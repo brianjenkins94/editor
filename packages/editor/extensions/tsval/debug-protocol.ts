@@ -41,7 +41,7 @@ export type Control =
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
 	 *  "Allow always", is the policy now in effect — what stops from here on; `give`, the result the call returns instead
 	 *  of being made (a rule's *give result*, just this once). */
-	| { "type": "decide"; "deny"?: boolean; "skip"?: boolean; "policy"?: Policy; "give"?: unknown }
+	| { "type": "decide"; "deny"?: boolean; "skip"?: boolean; "policy"?: Policy; "give"?: unknown; "decided"?: "once" | "always" | "refused" }
 	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
 	| { "type": "setValue"; "name": string; "value": string }
 	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */

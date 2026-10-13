@@ -18,8 +18,9 @@
  *
  * The extension's own code never joins the editor's hub: only its worker's runtime link does, through this.
  */
-import type { Observed, ObserveOptions } from "@brianjenkins94/observability";
 import type { Hub } from "@brianjenkins94/hub";
+import type { Observed, ObserveOptions } from "@brianjenkins94/observability";
+import type { Effect } from "./index.ts";
 import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 
@@ -60,7 +61,8 @@ export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?:
 
 	links().set(id, session);
 
-	const unlink = hub.link(portTransport(port), { "peer": id, "permissions": {
+	const unlink = hub.link(portTransport(port), { "peer": id,
+"permissions": {
 		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
 		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
 	} });
@@ -111,12 +113,22 @@ export interface RuntimeFs {
 	"rename": (path: string, to: string) => void;
 }
 
+/** A package's gated call, for the editor to decide at the call: its kind (an fs call's method and whether it reads or
+ *  writes; a command; a request), its arguments as strings, and the package, by name@version. */
+export interface RuntimeDecision { "kind": "fs" | "exec" | "net"; "method"?: string; "op"?: "read" | "write"; "args": string[]; "package": string }
+
+/** What the editor decided: whether the call may be made, and how (an Effect's `decided`). */
+export interface RuntimeVerdict { "allow": boolean; "decided": NonNullable<Effect["decided"]> }
+
 /** A worker's link into the editor's runtime. */
 export interface RuntimeConnection {
 	/** The workspace's files (once `ready`). */
 	"fs": RuntimeFs;
 	/** `fs` answered from here on: the editor has the worker's mailbox. */
 	"ready": Promise<void>;
+	/** A package's call beyond its baseline, decided by the editor at the call — redline, the policy, then the person,
+	 *  asked — blocking until it's answered (once `ready`). */
+	"decide": (call: RuntimeDecision) => RuntimeVerdict;
 	/** Answer the preview's requests to `port` with `handler` until the returned disposer runs. */
 	"serve": (port: number, handler: (request: RuntimeRequest) => Promise<RuntimeResponse>) => () => void;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
@@ -172,10 +184,11 @@ export function connectRuntime(port: MessagePort, { name, network = false }: { "
 			"rename": (path, to) => { call({ "op": "rename", "path": path, "to": to }); }
 		},
 		"ready": ready,
+		"decide": (decision) => call({ "op": "decide", "call": decision }).meta as RuntimeVerdict,
 		"log": log,
 		"serve": (listening, handler) => serve(hub, `virtual.debug.${listening}`, async (raw) => {
 			const request = raw as RuntimeRequest;
-			const path = request.url.split("?")[0]!;
+			const path = request.url.split("?")[0];
 
 			// Each server's traffic, as its own: the architecture view's `server:<port>`.
 			architecture.record(architecture.self, `server:${listening}`, "request", `${request.method} ${path}`, request.body?.byteLength ?? 0);

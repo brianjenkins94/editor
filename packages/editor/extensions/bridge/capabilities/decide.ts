@@ -11,7 +11,8 @@
  * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
  * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
-import type { BrokerOptions, CapabilityRequest, GrantStore, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
+import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
+import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
@@ -44,7 +45,13 @@ export interface CapabilityCall {
 	/** The preview window it came from, when the caller knows (the WS/WebRTC shim's requests arrive from one): the
 	 *  prompt shows there. The service worker's net gate knows only the port — every window of a server has its address. */
 	"window"?: string;
+	/** The package whose code made it (a debug run's, beyond its baseline: runtime-fs.ts), by name@version — its run
+	 *  counts it, as that package's, so it isn't counted here too. */
+	"package"?: string;
 }
+
+/** How a call was decided (util/silo's Effect `decided`): by the policy, or at the call — the person's answer. */
+export type Decided = NonNullable<Effect["decided"]>;
 
 /** Turn a raw interceptor call into the canonical silo request (scope string + context), or undefined if it
  *  isn't a gated capability (e.g. an fs method neither almostnode nor CAP_FS gates). */
@@ -94,15 +101,30 @@ function capabilityOf(request: CapabilityRequest): string {
 	return request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind;
 }
 
-/** Session-only store — "Allow once" lives here (a fast-path short-circuit in broker.gate); persisted decisions
- *  live in the policy file (consulted by the decider), so the store itself needs no disk. */
-function createSessionStore(): GrantStore {
-	const session = new Set<string>();
+/** Each run's answers at the call: the scopes allowed once — for the rest of that run, never the next — and those
+ *  refused, not asked again in it. Persisted decisions live in the policy (consulted by the decider), not here. */
+const runAnswers = new Map<string, { "allowed": Set<string>; "refused": Set<string> }>();
+/** How many runs' answers are kept: a run asks again only while it runs, and runs end. */
+const KEEP_RUNS = 64;
 
-	return {
-		"has": (scope) => session.has(scope),
-		"grant": (scope) => { session.add(scope); }
-	};
+/** `runId`'s answers so far (undefined with no run: a call that isn't a run's is asked each time). */
+function answersOf(runId: string | undefined): { "allowed": Set<string>; "refused": Set<string> } | undefined {
+	if (runId === undefined) {
+		return undefined;
+	}
+
+	let answers = runAnswers.get(runId);
+
+	if (answers === undefined) {
+		answers = { "allowed": new Set(), "refused": new Set() };
+		runAnswers.set(runId, answers);
+
+		for (const old of [...runAnswers.keys()].slice(0, Math.max(0, runAnswers.size - KEEP_RUNS))) {
+			runAnswers.delete(old);
+		}
+	}
+
+	return answers;
 }
 
 /** Where a prompt shows: the request's preview window and port, as far as they're known. */
@@ -133,23 +155,23 @@ async function promptViaShell(request: { "kind": string; "scope": string; "resou
  *  overlay in the preview window. "Allow always" writes an allow rule to MY override file (never the shared
  *  contract — that's your "don't show again"); "Allow once" is session-only (the broker adds it to the session
  *  store). Swappable for an external/AI decider behind this same seam. */
-async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
+async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "decided": Decided }> {
 	const capability = capabilityOf(request);
 	const resource = request.resource ?? "";
 	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability));
 
 	if (effective === "allow") {
-		return { "behavior": "allow" };
+		return { "behavior": "allow", "decided": "policy" };
 	}
 
 	if (effective === "deny") {
-		return { "behavior": "deny", "message": "denied by .silo policy" };
+		return { "behavior": "deny", "message": "denied by .silo policy", "decided": "policy" };
 	}
 
 	// Skipped (util/silo's `skip`): not made. Here there's no stand-in to answer it in its place, as a debug run has — so,
 	// as an enforcer without one, the gate refuses it.
 	if (effective === "skip") {
-		return { "behavior": "deny", "message": "skipped by .silo policy" };
+		return { "behavior": "deny", "message": "skipped by .silo policy", "decided": "policy" };
 	}
 
 	let choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
@@ -165,8 +187,9 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 			made = null;
 		}
 
+		// (a rule made at the call is the person's answer, in their policy now: as Allow always, or a refusal)
 		if (made === "allow" || made === "deny") {
-			return made === "allow" ? { "behavior": "allow" } : { "behavior": "deny", "message": "denied by your rule" };
+			return made === "allow" ? { "behavior": "allow", "decided": "always" } : { "behavior": "deny", "message": "denied by your rule", "decided": "refused" };
 		}
 
 		choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
@@ -175,14 +198,14 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 	if (choice === "allow-always") {
 		await persistOverride(capability, resource, "allow");
 
-		return { "behavior": "allow" };
+		return { "behavior": "allow", "decided": "always" };
 	}
 
 	if (choice === "allow-once") {
-		return { "behavior": "allow" };
+		return { "behavior": "allow", "decided": "once" };
 	}
 
-	return { "behavior": "deny", "message": choice === "deny" ? "denied" : "no decision" };
+	return { "behavior": "deny", "message": choice === "deny" ? "denied" : "no decision", "decided": "refused" };
 }
 
 /** BERNARD break-glass for redline scopes — the preview overlay's redline variant (a deliberate one-time
@@ -191,21 +214,21 @@ async function breakGlass(request: CapabilityRequest): Promise<boolean> {
 	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true, ...windowOf(request) })) === "authorize";
 }
 
-const store = createSessionStore();
 // The same question from the same window, asked while it's still waiting (six peer connections opened at once), gets
 // one prompt and one answer — "Allow always" written once. (Redline break-glass stays one deliberate answer per call.)
 const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabilityOf(request), request.scope, request.resource ?? "", windowOf(request)]), policyDecider);
-const options: BrokerOptions = { "store": store, "decide": decide, "breakGlass": breakGlass };
 
 /**
- * Decide one raw capability call. Resolves `true` to allow, `false` to deny. This is the endpoint every
- * interceptor round-trips to; a non-capability call (unclassifiable) is allowed (nothing to gate).
+ * Decide one raw capability call: whether it may be made, and how that was decided — by the policy, or at the call, the
+ * person's answer (an exception to the policy, recorded among its run's effects). This is the endpoint every interceptor
+ * round-trips to; a non-capability call (unclassifiable) is allowed (nothing to gate). Within a run, a scope allowed
+ * once stays allowed, and one refused stays refused, until it ends; the next run asks again.
  */
-export async function decideCapability(call: CapabilityCall): Promise<boolean> {
+export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow": boolean; "decided": Decided }> {
 	const request = classify(call);
 
 	if (request === undefined) {
-		return true;
+		return { "allow": true, "decided": "policy" };
 	}
 
 	// Carry where it came from onto the request so the decider can route the TOFU overlay there: the preview window
@@ -218,20 +241,75 @@ export async function decideCapability(call: CapabilityCall): Promise<boolean> {
 		(request as { "window"?: string }).window = call.window;
 	}
 
+	const answers = answersOf(call.runId);
+	// (a package's call is counted by its run, as that package's: its debugger's)
+	const counted = call.package === undefined ? call.runId : undefined;
+	// (an object: the broker's callbacks below set it, which a `let` narrowed to its first value wouldn't show)
+	const how: { "decided": Decided } = { "decided": "policy" };
+
+	if (answers?.refused.has(request.scope) === true) {
+		recordObservation(request, "deny", counted, "refused");
+
+		return { "allow": false, "decided": "refused" };
+	}
+
+	const options: BrokerOptions = {
+		"store": {
+			"has": (scope) => {
+				const allowed = answers?.allowed.has(scope) === true;
+
+				if (allowed) {
+					how.decided = "once";
+				}
+
+				return allowed;
+			},
+			// (the broker grants every allow; only an answer of "once" is this run's to remember — the policy's are the policy's)
+			"grant": (scope) => {
+				if (how.decided === "once") {
+					answers?.allowed.add(scope);
+				}
+			}
+		},
+		"decide": async (asked) => {
+			const verdict = await decide(asked);
+
+			how.decided = verdict.decided;
+
+			return verdict;
+		},
+		"breakGlass": async (asked) => {
+			const authorized = await breakGlass(asked);
+
+			how.decided = authorized ? "once" : "refused";
+
+			return authorized;
+		}
+	};
+
 	try {
 		await gate(request, options);
-		recordObservation(request, "allow", call.runId); // fired ⇒ observed surface + this run's record
+		recordObservation(request, "allow", counted, how.decided); // fired ⇒ observed surface + this run's record
 
-		return true;
+		return { "allow": true, "decided": how.decided };
 	} catch (error) {
 		if (error instanceof CapabilityDenied) {
-			recordObservation(request, "deny", call.runId); // attempt-but-blocked: recorded, not in the surface
+			if (how.decided === "refused") {
+				answers?.refused.add(request.scope);
+			}
 
-			return false;
+			recordObservation(request, "deny", counted, how.decided); // attempt-but-blocked: recorded, not in the surface
+
+			return { "allow": false, "decided": how.decided };
 		}
 
 		throw error;
 	}
+}
+
+/** Decide one raw capability call: `true` to allow, `false` to deny (decideCapabilityAs, without how). */
+export async function decideCapability(call: CapabilityCall): Promise<boolean> {
+	return (await decideCapabilityAs(call)).allow;
 }
 
 /** The network endpoint of a WS/WebRTC resource: `hostOf` covers ws(s):// (a special scheme with a real host);

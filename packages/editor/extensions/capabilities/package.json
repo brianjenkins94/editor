@@ -1,7 +1,7 @@
 {
   "name": "capabilities",
   "displayName": "Capabilities (tsserver plugin)",
-  "description": "Surfaces a program's capability use (net/fs/exec/env/eval) — static detect/reach plus a tsval canary — as native diagnostics, via a TypeScript Server Plugin that reuses tsserver's own typescript (real Program + checker, no bundled copy).",
+  "description": "Surfaces a program's capability use (net/fs/exec/env/eval) \u2014 static detect/reach plus a tsval canary \u2014 as native diagnostics, via a TypeScript Server Plugin that reuses tsserver's own typescript (real Program + checker, no bundled copy).",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
@@ -34,8 +34,8 @@
           "visibility": "collapsed"
         },
         {
-          "id": "silo.beyondBaseline",
-          "name": "Beyond the baseline",
+          "id": "silo.exceptions",
+          "name": "Exceptions",
           "visibility": "collapsed"
         }
       ]
@@ -81,6 +81,12 @@
         "title": "Re-place at Selection",
         "category": "Rules",
         "icon": "$(target)"
+      },
+      {
+        "command": "silo.exceptions.accept",
+        "title": "Accept",
+        "category": "Exceptions",
+        "icon": "$(check)"
       }
     ],
     "menus": {
@@ -115,6 +121,10 @@
         {
           "command": "silo.rules.replace",
           "when": "false"
+        },
+        {
+          "command": "silo.exceptions.accept",
+          "when": "false"
         }
       ],
       "view/item/context": [
@@ -142,6 +152,11 @@
           "command": "silo.rules.remove",
           "when": "view == silo.rules && viewItem =~ /^rule\\.mine/",
           "group": "inline@2"
+        },
+        {
+          "command": "silo.exceptions.accept",
+          "when": "view == silo.exceptions && viewItem == exceptions.pending",
+          "group": "inline"
         }
       ]
     },

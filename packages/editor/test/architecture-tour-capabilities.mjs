@@ -213,9 +213,9 @@ test("real effects: an allowed read reads the file, recorded; a call nobody allo
 		}, run.id));
 
 		assert.deepEqual(envelope.effects, [
-			{ "capability": "fs:read", "resource": "/workspace/rates.json", "how": "made", "calls": 1 },
-			{ "capability": "fs:write", "resource": "/workspace/sneaky.txt", "how": "denied", "calls": 1 }
-		], "its effects: the read made, the write refused");
+			{ "capability": "fs:read", "resource": "/workspace/rates.json", "how": "made", "calls": 1, "decided": "policy" },
+			{ "capability": "fs:write", "resource": "/workspace/sneaky.txt", "how": "denied", "calls": 1, "decided": "policy" }
+		], "its effects: the read made, the write refused — both by the policy, nobody asked");
 
 		// The ledger, asked what tried to write sneaky.txt (debug-mcp's runs_ledger): this run, and its refused write.
 		const asked = await session.request("runs.ledger", { "capability": "fs", "resource": "sneaky.txt" }, 10_000);

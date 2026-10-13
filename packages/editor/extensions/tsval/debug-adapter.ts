@@ -219,13 +219,13 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			return;
 		}
 
-		const { verdict, value, policy } = args as unknown as DecideRequest;
+		const { verdict, value, policy, decided } = args as unknown as DecideRequest;
 
 		if (policy !== undefined) {
 			this.policy = policy;
 		}
 
-		this.control({ "type": "decide", ...policy === undefined ? {} : { "policy": policy }, "deny": verdict === "deny", "skip": verdict === "skip", ...verdict === "give" ? { "give": value ?? null } : {} });
+		this.control({ "type": "decide", ...policy === undefined ? {} : { "policy": policy }, "deny": verdict === "deny", "skip": verdict === "skip", ...verdict === "give" ? { "give": value ?? null } : {}, ...decided === undefined ? {} : { "decided": decided } });
 		this.respond(request);
 		this.goOn("continue");
 	}

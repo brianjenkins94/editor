@@ -13,11 +13,13 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type { Effect } from "@brianjenkins94/run-contract";
+import type { RuntimeDecision } from "@brianjenkins94/run-contract/runtime";
 import { serve } from "@brianjenkins94/hub";
 import { verdictOf } from "@brianjenkins94/run-contract/gate";
 import { answerMailbox, runtimeSession } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
 import { recordEffect } from "../../shared/capabilities/run-effects";
+import { decideCapabilityAs } from "./capabilities/decide";
 import { policyFor, takeOnce } from "./capability-stops";
 
 const READS = new Set(["readFile", "stat", "readdir"]);
@@ -112,23 +114,24 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 	/** Each session's mailboxes, stopped as it ends. */
 	const stops = new Map<string, (() => void)[]>();
 
-	/** How the program's call of `capability` on `path` goes: as the policy decides, unless told once. */
-	const decide = async (session: string | undefined, capability: string, path: string): Promise<"allow" | "skip" | "deny"> => {
+	/** How the program's call of `capability` on `path` goes, and how that was decided: as the policy decides, unless the
+	 *  person answered for this call at its stop (an exception to the policy). */
+	const decide = async (session: string | undefined, capability: string, path: string): Promise<{ "verdict": "allow" | "skip" | "deny"; "decided": NonNullable<Effect["decided"]> }> => {
 		const once = session === undefined ? undefined : takeOnce(session, capability, path);
 
 		if (once !== undefined) {
-			return once;
+			return { "verdict": once, "decided": once === "allow" ? "once" : "refused" };
 		}
 
-		return verdictOf(await policyFor(session), capability, path, session !== undefined && sessions.get(session)?.configuration["__live"] === true);
+		return { "verdict": verdictOf(await policyFor(session), capability, path, session !== undefined && sessions.get(session)?.configuration["__live"] === true), "decided": "policy" };
 	};
 
-	/** A call of the program's in `session`, among its run's effects — how it went. */
-	const counted = (session: string | undefined, capability: string, path: string, how: Effect["how"]): Effect["how"] => {
+	/** A call of the program's in `session`, among its run's effects — how it went, and how it was decided. */
+	const counted = (session: string | undefined, capability: string, path: string, how: Effect["how"], decided?: Effect["decided"]): Effect["how"] => {
 		const runId = session === undefined ? undefined : sessions.get(session)?.configuration["__runId"];
 
 		if (typeof runId === "string") {
-			recordEffect(runId, capability, path, how);
+			recordEffect(runId, capability, path, how, 1, decided);
 		}
 
 		return how;
@@ -136,6 +139,15 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 
 	const answer = async (session: string | undefined, meta: Record<string, unknown>, payload: Uint8Array): Promise<Answer & { "how"?: Effect["how"] }> => {
 		const op = meta["op"] as string;
+
+		// A package's call beyond its baseline, decided at the call (the run contract's `decide`): as a preview's are, for the
+		// run the session is — the worker counts it, as that package's, with how it was decided.
+		if (op === "decide") {
+			const call = (meta["call"] ?? {}) as RuntimeDecision;
+			const runId = session === undefined ? undefined : sessions.get(session)?.configuration["__runId"];
+
+			return { "meta": await decideCapabilityAs({ "kind": call.kind, ...call.method === undefined ? {} : { "method": call.method }, ...call.op === undefined ? {} : { "op": call.op }, "args": call.args, "package": call.package, ...typeof runId === "string" ? { "runId": runId } : {} }) as unknown as Record<string, unknown> };
+		}
 		const path = workspacePath(meta["path"]);
 
 		if (!READS.has(op) && !WRITES.has(op)) {
@@ -157,7 +169,10 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 		const capability = READS.has(op) ? "fs:read" : "fs:write";
 		// Each path it reaches decided (a rename: both, refused if either is) — and counted.
 		const paths = to === undefined ? [path] : [path, to];
-		const verdicts = await Promise.all(paths.map(async (each) => decide(session, capability, each)));
+		const decisions = await Promise.all(paths.map(async (each) => decide(session, capability, each)));
+		const verdicts = decisions.map((each) => each.verdict);
+		// (an answer at the stop, when there was one: the exception on record)
+		const decided = decisions.find((each) => each.decided !== "policy")?.decided ?? "policy";
 		let verdict: "deny" | "skip" | "allow" = "allow";
 
 		if (verdicts.includes("deny")) {
@@ -166,7 +181,7 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 			verdict = "skip";
 		}
 
-		const count = (how: Effect["how"]): Effect["how"] => paths.map((each) => counted(session, capability, each, how))[0];
+		const count = (how: Effect["how"]): Effect["how"] => paths.map((each) => counted(session, capability, each, how, decided))[0];
 
 		if (verdict === "skip") {
 			return { ...skipped(op), "how": count("skipped") };

@@ -26,7 +26,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import { Unparsable } from "./bablr";
-import { ensureBaseline } from "./baseline";
+import { syncBaseline, watchBaseline } from "./baseline";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -164,6 +164,8 @@ function repoRelative(path: string): string {
 export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr): void {
 	const rpc = createRpcClient(hub);
 
+	// The dependency baseline, kept up to the dependencies as they change (made by the first run that keeps evidence).
+	watchBaseline(vscode);
 	// How much a preview's dev server instruments (`silo.evidence.previews`), asked as each preview starts.
 	serve(hub, "evidence.level", () => vscode.workspace.getConfiguration("silo.evidence").get<string>("previews") ?? "full");
 	// Each run's coverage, until the run ends (the session's coverage comes just before its end): its entry's, and each
@@ -419,7 +421,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 		await ensureSiloFiles(vscode);
 		// (the first run to keep anything makes the dependency baseline, if there's none: the editor's silo init)
-		void ensureBaseline(vscode);
+		void syncBaseline(vscode);
 
 		for (const each of covered ?? []) {
 			await recordFile(envelope, repoRelative(each.file), [each]);

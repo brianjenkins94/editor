@@ -9,7 +9,7 @@ import type { Effect } from "@brianjenkins94/util/silo/evidence";
 const runEffects = new Map<string, Map<string, Effect>>();
 const toldEffects = new Map<string, Map<string, Effect>>();
 
-function count(store: Map<string, Map<string, Effect>>, runId: string, capability: string, resource: string, how: Effect["how"], calls: number, pkg?: string): void {
+function count(store: Map<string, Map<string, Effect>>, runId: string, capability: string, resource: string, how: Effect["how"], calls: number, pkg?: string, decided?: Effect["decided"]): void {
 	let effects = store.get(runId);
 
 	if (effects === undefined) {
@@ -17,21 +17,21 @@ function count(store: Map<string, Map<string, Effect>>, runId: string, capabilit
 		store.set(runId, effects);
 	}
 
-	// (a package's call apart from the program's same call)
-	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}`;
+	// (a package's call apart from the program's same call; one decided at the call apart from one the policy decided)
+	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}\0${decided ?? ""}`;
 	const known = effects.get(key);
 
 	if (known === undefined) {
-		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": calls, ...pkg === undefined ? {} : { "package": pkg } });
+		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": calls, ...pkg === undefined ? {} : { "package": pkg }, ...decided === undefined ? {} : { "decided": decided } });
 	} else {
 		known.calls += calls;
 	}
 }
 
 /** A gated call `runId` made that the editor decided (a preview's, as its gate decides each; a file call through the
- *  runtime, runtime-fs.ts), and how it went. */
-export function recordEffect(runId: string, capability: string, resource: string, how: Effect["how"], calls = 1): void {
-	count(runEffects, runId, capability, resource, how, calls);
+ *  runtime, runtime-fs.ts), how it went, and how it was decided. */
+export function recordEffect(runId: string, capability: string, resource: string, how: Effect["how"], calls = 1, decided?: Effect["decided"]): void {
+	count(runEffects, runId, capability, resource, how, calls, undefined, decided);
 }
 
 /** Every gated call `runId` made so far that its debugger decided, as it tells them (the run contract's `effects`
@@ -40,7 +40,7 @@ export function setEffects(runId: string, effects: readonly Effect[]): void {
 	toldEffects.delete(runId);
 
 	for (const effect of effects) {
-		count(toldEffects, runId, effect.capability, effect.resource, effect.how, effect.calls, effect.package);
+		count(toldEffects, runId, effect.capability, effect.resource, effect.how, effect.calls, effect.package, effect.decided);
 	}
 }
 
@@ -51,7 +51,7 @@ export function takeEffects(runId: string): Effect[] {
 
 	for (const store of [runEffects, toldEffects]) {
 		for (const effect of store.get(runId)?.values() ?? []) {
-			count(merged, runId, effect.capability, effect.resource, effect.how, effect.calls, effect.package);
+			count(merged, runId, effect.capability, effect.resource, effect.how, effect.calls, effect.package, effect.decided);
 		}
 
 		store.delete(runId);

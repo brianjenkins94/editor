@@ -31,6 +31,7 @@
  * root `.silo` plus per-package ones without any schema change. No caller assumes a single root.
  */
 import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker";
+import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import type { Disposition, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, POLICY_GLOB, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
@@ -369,10 +370,11 @@ async function readObserved(root: vscode.Uri, user: string): Promise<void> {
  *   • when `runId` is known (a preview's run), count it among that run's effects (recordEffect) — made, or denied.
  * A denied call fired nothing, so it's kept out of the observed surface.
  */
-export function recordObservation(request: CapabilityRequest, disposition: Disposition, runId?: string): void {
-	// Counted SYNCHRONOUSLY (before any await) so a fast run-exit can't race it.
+export function recordObservation(request: CapabilityRequest, disposition: Disposition, runId?: string, decided?: Effect["decided"]): void {
+	// Counted SYNCHRONOUSLY (before any await) so a fast run-exit can't race it — with how it was decided (an answer at the
+	// call is an exception to the policy, on record in the run).
 	if (runId !== undefined) {
-		recordEffect(runId, request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind, request.resource ?? "", disposition === "allow" ? "made" : "denied");
+		recordEffect(runId, request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind, request.resource ?? "", disposition === "allow" ? "made" : "denied", 1, decided);
 	}
 
 	void (async () => {

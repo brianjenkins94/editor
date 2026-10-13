@@ -21,7 +21,7 @@ import type { StaticEntry, StaticSurface } from "../../shared/capabilities/silo-
 import type { Disposition, Effective, Policy } from "./policy";
 import * as vscode from "vscode";
 import { loadStaticSurface, writeStaticSurface } from "../../shared/capabilities/silo-store";
-import { registerBeyondBaseline } from "./beyond-baseline";
+import { registerExceptions } from "./exceptions";
 import { registerPlacedRules } from "./placed-rules";
 import { effectiveDisposition, policyUri, readPolicy, withoutRule, withRule, writePolicy } from "./policy";
 import { registerRulesTree } from "./rules-tree";
@@ -335,8 +335,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	void refresh();
 	// The Rules view, beside this one: the policy's rules as a tree (rules-tree.ts).
 	registerRulesTree(context);
-	// What runs saw packages do beyond the dependency baseline (beyond-baseline.ts).
-	registerBeyondBaseline(context);
+	// What's outside the dependency baseline and the policy: versions pending acceptance, and the policy's exceptions (exceptions.ts).
+	registerExceptions(context);
 	// And each placed rule beside its code, in the editor's Margin (placed-rules.ts).
 	registerPlacedRules(context);
 }

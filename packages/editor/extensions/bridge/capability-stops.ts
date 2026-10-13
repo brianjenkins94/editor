@@ -142,7 +142,15 @@ async function decide(hub: Hub, session: vscode.DebugSession, choice: Capability
 		request = { "verdict": verdict };
 	}
 
-	await session.customRequest("decide", request);
+	// (how it was decided, for its run's record: an answer at the call is an exception to the policy — a rule made here,
+	// or "always", is in the policy now; this run's, once)
+	let decided: NonNullable<DecideRequest["decided"]> = request.verdict === "allow" || request.verdict === "give" ? "once" : "refused";
+
+	if (request.verdict === "allow" && (choice === "allow-always" || choice === "rule")) {
+		decided = "always";
+	}
+
+	await session.customRequest("decide", { ...request, "decided": decided });
 	// (answered, the run goes on — a debugger in another extension host is seen by no tracker resuming)
 	answered(hub, session.id);
 }

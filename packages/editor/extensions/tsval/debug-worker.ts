@@ -20,9 +20,10 @@
  */
 import type { FsShim } from "@brianjenkins94/almostnode";
 import type { Effect, LoadedPackage } from "@brianjenkins94/run-contract";
-import type { RuntimeConnection } from "@brianjenkins94/run-contract/runtime";
+import type { RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/run-contract/runtime";
 import type { Told, Traced } from "@brianjenkins94/run-contract/values";
 import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
+import type { AcceptedPackages } from "@brianjenkins94/util/silo/evidence";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
@@ -34,7 +35,8 @@ import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
 
 import { LiveRecord } from "@brianjenkins94/run-contract/values";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
-import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
+import { covers } from "@brianjenkins94/util/silo/evidence";
+import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 import { NETWORK_PROBES } from "../../shared/architecture";
 import { capabilityStandins, givenAs, standinCapability } from "../../shared/capabilities/canary";
@@ -121,6 +123,9 @@ let allowNext = false;
 /** The call at the capability stop the user skipped (LIVE-VALUES.md): it isn't made, the run goes on with its inert
  *  stand-in's result. */
 let skipNext = false;
+/** How the call at the capability stop was decided — the person's answer there (an exception to the policy, on record in
+ *  the run's effects): taken by the next capability call, the one asked about. */
+let answeredNext: "once" | "always" | "refused" | undefined;
 /** A live run (LIVE-VALUES.md, *Live runs, as you type*): the file run again as typing pauses — it stops at nothing,
  *  asks nothing (what it can't make it skips), runs its timers at once, ends at its first idle or its step budget. */
 let liveRun = false;
@@ -132,17 +137,18 @@ const packagesRan = new Map<string, LoadedPackage>();
 const effects = new Map<string, Effect>();
 let tallying = false;
 
-/** A gated call, counted among the run's effects — a package's (`pkg`, its name@version) apart from the program's. */
-function tally(capability: string, resource: string, how: Effect["how"], pkg?: string): void {
+/** A gated call, counted among the run's effects — a package's (`pkg`, its name@version) apart from the program's — with
+ *  how it was decided: within the package's baseline, by the policy, or at the call (the person's answer). */
+function tally(capability: string, resource: string, how: Effect["how"], pkg?: string, decided?: Effect["decided"]): void {
 	if (!tallying) {
 		return;
 	}
 
-	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}`;
+	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}\0${decided ?? ""}`;
 	const known = effects.get(key);
 
 	if (known === undefined) {
-		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": 1, ...pkg === undefined ? {} : { "package": pkg } });
+		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": 1, ...pkg === undefined ? {} : { "package": pkg }, ...decided === undefined ? {} : { "decided": decided } });
 	} else {
 		known.calls += 1;
 	}
@@ -362,19 +368,69 @@ let packageDirOf: ((filename: string) => string | undefined) | undefined;
 
 /** The package installed in `dir`, as an effect names it: name@version (packagesRan), or its folder's name. */
 function packageOf(dir: string): string {
-	const ran = packagesRan.get(dir) ?? { "name": dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length) };
+	const ran = packageIn(dir);
 
 	return ran.version === undefined ? ran.name : `${ran.name}@${ran.version}`;
+}
+
+/** The dependency baseline (`.silo/baseline.json`, read as a run starts): what each package's own code may do, as it was
+ *  accepted when the library was added (a newer version's `pending` capabilities aren't, until accepted). Undefined with
+ *  none yet — the first run makes it — when a package's calls are counted, not asked about. */
+let baseline: AcceptedPackages | undefined;
+
+/** The baseline as it is now, through the editor's runtime (read as the debugger's own: neither decided nor counted). */
+function readBaseline(): AcceptedPackages | undefined {
+	try {
+		const text = new TextDecoder().decode(editorLink?.fs.readFile("/workspace/.silo/baseline.json", { "load": true }));
+
+		return (JSON.parse(text) as { "packages"?: AcceptedPackages }).packages;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The package installed in `dir`, by name and version (packagesRan). */
+function packageIn(dir: string): { "name": string; "version"?: string } {
+	return packagesRan.get(dir) ?? { "name": dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length) };
+}
+
+/**
+ * How the package in `dir` calling `capability` goes: trusted by the policy (an org's contract, say) — made, no question;
+ * within what its baseline accepts of it — made; else decided at the call by the editor (redline, the policy, then the
+ * person, asked — blocking until it's answered). Undefined when it isn't decided at all — no baseline yet, or no editor
+ * to ask — and the call is only counted. A failure to decide refuses it.
+ */
+function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecision, "package">): RuntimeVerdict | undefined {
+	const pkg = packageIn(dir);
+
+	if (policy !== undefined && packageDisposition(policy, pkg) === "allow") {
+		return { "allow": true, "decided": "policy" };
+	}
+
+	if (baseline === undefined || editorLink === undefined) {
+		return undefined;
+	}
+
+	const accepted = baseline[pkg.name];
+
+	if (accepted !== undefined && covers(accepted.caps, capability)) {
+		return { "allow": true, "decided": "baseline" };
+	}
+
+	try {
+		return editorLink.decide({ ...call, "package": packageOf(dir) });
+	} catch (error) {
+		return (error as { "code"?: string }).code === "ENOTCONN" ? undefined : { "allow": false, "decided": "refused" };
+	}
 }
 
 /** Each package's own `fetch`, by package folder. */
 const packageFetches = new Map<string, typeof fetch>();
 
 /**
- * The package whose module is in folder `from` gets the real `fetch` — what it reaches is what it reached — each call
- * counted among the run's effects as that package's (`net`, by URL), as its fs and child_process calls are
- * (packageBuiltin). Record, don't contain: a package that reaches for `globalThis.fetch` itself isn't told apart.
- * Undefined for anything that isn't a package's.
+ * The package whose module is in folder `from` gets the real `fetch`, each call decided (packageVerdict) and counted among
+ * the run's effects as that package's (`net`, by URL), as its fs and child_process calls are (packageBuiltin). A package
+ * that reaches for `globalThis.fetch` itself isn't told apart. Undefined for anything that isn't a package's.
  */
 function packageFetch(from: string): typeof fetch | undefined {
 	const dir = packageDirOf?.(from);
@@ -385,7 +441,16 @@ function packageFetch(from: string): typeof fetch | undefined {
 
 	if (!packageFetches.has(dir)) {
 		packageFetches.set(dir, async (input, init) => {
-			tally("net", reachedBy(input), "made", packageOf(dir));
+			const resource = reachedBy(input);
+			const verdict = packageVerdict(dir, "net", { "kind": "net", "args": [resource] });
+
+			if (verdict?.allow === false) {
+				tally("net", resource, "denied", packageOf(dir), verdict.decided);
+
+				throw Object.assign(new TypeError(`EACCES: ${packageOf(dir)} may not reach ${resource} (${verdict.decided === "policy" ? "the policy" : "refused at the call"})`), { "code": "EACCES" });
+			}
+
+			tally("net", resource, "made", packageOf(dir), verdict?.decided);
 
 			return globalThis.fetch(input, init);
 		});
@@ -429,29 +494,55 @@ function packageBuiltin(id: string, from: string): unknown {
 
 				return function(this: unknown, ...args: unknown[]): unknown {
 					const resource = reachedBy(args[0]);
+					let kind: RuntimeDecision["kind"] = "net";
+
+					if (capability.startsWith("fs:")) {
+						kind = "fs";
+					} else if (capability === "exec") {
+						kind = "exec";
+					}
+
+					const verdict = packageVerdict(dir, capability, { "kind": kind, "method": property as string, ...kind === "fs" ? { "op": capability === "fs:write" ? "write" : "read" } : {}, "args": [resource] });
+
+					if (verdict?.allow === false) {
+						tally(capability, resource, "denied", pkg, verdict.decided);
+
+						throw Object.assign(new Error(`EACCES: ${pkg} may not ${capability} ${resource} (${verdict.decided === "policy" ? "the policy" : "refused at the call"})`), { "code": "EACCES" });
+					}
+
+					// (a write decided here is let through the runtime's guard, as a program's allowed one is: madeFor)
+					const writing = verdict?.allow === true && capability === "fs:write";
+
+					if (writing) {
+						allowingWrites += 1;
+					}
 
 					try {
 						const result = (value as (...rest: unknown[]) => unknown).apply(this, args);
 
 						if (typeof (result as { "then"?: unknown } | null)?.then === "function") {
 							return (result as Promise<unknown>).then((settled) => {
-								tally(capability, resource, "made", pkg);
+								tally(capability, resource, "made", pkg, verdict?.decided);
 
 								return settled;
 							}, (error: unknown) => {
-								tally(capability, resource, refused(error) ? "denied" : "made", pkg);
+								tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict?.decided);
 
 								throw error;
 							});
 						}
 
-						tally(capability, resource, "made", pkg);
+						tally(capability, resource, "made", pkg, verdict?.decided);
 
 						return result;
 					} catch (error) {
-						tally(capability, resource, refused(error) ? "denied" : "made", pkg);
+						tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict?.decided);
 
 						throw error;
+					} finally {
+						if (writing) {
+							allowingWrites -= 1;
+						}
 					}
 				};
 			}
@@ -499,7 +590,17 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 				write(method, path);
 			}
 		},
-		"onPackage": (ran) => { packagesRan.set(ran.dir, ran); },
+		// A package the policy bans (an org's contract: one known to be bad) doesn't run at all: its first module fails to
+		// load, and the run's effects say so.
+		"onPackage": (ran) => {
+			packagesRan.set(ran.dir, ran);
+
+			if (policy !== undefined && packageDisposition(policy, ran) === "deny") {
+				tally("load", packageOf(ran.dir), "denied", packageOf(ran.dir), "policy");
+
+				throw Object.assign(new Error(`EACCES: ${packageOf(ran.dir)} may not run — the policy bans it`), { "code": "EACCES" });
+			}
+		},
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own — its calls counted as its.
 		"builtinFor": (id, requester, from) => {
 			if (requester === "package") {
@@ -666,8 +767,13 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 
 		const argument = args[tagged.resourceArg];
 		const resource = reachedBy(argument);
+		// How it's decided: the person's answer at its stop, when it was stopped at — else the policy.
+		const decided: Effect["decided"] = answeredNext ?? "policy";
+
+		answeredNext = undefined;
+
 		const denied = (why: string): never => {
-			tally(tagged.capability, resource, "denied");
+			tally(tagged.capability, resource, "denied", undefined, decided);
 
 			throw Object.assign(new Error(why), { "code": "EACCES" });
 		};
@@ -682,7 +788,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		giveNext = undefined;
 
 		if (given !== undefined) {
-			tally(tagged.capability, resource, "given");
+			tally(tagged.capability, resource, "given", undefined, decided);
 
 			return givenAs(tagged.capability, fn.apply(this, args), given.value);
 		}
@@ -690,7 +796,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		if (skipNext) {
 			skipNext = false;
 
-			return skipped(tagged.capability, resource, fn.apply(this, args));
+			return skipped(tagged.capability, resource, fn.apply(this, args), decided);
 		}
 
 		if (effect === undefined) {
@@ -702,7 +808,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		const verdict = verdictOf(policy, tagged.capability, resource, liveRun);
 
 		if (verdict === "skip") {
-			return skipped(tagged.capability, resource, fn.apply(this, args));
+			return skipped(tagged.capability, resource, fn.apply(this, args), decided);
 		}
 
 		if (verdict === "deny" && !allowNext) {
@@ -718,7 +824,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 
 		// (a workspace file's call the editor makes, and keeps among the run's effects itself)
 		if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
-			tally(tagged.capability, resource, "made");
+			tally(tagged.capability, resource, "made", undefined, decided);
 		}
 
 		return madeFor(tagged.capability, resource, () => effect(...made));
@@ -818,10 +924,10 @@ function madeFor(capability: string, resource: string, call: () => unknown): unk
 
 /** A call that wasn't made (skipped: at its stop, or by a live run) — its stand-in's `result` — told on its line, as a
  *  value of its own, so the margin says what didn't happen there. */
-function skipped(capability: string, resource: string, result: unknown): unknown {
+function skipped(capability: string, resource: string, result: unknown, decided?: Effect["decided"]): unknown {
 	const node = evaluating?.currentNode;
 
-	tally(capability, resource, "skipped");
+	tally(capability, resource, "skipped", undefined, decided);
 
 	if (evaluating !== undefined && node !== null && node !== undefined) {
 		const file = node.getSourceFile();
@@ -1937,6 +2043,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	programBuiltins = surface.modules;
 	runtime?.clearCache();
 	packagesRan.clear();
+	baseline = readBaseline();
 
 	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 
@@ -2091,6 +2198,7 @@ function decide(message: Extract<Control, { "type": "decide" }>): void {
 
 	denyNext = message.deny === true;
 	skipNext = message.skip === true;
+	answeredNext = message.decided;
 	giveNext = message.give === undefined ? undefined : { "value": message.give };
 	// Allowed — once, this run, always, by a rule: the call asked about happens for real.
 	allowNext = !denyNext && !skipNext && giveNext === undefined;

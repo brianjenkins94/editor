@@ -110,7 +110,17 @@ export interface LoadedPackage { "name": string; "version"?: string; "dir": stri
  *  `skipped` (not made — the program went on as if it had done nothing); `given` (a rule's result in its place). A
  *  capability is `fs:read`, `fs:write`, `net`, `exec`, `eval`, `net.ws` or `net.webrtc`; its resource, the path, host or
  *  command it reached. */
-export interface Effect { "capability": string; "resource": string; "how": "made" | "denied" | "skipped" | "given"; "calls": number; /** The package whose code made it, by `name@version`; absent for the program's own. */ "package"?: string }
+export interface Effect {
+	"capability": string;
+	"resource": string;
+	"how": "made" | "denied" | "skipped" | "given";
+	"calls": number;
+	/** The package whose code made it, by `name@version`; absent for the program's own. */
+	"package"?: string;
+	/** How it was decided: within what the package's baseline accepts (`baseline`), by the policy (`policy`), or at the
+	 *  call — the person's answer, an exception to the policy: allowed `once`, allowed `always`, or `refused`. */
+	"decided"?: "baseline" | "policy" | "once" | "always" | "refused";
+}
 
 /** The `effects` event: the run's effects so far — all of them, each telling; its last is the run's. */
 export interface EffectsEvent { "effects": Effect[] }
@@ -151,7 +161,14 @@ export interface Events {
  *  as if it had done nothing (`skip`) — or `give`n `value` as its result in its place. `policy`, when the answer changed
  *  it, is the run's from now on: its rules come first (one covering this call decides it — a rule giving its result
  *  gives it), the verdict after. */
-export interface DecideRequest { "verdict": "allow" | "deny" | "skip" | "give"; "value"?: unknown; "policy"?: Policy }
+export interface DecideRequest {
+	"verdict": "allow" | "deny" | "skip" | "give";
+	"value"?: unknown;
+	"policy"?: Policy;
+	/** How it was decided — the person's answer at the stop, an exception to the policy (an Effect's `decided`): allowed
+	 *  `once` (or for this run), `always` (a rule in their policy now), or `refused`. */
+	"decided"?: "once" | "always" | "refused";
+}
 
 /** The `stdin` request: input for the program's standard input; `end`, it's closed. */
 export interface StdinRequest { "data": string; "end"?: boolean }
