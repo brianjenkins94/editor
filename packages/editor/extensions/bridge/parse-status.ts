@@ -10,6 +10,10 @@ import { bridgeHub } from "./hub";
 export function registerParseStatus(context: vscode.ExtensionContext): void {
 	const diagnostics = vscode.languages.createDiagnosticCollection("BABLR");
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
+	// What each file's warning says now (none: it parses). The status comes with every parse — every resolve of an open
+	// document — and every set or delete fires onDidChangeDiagnostics in every extension host (inlay hints recompute on
+	// it), so the collection is touched only when a file's status changes.
+	const shown = new Map<string, string | undefined>();
 
 	context.subscriptions.push(diagnostics, { "dispose": bridgeHub.subscribe("parse.status", (data) => {
 		const { file, unparsable } = (data ?? {}) as { "file"?: unknown; "unparsable"?: unknown };
@@ -19,14 +23,21 @@ export function registerParseStatus(context: vscode.ExtensionContext): void {
 		}
 
 		const uri = file.startsWith("/") ? vscode.Uri.file(file) : vscode.Uri.joinPath(root, file);
+		const now = typeof unparsable === "string" ? unparsable : undefined;
 
-		if (typeof unparsable !== "string") {
+		if (shown.get(uri.toString()) === now) {
+			return;
+		}
+
+		shown.set(uri.toString(), now);
+
+		if (now === undefined) {
 			diagnostics.delete(uri);
 
 			return;
 		}
 
-		const diagnostic = new vscode.Diagnostic(new vscode.Range(0, 0, 0, Number.MAX_SAFE_INTEGER), `BABLR can't parse this file as it is (${unparsable}): runtime evidence and annotations can't attach to it until it does.`, vscode.DiagnosticSeverity.Warning);
+		const diagnostic = new vscode.Diagnostic(new vscode.Range(0, 0, 0, Number.MAX_SAFE_INTEGER), `BABLR can't parse this file as it is (${now}): runtime evidence and annotations can't attach to it until it does.`, vscode.DiagnosticSeverity.Warning);
 
 		diagnostic.source = "BABLR";
 		diagnostics.set(uri, [diagnostic]);
