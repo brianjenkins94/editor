@@ -24,12 +24,12 @@ isn't held to it.
 | --- | --- | --- |
 | type-queries | yes | — |
 | running | yes, in substance | `shared/lifecycle` (pure functions) |
-| notes | nearly | `_types.at`, a tsserver request the capabilities plugin serves, undocumented |
+| notes | yes (since S3) | — (`_types.at` is documented now: EXTENSION-POINTS 5) |
 | event sheet | packaging only | core builds and registers its `view.js` and recognizer worker (the editor's TypeScript chunk) |
 | cspell | packaging only | core builds its worker, server bundle and dictionary; `shared/zenfs-vfs` (in-memory) |
 | history | packaging | its tsserver plugin built and served by core, its `node_modules` faked by workbench-entry; `shared/evidence-store`; the edit history itself is `workbench/edit-history.ts` (zen-fs, git-engine, the classifier) |
 | eslint | packaging | as history, plus the preset built by core's Vite plugin; `shared/gated-eval` |
-| insights | no | `editor.metrics.read` (the bridge's, from the hub, undocumented); `_types.at`; `shared/evidence-store`, `cpuprofile` |
+| insights | no | `shared/evidence-store`, `cpuprofile` (S2); its commands are documented now (EXTENSION-POINTS 5) |
 | capabilities | no | its plugin and canary engine built by core from `shared/capabilities/`; ~780 lines of its logic in the bridge (the decider, what an answer at a stop means, rule places, `rules.*`); `workbench/rules-view.ts` (a custom view on monaco internals) |
 | tsval | no | the workspace's buffer and zen-fs directly; `shared/workspace-runtime` (core's preview taps), `NETWORK_PROBES`, canary, preview-evidence; `run.policy` (undocumented); its Margin is `workbench/live-values.ts` |
 | running's other half | — | ~525 bridge lines: preview runs as `production` sessions, tasks, the terminal's `node` auto-attach, live runs |
@@ -56,7 +56,10 @@ editor: `./recorded`, `./gate` already) or util (pure). Mechanical — but run-c
 (EXTENSION-POINTS' Order, 6), and both change editor-contrib's imports: do this with the rename, not before it, so the
 template's imports change once. *Unlocks:* every extension's `shared/` import.
 
-**S3. Document what's already used, or replace it.** `_types.at` (the capabilities plugin's; notes and insights depend
+**S3. Document what's already used, or replace it** — done (2026-10-14): EXTENSION-POINTS 5 lists every command an
+extension may run, `editor.arch.commands` named as core's own.
+
+*Was:* `_types.at` (the capabilities plugin's; notes and insights depend
 on it), `editor.metrics.read` (the bridge's), `run.policy` (the bridge's; tsval's explore), `editor.arch.commands`
 (command-tap's). Each becomes a documented extension point — `_types.at` named as the capabilities extension's, with
 `extensionDependencies` — or goes (~~`run.policy`~~: done 2026-10-14 — tsval's explore, which runs outside a session and so has no
