@@ -10,6 +10,7 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
 import { build, createLogger } from "vite";
+import { unenvResolve } from "@brianjenkins94/almostnode/unenv-resolve";
 import { eslintToolchain } from "./build/eslint-toolchain";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
@@ -302,7 +303,9 @@ export async function preBuild(): Promise<void> {
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
 		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
-		"plugins": [bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
+		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
+		// unenv's own)
+		"plugins": [unenvResolve(), bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
 		"build": {
 			"outDir": "dist",

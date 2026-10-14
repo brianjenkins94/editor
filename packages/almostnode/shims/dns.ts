@@ -1,6 +1,7 @@
 /**
- * dns shim - DNS operations are not available in browser
- * Provides stubs that work for basic use cases
+ * What almostnode's `dns` has over unenv's (builtins.ts): lookups that answer — every name is this machine (localhost),
+ * as the browser can't resolve names — where unenv's only say they aren't implemented. Vite resolves `localhost` with
+ * `dns.promises.lookup` as its dev server starts.
  */
 
 // DNS lookup callback type
@@ -93,35 +94,6 @@ export function reverse(
 	});
 }
 
-/**
- * Set servers - no-op in browser
- */
-export function setServers(_servers: string[]): void {
-  // No-op
-}
-
-/**
- * Get servers - return empty in browser
- */
-export function getServers(): string[] {
-	return [];
-}
-
-/**
- * Set default result order - no-op in browser
- * Order can be 'ipv4first', 'ipv6first', or 'verbatim'
- */
-export function setDefaultResultOrder(_order: string): void {
-  // No-op in browser
-}
-
-/**
- * Get default result order
- */
-export function getDefaultResultOrder(): string {
-	return "verbatim";
-}
-
 // Promises API
 export const promises = {
 	"lookup": (hostname: string, options?: { "family"?: number; "all"?: boolean }) => {
@@ -156,28 +128,5 @@ export const promises = {
 		return new Promise<string[]>((resolve) => {
 			resolve(["localhost"]);
 		});
-	},
-	"setServers": (_servers: string[]) => {},
-	"getServers": () => [] as string[]
-};
-
-// Constants
-export const ADDRCONFIG = 0;
-export const V4MAPPED = 0;
-export const ALL = 0;
-
-export default {
-	"lookup": lookup,
-	"resolve": resolve,
-	"resolve4": resolve4,
-	"resolve6": resolve6,
-	"reverse": reverse,
-	"setServers": setServers,
-	"getServers": getServers,
-	"setDefaultResultOrder": setDefaultResultOrder,
-	"getDefaultResultOrder": getDefaultResultOrder,
-	"promises": promises,
-	"ADDRCONFIG": ADDRCONFIG,
-	"V4MAPPED": V4MAPPED,
-	"ALL": ALL
+	}
 };

@@ -1,6 +1,6 @@
 /**
- * Node.js domain module shim
- * The domain module is deprecated but some packages still use it
+ * What almostnode's `domain` has over unenv's (builtins.ts): a Domain that runs what it's given (unenv's only says it
+ * isn't implemented), and `create` making one. The module is deprecated, but some packages still use it.
  */
 
 import { EventEmitter } from "./events";
@@ -48,12 +48,3 @@ export class Domain extends EventEmitter {
 export function create(): Domain {
 	return new Domain();
 }
-
-// Active domain (deprecated but some packages check for it)
-export const active: Domain | null = null;
-
-export default {
-	"Domain": Domain,
-	"create": create,
-	"active": active
-};

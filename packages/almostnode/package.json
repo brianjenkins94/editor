@@ -8,7 +8,8 @@
     ".": "./index.ts",
     "./bridge": "./server-bridge.ts",
     "./packages": "./frameworks/packages.ts",
-    "./fs-capabilities": "./shims/fs-capabilities.ts"
+    "./fs-capabilities": "./shims/fs-capabilities.ts",
+    "./unenv-resolve": "./unenv-resolve.ts"
   },
   "main": "./index.ts",
   "types": "./index.ts",
@@ -22,7 +23,8 @@
   "dependencies": {
     "pako": "^2.1.0",
     "resolve.exports": "^2.0.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "unenv": "2.0.0-rc.24"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

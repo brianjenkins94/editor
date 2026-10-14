@@ -1,21 +1,8 @@
 /* eslint-disable ts/no-unused-private-class-members -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
- * perf_hooks shim - Performance measurement APIs
- * Wraps browser Performance API
+ * What almostnode's `perf_hooks` has over unenv's (builtins.ts): a PerformanceObserver a program can create and observe
+ * with (unenv's only says it isn't implemented) — it reports nothing.
  */
-
-export const performance = globalThis.performance || {
-	"now": () => Date.now(),
-	"timeOrigin": Date.now(),
-	"mark": () => {},
-	"measure": () => {},
-	"getEntries": () => [],
-	"getEntriesByName": () => [],
-	"getEntriesByType": () => [],
-	"clearMarks": () => {},
-	"clearMeasures": () => {},
-	"clearResourceTimings": () => {}
-};
 
 export class PerformanceObserver {
 	private readonly callback: (list: PerformanceObserverEntryList) => void;
@@ -52,43 +39,3 @@ export interface PerformanceEntry {
 	"startTime": number;
 	"duration": number;
 }
-
-// Histogram stub
-export class Histogram {
-	min = 0;
-	max = 0;
-	mean = 0;
-	stddev = 0;
-	percentiles = new Map<number, number>();
-	exceeds = 0;
-
-	reset(): void {
-		this.min = 0;
-		this.max = 0;
-		this.mean = 0;
-		this.stddev = 0;
-		this.percentiles.clear();
-		this.exceeds = 0;
-	}
-
-	percentile(percentile: number): number {
-		return this.percentiles.get(percentile) || 0;
-	}
-}
-
-export function createHistogram(): Histogram {
-	return new Histogram();
-}
-
-export function monitorEventLoopDelay(options?: { "resolution"?: number }): Histogram {
-	const histogram = new Histogram();
-
-	return histogram;
-}
-
-export default {
-	"performance": performance,
-	"PerformanceObserver": PerformanceObserver,
-	"createHistogram": createHistogram,
-	"monitorEventLoopDelay": monitorEventLoopDelay
-};

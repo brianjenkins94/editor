@@ -13,48 +13,23 @@ import type { PackageJson } from "./types/package-json";
 import type { VirtualFS } from "./virtual-fs";
 import { resolve as resolveExports, imports as resolveImports } from "resolve.exports";
 import ts from "typescript";
+import * as unenvFs from "unenv/node/fs";
+import * as unenvFsPromises from "unenv/node/fs/promises";
+import * as unenvProcess from "unenv/node/process";
+import { fillIn, nodeBuiltins } from "./builtins";
 import { transformEsmToCjsSimple } from "./frameworks/esm-cjs";
-import assertShim from "./shims/assert";
-import * as asyncHooksShim from "./shims/async_hooks";
 import bufferShim from "./shims/buffer";
-import * as childProcessShim from "./shims/child_process";
 import { initChildProcess } from "./shims/child_process";
 import * as chokidarShim from "./shims/chokidar";
-import * as clusterShim from "./shims/cluster";
-import * as cryptoShim from "./shims/crypto";
-import * as dgramShim from "./shims/dgram";
-import * as diagnosticsChannelShim from "./shims/diagnostics_channel";
-import * as dnsShim from "./shims/dns";
-import * as domainShim from "./shims/domain";
 import * as esbuildShim from "./shims/esbuild";
-import eventsShim from "./shims/events";
 import { createFsShim } from "./shims/fs";
 import * as fseventsShim from "./shims/fsevents";
-import * as httpShim from "./shims/http";
-import * as http2Shim from "./shims/http2";
-import * as httpsShim from "./shims/https";
-import * as inspectorShim from "./shims/inspector";
-import * as moduleShim from "./shims/module";
-import * as netShim from "./shims/net";
-import * as osShim from "./shims/os";
-import * as pathShim from "./shims/path";
-import * as perfHooksShim from "./shims/perf_hooks";
+import * as pathShim from "unenv/node/path";
 import { createProcess } from "./shims/process";
-import * as querystringShim from "./shims/querystring";
 import * as readdirpShim from "./shims/readdirp";
-import * as readlineShim from "./shims/readline";
 import * as rollupShim from "./shims/rollup";
-import streamShim from "./shims/stream";
-import * as tlsShim from "./shims/tls";
-import * as ttyShim from "./shims/tty";
-import * as urlShim from "./shims/url";
-import * as utilShim from "./shims/util";
-import * as v8Shim from "./shims/v8";
-import * as vmShim from "./shims/vm";
-import * as workerThreadsShim from "./shims/worker_threads";
 
 import * as wsShim from "./shims/ws";
-import * as zlibShim from "./shims/zlib";
 import { uint8ToBase64, uint8ToHex } from "./utils/binary-encoding";
 import { simpleHash } from "./utils/hash";
 
@@ -395,20 +370,6 @@ function createStringDecoderModule() {
 }
 
 /**
- * Create a basic timers module
- */
-function createTimersModule() {
-	return {
-		"setTimeout": globalThis.setTimeout,
-		"setInterval": globalThis.setInterval,
-		"setImmediate": (fn: () => void) => setTimeout(fn, 0),
-		"clearTimeout": globalThis.clearTimeout,
-		"clearInterval": globalThis.clearInterval,
-		"clearImmediate": globalThis.clearTimeout
-	};
-}
-
-/**
  * Minimal prettier shim - just returns input unchanged
  * This is needed because prettier uses createRequire which conflicts with our runtime
  */
@@ -430,75 +391,10 @@ const prettierShim = {
 };
 
 /**
- * Create a mutable copy of a module for packages that need to patch it
- * (e.g., Sentry needs to patch http.request/http.get)
- */
-function makeMutable(mod: Record<string, unknown>): Record<string, unknown> {
-	const mutable: Record<string, unknown> = {};
-
-	for (const key of Object.keys(mod)) {
-		mutable[key] = mod[key];
-	}
-
-	return mutable;
-}
-
-/**
  * Built-in modules registry
  */
-const builtinModules: Record<string, unknown> = {
-	"path": pathShim,
-  // Make http/https mutable so packages like Sentry can patch them
-	"http": makeMutable(httpShim),
-	"https": makeMutable(httpsShim),
-	"net": netShim,
-	"events": eventsShim,
-	"stream": streamShim,
-	"buffer": bufferShim,
-	"url": urlShim,
-	"querystring": querystringShim,
-	"util": utilShim,
-	"tty": ttyShim,
-	"os": osShim,
-	"crypto": cryptoShim,
-	"zlib": zlibShim,
-	"dns": dnsShim,
-	"child_process": childProcessShim,
-	"assert": assertShim,
-	"string_decoder": createStringDecoderModule(),
-	"timers": createTimersModule(),
-	"_http_common": {},
-	"_http_incoming": {},
-	"_http_outgoing": {},
-  // New shims for Vite support
-	"chokidar": chokidarShim,
-	"ws": wsShim,
-	"fsevents": fseventsShim,
-	"readdirp": readdirpShim,
-	"module": moduleShim,
-	"perf_hooks": perfHooksShim,
-	"worker_threads": workerThreadsShim,
-	"esbuild": esbuildShim,
-	"rollup": rollupShim,
-	"v8": v8Shim,
-	"readline": readlineShim,
-	"tls": tlsShim,
-	"http2": http2Shim,
-	"cluster": clusterShim,
-	"dgram": dgramShim,
-	"vm": vmShim,
-	"inspector": inspectorShim,
-	"inspector/promises": inspectorShim,
-	// (Node's subpaths of a built-in, from the built-in's own shim)
-	"assert/strict": (assertShim as unknown as { "strict": unknown }).strict,
-	"stream/promises": (streamShim as unknown as { "promises": unknown }).promises,
-	"async_hooks": asyncHooksShim,
-	"domain": domainShim,
-	"diagnostics_channel": diagnosticsChannelShim,
-  // prettier uses createRequire which doesn't work in our runtime, so we shim it
-	"prettier": prettierShim,
-  // Some packages explicitly require 'console' (with Console constructor)
-	"console": {
+/** almostnode's console module: the page's console, with Node's Console constructor (some packages require it). */
+const consoleModule = {
 		...console,
 		"Console": class Console {
 			private readonly _stdout: { "write": (s: string) => void } | null;
@@ -548,19 +444,23 @@ const builtinModules: Record<string, unknown> = {
 			groupEnd() {}
 			table(data: unknown) { this._write("out", [data]); }
 		}
-	},
-  // util/types is accessed as a subpath
-	"util/types": utilShim.types,
-  // path subpaths (our path shim is already POSIX-based)
-	"path/posix": pathShim,
-	"path/win32": pathShim.win32,
-  // timers subpaths
-	"timers/promises": {
-		"setTimeout": (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }),
-		"setInterval": globalThis.setInterval,
-		"setImmediate": (value?: unknown) => new Promise((resolve) => { setTimeout(resolve, 0, value); }),
-		"scheduler": { "wait": (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }) }
-	}
+	};
+
+const builtinModules: Record<string, unknown> = {
+	// Node's built-ins: unenv's, almostnode's own only where it must differ (builtins.ts)
+	...nodeBuiltins({ "string_decoder": createStringDecoderModule(), "console": consoleModule }),
+	"_http_common": {},
+	"_http_incoming": {},
+	"_http_outgoing": {},
+	// Not Node's: packages almostnode intercepts (native binaries, or what a browser can't run), for Vite and its kind
+	"chokidar": chokidarShim,
+	"ws": wsShim,
+	"fsevents": fseventsShim,
+	"readdirp": readdirpShim,
+	"esbuild": esbuildShim,
+	"rollup": rollupShim,
+	// prettier uses createRequire which doesn't work in our runtime, so we shim it
+	"prettier": prettierShim
 };
 
 /**
@@ -1117,7 +1017,7 @@ ${code}
     // Special handling for 'module' - provide a working createRequire
 		if (id === "module") {
 			return {
-				...moduleShim,
+				...builtinModules["module"] as Record<string, unknown>,
 				"createRequire": (filenameOrUrl: string) => {
           // Convert file:// URL to path
 					let fromPath = filenameOrUrl;
@@ -1296,6 +1196,11 @@ export class Runtime {
     // Create fs shim with cwd getter for relative path resolution
 		this.fsShim = createFsShim(vfs, () => this.process.cwd(), options.beforeFs, options.afterFs);
 		this.options = options;
+
+    // almostnode's own fs and process — each runtime's — with what unenv's have that they lack (builtins.ts)
+		fillIn(this.fsShim, unenvFs as Record<string, unknown>);
+		fillIn(this.fsShim.promises, unenvFsPromises as Record<string, unknown>);
+		fillIn(this.process, unenvProcess as Record<string, unknown>, true);
 
     // process.getBuiltinModule (Node 22.3+): a built-in by its name, as require() gives it — undefined for anything else
 		(this.process as unknown as { "getBuiltinModule": (id: string) => unknown }).getBuiltinModule = (id: string): unknown => {
