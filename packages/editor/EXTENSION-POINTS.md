@@ -52,6 +52,15 @@ Underneath, the port is a link into the editor's hub, so the worker stays a real
 request its servers answer), its logs and each server's traffic (`server:<port>`) are the editor's to see. The
 extension's own code never joins the hub; the bridge stays the one bridge.
 
+**Its servers' bodies, streamed** (2026-10-14). `serve`'s handler gets a request's body whole, or — an upload longer
+than one piece (256 KiB) — as a stream it reads as it goes; and it may answer with a stream: the preview gets the head as
+soon as it's sent and the rest as it's written (server-sent events, a long download), the page reading at its own pace
+holding the writer back. A handler that answers whole is unchanged; one that assumes every request body is whole sees a
+stream only on a large upload. On the wire it's run-contract's `exchanges`: each piece another call on its request's
+route, naming its port, so every hop — the service worker, the tab's root, the dev-server worker — sends it the same way
+and none of them changed. A preview's request for `localhost:<port>` reaches the server on that port the same way; a port
+nothing serves goes to the network, as before. (WebSockets wait for a way to observe them too.)
+
 **Dogfooded:** tsval is an extension of its own (`extensions/tsval`), in the bridge's host, contributing the `tsval`
 debugger: VS Code's API, the contract and this export, nothing else — its adapter drives its worker by messages of their
 own. What Run means for any debugger moved to the bridge (an app's file runs the app, a rule's process.argv and its
