@@ -4,7 +4,7 @@
  */
 
 import type { VirtualFS } from "./virtual-fs";
-import { EventEmitter } from "./shims/events";
+import { EventEmitter } from "unenv/node/events";
 import { Buffer } from "./shims/stream";
 
 export interface DevServerOptions {

@@ -5,13 +5,16 @@
  */
 
 import type { ResponseData,	Server } from "./shims/http";
-import { EventEmitter } from "./shims/events";
+import { EventEmitter } from "unenv/node/events";
 import {
 	setServerCloseCallback,
 	setServerListenCallback
 } from "./shims/http";
 import { Buffer } from "./shims/stream";
 import { uint8ToBase64 } from "./utils/binary-encoding";
+
+/** A listener, as an EventEmitter takes one. */
+type EventListener = (...args: any[]) => void;
 
 const _encoder = new TextEncoder();
 

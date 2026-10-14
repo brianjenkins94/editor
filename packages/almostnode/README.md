@@ -25,15 +25,16 @@ Dropped from upstream: `worker-runtime.ts` / `sandbox-runtime.ts` (and `comlink`
 Since 2026-10-14 the built-in modules are [unenv](https://github.com/unjs/unenv)'s (pinned `2.0.0-rc.24`; what esm.sh
 and Cloudflare's Node compatibility build on), assembled in `builtins.ts`, three ways:
 
-- **unenv's as they are**: path, os, querystring, url, punycode, constants, timers, tty, readline, v8, dgram, cluster,
-  diagnostics_channel, inspector, trace_events, repl, worker_threads, util/types — their shims here are deleted.
+- **unenv's as they are**: events, buffer, assert, path, os, querystring, url, punycode, constants, timers, tty,
+  readline, v8, dgram, cluster, diagnostics_channel, inspector, trace_events, repl, worker_threads, util/types — their
+  shims here are deleted, and almostnode's own code (the http/net bridge, process, streams) extends unenv's EventEmitter.
 - **unenv's with a few names of ours over them**, where a program here needs them to work and unenv's only say "not
-  implemented": dns (lookups answering localhost — Vite resolves `localhost` as it starts), perf_hooks
-  (PerformanceObserver), domain (Domain, create). Those shims hold only those names.
+  implemented": dns (lookups answering localhost — Vite resolves `localhost` as it starts), util (callbackify,
+  stripVTControlCharacters), perf_hooks (PerformanceObserver), domain (Domain, create). Those shims hold only those names.
 - **ours, unenv filling in what they lack**: what the editor is behind (http/https/http2/net/tls — the dev servers'
   bridge; child_process's ENOSYS; fs over the VFS; module's `createRequire`; each runtime's process), what we implement
-  and unenv stubs (crypto's hashes, zlib, stream, string_decoder, vm), and what almostnode's own code builds on
-  (events, buffer, util, assert, async_hooks, console). A runtime's fs and process get unenv's missing names too.
+  and unenv stubs (crypto's hashes, zlib, stream, string_decoder, vm), and async_hooks and console. A runtime's fs and
+  process get unenv's missing names too.
 
 unenv's modules import each other by Node's names (`node:events`); `unenv-resolve.ts` makes those unenv's own — a
 bundler of almostnode uses its `unenvResolve()` plugin (the editor's build does), the tests their loader.

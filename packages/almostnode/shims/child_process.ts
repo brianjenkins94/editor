@@ -15,7 +15,7 @@
 // Polyfill process (some deps read globalThis.process at import time).
 import type { VirtualFS } from "../virtual-fs";
 import type { Buffer } from "./stream";
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 import { Readable, Writable } from "./stream";
 
 if (typeof globalThis.process === "undefined") {

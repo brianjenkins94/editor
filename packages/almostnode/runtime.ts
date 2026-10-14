@@ -13,12 +13,12 @@ import type { PackageJson } from "./types/package-json";
 import type { VirtualFS } from "./virtual-fs";
 import { resolve as resolveExports, imports as resolveImports } from "resolve.exports";
 import ts from "typescript";
+import { Buffer as UnenvBuffer } from "unenv/node/buffer";
 import * as unenvFs from "unenv/node/fs";
 import * as unenvFsPromises from "unenv/node/fs/promises";
 import * as unenvProcess from "unenv/node/process";
 import { fillIn, nodeBuiltins } from "./builtins";
 import { transformEsmToCjsSimple } from "./frameworks/esm-cjs";
-import bufferShim from "./shims/buffer";
 import { initChildProcess } from "./shims/child_process";
 import * as chokidarShim from "./shims/chokidar";
 import * as esbuildShim from "./shims/esbuild";
@@ -1723,7 +1723,7 @@ ${code}
 		);
 		const consoleWrapper = createConsoleWrapper(this.options.onConsole);
 		const { process } = this;
-		const buffer = bufferShim.Buffer;
+		const buffer = UnenvBuffer;
 
     // Use a Generator to maintain a persistent eval scope.
     // Generator functions preserve their local scope across yields, so

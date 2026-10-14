@@ -6,7 +6,7 @@
 
 import type { AddressInfo } from "./net";
 import { createHash } from "./crypto";
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 import { Server as NetServer, Socket } from "./net";
 import { Buffer, Readable, Writable } from "./stream";
 

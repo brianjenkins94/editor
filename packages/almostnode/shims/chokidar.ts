@@ -4,7 +4,7 @@
  */
 
 import type { FSWatcher as VFSWatcher, VirtualFS } from "../virtual-fs";
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 
 // Global reference to VFS - set by runtime
 let globalVFS: VirtualFS | null = null;

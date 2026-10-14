@@ -4,10 +4,10 @@
  *
  *   - unenv's module, as it is (`unenv`): what has nothing of the editor in it;
  *   - unenv's module, with a few of almostnode's names over it (`unenvWith`): what a program running here needs to work
- *     where unenv only says "not implemented" — Vite resolving `localhost` (dns.lookup), say;
+ *     where unenv only says "not implemented" — Vite resolving `localhost` (dns.lookup), util's callbackify, say;
  *   - almostnode's module, unenv filling in what it lacks (`oursOver`): what the editor is behind (the dev servers'
  *     http/net bridge, child_process's ENOSYS), or what almostnode implements and unenv stubs (crypto's hashes, zlib,
- *     streams, vm) — and what almostnode's own code builds on (events, buffer, util, assert).
+ *     streams, vm). almostnode's own code builds on unenv's events and buffer, as a program does.
  *
  * `fs` and `process` aren't here: each runtime has its own (the runtime's require answers them).
  *
@@ -58,14 +58,11 @@ import * as unenvV8 from "unenv/node/v8";
 import * as unenvVm from "unenv/node/vm";
 import * as unenvWorkerThreads from "unenv/node/worker_threads";
 import * as unenvZlib from "unenv/node/zlib";
-import assertShim from "./shims/assert";
 import * as asyncHooksShim from "./shims/async_hooks";
-import bufferShim from "./shims/buffer";
 import * as childProcessShim from "./shims/child_process";
 import * as cryptoShim from "./shims/crypto";
 import * as dnsShim from "./shims/dns";
 import * as domainShim from "./shims/domain";
-import eventsShim from "./shims/events";
 import * as httpShim from "./shims/http";
 import * as http2Shim from "./shims/http2";
 import * as httpsShim from "./shims/https";
@@ -85,6 +82,17 @@ type Namespace = Record<string, unknown>;
 function required(namespace: Namespace): Record<string, unknown> {
 	const value = namespace["default"];
 	const named = Object.fromEntries(Object.entries(namespace).filter(([name]) => name !== "default"));
+
+	// (a function — events' EventEmitter, assert — is the module, its named exports its properties)
+	if (typeof value === "function") {
+		for (const [name, each] of Object.entries(named)) {
+			if (!(name in value)) {
+				Object.defineProperty(value, name, { "value": each, "writable": true, "configurable": true, "enumerable": true });
+			}
+		}
+
+		return value as unknown as Record<string, unknown>;
+	}
 
 	return value !== null && typeof value === "object" ? { ...named, ...value as Namespace } : named;
 }
@@ -135,9 +143,9 @@ export function fillIn(target: object, namespace: Namespace, bind = false): void
 /** The built-ins, by name (`node:` stripped), but `fs` and `process` (each runtime's own). `own`: almostnode's modules
  *  the runtime makes (its string_decoder and console), unenv filling in what they lack. */
 export function nodeBuiltins(own: { "string_decoder": Namespace; "console": Namespace }): Record<string, unknown> {
-	const util = oursOver(utilShim as unknown as Namespace, unenvUtil);
+	const util = unenvWith(unenvUtil, utilShim as unknown as Namespace, ["callbackify", "stripVTControlCharacters"]);
 	const path = unenv(unenvPath);
-	const assert = oursOver(assertShim, unenvAssert);
+	const assert = unenv(unenvAssert);
 	const stream = oursOver(streamShim, unenvStream);
 
 	return {
@@ -181,8 +189,8 @@ export function nodeBuiltins(own: { "string_decoder": Namespace; "console": Name
 		"zlib": oursOver(zlibShim as unknown as Namespace, unenvZlib),
 		"vm": oursOver(vmShim as unknown as Namespace, unenvVm),
 		"module": oursOver(moduleShim as unknown as Namespace, unenvModule),
-		"events": oursOver(eventsShim, unenvEvents),
-		"buffer": oursOver(bufferShim, unenvBuffer),
+		"events": unenv(unenvEvents),
+		"buffer": unenv(unenvBuffer),
 		"util": util,
 		"sys": util,
 		"assert": assert,

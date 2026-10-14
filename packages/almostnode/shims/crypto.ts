@@ -4,7 +4,7 @@
  * Provides cryptographic utilities using Web Crypto API
  */
 
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 import { Buffer } from "./stream";
 
 // ============================================================================

@@ -5,7 +5,7 @@
  */
 
 import { uint8ToBase64, uint8ToBinaryString, uint8ToHex } from "../utils/binary-encoding";
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 
 const _encoder = new TextEncoder();
 const _decoder = new TextDecoder("utf-8");

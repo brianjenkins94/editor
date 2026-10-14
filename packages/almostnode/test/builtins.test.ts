@@ -18,7 +18,9 @@ const FLOORS: Record<string, number> = {
 	"assert": 19,
 	"assert/strict": 19,
 	"async_hooks": 7,
-	"buffer": 11,
+	// (9, not 11: almostnode's transcode only copied and its resolveObjectURL was always undefined — unenv's say they
+	// aren't implemented instead of answering wrongly)
+	"buffer": 9,
 	"child_process": 6,
 	"cluster": 12,
 	"console": 25,

@@ -4,9 +4,11 @@
  * Basic Socket and Server classes for virtual networking
  */
 
-import type { EventListener } from "./events";
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 import { Buffer, Duplex } from "./stream";
+
+/** A listener, as an EventEmitter takes one. */
+type EventListener = (...args: any[]) => void;
 
 // Keep the host's process alive while a server is listening (Node treats a listening server as a ref'd handle).
 // This hook is installed ONLY in the terminal's node worker (node-keepalive.ts) so it knows a `node server.js`

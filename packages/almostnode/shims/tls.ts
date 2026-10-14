@@ -3,7 +3,7 @@
  * Provides stubs that allow code to load without crashing
  */
 
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 
 export class TLSSocket extends EventEmitter {
 	authorized = false;

@@ -4,8 +4,10 @@
  * Process is an EventEmitter in Node.js
  */
 
-import type { EventListener } from "./events";
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
+
+/** A listener, as an EventEmitter takes one. */
+type EventListener = (...args: any[]) => void;
 
 export type ProcessEnv = Record<string, string | undefined>;
 

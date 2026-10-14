@@ -7,7 +7,7 @@
  * context (or another tab of the origin).
  */
 
-import { EventEmitter } from "./events";
+import { EventEmitter } from "unenv/node/events";
 
 // Polyfill for CloseEvent (not available in Node.js)
 const CloseEventPolyfill = typeof CloseEvent !== "undefined" ? CloseEvent : class CloseEvent extends Event {
