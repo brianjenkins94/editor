@@ -17,7 +17,9 @@ import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
-import { effectiveDisposition, isDangerous } from "@brianjenkins94/util/silo/policy";
+import { effectiveDisposition, isDangerous, packageDisposition } from "@brianjenkins94/util/silo/policy";
+import * as vscode from "vscode";
+import { recordEffect } from "../../../shared/capabilities/run-effects";
 import { loadEffectivePolicy, persistOverride, recordObservation } from "../../../shared/capabilities/silo-store";
 import { bridgeHub } from "../hub";
 import { coalesce } from "./coalesce";
@@ -29,9 +31,11 @@ import { coalesce } from "./coalesce";
  *   • fs:  `{ kind: "fs", method, args: [path, …] }` — op derived from the method, path from arg 0.
  *   • exec:`{ kind: "exec", args: [command, …] }`.
  *   • eval:`{ kind: "eval", resource }` — the codegen kind.
+ *   • load:`{ kind: "load", package }` — a package a preview loads (the service worker's esm.sh gate), by name or
+ *     name@version: the policy's word on the package alone (an org's ban), never a question.
  */
 export interface CapabilityCall {
-	"kind": "net" | "fs" | "exec" | "eval" | "net.ws" | "net.webrtc";
+	"kind": "net" | "fs" | "exec" | "eval" | "net.ws" | "net.webrtc" | "load";
 	"method"?: string;
 	"op"?: "read" | "write";
 	"resource"?: string;
@@ -225,6 +229,26 @@ const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabili
  * once stays allowed, and one refused stays refused, until it ends; the next run asks again.
  */
 export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow": boolean; "decided": Decided }> {
+	// A package a preview loads: refused only when the policy bans it — counted, as a debug run counts a ban, by its run.
+	if (call.kind === "load") {
+		const pkg = call.package ?? "";
+		const at = pkg.lastIndexOf("@");
+		const named = at > 0 ? { "name": pkg.slice(0, at), "version": pkg.slice(at + 1) } : { "name": pkg };
+		const banned = packageDisposition(await loadEffectivePolicy(), named) === "deny";
+
+		if (banned && call.runId !== undefined) {
+			recordEffect(call.runId, "load", pkg, "denied", 1, "policy");
+		}
+
+		// (said once per run: a preview missing a package it was refused shows nothing of why)
+		if (banned && !told.has(`${call.runId ?? ""}\0${pkg}`)) {
+			told.add(`${call.runId ?? ""}\0${pkg}`);
+			void vscode.window.showWarningMessage(`The preview didn't load ${pkg}: the policy bans it.`);
+		}
+
+		return { "allow": !banned, "decided": "policy" };
+	}
+
 	const request = classify(call);
 
 	if (request === undefined) {
@@ -306,6 +330,9 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 		throw error;
 	}
 }
+
+/** The bans a preview's run has been told of, by run and package. */
+const told = new Set<string>();
 
 /** Decide one raw capability call: `true` to allow, `false` to deny (decideCapabilityAs, without how). */
 export async function decideCapability(call: CapabilityCall): Promise<boolean> {

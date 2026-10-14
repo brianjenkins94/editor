@@ -28,6 +28,7 @@
 import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "./shared/architecture";
+import { esmPackage } from "./shared/preview-evidence";
 import { parseVirtual } from "./shared/virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
@@ -101,9 +102,37 @@ async function previewClientOf(event) {
 	}
 }
 
+// A package a preview loads from esm.sh (the dev server maps its bare imports there, and each module esm.sh serves
+// imports what it depends on from there too): asked about by name@version, as a `load` — an org's policy may ban it, and
+// then it isn't fetched at all. Asked once per package at a time: a page's burst of its modules shares the answer.
+const loading = new Map();
+
+function mayLoad(served, preview) {
+	const key = preview.tab + "\0" + preview.port + "\0" + served.name + "@" + (served.version || "");
+
+	if (!loading.has(key)) {
+		const asked = decide({ "kind": "load", "package": served.version === undefined ? served.name : served.name + "@" + served.version, "port": preview.port }, preview.tab);
+
+		loading.set(key, asked);
+		void asked.finally(() => { loading.delete(key); });
+	}
+
+	return loading.get(key);
+}
+
 // Gate a previewed app's DATA fetches (destination "" = fetch/XHR, not a subresource/module load) to http(s),
 // then fetch or block. Non-preview clients and non-data requests pass straight through — same as before.
 async function gateAndFetch(event, request, requestUrl) {
+	const served = esmPackage(request.url);
+
+	if (served !== undefined && event.clientId) {
+		const preview = await previewClientOf(event);
+
+		if (preview !== undefined && !(await mayLoad(served, preview))) {
+			return new Response("Blocked by policy: " + served.name + (served.version === undefined ? "" : "@" + served.version) + " may not be loaded", { "status": 403, "statusText": "Package banned" });
+		}
+	}
+
 	if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
 		const preview = await previewClientOf(event);
 

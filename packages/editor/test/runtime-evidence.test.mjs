@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { evidenceText, foldBranches, foldReached, foldSamples, foldValues, HALF_LIFE_RUNS, MAX_SAMPLES, MAX_TAGS, parseEvidence, parseSamples, samplesText } from "@brianjenkins94/util/silo/evidence";
 import { samplesPath } from "@brianjenkins94/util/silo/layout";
 import { loadedPackages } from "../previews/page-evidence.ts";
+import { esmPackage } from "../shared/preview-evidence.ts";
 
 const run = (index) => ({ "id": `run-${index}`, "at": `2026-10-04T00:00:0${index}Z` });
 const fade = 2 ** (-1 / HALF_LIFE_RUNS);
@@ -89,3 +90,12 @@ test("a preview's packages: the exact versions esm.sh served it, not the ranges 
 		"not a url"
 	]), ["@tanstack/query-core@5.62.0-beta.1", "react-dom@19.3.0", "react@19.3.0", "scheduler@0.27.0"]);
 });
+
+test("an esm.sh URL's package: its name, and its version when exact — a range names only the package", () => {
+	assert.deepEqual(esmPackage("https://esm.sh/react@^19?dev"), { "name": "react" });
+	assert.deepEqual(esmPackage("https://esm.sh/react-dom@19.3.0/client?dev"), { "name": "react-dom", "version": "19.3.0" });
+	assert.deepEqual(esmPackage("https://esm.sh/v135/@tanstack/query-core@5.62.0-beta.1/es2022/query-core.mjs"), { "name": "@tanstack/query-core", "version": "5.62.0-beta.1" });
+	assert.deepEqual(esmPackage("https://esm.sh/left-pad"), { "name": "left-pad" });
+	assert.equal(esmPackage("https://cdn.example.com/react@19.3.0/react.js"), undefined);
+});
+

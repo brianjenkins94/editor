@@ -19,6 +19,7 @@ import type { Encoded } from "@brianjenkins94/run-contract/recorded";
 import type { ObserveSite } from "@brianjenkins94/tsval";
 import type { ModuleEvidence, RecordedStop, Replay, StopHit } from "../shared/preview-evidence";
 import { encode } from "@brianjenkins94/run-contract/recorded";
+import { esmPackage } from "../shared/preview-evidence";
 import { preview } from "@brianjenkins94/run-contract/values";
 import { typeTag } from "@brianjenkins94/tsval/values";
 
@@ -99,11 +100,10 @@ export function loadedPackages(urls: string[]): string[] {
 	const found = new Set<string>();
 
 	for (const url of urls) {
-		const parsed = URL.canParse(url) ? new URL(url) : undefined;
-		const match = parsed?.hostname === "esm.sh" ? /^\/(?:(?:v\d+|stable)\/)?\*?((?:@[^/@]+\/)?[^/@]+)@(\d+\.\d+\.\d[^/?&]*)/u.exec(parsed.pathname) : null;
+		const served = esmPackage(url);
 
-		if (match !== null) {
-			found.add(`${match[1]}@${match[2]}`);
+		if (served?.version !== undefined) {
+			found.add(`${served.name}@${served.version}`);
 		}
 	}
 
