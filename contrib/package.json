@@ -79,7 +79,7 @@
   "devDependencies": {
     "@brianjenkins94/hub": "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz",
     "@brianjenkins94/observability": "https://brianjenkins94.github.io/editor/packages/observability@latest.tgz",
-    "@brianjenkins94/run-contract": "https://brianjenkins94.github.io/editor/packages/run-contract@latest.tgz",
+    "@brianjenkins94/editor-api": "https://brianjenkins94.github.io/editor/packages/editor-api@latest.tgz",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@tsconfig/node-lts": "latest",
     "@types/vscode": "^1.100.0",

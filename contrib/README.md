@@ -31,7 +31,7 @@ rename its `contrib` debug type, and change it there too.
 
 A debug adapter (the Debug Adapter Protocol, inline in the extension). The editor runs every file as a debug session,
 so breakpoints, stepping, the Variables view and the Debug Console come with the protocol. What the editor draws over
-the code comes from the custom events of the run contract — `@brianjenkins94/run-contract`, the editor's own package,
+the code comes from the custom events of the run contract — `@brianjenkins94/editor-api`, the editor's own package,
 the same events its tsval debugger sends:
 
 | Event | What the editor does with it |
@@ -49,7 +49,7 @@ it as `__policy` in its launch configuration (read it with `@brianjenkins94/util
 says to ask about.
 
 The program runs in a worker of its own (`src/worker.ts`), linked into the editor's workspace runtime
-(`@brianjenkins94/run-contract/runtime`, which needs `@brianjenkins94/hub` and `@brianjenkins94/observability` beside
+(`@brianjenkins94/editor-api/runtime`, which needs `@brianjenkins94/hub` and `@brianjenkins94/observability` beside
 it): `workspaceRuntime().connect(name, session)` in the extension gives the worker a port — bound to the debug session
 VS Code made the adapter for — and `connectRuntime(port, { name })` in the worker connects it. Its `fs` reads and writes the workspace synchronously, as `require` and
 `readFileSync` need — an open editor's unsaved text included — each call answered by the editor: a call the program makes
@@ -69,7 +69,7 @@ The editor parses code with BABLR (its TypeScript grammar), and keeps every text
 for a text's spans — the CST nodes an annotation can attach to:
 
 ```ts
-import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 
 const answer = await annotations(vscode.commands).spans(source);
 // { value: [{ id, start, end }, …] } — or { unparsable: why } when the grammar doesn't take the text as it is (mid-edit,
@@ -79,7 +79,7 @@ const answer = await annotations(vscode.commands).spans(source);
 Each `id` is the node's Merkle hash (its type over its tokens' text and its children's hashes, whitespace and comments
 left out), so it survives the node moving and changes when the node does. `editor.annotations.refer` and
 `editor.annotations.resolve` keep something attached to a span across edits — typed, and their contract documented, in
-`@brianjenkins94/run-contract/annotations` (`annotations(vscode.commands)`): what the editor's notes, evidence and placed
+`@brianjenkins94/editor-api/annotations` (`annotations(vscode.commands)`): what the editor's notes, evidence and placed
 rules use.
 
 ## The renderer — `src/renderer.ts`

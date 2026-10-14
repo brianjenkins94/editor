@@ -2,9 +2,9 @@
 // runtime (`connectRuntime`): its files, read and written synchronously — the program's calls decided by the editor's
 // policy, as every run's are — its log, and the preview's requests for a server the program starts. It tells the debug
 // adapter (interpreter.ts) what happened as it goes, and the adapter tells the editor.
-import type { Events } from "@brianjenkins94/run-contract";
-import type { RuntimeConnection } from "@brianjenkins94/run-contract/runtime";
-import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
+import type { Events } from "@brianjenkins94/editor-api";
+import type { RuntimeConnection } from "@brianjenkins94/editor-api/runtime";
+import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 
 /** What the adapter sends: the runtime link (inside the editor), then a program to run. */
 export type ToWorker =

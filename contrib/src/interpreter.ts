@@ -1,9 +1,9 @@
 // The interpreter: a debug adapter the editor starts for every run of a file — the ▷ button, the terminal, and live
 // runs as you type all go through `vscode.debug.startDebugging`. It speaks the Debug Adapter Protocol, so breakpoints,
 // stepping, the Variables view and the Debug Console are VS Code's own. What the editor draws on top of the code —
-// values in the margin, coverage — comes from the run contract's custom events (@brianjenkins94/run-contract). The
+// values in the margin, coverage — comes from the run contract's custom events (@brianjenkins94/editor-api). The
 // program itself runs in a worker (worker.ts), linked into the editor's runtime.
-import { workspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import { workspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import type { FromWorker, ToWorker } from "./worker";
 import InterpreterWorker from "./worker?worker&inline";
