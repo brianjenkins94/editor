@@ -84,10 +84,10 @@ All three came over from the `silo` prototype.
 
 ## What doesn't fit (open questions)
 
-1. **The baseline doesn't analyze packages any more.** The prototype's audit did (`package-capabilities` and
-   `deobfuscate`); the port into lib cut that half (`audit.ts` says so), and nothing calls `packages.ts`. `install`
-   says it records "what each installed package can do", so check where those facts come from now: probably only
-   builtins and the import surface. Reconnecting `packages` and `deobfuscate` is what Anticipate needs.
+1. **The baseline analyzes packages more coarsely than the prototype did.** Both front ends run lib's `detect` (a
+   pattern scan) over every code file of each package's own tarball: the editor from the registry, the command line
+   from node_modules. The prototype was finer: only the slice of a package your code imports (tree-shaken), and
+   deobfuscated first (`package-capabilities`, `deobfuscate`), which the port into lib cut off.
 2. **There's no gate outside the editor.** The editor gates its runs (tsval, almostnode) and util/mcp gates MCP tools,
    but nothing gates a program you run from a terminal. The prototype's `silo <script>` was that gate (a bundled
    broker, BERNARD and JUDICIAL); its decision core survived, its runner didn't. A `silo run` has been discussed
@@ -104,3 +104,77 @@ All three came over from the `silo` prototype.
    `features` and `history` rest on the parked feature layer.
 6. **The leftovers.** Whether `packages` and `deobfuscate` get wired into the baseline (see 1), and whether `guard`
    stays. `provenance` and `review` serve the dropped AI-approval purpose: whether to remove them.
+
+## Plan: one silo, two front ends
+
+Each job is implemented once in lib `util/silo`; the command line and the editor only present it. The prototype's
+AI-approval (approve, waive, review, provenance) isn't coming back. Nor is a separate approval step for packages:
+everything a person decides lives in their policy.
+
+### Principles
+
+- **Facts in the baseline, decisions in the policy, outcomes in the runs.** The baseline only records what code can do.
+  The policy says what's allowed (the shared contract, then yours). A run records what happened, including each
+  exception to the policy. Nothing else holds a decision.
+- **Git is the review.** A change to `baseline.json` or a policy file is reviewed the way code is: in the commit that
+  makes it. No command exists only to approve.
+- **The same answer from both front ends.** Same analysis, same files, same decision core (`enforce/decide.mjs`), same
+  run record. Where a front end can't do something (no node_modules in the browser, no terminal prompt in the editor),
+  it reads what the other one wrote instead of computing something different.
+- **No subcommand without a job.** Every subcommand is one of the four jobs, and says which.
+
+### No `accept`: what replaces "pending"
+
+Today a newer version that can do more is "pending" in the baseline until a person runs `silo accept` (or clicks Accept
+in the editor's Exceptions view); meanwhile its new capabilities ask at the call. That's a decision stored in the facts.
+Instead:
+
+1. **The baseline records what grew.** When a package's new version can do more, the baseline takes the new facts at
+   once, and notes each capability's origin: the version that introduced it. "`foo` 2.3.1 added `net`" is a fact.
+2. **Policy decides what a grown capability does at the call.** By default it asks, as any call outside the baseline
+   does. "Always allow" writes your policy (`policy/<user>.json`), which is the approval, reviewed in its commit. A
+   project can set the default to deny in its shared contract (for CI, say).
+3. **Track reports growth instead of blocking on it.** `silo install` prints what each upgrade added. `silo check` exits
+   1 when a package gained a capability no policy rule covers, so CI can require a policy decision.
+
+This removes `silo accept`, the editor's Accept action, and lib's `pending`/`acceptPending`. They're replaced by a
+capability's origin in the baseline and by policy rules.
+
+### The jobs, reconciled
+
+| Job | Command line | Editor | Shared in lib |
+|---|---|---|---|
+| Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Syncs the baseline from the registry as dependencies change (today's `workbench/baseline.ts`) | One package analysis, given a package's files however they were read (node_modules or a tarball) |
+| Track | `silo install` (nothing under a week old; reports growth); `silo check` (runs and growth beyond policy; CI gate, with the prototype's GitHub Action back) | The resolver takes nothing under a week old; the Exceptions view shows growth and exceptions, the same list `silo check` prints | The resolver's age rule, `beyondBaseline`, growth |
+| Remember | `silo coverage` (what committed runs ran); `features`/`history` stay, parked (CHANGE-HISTORY.md) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
+| Gate | `silo run <file>` (new): runs a program with every gated call decided by the policy, and records the run as the editor does | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |
+
+So the command line becomes: `install`, `check`, `run`, `coverage`, with `features` and `history` parked. `init` folds
+into `install`; `accept` goes.
+
+### In order
+
+1. **Take out what isn't coming back.** lib's `provenance` and `review` (with `review.json` and `audit`'s use of it), and
+   `pending`/`acceptPending`, replaced by each capability's origin and the policy default for grown capabilities (lib
+   first, then both front ends in one change, since they read the same `baseline.json`).
+2. **One package analysis.** Both front ends call the same lib function on a package's files. Then decide whether
+   deobfuscation joins it (see decisions).
+3. **`silo check` as the CI gate**, with the prototype's GitHub Action brought back.
+4. **`silo run`**, the desktop gate: the policy and decision core the editor already uses, a terminal prompt in place of
+   the editor's, and the same run envelope.
+5. **One run record and one attribution.** Fold the local MCP ledger and the shared runs into one shape, and have
+   `silo coverage` and the history extension share one way of saying which features ran.
+
+### Decisions to make
+
+- **Grown capabilities' default:** ask (as proposed), or deny in CI and ask locally.
+- **Deobfuscation in the baseline:** webcrack and wakaru are JavaScript and could run in the browser, but they're heavy.
+  Either both front ends deobfuscate (one analysis), or neither does yet. Not one each: two analyses would write
+  different baselines, and the file would flip with whoever synced it last.
+- **The slice you import (tree-shaking):** finer, but it needs the consumer surface, which only the command line has
+  today. Defer, or bring it to both.
+- **What `silo run` runs on:** tsval (the editor's interpreter: identical gating and evidence, but slower and not every
+  program), the prototype's bundled broker (any program, gating only at what it intercepts), or Node's permission model
+  (coarse, and no prompt).
+- **`guard`:** keep it as the seed of fail-loud's `invariant()`, or remove it with the other leftovers.
+
