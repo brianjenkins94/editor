@@ -14,9 +14,10 @@ import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
 import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
 
-// isomorphic-git reads the `Buffer` global (a Node-ism); the browser has none and the workbench bundle doesn't
-// polyfill node globals, so provide it. The `buffer` import resolves to the node-stdlib-browser polyfill via the
-// build's resolve.alias (see build.ts pass 1). Set before any git op runs (module load precedes the git service's first op).
+// isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
+// read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
+// isomorphic-git gets no such injection, so set the global too. Set before any git op runs (module load precedes the
+// git service's first op).
 // eslint-disable-next-line ts/naming-convention -- the Buffer global isomorphic-git expects, node's name
 (globalThis as unknown as { "Buffer"?: unknown }).Buffer ??= Buffer;
 

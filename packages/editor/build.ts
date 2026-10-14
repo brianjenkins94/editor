@@ -8,7 +8,6 @@ import { isCI, isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
-import stdlib from "node-stdlib-browser";
 import { build, createLogger } from "vite";
 import { unenvResolve } from "@brianjenkins94/almostnode/unenv-resolve";
 import { eslintToolchain } from "./build/eslint-toolchain";
@@ -159,14 +158,6 @@ function cspellDict(): Plugin {
 	};
 }
 
-/** `buffer` → the node-stdlib-browser polyfill, for the SHELL: its repo load clones with isomorphic-git (git-clone.ts),
- *  which uses the `Buffer` global, and the shell's bundle otherwise has no `buffer` to resolve (the package isn't a
- *  direct dependency). As the workbench pass's alias does for git-engine.ts; in dev, Vite pre-bundles it (it resolves
- *  into node_modules) into ESM. */
-function shellBuffer(): Plugin {
-	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] } } }) };
-}
-
 /** Emit the capabilities tsserver plugin VERBATIM next to capabilities-engine.js, so tsserver imports it from a served
  *  URL and its import.meta.url self-locates the sibling engine (copied byte-for-byte, not a vite input). */
 function capabilitiesTsPlugin(): Plugin {
@@ -195,12 +186,12 @@ export function hostPlugins(): Plugin[] {
 	return [
 		// The SHELL (main.tsx → shell.tsx) is built here, and it lazily imports the browser GitHub client
 		// (github.ts → fido → util/env, util/store), which pulls in node builtins: `env.ts` reads `process`/`path`/`url`
-		// at eval and `store.ts` (dynamic, browser-guarded) touches `fs`. `polyfillNode([...])` resolves these four AND
-		// injects the `process`/`Buffer` globals env.ts needs. Scoped to this list so it can't stub a builtin another
-		// chunk resolves itself. github.ts is dynamically imported, so fido + these polyfills land in a lazy chunk
-		// (docs/github-*.js), off the shell's cold-start path.
-		polyfillNode(["fs", "path", "url", "util"]),
-		shellBuffer(),
+		// at eval and `store.ts` (dynamic, browser-guarded) touches `fs`. `polyfillNode([...])` resolves these to unenv's
+		// AND injects the `process`/`Buffer` globals env.ts needs; `buffer` too, for the repo load's clone (isomorphic-git, in
+		// git-clone.ts, uses `Buffer`). Scoped to this list so it can't stub a builtin another chunk resolves itself.
+		// github.ts is dynamically imported, so fido + these polyfills land in a lazy chunk (docs/github-*.js), off the
+		// shell's cold-start path.
+		polyfillNode(["fs", "path", "url", "util", "buffer"]),
 		{
 			"name": "coi-headers",
 			"configureServer": function(server) {
@@ -264,19 +255,17 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("bridge"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledExtension("cspell"), bundledModule("extensions/event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url"])],
+		"plugins": [bundledExtension("bridge"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledExtension("cspell"), bundledModule("extensions/event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url", "buffer"])],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
-		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
-		// which the browser lacks and this bundle otherwise doesn't polyfill; the alias makes the import resolve to
-		// the real polyfill (git-engine.ts then assigns it to globalThis) instead of vite's empty browser stub.
 		// `@automerge/automerge` → its base64-INLINED-WASM entry (fullfat_base64): the default browser condition wants a
 		// bundler to serve a separate `automerge.wasm`, which our static Pages deploy can't; the base64 build carries the
 		// wasm inline, so the lazily-imported edit-history chunk is self-contained. Resolve via package.json → sibling.
 		// The terminal's commands run on juvy, which parses with node:util's parseArgs: @pkgjs/parseargs (Node's own, as a
-		// package). polyfillNode(["path", "url"]) is for util/env, which juvy imports (it reads node:path/url at load), and
-		// gives the bundle `global`/`process` where they're read.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"], "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
+		// package). polyfillNode(["path", "url", "buffer"]) is for util/env, which juvy imports (it reads node:path/url at
+		// load), and for isomorphic-git (the git SCM engine), which uses `Buffer` — unenv's, injected where it's read (and
+		// git-engine.ts sets the global, for the dev optimizer's copy) — and gives the bundle `global`/`process` too.
+		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,
