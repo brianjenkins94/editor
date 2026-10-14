@@ -61,9 +61,12 @@ The prototype is `~/Documents/GitHub/silo` (its README is the design doc). Its p
 | Confidence | Runs raise it, edits decay it (Wilson lower bound) | `runs.ts` `confidence` |
 | Deno backend | Permissions as a stronger box than the in-process broker | Not carried over |
 | `review`, `--reviewed`, `--waive`, `accept <ref>`, provenance | Per-function "have you read it", the AI-approval axis | Dropped on purpose (most code is AI-written); `provenance`, `review` remain in lib |
+| Fail-loud (`design/fail-loud.md`, designed) | Value invariants: AI code hedges (`?.`, `??`) on values your code guarantees, turning a crash into a silent wrong answer; guard at trust boundaries (the capability seams), let internal invariants fail loudly; invariants learned from recorded runs, human-gated; `waive(value, reason)` as a codified exception | Built in the editor under Remember: runtime evidence (value and branch observations per span, RUNTIME-EVIDENCE.md's second slice) and insights' "what could go" suggestions (its fourth). Its static half leaned on `strictNullChecks`; TypeScript here is relaxed by choice, so runs are the route |
 
-Note the name collision: the prototype's `accept <ref>` meant "trust everything as of this commit"; today's
-`silo accept` means "approve a package's pending version".
+Note the name collisions: the prototype's `accept <ref>` meant "trust everything as of this commit"; today's
+`silo accept` means "approve a package's pending version". And three things have been called a waiver or an
+exception: the prototype's `--waive` (accepted unread), fail-loud's `waive(value, reason)` (suppress one assert), and
+today's exceptions (a capability call whose outcome differed from the policy, recorded in the run).
 
 ## Modules nobody uses
 
