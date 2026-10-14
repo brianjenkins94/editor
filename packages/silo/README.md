@@ -12,6 +12,17 @@ Silo is everything that should exist when trying to build software safely in the
 The logic is lib's `util/silo` (pure where it can be, so the editor runs it in the browser). This package is the
 command line. The editor is the other front end.
 
+## How it got here
+
+Silo began as a desktop-first command line (the prototype, since abandoned), and was first about approving or waiving
+AI-written code: how likely a file was written by AI, which code units were reviewed. Most code is AI-written now, so
+that part wasn't worth pursuing. Then the editor became the better place for silo to exist and be productized. Parts of
+the prototype that haven't been urgent there stayed behind, because the editor runs in the browser, which is already a
+sandbox: gating a program run from a terminal matters on a desktop, much less in a browser tab.
+
+The goal is to reconcile the two: each job implemented once, in lib `util/silo`, with the command line and the editor
+as two front ends to it. Where a job seems to be missing something, the prototype is the first place to look.
+
 This document is an inventory of what exists, written 2026-10-14 after `silo` grew seven subcommands in two days
 without a plan. It describes, it doesn't decide: the open questions at the end are decisions still to make.
 
@@ -42,7 +53,9 @@ These are in lib `util/silo`, but nothing in the editor, the command line or the
 - **`packages`**: a package's capabilities, from bundling the slice of it you import. It's the only thing that uses
   `deobfuscate`, so that's unused too in effect.
 - **`guard`**: a runtime check at a boundary, with a pluggable reaction.
-- **`provenance`**: how likely a file was written by AI.
+- **`provenance`**: how likely a file was written by AI. The prototype's original purpose (approving AI-written code),
+  dropped on purpose: most code is AI-written now. `review` (which code units were reviewed, `review.json`) belongs
+  with it; only `audit` still reads it.
 
 All three came over from the `silo` prototype.
 
@@ -54,7 +67,8 @@ All three came over from the `silo` prototype.
    Anticipate is missing its core: static analysis and deobfuscation of the packages themselves.
 2. **There's no gate outside the editor.** The editor gates its runs (tsval, almostnode) and util/mcp gates MCP tools,
    but nothing gates a program you run from a terminal. A `silo run` has been discussed (tsval with policy, recording
-   exceptions) and not built.
+   exceptions) and not built. Not urgent while the editor (already a browser sandbox) is the product, but needed to
+   reconcile the two.
 3. **Two stores of what code can do.** `baseline.json` holds what packages can do (Anticipate). `capabilities.json` and
    `capabilities/<user>.json` hold what the code can do and what it was seen doing (the capabilities extension's). How
    they relate isn't written down.
@@ -64,5 +78,5 @@ All three came over from the `silo` prototype.
 5. **Which subcommands belong.** By the four jobs, all seven do: three for Track, two for Anticipate (with overlap),
    three for Remember, none for Gate. But they aren't grouped that way, the file's own header lists five of them, and
    `features` and `history` rest on the parked feature layer.
-6. **The leftovers.** Whether `packages` and `deobfuscate` get wired into the baseline (see 1), and whether `guard` and
-   `provenance` stay.
+6. **The leftovers.** Whether `packages` and `deobfuscate` get wired into the baseline (see 1), and whether `guard`
+   stays. `provenance` and `review` serve the dropped AI-approval purpose: whether to remove them.
