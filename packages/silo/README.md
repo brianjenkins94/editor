@@ -157,7 +157,10 @@ Anticipate and Track watch a dependency from both sides, and its usage. Each vie
 | **The join** | What can the part you use reach, tree-shaken? | Either side | lib `packages` (rolldown tree-shaking from the members you import, deobfuscated first). Built, never called |
 | **Runs** | What did it actually do? | Running it | Each run's effects, by package (`runs/<user>.jsonl`); the editor's debugger gates and counts them |
 
-The package ⊇ the join ⊇ what ran. The signals are in the gaps:
+As everywhere in this project, the heuristic is the floor and what runs derive is the ceiling: the analysis answers
+before anything has run, and the runs say what's true. In sets the order reads the other way: the package should
+contain the join, which should contain what ran. "Should", because `detect` is a pattern scan and can miss things. The
+signals are in the gaps:
 
 - **The join grew from the package's side.** A new version reaches more through the members you already use: the
   supply-chain signal.
