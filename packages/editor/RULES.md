@@ -117,7 +117,9 @@ rule*) — the same two buttons wherever the editor opens.
   by its own id, so no lookalike from before then can take it; a save starting flushes the burst typed so far, so a
   fix the save makes is a step of its own. The shared contract's rules are kept placed too: the one write silo makes to
   `policy.json` (silo-store's movePlace) — not a decision but a re-anchoring, committed with the code change that moved
-  the code. Moving a place keeps the rule's `added`.
+  the code. Moving a place keeps the rule's `added`. Each step is asked of BABLR once (2026-10-13): the bridge keeps
+  each answer by the text, the texts before it and the place, so listing the rules again — the Rules tree, the margin,
+  a save — asks only about a new burst, and the walk back to the latest text it's found in asks by its id alone.
 - **A node service's reads are recorded** (2026-10-06), as a preview's fetches are: what a run read of the workspace
   for real (an allowed `fs:read`), by the path as the program wrote it — `fs:read` and that path, what the debugger's
   stand-in asks — so *Rule…* is prefilled with it and a rule can give it to a later run (the debug worker's gated call →

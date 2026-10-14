@@ -470,23 +470,78 @@ async function textOf(uri: vscode.Uri): Promise<string> {
 	return open?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
 }
 
-/** Where `place` is in `text` (of `file`), by the editor's BABLR — if in `file` at all. `before`: texts it may have been
- *  made against, for it to be followed from the one it was by the structural diff. `unparsable` (why) when BABLR can't
- *  parse `text`: where it is can't be told, which isn't its being gone. */
-async function resolvePlace(text: string, file: string, place: unknown, before: string[] = []): Promise<Resolved | { "unparsable": string } | undefined> {
-	if (text === "") {
-		return undefined; // nothing to find it in (and BABLR reads no empty text)
+/** Resolutions already asked for (resolvePlace), each file's by what they were asked with — so a place followed again
+ *  asks BABLR only about what's new: the Rules tree, the margin and keeping places on save each list the rules, and an
+ *  edit adds one text to follow through. One asked again while it's being answered is answered once. A resolution also
+ *  looks in the other changed files (code moved there), so a file's go when another code file changes. */
+const resolved = new Map<string, Map<string, Promise<Resolved | { "unparsable": string } | undefined>>>();
+/** Each text asked about, as a short key (the same text, the same key) — dropped with every resolution past this many. */
+const textKeys = new Map<string, number>();
+const MAX_TEXTS = 1_000;
+
+/** `text`'s key in a resolution's. */
+function textKey(text: string): number {
+	const known = textKeys.get(text);
+
+	if (known !== undefined) {
+		return known;
 	}
 
-	const answer = await annotations(vscode.commands).resolve(text, file, [place as SpanRef], { "texts": before });
+	textKeys.set(text, textKeys.size);
+
+	return textKeys.size - 1;
+}
+
+/** Where `place` is in `text` (of `file`), as BABLR answers (resolvePlace) — rejected when it can't be asked. */
+async function askBablr(text: string, file: string, place: unknown, before: string[], byId: boolean): Promise<Resolved | { "unparsable": string } | undefined> {
+	const answer = await annotations(vscode.commands).resolve(text, file, [place as SpanRef], byId ? { "observed": true } : { "texts": before });
+
+	if ("unavailable" in answer) {
+		throw new Error(answer.unavailable);
+	}
 
 	if ("unparsable" in answer) {
 		return answer;
 	}
 
-	const [found] = "value" in answer ? answer.value : [];
+	const [found] = answer.value;
 
 	return found?.status === undefined || found.status === "orphaned" || found.candidate?.start === undefined || (found.candidate.file !== undefined && found.candidate.file !== file) ? undefined : found;
+}
+
+/** Where `place` is in `text` (of `file`), by the editor's BABLR — if in `file` at all. `before`: texts it may have been
+ *  made against, for it to be followed from the one it was by the structural diff. `byId`: by its own span id alone —
+ *  whether it's attached, without looking further. `unparsable` (why) when BABLR can't parse `text`: where it is can't
+ *  be told, which isn't its being gone. */
+async function resolvePlace(text: string, file: string, place: unknown, before: string[] = [], byId = false): Promise<Resolved | { "unparsable": string } | undefined> {
+	if (text === "") {
+		return undefined; // nothing to find it in (and BABLR reads no empty text)
+	}
+
+	if (textKeys.size + before.length >= MAX_TEXTS) {
+		textKeys.clear();
+		resolved.clear();
+	}
+
+	const asked = resolved.get(file) ?? new Map<string, Promise<Resolved | { "unparsable": string } | undefined>>();
+	const key = [textKey(text), before.map(textKey).join(","), byId, JSON.stringify(place)].join("|");
+	let answered = asked.get(key);
+
+	if (answered === undefined) {
+		const asking = askBablr(text, file, place, before, byId);
+
+		answered = asking;
+		resolved.set(file, asked);
+		asked.set(key, asking);
+		asking.catch(() => {
+			if (asked.get(key) === asking) {
+				asked.delete(key);
+			}
+		});
+	}
+
+	// (one that couldn't be asked — BABLR unavailable — isn't found this time, and is asked again next time)
+	return answered.catch(() => undefined);
 }
 
 /** A place found, when it was — not one that couldn't be looked for. */
@@ -504,7 +559,7 @@ const HISTORY_STEPS = 30;
 async function follow(place: unknown, texts: string[], file: string): Promise<{ "at": unknown; "found": Resolved } | undefined> {
 	let from = texts.length - 1;
 
-	while (from > 0 && foundOf(await resolvePlace(texts[from], file, place))?.status !== "attached") {
+	while (from > 0 && foundOf(await resolvePlace(texts[from], file, place, [], true))?.status !== "attached") {
 		from -= 1;
 	}
 
@@ -630,7 +685,23 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 	trackSessions(context, hub);
 
+	// A code file changed: every other file's resolutions may have looked in it.
+	const code = vscode.workspace.createFileSystemWatcher("**/*.{ts,tsx,js,jsx,mjs,cjs}");
+	const codeChanged = (uri: vscode.Uri): void => {
+		const file = vscode.workspace.asRelativePath(uri, false);
+
+		for (const other of resolved.keys()) {
+			if (other !== file) {
+				resolved.delete(other);
+			}
+		}
+	};
+
 	context.subscriptions.push(
+		code,
+		code.onDidChange(codeChanged),
+		code.onDidCreate(codeChanged),
+		code.onDidDelete(codeChanged),
 		// A file saved: my rules placed in it keep the places they're found at.
 		vscode.workspace.onDidSaveTextDocument((document) => {
 			if (document.uri.scheme === "file") {
