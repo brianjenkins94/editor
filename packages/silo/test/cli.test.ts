@@ -49,7 +49,7 @@ const repo = await repository({
 
 test("features: the working tree's ways in", async () => {
 	const fresh = await repository({ "2026-10-01": { "notes/package.json": manifest, "notes/extension.ts": extension("add();") } });
-	const features = currentFeatures(fresh);
+	const features = await currentFeatures(fresh);
 
 	assert.deepEqual([...features.keys()], ["command|notes.add"]);
 	assert.equal(features.get("command|notes.add")!.label, "Add Note");

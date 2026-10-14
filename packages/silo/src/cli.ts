@@ -5,8 +5,10 @@
  *   silo install [package…] [--min-age 7] [--project …] install — nothing newer than a week — and sync the baseline
  *   silo features [repo] [--json]                      every way into the program, found in its code
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
- *                [--analyzer auto|oxc|typescript]        commit messages, which are never read; the code read by the
- *                                                        repository's TypeScript when it's ≥ 7.1, else by oxc
+ *                                                        commit messages, which are never read
+ *
+ * The code is read by TypeScript — the one silo bundles (7.1), whatever the project has: its ways in, its declaration
+ * graph, its import surface.
  *
  * The logic is @brianjenkins94/util/silo (features, history, git-snapshots): pure, so the editor runs the same code in
  * the browser over its own workspace. This file is only the desktop's way to ask: git, the disk, and stdout.
@@ -14,6 +16,7 @@
 import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
 import type { Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { Step } from "@brianjenkins94/util/silo/history";
+import type { TypeScriptModules } from "@brianjenkins94/util/silo/typescript";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as path from "node:path";
 import { isEntry } from "@brianjenkins94/util/env";
@@ -26,51 +29,64 @@ import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
-import { oxcAnalyzer, waysIn } from "@brianjenkins94/util/silo/oxc";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
-import { typescriptAnalyzer } from "@brianjenkins94/util/silo/typescript";
+import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 
 /** The repository a path is in. */
 function repoOf(directory: string): string {
 	return execFileSync("git", ["rev-parse", "--show-toplevel"], { "cwd": path.resolve(directory), "encoding": "utf8" }).trim();
 }
 
-/** The program's features now: its tracked files as they are on disk. */
-export function currentFeatures(repo: string): ReturnType<typeof featuresOf> {
-	const files = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && includeByDefault(file));
+/** The TypeScript silo bundles (7.1): what reads the code, whatever the project has. */
+async function bundledTypeScript(): Promise<TypeScriptModules> {
+	const found = await typescriptModules(import.meta.dirname);
 
-	return featuresOf(files.flatMap((file) => {
-		try {
-			return [{ "file": file, "ways": waysIn(file, fs.readFileSync(path.join(repo, file))) }];
-		} catch {
-			return []; // deleted on disk, not yet in git
-		}
-	}));
-}
-
-/** Which analyzer reads the code: `typescript` (the repository's TypeScript, ≥ 7.1), `oxc`, or `auto` — TypeScript's when
- *  there is one, else oxc's. */
-export type AnalyzerChoice = "auto" | "oxc" | "typescript";
-
-/** The steps of a span of the history (its baseline, the commit before it, comes first and tells nothing). */
-export async function historyOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string; "analyzer"?: AnalyzerChoice } = {}): Promise<Step[]> {
-	const choice = options.analyzer ?? "auto";
-	const analyzer: Analyzer | undefined = choice === "oxc" ? undefined : await typescriptAnalyzer({ "root": repo });
-
-	if (choice === "typescript" && analyzer === undefined) {
-		throw new Error("--analyzer typescript needs TypeScript 7.1 or later installed in the repository");
+	if (found === undefined) {
+		throw new Error("silo's own TypeScript (7.1) isn't installed beside it: reinstall silo");
 	}
 
+	return found;
+}
+
+/** TypeScript's analyzer of `repo`, with the TypeScript silo bundles. */
+async function analyzerOf(repo: string): Promise<Analyzer> {
+	const analyzer = await typescriptAnalyzer({ "root": repo, "typescript": await bundledTypeScript() });
+
+	if (analyzer === undefined) {
+		throw new Error("TypeScript couldn't read " + repo);
+	}
+
+	return analyzer;
+}
+
+/** The program's features now: its tracked files as they are on disk. */
+export async function currentFeatures(repo: string): Promise<ReturnType<typeof featuresOf>> {
+	const files = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && includeByDefault(file) && fs.existsSync(path.join(repo, file)));
+	const analyzer = await analyzerOf(repo);
+
+	try {
+		// (each file by its path: read from disk, as it is now — deleted on disk but not yet in git, it's left out above)
+		const { ways } = await analyzer.analyze(new Map(files.map((file) => [file, file])), async (file) => fs.readFileSync(path.join(repo, file)));
+
+		return featuresOf([...ways].map(([file, found]) => ({ "file": file, "ways": found })));
+	} finally {
+		analyzer.close?.();
+	}
+}
+
+/** The steps of a span of the history (its baseline, the commit before it, comes first and tells nothing). */
+export async function historyOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string } = {}): Promise<Step[]> {
+	const analyzer = await analyzerOf(repo);
 	const objects = gitObjects(repo);
 	const steps: Step[] = [];
 
 	try {
-		for await (const step of replay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer ?? oxcAnalyzer() })) {
+		for await (const step of replay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer })) {
 			steps.push(step);
 		}
 	} finally {
 		objects.close();
-		analyzer?.close?.();
+		analyzer.close?.();
 	}
 
 	return steps;
@@ -86,24 +102,18 @@ async function placeSpans(source: string): Promise<{ "id": string; "start": numb
 }
 
 /** What the runs committed in a span of the history did, commit by commit (its baseline, the commit before it, first). */
-export async function coverageOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string; "analyzer"?: AnalyzerChoice } = {}): Promise<CoverageStep[]> {
-	const choice = options.analyzer ?? "auto";
-	const analyzer: Analyzer | undefined = choice === "oxc" ? undefined : await typescriptAnalyzer({ "root": repo });
-
-	if (choice === "typescript" && analyzer === undefined) {
-		throw new Error("--analyzer typescript needs TypeScript 7.1 or later installed in the repository");
-	}
-
+export async function coverageOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string } = {}): Promise<CoverageStep[]> {
+	const analyzer = await analyzerOf(repo);
 	const objects = gitObjects(repo);
 	const steps: CoverageStep[] = [];
 
 	try {
-		for await (const step of coverageReplay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer ?? oxcAnalyzer(), "place": placeSpans })) {
+		for await (const step of coverageReplay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer, "place": placeSpans })) {
 			steps.push(step);
 		}
 	} finally {
 		objects.close();
-		analyzer?.close?.();
+		analyzer.close?.();
 	}
 
 	return steps;
@@ -177,7 +187,7 @@ export const app = subcommands({
 
 				await ensureSiloDir(paths);
 
-				const { created, baseline, changed } = await ensureBaseline(paths);
+				const { created, baseline, changed } = await ensureBaseline(paths, paths.root, await bundledTypeScript());
 				const packages = Object.keys(baseline.packages).length;
 				const imports = Object.values(baseline.consumer).reduce((count, workspace) => count + Object.keys(workspace).length, 0);
 				const relative = path.relative(process.cwd(), paths.baseline);
@@ -225,7 +235,7 @@ export const app = subcommands({
 
 				await ensureSiloDir(paths);
 
-				const { created, baseline, changed } = await ensureBaseline(paths);
+				const { created, baseline, changed } = await ensureBaseline(paths, paths.root, await bundledTypeScript());
 				const relative = path.relative(process.cwd(), paths.baseline);
 				const where = relative.startsWith("..") ? paths.baseline : relative;
 
@@ -283,14 +293,13 @@ export const app = subcommands({
 				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes. Default: the whole history." },
 				"until": { "format": String, "default": "", "doc": "End of the span, as git's --until takes it. Default: now." },
 				"ref": { "format": String, "default": "HEAD", "doc": "The branch or commit to walk back from." },
-				"analyzer": { "format": ["auto", "oxc", "typescript"], "default": "auto", "doc": "What reads the code: the repository's TypeScript (7.1 or later), oxc, or auto." },
 				"json": jsonFlag
 			}),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
 				const since = config.get("since");
 				const until = config.get("until");
-				const steps = await coverageOf(repo, { "ref": config.get("ref"), "analyzer": config.get("analyzer") as AnalyzerChoice, ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
+				const steps = await coverageOf(repo, { "ref": config.get("ref"), ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
 				const span = since === "" ? steps : steps.slice(1);
 
 				process.stdout.write(config.get("json") ? JSON.stringify(span.map((step) => ({ ...step, "features": Object.fromEntries(step.features) })), undefined, "\t") + "\n" : coverageMarkdown(span, { "title": "Coverage of " + path.basename(repo) }));
@@ -309,9 +318,9 @@ export const app = subcommands({
 			"name": "features",
 			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag }),
-			"handler": (config) => {
+			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
-				const features = [...currentFeatures(repo).values()];
+				const features = [...(await currentFeatures(repo)).values()];
 
 				process.stdout.write(config.get("json") ? JSON.stringify(features, undefined, "\t") + "\n" : featuresMarkdown(features, { "title": "Features of " + path.basename(repo) }));
 			}
@@ -324,13 +333,12 @@ export const app = subcommands({
 				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes (\"7 days ago\", 2026-10-05). Default: the whole history." },
 				"until": { "format": String, "default": "", "doc": "End of the span, as git's --until takes it. Default: now." },
 				"ref": { "format": String, "default": "HEAD", "doc": "The branch or commit to walk back from." },
-				"analyzer": { "format": ["auto", "oxc", "typescript"], "default": "auto", "doc": "What reads the code: the repository's TypeScript (7.1 or later), oxc, or auto — TypeScript when there is one." },
 				"json": jsonFlag
 			}),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
 				const since = config.get("since"), until = config.get("until");
-				const steps = await historyOf(repo, { "ref": config.get("ref"), "analyzer": config.get("analyzer") as AnalyzerChoice, ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
+				const steps = await historyOf(repo, { "ref": config.get("ref"), ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
 				const span = since === "" ? steps : steps.slice(1); // the baseline only gives the first commit something to compare with
 
 				process.stdout.write(config.get("json") ? JSON.stringify(span, undefined, "\t") + "\n" : historyMarkdown(span, { "title": "History of " + path.basename(repo) }));

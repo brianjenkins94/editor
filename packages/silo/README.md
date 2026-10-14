@@ -66,7 +66,7 @@ The prototype is `~/Documents/GitHub/silo` (its README is the design doc). Its p
 | Two static engines | TypeScript's call hierarchy (precise, under-reports) and tree-shaking (over-reports); their disagreement is the blind-spot detector | `detect`/`reach` (pattern-based); the TypeScript reading is in `ts-analysis` for history, not capabilities |
 | Confidence | Runs raise it, edits decay it (Wilson lower bound) | `runs.ts` `confidence` |
 | Deno backend | Permissions as a stronger box than the in-process broker | Not carried over |
-| `review`, `--reviewed`, `--waive`, `accept <ref>`, provenance | Per-function "have you read it", the AI-approval axis | Dropped on purpose (most code is AI-written); `provenance`, `review` remain in lib |
+| `review`, `--reviewed`, `--waive`, `accept <ref>`, provenance | Per-function "have you read it", the AI-approval axis | Dropped on purpose (most code is AI-written); lib's `provenance` and `review` were removed (2026-10-14) in lib |
 | Fail-loud (`design/fail-loud.md`, designed) | Value invariants: AI code hedges (`?.`, `??`) on values your code guarantees, turning a crash into a silent wrong answer; guard at trust boundaries (the capability seams), let internal invariants fail loudly; invariants learned from recorded runs, human-gated; `waive(value, reason)` as a codified exception | Built in the editor under Remember: runtime evidence (value and branch observations per span, RUNTIME-EVIDENCE.md's second slice) and insights' "what could go" suggestions (its fourth). Its static half leaned on `strictNullChecks`; TypeScript here is relaxed by choice, so runs are the route |
 
 Note the name collisions: the prototype's `accept <ref>` meant "trust everything as of this commit"; a later
@@ -82,11 +82,8 @@ These are in lib `util/silo`, but nothing in the editor, the command line or the
   `deobfuscate`, so that's unused too in effect. Not leftovers: they're the prototype's package analysis, the core of
   Anticipate, cut off when `audit` was ported.
 - **`guard`**: a runtime check at a boundary, with a pluggable reaction.
-- **`provenance`**: how likely a file was written by AI. The prototype's original purpose (approving AI-written code),
-  dropped on purpose: most code is AI-written now. `review` (which code units were reviewed, `review.json`) belongs
-  with it; only `audit` still reads it.
 
-All three came over from the `silo` prototype.
+Both came over from the `silo` prototype. (`provenance` and `review`, the AI-approval purpose's, were removed.)
 
 ## What doesn't fit (open questions)
 
@@ -109,7 +106,7 @@ All three came over from the `silo` prototype.
    three for Remember, none for Gate. But they aren't grouped that way, the file's own header lists five of them, and
    `features` and `history` rest on the parked feature layer.
 6. **The leftovers.** Whether `packages` and `deobfuscate` get wired into the baseline (see 1), and whether `guard`
-   stays. `provenance` and `review` serve the dropped AI-approval purpose: whether to remove them.
+   stays. (`provenance` and `review`, the dropped AI-approval purpose's, are removed.)
 
 ## Design: one silo, two front ends
 
@@ -203,7 +200,8 @@ So the command line becomes: `install`, `run`, `coverage`, with `features` and `
 
 ### What the design implies, when it's built
 
-- **Out:** lib's `provenance` and `review` (with `review.json` and `audit`'s use of it); `silo init` and `check`.
+- **Out:** `silo init` and `check`. (lib's `provenance` and `review` are out already, as is oxc: TypeScript reads the
+  code everywhere — the editor's TypeScript server, and the TypeScript 7.1 `silo` bundles.)
 - **One package analysis**, called by both front ends on a package's files, however they were read.
 - **`silo run`**, the desktop gate: the policy and decision core the editor already uses, a terminal prompt in place of
   the editor's, failure in place of a prompt in CI, and the same run envelope.
@@ -221,11 +219,63 @@ dynamic `import()` and `createRequire` a bundle misses. Two of its parts are in 
 gate's order: the redline, the grants, the decider, with the prompt left pluggable). The preload binding itself, with
 a terminal prompt or failure in CI, is what's missing.
 
+### Where analysis lives when TypeScript 7 arrives
+
+The editor reads code inside tsserver today, through plugins: capabilities (its squiggles, `_capabilities.surface`,
+`_types.at`, `_statements`, the canary), history (`_history.read`), and eslint (its engine runs there, borrowing
+tsserver's Program, and `_eslint.fixAll` is a tsserver request). TypeScript 7's native language server is Go, speaks
+LSP, and loads no JavaScript plugins, so when the editor's TypeScript (pinned through `monaco-vscode-api`; 6.0.3 today)
+moves to 7, all of them lose their host — whatever parser they use. We choose when that happens.
+
+What each needs isn't a plugin: a tree of the current text (unsaved edits included), and for some a checker.
+
+| Today in the plugin | Needs |
+|---|---|
+| capabilities' squiggles, `_capabilities.surface` | the tree |
+| `_types.at`, `_statements` | the tree and the checker |
+| history's `_history.read` | the tree and the checker's symbols |
+| the canary | a `ts` to run tsval with |
+| eslint (typescript-eslint) | a classic TypeScript Program (≤ 6) |
+
+eslint will stay on TypeScript 6 long after VS Code is on 7: every lint plugin with type-aware rules is written against
+the classic API through typescript-eslint, which doesn't support 7 (TypeScript's own advice is to run 6 beside 7 for
+it). So eslint needs a TypeScript 6 of its own, not a borrowed one.
+
+The plan, none of it scheduled:
+
+1. **The readings in lib, behind one seam.** `findReach`, `surfaceOf` and `ts-analysis` already take `ts` (or a
+   `TsHost`) and run on 6.x and 7.1 alike (`astOf` adapts 7.1's AST module). `_types.at` and `_statements`, written in
+   `ts-plugin.js`, move there too. A plugin becomes a thin adapter, and a TypeScript 7 adapter is the other one
+   (`typescript.ts` already is, for history).
+2. **Findings published by the extension, not injected into tsserver's diagnostics.** The capabilities extension asks
+   for its findings and shows them through its own diagnostic collection (or adds them as LSP middleware, below), so
+   the plugin only answers requests — the shape the TypeScript 7 host has.
+3. **eslint in a realm of its own, with its own TypeScript 6** (a worker, as the cspell server is): its own language
+   service and Program over the workspace, its fix-all its own. To measure first: a second Program over the same files
+   costs memory (the TS servers are the biggest realms in the performance budgets), and the editor loads two
+   TypeScripts. It's the plugin with a known destination and the hardest to move later.
+4. **A TypeScript 7 host for capabilities and history.** What replaces `typescriptServerPlugins` and
+   `typescript.tsserverRequest` when VS Code adopts 7.1, per Jake Bailey (TypeScript team, 2026-10-14): "you can ask our
+   extension for an api connection, and we support lsp middleware proxying". So an extension asks VS Code's TypeScript
+   extension for a 7.1 API connection to the server it already runs — the program, checker and current text a plugin
+   reads today, through the same API `silo` uses (`./typescript`'s host) — and anything a plugin added to the server's
+   answers (diagnostics, hovers) it adds as LSP middleware instead. 7.1's API attaching to a running server
+   (`API.fromLSPConnection`, `custom/initializeAPISession`, as the unreleased Playground v2 does) is that connection.
+   In the browser this needs the server itself to run there (a `tsc.wasm`, not published yet); on the desktop it's
+   there.
+
+1 and 2 are mechanical and make the switch one adapter, over a connection we know we'll get; 3 waits on a memory
+measurement; 4 waits on VS Code shipping 7.1 (and, for the browser editor, TypeScript 7 in the browser).
+
 ### Decided
 
 - **Analysis: wanted, in both front ends.** Both sides of each dependency and their join, checked against the runs, as
   in "Each dependency, seen four ways". Both front ends now record your usage (the import surface); the join is
   what's left.
+- **TypeScript reads the code, everywhere; no oxc.** The editor reads it off its TypeScript server's tree; `silo`
+  bundles TypeScript 7.1 (a nightly, pinned, until 7.1 is released) and reads every project with it, whatever the
+  project has (no tsconfig: TypeScript's defaults). lib's readings take `ts` as a parameter, so the same code runs on
+  6.x and 7.1 (`astOf` adapts 7.1's AST module).
 - **Deobfuscation: later.** It joins the one analysis, in both front ends, when it comes.
 - **The desktop gate is the `--import` preload**, above.
 - **`guard` is not gating.** It's a runtime type check at a boundary (a value against its declared type), reacting

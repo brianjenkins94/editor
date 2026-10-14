@@ -106,8 +106,9 @@ Still to do for reach: the run side (the spans recorded runs reached, step 4), a
 
 Reading code is a compiler's job, so the analysis moves from oxc to TypeScript 7, behind one seam (lib `graph.ts`): a
 `DeclarationGraph` is what reach and history need of a program (each declaration's fingerprint, and where each node
-leads), and an `Analyzer` turns a snapshot's files into one. oxc's (`oxcAnalyzer`) stays the default and the
-browser's; `typescript.ts` is TypeScript's, in Node.
+leads), and an `Analyzer` turns a snapshot's files into one. `typescript.ts` is TypeScript's, in Node. (Since
+2026-10-14 oxc is gone: `silo` bundles TypeScript 7.1 and always reads with it, and the browser reads with its
+TypeScript server's.)
 
 - **One compiler for a whole replay.** The first snapshot is a synthetic program over the snapshot's sources, given as a
   filesystem layer over the disk (which still serves `node_modules`); each later snapshot is an update with a layer of
@@ -116,8 +117,8 @@ browser's; `typescript.ts` is TypeScript's, in Node.
 - **What a name is, the checker says.** Imports through re-exports and the tsconfig's `paths`, scopes, method calls:
   what oxc's name matching approximated. The program's own packages resolve to their sources, not to an installed
   copy; imports stay nodes, so the module bodies importing runs are reached, as before.
-- **The repository's own TypeScript, 7.1 or later** (`typescript/sync`, stable from 7.1). Without one,
-  `typescriptAnalyzer` answers undefined and `silo history --analyzer auto` (the default) uses oxc.
+- **TypeScript 7.1** (`typescript/sync`, stable from 7.1): the one `silo` bundles, whatever the repository has (it
+  used to need the repository's own, else fell back to oxc).
 
 On this repo's whole history, TypeScript finds 2,362 feature changes to oxc's 2,081, 7 of oxc's not among them, and 331
 silent commits to 336, in 66 seconds to 25. The extra come from what oxc doesn't follow (the tsconfig's paths into the
@@ -144,8 +145,7 @@ changes as facts in `.silo/history/<user>.jsonl` and told them with the commits;
   `Replayer`), and tells what changed. Public API only: no hub, no capture of its own, nothing written.
 - **One reading for both hosts.** Ways in and the declaration graph are read once over TypeScript's tree, behind a
   small host interface: TypeScript 7's API for the command line, the in-process API for the editor. Both find the
-  same 289 features on this repo as oxc's recognizers. oxc is now one module (`oxc.ts`), loaded only where neither
-  TypeScript is.
+  same 289 features on this repo as oxc's recognizers did. (oxc has since been removed.)
 Verified in the editor: adding a command registration and taking it out again, unsaved, was told as `added` then
 `removed`; editing only a helper in another file was told as `changed … via reach` through it.
 
@@ -190,10 +190,10 @@ In order, each useful on its own:
 
 - **The logic** is in lib's `util/silo`: `features.ts` (the feature model), `graph.ts` (the declaration graph's seam and
   reach), `history.ts` (the replay, the events, the sentences), `exercise.ts` (what runs say of a feature),
-  `ts-analysis.ts` (the reading over TypeScript's tree, for either host), `oxc.ts` (oxc's reading), and the Node ones:
+  `ts-analysis.ts` (the reading over TypeScript's tree, for either host), and the Node ones:
   `typescript.ts` (TypeScript 7's host) and `git-snapshots.ts` (a git history as snapshots).
 - **The command line** is `packages/silo` in this repo, published from here as `@brianjenkins94/silo` (bin `silo`):
-  `silo features [repo]` and `silo history [repo] [--since …] [--until …] [--analyzer auto|oxc|typescript]`, each with
+  `silo features [repo]` and `silo history [repo] [--since …] [--until …]`, each with
   `--json`. It runs in any desktop terminal, VS Code's included.
 - **The editor** uses the same internals: `extensions/history` and its TypeScript server plugin derive history live, with
   the TypeScript server's own TypeScript.
