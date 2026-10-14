@@ -17,8 +17,9 @@
  *     dev server — so the old IndexedDB "vfs store" serving path was retired.
  *   • Dev-server bridge — a preview's dev server (almostnode's ViteDevServer) runs in the node worker; we answer
  *     `/__virtual__/<tab>/<port>/…` fetches by calling it over the hub (`virtual.request`), so the preview iframe
- *     reaches it over ordinary HTTP. (This used to be almostnode's ServerBridge: a MessagePort to a relay in the
- *     page. The hub already links us to the page, so the port and the relay are gone.)
+ *     reaches it over ordinary HTTP — both bodies streamed (run-contract's exchanges), and a preview's request for
+ *     localhost:<port> sent to the server on that port. (This used to be almostnode's ServerBridge: a MessagePort to a
+ *     relay in the page. The hub already links us to the page, so the port and the relay are gone.)
  *   • COI stamping — every other response is passed through with the isolation headers added.
  *
  * Registered by coi.ts (in prod to provide isolation; in dev, additionally, for the resolver). Pattern
@@ -363,11 +364,81 @@ function virtualHeaders(source) {
 // Statuses whose Response must not carry a body.
 const NULL_BODY = new Set([101, 103, 204, 205, 304]);
 
-// Answer one request from the dev server on `port` (in the node worker, over the hub). Buffered: the dev server
-// answers whole responses (an SSE / chunked API route arrives in one piece).
-async function handleVirtualRequest(request, tab, port, path) {
+// One exchange with the server on `port` (a dev server in the node worker, or a run's own; over the hub — run-contract's
+// `exchanges` is the other end): both bodies stream. A body that fits in its first REQUEST_PIECE goes whole with the
+// request; a longer one follows in writes, each sent once the server has taken the last. The answer comes at its head;
+// the rest of its body is read a piece at a time as the page reads it, and the page going away cancels it. Every call
+// goes the request's way (its route and port), so it reaches the same server.
+const REQUEST_PIECE = 262144;
+const EXCHANGE_CALL = { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS };
+
+// The start of a request's body: up to REQUEST_PIECE of it, and whether there's more (its reader, to go on with).
+async function requestStart(request) {
+	if (request.method === "GET" || request.method === "HEAD") {
+		return { "body": undefined, "rest": undefined };
+	}
+
+	if (request.body === null || request.body === undefined) {
+		return { "body": new Uint8Array(await request.arrayBuffer()), "rest": undefined };
+	}
+
+	const reader = request.body.getReader();
+	const pieces = [];
+	let bytes = 0;
+
+	for (;;) {
+		const { done, value } = await reader.read();
+
+		if (done) {
+			return { "body": joinBytes(pieces), "rest": undefined };
+		}
+
+		pieces.push(value);
+		bytes += value.byteLength;
+
+		if (bytes >= REQUEST_PIECE) {
+			return { "body": joinBytes(pieces), "rest": reader };
+		}
+	}
+}
+
+function joinBytes(pieces) {
+	const joined = new Uint8Array(pieces.reduce((total, piece) => total + piece.byteLength, 0));
+	let at = 0;
+
+	for (const piece of pieces) {
+		joined.set(piece, at);
+		at += piece.byteLength;
+	}
+
+	return joined;
+}
+
+// Send the rest of a request's body in writes: `first` (what requestStart read), then what's left of `reader`.
+async function sendBody(call, first, reader) {
+	try {
+		let ok = (await call({ "write": first })).ok;
+
+		while (ok) {
+			const { done, value } = await reader.read();
+
+			ok = (await call(done ? { "end": true } : { "write": value })).ok && !done;
+		}
+	} catch (error) {
+		swLog.warn("request body not sent", { "error": String(error) });
+	}
+
+	void reader.cancel().catch(() => undefined);
+}
+
+// Answer `request` from the server on `port` in `tab`, as `path` on it. `options.loopback`: the page asked for
+// localhost:<port> — undefined is the answer when nothing serves that port, for the caller to send it to the network.
+async function handleVirtualRequest(request, tab, port, path, options = {}) {
 	// A timed span per request — the collector shows each dev-server round-trip and its duration.
 	const span = swLog.span("virtual", { "tab": tab, "port": port, "method": request.method, "path": path });
+	const route = "virtual.request." + tab;
+	const stream = Math.random().toString(36).slice(2) + Date.now().toString(36);
+	const call = (step) => rpc.request(route, { "port": port, "stream": stream, ...step }, EXCHANGE_CALL);
 
 	try {
 		const headers = {};
@@ -376,15 +447,38 @@ async function handleVirtualRequest(request, tab, port, path) {
 			headers[key] = value;
 		});
 
-		const body = request.method !== "GET" && request.method !== "HEAD" ? new Uint8Array(await request.arrayBuffer()) : undefined;
+		if (options.loopback !== undefined) {
+			headers.host = options.loopback;
+		}
+
+		const { body, rest } = await requestStart(request);
 		// A worker's ENTRY script (its imports are mode "cors"): the dev server puts the editor's worker tap first.
 		const entry = (request.destination === "worker" || request.destination === "sharedworker") && request.mode === "same-origin" ? request.destination : undefined;
-		const response = await rpc.request("virtual.request." + tab, { "port": port, "method": request.method, "url": path, "headers": headers, "body": body, "entry": entry }, { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS });
-		const content = NULL_BODY.has(response.status) || request.method === "HEAD" ? null : response.body;
+		const answering = rpc.request(route, { "port": port, "method": request.method, "url": path, "headers": headers, "body": rest === undefined ? body : undefined, "more": rest === undefined ? undefined : true, "stream": stream, "entry": entry }, EXCHANGE_CALL);
 
-		span.end({ "status": response.status });
+		if (rest !== undefined) {
+			void sendBody(call, body, rest);
+		}
 
-		return new Response(content, { "status": response.status, "statusText": response.statusText, "headers": virtualHeaders(response.headers) });
+		const response = await answering;
+
+		if (options.loopback !== undefined && response.listening === false) {
+			span.end({ "status": "unrouted" });
+
+			return undefined;
+		}
+
+		span.end({ "status": response.status, "streamed": response.stream !== undefined });
+
+		const nullBody = NULL_BODY.has(response.status) || request.method === "HEAD";
+
+		if (nullBody && response.stream !== undefined) {
+			void call({ "cancel": true }).catch(() => undefined);
+		}
+
+		const content = response.stream === undefined ? response.body : streamedBody(call, response.body);
+
+		return new Response(nullBody ? null : content, { "status": response.status, "statusText": response.statusText, "headers": virtualHeaders(response.headers) });
 	} catch (error) {
 		console.error("[coi-serviceworker] virtual", error);
 		span.error("dev server unreachable", { "error": String(error) });
@@ -392,6 +486,60 @@ async function handleVirtualRequest(request, tab, port, path) {
 
 		return new Response("dev server unreachable: " + error.message, { "status": 502, "headers": { "content-type": "text/plain" } });
 	}
+}
+
+// The rest of a streamed answer's body, read from the server as the page reads it (a read with nothing yet answers empty
+// after a while, and is asked again), starting with `first`.
+function streamedBody(call, first) {
+	return new ReadableStream({
+		"start": (controller) => {
+			if (first.byteLength > 0) {
+				controller.enqueue(first);
+			}
+		},
+		"pull": async (controller) => {
+			const piece = await call({ "read": true });
+
+			// (not a piece: the server's gone — its run stopped)
+			if (piece === null || typeof piece !== "object" || !(piece.body instanceof Uint8Array)) {
+				controller.close();
+
+				return;
+			}
+
+			if (piece.body.byteLength > 0) {
+				controller.enqueue(piece.body);
+			}
+
+			if (piece.done) {
+				controller.close();
+			}
+		},
+		"cancel": () => {
+			void call({ "cancel": true }).catch(() => undefined);
+		}
+	}, { "highWaterMark": 0 });
+}
+
+// The hosts a page means this machine by: a preview's request to one goes to the server on that port, if one serves it.
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+// A preview's request for localhost:<port> — fetch, XHR, EventSource, an <img> or <script> — answered by the server on
+// that port (a client on 5173 calling its API on 3001); what isn't a preview's, or names a port nothing serves, goes to
+// the network as any other request. (A navigation isn't the SW's to route: it's outside its scope.)
+async function routeLoopback(event, request, requestUrl) {
+	const preview = await previewClientOf(event);
+
+	if (preview !== undefined) {
+		const port = Number(requestUrl.port || (requestUrl.protocol === "https:" ? 443 : 80));
+		const response = await handleVirtualRequest(request.clone(), preview.tab, port, requestUrl.pathname + requestUrl.search, { "loopback": requestUrl.host });
+
+		if (response !== undefined) {
+			return response;
+		}
+	}
+
+	return gateAndFetch(event, request, requestUrl);
 }
 
 globalThis.addEventListener("fetch", (event) => {
@@ -445,6 +593,15 @@ globalThis.addEventListener("fetch", (event) => {
 
 			return;
 		}
+	}
+
+	if (requestUrl.origin !== globalThis.location.origin && LOOPBACK.has(requestUrl.hostname) && event.clientId) {
+		const response = routeLoopback(event, request, requestUrl);
+
+		recordPreviewRequest(event, pathname, requestUrl.host + pathname + " (localhost)", response);
+		event.respondWith(response);
+
+		return;
 	}
 
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.

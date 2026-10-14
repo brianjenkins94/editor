@@ -73,11 +73,243 @@ export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?:
 	};
 }
 
-/** A request the preview makes of a server the program listens with, on `port`. `entry`: a worker's entry script. */
-export interface RuntimeRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array; "entry"?: "worker" | "sharedworker" }
+/** A request the preview makes of a server the program listens with, on `port`. `entry`: a worker's entry script. Its
+ *  body is whole, or — under `exchanges`, for a request sent in pieces — a stream, read as the server reads it. */
+export interface RuntimeRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array | ReadableStream<Uint8Array>; "entry"?: "worker" | "sharedworker" }
 
-/** The server's answer. */
-export interface RuntimeResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
+/** The server's answer: its body whole, or a stream of it as the server writes it (passed on in pieces by `exchanges`). */
+export interface RuntimeResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> | ReadableStream<Uint8Array> }
+
+/**
+ * An exchange as it travels — every call on the preview's route (the service worker → a tab's root → the dev-server worker
+ * → a run's `virtual.debug.<port>`), each carrying its port so every hop sends it the same way as the request.
+ *
+ * A request may name its exchange (`stream`) so that either body can come in pieces: with `more`, its body follows in
+ * `write` calls (the last with `end`), each answered once the server has room for it; and the answer, its `stream` set,
+ * is only the start of its body — the rest is `read`, a piece at a time, each answered with what's arrived since the
+ * last (after a wait, maybe nothing), until `done`. A `cancel` drops the exchange, as a client hanging up. One the caller
+ * leaves alone for a minute is dropped too. A request without `stream` is answered whole, as before.
+ */
+export type ExchangeCall = WireRequest | ExchangeStep;
+/** A request as it travels: its body whole, or (`more`) to follow. */
+export type WireRequest = Omit<RuntimeRequest, "body"> & { "body"?: Uint8Array; "stream"?: string; "more"?: true };
+/** The rest of an exchange: a piece of the request's body (`write`, `end`), the next of the answer's (`read`), or `cancel`. */
+export interface ExchangeStep { "port": number; "stream": string; "write"?: Uint8Array; "end"?: true; "read"?: true; "cancel"?: true }
+/** An answer as it travels: whole, or the start of its body with `stream` set. `listening` false: nobody serves the port. */
+export interface WireResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number>; "stream"?: string; "listening"?: false }
+/** A `read`'s answer. */
+export interface ExchangePiece { "body": Uint8Array; "done": boolean }
+
+/** How long a `read` with nothing to give waits before answering empty — under every hop's timeout. */
+const READ_WAIT_MS = 15_000;
+/** How long an exchange nobody touches is kept. */
+const IDLE_MS = 60_000;
+/** The most a piece gathers before it's sent. */
+const PIECE_BYTES = 1024 * 1024;
+/** How much of a request's body is queued ahead of the server before a `write` waits. */
+const REQUEST_QUEUE_BYTES = 65_536;
+
+interface Exchange {
+	/** The request's body, fed by `write`s. */
+	"feed": ReadableStreamDefaultController<Uint8Array>;
+	"body": ReadableStream<Uint8Array>;
+	/** A `write` waiting for room. */
+	"room"?: () => void;
+	/** The answer's body. */
+	"reader"?: ReadableStreamDefaultReader<Uint8Array>;
+	/** A read of it under way, kept for the next `read` when it wasn't answered in time. */
+	"pending"?: Promise<ReadableStreamReadResult<Uint8Array>>;
+	"idle"?: ReturnType<typeof setTimeout>;
+}
+
+function joinPieces(pieces: Uint8Array[]): Uint8Array {
+	const joined = new Uint8Array(pieces.reduce((total, piece) => total + piece.byteLength, 0));
+	let at = 0;
+
+	for (const piece of pieces) {
+		joined.set(piece, at);
+		at += piece.byteLength;
+	}
+
+	return joined;
+}
+
+/** All of `stream`. */
+export async function drain(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+	const pieces: Uint8Array[] = [];
+
+	for (const reader = stream.getReader(); ;) {
+		const { done, value } = await reader.read();
+
+		if (done) {
+			return joinPieces(pieces);
+		}
+
+		pieces.push(value);
+	}
+}
+
+/**
+ * Answer the calls of streamed exchanges with `handler`, which gets each request with its body whole or a stream, and
+ * answers with its body whole or a stream. What it returns answers every `ExchangeCall` for one server (or several:
+ * exchanges are told apart by their id).
+ */
+export function exchanges(handler: (request: RuntimeRequest) => Promise<RuntimeResponse>): (call: ExchangeCall) => Promise<WireResponse | ExchangePiece | { "ok": boolean }> {
+	const open = new Map<string, Exchange>();
+	/** Exchanges ended — kept a while, so a `write` still on its way isn't taken for the start of a new one. */
+	const ended = new Set<string>();
+
+	function end(id: string): void {
+		open.delete(id);
+		ended.add(id);
+		setTimeout(() => { ended.delete(id); }, IDLE_MS);
+	}
+
+	/** The exchange `id` — made by whichever of its calls comes first (its first `write` may overtake the request). */
+	function exchange(id: string): Exchange {
+		let found = open.get(id);
+
+		if (found === undefined) {
+			let feed!: ReadableStreamDefaultController<Uint8Array>;
+			const body = new ReadableStream<Uint8Array>({
+				"start": (controller) => { feed = controller; },
+				"pull": () => {
+					found!.room?.();
+					found!.room = undefined;
+				}
+			}, { "highWaterMark": REQUEST_QUEUE_BYTES, "size": (chunk) => chunk.byteLength });
+
+			found = { "feed": feed, "body": body };
+			open.set(id, found);
+		}
+
+		clearTimeout(found.idle);
+		found.idle = setTimeout(() => { drop(id); }, IDLE_MS);
+
+		return found;
+	}
+
+	function drop(id: string): void {
+		const gone = open.get(id);
+
+		if (gone === undefined) {
+			return;
+		}
+
+		end(id);
+		clearTimeout(gone.idle);
+		gone.room?.();
+
+		try {
+			gone.feed.error(new Error("the exchange was dropped"));
+		} catch {
+			// (already closed)
+		}
+
+		void gone.reader?.cancel().catch(() => undefined);
+	}
+
+	/** What's arrived of the answer's body: waiting up to `waitMs` for its first piece, then taking whatever else is
+	 *  already there (up to PIECE_BYTES). */
+	async function gather(id: string, found: Exchange, waitMs: number): Promise<ExchangePiece> {
+		const pieces: Uint8Array[] = [];
+		let bytes = 0;
+
+		for (let wait = waitMs; bytes < PIECE_BYTES; wait = 0) {
+			const reading = found.pending ?? found.reader!.read();
+			const timedOut = Symbol("timed out");
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const read = await Promise.race([reading, new Promise<typeof timedOut>((resolve) => { timer = setTimeout(() => { resolve(timedOut); }, wait); })]);
+
+			clearTimeout(timer);
+
+			if (read === timedOut) {
+				found.pending = reading;
+
+				return { "body": joinPieces(pieces), "done": false };
+			}
+
+			found.pending = undefined;
+
+			if (read.done) {
+				end(id);
+				clearTimeout(found.idle);
+
+				return { "body": joinPieces(pieces), "done": true };
+			}
+
+			pieces.push(read.value);
+			bytes += read.value.byteLength;
+		}
+
+		return { "body": joinPieces(pieces), "done": false };
+	}
+
+	return async (call) => {
+		if (!("method" in call)) {
+			const step = call;
+			const found = open.get(step.stream);
+
+			if (step.cancel === true) {
+				drop(step.stream);
+
+				return { "ok": true };
+			}
+
+			if (step.read === true) {
+				return found?.reader === undefined ? { "body": new Uint8Array(), "done": true } : gather(step.stream, exchange(step.stream), READ_WAIT_MS);
+			}
+
+			if (ended.has(step.stream)) {
+				return { "ok": false };
+			}
+
+			const writing = exchange(step.stream);
+
+			try {
+				if (step.write !== undefined) {
+					writing.feed.enqueue(step.write);
+
+					if ((writing.feed.desiredSize ?? 0) <= 0) {
+						await new Promise<void>((resolve) => { writing.room = resolve; });
+					}
+				}
+
+				if (step.end === true) {
+					writing.feed.close();
+				}
+			} catch {
+				return { "ok": false }; // (its body was closed under it: the exchange is over)
+			}
+
+			return { "ok": open.has(step.stream) };
+		}
+
+		const { stream, more, ...request } = call;
+		const streamed = stream === undefined ? undefined : exchange(stream);
+		const response = await handler({ ...request, "body": more === true && streamed !== undefined ? streamed.body : request.body });
+		const head = { "status": response.status, "statusText": response.statusText, "headers": response.headers };
+
+		if (!(response.body instanceof ReadableStream)) {
+			if (stream !== undefined) {
+				drop(stream);
+			}
+
+			return { ...head, "body": response.body };
+		}
+
+		if (streamed === undefined) {
+			return { ...head, "body": await drain(response.body) };
+		}
+
+		streamed.reader = response.body.getReader();
+
+		// The answer starts with what's already written — often all of it.
+		const first = await gather(stream!, streamed, 0);
+
+		return first.done ? { ...head, "body": first.body } : { ...head, "body": first.body, "stream": stream };
+	};
+}
 
 /** Where core puts the workspace runtime in an extension host (the bridge's, in the bridge's; core's bootstrap's, in
  *  the web worker host). */
@@ -147,7 +379,8 @@ export interface RuntimeConnection {
 	 *  to install in the worker's own memory (the workspace's filesystem is too small for node_modules). Blocks until it's
 	 *  fetched (once `ready`); fails as a read does (`ENOENT`, …) when it can't be. */
 	"tarball": (name: string, version: string) => Uint8Array;
-	/** Answer the preview's requests to `port` with `handler` until the returned disposer runs. */
+	/** Answer the preview's requests to `port` with `handler` until the returned disposer runs — each body whole, or a
+	 *  stream (see `exchanges`). */
 	"serve": (port: number, handler: (request: RuntimeRequest) => Promise<RuntimeResponse>) => () => void;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
 	"log": Observed["log"];
@@ -205,19 +438,22 @@ export function connectRuntime(port: MessagePort, { name, network = false }: { "
 		"decide": (decision) => call({ "op": "decide", "call": decision }).meta as RuntimeVerdict,
 		"tarball": (name, version) => call({ "op": "tarball", "name": name, "version": version }).payload,
 		"log": log,
-		"serve": (listening, handler) => serve(hub, `virtual.debug.${listening}`, async (raw) => {
-			const request = raw as RuntimeRequest;
-			const path = request.url.split("?")[0];
+		"serve": (listening, handler) => {
+			const answer = exchanges(async (request) => {
+				const path = request.url.split("?")[0];
 
-			// Each server's traffic, as its own: the architecture view's `server:<port>`.
-			architecture.record(architecture.self, `server:${listening}`, "request", `${request.method} ${path}`, request.body?.byteLength ?? 0);
+				// Each server's traffic, as its own: the architecture view's `server:<port>`.
+				architecture.record(architecture.self, `server:${listening}`, "request", `${request.method} ${path}`, request.body instanceof ReadableStream ? 0 : request.body?.byteLength ?? 0);
 
-			const response = await handler(request);
+				const response = await handler(request);
 
-			architecture.record(`server:${listening}`, architecture.self, response.status >= 400 ? "error" : "reply", `${response.status} ${path}`, response.body.length);
+				architecture.record(`server:${listening}`, architecture.self, response.status >= 400 ? "error" : "reply", `${response.status} ${path}`, response.body instanceof ReadableStream ? 0 : response.body.length);
 
-			return response;
-		})
+				return response;
+			});
+
+			return serve(hub, `virtual.debug.${listening}`, async (raw) => answer(raw as ExchangeCall));
+		}
 	};
 }
 

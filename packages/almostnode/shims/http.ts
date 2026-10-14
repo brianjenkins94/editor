@@ -50,6 +50,8 @@ export class IncomingMessage extends stream.Readable {
 	socket: Socket;
 
 	private _body: Buffer | null = null;
+	/** Its body as a stream (Server.serve), read as the handler reads it. */
+	private _source: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
 	constructor(socket?: Socket) {
 		super();
@@ -64,8 +66,27 @@ export class IncomingMessage extends stream.Readable {
 		return this;
 	}
 
-	// (its body is pushed whole — _setBody)
-	override _read(): void {}
+	// Its body: pushed whole (_setBody), or read from its stream a piece at a time, as the handler asks for more.
+	override _read(): void {
+		const source = this._source;
+
+		if (source === null) {
+			return;
+		}
+
+		source.read().then(({ done, value }) => {
+			if (done) {
+				this._source = null;
+				this.complete = true;
+				this.push(null);
+			} else {
+				this.push(Buffer.from(value));
+			}
+		}, (error: Error) => {
+			this._source = null;
+			this.destroy(error);
+		});
+	}
 
   // Internal: set body data
 	_setBody(body: Buffer | string | null): void {
@@ -88,7 +109,7 @@ export class IncomingMessage extends stream.Readable {
 		method: string,
 		url: string,
 		headers: Record<string, string>,
-		body?: Buffer | string
+		body?: Buffer | string | Uint8Array | ReadableStream<Uint8Array>
 	): IncomingMessage {
 		const msg = new IncomingMessage();
 
@@ -101,8 +122,10 @@ export class IncomingMessage extends stream.Readable {
 			msg.rawHeaders.push(key, value);
 		}
 
-		if (body) {
-			msg._setBody(body);
+		if (body instanceof ReadableStream) {
+			msg._source = body.getReader();
+		} else if (body) {
+			msg._setBody(body as Buffer | string);
 		} else {
 			msg.push(null);
 			msg.complete = true;
@@ -123,18 +146,62 @@ export class ServerResponse extends stream.Writable {
 	sendDate = true;
 	socket: Socket | null;
 
+	readonly req: IncomingMessage;
+
 	private readonly _headers = new Map<string, string | string[]>();
 	private readonly _body: Uint8Array[] = [];
 	private _resolve?: (response: ResponseData) => void;
+	/** Streamed (Server.serve): the head goes as soon as it's sent, the body as it's written. */
+	private _stream?: { "body": ReadableStream<Uint8Array>; "controller": ReadableStreamDefaultController<Uint8Array>; "head": (response: StreamedResponse) => void; "needDrain": boolean; "closed": boolean };
 
 	constructor(req: IncomingMessage) {
 		super();
+		this.req = req;
 		this.socket = req.socket;
 	}
 
   // Internal: set resolver for async response handling
 	_setResolver(resolve: (response: ResponseData) => void): void {
 		this._resolve = resolve;
+	}
+
+	/** Stream this response: `head` hears its head once it's sent, with its body as a stream of what's written — up to
+	 *  64 KiB queued, past which `write` says false and `drain` follows once the reader has taken some. A reader that
+	 *  cancels closes the response and its request, as a client hanging up does. */
+	_setStream(head: (response: StreamedResponse) => void): void {
+		let controller!: ReadableStreamDefaultController<Uint8Array>;
+		const body = new ReadableStream<Uint8Array>({
+			"start": (started) => { controller = started; },
+			"pull": () => {
+				if (this._stream?.needDrain === true) {
+					this._stream.needDrain = false;
+					this.emit("drain");
+				}
+			},
+			"cancel": () => {
+				this._stream!.closed = true;
+				this.emit("close");
+				this.req.emit("close");
+			}
+		}, { "highWaterMark": 65536, "size": (chunk) => chunk.byteLength });
+
+		this._stream = { "body": body, "controller": controller, "head": head, "needDrain": false, "closed": false };
+	}
+
+	/** Send the head of a streamed response, once. */
+	private _sendHead(): void {
+		const streamed = this._stream;
+
+		if (streamed === undefined || this.headersSent) {
+			return;
+		}
+
+		this.headersSent = true;
+		streamed.head({ "statusCode": this.statusCode, "statusMessage": this.statusMessage, "headers": flatHeaders(this._headers), "body": streamed.body });
+	}
+
+	flushHeaders(): void {
+		this._sendHead();
 	}
 
 	setHeader(name: string, value: string | string[] | number): this {
@@ -197,6 +264,8 @@ export class ServerResponse extends stream.Writable {
 			}
 		}
 
+		this._sendHead();
+
 		return this;
 	}
 
@@ -205,16 +274,35 @@ export class ServerResponse extends stream.Writable {
 		encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
 		callback?: (error?: Error | null) => void
 	): boolean {
-		this.headersSent = true;
 		const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-
-		this._body.push(buffer);
-
 		const cb = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+		const streamed = this._stream;
 
 		if (cb) {
 			queueMicrotask(() => { cb(null); });
 		}
+
+		if (streamed !== undefined) {
+			this._sendHead();
+
+			if (streamed.closed || this.finished) {
+				return false;
+			}
+
+			// (a copy: the writer may reuse its buffer)
+			streamed.controller.enqueue(new Uint8Array(buffer));
+
+			if ((streamed.controller.desiredSize ?? 0) > 0) {
+				return true;
+			}
+
+			streamed.needDrain = true;
+
+			return false;
+		}
+
+		this.headersSent = true;
+		this._body.push(buffer);
 
 		return true;
 	}
@@ -234,21 +322,26 @@ export class ServerResponse extends stream.Writable {
 			callback = encodingOrCallback;
 		}
 
+		const streamed = this._stream;
+
+		if (streamed !== undefined) {
+			this._sendHead();
+
+			if (!streamed.closed && !this.finished) {
+				streamed.closed = true;
+				streamed.controller.close();
+			}
+		}
+
 		this.headersSent = true;
 		this.finished = true;
 
     // Resolve with response data
 		if (this._resolve) {
-			const headers: Record<string, string> = {};
-
-			for (const [key, value] of this._headers) {
-				headers[key] = Array.isArray(value) ? value.join(", ") : value;
-			}
-
 			this._resolve({
 				"statusCode": this.statusCode,
 				"statusMessage": this.statusMessage,
-				"headers": headers,
+				"headers": flatHeaders(this._headers),
 				"body": Buffer.concat(this._body)
 			});
 		}
@@ -317,6 +410,25 @@ export interface ResponseData {
 	"statusMessage": string;
 	"headers": Record<string, string>;
 	"body": Buffer;
+}
+
+/** A response as Server.serve answers: its head, and its body still being written. */
+export interface StreamedResponse {
+	"statusCode": number;
+	"statusMessage": string;
+	"headers": Record<string, string>;
+	"body": ReadableStream<Uint8Array>;
+}
+
+/** Headers as a response carries them: a list joined. */
+function flatHeaders(headers: Map<string, string | string[]>): Record<string, string> {
+	const flat: Record<string, string> = {};
+
+	for (const [key, value] of headers) {
+		flat[key] = Array.isArray(value) ? value.join(", ") : value;
+	}
+
+	return flat;
 }
 
 /**
@@ -470,6 +582,33 @@ export class Server extends EventEmitter {
 				}
 			} catch (error) {
 				if (timeoutId) { clearTimeout(timeoutId); }
+				reject(error);
+			}
+		});
+	}
+
+	/** Serve one request with both bodies streamed (a preview's requests: run-contract's exchanges): `body` is read as
+	 *  the handler reads it, and the answer comes as soon as the handler sends its head, with the rest of its body to read
+	 *  as it's written (ServerResponse._setStream). */
+	async serve(
+		method: string,
+		url: string,
+		headers: Record<string, string>,
+		body?: Uint8Array | ReadableStream<Uint8Array>
+	): Promise<StreamedResponse> {
+		return new Promise((resolve, reject) => {
+			const req = IncomingMessage.fromRequest(method, url, headers, body);
+			const res = new ServerResponse(req);
+
+			res._setStream(resolve);
+
+			try {
+				this.emit("request", req, res);
+
+				if (this._requestListener) {
+					this._requestListener(req, res);
+				}
+			} catch (error) {
 				reject(error);
 			}
 		});

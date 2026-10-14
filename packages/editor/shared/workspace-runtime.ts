@@ -6,17 +6,24 @@
  * program's own files and its stand-ins.
  */
 import type { RuntimeOptions, VirtualFS } from "@brianjenkins94/almostnode";
+import type { RuntimeRequest, RuntimeResponse } from "@brianjenkins94/run-contract/runtime";
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
+import { drain } from "@brianjenkins94/run-contract/runtime";
 import pageTap from "previews:page-tap";
 import workerTap from "previews:worker-tap";
 
-/** A preview's request for a port (relayed by the service worker, then the tab's root). Its body crosses as a
- *  Uint8Array (structured-clone over the worker port). */
-export interface VirtualRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array; /** A worker's entry script (the service worker tells: destination worker, mode same-origin). */ "entry"?: "worker" | "sharedworker" }
-export interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
-interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
-/** What answers a port: a dev server, or a program's own http server (almostnode's). */
-export interface RequestHandler { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> }
+/** A preview's request for a port (relayed by the service worker, then the tab's root), and its answer — each body whole
+ *  or a stream (run-contract's exchanges carry them in pieces). `entry`: a worker's entry script (the service worker
+ *  tells: destination worker, mode same-origin). */
+export type VirtualRequest = RuntimeRequest;
+export type VirtualResponse = RuntimeResponse;
+interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> | ReadableStream<Uint8Array> }
+/** What answers a port: a dev server (whole bodies), or a program's own http server (almostnode's, which also `serve`s
+ *  with both bodies streamed). */
+export interface RequestHandler {
+	"handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse>;
+	"serve"?: (method: string, url: string, headers: Record<string, string>, body?: Uint8Array | ReadableStream<Uint8Array>) => Promise<ServerResponse>;
+}
 
 /** The deploy base (this worker's served URL minus the "/__vscode__/…" tail), so a program's `file://` dynamic import
  *  resolves under the base-scoped service worker. Same computation as server-host. */
@@ -104,12 +111,15 @@ export function workerTapResponse(url: string): VirtualResponse | undefined {
 export async function answerServer(server: RequestHandler, request: VirtualRequest, observed?: (direction: "request" | "reply" | "error", label: string, bytes: number) => void): Promise<VirtualResponse> {
 	const { method, url, headers, body, entry } = request;
 	const [path] = url.split("?");
+	const streamed = body instanceof ReadableStream;
 
-	observed?.("request", method + " " + path, body?.byteLength ?? 0);
+	observed?.("request", method + " " + path, streamed ? 0 : body?.byteLength ?? 0);
 
-	const response = await server.handleRequest(method, url, headers, body);
+	// A program's own server streams both ways; a dev server takes and answers whole bodies.
+	const response = server.serve === undefined ? await server.handleRequest(method, url, headers, streamed ? await drain(body) : body) : await server.serve(method, url, headers, body);
+	const whole = async (): Promise<Uint8Array> => (response.body instanceof ReadableStream ? drain(response.body) : new Uint8Array(response.body));
 
-	observed?.(response.statusCode >= 400 ? "error" : "reply", String(response.statusCode) + " " + path, response.body.length);
+	observed?.(response.statusCode >= 400 ? "error" : "reply", String(response.statusCode) + " " + path, response.body instanceof ReadableStream ? 0 : response.body.length);
 
 	// Re-encoded, with its content-length fixed; only HTML and a worker's entry are touched.
 	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
@@ -125,11 +135,11 @@ export async function answerServer(server: RequestHandler, request: VirtualReque
 	};
 
 	if (entry !== undefined && response.statusCode < 300 && /javascript|typescript/u.test(contentType)) {
-		return rewritten(injectWorkerTap(new TextDecoder().decode(new Uint8Array(response.body)), url));
+		return rewritten(injectWorkerTap(new TextDecoder().decode(await whole()), url));
 	}
 
 	if (contentType.includes("text/html")) {
-		return rewritten(injectObsTap(new TextDecoder().decode(new Uint8Array(response.body))));
+		return rewritten(injectObsTap(new TextDecoder().decode(await whole())));
 	}
 
 	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };

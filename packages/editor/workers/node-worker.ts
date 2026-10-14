@@ -9,11 +9,13 @@
  * filesystem — and every change it makes is reported back as `workspace.changed` (persisted + announced by the
  * workbench; see workspace-changes.ts).
  */
+import type { ExchangeCall, WireResponse } from "@brianjenkins94/run-contract/runtime";
 import type { WorkspaceChange } from "../shared/workspace-changes";
 import type { RequestHandler, VirtualRequest, VirtualResponse } from "../shared/workspace-runtime";
 
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
+import { exchanges } from "@brianjenkins94/run-contract/runtime";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { identifyWorker } from "../shared/architecture-ids";
 import { ZENFS_NODE } from "../shared/architecture-zenfs";
@@ -56,7 +58,8 @@ const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= workspac
 
 // Preview bridge relay (M0): the service worker's `/__virtual__/<tab>/<port>/…` request arrives here (relayed by
 // the tab's root); we drive the dev server on that port (M1, below) and return its response — or relay it to a debug run
-// serving the port. Body crosses as a Uint8Array (structured-clone over the worker port).
+// serving the port. Every call of an exchange (run-contract's: a body in pieces) names its port, so each goes where its
+// request went.
 type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "setStops": (stops: Record<string, number[]>) => string[]; "stop": () => void };
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry —
@@ -82,22 +85,16 @@ function applyStops(port: number, server: PreviewServer): void {
 let lastPreviewConfig: { "port": number; "root": string } | undefined;
 
 /** A 503 for a port nobody here listens on. */
-function notListening(port: number): VirtualResponse {
-	return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${port}`) };
+function notListening(port: number): WireResponse {
+	return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${port}`), "listening": false };
 }
 
-/** Answer a preview's request from the dev server on its port in this worker — or undefined when there's none here. */
-async function answerVirtual(raw: unknown): Promise<VirtualResponse | undefined> {
-	const request = raw as VirtualRequest;
+/** Answer a preview's request from the dev server on its port in this worker. */
+async function answerVirtual(request: VirtualRequest): Promise<VirtualResponse> {
 	const server = previewServers.get(request.port);
-	const tap = workerTapResponse(request.url);
-
-	if (tap !== undefined) {
-		return tap;
-	}
 
 	if (server === undefined) {
-		return undefined;
+		return notListening(request.port);
 	}
 
 	const serverNode = "vite:" + request.port;
@@ -111,18 +108,25 @@ async function answerVirtual(raw: unknown): Promise<VirtualResponse | undefined>
 	});
 }
 
-serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
-	const answered = await answerVirtual(raw);
+const devServerExchanges = exchanges(answerVirtual);
 
-	if (answered !== undefined) {
-		return answered;
+serve(hub, "virtual.request", async (raw) => {
+	const call = raw as ExchangeCall;
+	const tap = "url" in call ? workerTapResponse(call.url) : undefined;
+
+	if (tap !== undefined) {
+		return tap;
+	}
+
+	if (previewServers.has(call.port)) {
+		return devServerExchanges(call);
 	}
 
 	// Not a dev server's port: a debug run's server (extensions/tsval/debug-worker.ts — asked only when one serves the port: `$rpc.call.`
 	// is the hub's call prefix) — or nobody's.
-	const { port } = raw as VirtualRequest;
+	const { port } = call;
 
-	return hub.interested(`$rpc.call.virtual.debug.${port}`) ? rpc.request(`virtual.debug.${port}`, raw, { "timeoutMs": 60_000 }).then((reply) => reply as VirtualResponse, () => notListening(port)) : notListening(port);
+	return hub.interested(`$rpc.call.virtual.debug.${port}`) ? rpc.request(`virtual.debug.${port}`, raw, { "timeoutMs": 60_000 }).catch(() => notListening(port)) : notListening(port);
 });
 
 // M1: start almostnode's ViteDevServer in THIS worker on the shared workspace zen-fs, so the preview runs off

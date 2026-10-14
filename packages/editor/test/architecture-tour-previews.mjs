@@ -306,6 +306,70 @@ test("node script: a service runs in the debugger, and stopping it leaves the pr
 	assert.equal(await preview?.evaluate(async () => (await fetch(location.href)).status), 200);
 });
 
+// A preview asks for localhost:<port> as on a developer's machine, and the server on that port answers — here a node service
+// on 3001 asked from the 5173 preview: its events arrive as they're written (not when the response ends), and an upload
+// longer than one piece reaches it whole.
+test("localhost: a preview's request for another port reaches its server, streamed both ways", async () => {
+	const workbench = session.workbench();
+	const server = [
+		"const http = require('http');",
+		"http.createServer((req, res) => {",
+		"\tif (req.url === '/events') {",
+		"\t\tres.writeHead(200, { 'content-type': 'text/event-stream' });",
+		"\t\tlet sent = 0;",
+		"\t\tconst timer = setInterval(() => { sent += 1; res.write('data: ' + sent + '\\n\\n'); if (sent === 3) { clearInterval(timer); res.end(); } }, 400);",
+		"\t\treq.on('close', () => clearInterval(timer));",
+		"\t\treturn;",
+		"\t}",
+		"\tlet size = 0;",
+		"\treq.on('data', (chunk) => { size += chunk.length; });",
+		"\treq.on('end', () => res.end(req.method + ' ' + size));",
+		"}).listen(3001);",
+		""
+	].join("\n");
+
+	await workbench.evaluate(async (text) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/events-server.js"), new TextEncoder().encode(text));
+	}, server);
+	await session.terminal("node events-server.js", { "fresh": true });
+	// Listening first: before then, a request for 3001 isn't any server's and goes to the network — asking the person.
+	await eventually("its run, listening on 3001", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node events-server.js" && run.port === 3001) || undefined);
+
+	// (The current frame each time: the preview's may be replaced as the run's windows come and go.)
+	const preview = () => session.page.frames().find((frame) => /__virtual__\/[^/]+\/5173\/$/u.test(frame.url()));
+
+	await eventually("the server on 3001, from the preview", async () => (await preview()?.evaluate(async () => (await fetch("http://localhost:3001/ping").then((response) => response.text(), () => "")).startsWith("GET")).catch(() => false)) || undefined);
+
+	const events = await preview().evaluate(async () => {
+		const reader = (await fetch("http://localhost:3001/events")).body.getReader();
+		const arrived = [];
+
+		for (let read = await reader.read(); !read.done; read = await reader.read()) {
+			arrived.push({ "text": new TextDecoder().decode(read.value), "at": performance.now() });
+		}
+
+		return arrived;
+	});
+
+	assert.equal(events.map((piece) => piece.text).join(""), "data: 1\n\ndata: 2\n\ndata: 3\n\n");
+	assert.ok(events.length >= 3, `each event as it's written, not the whole at the end: ${events.length} pieces`);
+	assert.ok(events.at(-1).at - events[0].at > 500, "spread over the time they were written in");
+
+	const upload = await preview().evaluate(async () => (await fetch("http://localhost:3001/upload", { "method": "POST", "body": new Uint8Array(700_000) })).text());
+
+	assert.equal(upload, "POST 700000", "an upload of several pieces, whole");
+
+	await session.page.keyboard.press("Control+C");
+	await eventually("the service stopped", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node events-server.js" && run.state === "stopped") || undefined);
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.delete(api.Uri.file("/workspace/events-server.js"));
+	});
+});
+
 // What a run read of the workspace is recorded (RULES.md, slice 2), as a preview's fetches are: by the path as the script
 // wrote it — what a stand-in asks for — so a rule can give a run what an earlier one read.
 test("record: a node service's reads of the workspace, kept to be given back", async () => {
