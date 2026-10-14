@@ -13,7 +13,10 @@
  *   • `source.fixAll.eslint` (what `editor.codeActionsOnSave` runs) and the formatter both ask the worker to fix the
  *     document's text;
  *   • the formatter is registered only while `eslint.format.enable` is true — the desktop extension's default is
- *     false, so `editor.defaultFormatter` alone doesn't make eslint format on either side.
+ *     false, so `editor.defaultFormatter` alone doesn't make eslint format on either side;
+ *   • the config is the workspace's `eslint.config.*` (else the preset): one that fails to load is a problem on that
+ *     file, saying why and that the preset lints meanwhile, and a change to one starts the worker afresh, as the
+ *     desktop server reloads its config.
  */
 import { workspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
@@ -29,12 +32,19 @@ const UNUSED_RULES = new Set(["no-unused-imports", "no-unused-private-class-memb
 /** What the worker says of a file (eslint's messages). */
 interface Message { "line": number; "column": number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
-/** The worker, started once: lint a text, or fix it. */
-interface Worker { "lint": (file: string, text: string) => Promise<Message[]>; "fix": (file: string, text: string) => Promise<{ "output": string; "fixed": boolean }> }
+/** The names ESLint finds a config by, at the workspace's root (worker.ts's CONFIGS). */
+const CONFIG_GLOB = "eslint.config.{js,mjs,cjs,ts,mts,cts}";
+
+/** The worker: lint a text, or fix it — until it's disposed. */
+interface Worker { "lint": (file: string, text: string) => Promise<Message[]>; "fix": (file: string, text: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
+
+/** What the worker lints with once it's loaded: the workspace's config file, or the preset (undefined) — and why not
+ *  the workspace's, when it failed to load. */
+type OnConfig = (config: string | undefined, error: string | undefined) => void;
 
 /** ESLint's worker (worker.ts, through its bootstrap `worker.js`), given its link into the workspace runtime once it
  *  listens. Undefined where there's no workspace runtime (no editor core in this host): nothing is linted. */
-function startWorker(context: vscode.ExtensionContext): Worker | undefined {
+function startWorker(context: vscode.ExtensionContext, onConfig: OnConfig): Worker | undefined {
 	const runtime = workspaceRuntime();
 
 	if (runtime === undefined) {
@@ -43,8 +53,14 @@ function startWorker(context: vscode.ExtensionContext): Worker | undefined {
 		return undefined;
 	}
 
+	const disposables: (() => void)[] = [];
 	const worker = new globalThis.Worker(vscode.Uri.joinPath(context.extensionUri, "worker.js").toString(true), { "name": "eslint" });
 	const pending = new Map<number, { "resolve": (answer: Record<string, unknown>) => void; "reject": (error: Error) => void }>();
+	// (it listens once it says it's ready: its module loads after the bootstrap, and a message before then is lost)
+	let listening: () => void;
+	const ready = new Promise<void>((resolve) => {
+		listening = resolve;
+	});
 	let next = 0;
 	let failure: Error | undefined;
 	const failAll = (error: Error): void => {
@@ -67,14 +83,19 @@ function startWorker(context: vscode.ExtensionContext): Worker | undefined {
 		if (data["ready"] === true) {
 			const link = runtime.connect("eslint");
 
-			context.subscriptions.push({ "dispose": link.dispose });
+			disposables.push(link.dispose);
 			worker.postMessage({ "runtime": link.port }, [link.port]);
+			listening();
 
 			return;
 		}
 
 		if (data["booted"] === true) {
-			console.info(`[eslint] ESLint loaded in ${String(data["ms"])} ms`);
+			const config = typeof data["config"] === "string" ? data["config"] : undefined;
+			const error = typeof data["error"] === "string" ? data["error"] : undefined;
+
+			console.info(`[eslint] ESLint loaded in ${String(data["ms"])} ms, linting with ${config ?? "the preset"}`);
+			onConfig(config, error);
 
 			return;
 		}
@@ -91,15 +112,21 @@ function startWorker(context: vscode.ExtensionContext): Worker | undefined {
 			}
 		}
 	});
-	context.subscriptions.push({ "dispose": () => {
+	disposables.push(() => {
 		worker.terminate();
-	} });
+		failAll(new Error("eslint's worker was started afresh"));
+	});
 
 	const ask = (request: Record<string, unknown>): Promise<Record<string, unknown>> => (failure === undefined
 		? new Promise((resolve, reject) => {
 			next += 1;
-			pending.set(next, { "resolve": resolve, "reject": reject });
-			worker.postMessage({ "id": next, ...request });
+
+			const id = next;
+
+			pending.set(id, { "resolve": resolve, "reject": reject });
+			void ready.then(() => {
+				worker.postMessage({ "id": id, ...request });
+			});
 		})
 		: Promise.reject(failure));
 
@@ -109,6 +136,11 @@ function startWorker(context: vscode.ExtensionContext): Worker | undefined {
 			const answer = await ask({ "fix": { "file": file, "text": text } });
 
 			return { "output": answer["output"] as string, "fixed": answer["fixed"] === true };
+		},
+		"dispose": () => {
+			for (const dispose of disposables.splice(0)) {
+				dispose();
+			}
 		}
 	};
 }
@@ -190,11 +222,36 @@ function wholeDocument(document: vscode.TextDocument): vscode.Range {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-	const worker = startWorker(context);
+	// (a workspace config that failed to load: a problem on it, apart from what linting it says)
+	const configProblems = vscode.languages.createDiagnosticCollection("eslint-config");
+	const onConfig: OnConfig = (config, error) => {
+		configProblems.clear();
 
-	if (worker === undefined) {
+		const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+
+		if (error !== undefined && folder !== undefined) {
+			void vscode.workspace.findFiles(new vscode.RelativePattern(folder, CONFIG_GLOB), null, 1).then(([file]) => {
+				if (file !== undefined) {
+					const problem = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 0), `ESLint couldn't load this config, so the preset lints meanwhile: ${error}`, vscode.DiagnosticSeverity.Error);
+
+					problem.source = "eslint";
+					configProblems.set(file, [problem]);
+				}
+			});
+		}
+	};
+
+	const first = startWorker(context, onConfig);
+
+	if (first === undefined) {
 		return;
 	}
+
+	let worker: Worker = first;
+
+	context.subscriptions.push(configProblems, { "dispose": () => {
+		worker.dispose();
+	} });
 
 	const collection = vscode.languages.createDiagnosticCollection("eslint");
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -318,6 +375,30 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	for (const document of vscode.workspace.textDocuments) {
 		schedule(document, 0);
+	}
+
+	// A config made, changed or removed: a worker afresh — the old one's config and plugins stay loaded in it — and every
+	// open document linted with what it loads.
+	const folder = vscode.workspace.workspaceFolders?.[0];
+
+	if (folder !== undefined) {
+		const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, CONFIG_GLOB));
+		let restart: ReturnType<typeof setTimeout> | undefined;
+		const restarted = (): void => {
+			clearTimeout(restart);
+			restart = setTimeout(() => {
+				worker.dispose();
+				worker = startWorker(context, onConfig) ?? worker;
+
+				for (const document of vscode.workspace.textDocuments) {
+					schedule(document, 0);
+				}
+			}, SETTLE_MS);
+		};
+
+		context.subscriptions.push(watcher, watcher.onDidCreate(restarted), watcher.onDidChange(restarted), watcher.onDidDelete(restarted), { "dispose": () => {
+			clearTimeout(restart);
+		} });
 	}
 }
 

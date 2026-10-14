@@ -259,7 +259,7 @@ const SCAFFOLDING = new Set(["editor-ambient.d.ts", ".silo", "node_modules", ".g
 //     copy so the priority-1 base shows through.
 //   .gitignore — read straight off zen-fs by isomorphic-git (a priority-1 base would be invisible to it): MATERIALIZE
 //     the git default (gitEngine.DEFAULT_GITIGNORE) into zen-fs.
-//   ESLINT_CONFIGS — kept overridable so a repo's own is writable; eslint's worker lints with the preset
+//   ESLINT_CONFIGS — kept overridable so a repo's own is writable; eslint's worker lints with it (else the preset)
 //     (extensions/eslint/worker.ts), so there's nothing to materialize; on omit we just drop a stale one. Variants are
 //     one concept — a repo providing ANY counts.
 // Keep OVERRIDABLE_DEFAULTS in sync with workspace-fs.ts.
@@ -389,7 +389,7 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 		}
 
 		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing
-		// to materialize — eslint's worker lints with the preset.
+		// to materialize — with none, eslint's worker lints with the preset.
 		if (!ESLINT_CONFIGS.some((name) => providedAtRoot(name))) {
 			for (const name of ESLINT_CONFIGS) {
 				await dropWritable(name);

@@ -333,9 +333,10 @@ maps, type declarations and docs; TypeScript kept to its compiler API and lib fi
 almostnode (resolving as Node does, `browserField: false`) and reads the workspace through the workspace runtime, as
 tooling reads — never asked about. The extension shows its problems as its own diagnostics (so eslint's `info` is
 Information now, not a Warning) and fixes through it. In the editor: ESLint loads in about 4 s, and a floating promise is
-reported, with types. The engine bundled into tsserver, its plugin and the preset's build-time extraction are gone. Not
-yet: a repository's own `eslint.config.*` (the worker lints with the preset; running a repository's config is running
-its code, which the old engine did in `gatedEvalRealm`).
+reported, with types. The engine bundled into tsserver, its plugin and the preset's build-time extraction are gone. A repository's own
+`eslint.config.*` is what it lints with (the preset when there's none, or when it fails to load — said as a problem on
+the config): its code runs in the worker, whose network is shut once the toolchain is fetched, over a read-only
+workspace; its imports resolve to the toolchain for the packages it carries, the workspace's node_modules for the rest.
 
 ### Decided
 
