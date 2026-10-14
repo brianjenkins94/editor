@@ -186,8 +186,12 @@ a terminal prompt or failure in CI, is what's missing.
 - **`guard` is not gating.** It's a runtime type check at a boundary (a value against its declared type), reacting
   through a pluggable handler (record and keep going, throw, or hand to a broker): the runtime target for
   type-generated asserts, fail-loud's type-derived half. It belongs with fail-loud, under Remember, not with the gate.
+  It stays in lib as the runtime piece; the editor builds out the asserts that call it (inserted by tsval's and the
+  preview dev server's transforms, shown with the runtime evidence). No subcommand: nothing about it is typed. Later,
+  the desktop preload could insert the same asserts as files load (its load hook can transform source), without a new
+  command.
 
 ### Decisions to make
 
-- **`guard`:** keep it for fail-loud's type-derived asserts, or remove it until that's picked up.
+None open. (The questions above, "What doesn't fit", are answered by this design.)
 
