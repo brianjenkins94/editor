@@ -166,8 +166,9 @@ signals are in the gaps:
   supply-chain signal.
 - **The join grew from your side.** Your code started using a member that reaches more (`fetchAll`, and with it `net`).
   The prototype counted this as drift too: "is my relationship to this package still the one I approved?"
-- **A run did what the join didn't predict.** A blind spot in the analysis, or a package hiding what it does. The
-  strongest of the four.
+- **A call the join didn't predict.** A blind spot in the analysis, or a package hiding what it does. It never just
+  happens: the gate stops it before it's made and asks (allow, allow always, deny), and the answer is recorded in the
+  run as an exception to the policy.
 - **The join allows what no run used.** A candidate for a narrower policy (least privilege).
 
 What this asks of the design:
@@ -179,8 +180,8 @@ What this asks of the design:
 3. **The editor computes your usage.** It's half the join, and only the command line has it now. In the editor it can
    come from the TypeScript server it already runs (the import surface is a reading of your code, which is analysis's
    job: TypeScript 7, not BABLR).
-4. **A run beyond the join is its own finding**, apart from a call outside the policy: something static analysis
-   missed, shown in the Exceptions view and by the command line.
+4. **Nothing outside the join runs unasked.** Wherever a package's call can't be decided (no baseline yet, nobody to
+   ask), it's refused, as a preview's are, not just counted.
 
 ### The jobs, reconciled
 
