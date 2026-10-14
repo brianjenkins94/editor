@@ -282,11 +282,12 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 	// Every rule as the tree lists it, as data (the `rules_list` tool).
 	serve(hub, "rules.state", async () => ({ "rules": await listed() ?? [] }));
 
-	// A preview's capability prompt (decide.ts): its Rule… makes the rule here — a new one, prefilled with the call —
+	// A preview's capability prompt (decide.ts): its Rule… makes the rule here — a new one, prefilled with the call (and the
+	// package making it, a package's) —
 	// and the call waits on it: Just this once (decided by it, not kept), Save as rule (kept, and decided by it), or
 	// Cancel (back to the prompt's choices). Answers the decision, or null.
 	serve(hub, "rules.make", async (args) => {
-		const { capability, resource } = (args ?? {}) as { "capability"?: string; "resource"?: string };
+		const { capability, resource, "package": pkg } = (args ?? {}) as { "capability"?: string; "resource"?: string; "package"?: string };
 
 		if (typeof capability !== "string") {
 			return null;
@@ -294,7 +295,7 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 
 		await loadPolicy();
 
-		const subject = { "capability": capability, "resource": resource ?? "" };
+		const subject = { "capability": capability, "resource": resource ?? "", ...typeof pkg === "string" ? { "package": pkg } : {} };
 
 		return new Promise<string | null>((resolve) => {
 			const done = (decision: string | null): void => {
@@ -319,7 +320,7 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 				return Promise.resolve();
 			};
 
-			show(rulePanel(policy, callRule(capability, resource), (rule) => callVerdict(policy, rule, subject), [
+			show(rulePanel(policy, callRule(capability, resource, typeof pkg === "string" ? pkg : undefined), (rule) => callVerdict(policy, rule, subject), [
 				{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and ask again next time", "act": once },
 				{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it", "act": saveAsRule },
 				{ "label": "Cancel", "className": "cancel", "title": "Back to the preview's question", "act": cancel, "always": true }

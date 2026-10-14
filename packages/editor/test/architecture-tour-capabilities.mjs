@@ -233,6 +233,54 @@ test("real effects: an allowed read reads the file, recorded; a call nobody allo
 	}
 });
 
+// A package's call beyond its baseline (decide.ts → the capability prompt, shell-preview.ts): the prompt says whose call it
+// is and why it's asked — here, a package the baseline never read — and Allow always keeps a rule about that package's
+// calls only. Asked with no preview open, it shows in a window of its own, which closes once it's answered.
+test("package prompt: whose call, and why it's asked; Allow always is about that package; its window closes", async () => {
+	const workbench = session.workbench();
+	const write = (path, text) => workbench.evaluate(([file, body]) => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file(file), new TextEncoder().encode(body)), [path, text]);
+	const remove = (path) => workbench.evaluate((file) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(file), { "recursive": true }).then(() => undefined, () => undefined), path);
+	const ownWindows = () => session.page.getByText("Capability request", { "exact": true }).count();
+
+	// (the baseline made, as the project opened: what the prompt says is what it says of the package)
+	await eventually("the baseline", () => workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/.silo/baseline.json")).then(() => true, () => undefined)), 120_000);
+	await write("/workspace/node_modules/sneaky/package.json", JSON.stringify({ "name": "sneaky", "version": "1.0.0", "main": "index.js" }));
+	await write("/workspace/node_modules/sneaky/index.js", "const fs = require(\"node:fs\");\n\nmodule.exports = () => fs.writeFileSync(\"/workspace/sneaky-out.txt\", \"x\");\n");
+	await write("/workspace/package-call.js", "require(\"sneaky\")();\nconsole.log(\"wrote\");\n");
+
+	try {
+		const ran = session.request("debug.start", { "program": "/workspace/package-call.js", "breakpoints": [] }, 120_000);
+		// (the prompt's own card: in a window of its own, the window's card holds it)
+		const prompt = session.page.locator("wa-card", { "hasText": "sneaky 1.0.0" }).last();
+
+		await prompt.waitFor({ "timeout": 60_000 });
+
+		const text = await prompt.innerText();
+
+		assert.match(text, /sneaky 1\.0\.0 · fs:write/u, "whose call it is, and what");
+		assert.match(text, /The baseline has nothing of sneaky/u, "why it's asked");
+		assert.match(text, /for sneaky's calls only/u, "what Allow always keeps");
+
+		const alone = await ownWindows() > 0;
+
+		await prompt.locator("wa-button", { "hasText": "Allow always" }).click();
+		assert.deepEqual((await ran).output, ["wrote"], "allowed: the call made");
+
+		const { mine } = await session.request("rules.list", undefined, 10_000);
+
+		assert.deepEqual(mine.rules[0].when.predicates.filter(({ "target_id": targetId }) => targetId !== "resource").map(({ "target_id": targetId, argument }) => [targetId, argument]), [["capability", "fs:write"], ["package", "sneaky"]], "a rule about sneaky's calls");
+		await session.request("rules.set", { "previous": mine.rules[0] }, 10_000);
+
+		if (alone) {
+			await eventually("the prompt's own window, closed", async () => (await ownWindows() === 0) || undefined);
+		}
+	} finally {
+		await remove("/workspace/node_modules/sneaky");
+		await remove("/workspace/package-call.js");
+		await remove("/workspace/sneaky-out.txt");
+	}
+});
+
 // A program's file calls are the editor's to make (EXTENSION-POINTS.md, 2: the runtime's files, through core) — so a read
 // is what the editor has: an open editor's unsaved text, not what's on disk.
 test("a program's read is the editor's: an open editor's unsaved text", async () => {

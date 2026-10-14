@@ -469,14 +469,16 @@ function resultOf(rule: EditedRule): { "value": unknown } | undefined {
 	return give === undefined ? undefined : { "value": give.argument };
 }
 
-/** A rule about a call, as it starts: its capability, its resource (when known), then allow. */
-export function callRule(capability: string, resource?: string): EditedRule {
+/** A rule about a call, as it starts: its capability, its resource (when known), the package making it (when it's a
+ *  package's), then allow. */
+export function callRule(capability: string, resource?: string, pkg?: string): EditedRule {
 	return {
 		"when": {
 			"logicalType_id": "all",
 			"predicates": [
 				{ "target_id": "capability", "operator_id": "is", "argument": capability },
-				...resource === undefined ? [] : [{ "target_id": "resource", "operator_id": "is", "argument": resource }]
+				...resource === undefined ? [] : [{ "target_id": "resource", "operator_id": "is", "argument": resource }],
+				...pkg === undefined ? [] : [{ "target_id": "package", "operator_id": "is", "argument": pkg }]
 			]
 		},
 		"then": [{ "action_id": "allow" }]

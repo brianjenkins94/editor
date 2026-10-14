@@ -104,6 +104,13 @@ baseline's version is the one running); else the editor decides (`decide` on the
 answer at a prompt is an exception to the policy, recorded in the run (an effect's `decided`); "Allow always" also adds
 a rule to the person's policy; "Allow once" lasts the run.
 
+A package's call is asked about as that package's: the prompt names it (name and version) and says why it asks — what
+the baseline says of the call (run-contract's `AskedWhy`, worked out by the debug worker): the capability grew (from the
+code's use, with the members that brought it in, or from a new version), the analysis didn't predict it, the baseline
+read another version, it has nothing of the package, or there's no baseline. The policy's rules about that package's
+calls decide it (`effectiveDisposition`'s `about`), "Allow always" keeps a rule about that package's calls only, and an
+answer for the run is that package's, not every caller's.
+
 ## Invariants (keep these true)
 
 - **One classifier.** `capability-breakpoints.classifyCall` is THE way to decide "is this a capability, what

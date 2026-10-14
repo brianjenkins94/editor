@@ -147,7 +147,7 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 			const call = (meta["call"] ?? {}) as RuntimeDecision;
 			const runId = session === undefined ? undefined : sessions.get(session)?.configuration["__runId"];
 
-			return { "meta": await decideCapabilityAs({ "kind": call.kind, ...call.method === undefined ? {} : { "method": call.method }, ...call.op === undefined ? {} : { "op": call.op }, "args": call.args, "package": call.package, ...typeof runId === "string" ? { "runId": runId } : {} }) as unknown as Record<string, unknown> };
+			return { "meta": await decideCapabilityAs({ "kind": call.kind, ...call.method === undefined ? {} : { "method": call.method }, ...call.op === undefined ? {} : { "op": call.op }, "args": call.args, "package": call.package, ...call.why === undefined ? {} : { "why": call.why }, ...typeof runId === "string" ? { "runId": runId } : {} }) as unknown as Record<string, unknown> };
 		}
 
 		// A package the debugger's require found nothing of: its tarball, fetched by the workbench (tarballs.ts).

@@ -196,7 +196,7 @@ export async function loadPolicyFiles(): Promise<{ "mine": { "file": string; "ru
 
 /** Persist a user decision to `policy/<user>.json` (NEVER policy.json — silo doesn't author the contract),
  *  stamping `added` on a first-time grant and preserving it across later flips. */
-export async function persistOverride(capability: string, resource: string, disposition: Disposition): Promise<void> {
+export async function persistOverride(capability: string, resource: string, disposition: Disposition, about: Record<string, string> = {}): Promise<void> {
 	const root = siloRoot();
 
 	if (root === undefined) {
@@ -208,7 +208,7 @@ export async function persistOverride(capability: string, resource: string, disp
 	// Written from the file as it is now, not the cache: a change by hand (or a delete) the watcher hasn't reported yet
 	// must not come back.
 	overrideCache = undefined;
-	overrideCache = withRule(await loadOverride(root, user), capability, resource, disposition, new Date().toISOString());
+	overrideCache = withRule(await loadOverride(root, user), capability, resource, disposition, new Date().toISOString(), about);
 	await writeText(fileIn(root, userPolicyPath(user)), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
 

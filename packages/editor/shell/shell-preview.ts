@@ -19,6 +19,7 @@
  */
 import type { Hub, LinkPermissions } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
+import type { AskedWhy } from "@brianjenkins94/run-contract/runtime";
 import type { DevtoolsPanel } from "./preview-devtools";
 import type { PaneWindow, PaneWindowFactory } from "./window";
 import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTransport } from "@brianjenkins94/hub";
@@ -72,11 +73,42 @@ const poppedLayer = css({
 });
 const promptTitle = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)", "marginBlockEnd": "var(--wa-space-2xs)" });
 const promptScope = css({ "display": "block", "fontFamily": "var(--wa-font-family-code, monospace)", "fontSize": "12px", "wordBreak": "break-all", "color": "var(--wa-color-text-quiet)", "marginBlockEnd": "var(--wa-space-s)" });
+const promptWhy = css({ "display": "block", "fontSize": "12px", "marginBlockEnd": "var(--wa-space-s)" });
 const promptActions = css({ "display": "flex", "flexWrap": "wrap", "gap": "var(--wa-space-2xs)", "justifyContent": "flex-end" });
+const promptNote = css({ "display": "block", "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "textAlign": "end", "marginBlockStart": "var(--wa-space-2xs)" });
 
 /** What the prompt overlay reports back (mirrors the ext-host decider's expectations). */
 type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize" | "rule";
-interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string; "dangerous"?: boolean; "redline"?: boolean }
+/** What's asked (decide.ts): the call's capability (`scope`), and — a package's call — the package, by name@version, and
+ *  why it's asked about. */
+interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string; "dangerous"?: boolean; "redline"?: boolean; "package"?: string; "why"?: AskedWhy }
+
+/** A package as `name@version` names it (a scoped name's own `@` kept). */
+function packageNamed(pkg: string): { "name": string; "version"?: string } {
+	const at = pkg.lastIndexOf("@");
+
+	return at > 0 ? { "name": pkg.slice(0, at), "version": pkg.slice(at + 1) } : { "name": pkg };
+}
+
+/** Why package `name`'s call is asked about, said plainly: what its baseline says of the call. */
+function whyText(name: string, why: AskedWhy): string {
+	switch (why.reason) {
+		case "grew":
+			if (why.by === "version") {
+				return `${name} ${why.origin} can do this; the version before it couldn't.`;
+			}
+
+			return why.origin === "*" ? `Your code started using all of ${name}, which reaches this.` : `Your code started using ${why.origin} from ${name}, which reaches this.`;
+		case "unpredicted":
+			return `Nothing read of ${name} ahead of time reaches this: it may be built as it runs, or the analysis missed it.`;
+		case "other-version":
+			return `The baseline read ${name} ${why.recorded}, not this version: what this one can do hasn't been read yet.`;
+		case "unread":
+			return `The baseline has nothing of ${name}: it isn't among the dependencies read ahead of time.`;
+		default:
+			return `There's no baseline, so what ${name} can do wasn't read ahead of time.`;
+	}
+}
 
 /**
  * What may cross the link a preview window `id` joins the editor's tree through — its page tap's hub, and the app's
@@ -632,9 +664,16 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			}
 
 			const scope = document.createElement("span");
+			// (a package's call: whose it is, and why it's asked about)
+			const asker = request.package === undefined ? undefined : packageNamed(request.package);
 
 			scope.className = promptScope();
-			scope.textContent = request.scope ?? request.kind ?? "capability";
+			scope.textContent = (asker === undefined ? "" : `${asker.name}${asker.version === undefined ? "" : " " + asker.version} · `) + (request.scope ?? request.kind ?? "capability");
+
+			const why = document.createElement("span");
+
+			why.className = promptWhy();
+			why.textContent = asker === undefined || request.why === undefined ? "" : whyText(asker.name, request.why);
 
 			const actions = document.createElement("div");
 
@@ -661,7 +700,13 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 				actions.append(button("Rule…", "neutral", "rule"), button("Deny", "neutral", "deny"), button("Allow once", "brand", "allow-once"), button("Allow always", "brand", "allow-always"));
 			}
 
-			card.append(title, scope, actions);
+			// (what Allow always keeps: a rule in your policy — for a package's call, about that package's calls only)
+			const note = document.createElement("span");
+
+			note.className = promptNote();
+			note.textContent = request.redline === true ? "" : `Allow always keeps a rule in your policy${asker === undefined ? "" : `, for ${asker.name}'s calls only`}.`;
+
+			card.append(title, scope, ...why.textContent === "" ? [] : [why], actions, note);
 			layer.replaceChildren(card);
 			layer.classList.add("open");
 		});
@@ -675,7 +720,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	// requests queue on their own overlay without blocking another window's.
 	// With no preview window at all (a node script's decision, nothing previewed): a window of its own, holding just the
 	// prompt — not a preview window onto a server nobody started.
-	let promptOnly: { "paneWindow": PaneWindow; "promptEl": HTMLDivElement; "promptChain": Promise<unknown> } | undefined;
+	let promptOnly: { "paneWindow": PaneWindow; "promptEl": HTMLDivElement; "promptChain": Promise<unknown>; "waiting": number } | undefined;
 	const promptWindow = (): NonNullable<typeof promptOnly> => {
 		if (promptOnly === undefined) {
 			const paneWindow = createPaneWindow({
@@ -685,6 +730,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 				"height": 220,
 				"onClose": () => {
 					paneWindow.close();
+					promptOnly = undefined;
 				}
 			});
 			const promptEl = document.createElement("div");
@@ -692,7 +738,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			promptEl.className = promptLayer();
 			paneWindow.body.classList.add(bodyRelative());
 			paneWindow.body.appendChild(promptEl);
-			promptOnly = { "paneWindow": paneWindow, "promptEl": promptEl, "promptChain": Promise.resolve() };
+			promptOnly = { "paneWindow": paneWindow, "promptEl": promptEl, "promptChain": Promise.resolve(), "waiting": 0 };
 		}
 
 		return promptOnly;
@@ -704,6 +750,21 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		const result = surface.promptChain.then(() => runOnePrompt(surface, request as PromptRequest));
 
 		surface.promptChain = result.catch(() => undefined);
+
+		// A window of its own, holding just the prompt: closed once nothing is waiting in it — not left open, empty.
+		if (surface === promptOnly) {
+			const only = promptOnly;
+
+			only.waiting += 1;
+			void surface.promptChain.then(() => {
+				only.waiting -= 1;
+
+				if (only.waiting === 0 && promptOnly === only) {
+					only.paneWindow.close();
+					promptOnly = undefined;
+				}
+			});
+		}
 
 		return result;
 	});

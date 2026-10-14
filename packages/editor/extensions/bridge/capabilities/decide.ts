@@ -11,6 +11,7 @@
  * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
  * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
+import type { AskedWhy } from "@brianjenkins94/run-contract/runtime";
 import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
@@ -50,8 +51,18 @@ export interface CapabilityCall {
 	 *  prompt shows there. The service worker's net gate knows only the port — every window of a server has its address. */
 	"window"?: string;
 	/** The package whose code made it (a debug run's, beyond its baseline: runtime-fs.ts), by name@version — its run
-	 *  counts it, as that package's, so it isn't counted here too. */
+	 *  counts it, as that package's, so it isn't counted here too; the policy's rules about that package's calls decide it,
+	 *  and an answer of "Allow always" is a rule about them. */
 	"package"?: string;
+	/** Why the package's call is asked about (what its baseline says of it), said at the prompt. */
+	"why"?: AskedWhy;
+}
+
+/** A package as `name@version` names it (a scoped name's own `@` kept). */
+function packageNamed(pkg: string): { "name": string; "version"?: string } {
+	const at = pkg.lastIndexOf("@");
+
+	return at > 0 ? { "name": pkg.slice(0, at), "version": pkg.slice(at + 1) } : { "name": pkg };
 }
 
 /** How a call was decided (util/silo's Effect `decided`): by the policy, or at the call — the person's answer. */
@@ -138,12 +149,28 @@ function windowOf(request: object): { "port"?: number; "window"?: string } {
 	return { ...typeof port === "number" ? { "port": port } : {}, ...typeof window === "string" ? { "window": window } : {} };
 }
 
+/** Whose call it is, and why it's asked about, as far as they're known: a package's (name@version), with what its
+ *  baseline says of it — said at the prompt. */
+function askerOf(request: object): { "package"?: string; "why"?: AskedWhy } {
+	const { "package": pkg, why } = request as { "package"?: string; "why"?: AskedWhy };
+
+	return { ...typeof pkg === "string" ? { "package": pkg } : {}, ...why === undefined ? {} : { "why": why } };
+}
+
+/** What a rule about the call is about, beyond its capability and resource: the package making it, by name (any version
+ *  of it) — a package's call, decided always, is decided for that package, not for every caller. */
+function aboutOf(request: object): Record<string, string> {
+	const { "package": pkg } = askerOf(request);
+
+	return pkg === undefined ? {} : { "package": packageNamed(pkg).name };
+}
+
 const shellRpc = createRpcClient(bridgeHub);
 
 /** The TOFU prompt: OUR WebAwesome overlay INSIDE the preview window (shell-preview.ts), reached over the hub —
  *  never a VS Code notification. Returns the user's choice, or undefined if the shell can't be reached at all
  *  (then we fail CLOSED: if we can't ask, we don't allow — an unreachable shell is a bigger problem anyway). */
-async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean; "port"?: number; "window"?: string }): Promise<string | undefined> {
+async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean; "port"?: number; "window"?: string; "package"?: string; "why"?: AskedWhy }): Promise<string | undefined> {
 	try {
 		const reply = await shellRpc.request("capability.prompt", request, { "timeoutMs": 300000 });
 
@@ -162,7 +189,9 @@ async function promptViaShell(request: { "kind": string; "scope": string; "resou
 async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "decided": Decided }> {
 	const capability = capabilityOf(request);
 	const resource = request.resource ?? "";
-	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability));
+	// (a package's call: the rules about that package's calls too)
+	const pkg = askerOf(request).package;
+	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability), pkg === undefined ? {} : packageNamed(pkg));
 
 	if (effective === "allow") {
 		return { "behavior": "allow", "decided": "policy" };
@@ -178,7 +207,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 		return { "behavior": "deny", "message": "skipped by .silo policy", "decided": "policy" };
 	}
 
-	let choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
+	let choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request), ...askerOf(request) });
 
 	// Rule…: the rule is made in the Rules view (rules-view.ts `rules.make`), and the call waits on it; cancelled, the
 	// question comes back.
@@ -186,7 +215,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 		let made: unknown;
 
 		try {
-			made = await shellRpc.request("rules.make", { "capability": capability, "resource": resource }, { "timeoutMs": 300000 });
+			made = await shellRpc.request("rules.make", { "capability": capability, "resource": resource, ...aboutOf(request) }, { "timeoutMs": 300000 });
 		} catch {
 			made = null;
 		}
@@ -196,11 +225,11 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 			return made === "allow" ? { "behavior": "allow", "decided": "always" } : { "behavior": "deny", "message": "denied by your rule", "decided": "refused" };
 		}
 
-		choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
+		choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request), ...askerOf(request) });
 	}
 
 	if (choice === "allow-always") {
-		await persistOverride(capability, resource, "allow");
+		await persistOverride(capability, resource, "allow", aboutOf(request));
 
 		return { "behavior": "allow", "decided": "always" };
 	}
@@ -215,12 +244,12 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 /** BERNARD break-glass for redline scopes — the preview overlay's redline variant (a deliberate one-time
  *  "Authorize once"); never persisted. Fail closed if the shell can't be reached. */
 async function breakGlass(request: CapabilityRequest): Promise<boolean> {
-	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true, ...windowOf(request) })) === "authorize";
+	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true, ...windowOf(request), ...askerOf(request) })) === "authorize";
 }
 
 // The same question from the same window, asked while it's still waiting (six peer connections opened at once), gets
 // one prompt and one answer — "Allow always" written once. (Redline break-glass stays one deliberate answer per call.)
-const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabilityOf(request), request.scope, request.resource ?? "", windowOf(request)]), policyDecider);
+const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabilityOf(request), request.scope, request.resource ?? "", windowOf(request), aboutOf(request)]), policyDecider);
 
 /**
  * Decide one raw capability call: whether it may be made, and how that was decided — by the policy, or at the call, the
@@ -232,8 +261,7 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 	// A package a preview loads: refused only when the policy bans it — counted, as a debug run counts a ban, by its run.
 	if (call.kind === "load") {
 		const pkg = call.package ?? "";
-		const at = pkg.lastIndexOf("@");
-		const named = at > 0 ? { "name": pkg.slice(0, at), "version": pkg.slice(at + 1) } : { "name": pkg };
+		const named = packageNamed(pkg);
 		const banned = packageDisposition(await loadEffectivePolicy(), named) === "deny";
 
 		if (banned && call.runId !== undefined) {
@@ -265,13 +293,20 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 		(request as { "window"?: string }).window = call.window;
 	}
 
+	// And whose call it is, and why it's asked: a package's is decided by the rules about its calls, and the prompt says so.
+	if (call.package !== undefined) {
+		Object.assign(request, { "package": call.package }, call.why === undefined ? {} : { "why": call.why });
+	}
+
 	const answers = answersOf(call.runId);
+	// (a run's answers are about whose call it was: a package allowed once doesn't allow another's)
+	const answered = (scope: string): string => (call.package === undefined ? scope : `${packageNamed(call.package).name}\0${scope}`);
 	// (a package's call is counted by its run, as that package's: its debugger's)
 	const counted = call.package === undefined ? call.runId : undefined;
 	// (an object: the broker's callbacks below set it, which a `let` narrowed to its first value wouldn't show)
 	const how: { "decided": Decided } = { "decided": "policy" };
 
-	if (answers?.refused.has(request.scope) === true) {
+	if (answers?.refused.has(answered(request.scope)) === true) {
 		recordObservation(request, "deny", counted, "refused");
 
 		return { "allow": false, "decided": "refused" };
@@ -280,7 +315,7 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 	const options: BrokerOptions = {
 		"store": {
 			"has": (scope) => {
-				const allowed = answers?.allowed.has(scope) === true;
+				const allowed = answers?.allowed.has(answered(scope)) === true;
 
 				if (allowed) {
 					how.decided = "once";
@@ -291,7 +326,7 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 			// (the broker grants every allow; only an answer of "once" is this run's to remember — the policy's are the policy's)
 			"grant": (scope) => {
 				if (how.decided === "once") {
-					answers?.allowed.add(scope);
+					answers?.allowed.add(answered(scope));
 				}
 			}
 		},
@@ -319,7 +354,7 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 	} catch (error) {
 		if (error instanceof CapabilityDenied) {
 			if (how.decided === "refused") {
-				answers?.refused.add(request.scope);
+				answers?.refused.add(answered(request.scope));
 			}
 
 			recordObservation(request, "deny", counted, how.decided); // attempt-but-blocked: recorded, not in the surface

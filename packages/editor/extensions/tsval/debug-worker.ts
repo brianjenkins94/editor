@@ -20,7 +20,7 @@
  */
 import type { FsShim } from "@brianjenkins94/almostnode";
 import type { Effect, LoadedPackage } from "@brianjenkins94/run-contract";
-import type { RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/run-contract/runtime";
+import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/run-contract/runtime";
 import type { Told, Traced } from "@brianjenkins94/run-contract/values";
 import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
@@ -509,10 +509,46 @@ function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecis
 	}
 
 	try {
-		return editorLink.decide({ ...call, "package": packageOf(dir) });
+		return editorLink.decide({ ...call, "package": packageOf(dir), "why": askedWhy(pkg, capability) });
 	} catch {
 		return alone();
 	}
+}
+
+/** Why `pkg`'s call of `capability` is asked about, from what the baseline says of it — said at the prompt, so whoever
+ *  answers knows whether the package changed, the code's use of it did, or the analysis missed the call. */
+function askedWhy(pkg: { "name": string; "version"?: string }, capability: string): AskedWhy {
+	if (baseline === undefined) {
+		return { "reason": "no-baseline" };
+	}
+
+	const recorded = baseline.packages?.[pkg.name]?.version;
+
+	if (recorded !== undefined && pkg.version !== undefined && recorded !== pkg.version) {
+		return { "reason": "other-version", "recorded": recorded };
+	}
+
+	const whole = baseline.packages?.[pkg.name];
+
+	// (never read: not a dependency, or one that couldn't be — the code's use of it has no join, only its members)
+	if (whole === undefined) {
+		return { "reason": "unread" };
+	}
+
+	// (what the gate decided against: the code's use of it, else, for a package only a dependency uses, the whole package)
+	const uses = Object.values(baseline.consumer ?? {}).flatMap((workspace) => Object.entries(workspace).filter(([spec, entry]) => entry.kind === "package" && (spec === pkg.name || spec.startsWith(pkg.name + "/"))).map(([, entry]) => entry));
+	const entries: { "grew"?: Record<string, string> }[] = uses.length > 0 ? uses : [whole];
+
+	for (const entry of entries) {
+		for (const [grown, origin] of Object.entries(entry.grew ?? {})) {
+			if (covers([grown], capability)) {
+				// (a version's origin is the version; the code's, the members it started using, or `*`)
+				return { "reason": "grew", "by": /^\d/u.test(origin) ? "version" : "code", "origin": origin };
+			}
+		}
+	}
+
+	return { "reason": "unpredicted" };
 }
 
 /** Each package's own `fetch`, by package folder. */

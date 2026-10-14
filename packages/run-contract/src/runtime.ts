@@ -113,9 +113,23 @@ export interface RuntimeFs {
 	"rename": (path: string, to: string) => void;
 }
 
+/**
+ * Why a package's call is asked about — what the baseline said of it, so whoever is asked knows: the capability `grew`
+ * (`by` the code's use of the package — `origin` the members it started using, `*` all of it — or a new `version`,
+ * `origin` that version); the analysis didn't predict it (`unpredicted`: none of what was read of the package reaches
+ * it); the baseline read `other-version` (`recorded`) than the one running; it has nothing of the package (`unread`);
+ * or there's no baseline (`no-baseline`).
+ */
+export type AskedWhy =
+	| { "reason": "grew"; "by": "code" | "version"; "origin": string }
+	| { "reason": "unpredicted" }
+	| { "reason": "other-version"; "recorded": string }
+	| { "reason": "unread" }
+	| { "reason": "no-baseline" };
+
 /** A package's gated call, for the editor to decide at the call: its kind (an fs call's method and whether it reads or
- *  writes; a command; a request), its arguments as strings, and the package, by name@version. */
-export interface RuntimeDecision { "kind": "fs" | "exec" | "net"; "method"?: string; "op"?: "read" | "write"; "args": string[]; "package": string }
+ *  writes; a command; a request), its arguments as strings, the package, by name@version, and why it's asked about. */
+export interface RuntimeDecision { "kind": "fs" | "exec" | "net"; "method"?: string; "op"?: "read" | "write"; "args": string[]; "package": string; "why"?: AskedWhy }
 
 /** What the editor decided: whether the call may be made, and how (an Effect's `decided`). */
 export interface RuntimeVerdict { "allow": boolean; "decided": NonNullable<Effect["decided"]> }
