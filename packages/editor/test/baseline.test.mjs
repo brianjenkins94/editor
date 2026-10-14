@@ -23,9 +23,15 @@ test("a tarball's files, long paths included — bytes as they are, and what det
 	fs.writeFileSync(path.join(dir, "package", "README.md"), "fetch('https://not.code');\n");
 	fs.writeFileSync(path.join(dir, "package", "probe.wasm"), binary);
 	// (COPYFILE_DISABLE: macOS's tar would add its ._ metadata files, which no published tarball has)
-	// (each way a long path is written: pax, as npm's tarballs have it, and GNU tar's)
-	for (const format of ["pax", "gnutar"]) {
-		execFileSync("tar", ["czf", "probe.tgz", "--format", format, "package"], { "cwd": dir, "env": { ...process.env, "COPYFILE_DISABLE": "1" } });
+	// (each way a long path is written: pax, as npm's tarballs have it, and GNU tar's — `gnu` to GNU tar, `gnutar` to bsdtar)
+	const tar = (format) => execFileSync("tar", ["czf", "probe.tgz", "--format", format, "package"], { "cwd": dir, "env": { ...process.env, "COPYFILE_DISABLE": "1" }, "stdio": "ignore" });
+
+	for (const format of ["pax", "gnu"]) {
+		try {
+			tar(format);
+		} catch {
+			tar(format === "gnu" ? "gnutar" : format);
+		}
 
 		const files = unpack(new Uint8Array(fs.readFileSync(path.join(dir, "probe.tgz"))));
 		const code = [...files].filter(([file]) => file.endsWith(".js"));
