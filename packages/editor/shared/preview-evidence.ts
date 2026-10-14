@@ -3,8 +3,8 @@
  * evidence (workbench/evidence.ts), recorded stops (workbench/recorded-stops.ts), and the replays the debugger steps
  * (the bridge's replay.ts, tsval's replay-run.ts).
  */
-import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
-import type { Encoded } from "@brianjenkins94/run-contract/recorded";
+import type { SiteObservation, StatementCoverage } from "@brianjenkins94/editor-api";
+import type { Encoded } from "@brianjenkins94/editor-api/recorded";
 
 /** What one version of a module observed in a page: its file and version, each statement with its count, each site
  *  that ran — positions in the module's original source. */

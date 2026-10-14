@@ -20,9 +20,9 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { EditedRule, RuleCatalog, RulePredicate } from "@brianjenkins94/monaco-vscode-api/main";
 import type * as vscodeApi from "vscode";
 import type { PanelButton, PolicyModule, Verdict } from "./live-values";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { describeRule, registerCustomView, ViewContainerLocation, viewContainerRegistry } from "@brianjenkins94/monaco-vscode-api/main";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { callRule, callVerdict, decisionOf, ensureStyled, rulePanel, variablesOf, withVariables } from "./live-values";
 import css from "./rules-view.css?raw";
 

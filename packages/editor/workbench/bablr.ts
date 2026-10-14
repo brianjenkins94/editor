@@ -268,7 +268,7 @@ export function startBablr(hub: Hub): Bablr {
 		return first;
 	};
 
-	/** What the bridge's `editor.annotations.*` commands answer (run-contract's Answer): the value, or — the text can't
+	/** What the bridge's `editor.annotations.*` commands answer (editor-api's Answer): the value, or — the text can't
 	 *  be parsed — why. Anything else that goes wrong rejects (the command's caller hears `unavailable`). */
 	const answer = async <T>(ask: () => Promise<T>): Promise<{ "value": T } | { "unparsable": string }> => {
 		try {

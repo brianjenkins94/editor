@@ -6,14 +6,14 @@
  * program's own files and its stand-ins.
  */
 import type { RuntimeOptions, VirtualFS } from "@brianjenkins94/almostnode";
-import type { RuntimeRequest, RuntimeResponse } from "@brianjenkins94/run-contract/runtime";
+import type { RuntimeRequest, RuntimeResponse } from "@brianjenkins94/editor-api/runtime";
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
-import { drain } from "@brianjenkins94/run-contract/runtime";
+import { drain } from "@brianjenkins94/editor-api/runtime";
 import pageTap from "previews:page-tap";
 import workerTap from "previews:worker-tap";
 
 /** A preview's request for a port (relayed by the service worker, then the tab's root), and its answer — each body whole
- *  or a stream (run-contract's exchanges carry them in pieces). `entry`: a worker's entry script (the service worker
+ *  or a stream (editor-api's exchanges carry them in pieces). `entry`: a worker's entry script (the service worker
  *  tells: destination worker, mode same-origin). */
 export type VirtualRequest = RuntimeRequest;
 export type VirtualResponse = RuntimeResponse;

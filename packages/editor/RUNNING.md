@@ -126,7 +126,7 @@ URL (contributed-extensions.ts): listed by the site's own `extensions.json` (edi
 package, `packages/editor@latest.tgz` on its site — the built site itself — with the extension added), or a page's `?extension=` while it's developed. Its
 manifest's `configurationDefaults` makes it `run.debugger`. The editor's ▷ and live runs then start that; its sessions are runs like
 tsval's (the bridge's debug-events.ts asks core for each one's id), and the custom events it sends — the run contract's
-(packages/run-contract: `values`, `coverage`, `effects`, `ended`) — are the margin's, the evidence's and the run ledger's,
+(packages/editor-api: `values`, `coverage`, `effects`, `ended`) — are the margin's, the evidence's and the run ledger's,
 read the one way tsval's are: tsval tells the editor through the same contract. Stepping, breakpoints and the Variables view are the
 Debug Adapter Protocol's. Capability stops are the contract's too: every debugger is given the policy (`__policy`), asks
 about a gated call with `ask`, and is answered with a `decide` request (capability-stops.ts says what each answer means).

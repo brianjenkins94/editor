@@ -9,14 +9,14 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { CoverageEvent, Effect, LiveBatch } from "@brianjenkins94/run-contract";
+import type { CoverageEvent, Effect, LiveBatch } from "@brianjenkins94/editor-api";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { Replay } from "../../shared/preview-evidence";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
-export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/run-contract";
+export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/editor-api";
 
-/** What the adapter posts its worker: first its link into the editor's runtime (run-contract's workspace runtime: its
+/** What the adapter posts its worker: first its link into the editor's runtime (editor-api's workspace runtime: its
  *  servers answer the preview through it, its log and spans are the editor's), then control messages — each with the
  *  adapter action's trace, which the work it starts continues. The worker posts back `WorkerEvent`s. */
 export type ToWorker =
@@ -112,6 +112,6 @@ export type WorkerEvent =
 	/** Out of work, serving: the session is idle until a request (or a timer) comes. */
 	| { "type": "serving"; "ports": number[] };
 
-/** Coverage, and the observed sites, as the run contract has them (@brianjenkins94/run-contract): the body of the
+/** Coverage, and the observed sites, as the run contract has them (@brianjenkins94/editor-api): the body of the
  *  adapter's `getCoverage` reply and of its `coverage` event. */
 export type CoverageReport = CoverageEvent;

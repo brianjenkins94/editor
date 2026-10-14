@@ -17,7 +17,7 @@
  *     dev server — so the old IndexedDB "vfs store" serving path was retired.
  *   • Dev-server bridge — a preview's dev server (almostnode's ViteDevServer) runs in the node worker; we answer
  *     `/__virtual__/<tab>/<port>/…` fetches by calling it over the hub (`virtual.request`), so the preview iframe
- *     reaches it over ordinary HTTP — both bodies streamed (run-contract's exchanges), and a preview's request for
+ *     reaches it over ordinary HTTP — both bodies streamed (editor-api's exchanges), and a preview's request for
  *     localhost:<port> sent to the server on that port. (This used to be almostnode's ServerBridge: a MessagePort to a
  *     relay in the page. The hub already links us to the page, so the port and the relay are gone.)
  *   • COI stamping — every other response is passed through with the isolation headers added.
@@ -364,7 +364,7 @@ function virtualHeaders(source) {
 // Statuses whose Response must not carry a body.
 const NULL_BODY = new Set([101, 103, 204, 205, 304]);
 
-// One exchange with the server on `port` (a dev server in the node worker, or a run's own; over the hub — run-contract's
+// One exchange with the server on `port` (a dev server in the node worker, or a run's own; over the hub — editor-api's
 // `exchanges` is the other end): both bodies stream. A body that fits in its first REQUEST_PIECE goes whole with the
 // request; a longer one follows in writes, each sent once the server has taken the last. The answer comes at its head;
 // the rest of its body is read a piece at a time as the page reads it, and the page going away cancels it. Every call

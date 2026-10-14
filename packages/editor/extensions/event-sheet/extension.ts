@@ -11,11 +11,11 @@
  * behavior and composite behavior on its declaration — placed by the span references anchoring gives them, so they
  * follow their code; projected again as the game's files are saved.
  */
-import type { PaneContent, PaneItem } from "@brianjenkins94/run-contract/pane";
+import type { PaneContent, PaneItem } from "@brianjenkins94/editor-api/pane";
 import type { GameModel, NodeLoc } from "./recognizer";
 import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
-import { refreshPane } from "@brianjenkins94/run-contract/pane";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import * as vscode from "vscode";
 import { watchWorker } from "../../shared/failures";
 import { anchorGame } from "./anchors";

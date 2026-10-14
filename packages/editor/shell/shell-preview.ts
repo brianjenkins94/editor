@@ -17,9 +17,9 @@
  *   • `preview.hmr.<port>` → post the HMR update into every window of the port (its injected client applies it).
  * Each iframe's injected console tap posts `{channel:"obs-log"}` up here; we reshape onto `$sys.log.<window>`.
  */
+import type { AskedWhy } from "@brianjenkins94/editor-api/runtime";
 import type { Hub, LinkPermissions } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
-import type { AskedWhy } from "@brianjenkins94/run-contract/runtime";
 import type { DevtoolsPanel } from "./preview-devtools";
 import type { PaneWindow, PaneWindowFactory } from "./window";
 import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTransport } from "@brianjenkins94/hub";

@@ -9,15 +9,15 @@
  * session over hub RPC (debug-control.ts), so debug-mcp can drive it too. Inline is the only viable shape in-browser
  * (a DebugAdapterServer needs a socket).
  */
-import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/run-contract";
-import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
-import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/editor-api";
+import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
+import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import type { Span } from "@brianjenkins94/util/logger";
 
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { Replay } from "../../shared/preview-evidence";
 import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { logger } from "@brianjenkins94/util/logger";
 import { EMPTY_POLICY, given as givenBy, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
@@ -430,7 +430,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.send({ "type": "event", "event": event, "body": body ?? {} });
 	}
 
-	/** One of the run contract's events (@brianjenkins94/run-contract): what the editor reads from a run, whichever
+	/** One of the run contract's events (@brianjenkins94/editor-api): what the editor reads from a run, whichever
 	 *  debugger's — debug-events.ts turns it into the margin's values, the run's evidence and its effects. */
 	private tell<Name extends keyof Events>(name: Name, body: Events[Name]): void {
 		this.event(name, body as unknown as Dap);

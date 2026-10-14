@@ -14,14 +14,14 @@
  * and the functions it was in; the latest of each stop's hits kept, and reported soon after (not every 10 seconds: a
  * stop is looked at as it happens).
  */
-import type { SiteObservation } from "@brianjenkins94/run-contract";
-import type { Encoded } from "@brianjenkins94/run-contract/recorded";
+import type { SiteObservation } from "@brianjenkins94/editor-api";
+import type { Encoded } from "@brianjenkins94/editor-api/recorded";
 import type { ObserveSite } from "@brianjenkins94/tsval";
 import type { ModuleEvidence, RecordedStop, Replay, StopHit } from "../shared/preview-evidence";
-import { encode } from "@brianjenkins94/run-contract/recorded";
-import { esmPackage } from "../shared/preview-evidence";
-import { preview } from "@brianjenkins94/run-contract/values";
+import { encode } from "@brianjenkins94/editor-api/recorded";
+import { preview } from "@brianjenkins94/editor-api/values";
 import { typeTag } from "@brianjenkins94/tsval/values";
+import { esmPackage } from "../shared/preview-evidence";
 
 /** What a site of a module records: a statement (coverage), or one of tsval's observe sites (instrument.ts). */
 type SiteKind = "statement" | ObserveSite;

@@ -42,17 +42,17 @@
  * anchored by its node's range in the text that ran (anchors.ts, BABLR spans) and drawn where that code is now; what
  * lost its code goes.
  */
+import type { AskEvent, LiveBatch, LiveCall, LiveValue, RunEnd } from "@brianjenkins94/editor-api";
+import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem } from "@brianjenkins94/editor-api/pane";
 import type { Hub } from "@brianjenkins94/hub";
 import type { EditedRule, PaneMark, RuleCatalog, RulePredicate, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
-import type { AskEvent, LiveBatch, LiveCall, LiveValue, RunEnd } from "@brianjenkins94/run-contract";
-import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem } from "@brianjenkins94/run-contract/pane";
 import type * as vscodeApi from "vscode";
 import type { CapabilityChoice } from "../shared/capabilities/capability-breakpoints";
 import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { ruleEditor } from "@brianjenkins94/monaco-vscode-api/main";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 import { Anchors } from "./anchors";
 import { parseInputs } from "./inputs";

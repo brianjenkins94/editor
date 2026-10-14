@@ -5,8 +5,8 @@
  * The rules and where each is now come from the editor (`silo.rules.list`: its sentence in the catalog's words, its
  * place as the editor found it in the file as it is); drawn again as the policy files change, and as the file does.
  */
-import type { PaneContent, PaneMark } from "@brianjenkins94/run-contract/pane";
-import { refreshPane } from "@brianjenkins94/run-contract/pane";
+import type { PaneContent, PaneMark } from "@brianjenkins94/editor-api/pane";
+import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 import { placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";

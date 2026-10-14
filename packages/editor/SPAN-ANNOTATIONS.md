@@ -111,7 +111,7 @@ line, folded the same way. Collections may partition further (evidence adds an e
   ranges, and re-identification from a baseline (strategy 3), all from its cached parses. Extensions reach it through
   two commands, both batched — one call a file: `editor.annotations.refer(text, file, ranges)` and
   `editor.annotations.resolve(text, file, refs, { observed })` — typed, with their contract, in
-  `@brianjenkins94/run-contract/annotations` (`annotations(vscode.commands)`), which every caller goes through. A text
+  `@brianjenkins94/editor-api/annotations` (`annotations(vscode.commands)`), which every caller goes through. A text
   BABLR can't parse as it is answers `unparsable` (why), never a lost annotation: what's placed stays where it was
   until the text parses again — and the editor flags the file in the Problems view.
 - **Editor core**: baseline contents from git's objects.

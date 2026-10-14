@@ -7,9 +7,9 @@
  * never depends on that link existing. This is the clean extension/harness boundary: the bridge speaks hub
  * subjects and degrades to a standalone root when nothing is above it.
  */
-import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
+import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub } from "@brianjenkins94/hub";
-import { linkRuntime } from "@brianjenkins94/run-contract/runtime";
 
 export const bridgeHub = createHub({ "id": "bridge" });
 
@@ -17,9 +17,9 @@ export const bridgeHub = createHub({ "id": "bridge" });
  *  /workspace — an LSP server's through its control port, a debug run's in its launch. */
 export const workspace: { "buffer"?: SharedArrayBuffer } = {};
 
-/** The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; run-contract's
+/** The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; editor-api's
  *  `WorkspaceRuntime`): the workspace's buffer as it is when asked for, and a port into the bridge hub per worker — linked
- *  as every runtime link is (run-contract's `linkRuntime`), and connected with its `connectRuntime`. */
+ *  as every runtime link is (editor-api's `linkRuntime`), and connected with its `connectRuntime`. */
 export function workspaceRuntime(): WorkspaceRuntime {
 	return {
 		get "buffer"() { return workspace.buffer; },

@@ -8,9 +8,9 @@
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
-import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
+import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type * as vscodeApi from "vscode";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 
 /** A range of offsets, `[start, end)`. */
 export type Range = [number, number];

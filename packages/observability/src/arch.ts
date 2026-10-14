@@ -196,7 +196,7 @@ export function approxSize(value: unknown, depth = 0): number {
 /** `node.out.12` → `node.out.*`: ids in subjects (and in RPC names) would make every run a new label. An id is a
  *  number, a UUID, 8+ hex digits, or 12+ lowercase letters and digits with at least one digit (a word isn't). */
 /** The context a hub id is: `<name>#<instance>` — an id an edge gave one of several hubs of one name (each worker a
- *  debugger starts, run-contract's linkRuntime) — is an instance of `<name>`, the rest themselves. */
+ *  debugger starts, editor-api's linkRuntime) — is an instance of `<name>`, the rest themselves. */
 export function contextOf(id: string): string {
 	const at = id.indexOf("#");
 

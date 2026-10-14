@@ -1,7 +1,7 @@
 {
   "name": "bridge",
   "displayName": "Bridge",
-  "description": "The bridge between the editor's core runtime and VS Code — the one extension that touches the hub: core's vscode API is its; every debugger's run-contract events, capability stops and agent control, and the workspace runtime it gives a debugger (tsval, or an interpreter plugged in); tasks, Source Control and the run picker.",
+  "description": "The bridge between the editor's core runtime and VS Code — the one extension that touches the hub: core's vscode API is its; every debugger's editor-api events, capability stops and agent control, and the workspace runtime it gives a debugger (tsval, or an interpreter plugged in); tasks, Source Control and the run picker.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {

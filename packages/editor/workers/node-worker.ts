@@ -9,13 +9,13 @@
  * filesystem — and every change it makes is reported back as `workspace.changed` (persisted + announced by the
  * workbench; see workspace-changes.ts).
  */
-import type { ExchangeCall, WireResponse } from "@brianjenkins94/run-contract/runtime";
+import type { ExchangeCall, WireResponse } from "@brianjenkins94/editor-api/runtime";
 import type { WorkspaceChange } from "../shared/workspace-changes";
 import type { RequestHandler, VirtualRequest, VirtualResponse } from "../shared/workspace-runtime";
 
+import { exchanges } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
-import { exchanges } from "@brianjenkins94/run-contract/runtime";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { identifyWorker } from "../shared/architecture-ids";
 import { ZENFS_NODE } from "../shared/architecture-zenfs";
@@ -58,7 +58,7 @@ const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= workspac
 
 // Preview bridge relay (M0): the service worker's `/__virtual__/<tab>/<port>/…` request arrives here (relayed by
 // the tab's root); we drive the dev server on that port (M1, below) and return its response — or relay it to a debug run
-// serving the port. Every call of an exchange (run-contract's: a body in pieces) names its port, so each goes where its
+// serving the port. Every call of an exchange (editor-api's: a body in pieces) names its port, so each goes where its
 // request went.
 type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "setStops": (stops: Record<string, number[]>) => string[]; "stop": () => void };
 

@@ -5,11 +5,11 @@
  */
 
 import type { AddressInfo } from "./net";
-import { createHash } from "./crypto";
 import EventEmitter from "events/events.js";
-import { Server as NetServer, Socket } from "./net";
-import { Buffer } from "../utils/buffer";
 import stream from "readable-stream/lib/stream.js";
+import { Buffer } from "../utils/buffer";
+import { createHash } from "./crypto";
+import { Server as NetServer, Socket } from "./net";
 
 // Save the browser's native WebSocket at module load time, BEFORE any CLI bundle
 // can overwrite it (e.g. Convex CLI does `globalThis.WebSocket = bundledWs`).
@@ -587,7 +587,7 @@ export class Server extends EventEmitter {
 		});
 	}
 
-	/** Serve one request with both bodies streamed (a preview's requests: run-contract's exchanges): `body` is read as
+	/** Serve one request with both bodies streamed (a preview's requests: editor-api's exchanges): `body` is read as
 	 *  the handler reads it, and the answer comes as soon as the handler sends its head, with the rest of its body to read
 	 *  as it's written (ServerResponse._setStream). */
 	async serve(

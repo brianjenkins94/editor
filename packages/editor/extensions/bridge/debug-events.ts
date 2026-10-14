@@ -1,6 +1,6 @@
 /**
  * What every debugger's runs tell the editor — tsval's, and any interpreter plugged in as `run.debugger` (editor-contrib's
- * starting point, contrib/README.md) — read the one way: the run contract's custom events (@brianjenkins94/run-contract)
+ * starting point, contrib/README.md) — read the one way: the run contract's custom events (@brianjenkins94/editor-api)
  * into what core shows and keeps.
  *
  * - `values`: the margin's values (`values.session.<id>`, live-values.ts), as they come;
@@ -24,15 +24,15 @@
  * - a run in core's registry (`runs.begin`), known by one id from start to end — its end the run's, with its exit code
  *   (DAP's `exited`: extension.ts's `node.exit`).
  */
-import type { AskEvent, CoverageEvent, EffectsEvent, EndedEvent, ListeningEvent, RecordedEvent, StdinRequest, ValuesEvent } from "@brianjenkins94/run-contract";
+import type { AskEvent, CoverageEvent, EffectsEvent, EndedEvent, ListeningEvent, RecordedEvent, StdinRequest, ValuesEvent } from "@brianjenkins94/editor-api";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { given as givenBy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { setEffects } from "../../shared/capabilities/run-effects";
 import { recordResult } from "../../shared/capabilities/silo-store";
 import { asked, policyFor } from "./capability-stops";
-import { appRootOf, runApp } from "./launch";
 import { bridgeHub } from "./hub";
+import { appRootOf, runApp } from "./launch";
 
 /** A preview's run: the bridge's own, made by the preview (extension.ts), and nothing of Run's. */
 const PRODUCTION = "production";

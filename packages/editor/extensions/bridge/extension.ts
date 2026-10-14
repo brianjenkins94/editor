@@ -1,16 +1,16 @@
 /**
  * The bridge between the editor's core runtime and VS Code (runs in the LocalProcess extension host,
  * which shares the workbench's realm): core's vscode API is this extension's, and everything of core's that VS Code
- * shows or drives crosses here — the hub's uplink, every debugger's run-contract events and capability stops, the
+ * shows or drives crosses here — the hub's uplink, every debugger's editor-api events and capability stops, the
  * workspace runtime it gives a debugger (tsval: extensions/tsval), tasks, Source Control, the run picker. Feature
  * extensions use the public API only; this is the one that touches the hub.
  */
 import type { CommandTotals } from "../command-tap";
 import type { CapabilityCall } from "./capabilities/decide";
+import { provideWorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { observe } from "@brianjenkins94/observability";
 
-import { provideWorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import { observe } from "@brianjenkins94/observability";
 import * as vscode from "vscode";
 import { storeNode } from "../../shared/architecture-zenfs";
 import { takeEffects } from "../../shared/capabilities/run-effects";
@@ -117,7 +117,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 		return typeof capability === "string" && typeof resource === "string" ? await recordedResult(capability, resource) ?? null : null;
 	}) });
 
-	// The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; run-contract's
+	// The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; editor-api's
 	// `workspaceRuntime()`): tsval's — an extension of its own, extensions/tsval — with the workspace's buffer, ours. Its
 	// workers' file calls are answered by runtime-fs.ts, a debugger's anywhere (the web worker host's come by core's
 	// bootstrap there).
@@ -144,7 +144,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
 	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
 	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call, through
-	// run-contract's annotations(). Each answers `{ value }`, or `{ unparsable }` — why BABLR's grammar doesn't take the
+	// editor-api's annotations(). Each answers `{ value }`, or `{ unparsable }` — why BABLR's grammar doesn't take the
 	// text as it is (a file mid-edit, often), which loses nothing: what's placed stays where it was. A failure rejects.
 	const annotation = async (topic: string, args: Record<string, unknown>): Promise<{ "value": unknown } | { "unparsable": string }> => rpc.request(`annotations.${topic}`, args, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as Promise<{ "value": unknown } | { "unparsable": string }>;
 

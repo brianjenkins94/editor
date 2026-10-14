@@ -105,7 +105,7 @@ answer at a prompt is an exception to the policy, recorded in the run (an effect
 a rule to the person's policy; "Allow once" lasts the run.
 
 A package's call is asked about as that package's: the prompt names it (name and version) and says why it asks — what
-the baseline says of the call (run-contract's `AskedWhy`, worked out by the debug worker): the capability grew (from the
+the baseline says of the call (editor-api's `AskedWhy`, worked out by the debug worker): the capability grew (from the
 code's use, with the members that brought it in, or from a new version), the analysis didn't predict it, the baseline
 read another version, it has nothing of the package, or there's no baseline. The policy's rules about that package's
 calls decide it (`effectiveDisposition`'s `about`), "Allow always" keeps a rule about that package's calls only, and an

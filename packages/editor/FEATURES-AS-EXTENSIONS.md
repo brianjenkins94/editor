@@ -1,6 +1,6 @@
 # Features as extensions
 
-Each feature one folder, written the way editor-contrib's template (`contrib/`) is: against VS Code's API, run-contract
+Each feature one folder, written the way editor-contrib's template (`contrib/`) is: against VS Code's API, editor-api
 and the commands EXTENSION-POINTS.md documents — nothing else. Started 2026-10-13, after a count of `packages/editor`
 (35k lines) found most features spread over three to five folders: the debugger in `extensions/tsval`, `workbench/` and
 `extensions/bridge/`; git in `shell/`, `workbench/`, `shared/` and the bridge; capabilities in four. The event sheet —
@@ -13,7 +13,7 @@ through it.
 
 ## The test
 
-A feature passes when it could ship in editor-contrib's place: its imports are `vscode`, `@brianjenkins94/run-contract`
+A feature passes when it could ship in editor-contrib's place: its imports are `vscode`, `@brianjenkins94/editor-api`
 and util; the commands it runs are VS Code's or ones EXTENSION-POINTS.md documents; its files load the way a contributed
 extension's do. The rest of core — the shell's chrome, previews, the workbench's boot — isn't a VS Code augmentation and
 isn't held to it.
@@ -51,10 +51,9 @@ packaging, the biggest group by count.
 
 **S2. Core's libraries as packages.** What extensions import from `shared/` is library code — `evidence-store`,
 `cpuprofile`, `lifecycle`, `gated-eval`, `preview-evidence`, `capabilities/{canary,capability-breakpoints,silo-store,
-run-effects}` — that runs wherever it's imported. It goes to run-contract (what a debugger or an extension needs of the
-editor: `./recorded`, `./gate` already) or util (pure). Mechanical — but run-contract is due to be renamed `editor-api`
-(EXTENSION-POINTS' Order, 6), and both change editor-contrib's imports: do this with the rename, not before it, so the
-template's imports change once. *Unlocks:* every extension's `shared/` import.
+run-effects}` — that runs wherever it's imported. It goes to editor-api (what a debugger or an extension needs of the
+editor: `./recorded`, `./gate` already) or util (pure). Mechanical. (It was `run-contract` until 2026-10-14; renamed
+first, so editor-contrib's imports change to the new name once.) *Unlocks:* every extension's `shared/` import.
 
 **S3. Document what's already used, or replace it** — done (2026-10-14): EXTENSION-POINTS 5 lists every command an
 extension may run, `editor.arch.commands` named as core's own.
@@ -96,8 +95,8 @@ subscribes to, whichever host the debugger is in. *Unlocks:* the Margin (live-va
 extension providing the `margin` pane view, and evidence's observations.
 
 **S7. A preview page as a runtime.** Pages report over hub-only subjects (`evidence.preview`, `stops.preview`,
-`preview.profiled`, `preview.version`, `preview.stops`) with no run-contract counterpart. The seam: a page's reports as
-run-contract events of its run. *Unlocks:* recorded stops, profiles and stepping a recorded stop (the bridge's
+`preview.profiled`, `preview.version`, `preview.stops`) with no editor-api counterpart. The seam: a page's reports as
+editor-api events of its run. *Unlocks:* recorded stops, profiles and stepping a recorded stop (the bridge's
 `replay.ts`) into their extensions; evidence's preview half.
 
 **S8. Smaller, each for one feature:**
@@ -117,7 +116,7 @@ tsval mounts the workspace's buffer with zen-fs, which EXTENSION-POINTS.md says 
 says why tsval does: its module loading stays on the buffer because a mailbox call costs ~0.5–0.7 ms and a run's
 loading makes hundreds with real packages. So tsval passing the test is a decision first: keep the buffer as a
 documented editor-only privilege (`workspaceRuntime().buffer`, never a contributed one), or measure again with the
-mailbox batching loads. The rest is ordinary: preview taps added core-side behind run-contract's `serve()`,
+mailbox batching loads. The rest is ordinary: preview taps added core-side behind editor-api's `serve()`,
 `NETWORK_PROBES` a default of `connectRuntime`, canary and preview-evidence via S2, `run.policy` via S3.
 
 ## Where each feature ends up

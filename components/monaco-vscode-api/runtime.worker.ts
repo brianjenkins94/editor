@@ -3,7 +3,7 @@
  * The editor's workspace runtime in a worker core boots — for the web worker extension host's extensions, whose
  * debuggers reach the editor this way (EXTENSION-POINTS.md, 2): VS Code takes `postMessage` away from them, so each
  * debugger's port into the editor goes up core's port (architecture/workerPort.ts), linked into the workbench's hub by
- * whoever holds it (installMonacoProbes' `linkRuntime`, the extension host's only). Put where run-contract's
+ * whoever holds it (installMonacoProbes' `linkRuntime`, the extension host's only). Put where editor-api's
  * `workspaceRuntime()` looks for it (its `RUNTIME` symbol). No buffer: the workspace's own bytes are for the editor's
  * own debugger.
  */
@@ -12,6 +12,7 @@ import { toCore } from "./architecture/workerPort";
 
 declare const self: DedicatedWorkerGlobalScope;
 
+// (editor-api's key — it keeps the package's old name, run-contract, so published copies find it)
 (self as unknown as Record<symbol, unknown>)[Symbol.for("@brianjenkins94/run-contract/workspaceRuntime")] = {
 	"buffer": undefined,
 	"connect": (name: string, session?: string) => {

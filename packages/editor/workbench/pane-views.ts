@@ -2,19 +2,19 @@
  * Pane views (EXTENSION-POINTS.md, 4): the tabs on the pane's first line, and what each draws beside the code. A view
  * is core's (the Margin, live-values.ts's) or an extension's — declared in its manifest (`contributes.paneViews`) — and
  * either way provided by its command `<id>.paneView`, run with a file's URI whenever the view is shown, the file is, or
- * it changes (or the provider says so: `editor.pane.refresh`). Its content is data (@brianjenkins94/run-contract/pane):
+ * it changes (or the provider says so: `editor.pane.refresh`). Its content is data (@brianjenkins94/editor-api/pane):
  * drawn here, in the Margin's look, each item on the lines its `at` is on now — lines as given, a span reference
  * resolved by the editor's BABLR, or a range in a text that ran followed from it (anchors.ts). A view declared `into`
  * another adds its items to that one's.
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
+import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup, PaneItem, PaneViewDeclaration } from "@brianjenkins94/editor-api/pane";
 import type { PaneMark as FrameMark, PaneEntry, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
-import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup, PaneItem, PaneViewDeclaration } from "@brianjenkins94/run-contract/pane";
 import type * as vscodeApi from "vscode";
 import type { NativeDrawing } from "./pane-native";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { Anchors } from "./anchors";
 import { installNativeFace } from "./pane-native";
 

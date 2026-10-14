@@ -7,7 +7,7 @@
  * there. The debugger's module loading isn't through this: its reads aren't the program's.
  */
 import type { Stats } from "@brianjenkins94/almostnode";
-import type { RuntimeFs, RuntimeStat } from "@brianjenkins94/run-contract/runtime";
+import type { RuntimeFs, RuntimeStat } from "@brianjenkins94/editor-api/runtime";
 import { VirtualFS } from "@brianjenkins94/almostnode";
 
 /** `path`, absolute and normalized — if it's in the workspace. */

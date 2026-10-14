@@ -35,7 +35,8 @@ export interface WorkspaceRuntime {
 }
 
 /** Where core keeps each runtime link's session, by the id it gave the worker — in core's realm, which both ends that
- *  link runtime ports share (the bridge's host and the workbench). */
+ *  link runtime ports share (the bridge's host and the workbench).
+ *  (The key keeps the package's old name, run-contract: it's how a published copy and core find each other, so it never changes.) */
 const LINKS = Symbol.for("@brianjenkins94/run-contract/runtimeLinks");
 
 function links(): Map<string, string | undefined> {
@@ -312,7 +313,8 @@ export function exchanges(handler: (request: RuntimeRequest) => Promise<RuntimeR
 }
 
 /** Where core puts the workspace runtime in an extension host (the bridge's, in the bridge's; core's bootstrap's, in
- *  the web worker host). */
+ *  the web worker host).
+ *  (The key keeps the package's old name, run-contract: it's how a published copy and core find each other, so it never changes.) */
 const RUNTIME = Symbol.for("@brianjenkins94/run-contract/workspaceRuntime");
 
 /** The workspace runtime of this extension host — undefined outside the editor. */

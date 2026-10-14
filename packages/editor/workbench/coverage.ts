@@ -18,9 +18,9 @@
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
+import type { CoverageEvent as CoverageReport } from "@brianjenkins94/editor-api";
+import type { PaneMark as ContentMark } from "@brianjenkins94/editor-api/pane";
 import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
-import type { CoverageEvent as CoverageReport } from "@brianjenkins94/run-contract";
-import type { PaneMark as ContentMark } from "@brianjenkins94/run-contract/pane";
 import type * as vscodeApi from "vscode";
 import type { EvidenceStore } from "../shared/evidence-store";
 import { Anchors, offsetOf } from "./anchors";

@@ -19,9 +19,9 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import type { FsShim } from "@brianjenkins94/almostnode";
-import type { Effect, LoadedPackage } from "@brianjenkins94/run-contract";
-import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/run-contract/runtime";
-import type { Told, Traced } from "@brianjenkins94/run-contract/values";
+import type { Effect, LoadedPackage } from "@brianjenkins94/editor-api";
+import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/editor-api/runtime";
+import type { Told, Traced } from "@brianjenkins94/editor-api/values";
 import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
@@ -31,11 +31,11 @@ import type { SiteSums } from "./site-sums";
 
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { unpack } from "@brianjenkins94/almostnode/packages";
-import { verdictOf } from "@brianjenkins94/run-contract/gate";
-import { revive } from "@brianjenkins94/run-contract/recorded";
-import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
+import { verdictOf } from "@brianjenkins94/editor-api/gate";
+import { revive } from "@brianjenkins94/editor-api/recorded";
+import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 
-import { LiveRecord } from "@brianjenkins94/run-contract/values";
+import { LiveRecord } from "@brianjenkins94/editor-api/values";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
 import { covers, settledReach } from "@brianjenkins94/util/silo/evidence";
 import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
@@ -46,7 +46,7 @@ import { capabilityBreakLines, classifyCall, shouldBreak } from "../../shared/ca
 import { replayGuard, replayProgram } from "./replay-run";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 
-// This worker's link into the editor's runtime (run-contract's workspace runtime), the port the adapter hands over first
+// This worker's link into the editor's runtime (editor-api's workspace runtime), the port the adapter hands over first
 // thing: a server the program starts answers the preview through it, and its log and spans — a step's, its uncaught
 // errors, its own requests — are the editor's, as this worker's (the top page's timeline, debug-mcp). The debug protocol
 // itself is the adapter's and this worker's own: their messages (debug-protocol.ts' ToWorker / WorkerEvent).

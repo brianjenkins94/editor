@@ -7,8 +7,8 @@
  *
  * Runs in the workbench realm, beside runtime evidence (evidence.ts), which reads the same pages' counts.
  */
+import type { LiveValue } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
-import type { LiveValue } from "@brianjenkins94/run-contract";
 import type * as vscodeApi from "vscode";
 import type { RecordedStop } from "../shared/preview-evidence";
 import { createRpcClient } from "@brianjenkins94/hub";

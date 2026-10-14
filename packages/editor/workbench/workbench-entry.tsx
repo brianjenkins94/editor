@@ -17,10 +17,11 @@ import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
+import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
-import { linkRuntime } from "@brianjenkins94/run-contract/runtime";
+import bridgeExtensionPath from "bridge:extension";
 import capabilitiesExtensionPath from "capabilities:extension";
 import cspellExtensionPath from "cspell:extension";
 import settingsDefaults from "editor:settings-defaults";
@@ -34,7 +35,7 @@ import { render } from "preact";
 import runningExtensionPath from "running:extension";
 import tsvalExtensionPath from "tsval:extension";
 import typeQueriesExtensionPath from "type-queries:extension";
-import bridgeExtensionPath from "bridge:extension";
+import bridgeManifest from "../extensions/bridge/package.json";
 import capabilitiesManifest from "../extensions/capabilities/package.json";
 import cspellManifest from "../extensions/cspell/package.json";
 import eslintManifest from "../extensions/eslint/package.json";
@@ -45,13 +46,12 @@ import notesManifest from "../extensions/notes/package.json";
 import runningManifest from "../extensions/running/package.json";
 import tsvalManifest from "../extensions/tsval/package.json";
 import typeQueriesManifest from "../extensions/type-queries/package.json";
-import bridgeManifest from "../extensions/bridge/package.json";
 import { NETWORK_PROBES } from "../shared/architecture";
-import { failureText } from "../shared/failures";
 import { classifyUrl, identifyWorker } from "../shared/architecture-ids";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { evidenceStore } from "../shared/evidence-store";
+import { failureText } from "../shared/failures";
 import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
@@ -130,7 +130,7 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 // A debugger's worker in the web worker extension host (an extension loaded from outside, editor-contrib's) reaches the
 // editor's runtime through the probe there — VS Code leaves its extensions no other way out — linked into this hub, and
 // answered as tsval's is (EXTENSION-POINTS.md, 2: its file calls by the bridge, its servers by the preview) — linked as
-// every runtime link is (run-contract's linkRuntime: its own id, carrying only the runtime).
+// every runtime link is (editor-api's linkRuntime: its own id, carrying only the runtime).
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
 

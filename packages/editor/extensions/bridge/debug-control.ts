@@ -24,12 +24,12 @@
  * from here shows in its UI too, whichever debugger it is. Per-session subjects route each action to exactly the pod that
  * owns the session, even with several editor tabs linked to debug-mcp.
  */
+import type { Resolved, SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Resolved, SpanRef } from "@brianjenkins94/run-contract/annotations";
 
 import type { Rule } from "@brianjenkins94/util/silo/policy";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { given, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 

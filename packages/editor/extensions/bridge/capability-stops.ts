@@ -1,5 +1,5 @@
 /**
- * Capability stops, whichever debugger's (the run contract, @brianjenkins94/run-contract): a run stopped at a gated call
+ * Capability stops, whichever debugger's (the run contract, @brianjenkins94/editor-api): a run stopped at a gated call
  * asks on its line (`ask`), the question shows in the margin (`capability.ask`, live-values.ts), and the answer — the
  * margin's buttons, an agent's `debug.session.<id>.decide` — goes back to the debugger as a `decide` request.
  *
@@ -9,8 +9,8 @@
  * result given in the call's place. The debugger is told the verdict, and — when the answer changed it — the policy in
  * effect from now on. Every debugger is given the policy as it launches (`__policy`, debug-events.ts).
  */
+import type { AskEvent, DecideRequest } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
-import type { AskEvent, DecideRequest } from "@brianjenkins94/run-contract";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityChoice } from "../../shared/capabilities/capability-breakpoints";
 import type { DebugOutcome } from "./debug-control";

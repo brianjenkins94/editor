@@ -11,7 +11,7 @@
  * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
  * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
-import type { AskedWhy } from "@brianjenkins94/run-contract/runtime";
+import type { AskedWhy } from "@brianjenkins94/editor-api/runtime";
 import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";

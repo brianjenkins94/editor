@@ -14,9 +14,9 @@
  * Dismissing writes a tombstone, so a branch merge can't bring the note back. Only a note's author changes it. Public
  * API only: everything it knows of the code comes from the editor's BABLR, through commands.
  */
-import type { Resolved } from "@brianjenkins94/run-contract/annotations";
+import type { Resolved } from "@brianjenkins94/editor-api/annotations";
 import type { Annotation, Candidate, SpanRef } from "@brianjenkins94/util/silo/annotations";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { annotationsText, parseAnnotations } from "@brianjenkins94/util/silo/annotations";
 import { parseEvidence, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { annotationsPath, GITATTRIBUTES, SILO_DIR } from "@brianjenkins94/util/silo/layout";

@@ -4,12 +4,12 @@ import { builtinModules, createRequire } from "node:module";
 import * as path from "node:path";
 import * as url from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import { unenvResolve } from "@brianjenkins94/almostnode/unenv-resolve";
 import { isCI, isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, createLogger } from "vite";
-import { unenvResolve } from "@brianjenkins94/almostnode/unenv-resolve";
 import { eslintToolchain } from "./build/eslint-toolchain";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
@@ -288,7 +288,7 @@ export async function preBuild(): Promise<void> {
 		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
 		// `@brianjenkins94/bablr` → its BUILT, browser-safe dist (the BABLR worker's CST engine): the alias uses
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
-		// (and hub/observability to the editor's own: a debugger's worker connects through run-contract's runtime helper,
+		// (and hub/observability to the editor's own: a debugger's worker connects through editor-api's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
 		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.

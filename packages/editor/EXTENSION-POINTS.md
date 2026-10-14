@@ -15,14 +15,15 @@ what's contributed stays portable to the desktop (extension boundaries: the hub 
 That's for VS Code augmentations; core's own runtime UI — the shell, previews, the prompt in a preview window — isn't
 one.
 
-What an extension author imports is one package, `packages/run-contract` (released like hub, on the site as
-`packages/run-contract@latest.tgz`): the run contract's types, the workspace runtime's (`./runtime`), span annotations
-(`./annotations`) and pane views (`./pane`). It's more than the run contract now, so it's due to be renamed `editor-api`.
+What an extension author imports is one package, `packages/editor-api` (released like hub, on the site as
+`packages/editor-api@latest.tgz`): the run contract's types, the workspace runtime's (`./runtime`), span annotations
+(`./annotations`) and pane views (`./pane`). It was `run-contract` until it carried more than the run contract (renamed
+2026-10-14; its `Symbol.for` keys keep the old name — they're how a published copy and core find each other).
 editor-contrib depends on it; the bridge and tsval import the same types.
 
 ## 1. The run contract — done
 
-A debugger is a runtime: what it reports goes in the margin, the evidence and the run ledger (packages/run-contract):
+A debugger is a runtime: what it reports goes in the margin, the evidence and the run ledger (packages/editor-api):
 
 - **Events:** `values` (as they come), `coverage` (as the run ends), `effects` (each gated call made, denied, skipped or
   given — the run's envelope), `ended` (a file's values go; how it ended short, marked), `ask` (a capability stop's
@@ -45,7 +46,7 @@ What the contract can't carry: a debugger's worker reads the workspace synchrono
 zen-fs over a SharedArrayBuffer) and its servers answer the preview. **Any debugger may have it**, not just tsval — an
 interpreter like editor-contrib's should be able to run real programs against the workspace.
 
-**The extension point** (packages/run-contract's `./runtime`): `workspaceRuntime()` — `connect(name, session)`, a port for the
+**The extension point** (packages/editor-api's `./runtime`): `workspaceRuntime()` — `connect(name, session)`, a port for the
 debugger's worker, and (for the editor's own debugger) the workspace's `buffer`. The worker calls `connectRuntime(port,
 { name })`, reads and writes the workspace through its `fs` (below), and answers the preview for a port its
 program listens on with `serve(port, request => response)`; no subject names.
@@ -57,7 +58,7 @@ extension's own code never joins the hub; the bridge stays the one bridge.
 than one piece (256 KiB) — as a stream it reads as it goes; and it may answer with a stream: the preview gets the head as
 soon as it's sent and the rest as it's written (server-sent events, a long download), the page reading at its own pace
 holding the writer back. A handler that answers whole is unchanged; one that assumes every request body is whole sees a
-stream only on a large upload. On the wire it's run-contract's `exchanges`: each piece another call on its request's
+stream only on a large upload. On the wire it's editor-api's `exchanges`: each piece another call on its request's
 route, naming its port, so every hop — the service worker, the tab's root, the dev-server worker — sends it the same way
 and none of them changed. A preview's request for `localhost:<port>` reaches the server on that port the same way; a port
 nothing serves goes to the network, as before. (WebSockets wait for a way to observe them too.)
@@ -114,12 +115,12 @@ It gets **synchronous files through core** instead, each call answered by the br
   debugger runs it — it isn't a wall against the extension, which has `vscode.workspace.fs` like any extension.
 - **Effects, kept by core.** Each program call is counted among its run's effects as it's answered (run-effects.ts), so
   a debugger's `effects` event tells only what the editor didn't see — the requests and commands it made itself.
-- **Reaching it from either host.** `workspaceRuntime()` (run-contract's `./runtime`) finds it where core put it: in the
+- **Reaching it from either host.** `workspaceRuntime()` (editor-api's `./runtime`) finds it where core put it: in the
   bridge's host, the bridge's — the buffer included, for tsval, our own code built with the same zen-fs; in the web
   worker host, core's (runtime.worker.ts, loaded by core's bootstrap before VS Code's extension host, its ports going up
   core's port into that worker, workerPort.ts — the one the architecture probe reports over too) — no buffer. Its
   `connect(name, session)` gives a port either way.
-- **One way to link it** (run-contract's `linkRuntime`), whichever host the port comes from — into the bridge's hub or the
+- **One way to link it** (editor-api's `linkRuntime`), whichever host the port comes from — into the bridge's hub or the
   workbench's: the editor names the worker `<name>#<instance>`, its own id (an answer goes to that worker alone, not to
   every worker of the name; the architecture view counts each as an instance of `<name>`), and the link carries only the
   runtime — the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and answers. No
@@ -136,7 +137,7 @@ It gets **synchronous files through core** instead, each call answered by the br
 Placing something on code that survives edits and reformatting (SPAN-ANNOTATIONS.md): `editor.annotations.refer`,
 `resolve` and `spans`, commands the bridge registers.
 
-**The extension point** (packages/run-contract's `./annotations`): `annotations(vscode.commands)` gives typed `spans`,
+**The extension point** (packages/editor-api's `./annotations`): `annotations(vscode.commands)` gives typed `spans`,
 `refer` and `resolve`, and the contract is documented there — batch them (one call per text), what each status means
 (`attached`, `moved`, `re-placed` — store its new `ref` —, `uncertain`, `orphaned`: lost, kept to be re-placed or
 dismissed), how a lost reference is looked for before it's orphaned, and that each call answers one of three: `{ value }`,
@@ -249,7 +250,7 @@ what makes the second face possible.
 
 ### Steps
 
-1. ~~**The content model and core's renderer**~~ — done (2026-10-12): run-contract's `./pane` (the types,
+1. ~~**The content model and core's renderer**~~ — done (2026-10-12): editor-api's `./pane` (the types,
    `refreshPane`); core's pane-views.ts — the strip (core's views, then every extension's `contributes.paneViews`, read
    through VS Code's extension service, whichever host), a view's provider asked per shown file, each item's `at`
    resolved, its content drawn in the Margin's look; the Margin still live-values.ts's drawing, handed to pane-views
@@ -288,8 +289,8 @@ A command not here is core's own, and an extension that calls one doesn't pass.
 
 | Command | Answered by | What it is |
 | --- | --- | --- |
-| `editor.annotations.spans`, `.refer`, `.resolve` | core's BABLR (the bridge registers them) | span annotations (3), through run-contract's `annotations()` — never by hand |
-| `editor.pane.refresh(view, uri?)` | core's pane (pane-views.ts) | a pane view's content changed (4), through run-contract's `refreshPane()` |
+| `editor.annotations.spans`, `.refer`, `.resolve` | core's BABLR (the bridge registers them) | span annotations (3), through editor-api's `annotations()` — never by hand |
+| `editor.pane.refresh(view, uri?)` | core's pane (pane-views.ts) | a pane view's content changed (4), through editor-api's `refreshPane()` |
 | `silo.rules.list`, `.open`, `.new`, `.remove`, `.replace` | core's rules (rules-view.ts) | the workspace's capability rules, as the Rules tree reads and edits them (6) |
 | `editor.debugFile(uri?)` | the bridge | Run (▷): a program file in `run.debugger`, an app's file its app (RUNNING.md) |
 | `editor.metrics.read(since?)` | the bridge, from the metrics plane | `{ [source]: MetricsSample[] }`, oldest first: every context's samples (`$sys.metrics.<source>`) from the last few minutes, only those newer than `since` when it's given. `MetricsSample` is observability's type. The insights monitor reads it |
@@ -353,8 +354,8 @@ breaks is what the bridge reaches over the hub, because core isn't there:
 5. ~~Pane views (4): the content model and core's renderer; the Margin as the first provider, coverage and placed rules
    into it, the event sheet's tab; then the native face~~ — done (2026-10-12).
 6. editor-contrib's template provides a pane view (its interpreter's results into the Margin, or a tab of its own), so
-   the template shows every seam it should; and run-contract is renamed `editor-api` — both change the template's
-   imports.
+   the template shows every seam it should; and ~~run-contract is renamed `editor-api`~~ (done 2026-10-14) — both
+   change the template's imports.
 7. The decider — when a second decider needs it.
 
 ## Workspace tools — done (2026-10-10)

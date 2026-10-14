@@ -20,10 +20,10 @@
  * workspace's failed to load), or `{ failed }` — and answers `{ id, lint: { file, text } }` with `{ id, messages }` and
  * `{ id, fix: { file, text } }` with `{ id, output, fixed }`, or `{ id, error }`. Requests sent before it booted wait.
  */
-import type { RuntimeFs } from "@brianjenkins94/run-contract/runtime";
+import type { RuntimeFs } from "@brianjenkins94/editor-api/runtime";
 import { createRuntime } from "@brianjenkins94/almostnode";
 import { unpack } from "@brianjenkins94/almostnode/packages";
-import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
+import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 import { RuntimeVfs } from "../../shared/runtime-vfs";
 
 /** What a lint says of a file: eslint's messages, as LintMessage has them (what the extension shows). */

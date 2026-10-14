@@ -2,10 +2,10 @@
  * A recorded call, run again (RUNNING.md: stepping a recorded handler): the program a replay runs, and what stands in for
  * the calls it can't make. Pure — the debug worker runs it (debug-worker.ts `launchReplay`), node tests it.
  */
-import type { Encoded } from "@brianjenkins94/run-contract/recorded";
+import type { Encoded } from "@brianjenkins94/editor-api/recorded";
 import type ts from "typescript";
 import type { Replay } from "../../shared/preview-evidence";
-import { revive } from "@brianjenkins94/run-contract/recorded";
+import { revive } from "@brianjenkins94/editor-api/recorded";
 import { isGuestFunction } from "@brianjenkins94/tsval";
 
 /** The program a replay runs (RUNNING.md: stepping a recorded handler): the recorded version's text with everything but

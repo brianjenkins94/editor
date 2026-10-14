@@ -1,6 +1,6 @@
 /**
  * The runtime's files (EXTENSION-POINTS.md, 2, *The runtime's files, through core*): a debugger's worker reads and
- * writes the workspace synchronously through its mailbox (run-contract's `connectRuntime`), and each call is answered
+ * writes the workspace synchronously through its mailbox (editor-api's `connectRuntime`), and each call is answered
  * here — an open editor's unsaved text for a read, a write as the workspace's (editors, Source Control and watchers see
  * it). A call of the program's (not the debugger's own `load`) is decided as tsval decides its own: by the session's
  * policy (`policyFor`, its "this run" answers included, and a call it was just told to make once), and a live run makes
@@ -10,13 +10,13 @@
  * The gate keeps the program to the policy, whichever debugger runs it; the debugger's extension is trusted as any
  * extension is (it has `vscode.workspace.fs`).
  */
+import type { Effect } from "@brianjenkins94/editor-api";
+import type { RuntimeDecision } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
-import type { Effect } from "@brianjenkins94/run-contract";
-import type { RuntimeDecision } from "@brianjenkins94/run-contract/runtime";
+import { verdictOf } from "@brianjenkins94/editor-api/gate";
+import { answerMailbox, runtimeSession } from "@brianjenkins94/editor-api/runtime";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { verdictOf } from "@brianjenkins94/run-contract/gate";
-import { answerMailbox, runtimeSession } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
 import { recordEffect } from "../../shared/capabilities/run-effects";
 import { decideCapabilityAs } from "./capabilities/decide";
