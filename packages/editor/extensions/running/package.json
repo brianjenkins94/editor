@@ -1,7 +1,7 @@
 {
   "name": "running",
   "displayName": "Running",
-  "description": "What's running, in one place: every command in a terminal, debug session and task — a service (keeps running until stopped) or a task (runs to completion) — in the status bar while anything is, with the way to stop it; and how each one ended. Built on VS Code's public API alone: terminal shell integration, debug sessions and tasks.",
+  "description": "What's running, in one place: every command in a terminal, debug session and task — a service (keeps running until stopped) or a task (runs to completion) — in the status bar while anything is, with the way to stop it; and how each one ended. And live runs: the program file you’re typing in runs again whenever typing pauses, so the margin shows what it did. Built on VS Code's public API alone: terminal shell integration, debug sessions and tasks.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
@@ -18,6 +18,16 @@
         "title": "Show What's Running",
         "category": "Running"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Run",
+      "properties": {
+        "run.liveRuns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the program file you're typing in again whenever typing pauses, so the margin shows what it did (LIVE-VALUES.md). A live run makes nothing but reads the policy allows: writes, requests and commands are skipped."
+        }
+      }
+    }
   }
 }

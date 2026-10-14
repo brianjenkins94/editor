@@ -18,6 +18,7 @@
 import type { LifecycleGuess } from "../../shared/lifecycle";
 import * as vscode from "vscode";
 import { lifecycleOfScript, lifecycleOfSource } from "../../shared/lifecycle";
+import { registerLiveRuns } from "./live-run";
 
 type RunState = "running" | "exited" | "failed" | "stopped" | "ended";
 
@@ -133,6 +134,8 @@ async function classify(commandLine: string, cwd: vscode.Uri | undefined, depth 
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+	registerLiveRuns(context);
+
 	const item = vscode.window.createStatusBarItem("running", vscode.StatusBarAlignment.Left, 50);
 	const live = new Set<Run>();
 	const ended: Run[] = [];

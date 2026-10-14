@@ -69,3 +69,27 @@ export function lifecycleOfSource(source: string): LifecycleGuess {
 
 	return { "lifecycle": "task", "reason": "runs to completion" };
 }
+
+/** Where a file's app is (RUNNING.md, step 4: an app's code runs in its page, its dev server a run): the folder of the
+ *  nearest `index.html` up from it, in its own package (the search stops at a `package.json`) — when the page loads the
+ *  file, or the file is a component (`.jsx`, `.tsx`) or a page's code (it uses `react-dom` or `document`). A file that's
+ *  none of those is a program. `read` gives a file's text, or undefined when there's none. */
+export async function appRootOf(path: string, read: (file: string) => Promise<string | undefined>): Promise<string | undefined> {
+	for (let dir = path.slice(0, path.lastIndexOf("/")); dir.startsWith("/workspace"); dir = dir.slice(0, dir.lastIndexOf("/"))) {
+		const html = await read(`${dir}/index.html`);
+
+		if (html === undefined) {
+			// A package with no page: its files are programs (a page further up is another package's).
+			if (await read(`${dir}/package.json`) !== undefined) {
+				return undefined;
+			}
+		} else {
+			const loaded = [...html.matchAll(/<script\s(?:[^>]*\s)?src\s*=\s*["']([^"']+)["']/giu)].map(([, src]) => `${dir}/${src.replace(/^\.\//u, "")}`);
+			const source = await read(path) ?? "";
+
+			return loaded.includes(path) || /\.[jt]sx$/u.test(path) || /\breact-dom\b|\bdocument\./u.test(source) ? dir : undefined;
+		}
+	}
+
+	return undefined;
+}

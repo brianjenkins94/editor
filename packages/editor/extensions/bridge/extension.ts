@@ -23,7 +23,6 @@ import { registerDebugEvents } from "./debug-events";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { bridgeHub, workspace, workspaceRuntime } from "./hub";
 import { registerLaunch } from "./launch";
-import { registerLiveRuns } from "./live-run";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { registerParseStatus } from "./parse-status";
 import { registerProductionDebug } from "./production-adapter";
@@ -136,7 +135,6 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	registerLaunch(context);
 	// A recorded stop's call, stepped in the debugger (replay.ts).
 	registerReplay(context);
-	registerLiveRuns(context);
 	// The editor's ▷: Run (RUNNING.md) — the file, as every way in runs it.
 	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", (uri?: vscode.Uri) => {
 		void runProgram({ ...uri instanceof vscode.Uri ? { "program": uri.path } : {} }).catch(() => undefined);

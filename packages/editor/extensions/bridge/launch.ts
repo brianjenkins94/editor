@@ -6,9 +6,11 @@
 import type { LaunchTarget } from "../../shared/runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
+import { appRootOf as appRootIn } from "../../shared/lifecycle";
 import { bridgeHub } from "./hub";
 
 const idOf = (task: vscode.Task): string => `${task.source}:${task.name}`;
+const readText = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
 /** A task as the picker shows it: a `run` task's command (tasks.ts), or a shell task's. */
 function targetOf(task: vscode.Task): LaunchTarget | undefined {
@@ -32,30 +34,9 @@ export function runDebugger(): string {
 	return vscode.workspace.getConfiguration("run").get<string>("debugger") || "tsval";
 }
 
-/** Where a file's app is (RUNNING.md, step 4: an app's code runs in its page, its dev server a run): the folder of the
- *  nearest `index.html` up from it, in its own package (the search stops at a `package.json`) — when the page loads the
- *  file, or the file is a component (`.jsx`, `.tsx`) or a page's code (it uses `react-dom` or `document`). A file that's
- *  none of those is a program. */
+/** Where a file's app is, if it's an app's (shared/lifecycle.ts), read through the workspace. */
 export async function appRootOf(path: string): Promise<string | undefined> {
-	const read = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
-
-	for (let dir = path.slice(0, path.lastIndexOf("/")); dir.startsWith("/workspace"); dir = dir.slice(0, dir.lastIndexOf("/"))) {
-		const html = await read(`${dir}/index.html`);
-
-		if (html === undefined) {
-			// A package with no page: its files are programs (a page further up is another package's).
-			if (await read(`${dir}/package.json`) !== undefined) {
-				return undefined;
-			}
-		} else {
-			const loaded = [...html.matchAll(/<script\s(?:[^>]*\s)?src\s*=\s*["']([^"']+)["']/giu)].map(([, src]) => `${dir}/${src.replace(/^\.\//u, "")}`);
-			const source = await read(path) ?? "";
-
-			return loaded.includes(path) || /\.[jt]sx$/u.test(path) || /\breact-dom\b|\bdocument\./u.test(source) ? dir : undefined;
-		}
-	}
-
-	return undefined;
+	return appRootIn(path, readText);
 }
 
 /** Run the app at `root`: its `dev` script, as a task (its dev server's output in the task's terminal, its preview

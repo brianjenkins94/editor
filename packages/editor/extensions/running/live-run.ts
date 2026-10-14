@@ -7,13 +7,17 @@
  * Off with `run.liveRuns`.
  */
 import * as vscode from "vscode";
-import { appRootOf, runDebugger } from "./launch";
+import { appRootOf } from "../../shared/lifecycle";
 
 /** How long typing has to pause before the file runs again. */
 const PAUSE_MS = 400;
 
 /** What a live run runs: a JavaScript or TypeScript file (RUNNING.md's programs), saved somewhere or not. */
 const PROGRAM = /\.(?:m|c)?[jt]sx?$/u;
+
+/** The debugger a run of a file starts (`run.debugger`, the bridge's setting: tsval, or another extension's debug type). */
+const runDebugger = (): string => vscode.workspace.getConfiguration("run").get<string>("debugger") || "tsval";
+const readText = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
 export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -39,7 +43,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		const { path } = document.uri;
 
 		// (an app's file runs in its page, not here — RUNNING.md, step 4)
-		if (!enabled() || yours(path) || running.has(path) || await appRootOf(path) !== undefined) {
+		if (!enabled() || yours(path) || running.has(path) || await appRootOf(path, readText) !== undefined) {
 			return;
 		}
 

@@ -120,7 +120,7 @@ mailbox batching loads. The rest is ordinary: preview taps added core-side behin
 
 | Feature | Its folder | Moves in | Needs |
 | --- | --- | --- | --- |
-| Running | `extensions/running` | bridge: live-run.ts, production-adapter.ts, tasks provider, launch helpers, auto-attach | S2, S4 (live-run.ts needs nothing) |
+| Running | `extensions/running` | bridge: live-run.ts, production-adapter.ts, tasks provider, launch helpers, auto-attach | S2, S4 (live-run.ts: done) |
 | Capabilities | `extensions/capabilities` | bridge: decide.ts, coalesce.ts, stops' meanings, rule places, `rules.*`; `workbench/rules-view.ts`; `shared/capabilities` (→ S2) | S1, S2, S4, rich view; S5 (deferred) for the decision logic |
 | Debugger | `extensions/tsval` (+ the Margin as an extension) | `workbench/live-values.ts`, `inputs.ts`; bridge: replay.ts | S6, S7, S4, tsval's decision |
 | Git | `extensions/git-scm` (the view) + core's engine | bridge: source-control.ts | S4 |
@@ -138,7 +138,8 @@ decider.
 
 ## Order
 
-1. **Free moves and naming** — live-run.ts to running (no seam); S3's commands documented or replaced; S2's libraries
+1. **Free moves and naming** — ~~live-run.ts to running~~ (done 2026-10-14: it needed only `appRootOf`, now pure in
+   `shared/lifecycle.ts` beside running's other run classification; `run.liveRuns` is running's setting); S3's commands documented or replaced; S2's libraries
    out of `shared/`, with the `editor-api` rename. Small, no design; type-queries, running and notes pass after it.
 2. **S1, the loader** — cspell, the event sheet, history and eslint pass on packaging; capabilities' plugin loads like
    any extension's.
