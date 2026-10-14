@@ -2,9 +2,10 @@
  * Capabilities — extension host entry (plain CJS, loads in the web-worker host that can't load ESM entrypoints:
  * CodinGame/monaco-vscode-api#818). Responsibilities:
  *
- * 1. The tsserver plugin (ts-plugin.js) runs BOTH analysis halves inside tsserver — static (util/silo) + the tsval
- *    canary, reusing tsserver's own `ts` — and publishes NATIVE ts.Diagnostics (source "capabilities"): squiggles
- *    + Problems + hover, with the concrete runtime value merged in once the canary's background run completes.
+ * 1. The findings (findings.ts): the tsserver plugin (ts-plugin.js) answers `_capabilities.findings` — both analysis
+ *    halves over the tree tsserver holds, static (util/silo) + the tsval canary, with tsserver's own `ts` — and this
+ *    extension shows them as its own diagnostics (source "capabilities"): squiggles + Problems + hover, with the
+ *    concrete runtime value merged in once the canary's background run completes.
  *    (Do NOT add a timer-based `restartTsServer` — it races the initial `updateOpen` and hangs "Analyzing…".)
  *
  * 2. The "Capability calls" panel — the middle AND third columns — is rendered HERE. It reads those diagnostics
@@ -26,6 +27,7 @@ import * as vscode from "vscode";
 import { loadStaticSurface, writeStaticSurface } from "../../shared/capabilities/silo-store";
 import { keepBaseline } from "./baseline";
 import { registerExceptions } from "./exceptions";
+import { publishFindings } from "./findings";
 import { registerPlacedRules } from "./placed-rules";
 import { effectiveDisposition, policyUri, readPolicy, withoutRule, withRule, writePolicy } from "./policy";
 import { registerRulesTree } from "./rules-tree";
@@ -342,6 +344,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	// What's outside the dependency baseline and the policy: versions pending acceptance, and the policy's exceptions (exceptions.ts).
 	registerExceptions(context);
 	keepBaseline(context);
+	publishFindings(context);
 	// And each placed rule beside its code, in the editor's Margin (placed-rules.ts).
 	registerPlacedRules(context);
 }

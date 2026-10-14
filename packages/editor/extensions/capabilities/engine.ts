@@ -1,60 +1,73 @@
 /**
- * Capabilities engine — the STATIC half of the capability IDE, built on `@brianjenkins94/util/silo` (the canonical
- * static analysis). `findReach` reads the file off TypeScript's tree — the SourceFile tsserver already holds, with
- * tsserver's own `ts`, so the engine parses nothing itself — and returns every capability call with a literal resource
- * — WHERE it is (source span), WHAT it reaches, and its `callee` — while `policy.isDangerous` grades the capability.
+ * Capabilities engine — what the capability IDE reads of a file, built on `@brianjenkins94/util/silo` (the canonical
+ * static analysis). Every reading takes the `ts` and the SourceFile (and checker) of whatever holds the file — the
+ * TypeScript server today, through the capabilities plugin; TypeScript 7.1's API connection later — so it parses
+ * nothing itself and doesn't care which host it's in.
  *
- * Static means every such call is reported, whether or not it executes; a call whose resource isn't a literal is the
- * canary's (the dynamic half), which observes the concrete pre-call value.
- *
- * And a file's import surface (`surface`): which members of each specifier its code uses — what the baseline's
- * `consumer` is made of, the project's use of its dependencies (baseline.ts asks the plugin for every file's).
- *
- * Loaded INSIDE the capabilities tsserver plugin (ts-plugin.js), which enriches each row's `type` from tsserver's
- * checker before publishing native diagnostics.
+ * - `findings`: the squiggles. Every capability call with a literal resource (`findReach`) — WHERE, WHAT it reaches, its
+ *   callee and type — graded by `policy.isDangerous`, merged with what the canary (the dynamic half) observed: the
+ *   concrete resource of a call whose argument isn't a literal. The capabilities extension publishes them.
+ * - `surface`: a file's import surface, for the baseline's `consumer` (baseline.ts).
+ * - `typesAt` and `statementsOf` (lib's `typed`): the types at a file's ranges (runtime evidence) and its statements as
+ *   cards (projections).
  */
 import type { SurfaceEntry } from "@brianjenkins94/util/silo/detect";
+import type { CanaryObservation } from "../../shared/capabilities/canary";
 import { surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import { findReach, surfaceOf } from "@brianjenkins94/util/silo/reach";
+import { typeAtStart } from "@brianjenkins94/util/silo/typed";
 
-export interface CapabilityRow {
-	/** Capability class: net / fs / fs:read / fs:write / exec / env / eval. */
-	"capability": string;
-	/** The call/member expression text (e.g. "fetch", "fs.readFileSync"). */
-	"callee": string;
-	/** The statically-resolved resource (URL / path / command / env key), or a placeholder when unresolvable. */
-	"value": string;
-	/** Whether the resource resolved statically (false → the dynamic canary is needed to see the real value). */
-	"resolved": boolean;
-	/** Source span of the whole finding node, for anchoring to the document. */
+export { statementsOf, typesAt } from "@brianjenkins94/util/silo/typed";
+
+/** One capability finding, as the extension shows it: its span, whether it's dangerous (a warning, else a hint), and
+ *  what it says — `capability: callee → resource · type`. */
+export interface Finding {
 	"start": number;
 	"end": number;
-	/** Whether the capability is dangerous enough to gate (silo policy) — drives the diagnostic severity. */
 	"dangerous": boolean;
-	/** The real-checker type of the expression, filled by the plugin (undefined until then). */
-	"type"?: string;
+	"message": string;
 }
 
-/** Analyze one document's capability surface, statically: every reached capability call with its span, resolved
- *  value, and danger grade. `ts` is tsserver's own module, `sourceFile` its SourceFile of the document. */
-// eslint-disable-next-line ts/no-explicit-any -- tsserver's `ts` and SourceFile, as the plugin hands them over
-export function analyze(ts: any, sourceFile: any): CapabilityRow[] {
-	return findReach(ts, sourceFile).map((reach) => ({
-		"capability": reach.capability,
-		"callee": reach.callee,
-		"value": reach.value,
-		// (every static row's resource is a literal: that's what findReach captures)
-		"resolved": true,
-		"start": reach.start,
-		"end": reach.end,
-		"dangerous": isDangerous(reach.capability)
-	}));
+/** A finding's message: the static resource when it's a literal, else the canary's (`(ran)`), else that it needs a run;
+ *  and its type, when the checker says one. */
+function messageOf(capability: string, callee: string, resource: string | undefined, observation: CanaryObservation | undefined, type: string | undefined): string {
+	let value = " → (unresolved — needs a run)";
+
+	if (resource !== undefined) {
+		value = " → " + resource;
+	} else if (observation?.observed === true) {
+		value = " → " + observation.value + " (ran)";
+	}
+
+	return `${capability}: ${callee}${value}${type === undefined || type === "" || type === "any" ? "" : " · " + type}`;
 }
 
-/** One document's import surface — each specifier, the members its code uses of it (`dynamic`: some it can't name) —
- *  read off the SourceFile tsserver holds, with its own `ts`. */
-// eslint-disable-next-line ts/no-explicit-any -- tsserver's `ts` and SourceFile, as the plugin hands them over
+/** A file's capability findings: every call with a literal resource, typed by `checker`, and every call only the canary
+ *  saw (`observations`, its run of this text) with the resource it ran with. */
+// eslint-disable-next-line ts/no-explicit-any -- the host's `ts`, SourceFile and checker, as the plugin hands them over
+export function findings(ts: any, sourceFile: any, checker: any, observations: readonly CanaryObservation[]): Finding[] {
+	const found: Finding[] = [];
+	const observed = new Map(observations.map((observation) => [observation.start, observation]));
+	const statics = new Set<number>();
+
+	for (const reach of findReach(ts, sourceFile)) {
+		statics.add(reach.start);
+		found.push({ "start": reach.start, "end": reach.end, "dangerous": isDangerous(reach.capability), "message": messageOf(reach.capability, reach.callee, reach.value, observed.get(reach.start), typeAtStart(ts, checker, sourceFile, reach.start)) });
+	}
+
+	// The calls only the canary saw: their resource wasn't a literal.
+	for (const observation of observations) {
+		if (!statics.has(observation.start)) {
+			found.push({ "start": observation.start, "end": observation.end, "dangerous": observation.dangerous, "message": observation.observed ? `${observation.capability}: ${observation.callee} → ${observation.value} (ran)` : `${observation.capability}: ${observation.callee} → (ran; no string resource)` });
+		}
+	}
+
+	return found;
+}
+
+/** One document's import surface — each specifier, the members its code uses of it (`dynamic`: some it can't name). */
+// eslint-disable-next-line ts/no-explicit-any -- the host's `ts` and SourceFile, as the plugin hands them over
 export function surface(ts: any, sourceFile: any): Record<string, SurfaceEntry> {
 	return surfaceEntries(surfaceOf(ts, sourceFile));
 }

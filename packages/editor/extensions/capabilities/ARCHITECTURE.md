@@ -20,9 +20,10 @@ the core at its own call boundary. Hold to that and the seams stay put.
   │ tsserver plugin (in-browser tsserver, ts reused, ~free)                                                      │
   │   ts-plugin.js  ──loads──▶ capabilities-engine.js  (DETECT: util/silo findReach, on tsserver's tree)         │
   │                 ──loads──▶ capabilities-canary.js  (RESOLVE: tsval, at beforeCall)                           │
-  │   → emits native ts.Diagnostics (source "capabilities")   ◀── the ONLY clean channel out of tsserver        │
+  │   → answers requests only: _capabilities.findings / .surface, _types.at, _statements (tsserverRequest)    │
   ├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
   │ ext host (the extension)                                                                                     │
+  │   findings.ts   asks _capabilities.findings → its own diagnostics (source "capabilities"): squiggles      │
   │   extension.ts  reads those diagnostics + .silo/policy.json → PANEL (dispositions, editing)                  │
   │                 TRIPWIRE (surface): a denied call → its own error diagnostic (source "capabilities-policy")  │
   │   policy.ts     the vscode file I/O for the base .silo/policy.json (the panel edits the contract)            │
@@ -77,9 +78,10 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | --- | --- | --- |
 | `@brianjenkins94/util/silo/policy` | pure policy model: `Policy`/`Rule`, `effectiveDisposition`, `findRule`, `matchesResource`, edits, `DANGEROUS`/`isDangerous` (shared with silo; was the local `policy-core.ts` fork) | anywhere (pure) |
 | `capability-breakpoints.ts` | pure call model: `classifyCall`, `shouldBreak`, `capabilityBreakLines`, `renderCallee` | anywhere (needs only `ts` types) |
-| `engine.ts` → `capabilities-engine.js` | DETECT — util/silo `findReach`, reading the SourceFile tsserver holds with its own `ts` (no parser bundled) | tsserver plugin |
+| `engine.ts` → `capabilities-engine.js` | the readings, over whatever holds the tree (its `ts`, SourceFile, checker): `findings` (util/silo `findReach`, typed, merged with the canary's observations), `surface`, and lib `typed`'s `typesAt` / `statementsOf` | tsserver plugin |
 | `canary.ts` → `capabilities-canary.js` | RESOLVE — tsval run, observes pre-call values (ts **external**, reuses tsserver's) | tsserver plugin |
-| `ts-plugin.js` | loads both engines, runs the canary in the background, merges results into diagnostics | tsserver plugin |
+| `ts-plugin.js` | loads both engines, runs the canary in the background, and answers requests with the engine's readings — nothing injected into tsserver's own diagnostics | tsserver plugin |
+| `findings.ts` | asks `_capabilities.findings` for each open document (as it opens and its edits settle; again while the canary runs) and shows them as this extension's own diagnostics | ext host |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |
 | `extension.ts` | the "Capability calls" panel + the tripwire error-surface | ext host |
 | `baseline.ts` | keeps `.silo/baseline.json` up to `.silo/versions.json` (the workbench's resolver): new or changed packages read in the package worker, lib's `syncPackages`; and its `consumer` — the code's use of its dependencies — from every file's import surface (`_capabilities.surface`, the plugin's), synced as code changes; off with `silo.baseline` | ext host |
@@ -111,7 +113,7 @@ a rule to the person's policy; "Allow once" lasts the run.
 - **One policy model.** `@brianjenkins94/util/silo/policy` is the single source of dispositions + matching (shared
   with silo, no longer a local fork); `silo-store` is the single source of `.silo/` I/O (base+override merge,
   observed facts). `policy.ts` only adds the panel's base-file I/O.
-- **Diagnostics are the bus out of tsserver.** Anything the plugin needs to tell the UI rides a `ts.Diagnostic`.
+- **The plugin only answers.** Everything it computes is the engine's (lib's readings over the host's tree); the extension asks with `typescript.tsserverRequest` and shows what comes back. So moving to TypeScript 7 is one adapter — its API connection answering the same requests (the silo README's "Where analysis lives when TypeScript 7 arrives").
 - **One decision endpoint; thin interceptors.** Every runtime interceptor (the service-worker net gate, the
   almostnode fs/exec shim hook) is dumb and full-round-trips to `decide.ts` (`classify → gate → decide`); no
   policy, grant store, or prompt lives in an interceptor. The net gate runs *in* the service worker (that's where

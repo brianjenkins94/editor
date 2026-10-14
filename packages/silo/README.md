@@ -243,13 +243,14 @@ it). So eslint needs a TypeScript 6 of its own, not a borrowed one.
 
 The plan, none of it scheduled:
 
-1. **The readings in lib, behind one seam.** `findReach`, `surfaceOf` and `ts-analysis` already take `ts` (or a
-   `TsHost`) and run on 6.x and 7.1 alike (`astOf` adapts 7.1's AST module). `_types.at` and `_statements`, written in
-   `ts-plugin.js`, move there too. A plugin becomes a thin adapter, and a TypeScript 7 adapter is the other one
-   (`typescript.ts` already is, for history).
-2. **Findings published by the extension, not injected into tsserver's diagnostics.** The capabilities extension asks
-   for its findings and shows them through its own diagnostic collection (or adds them as LSP middleware, below), so
-   the plugin only answers requests — the shape the TypeScript 7 host has.
+1. **The readings in lib, behind one seam** (built 2026-10-14). `findReach`, `surfaceOf` and `ts-analysis` take `ts`
+   (or a `TsHost`) and run on 6.x and 7.1 alike (`astOf` adapts 7.1's AST module); `_types.at` and `_statements`, once
+   written in `ts-plugin.js`, are lib's `typed` (`typesAt`, `typeAtStart`, `statementsOf`). A plugin is a thin adapter,
+   and a TypeScript 7 adapter is the other one (`typescript.ts` already is, for history).
+2. **Findings published by the extension, not injected into tsserver's diagnostics** (built 2026-10-14). The plugin
+   answers `_capabilities.findings`, and the capabilities extension shows them through its own diagnostic collection
+   (`findings.ts`; or, later, as LSP middleware), so the plugin only answers requests — the shape the TypeScript 7
+   host has.
 3. **eslint in a realm of its own, with its own TypeScript 6** (a worker, as the cspell server is): its own language
    service and Program over the workspace, its fix-all its own. To measure first: a second Program over the same files
    costs memory (the TS servers are the biggest realms in the performance budgets), and the editor loads two
