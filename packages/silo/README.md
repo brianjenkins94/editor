@@ -278,12 +278,14 @@ editor, TypeScript 7 in the browser).
 
 #### What a second TypeScript Program costs (measured 2026-10-14)
 
-eslint in the editor doesn't lint with types today. The plugin hands the engine only a file's text, and the engine
-strips `project`, `projectService` and `programs`; it borrows tsserver's `ts` only to parse. The preset turns on 13
-type-aware typescript-eslint rules (`no-floating-promises`, `no-misused-promises`, `naming-convention`, `no-deprecated`,
-`unbound-method`, `switch-exhaustiveness-check` and more): without a Program each one throws in `create`, the engine's
-`guardRule` records it as broken, and it reports nothing. Checked in the editor: a floating promise isn't reported, a
-`var` beside it is. The desktop's eslint reports both.
+eslint in the editor doesn't lint with types today, and in fact runs none of typescript-eslint's rules. Its plugin
+doesn't load in the browser: through `@typescript-eslint/utils` it imports ESLint's Node API, which reads
+`process.hrtime.bigint` as it loads, and the browser's `process` has no `hrtime` (`_eslint.status` says so). The engine
+drops the rules of a plugin that didn't load, so the preset's `ts/*` rules — the 13 type-aware ones among them
+(`no-floating-promises`, `no-misused-promises`, `naming-convention`, `no-deprecated`, `unbound-method`, …) — report
+nothing; nor do `style`, `node`, `test`, `jsdoc` or `eslint-comments`, each failing on a Node gap of its own. Checked in
+the editor: a floating promise isn't reported, a `var` beside it is. The desktop's eslint reports both. The tsserver
+plugin now hands the engine the server's Program (below), for when the plugin loads.
 
 So the question is what a Program of its own costs, in a worker: TypeScript 5.9 (the editor's built chunk), a Program
 over each project's tsconfig, as tsserver opens it, then every file checked, as linting the whole project would. Memory
@@ -307,9 +309,10 @@ What follows from it:
 
 - **Moving eslint as it is costs about 20 MB**: a TypeScript in another realm. The engine and its plugins move out of
   the semantic server, so they aren't added.
-- **Type-aware lint, while eslint still runs inside tsserver, costs nothing**: hand typescript-eslint the server's own
-  Program (`parserOptions.programs`, from `getProgram()` in the plugin), and the 13 rules run. That's parity with the
-  desktop now, without a realm.
+- **Type-aware lint, while eslint still runs inside tsserver, costs nothing**: the plugin hands typescript-eslint the
+  server's own Program (`parserOptions.programs`, from `getProgram()`; built 2026-10-14, the lint pass only — a fix-all
+  pass changes the text the Program holds). It takes effect once typescript-eslint's plugin loads in the browser, which
+  needs `process.hrtime` first (lib's `polyfillNode`), and perhaps more after it.
 - **Type-aware lint in a realm of its own costs a Program**, beside the TypeScript server's own: about 90 MB on the demo
   and 200 MB on a mid-sized repository, up to 450–550 MB on one this editor's size. Rooted at the open file instead of
   the whole tsconfig, about 135 MB even there, rebuilt as the open file changes. When VS Code moves to TypeScript 7 the

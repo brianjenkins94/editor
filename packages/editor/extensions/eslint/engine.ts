@@ -323,9 +323,28 @@ export async function applyWorkspaceConfig(text: string | undefined): Promise<vo
 
 /** Lint one document's text; returns [] on any failure so a bad file never breaks the checker pass. Messages
  *  are ordered errors-first (severity 2 before 1); the sort is stable, so source order is kept within a severity. */
-export function lintText(text: string, filename: string): LintMessage[] {
+/** The config a lint runs with: the active one, and — given tsserver's Program — that Program for typescript-eslint
+ *  (`parserOptions.programs`), so its type-aware rules run on the server's own types instead of failing for want of
+ *  them. Kept while the Program and the config are the same, as a lint of each open file asks again. */
+let typed: { "program": unknown; "base": Linter.Config[]; "config": Linter.Config[] } | undefined;
+
+function configWith(program: unknown): Linter.Config[] {
+	if (program === undefined) {
+		return activeConfig;
+	}
+
+	if (typed?.program !== program || typed.base !== activeConfig) {
+		typed = { "program": program, "base": activeConfig, "config": [...activeConfig, { "languageOptions": { "parserOptions": { "programs": [program] } } }] };
+	}
+
+	return typed.config;
+}
+
+/** Lint `text` (the file `filename`). `program`: the TypeScript Program the file is in — tsserver's own — whose
+ *  source of the file is `text`; typescript-eslint reads the file from it, so the type-aware rules have types. */
+export function lintText(text: string, filename: string, program?: unknown): LintMessage[] {
 	try {
-		const messages = linter.verify(text, activeConfig, { "filename": filename }).map((message) => ({ ...message, "fixable": message.fix !== undefined }));
+		const messages = linter.verify(text, configWith(program), { "filename": filename }).map((message) => ({ ...message, "fixable": message.fix !== undefined }));
 
 		return messages.sort((left, right) => right.severity - left.severity);
 	} catch (error) {
@@ -335,7 +354,9 @@ export function lintText(text: string, filename: string): LintMessage[] {
 }
 
 /** Apply every autofix eslint has for `text` (what the desktop extension's `source.fixAll.eslint` does), with the
- *  same active config as `lintText`. Returns the input unchanged (`fixed: false`) on failure. */
+ *  same active config as `lintText`. Returns the input unchanged (`fixed: false`) on failure. No Program: each round
+ *  of fixes changes the text, and typescript-eslint would read the file from the Program as it was — so a type-aware
+ *  rule's fix isn't applied here (its problem is still shown). */
 export function fixText(text: string, filename: string): { "output": string; "fixed": boolean } {
 	try {
 		const result = linter.verifyAndFix(text, activeConfig, { "filename": filename });

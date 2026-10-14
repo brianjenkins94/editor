@@ -15,7 +15,8 @@
  * via configurePlugin, applied here with the desktop server's semantics.
  *
  * Fixes: the `_eslint.fixAll` protocol request returns the text with every autofix applied — the backend for the
- * extension's `source.fixAll.eslint` code action and its formatter.
+ * extension's `source.fixAll.eslint` code action and its formatter. `_eslint.status` says what the engine loaded, and
+ * which rules broke.
  */
 
 export default function init(modules) {
@@ -152,6 +153,11 @@ export default function init(modules) {
 
 			return { "response": result, "responseRequired": true };
 		});
+		// `_eslint.status` — what the engine has: the plugins it loaded and couldn't, and the rules that broke (a rule that
+		// throws is silenced, so this is where it shows). Undefined until the engine has loaded.
+		session.addProtocolHandler("_eslint.status", function() {
+			return { "response": engine === undefined || typeof engine.pluginStatus !== "function" ? { "error": engineError === undefined ? "the engine hasn't loaded" : String(engineError) } : engine.pluginStatus(), "responseRequired": true };
+		});
 	}
 
 	// This plugin is served as a real file next to the engine (/__vscode__/lsp/eslint-ts-plugin.js and
@@ -237,7 +243,8 @@ export default function init(modules) {
 						Promise.resolve(engine.applyWorkspaceConfig(readWorkspaceConfig())).catch(function() { /* never breaks linting */ });
 					}
 
-					const messages = engine.lintText(sourceFile.text, fileName);
+					// (the Program the text is from: typescript-eslint's type-aware rules read its types)
+					const messages = engine.lintText(sourceFile.text, fileName, program);
 
 					for (const message of messages) {
 						const category = categoryOf(message.severity, message.ruleId === null ? undefined : overrideFor(message.ruleId, message.fixable === true));
