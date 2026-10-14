@@ -7,11 +7,16 @@
  * Static means every such call is reported, whether or not it executes; a call whose resource isn't a literal is the
  * canary's (the dynamic half), which observes the concrete pre-call value.
  *
+ * And a file's import surface (`surface`): which members of each specifier its code uses — what the baseline's
+ * `consumer` is made of, the project's use of its dependencies (baseline.ts asks the plugin for every file's).
+ *
  * Loaded INSIDE the capabilities tsserver plugin (ts-plugin.js), which enriches each row's `type` from tsserver's
  * checker before publishing native diagnostics.
  */
+import type { SurfaceEntry } from "@brianjenkins94/util/silo/detect";
+import { surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
-import { findReach } from "@brianjenkins94/util/silo/reach";
+import { findReach, surfaceOf } from "@brianjenkins94/util/silo/reach";
 
 export interface CapabilityRow {
 	/** Capability class: net / fs / fs:read / fs:write / exec / env / eval. */
@@ -45,4 +50,11 @@ export function analyze(ts: any, sourceFile: any): CapabilityRow[] {
 		"end": reach.end,
 		"dangerous": isDangerous(reach.capability)
 	}));
+}
+
+/** One document's import surface — each specifier, the members its code uses of it (`dynamic`: some it can't name) —
+ *  read off the SourceFile tsserver holds, with its own `ts`. */
+// eslint-disable-next-line ts/no-explicit-any -- tsserver's `ts` and SourceFile, as the plugin hands them over
+export function surface(ts: any, sourceFile: any): Record<string, SurfaceEntry> {
+	return surfaceEntries(surfaceOf(ts, sourceFile));
 }

@@ -82,7 +82,7 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | `ts-plugin.js` | loads both engines, runs the canary in the background, merges results into diagnostics | tsserver plugin |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |
 | `extension.ts` | the "Capability calls" panel + the tripwire error-surface | ext host |
-| `baseline.ts` | keeps `.silo/baseline.json` up to `.silo/versions.json` (the workbench's resolver): new or changed packages read in the package worker, lib's `syncPackages`; off with `silo.baseline` | ext host |
+| `baseline.ts` | keeps `.silo/baseline.json` up to `.silo/versions.json` (the workbench's resolver): new or changed packages read in the package worker, lib's `syncPackages`; and its `consumer` — the code's use of its dependencies — from every file's import surface (`_capabilities.surface`, the plugin's), synced as code changes; off with `silo.baseline` | ext host |
 | `packages-worker.ts` → `lsp/packages-worker.js` | READ — each package's tarball through lib's `packageCaps` (code files, install hooks); started for a sync, ended after | a worker of the extension's |
 | `exceptions.ts` | the "Exceptions" view: libraries that grew a capability (the baseline's `grew`), and the policy's exceptions — each run's answers at the call (`decided`: once / always / refused), by package or the program | ext host |
 | `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `silo/policy`) | ext host |

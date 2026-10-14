@@ -159,7 +159,7 @@ Anticipate and Track watch a dependency from both sides, and its usage. Each vie
 | View | Question | Changed by | Today |
 |---|---|---|---|
 | **The package** | What can its own code do? | A new version | `baseline.packages[name].caps`: lib `detect` over every code file of the package. Live in both front ends; what `grew` is recorded on |
-| **Your usage** | Which of its exports does your code import and call? | Your code | `baseline.consumer[workspace][spec].members`: lib `audit`'s import surface (oxc, member-level; computed access is `*`). Command line only; the editor never writes `consumer` |
+| **Your usage** | Which of its exports does your code import and call? | Your code | `baseline.consumer[workspace][spec].members`, by lib `consumerOf` in both front ends: the editor reads each file's import surface off its TypeScript server's tree (`surfaceOf`), the command line with oxc (`surfaceOfSource`), the two self-tested to agree |
 | **The join** | What can the part you use reach, tree-shaken? | Either side | lib `packages` (rolldown tree-shaking from the members you import, deobfuscated first). Built, never called |
 | **Runs** | What did it actually do? | Running it | Each run's effects, by package (`runs/<user>.jsonl`); the editor's debugger gates and counts them |
 
@@ -183,9 +183,8 @@ What this asks of the design:
    use can reach, which is tighter than what the whole package can.
 2. **A grown capability's origin is a version or your code.** `grew` today records only a version (the package's
    side); growth from your side needs the member(s) that brought it in.
-3. **The editor computes your usage.** It's half the join, and only the command line has it now. In the editor it can
-   come from the TypeScript server it already runs (the import surface is a reading of your code, which is analysis's
-   job: TypeScript 7, not BABLR).
+3. **The editor computes your usage** (built). It's half the join. The editor reads it off the TypeScript server it
+   already runs (the capabilities plugin's `_capabilities.surface`), as code changes, into `consumer`.
 4. **Nothing outside the join runs undecided.** A package's call the baseline doesn't cover (none kept, or an entry of
    another version) goes to the policy, and the run records how it went. Where nobody can be asked (a live run, CI), the
    policy decides alone, and what it would ask about is refused.
@@ -225,8 +224,8 @@ a terminal prompt or failure in CI, is what's missing.
 ### Decided
 
 - **Analysis: wanted, in both front ends.** Both sides of each dependency and their join, checked against the runs, as
-  in "Each dependency, seen four ways". The editor needs your usage (the import surface) for it, which only the command
-  line computes today.
+  in "Each dependency, seen four ways". Both front ends now record your usage (the import surface); the join is
+  what's left.
 - **Deobfuscation: later.** It joins the one analysis, in both front ends, when it comes.
 - **The desktop gate is the `--import` preload**, above.
 - **`guard` is not gating.** It's a runtime type check at a boundary (a value against its declared type), reacting
