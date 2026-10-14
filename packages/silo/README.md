@@ -46,12 +46,32 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 | Remember | What does my program do, what ran, how has it grown? | `coverage` (what committed runs ran, by feature), `features`, `history` | insights (coverage in the gutter), notes, the history extension | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `layout` | `runs/`, `evidence/`, `policy*` |
 | Gate | Should this call happen? | none | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
+## What the prototype had, and where it is now
+
+The prototype is `~/Documents/GitHub/silo` (its README is the design doc). Its pieces:
+
+| Prototype | What it did | Now |
+|---|---|---|
+| `silo <script>` (runner) | Drift check, then bundle the script with a capability broker injected and run it, prompting on any new scope; grants persisted, runs recorded, confidence updated | **No desktop runner.** The decision core is lib `util/silo/enforce/decide.mjs` (used by util/mcp's broker); the editor gates its own runs |
+| BERNARD / JUDICIAL | A redline nothing can auto-approve (secrets, `rm`, `eval`, system dirs, unknown hosts), then a pluggable decider (a command, an agent, you) | `enforce/decide.mjs` (`redline`, `judicial`) |
+| `silo audit` | Per dependency: the members your code imports, joined with what that slice can reach (tree-shaken, deobfuscated with webcrack ∪ wakaru), diffed against `.silo/baseline.json`; exits 1 on drift | Split: `audit` (the import surface and builtins) is live; the package half (`packages`, `deobfuscate`) is **cut off** (see question 1) |
+| `silo install` (cooldown) | Nothing published in the last week; a breadcrumb for the runner when the lockfile moves | `silo install` (live) |
+| CI gate | The audit in CI, as a GitHub Action (`action.yml`) | Not carried over |
+| Two static engines | TypeScript's call hierarchy (precise, under-reports) and tree-shaking (over-reports); their disagreement is the blind-spot detector | `detect`/`reach` (pattern-based); the TypeScript reading is in `ts-analysis` for history, not capabilities |
+| Confidence | Runs raise it, edits decay it (Wilson lower bound) | `runs.ts` `confidence` |
+| Deno backend | Permissions as a stronger box than the in-process broker | Not carried over |
+| `review`, `--reviewed`, `--waive`, `accept <ref>`, provenance | Per-function "have you read it", the AI-approval axis | Dropped on purpose (most code is AI-written); `provenance`, `review` remain in lib |
+
+Note the name collision: the prototype's `accept <ref>` meant "trust everything as of this commit"; today's
+`silo accept` means "approve a package's pending version".
+
 ## Modules nobody uses
 
 These are in lib `util/silo`, but nothing in the editor, the command line or the rest of lib imports them:
 
 - **`packages`**: a package's capabilities, from bundling the slice of it you import. It's the only thing that uses
-  `deobfuscate`, so that's unused too in effect.
+  `deobfuscate`, so that's unused too in effect. Not leftovers: they're the prototype's package analysis, the core of
+  Anticipate, cut off when `audit` was ported.
 - **`guard`**: a runtime check at a boundary, with a pluggable reaction.
 - **`provenance`**: how likely a file was written by AI. The prototype's original purpose (approving AI-written code),
   dropped on purpose: most code is AI-written now. `review` (which code units were reviewed, `review.json`) belongs
@@ -61,13 +81,14 @@ All three came over from the `silo` prototype.
 
 ## What doesn't fit (open questions)
 
-1. **The baseline may not analyze packages.** `audit.ts` says package capability probing was cut and lives in
-   `packages.ts`, which nothing calls, and deobfuscation is reached only through it. Yet `install` says it records
-   "what each installed package can do". Either the baseline gets its package facts some other way (to verify), or
-   Anticipate is missing its core: static analysis and deobfuscation of the packages themselves.
+1. **The baseline doesn't analyze packages any more.** The prototype's audit did (`package-capabilities` and
+   `deobfuscate`); the port into lib cut that half (`audit.ts` says so), and nothing calls `packages.ts`. `install`
+   says it records "what each installed package can do", so check where those facts come from now: probably only
+   builtins and the import surface. Reconnecting `packages` and `deobfuscate` is what Anticipate needs.
 2. **There's no gate outside the editor.** The editor gates its runs (tsval, almostnode) and util/mcp gates MCP tools,
-   but nothing gates a program you run from a terminal. A `silo run` has been discussed (tsval with policy, recording
-   exceptions) and not built. Not urgent while the editor (already a browser sandbox) is the product, but needed to
+   but nothing gates a program you run from a terminal. The prototype's `silo <script>` was that gate (a bundled
+   broker, BERNARD and JUDICIAL); its decision core survived, its runner didn't. A `silo run` has been discussed
+   (tsval with policy, recording exceptions) and not built. Not urgent while the editor (already a browser sandbox) is the product, but needed to
    reconcile the two.
 3. **Two stores of what code can do.** `baseline.json` holds what packages can do (Anticipate). `capabilities.json` and
    `capabilities/<user>.json` hold what the code can do and what it was seen doing (the capabilities extension's). How
