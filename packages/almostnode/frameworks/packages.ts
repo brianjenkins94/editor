@@ -58,6 +58,50 @@ export function isRegistrySpec(spec: string): boolean {
 	return !/^[a-z][\d+.a-z-]*:/iu.test(spec) && !spec.includes("/");
 }
 
+/**
+ * The esm.sh URL for a registry dependency's `subpath` ("", "/" for an import map's prefix, or "/sub"). One definition
+ * for the import map and for rewritten imports, so a module loads once whichever way it's reached: react/react-dom get
+ * the `?dev` build the React-Refresh preamble hooks; other deps get `?external=react,react-dom`, so a component library
+ * shares the app's single React copy rather than pulling its own.
+ *
+ * `deps`: the exact versions of what it depends on, all the way down (`name@version,…` — esm.sh's `deps`, which esm.sh
+ * hands down to each dependency's own build, as just that dependency's), so none of them is esm.sh's own pick. It's the
+ * same list esm.sh hands this package when another imports it, so both ways in are one build. A prefix (its subpaths
+ * appended after) can't carry a scoped name — esm.sh reads a `/` there as the path — so a prefix has none of those.
+ */
+export function registryUrl(name: string, version: string, subpath: string, deps: string[] = []): string {
+	const query = name === "react" || name === "react-dom" ? "dev" : "external=react,react-dom";
+	const pinned = (list: string[]): string => (list.length === 0 ? "" : `&deps=${list.join(",")}`);
+
+	if (subpath === "/") {
+		return `https://esm.sh/${name}@${version}&${query}${pinned(deps.filter((each) => !each.startsWith("@")))}/`;
+	}
+
+	return `https://esm.sh/${name}@${version}${subpath}?${query}${pinned(deps)}`;
+}
+
+/** Each pinned package (name → its version and the names it depends on) → `name`'s dependencies all the way down, each
+ *  at its pinned version (registryUrl's `deps`), sorted; none for a package not pinned at `version`. */
+export function pinnedDependencies(pins: Record<string, { "version": string; "dependencies"?: string[] }>, name: string, version: string): string[] {
+	if (pins[name]?.version !== version) {
+		return [];
+	}
+
+	const seen = new Set<string>([name]);
+	const queue = [...pins[name].dependencies ?? []];
+
+	for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+		if (!seen.has(next) && pins[next] !== undefined) {
+			seen.add(next);
+			queue.push(...pins[next].dependencies ?? []);
+		}
+	}
+
+	seen.delete(name);
+
+	return [...seen].map((each) => `${each}@${pins[each].version}`).toSorted();
+}
+
 /** The entries of a ustar archive (gunzipped): regular files, their paths with the leading `package/` dropped — a long
  *  path as pax or GNU tar gives it. */
 export function untar(archive: Uint8Array): Map<string, Uint8Array> {

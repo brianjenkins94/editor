@@ -42,17 +42,17 @@ test("a tarball's files, long paths included — bytes as they are, and what det
 	}
 });
 
-test("a lockfile's packages: each name once, root before nested, links left out", () => {
+test("a lockfile's packages: each name once, root before nested, links left out — and what each depends on", () => {
 	assert.deepEqual(lockedVersions({ "packages": {
 		"": { "version": "0.0.0" },
 		"node_modules/a/node_modules/b": { "version": "1.0.0" },
-		"node_modules/b": { "version": "2.0.0", "resolved": "https://registry.npmjs.org/b/-/b-2.0.0.tgz" },
+		"node_modules/b": { "version": "2.0.0", "resolved": "https://registry.npmjs.org/b/-/b-2.0.0.tgz", "dependencies": { "@s/c": "^3" }, "peerDependencies": { "react": "*" } },
 		"node_modules/@s/c": { "version": "3.0.0" },
 		"node_modules/local": { "version": "0.0.1", "link": true },
 		"packages/app": { "version": "1.0.0" }
 	} }), {
-		"b": { "version": "2.0.0", "range": "2.0.0", "tarball": "https://registry.npmjs.org/b/-/b-2.0.0.tgz" },
-		"@s/c": { "version": "3.0.0", "range": "3.0.0" }
+		"b": { "version": "2.0.0", "range": "2.0.0", "tarball": "https://registry.npmjs.org/b/-/b-2.0.0.tgz", "dependencies": ["@s/c", "react"] },
+		"@s/c": { "version": "3.0.0", "range": "3.0.0", "dependencies": [] }
 	});
 });
 
@@ -74,7 +74,7 @@ test("a range resolved with nothing younger than a week — `latest` the latest 
 });
 
 test("what's resolved already stays — a lockfile's way: nothing asked again", async () => {
-	const known = { "react": { "version": "18.2.0", "range": "^18.2.0" }, "loose-envify": { "version": "1.4.0", "range": "^1.1.0" } };
+	const known = { "react": { "version": "18.2.0", "range": "^18.2.0", "dependencies": ["loose-envify"] }, "loose-envify": { "version": "1.4.0", "range": "^1.1.0", "dependencies": [] } };
 	const asked = [];
 	const realFetch = globalThis.fetch;
 
@@ -87,6 +87,24 @@ test("what's resolved already stays — a lockfile's way: nothing asked again", 
 	try {
 		assert.deepEqual(await resolveVersions({ "react": "^18.2.0" }, { known }), known);
 		assert.deepEqual(asked, []);
+	} finally {
+		globalThis.fetch = realFetch;
+	}
+});
+
+test("one resolved before its dependencies were kept: they're read, its version as it was", async () => {
+	const realFetch = globalThis.fetch;
+	const manifests = { "https://registry.npmjs.org/react/18.2.0": { "dependencies": { "loose-envify": "^1.1.0" } }, "https://registry.npmjs.org/loose-envify/1.4.0": { "dependencies": {} } };
+
+	globalThis.fetch = async (url) => (manifests[String(url)] === undefined ? Response.error() : Response.json(manifests[String(url)]));
+
+	try {
+		const known = { "react": { "version": "18.2.0", "range": "^18.2.0" }, "loose-envify": { "version": "1.4.0", "range": "^1.1.0" } };
+
+		assert.deepEqual(await resolveVersions({ "react": "^18.2.0" }, { known }), {
+			"loose-envify": { "version": "1.4.0", "range": "^1.1.0", "dependencies": [] },
+			"react": { "version": "18.2.0", "range": "^18.2.0", "dependencies": ["loose-envify"] }
+		});
 	} finally {
 		globalThis.fetch = realFetch;
 	}

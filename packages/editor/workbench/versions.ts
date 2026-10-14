@@ -22,8 +22,9 @@ export const MIN_AGE_DAYS = 7;
 
 
 /** A dependency as resolved: its exact version, the range it was resolved from, and `young` when nothing old enough
- *  satisfied it. `tarball`: a lockfile's `resolved` URL, when it names one. */
-export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string }
+ *  satisfied it. `tarball`: a lockfile's `resolved` URL, when it names one. `dependencies`: the names that version
+ *  depends on (peers and optional ones too) — what the preview pins its dependencies by (esm.sh's `deps`). */
+export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[] }
 
 /** What `.silo/versions.json` holds. */
 export interface VersionsFile { "resolvedAt": string; "minAgeDays": number; "from": "package-lock.json" | "package.json"; "packages": Record<string, Resolved> }
@@ -86,7 +87,8 @@ function published(name: string): Promise<Published[]> {
 	return publishedOf.get(name)!;
 }
 
-/** `name`@`version`'s own dependencies, from its manifest on npm's registry. */
+/** `name`@`version`'s own dependencies — its peers and optional ones too, as npm installs them — by name: their ranges,
+ *  from its manifest on npm's registry. */
 async function dependenciesOf(name: string, version: string): Promise<Record<string, string>> {
 	const response = await fetch(`https://registry.npmjs.org/${name}/${version}`);
 
@@ -94,9 +96,9 @@ async function dependenciesOf(name: string, version: string): Promise<Record<str
 		throw new Error(`registry: ${response.status} for ${name}@${version}`);
 	}
 
-	const manifest = await response.json() as { "dependencies"?: Record<string, string> };
+	const manifest = await response.json() as Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string> | undefined>;
 
-	return manifest.dependencies ?? {};
+	return { ...manifest.peerDependencies, ...manifest.optionalDependencies, ...manifest.dependencies };
 }
 
 /** A dependency range the registry can resolve (not a file:, link:, git or URL dependency, nor an npm: alias). */
@@ -112,6 +114,19 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 	const cutoff = now - minAgeDays * 24 * 60 * 60 * 1000;
 	const resolved: Record<string, Resolved> = { ...known };
 	const queue: [string, string][] = Object.entries(roots);
+	// (one resolved before what it depends on was kept: what it depends on read now — its version kept as it is)
+	const unread = Object.entries(known).filter(([, each]) => each.dependencies === undefined);
+
+	for (let at = 0; at < unread.length; at += PARALLEL) {
+		await Promise.all(unread.slice(at, at + PARALLEL).map(async ([name, each]) => {
+			const dependencies = await dependenciesOf(name, each.version).catch(() => undefined);
+
+			if (dependencies !== undefined) {
+				resolved[name] = { ...each, "dependencies": Object.keys(dependencies).toSorted() };
+				queue.push(...Object.entries<string>(dependencies));
+			}
+		}));
+	}
 
 	while (queue.length > 0) {
 		const batch = queue.splice(0, PARALLEL).filter(([name, range], index, all) => !(name in resolved) && resolvable(range) && all.findIndex(([other]) => other === name) === index);
@@ -121,8 +136,10 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 				const chosen = choose(await published(name), range, cutoff);
 
 				if (chosen !== undefined && !(name in resolved)) {
-					resolved[name] = { "version": chosen.version, "range": range, ...chosen.young ? { "young": true as const } : {} };
-					queue.push(...Object.entries<string>(await dependenciesOf(name, chosen.version)));
+					const dependencies = await dependenciesOf(name, chosen.version);
+
+					resolved[name] ??= { "version": chosen.version, "range": range, ...chosen.young ? { "young": true as const } : {}, "dependencies": Object.keys(dependencies).toSorted() };
+					queue.push(...Object.entries<string>(dependencies));
 				}
 			} catch {
 				// (left out: what can't be resolved now is resolved the next time)
@@ -134,14 +151,16 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 }
 
 /** The packages a lockfile installs (npm's v2/v3 `packages`), each name once — the first, root before nested. */
-export function lockedVersions(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean }> }): Record<string, Resolved> {
+export function lockedVersions(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean } & Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>>> }): Record<string, Resolved> {
 	const locked: Record<string, Resolved> = {};
 
 	for (const [path, entry] of Object.entries(lock.packages ?? {}).toSorted(([one], [other]) => one.split("node_modules/").length - other.split("node_modules/").length)) {
 		const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
 
 		if (path.includes("node_modules/") && entry.version !== undefined && entry.link !== true && !(name in locked)) {
-			locked[name] = { "version": entry.version, "range": entry.version, ...entry.resolved?.startsWith("https://") === true ? { "tarball": entry.resolved } : {} };
+			const dependencies = Object.keys({ ...entry.peerDependencies, ...entry.optionalDependencies, ...entry.dependencies }).toSorted();
+
+			locked[name] = { "version": entry.version, "range": entry.version, ...entry.resolved?.startsWith("https://") === true ? { "tarball": entry.resolved } : {}, "dependencies": dependencies };
 		}
 	}
 

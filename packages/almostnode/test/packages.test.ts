@@ -178,3 +178,24 @@ test("a tarball is fetched once, however often it's asked for; a failed fetch is
 	await assert.rejects(resolve.resolve("@x/gone", "/a.ts"), /answered 404/u);
 	assert.equal(fetched.filter((url) => url.includes("gone")).length, 2);
 });
+
+test("a pinned package's esm.sh URL pins what it depends on, all the way down — a prefix drops the scoped ones", async () => {
+	const { pinnedDependencies, registryUrl } = await import("../frameworks/packages.ts");
+	const pins = {
+		"react": { "version": "18.3.1", "dependencies": ["loose-envify"] },
+		"react-dom": { "version": "18.3.1", "dependencies": ["loose-envify", "react", "scheduler"] },
+		"loose-envify": { "version": "1.4.0", "dependencies": ["js-tokens"] },
+		"js-tokens": { "version": "4.0.0", "dependencies": [] },
+		"scheduler": { "version": "0.23.2", "dependencies": ["loose-envify"] },
+		"ui": { "version": "1.0.0", "dependencies": ["@x/core", "react"] },
+		"@x/core": { "version": "2.0.0" }
+	};
+	const reactDom = pinnedDependencies(pins, "react-dom", "18.3.1");
+
+	assert.deepEqual(reactDom, ["js-tokens@4.0.0", "loose-envify@1.4.0", "react@18.3.1", "scheduler@0.23.2"]);
+	assert.deepEqual(pinnedDependencies(pins, "react-dom", "18.2.0"), [], "a version it doesn't pin: esm.sh's own pick");
+	assert.equal(registryUrl("react-dom", "18.3.1", "", reactDom), "https://esm.sh/react-dom@18.3.1?dev&deps=js-tokens@4.0.0,loose-envify@1.4.0,react@18.3.1,scheduler@0.23.2");
+	assert.equal(registryUrl("react-dom", "18.3.1", "/client", reactDom), "https://esm.sh/react-dom@18.3.1/client?dev&deps=js-tokens@4.0.0,loose-envify@1.4.0,react@18.3.1,scheduler@0.23.2");
+	assert.equal(registryUrl("ui", "1.0.0", "/", pinnedDependencies(pins, "ui", "1.0.0")), "https://esm.sh/ui@1.0.0&external=react,react-dom&deps=js-tokens@4.0.0,loose-envify@1.4.0,react@18.3.1/");
+	assert.equal(registryUrl("ui", "1.0.0", ""), "https://esm.sh/ui@1.0.0?external=react,react-dom");
+});

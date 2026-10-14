@@ -16,7 +16,7 @@ import { addReactRefresh as _addReactRefresh, shiftInlineSourceMap } from "./cod
 import type { InstrumentLevel } from "./instrument";
 import { instrument } from "./instrument";
 import type { Manifest } from "./packages";
-import { isRegistrySpec, PACKAGE_PREFIX, PackageResolver } from "./packages";
+import { isRegistrySpec, PACKAGE_PREFIX, PackageResolver, pinnedDependencies, registryUrl } from "./packages";
 
 // Check if we're in a real runtime that should transpile (not jsdom or a Node test).
 // A real browser has window + navigator.serviceWorker (jsdom has window but not that); a Web Worker (where the
@@ -285,18 +285,6 @@ const HMR_CLIENT_SCRIPT = `
 </script>
 `;
 
-/**
- * The esm.sh URL for a registry dependency's `subpath` ("" or "/sub"). One definition for the import map and for
- * rewritten imports, so a module loads once whichever way it's reached: react/react-dom get the `?dev` build the
- * React-Refresh preamble hooks; other deps get `?external=react,react-dom`, so a component library shares the app's
- * single React copy rather than pulling its own.
- */
-function registryUrl(name: string, version: string, subpath: string): string {
-	const query = name === "react" || name === "react-dom" ? "dev" : "external=react,react-dom";
-
-	return `https://esm.sh/${name}@${version}` + (subpath === "" ? `?${query}` : `&${query}${subpath}`);
-}
-
 /** The git blob oid of `text` (sha1 of `blob <length>\0<bytes>`): a module version's name, as git and runtime evidence
  *  name a file's content. */
 async function blobOid(text: string): Promise<string> {
@@ -329,7 +317,7 @@ export class ViteDevServer extends DevServer {
 
 	constructor(vfs: VirtualFS, options: ViteDevServerOptions) {
 		super(vfs, options);
-		this.packages = new PackageResolver({ "manifest": () => this.readManifest(), "registryUrl": registryUrl, "pinned": () => this.readPins(options.versionsFile) });
+		this.packages = new PackageResolver({ "manifest": () => this.readManifest(), "registryUrl": (name, version, subpath) => this.esmUrl(name, version, subpath), "pinned": () => Object.fromEntries(Object.entries(this.readPins()).map(([name, { version }]) => [name, version])) });
 		this.options = {
 			"jsx": true,
 			"jsxFactory": "React.createElement",
@@ -498,19 +486,24 @@ export class ViteDevServer extends DevServer {
 		return this.serveFile(filePath);
 	}
 
-	/** Each package's pinned version, from the host's versions file (none without one). */
-	private readPins(file: string | undefined): Record<string, string> {
-		if (file === undefined) {
+	/** Each package's pinned version and what it depends on, from the host's versions file (none without one). */
+	private readPins(): Record<string, { "version": string; "dependencies"?: string[] }> {
+		if (this.options.versionsFile === undefined) {
 			return {};
 		}
 
 		try {
-			const { packages } = JSON.parse(this.vfs.readFileSync(file, "utf8") as string) as { "packages"?: Record<string, { "version"?: string }> };
+			const { packages } = JSON.parse(this.vfs.readFileSync(this.options.versionsFile, "utf8") as string) as { "packages"?: Record<string, { "version"?: unknown; "dependencies"?: unknown }> };
 
-			return Object.fromEntries(Object.entries(packages ?? {}).flatMap(([name, { version }]) => (typeof version === "string" ? [[name, version]] : [])));
+			return Object.fromEntries(Object.entries(packages ?? {}).flatMap(([name, { version, dependencies }]) => (typeof version === "string" ? [[name, { "version": version, ...Array.isArray(dependencies) ? { "dependencies": dependencies.filter((each): each is string => typeof each === "string") } : {} }]] : [])));
 		} catch {
 			return {};
 		}
+	}
+
+	/** `name`@`version`'s esm.sh URL (registryUrl), its dependencies at their pinned versions. */
+	private esmUrl(name: string, version: string, subpath: string): string {
+		return registryUrl(name, version, subpath, pinnedDependencies(this.readPins(), name, version));
 	}
 
 	/** The app's package.json (at the server root), or undefined. */
@@ -884,10 +877,10 @@ export default css;
 		const reactVersion = deps.react ?? REACT_VERSION;
 		const reactDomVersion = deps["react-dom"] ?? reactVersion;
 		const imports: Record<string, string> = {
-			"react": registryUrl("react", reactVersion, ""),
-			"react/": registryUrl("react", reactVersion, "/"),
-			"react-dom": registryUrl("react-dom", reactDomVersion, ""),
-			"react-dom/": registryUrl("react-dom", reactDomVersion, "/")
+			"react": this.esmUrl("react", reactVersion, ""),
+			"react/": this.esmUrl("react", reactVersion, "/"),
+			"react-dom": this.esmUrl("react-dom", reactDomVersion, ""),
+			"react-dom/": this.esmUrl("react-dom", reactDomVersion, "/")
 		};
 
 		for (const [name, version] of Object.entries(deps)) {
@@ -896,8 +889,8 @@ export default css;
 				continue;
 			}
 
-			imports[name] = registryUrl(name, version, "");
-			imports[`${name}/`] = registryUrl(name, version, "/");
+			imports[name] = this.esmUrl(name, version, "");
+			imports[`${name}/`] = this.esmUrl(name, version, "/");
 		}
 
 		return `<script type="importmap">\n${JSON.stringify({ "imports": imports }, null, 2)}\n</script>`;
