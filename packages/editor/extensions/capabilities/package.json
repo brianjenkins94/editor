@@ -81,12 +81,6 @@
         "title": "Re-place at Selection",
         "category": "Rules",
         "icon": "$(target)"
-      },
-      {
-        "command": "silo.exceptions.accept",
-        "title": "Accept",
-        "category": "Exceptions",
-        "icon": "$(check)"
       }
     ],
     "menus": {
@@ -121,10 +115,6 @@
         {
           "command": "silo.rules.replace",
           "when": "false"
-        },
-        {
-          "command": "silo.exceptions.accept",
-          "when": "false"
         }
       ],
       "view/item/context": [
@@ -152,11 +142,6 @@
           "command": "silo.rules.remove",
           "when": "view == silo.rules && viewItem =~ /^rule\\.mine/",
           "group": "inline@2"
-        },
-        {
-          "command": "silo.exceptions.accept",
-          "when": "view == silo.exceptions && viewItem == exceptions.pending",
-          "group": "inline"
         }
       ]
     },

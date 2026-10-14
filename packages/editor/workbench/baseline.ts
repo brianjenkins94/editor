@@ -1,9 +1,9 @@
 /**
  * The dependency-capability baseline (`.silo/baseline.json`, lib's util/silo/audit.ts `Baseline`), kept by the editor —
  * its `silo init`: what each library the project depends on can do, read off its own code as it's added. Made on the
- * first run that keeps evidence, then synced as the dependencies change (lib's syncPackages): a library added is accepted
- * as it is; a new version that can do more is pending until a person accepts it, and meanwhile what's new in it asks at
- * the call. Runs never change it — a compromised version would approve itself; what's decided at the call, beyond it, is
+ * first run that keeps evidence, then synced as the dependencies change (lib's syncPackages): a library added is taken
+ * as it is; a new version that can do more records what it grew, and that asks at the call unless the policy allows it.
+ * Runs never change it — a compromised version would approve itself; what's decided at the call, beyond it, is
  * recorded in the runs instead (their effects' `decided`).
  *
  * The packages are the ones the project loads, by name@version — the shared resolver's (versions.ts): a
@@ -14,16 +14,13 @@
  *
  * `consumer` (what the project's own code imports, and how) isn't made here — desktop silo's establishBaseline does.
  */
-import type { AcceptedPackages } from "@brianjenkins94/util/silo/evidence";
+import type { BaselinePackages, InstalledPackages } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import { detect } from "@brianjenkins94/util/silo/detect";
 import { syncPackages } from "@brianjenkins94/util/silo/evidence";
 import { packageFiles } from "./tarballs";
 import { syncVersions } from "./versions";
 import { baselinePath } from "@brianjenkins94/util/silo/layout";
-
-/** A package as the baseline accepts it: its version, and what its own code can do. */
-interface Accepted { "version": string; "caps": string[] }
 
 /** A package to read: by name and exact version, and its tarball (a lockfile's `resolved`, else the registry's). */
 interface Wanted { "name": string; "version": string; "tarball"?: string }
@@ -52,14 +49,14 @@ async function capsOf(name: string, version: string, tarball?: string): Promise<
 let syncing: Promise<void> = Promise.resolve();
 let queued = false;
 
-/** What `.silo/baseline.json` holds: what was accepted, and how a package that can do more waits for acceptance. */
-interface BaselineFile { "consumer"?: unknown; "packages"?: AcceptedPackages }
+/** What `.silo/baseline.json` holds: what each package can do, and what a later version of it grew. */
+interface BaselineFile { "consumer"?: unknown; "packages"?: BaselinePackages }
 
 /**
  * `.silo/baseline.json` (at `root`) made if there's none, else brought up to what the project would install now (lib's
- * syncPackages): a library added is accepted as its code is; a new version that can do more is pending until it's
- * accepted, its new capabilities asking at the call meanwhile. What a package can do is read from its tarball only when
- * it's new or its version is — what's accepted, or pending, of the version installed is known. Runs never change it.
+ * syncPackages): a library added is taken as its code is; a new version that can do more records what it grew, which
+ * asks at the call unless the policy allows it. What a package can do is read from its tarball only when it's new or its
+ * version is — the version in the baseline is known. Runs never change it.
  * A package that can't be read is left out, and said: its calls will read as a package the baseline doesn't have.
  * `make`: false syncs one that's there and makes none (a dependency changing in a workspace that doesn't keep one).
  */
@@ -80,7 +77,7 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 			return;
 		}
 
-		const accepted = existing?.packages ?? {};
+		const known = existing?.packages ?? {};
 		// (the versions everything loads — the resolver's: versions.ts)
 		const versions = await syncVersions(vscode, root);
 
@@ -89,13 +86,12 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 		}
 
 		const wanted: Wanted[] = Object.entries(versions.packages).map(([name, each]) => ({ "name": name, "version": each.version, ...each.tarball === undefined ? {} : { "tarball": each.tarball } }));
-		const installed: Record<string, Accepted> = {};
+		const installed: InstalledPackages = {};
 		const unread: string[] = [];
 
 		for (let at = 0; at < wanted.length; at += PARALLEL) {
 			await Promise.all(wanted.slice(at, at + PARALLEL).map(async ({ name, version, tarball }) => {
-				const known = accepted[name];
-				const caps = known?.version === version ? known.caps : known?.pending?.version === version ? known.pending.caps : undefined;
+				const caps = known[name]?.version === version ? known[name].caps : undefined;
 
 				try {
 					installed[name] = { "version": version, "caps": caps ?? await capsOf(name, version, tarball) };
@@ -105,9 +101,9 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 			}));
 		}
 
-		const { packages, changed } = syncPackages(accepted, installed);
+		const { packages, changed } = syncPackages(known, installed);
 
-		if (existing !== undefined && changed.added.length + changed.updated.length + changed.pending.length === 0) {
+		if (existing !== undefined && changed.added.length + changed.updated.length + changed.grew.length === 0) {
 			return;
 		}
 
@@ -119,7 +115,7 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 		if (existing === undefined) {
 			console.info(`[baseline] made ${baselinePath()}: ${Object.keys(sorted).length} packages, from ${versions.from}`);
 		} else {
-			console.info(`[baseline] synced ${baselinePath()} — added: ${changed.added.join(", ") || "none"}; updated: ${changed.updated.join(", ") || "none"}; pending acceptance: ${changed.pending.join(", ") || "none"}`);
+			console.info(`[baseline] synced ${baselinePath()} — added: ${changed.added.join(", ") || "none"}; updated: ${changed.updated.join(", ") || "none"}; grew: ${changed.grew.map((name) => `${name} (${Object.entries(packages[name].grew ?? {}).filter(([, version]) => version === packages[name].version).map(([capability]) => capability).join(", ")})`).join(", ") || "none"}`);
 		}
 
 		if (unread.length > 0) {

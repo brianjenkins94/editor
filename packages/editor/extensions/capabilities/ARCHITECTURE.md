@@ -55,9 +55,10 @@ signal** (a scope OBSERVED with no matching STATIC entry is the alarm; silo must
   capabilities.json         FACTS · static        what analysis (findReach) says code CAN do
   capabilities/<user>.json  FACTS · observed      what actually FIRED for this user — a day-coarsened rollup
   runs/<user>.jsonl         FACTS · observed      the run ledger (evidence.ts): each run's envelope, with its `effects`
-  baseline.json             FACTS · accepted      what each dependency's own code can do, by static analysis, as libraries are
+  baseline.json             FACTS · static        what each dependency's own code can do, by static analysis, as libraries are
                                                   added (workbench/baseline.ts: made on the first run, synced as package.json /
-                                                  the lockfile change; a version that can do more is `pending` until accepted).
+                                                  the lockfile change; what a newer version can do more is in `grew`, with the
+                                                  version that grew it — it asks at the call unless the policy allows it).
                                                   Never taught by runs.
   .gitignore                silo-managed          ignores local/
 ```
@@ -81,7 +82,7 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | `ts-plugin.js` | loads both engines, runs the canary in the background, merges results into diagnostics | tsserver plugin |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |
 | `extension.ts` | the "Capability calls" panel + the tripwire error-surface | ext host |
-| `exceptions.ts` | the "Exceptions" view: versions pending acceptance (Accept: lib's `acceptPending`), and the policy's exceptions — each run's answers at the call (`decided`: once / always / refused), by package or the program | ext host |
+| `exceptions.ts` | the "Exceptions" view: libraries that grew a capability (the baseline's `grew`), and the policy's exceptions — each run's answers at the call (`decided`: once / always / refused), by package or the program | ext host |
 | `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `silo/policy`) | ext host |
 | `silo-store.ts` | the whole `.silo/` layout: base+override policy merge, observed rollup, run firehose, git-user resolution | ext host |
 | `decide.ts` | the single capability decision endpoint every interceptor round-trips to (classify → gate → decide) | ext host |

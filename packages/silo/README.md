@@ -42,7 +42,7 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 | Job | Question it answers | Command line | Editor | lib `util/silo` | In `.silo/` |
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `init`, `install` (record the baseline) | `workbench/baseline.ts` | `detect`, `audit`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
-| Track | Has a package started doing something new? | `install` (sync, nothing under a week old), `accept` (approve a pending version), `check` (runs beyond the baseline) | — | `audit`, `evidence` (`beyondBaseline`, `acceptPending`) | `baseline.json`, `runs/` |
+| Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
 | Remember | What does my program do, what ran, how has it grown? | `coverage` (what committed runs ran, by feature), `features`, `history` | insights (coverage in the gutter), notes, the history extension | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `layout` | `runs/`, `evidence/`, `policy*` |
 | Gate | Should this call happen? | none | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
@@ -63,8 +63,8 @@ The prototype is `~/Documents/GitHub/silo` (its README is the design doc). Its p
 | `review`, `--reviewed`, `--waive`, `accept <ref>`, provenance | Per-function "have you read it", the AI-approval axis | Dropped on purpose (most code is AI-written); `provenance`, `review` remain in lib |
 | Fail-loud (`design/fail-loud.md`, designed) | Value invariants: AI code hedges (`?.`, `??`) on values your code guarantees, turning a crash into a silent wrong answer; guard at trust boundaries (the capability seams), let internal invariants fail loudly; invariants learned from recorded runs, human-gated; `waive(value, reason)` as a codified exception | Built in the editor under Remember: runtime evidence (value and branch observations per span, RUNTIME-EVIDENCE.md's second slice) and insights' "what could go" suggestions (its fourth). Its static half leaned on `strictNullChecks`; TypeScript here is relaxed by choice, so runs are the route |
 
-Note the name collisions: the prototype's `accept <ref>` meant "trust everything as of this commit"; today's
-`silo accept` means "approve a package's pending version". And three things have been called a waiver or an
+Note the name collisions: the prototype's `accept <ref>` meant "trust everything as of this commit"; a later
+`silo accept` (removed) meant "approve a package's pending version". And three things have been called a waiver or an
 exception: the prototype's `--waive` (accepted unread), fail-loud's `waive(value, reason)` (suppress one assert), and
 today's exceptions (a capability call whose outcome differed from the policy, recorded in the run).
 
@@ -126,14 +126,15 @@ everything a person decides lives in their policy.
 - **The run is the gate, everywhere.** There's no separate check: a program run through silo is gated at each call, and
   where nobody can be asked (CI), a call that's needed but neither in the baseline nor allowed by policy fails the run.
 
-### No `accept`: what replaces "pending"
+### No `accept`: what replaced "pending"
 
-Today a newer version that can do more is "pending" in the baseline until a person runs `silo accept` (or clicks Accept
-in the editor's Exceptions view); meanwhile its new capabilities ask at the call. That's a decision stored in the facts.
-Instead:
+A newer version that could do more used to be "pending" in the baseline until a person ran `silo accept` (or clicked
+Accept in the editor's Exceptions view); meanwhile its new capabilities asked at the call. That was a decision stored in
+the facts. Now (built):
 
 1. **The baseline records what grew.** When a package's new version can do more, the baseline takes the new facts at
-   once, and notes each capability's origin: the version that introduced it. "`foo` 2.3.1 added `net`" is a fact.
+   once, and notes each capability's origin in the entry's `grew`: `{"net": "2.3.1"}` — "`foo` 2.3.1 added `net`" is a
+   fact. What it could do when it was added is `settledCaps`; a grown capability is outside the baseline at the call.
 2. **Policy decides what a grown capability does at the call.** By default it asks, as any call outside the baseline
    does. "Always allow" writes your policy (`policy/<user>.json`), which is the approval, reviewed in its commit. A
    project can set the default to deny in its shared contract (for CI, say).
@@ -141,8 +142,9 @@ Instead:
    the decision comes at the call, when the capability is actually used. In CI, where nothing can ask, `silo run` fails
    on it, so a pull request that needs a new capability needs a policy rule (reviewed in that pull request) to pass.
 
-This removes `silo accept`, the editor's Accept action, and lib's `pending`/`acceptPending`; and `silo check`, whose job
-the run does. They're replaced by a capability's origin in the baseline, policy rules, and the run's own failure in CI.
+This removed `silo accept`, the editor's Accept action, and lib's `pending`/`acceptPending`. `silo check`, whose job the
+run does, goes when `silo run` exists. They're replaced by a capability's origin in the baseline, policy rules, and the
+run's own failure in CI.
 
 ### The jobs, reconciled
 
@@ -158,8 +160,7 @@ So the command line becomes: `install`, `run`, `coverage`, with `features` and `
 
 ### What the design implies, when it's built
 
-- **Out:** lib's `provenance` and `review` (with `review.json` and `audit`'s use of it); `pending`/`acceptPending`, for
-  each capability's origin; `silo init`, `accept` and `check`; the editor's Accept action.
+- **Out:** lib's `provenance` and `review` (with `review.json` and `audit`'s use of it); `silo init` and `check`.
 - **One package analysis**, called by both front ends on a package's files, however they were read.
 - **`silo run`**, the desktop gate: the policy and decision core the editor already uses, a terminal prompt in place of
   the editor's, failure in place of a prompt in CI, and the same run envelope.

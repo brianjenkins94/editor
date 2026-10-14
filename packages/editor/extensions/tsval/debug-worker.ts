@@ -23,7 +23,7 @@ import type { Effect, LoadedPackage } from "@brianjenkins94/run-contract";
 import type { RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/run-contract/runtime";
 import type { Told, Traced } from "@brianjenkins94/run-contract/values";
 import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
-import type { AcceptedPackages } from "@brianjenkins94/util/silo/evidence";
+import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
@@ -36,7 +36,7 @@ import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
 
 import { LiveRecord } from "@brianjenkins94/run-contract/values";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
-import { covers } from "@brianjenkins94/util/silo/evidence";
+import { covers, settledCaps } from "@brianjenkins94/util/silo/evidence";
 import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 import { NETWORK_PROBES } from "../../shared/architecture";
@@ -374,17 +374,17 @@ function packageOf(dir: string): string {
 	return ran.version === undefined ? ran.name : `${ran.name}@${ran.version}`;
 }
 
-/** The dependency baseline (`.silo/baseline.json`, read as a run starts): what each package's own code may do, as it was
- *  accepted when the library was added (a newer version's `pending` capabilities aren't, until accepted). Undefined with
+/** The dependency baseline (`.silo/baseline.json`, read as a run starts): what each package's own code could do when the
+ *  library was added (what a newer version grew isn't settled: it asks, unless the policy allows it). Undefined with
  *  none yet — the first run makes it — when a package's calls are counted, not asked about. */
-let baseline: AcceptedPackages | undefined;
+let baseline: BaselinePackages | undefined;
 
 /** The baseline as it is now, through the editor's runtime (read as the debugger's own: neither decided nor counted). */
-function readBaseline(): AcceptedPackages | undefined {
+function readBaseline(): BaselinePackages | undefined {
 	try {
 		const text = new TextDecoder().decode(editorLink?.fs.readFile("/workspace/.silo/baseline.json", { "load": true }));
 
-		return (JSON.parse(text) as { "packages"?: AcceptedPackages }).packages;
+		return (JSON.parse(text) as { "packages"?: BaselinePackages }).packages;
 	} catch {
 		return undefined;
 	}
@@ -476,7 +476,7 @@ function packageIn(dir: string): { "name": string; "version"?: string } {
 
 /**
  * How the package in `dir` calling `capability` goes: trusted by the policy (an org's contract, say) — made, no question;
- * within what its baseline accepts of it — made; else decided at the call by the editor (redline, the policy, then the
+ * within what its baseline settled of it — made; else decided at the call by the editor (redline, the policy, then the
  * person, asked — blocking until it's answered). Undefined when it isn't decided at all — no baseline yet, or no editor
  * to ask — and the call is only counted. A failure to decide refuses it.
  */
@@ -491,9 +491,9 @@ function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecis
 		return undefined;
 	}
 
-	const accepted = baseline[pkg.name];
+	const entry = baseline[pkg.name];
 
-	if (accepted !== undefined && covers(accepted.caps, capability)) {
+	if (entry !== undefined && covers(settledCaps(entry), capability)) {
 		return { "allow": true, "decided": "baseline" };
 	}
 

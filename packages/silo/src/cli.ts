@@ -3,7 +3,6 @@
  *
  *   silo init [repo]                                   start keeping .silo/: the baseline, synced with what's installed
  *   silo install [package…] [--min-age 7] [--project …] install — nothing newer than a week — and sync the baseline
- *   silo accept <package…> [--project …]               accept a version pending in the baseline
  *   silo features [repo] [--json]                      every way into the program, found in its code
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
  *                [--analyzer auto|oxc|typescript]        commit messages, which are never read; the code read by the
@@ -21,9 +20,9 @@ import { isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { juvy } from "@brianjenkins94/util/juvy";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
-import { ensureBaseline, ensureSiloDir, loadBaseline, saveBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
+import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
-import { acceptPending, beyondBaseline, covers } from "@brianjenkins94/util/silo/evidence";
+import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
@@ -158,9 +157,9 @@ export function installCommand(manager: "npm" | "pnpm", packages: string[], days
 	return ["install", ...packages, `--before=${new Date(now - days * 24 * 60 * 60 * 1000).toISOString()}`];
 }
 
-/** What a pending version can do that the accepted one can't. */
-function newIn(entry: { "caps": string[]; "pending"?: { "caps": string[] } }): string[] {
-	return (entry.pending?.caps ?? []).filter((capability) => !covers(entry.caps, capability));
+/** What `entry`'s version grew: the capabilities it can do that the one before it couldn't. */
+function grewIn(entry: { "version"?: string; "grew"?: Record<string, string> }): string[] {
+	return Object.entries(entry.grew ?? {}).filter(([, version]) => version === (entry.version ?? "")).map(([capability]) => capability);
 }
 
 const jsonFlag = { "format": Boolean, "default": false, "doc": "Print the data as JSON instead of a document." } as const;
@@ -171,7 +170,7 @@ export const app = subcommands({
 	"commands": [
 		command({
 			"name": "init",
-			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — accepted as it is now; once it's there, synced with what's installed (a library added is accepted; a new version that can do more is pending until `silo accept`).",
+			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — as it is now; once it's there, synced with what's installed (a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and asks at the call unless the policy allows it).",
 			"config": juvy({ "repo": repoArgument }),
 			"handler": async (config) => {
 				const paths = siloPaths(repoOf(config.get("repo")));
@@ -186,12 +185,12 @@ export const app = subcommands({
 
 				process.stdout.write(created
 					? `Made ${where}: ${imports} imports, ${packages} packages. Commit it: a change to what they can do is drift from here.\n`
-					: `${where} is there (${imports} imports, ${packages} packages) — synced with what's installed: ${changed.added.length} added, ${changed.updated.length} updated, ${changed.pending.length} pending acceptance.\n`);
+					: `${where} is there (${imports} imports, ${packages} packages) — synced with what's installed: ${changed.added.length} added, ${changed.updated.length} updated, ${changed.grew.length} grew.\n`);
 			}
 		}),
 		command({
 			"name": "install",
-			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — then sync the baseline with what's installed: a library added is accepted; a new version that can do more is pending until accepted (`silo accept`). Exits 1 when the install fails or anything is pending.",
+			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — then sync the baseline with what's installed: a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and said — it asks at the call unless the policy allows it. Exits 1 when the install fails.",
 			"config": juvy({
 				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "What to add (none: the project's own dependencies), as the package manager takes them: name, name@range, name@tag." },
 				"min-age": { "format": Number, "default": 7, "doc": "The youngest a version may be, in days." },
@@ -221,7 +220,7 @@ export const app = subcommands({
 					return;
 				}
 
-				// What was installed, against what was accepted.
+				// What was installed, against the baseline.
 				const paths = siloPaths(repo);
 
 				await ensureSiloDir(paths);
@@ -231,52 +230,21 @@ export const app = subcommands({
 				const where = relative.startsWith("..") ? paths.baseline : relative;
 
 				if (created) {
-					process.stdout.write(`Made ${where}: ${Object.keys(baseline.packages).length} packages accepted as they are. Commit it.\n`);
+					process.stdout.write(`Made ${where}: ${Object.keys(baseline.packages).length} packages, as they are. Commit it.\n`);
 
 					return;
 				}
 
 				process.stdout.write(`${where}: ${changed.added.length} added (${changed.added.join(", ") || "none"}), ${changed.updated.length} updated.\n`);
 
-				if (changed.pending.length > 0) {
-					process.stderr.write(`Pending acceptance — a new version can do more than what was accepted of it (until accepted, that asks at the call):\n${changed.pending.map((name) => `  ${name} ${baseline.packages[name]?.pending?.version ?? ""}: can also ${newIn(baseline.packages[name] ?? { "caps": [] }).join(", ")}`).join("\n")}\nAccept with: silo accept ${changed.pending.join(" ")}\n`);
-					process.exitCode = 1;
-				}
-			}
-		}),
-		command({
-			"name": "accept",
-			"description": "Accept a version pending in the baseline: what its code can do is what's accepted of it now — an approval, to commit.",
-			"config": juvy({
-				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "The packages, by name." },
-				"project": projectFlag
-			}),
-			"handler": async (config) => {
-				const paths = siloPaths(projectOf(config.get("project")));
-				const baseline = loadBaseline(paths);
-				const names = config.get("packages") as string[];
-				const none = names.filter((name) => baseline.packages[name]?.pending === undefined);
-
-				for (const name of names) {
-					const entry = baseline.packages[name];
-
-					if (entry?.pending !== undefined) {
-						process.stdout.write(`${name}: ${entry.version ?? "?"} → ${entry.pending.version ?? "?"}, accepting ${newIn(entry).join(", ") || "nothing new"}\n`);
-						baseline.packages = acceptPending(baseline.packages, name);
-					}
-				}
-
-				await saveBaseline(paths, baseline);
-
-				if (none.length > 0) {
-					process.stderr.write(`Nothing pending for: ${none.join(", ")}\n`);
-					process.exitCode = 1;
+				if (changed.grew.length > 0) {
+					process.stderr.write(`Grew — a new version can do more than before (that asks at the call unless your policy allows it):\n${changed.grew.map((name) => `  ${name} ${baseline.packages[name]?.version ?? ""}: can also ${grewIn(baseline.packages[name] ?? { "caps": [] }).join(", ")}`).join("\n")}\n`);
 				}
 			}
 		}),
 		command({
 			"name": "check",
-			"description": "What the runs' packages did that the baseline doesn't account for — a capability not accepted of a package, or a package it doesn't have. Exits 1 when there's any.",
+			"description": "What the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 when there's any.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag }),
 			"handler": (config) => {
 				const paths = siloPaths(repoOf(config.get("repo")));
@@ -293,10 +261,10 @@ export const app = subcommands({
 				if (config.get("json")) {
 					process.stdout.write(JSON.stringify(found, undefined, "\t") + "\n");
 				} else if (found.length === 0) {
-					process.stdout.write("Every package call the runs made is one the baseline accepts.\n");
+					process.stdout.write("Every package call the runs made is one the baseline accounts for.\n");
 				} else {
 					for (const each of found) {
-						const what = each.kind === "new" ? "isn't in the baseline" : `may not ${each.capability}` + (each.accepted === undefined ? "" : ` (accepted at ${each.accepted.version ?? "no version"}: ${each.accepted.caps.join(", ") || "nothing"})`);
+						const what = each.kind === "new" ? "isn't in the baseline" : `may not ${each.capability}` + (each.grew === undefined ? "" : ` (grew in ${each.grew})`) + (each.baseline === undefined ? "" : ` (the baseline has ${each.baseline.version ?? "no version"})`);
 
 						process.stdout.write(`${each.package} ${what} — ${each.capability} ${each.resource}, ${each.how} ×${each.calls}, in ${each.run.user}'s run of ${each.run.entry} (${each.run.endedAt})\n`);
 					}
