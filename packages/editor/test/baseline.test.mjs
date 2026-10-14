@@ -109,3 +109,29 @@ test("one resolved before its dependencies were kept: they're read, its version 
 		globalThis.fetch = realFetch;
 	}
 });
+
+test("a platform build — a native binary for some OS or CPU — is marked, its version resolved as any other's", async () => {
+	const realFetch = globalThis.fetch;
+	const binary = "@typescript/typescript-linux-x64";
+	const old = "2026-07-01T00:00:00Z";
+	const answers = {
+		"https://api.deps.dev/v3/systems/npm/packages/typescript": { "versions": [{ "versionKey": { "version": "7.0.2" }, "publishedAt": old, "isDefault": true }] },
+		[`https://api.deps.dev/v3/systems/npm/packages/${encodeURIComponent(binary)}`]: { "versions": [{ "versionKey": { "version": "7.0.2" }, "publishedAt": old, "isDefault": true }] },
+		"https://registry.npmjs.org/typescript/7.0.2": { "optionalDependencies": { [binary]: "7.0.2" } },
+		[`https://registry.npmjs.org/${binary}/7.0.2`]: { "os": ["linux"], "cpu": ["x64"] }
+	};
+
+	globalThis.fetch = async (url) => (answers[String(url)] === undefined ? Response.error() : Response.json(answers[String(url)]));
+
+	try {
+		assert.deepEqual(await resolveVersions({ "typescript": "^7.0.0" }, { "now": Date.parse("2026-10-14T00:00:00Z") }), {
+			[binary]: { "version": "7.0.2", "range": "7.0.2", "dependencies": [], "platform": true },
+			"typescript": { "version": "7.0.2", "range": "^7.0.0", "dependencies": [binary] }
+		});
+	} finally {
+		globalThis.fetch = realFetch;
+	}
+
+	// A lockfile says so too: its entry's os/cpu.
+	assert.deepEqual(lockedVersions({ "packages": { "": {}, [`node_modules/${binary}`]: { "version": "7.0.2", "os": ["linux"], "cpu": ["x64"], "optional": true } } })[binary], { "version": "7.0.2", "range": "7.0.2", "dependencies": [], "platform": true });
+});

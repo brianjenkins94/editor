@@ -8,8 +8,9 @@
  *
  * The packages are the ones the project loads, by name@version — the editor's resolver's, in `.silo/versions.json` (the
  * workbench keeps it: a package-lock.json's versions, else each package.json's ranges resolved with nothing younger than
- * a week); a change to that file is a change to the dependencies. What each can do is lib's packageCaps over its
- * published tarball — its own files, as installedPackages reads them on desktop, never what it depends on (each
+ * a week); a change to that file is a change to the dependencies. A platform build there (a native binary for some OS
+ * or CPU, marked `platform`) never runs in the editor: it's left out. What each package can do is lib's packageCaps over
+ * its published tarball — its own files, as installedPackages reads them on desktop, never what it depends on (each
  * dependency is its own entry) — read in a worker of this extension's (packages-worker.ts), started for a sync and ended
  * after it. Only a package that's new, or at a new version, is read.
  *
@@ -47,7 +48,7 @@ const SETTLE_MS = 1500;
 const CODE = /\.[cm]?[jt]sx?$/u;
 
 /** What this reads of `.silo/versions.json` (the workbench's versions.ts `VersionsFile`). */
-interface VersionsFile { "from": string; "packages": Record<string, { "version": string; "tarball"?: string }> }
+interface VersionsFile { "from": string; "packages": Record<string, { "version": string; "tarball"?: string; "platform"?: true }> }
 
 /** The package worker, started for one sync: each package's capabilities, by its tarball's URL; `end` stops it. */
 function packageWorker(context: vscode.ExtensionContext): { "capsOf": (url: string) => Promise<string[]>; "end": () => void } {
@@ -191,7 +192,8 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri):
 	const installed: InstalledPackages = {};
 	const wanted: { "name": string; "version": string; "url": string }[] = [];
 
-	for (const [name, { version, tarball }] of Object.entries(versions.packages)) {
+	// (a platform build — a native binary for some OS/CPU — never runs here: not read, not in the baseline)
+	for (const [name, { version, tarball }] of Object.entries(versions.packages).filter(([, each]) => each.platform !== true)) {
 		if (known[name]?.version === version) {
 			installed[name] = { "version": version, "caps": known[name].caps };
 		} else {

@@ -23,11 +23,17 @@ export const MIN_AGE_DAYS = 7;
 
 /** A dependency as resolved: its exact version, the range it was resolved from, and `young` when nothing old enough
  *  satisfied it. `tarball`: a lockfile's `resolved` URL, when it names one. `dependencies`: the names that version
- *  depends on (peers and optional ones too) — what the preview pins its dependencies by (esm.sh's `deps`). */
-export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[] }
+ *  depends on (peers and optional ones too) — what the preview pins its dependencies by (esm.sh's `deps`). `platform`:
+ *  a build for particular operating systems or CPUs only (its manifest's `os`/`cpu` — a native binary, such as each of
+ *  TypeScript 7's `@typescript/typescript-<os>-<arch>`): npm installs only the one for the machine, and none runs in the
+ *  browser, so nothing reads it (the baseline skips it). */
+export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true }
 
-/** What `.silo/versions.json` holds. */
-export interface VersionsFile { "resolvedAt": string; "minAgeDays": number; "from": "package-lock.json" | "package.json"; "packages": Record<string, Resolved> }
+/** What `.silo/versions.json` holds. `format`: 2 since entries say `platform` (an older file's are read again once). */
+export interface VersionsFile { "resolvedAt": string; "minAgeDays": number; "from": "package-lock.json" | "package.json"; "format"?: number; "packages": Record<string, Resolved> }
+
+/** The file's format: 2 marks a platform build (Resolved's `platform`). */
+const FORMAT = 2;
 
 /** One version of a package, and when it was published (`latest`: npm's `latest` tag is it). */
 export interface Published { "version": string; "at": string; "latest"?: boolean }
@@ -87,18 +93,21 @@ function published(name: string): Promise<Published[]> {
 	return publishedOf.get(name)!;
 }
 
+/** Whether a manifest (a registry's, a lockfile entry) is a build for particular operating systems or CPUs only. */
+const isPlatform = (manifest: { "os"?: unknown; "cpu"?: unknown }): boolean => (Array.isArray(manifest.os) && manifest.os.length > 0) || (Array.isArray(manifest.cpu) && manifest.cpu.length > 0);
+
 /** `name`@`version`'s own dependencies — its peers and optional ones too, as npm installs them — by name: their ranges,
- *  from its manifest on npm's registry. */
-async function dependenciesOf(name: string, version: string): Promise<Record<string, string>> {
+ *  from its manifest on npm's registry; and whether it's a platform build (isPlatform). */
+async function manifestOf(name: string, version: string): Promise<{ "dependencies": Record<string, string>; "platform": boolean }> {
 	const response = await fetch(`https://registry.npmjs.org/${name}/${version}`);
 
 	if (!response.ok) {
 		throw new Error(`registry: ${response.status} for ${name}@${version}`);
 	}
 
-	const manifest = await response.json() as Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string> | undefined>;
+	const manifest = await response.json() as Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>> & { "os"?: unknown; "cpu"?: unknown };
 
-	return { ...manifest.peerDependencies, ...manifest.optionalDependencies, ...manifest.dependencies };
+	return { "dependencies": { ...manifest.peerDependencies, ...manifest.optionalDependencies, ...manifest.dependencies }, "platform": isPlatform(manifest) };
 }
 
 /** A dependency range the registry can resolve (not a file:, link:, git or URL dependency, nor an npm: alias). */
@@ -119,11 +128,11 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 
 	for (let at = 0; at < unread.length; at += PARALLEL) {
 		await Promise.all(unread.slice(at, at + PARALLEL).map(async ([name, each]) => {
-			const dependencies = await dependenciesOf(name, each.version).catch(() => undefined);
+			const manifest = await manifestOf(name, each.version).catch(() => undefined);
 
-			if (dependencies !== undefined) {
-				resolved[name] = { ...each, "dependencies": Object.keys(dependencies).toSorted() };
-				queue.push(...Object.entries<string>(dependencies));
+			if (manifest !== undefined) {
+				resolved[name] = { ...each, "dependencies": Object.keys(manifest.dependencies).toSorted(), ...manifest.platform ? { "platform": true as const } : {} };
+				queue.push(...Object.entries<string>(manifest.dependencies));
 			}
 		}));
 	}
@@ -136,10 +145,10 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 				const chosen = choose(await published(name), range, cutoff);
 
 				if (chosen !== undefined && !(name in resolved)) {
-					const dependencies = await dependenciesOf(name, chosen.version);
+					const manifest = await manifestOf(name, chosen.version);
 
-					resolved[name] ??= { "version": chosen.version, "range": range, ...chosen.young ? { "young": true as const } : {}, "dependencies": Object.keys(dependencies).toSorted() };
-					queue.push(...Object.entries<string>(dependencies));
+					resolved[name] ??= { "version": chosen.version, "range": range, ...chosen.young ? { "young": true as const } : {}, "dependencies": Object.keys(manifest.dependencies).toSorted(), ...manifest.platform ? { "platform": true as const } : {} };
+					queue.push(...Object.entries<string>(manifest.dependencies));
 				}
 			} catch {
 				// (left out: what can't be resolved now is resolved the next time)
@@ -151,7 +160,7 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 }
 
 /** The packages a lockfile installs (npm's v2/v3 `packages`), each name once — the first, root before nested. */
-export function lockedVersions(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean } & Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>>> }): Record<string, Resolved> {
+export function lockedVersions(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean; "os"?: unknown; "cpu"?: unknown } & Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>>> }): Record<string, Resolved> {
 	const locked: Record<string, Resolved> = {};
 
 	for (const [path, entry] of Object.entries(lock.packages ?? {}).toSorted(([one], [other]) => one.split("node_modules/").length - other.split("node_modules/").length)) {
@@ -160,7 +169,7 @@ export function lockedVersions(lock: { "packages"?: Record<string, { "version"?:
 		if (path.includes("node_modules/") && entry.version !== undefined && entry.link !== true && !(name in locked)) {
 			const dependencies = Object.keys({ ...entry.peerDependencies, ...entry.optionalDependencies, ...entry.dependencies }).toSorted();
 
-			locked[name] = { "version": entry.version, "range": entry.version, ...entry.resolved?.startsWith("https://") === true ? { "tarball": entry.resolved } : {}, "dependencies": dependencies };
+			locked[name] = { "version": entry.version, "range": entry.version, ...entry.resolved?.startsWith("https://") === true ? { "tarball": entry.resolved } : {}, "dependencies": dependencies, ...isPlatform(entry) ? { "platform": true as const } : {} };
 		}
 	}
 
@@ -198,12 +207,14 @@ export function syncVersions(vscode: typeof vscodeApi, root = "/workspace"): Pro
 
 		const uri = vscode.Uri.file(`${root}/${versionsPath()}`);
 		const before = await read(uri).catch(() => undefined) as VersionsFile | undefined;
-		// (what was resolved stays, but a root whose range changed: resolved again, with what it now depends on)
-		const known = Object.fromEntries(Object.entries(before?.from === "package.json" ? before.packages : {}).filter(([name, each]) => roots[name] === undefined || roots[name] === each.range));
+		// (what was resolved stays, but a root whose range changed: resolved again, with what it now depends on — and a file
+		// from before `platform`: each entry's manifest read again once, its version kept)
+		const kept = Object.entries(before?.from === "package.json" ? before.packages : {}).filter(([name, each]) => roots[name] === undefined || roots[name] === each.range);
+		const known = Object.fromEntries(before?.format === FORMAT ? kept : kept.map(([name, { "dependencies": _, ...each }]) => [name, each]));
 		const packages = lock?.packages === undefined ? await resolveVersions(roots, { "known": known }) : lockedVersions(lock);
-		const now: VersionsFile = { "resolvedAt": new Date().toISOString(), "minAgeDays": MIN_AGE_DAYS, "from": lock?.packages === undefined ? "package.json" : "package-lock.json", "packages": packages };
+		const now: VersionsFile = { "resolvedAt": new Date().toISOString(), "minAgeDays": MIN_AGE_DAYS, "from": lock?.packages === undefined ? "package.json" : "package-lock.json", "format": FORMAT, "packages": packages };
 
-		if (before !== undefined && JSON.stringify(before.packages) === JSON.stringify(packages)) {
+		if (before !== undefined && before.format === FORMAT && JSON.stringify(before.packages) === JSON.stringify(packages)) {
 			return before;
 		}
 
