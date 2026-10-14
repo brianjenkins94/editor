@@ -1170,6 +1170,35 @@ test("search: findFiles keeps to its glob, and to files.exclude unless told not 
 	assert.ok(found.everything.length > found.all.length, "and not when excludes are turned off");
 });
 
+// A default config the editor supplies (tsconfig.json) is the repo's to replace: deleted, the default shows through;
+// written again, the new one is the workspace's — not refused because the default under it is read-only.
+test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
+	const found = await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/tsconfig.json");
+		const text = async () => new TextDecoder().decode(await api.workspace.fs.readFile(uri));
+		const original = await text();
+
+		await api.workspace.fs.delete(uri);
+
+		const fallback = await text().catch((error) => `unreadable: ${error}`);
+		const written = "{ \"compilerOptions\": { \"strict\": true } }\n";
+		const write = await api.workspace.fs.writeFile(uri, new TextEncoder().encode(written)).then(() => "written", (error) => String(error));
+		const after = await text();
+		const readOnly = ((await api.workspace.fs.stat(uri)).permissions ?? 0) & 1;
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(original));
+
+		return { "fallback": fallback.startsWith("unreadable") ? fallback : "default", "write": write, "after": after === written, "readOnly": readOnly, "restored": await text() === original };
+	});
+
+	assert.equal(found.fallback, "default", "deleted, the editor's default shows through");
+	assert.equal(found.write, "written", "a new one can be written");
+	assert.equal(found.after, true, "and it's what's read");
+	assert.equal(found.readOnly, 0, "and it isn't read-only");
+	assert.equal(found.restored, true);
+});
+
 // What the editor keeps, discovered from what was written and read (DISCOVERED-ARCHITECTURE.md): by now the tour has
 // run code (evidence, samples, runs), kept notes, and parsed with BABLR.
 test("stores: discovered from what's written and read", async () => {

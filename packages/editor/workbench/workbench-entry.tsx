@@ -250,12 +250,13 @@ function runCommand(command: string): void {
 // acquired deps, git meta. They survive a `replace` (the editor needs them) and are never sent back to a repo on commit.
 const SCAFFOLDING = new Set(["editor-ambient.d.ts", ".silo", "node_modules", ".git"]);
 
-// Root-level managed configs are OVERRIDABLE DEFAULTS (writable in zen-fs; see workspace-fs.ts). A loaded repo's own
-// copy always wins — it OVERWRITES in place, because clearWorkspace keeps these (never delete-then-write: the VS Code
-// overlay has no copy-up, so once the writable copy is gone the path resolves to the read-only base and a fresh write
-// there is rejected). When a repo ships NONE, the reconciliation differs by how the config is read:
+// Root-level managed configs are OVERRIDABLE DEFAULTS: writable in zen-fs (see workspace-fs.ts), and writable in the
+// priority-1 base too (see the boot below) — the file service refuses a write to a path whose stat says read-only, so a
+// read-only base would make a deleted default impossible to write again. A write goes to the highest writable overlay,
+// zen-fs: the base never changes, and the new file is the workspace's (copy-up). A loaded repo's own copy overwrites in
+// place, because clearWorkspace keeps these. When a repo ships NONE, the reconciliation differs by how the config is read:
 //   FALLTHROUGH_DEFAULTS — TS project configs, read by tsserver via the COMPOSITE file service: DELETE the writable
-//     copy so the read-only priority-1 base shows through.
+//     copy so the priority-1 base shows through.
 //   .gitignore — read straight off zen-fs by isomorphic-git (a priority-1 base would be invisible to it): MATERIALIZE
 //     the git default (gitEngine.DEFAULT_GITIGNORE) into zen-fs.
 //   ESLINT_CONFIGS — kept overridable so a repo's own is writable; eslint's worker lints with the preset
@@ -504,7 +505,8 @@ function maybeBoot(): void {
 	// the base a genuine fall-through DEFAULT layer: a loaded repo that omits its own tsconfig reads the base one.
 	// Editors that reference source open POST-boot (in the .then below, after installWorkspaceFs seeds zen-fs) rather
 	// than via boot's defaultLayout, which can't read them — the file service isn't up until boot resolves.
-	const baseFiles = files.filter((file) => file.readonly === true);
+	// (the overridable defaults among it not read-only there: written again after they're deleted, they go to zen-fs)
+	const baseFiles = files.filter((file) => file.readonly === true).map((file) => (OVERRIDABLE_DEFAULTS.has(file.path.slice((workspaceFolder ?? "/workspace").length + 1)) ? { ...file, "readonly": false } : file));
 
 	boot({
 		// VS Code lays out the whole workbench — minus the menu bar and title bar: the shell around this iframe is the
