@@ -148,10 +148,10 @@ the run does. They're replaced by a capability's origin in the baseline, policy 
 
 | Job | Command line | Editor | Shared in lib |
 |---|---|---|---|
-| Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Syncs the baseline from the registry as dependencies change (today's `workbench/baseline.ts`) | One package analysis, given a package's files however they were read (node_modules or a tarball) |
+| Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Syncs the baseline from the registry as dependencies change (today's `workbench/baseline.ts`) | One package analysis, given a package's files however they were read (node_modules or a tarball): the slice of each package the code imports (the import surface, tree-shaken), as the prototype's audit did |
 | Track | `silo install` (nothing under a week old; reports what each upgrade added) | The resolver takes nothing under a week old; the Exceptions view shows growth and the runs' exceptions | The resolver's age rule, growth, `beyondBaseline` |
 | Remember | `silo coverage` (what committed runs ran); `features`/`history` stay, parked (CHANGE-HISTORY.md) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
-| Gate | `silo run <file>` (new): runs a program with every gated call decided by the policy, and records the run as the editor does; asks at a terminal, fails where it can't ask (CI) | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |
+| Gate | `silo run <file>` (new): Node with silo's `--import` preload (below), every gated call decided by the policy, the run recorded as the editor does; asks at a terminal, fails where it can't ask (CI) | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |
 
 So the command line becomes: `install`, `run`, `coverage`, with `features` and `history` parked. `init` folds into
 `install`; `accept` and `check` go. In CI, the gate is running the project (its tests, its scripts) through `silo run`.
@@ -166,15 +166,28 @@ So the command line becomes: `install`, `run`, `coverage`, with `features` and `
 - **One run record and one attribution**: the local MCP ledger and the shared runs in one shape, and one way, shared
   by `silo coverage` and the history extension, of saying which features ran.
 
+### The desktop gate: a `--import` preload
+
+`silo run <file>` is Node with silo's preload: `node --import <silo>/preload <file>`, or ambient,
+`NODE_OPTIONS="--import <silo>/preload"`, so any Node process (tests, npm scripts, tools) is gated. The prototype built
+it (`enforce/preload.mjs`): it overrides `fetch` for net, and uses Node's `module.registerHooks` (22.15+) to swap in
+wrapped `node:fs` and `node:child_process` as they load. That runs the real files, without bundling, and catches the
+dynamic `import()` and `createRequire` a bundle misses. Two of its parts are in lib already: `enforce/intercept.mjs`
+(which builtin method is which capability; it names the preload as one of its bindings) and `enforce/broker.mjs` (the
+gate's order: the redline, the grants, the decider, with the prompt left pluggable). The preload binding itself, with
+a terminal prompt or failure in CI, is what's missing.
+
+### Decided
+
+- **Analysis: wanted, in both front ends.** The slice of a package the code imports, as the prototype's audit did. The
+  editor needs the import surface for it, which only the command line computes today.
+- **Deobfuscation: later.** It joins the one analysis, in both front ends, when it comes.
+- **The desktop gate is the `--import` preload**, above.
+- **`guard` is not gating.** It's a runtime type check at a boundary (a value against its declared type), reacting
+  through a pluggable handler (record and keep going, throw, or hand to a broker): the runtime target for
+  type-generated asserts, fail-loud's type-derived half. It belongs with fail-loud, under Remember, not with the gate.
+
 ### Decisions to make
 
-- **Deobfuscation in the baseline:** webcrack and wakaru are JavaScript and could run in the browser, but they're heavy.
-  Either both front ends deobfuscate (one analysis), or neither does yet. Not one each: two analyses would write
-  different baselines, and the file would flip with whoever synced it last.
-- **The slice you import (tree-shaking):** finer, but it needs the consumer surface, which only the command line has
-  today. Defer, or bring it to both.
-- **What `silo run` runs on:** tsval (the editor's interpreter: identical gating and evidence, but slower and not every
-  program), the prototype's bundled broker (any program, gating only at what it intercepts), or Node's permission model
-  (coarse, and no prompt).
-- **`guard`:** keep it as the seed of fail-loud's `invariant()`, or remove it with the other leftovers.
+- **`guard`:** keep it for fail-loud's type-derived asserts, or remove it until that's picked up.
 
