@@ -338,6 +338,7 @@ flowchart LR
       n_exthost_iframe["Iframe relay"]
       subgraph c_extHostWorker["Web worker extension host"]
         n_ext_capabilities["capabilities"]
+        n_ext_capabilities_packages["packages"]
         n_ext_cspell_cspell["cspell"]
         n_ext_eslint["eslint"]
         n_ext_event_sheet["event-sheet"]
@@ -415,6 +416,7 @@ flowchart LR
   n_ext_capabilities -->|"reads"| n_store__silo_runs__file__jsonl
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
+  n_ext_capabilities_packages <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_eslint <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet <-.->|"commands"| n_ext_vscode
