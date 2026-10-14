@@ -21,6 +21,7 @@ import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { logger } from "@brianjenkins94/util/logger";
 import { EMPTY_POLICY, given as givenBy, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
+import { watchWorker } from "../../shared/failures";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -519,8 +520,18 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		// cache for an unchanged URL even after a rebuild); harmless in production.
 		this.worker = startWorker(this.runtime, this.id, (event) => {
 			this.onWorker(event);
-		}, (message) => {
-			this.event("output", { "category": "stderr", "output": `[debug-worker] ${message}\n` });
+		}, (message, loaded) => {
+			this.event("output", { "category": "stderr", "output": `[debug-worker] ${loaded ? "uncaught error" : "couldn't load"}: ${message}\n` });
+
+			// One that never loaded never answers: the session ends now, saying why, not when whoever waits on it gives up.
+			if (!loaded && !this.ended) {
+				this.ended = true;
+				this.endAction();
+				this.event("exited", { "exitCode": 1 });
+				this.event("terminated");
+				this.closeWorker();
+				this.settle("terminated");
+			}
 		});
 
 		const trace = this.startAction("launch");
@@ -773,8 +784,9 @@ function loopStartOf(value: unknown): LoopStart | undefined {
  */
 /** A debug worker: started, given its link into the editor's runtime (the workspace runtime — its servers answer the
  *  preview through it, its log and spans are the editor's) — for debug session `session`, when it runs one — then sent
- *  control messages; its events go to `onEvent`, a failure to start or an uncaught error to `onError`. */
-function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onEvent: (event: WorkerEvent) => void, onError: (message: string) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
+ *  control messages; its events go to `onEvent`, a failure to load or an uncaught error to `onError` (with whether it had
+ *  loaded), said as the debug worker's (watchWorker). */
+function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onEvent: (event: WorkerEvent) => void, onError: (message: string, loaded: boolean) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
 	// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module cache for an
 	// unchanged URL even after a rebuild); harmless in production.
 	const url = new URL("./lsp/debug-worker.js", location.href);
@@ -791,9 +803,7 @@ function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onE
 		onEvent(event.data);
 	};
 
-	worker.onerror = (event) => {
-		onError(event.message);
-	};
+	watchWorker(worker, "debug-worker", onError);
 
 	// (posted before it loads: queued, and delivered once its module is evaluated — the runtime link first)
 	post({ "kind": "runtime", "port": link.port }, [link.port]);

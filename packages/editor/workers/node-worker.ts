@@ -18,6 +18,7 @@ import { NETWORK_PROBES } from "../shared/architecture";
 import { identifyWorker } from "../shared/architecture-ids";
 import { ZENFS_NODE } from "../shared/architecture-zenfs";
 
+import { watchWorker } from "../shared/failures";
 import { WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { answerServer, workerTapResponse } from "../shared/workspace-runtime";
 import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "../shared/zenfs-vfs.js";
@@ -176,9 +177,8 @@ async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: n
 		round.abort(new Error("provoke child timed out after " + timeoutMs + "ms"));
 	}, timeoutMs);
 
-	worker.addEventListener("error", (event) => {
-		event.preventDefault();
-		round.abort(new Error(event.message || "provoke child worker error"));
+	watchWorker(worker, "provoke-worker", (message) => {
+		round.abort(new Error("the provoke child failed: " + message));
 	});
 
 	try {

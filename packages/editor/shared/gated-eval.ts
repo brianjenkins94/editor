@@ -12,6 +12,7 @@
  * manifests, plugin metadata, …) can use this. `imports` maps bare specifiers the code `require`s to plain data;
  * anything unlisted resolves to an inert stub so evaluation survives without granting anything.
  */
+import { watchWorker } from "./failures";
 
 export interface GatedEvalResult {
 	/** The value the code exported (default export, else module.exports), structured-clonable only. */
@@ -83,6 +84,7 @@ function ensureWorker(): Worker {
 
 	blobUrl = URL.createObjectURL(new Blob([REALM_SOURCE], { "type": "text/javascript" }));
 	worker = new Worker(blobUrl);
+	watchWorker(worker, "gated-eval");
 	worker.onmessage = (event: MessageEvent) => {
 		const data = event.data as { "id": number; "value"?: unknown; "error"?: string; "attempts"?: string[] };
 		const entry = pending.get(data.id);

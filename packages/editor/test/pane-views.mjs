@@ -9,7 +9,6 @@ import fs from "node:fs";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { after, before, test } from "node:test";
-import { until } from "@brianjenkins94/util/until";
 import { startSession } from "./architecture-harness.mjs";
 
 const FIXTURE = new URL("fixtures/pane-view/", import.meta.url);
@@ -47,7 +46,7 @@ after(async () => {
 });
 
 function eventually(what, probe, timeoutMs = 60_000) {
-	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
+	return session.eventually(what, probe, timeoutMs);
 }
 
 /** The pane's cells, each with its first line and its text. */

@@ -17,6 +17,7 @@ import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { refreshPane } from "@brianjenkins94/run-contract/pane";
 import * as vscode from "vscode";
+import { watchWorker } from "../../shared/failures";
 import { anchorGame } from "./anchors";
 
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
@@ -86,11 +87,8 @@ function recognizer(context: vscode.ExtensionContext): { "project": (root: strin
 				return;
 			}
 
-			// Its module didn't load: this worker never will; the next projection starts another.
+			// (its module didn't load: said and failed by watchWorker)
 			if (failed !== undefined) {
-				markFailed(new Error("the recognizer couldn't start: " + failed));
-				worker = undefined;
-
 				return;
 			}
 
@@ -105,11 +103,11 @@ function recognizer(context: vscode.ExtensionContext): { "project": (root: strin
 			}
 		});
 		// A worker that fails to load (or dies) never answers: fail what's waiting, and start afresh next time.
-		started.addEventListener("error", (event) => {
-			event.preventDefault();
+		watchWorker(started, "recognizer-worker", (message) => {
+			markFailed(new Error("the recognizer failed: " + message));
 
 			for (const call of pending.values()) {
-				call.reject(new Error("the recognizer couldn't start: " + (event.message || "it failed to load")));
+				call.reject(new Error("the recognizer failed: " + message));
 			}
 
 			pending.clear();

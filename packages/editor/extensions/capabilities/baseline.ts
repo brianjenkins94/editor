@@ -32,6 +32,7 @@ import { add, consumerOf, surfaceEntries } from "@brianjenkins94/util/silo/detec
 import { JOIN, joinedBefore, joinsWanted, syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
 import { baselinePath, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
+import { failureText, watchWorker } from "../../shared/failures";
 import { tarballUrl } from "../../shared/tarball-url";
 
 /** How many packages are read at once. */
@@ -82,6 +83,10 @@ function packageWorker(context: vscode.ExtensionContext): { "read": (url: string
 	};
 
 	ready.catch(() => undefined);
+	// (its failure to load, or an uncaught error in it, said as the package worker's)
+	watchWorker(worker, "packages-worker", (message) => {
+		failAll("the package worker failed: " + message);
+	});
 	worker.addEventListener("message", (event: MessageEvent) => {
 		const { id, caps, slices, error, failed, "ready": isReady } = event.data as { "id"?: number; "caps"?: string[]; "slices"?: Record<string, string[] | null>; "error"?: string; "failed"?: string; "ready"?: true };
 
@@ -91,9 +96,8 @@ function packageWorker(context: vscode.ExtensionContext): { "read": (url: string
 			return;
 		}
 
+		// (said and failed by watchWorker)
 		if (failed !== undefined) {
-			failAll("the package worker couldn't start: " + failed);
-
 			return;
 		}
 
@@ -106,10 +110,6 @@ function packageWorker(context: vscode.ExtensionContext): { "read": (url: string
 		} else {
 			call?.resolve({ "caps": caps, "slices": slices ?? {} });
 		}
-	});
-	worker.addEventListener("error", (event) => {
-		event.preventDefault();
-		failAll("the package worker failed: " + (event.message || "it couldn't load"));
 	});
 
 	return {
@@ -332,7 +332,7 @@ export function keepBaseline(context: vscode.ExtensionContext): void {
 				setTimeout(sync, RETRY_MS);
 			}
 		}).catch((error: unknown) => {
-			console.error("[baseline] couldn't be synced:", error);
+			console.error("[baseline] couldn't be synced:", failureText(error));
 		});
 	};
 

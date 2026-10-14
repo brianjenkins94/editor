@@ -15,6 +15,7 @@
 import { createRuntime } from "@brianjenkins94/almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string (bundledNodeServer in build.ts); run below.
 import serverNodeCode from "cspell:server-node";
+import { failureText } from "../../shared/failures";
 import { createZenfsVFS } from "../../shared/zenfs-vfs.js";
 
 // Kept in one place, matched by server-node's DICT_PATH.
@@ -58,5 +59,5 @@ async function main(): Promise<void> {
 // Awaited, so whoever imports this module (the extension's bootstrap, server.js) knows when the server listens: what the
 // client sent before then is held there and handed on once this resolves.
 await main().catch((error: unknown) => {
-	console.error("[cspell/server-host] failed to start cspell server under almostnode", error);
+	console.error("[cspell/server-host] failed to start cspell server under almostnode:", failureText(error));
 });

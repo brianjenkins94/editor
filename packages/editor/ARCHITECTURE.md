@@ -620,3 +620,19 @@ Cross-origin isolation (SharedArrayBuffer) must hold in **every** nested realm. 
 is all same-origin, and the service worker (prod) or dev headers stamp COOP/COEP, so isolation propagates — but a
 new realm (another iframe, a worker) inherits it only under those same conditions. When adding a realm, confirm
 `crossOriginIsolated` there before relying on SAB/Atomics.
+
+## A worker's globals, and its failures
+
+A worker has only a worker's globals, and code that reads one it lacks as it loads (util's env reads `process`) fails
+before anything in the worker runs. A shim at the top of the worker's entry doesn't help when the bundler shares the
+module with another entry: it becomes a chunk of its own, and an entry's imports load before its own code. So a worker
+whose code needs a shim gets a build of its own, with the shim on every chunk (`build.ts`: the package worker, 2b, and
+the tsserver engines); and `test/worker-realms.mjs` loads every `dist/lsp` entry as it's started, in its realm (a bare
+worker, or tsserver's with its `ts` handed in), and names any that can't load.
+
+Whoever starts a worker watches it (`shared/failures.ts`' `watchWorker`): its failure to load, or an uncaught error in
+it, is said once, by its name and with where it happened (`[debug-worker] couldn't load: … (…/lsp/env-….js:12)`), and
+kept from going on up — unwatched, it reaches the realm that started it and that realm's starter in turn, each saying it
+under its own name. An extension's bootstrap reports its module's failure the same way (`{ failed }`, with the stack).
+What waits on a worker that never loaded stops waiting: a debug session ends, and the architecture harness fails the
+wait in progress with the realm's reason instead of timing out.

@@ -9,6 +9,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunRegistry } from "./runs";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
+import { watchWorker } from "../shared/failures";
 import { createRunRegistry } from "./runs";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
@@ -81,7 +82,10 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 	const rpc = createRpcClient(hub); // for request/reply calls into the worker (e.g. the preview bridge relay)
 
 	// The dev-server worker: the preview dev servers, answering their requests — started once, never terminated.
-	hub.link(portTransport(new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" })));
+	const nodeWorker = new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" });
+
+	watchWorker(nodeWorker, "node-worker");
+	hub.link(portTransport(nodeWorker));
 
 	// A run: launched under the tsval debug adapter (ext host), on `node.out/exit.<runId>` — the adapter (or its
 	// terminate) relays onto them. The adapter spawns its own debug worker.

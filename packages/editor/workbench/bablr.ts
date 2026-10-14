@@ -23,6 +23,7 @@ import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations"
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs } from "@zenfs/core";
+import { watchWorker } from "../shared/failures";
 import { blobText, status } from "./git-engine";
 
 /** BABLR's grammar doesn't take a text: `message` is why. */
@@ -95,9 +96,8 @@ export function startBablr(hub: Hub): Bablr {
 	const rpc = createRpcClient(hub);
 	const dead = new AbortController();
 
-	worker.addEventListener("error", (event) => {
-		event.preventDefault();
-		dead.abort(new Error("BABLR worker failed: " + (event.message || "could not load")));
+	watchWorker(worker, "bablr-worker", (message) => {
+		dead.abort(new Error("BABLR worker failed: " + message));
 	});
 
 	// One call at a time: BABLR is slow, and the newest request is the one someone is waiting on.

@@ -12,7 +12,6 @@ import { readFile } from "node:fs/promises";
 import * as http from "node:http";
 import { after, before, test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
-import { until } from "@brianjenkins94/util/until";
 import { startSession } from "./architecture-harness.mjs";
 
 const CONTRIB = new URL("../../../contrib/", import.meta.url);
@@ -54,7 +53,7 @@ after(async () => {
 
 /** Poll `probe` (in this process) until it's truthy, waiting the way the page does. */
 function eventually(what, probe, timeoutMs = 60_000) {
-	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
+	return session.eventually(what, probe, timeoutMs);
 }
 
 test("Run starts editor-contrib's interpreter: a run in its worker, the program read through the editor's runtime, telling its values, coverage, effects and end", async () => {

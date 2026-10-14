@@ -47,6 +47,7 @@ import tsvalManifest from "../extensions/tsval/package.json";
 import typeQueriesManifest from "../extensions/type-queries/package.json";
 import bridgeManifest from "../extensions/bridge/package.json";
 import { NETWORK_PROBES } from "../shared/architecture";
+import { failureText } from "../shared/failures";
 import { classifyUrl, identifyWorker } from "../shared/architecture-ids";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
@@ -181,6 +182,22 @@ window.addEventListener("unhandledrejection", (event) => {
 	});
 });
 
+/**
+ * An extension's worker, as a classic bootstrap (an extension's workers start classic) that imports the module worker at
+ * `lsp/<file>` by its URL, so its own imports resolve beside it. A module that didn't load is said back as `{ failed }`
+ * with its stack, which names where it failed (shared/failures.ts' watchWorker says it). `hold`: messages that arrive
+ * before the module listens are kept, and handed on once it has loaded (a classic script is done at once, so a client's
+ * first messages would arrive before the module worker listens).
+ */
+function workerBootstrap(file: string, hold = false): string {
+	const url = JSON.stringify(new URL("./lsp/" + file, location.href).href);
+	const failed = "(error) => { postMessage({ \"failed\": String(error && error.stack || error) }); }";
+
+	return "data:text/javascript," + encodeURIComponent(hold
+		? `const held = []; const hold = (event) => { held.push(event.data); }; addEventListener("message", hold); import(${url}).then(() => { removeEventListener("message", hold); for (const data of held) { dispatchEvent(new MessageEvent("message", { "data": data })); } }, ${failed});`
+		: `import(${url}).catch(${failed});`);
+}
+
 /** Readable text for a caught `unknown` — Error message when it is one, a string as-is, else JSON (avoids
  *  the `[object Object]` a bare `String(error)` gives, and keeps relayed log attrs meaningful). */
 function errText(error: unknown): string {
@@ -220,7 +237,7 @@ function runCommand(command: string): void {
 	const pending = vscodeApi?.commands?.executeCommand(command) as Promise<unknown> | undefined;
 
 	pending?.catch((error: unknown) => {
-		console.error("[vscode] command failed", command, error);
+		console.error("[vscode] command failed", command, failureText(error));
 	});
 }
 
@@ -703,7 +720,7 @@ function maybeBoot(): void {
 			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/index.js", capabilitiesPluginUrl);
 			// Its package worker, for the dependency baseline (baseline.ts): a bootstrap importing the module worker by its URL, as
 			// the event sheet's recognizer is started.
-			capabilitiesExt.registerFileUrl("./packages.js", "data:text/javascript," + encodeURIComponent(`import(${JSON.stringify(new URL("./lsp/packages-worker.js", location.href).href)}).catch((error) => { postMessage({ "failed": String(error) }); });`));
+			capabilitiesExt.registerFileUrl("./packages.js", workerBootstrap("packages-worker.js"));
 
 			// History: what your edits change, as you make them — a TS server plugin that reads the program tsserver holds with
 			// its own `ts` (served beside its engine, like eslint's and capabilities'), and an extension that replays each pause
@@ -731,7 +748,7 @@ function maybeBoot(): void {
 			eventSheetExt.registerFileUrl("./view.js", new URL(eventSheetViewPath, location.href).href);
 			// (An extension's workers start classic: recognizer.js is a bootstrap importing the module worker by its URL, so the
 			// worker's own imports — the shared ts chunk — resolve beside it.)
-			eventSheetExt.registerFileUrl("./recognizer.js", "data:text/javascript," + encodeURIComponent(`import(${JSON.stringify(new URL("./lsp/recognizer-worker.js", location.href).href)}).catch((error) => { postMessage({ "failed": String(error) }); });`));
+			eventSheetExt.registerFileUrl("./recognizer.js", workerBootstrap("recognizer-worker.js"));
 
 			// Running: what's running and how it ended, from terminal shell integration, debug sessions and tasks — public
 			// API only, as a desktop extension would see it.
@@ -757,7 +774,7 @@ function maybeBoot(): void {
 			// (an extension's workers start classic: server.js imports the module worker. A classic script is done at once, so
 			// the client's first messages arrive before the server listens: held until the import resolves — server-host
 			// awaits its server's start — then handed on.)
-			cspellExt.registerFileUrl("./server.js", "data:text/javascript," + encodeURIComponent(`const held = []; const hold = (event) => { held.push(event.data); }; addEventListener("message", hold); import(${JSON.stringify(new URL("./lsp/server-host.js", location.href).href)}).then(() => { removeEventListener("message", hold); for (const data of held) { dispatchEvent(new MessageEvent("message", { "data": data })); } }, (error) => { console.error("[cspell] server failed to load", error); });`));
+			cspellExt.registerFileUrl("./server.js", workerBootstrap("server-host.js", true));
 
 			// And any from outside the editor, by URL — the site's own (`extensions.json`) and `?extension=`'s:
 			// editor-contrib's interpreters and renderers (contributed-extensions.ts).

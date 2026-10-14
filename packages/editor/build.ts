@@ -3,12 +3,13 @@ import { createHash } from "node:crypto";
 import { builtinModules, createRequire } from "node:module";
 import * as path from "node:path";
 import * as url from "node:url";
+import { stripVTControlCharacters } from "node:util";
 import { isCI, isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
-import { build } from "vite";
+import { build, createLogger } from "vite";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
 import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
@@ -27,6 +28,24 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
 // Every node builtin, bare (`fs`) and `node:`-prefixed — kept external so almostnode resolves them to its own
 // shims at runtime instead of vite bundling/polyfilling them.
 const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
+
+/** Warnings that are known, and so by design, that a build says over and over: util's node builtins (its env and fs work
+ *  in Node or a browser, and its self-tests' `node:assert` is imported in blocks a browser never runs), and the direct `eval`
+ *  of almostnode and vm-browserify (each emulates Node's vm). */
+const KNOWN_WARNINGS = [/has been externalized for browser compatibility, imported by "[^"]*[\\/]@brianjenkins94[\\/]util[\\/]/u, /\[EVAL\][\s\S]*[\\/](?:almostnode|vm-browserify)[\\/]/u];
+
+/** Vite's logger, less the known warnings: what's left is worth reading — in CI, where it's the log a failure is read in. */
+export const logger = createLogger();
+
+for (const level of ["warn", "warnOnce"] as const) {
+	const say = logger[level].bind(logger);
+
+	logger[level] = (message, options) => {
+		if (!KNOWN_WARNINGS.some((known) => known.test(stripVTControlCharacters(message)))) {
+			say(message, options);
+		}
+	};
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Virtual-module bundlers (extensions + almostnode node servers), formerly entry.config.ts helpers.
@@ -72,7 +91,7 @@ function bundledModule(folder: string, file: string, id: string, format: "cjs" |
 					"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
 					// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
 					// into siblings we don't capture (we grab only the entry chunk as a string).
-					"rollupOptions": { "external": externals, "output": { "inlineDynamicImports": true, ...banner === undefined ? {} : { "banner": banner } } }
+					"rollupOptions": { "external": externals, "output": { "codeSplitting": false, ...banner === undefined ? {} : { "banner": banner } } }
 				}
 			}) as RollupOutput[];
 
@@ -292,6 +311,7 @@ function dockviewCssPlugin(): Plugin {
 export async function preBuild(): Promise<void> {
 	// 1. Workbench iframe entry (workbench-entry.tsx → dist/workbench.js). monaco kept external → ./main.js.
 	await buildPackage(root, {
+		"customLogger": logger,
 		// Relative, like every other build here: the workbench is served under /__vscode__/, and with the default "/"
 		// Vite's dynamic-import preload helper asked for a lazy chunk's dependencies at the SITE root (the terminal's
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
@@ -326,6 +346,7 @@ export async function preBuild(): Promise<void> {
 
 	// 2. LSP host + tsval debug workers (dist/lsp/), almostnode-hosted — node builtins external.
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		// `dedupe` collapses the two physical typescript installs (almostnode's own dep + tsval's) to ONE, so the
 		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
@@ -379,6 +400,7 @@ export async function preBuild(): Promise<void> {
 
 	// 3. eslint engine (dist/lsp/eslint-engine.js) — typescript externalized to the shim, node builtins polyfilled.
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		"resolve": {
 			"alias": [
@@ -421,6 +443,7 @@ export async function preBuild(): Promise<void> {
 	// util's env, which reads `process` as it loads), so every chunk carries the shim — shared with the debug worker, a
 	// chunk of util would load before the shim on either's entry.
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		"build": {
 			"outDir": "dist",
@@ -441,6 +464,7 @@ export async function preBuild(): Promise<void> {
 	// policy), run INSIDE the capabilities tsserver plugin, which hands it tsserver's own `ts` and SourceFile: it reads
 	// TypeScript's tree and parses nothing itself, so no parser is bundled (no typescript, no oxc).
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		"resolve": { "conditions": ["browser", "import", "default"] },
 		"plugins": [polyfillNode(), capabilitiesTsPlugin()],
@@ -465,6 +489,7 @@ export async function preBuild(): Promise<void> {
 	// the ~7MB bundled copy (16.7MB → a few hundred KB). The canary classifies by injected-stand-in identity: it sees
 	// calls as they're made, aliases included, not by their shape in the tree.
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		"resolve": {
 			"alias": [
@@ -491,6 +516,7 @@ export async function preBuild(): Promise<void> {
 	// INSIDE the history tsserver plugin with tsserver's own `ts`: `typescript` is EXTERNALIZED to the ts-external shim
 	// (the plugin sets globalThis.__historyTs first), and no oxc — ts-analysis loads only silo's pure model and graph.
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		"resolve": {
 			"alias": [{ "find": /^typescript(\/.*)?$/u, "replacement": resolvePath("./extensions/history/ts-external.js") }],
@@ -513,6 +539,7 @@ export async function preBuild(): Promise<void> {
 
 	// 4. COI service worker (→ docs/coi-serviceworker.js), single-file ES module.
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		"build": {
 			"outDir": "../../docs",
@@ -520,7 +547,7 @@ export async function preBuild(): Promise<void> {
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
 				"input": { "coi-serviceworker": resolvePath("./coi-serviceworker.js") },
-				"output": { "inlineDynamicImports": true }
+				"output": { "codeSplitting": false }
 			}
 		}
 	});
@@ -558,6 +585,7 @@ function shellPreloadPlugin(): Plugin {
  *  so it lays down alongside the published package tarballs (docs/*.tgz). */
 async function hostBuild(): Promise<void> {
 	await buildPackage(root, {
+		"customLogger": logger,
 		"base": "./",
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },

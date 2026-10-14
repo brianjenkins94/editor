@@ -9,7 +9,6 @@
  */
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { until } from "@brianjenkins94/util/until";
 
 import { parseVirtual } from "../shared/virtual-path.ts";
 import { DEBUG_MCP_PORT, hasLabel, startSession } from "./architecture-harness.mjs";
@@ -155,7 +154,7 @@ after(async () => {
 
 /** Poll `probe` (in this process) until it's truthy, waiting the way the page does. */
 function eventually(what, probe, timeoutMs = 60_000) {
-	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
+	return session.eventually(what, probe, timeoutMs);
 }
 
 /** The frame the app nests in its page. */

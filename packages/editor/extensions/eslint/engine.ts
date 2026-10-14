@@ -16,6 +16,7 @@ import * as tsParserModule from "@typescript-eslint/parser";
 import { Linter } from "eslint/universal";
 import presetData from "eslint:preset";
 import presetPlugins from "eslint:preset-plugins";
+import { failureText } from "../../shared/failures";
 import { gatedEvalRealm } from "../../shared/gated-eval";
 
 const linter = new Linter();
@@ -341,7 +342,7 @@ export function fixText(text: string, filename: string): { "output": string; "fi
 
 		return { "output": result.output, "fixed": result.fixed };
 	} catch (error) {
-		console.error("[eslint-engine] verifyAndFix failed", error);
+		console.error("[eslint-engine] verifyAndFix failed:", failureText(error));
 
 		return { "output": text, "fixed": false };
 	}

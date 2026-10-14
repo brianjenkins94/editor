@@ -6,6 +6,7 @@
  */
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
+import { failureText, watchWorker } from "../../shared/failures";
 
 // The documents it checks. The react language ids matter: a .tsx file's languageId is `typescriptreact`, and a client
 // only forwards documents its selector names.
@@ -18,13 +19,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	// (named, so the architecture view and the memory gauge call it cspell)
 	const worker = new Worker(vscode.Uri.joinPath(context.extensionUri, "server.js").toString(true), { "name": "cspell" });
 
-	worker.addEventListener("error", (event) => {
-		console.error("[cspell] worker error:", event.message);
-	});
+	watchWorker(worker, "cspell");
 
 	client = new LanguageClient("cspell", "cspell", worker, { "documentSelector": DOCUMENTS });
 	client.start().catch((error: unknown) => {
-		console.error("[cspell] language client failed to start", error);
+		console.error("[cspell] language client failed to start:", failureText(error));
 	});
 }
 

@@ -16,6 +16,7 @@
 import type * as vscodeApi from "vscode";
 import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
+import { failureText } from "../shared/failures";
 
 /** The youngest a version may be, in days. */
 export const MIN_AGE_DAYS = 7;
@@ -230,7 +231,7 @@ export function syncVersions(vscode: typeof vscodeApi, root = "/workspace"): Pro
 
 		return now;
 	}).catch((error: unknown) => {
-		console.error("[versions] couldn't be resolved:", error);
+		console.error("[versions] couldn't be resolved:", failureText(error));
 
 		return undefined;
 	});

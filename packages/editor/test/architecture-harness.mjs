@@ -36,14 +36,18 @@ async function reachable(url) {
 }
 
 /** Spawn `command` and resolve once its output contains `ready`. */
-async function startProcess(command, args, cwd, ready) {
+async function startProcess(command, args, cwd, ready, { echoStdout = true } = {}) {
 	// Its own process group, so close() can stop what npx starts under it (tsx → the dev server), not just npx: an
 	// orphaned dev server keeps :5173, and the next session's starts beside it on another port.
 	const child = spawn(command, args, { "cwd": cwd, "stdio": ["pipe", "pipe", "pipe"], "detached": true });
 
 	// In CI there's no one to watch it: what the dev server / debug-mcp says is the only clue when a session won't boot.
+	// (`echoStdout: false`: a stdout that's a protocol — debug-mcp's is MCP's, a JSON-RPC message per line — isn't.)
 	if (process.env.CI !== undefined) {
-		child.stdout.pipe(process.stderr);
+		if (echoStdout) {
+			child.stdout.pipe(process.stderr);
+		}
+
 		child.stderr.pipe(process.stderr);
 	}
 
@@ -83,6 +87,13 @@ export const hasLabel = (one, other, label) => (snapshot) => between(snapshot, o
 
 // ── one dev server for a whole run ────────────────────────────────────────────────────────────────────────────
 
+/** A resource that's missing by design, not by failure: the page's icon, and the `.d.ts` candidates the editor's type
+ *  loader tries (module resolution asks for files that may not exist). Not counted among the page's errors. */
+const EXPECTED_MISSES = [/\/favicon\.ico$/u, /\/workspace\/node_modules\/.+\.d\.ts(?:\?|$)/u];
+
+/** A realm that couldn't load, as its starter says it (shared/failures.ts' watchWorker): `[debug-worker] couldn't load: …`. */
+const COULD_NOT_LOAD = /\[([\w-]+)\] couldn't load: /u;
+
 /** The dev server the run's global setup started, if it had to: every suite file's sessions find it answering and use it. */
 let runServer;
 
@@ -116,7 +127,7 @@ export async function startSession(options = {}) {
 	const debugMcpPort = options.debugMcpPort ?? DEBUG_MCP_PORT;
 
 	if (options.debugMcp === true) {
-		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(debugMcpPort)], new URL("../../debug-mcp/", import.meta.url), "listening"));
+		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(debugMcpPort)], new URL("../../debug-mcp/", import.meta.url), "listening", { "echoStdout": false }));
 	}
 
 	// (`chromium`: Playwright launch options for the browser — the performance suite's full build and eager measurement.)
@@ -138,6 +149,8 @@ export async function startSession(options = {}) {
 	const page = await context.newPage();
 	// What went wrong in the page, kept to say why when the editor doesn't boot (and printed as it happens in CI).
 	const pageErrors = [];
+	// Who hears of a realm that couldn't load: each wait in progress, which fails on it at once (failFast).
+	const realmFailed = new Set();
 
 	page.on("pageerror", (error) => {
 		pageErrors.push(error.message);
@@ -148,10 +161,26 @@ export async function startSession(options = {}) {
 	});
 	page.on("console", (message) => {
 		if (message.type() === "error") {
-			pageErrors.push(message.text());
+			// (a resource that failed says only its status: where it was is the message's location)
+			const { url } = message.location();
+			const missing = message.text().startsWith("Failed to load resource");
+
+			if (missing && EXPECTED_MISSES.some((expected) => expected.test(url))) {
+				return;
+			}
+
+			const text = missing && url !== "" ? `${message.text()}: ${url}` : message.text();
+
+			pageErrors.push(text);
+
+			if (COULD_NOT_LOAD.test(text)) {
+				for (const fail of realmFailed) {
+					fail(text);
+				}
+			}
 
 			if (process.env.CI !== undefined) {
-				console.error("[page console]", message.text());
+				console.error("[page console]", text);
 			}
 		}
 	});
@@ -206,13 +235,37 @@ export async function startSession(options = {}) {
 		clearInterval(looking);
 	});
 
+	/**
+	 * `waiting`, unless a realm says it couldn't load meanwhile: then it fails at once, saying which and why. Whatever was
+	 * awaited may come from that realm (a debug run's worker that never loaded never answers), and a wait that runs out
+	 * its timeout says only that it timed out.
+	 */
+	function failFast(what, waiting) {
+		let stop;
+		const failed = new Promise((_resolve, reject) => {
+			stop = (text) => {
+				reject(new Error(`gave up waiting for ${what}: ${text.slice(text.search(COULD_NOT_LOAD))}`));
+			};
+			realmFailed.add(stop);
+		});
+
+		return Promise.race([waiting, failed]).finally(() => {
+			realmFailed.delete(stop);
+		});
+	}
+
 	/** Poll what the view observed until `ready(snapshot)` holds. */
 	async function observed(what, ready, timeoutMs = TIMEOUT_MS) {
-		return until(what, async () => {
+		return failFast(what, until(what, async () => {
 			const seen = await look();
 
 			return seen !== undefined && ready(seen) ? seen : undefined;
-		}, { "timeoutMs": timeoutMs, "intervalMs": 500, "sleep": (ms) => page.waitForTimeout(ms) });
+		}, { "timeoutMs": timeoutMs, "intervalMs": 500, "sleep": (ms) => page.waitForTimeout(ms) }));
+	}
+
+	/** Poll `probe` (in this process) until it's truthy, waiting the way the page does — failing fast as `observed` does. */
+	function eventually(what, probe, timeoutMs = 30_000) {
+		return failFast(what, until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => page.waitForTimeout(ms) }));
 	}
 
 	// Preview windows float over the workbench (they live in the shell), so drive it by keyboard from a spot they
@@ -230,6 +283,18 @@ export async function startSession(options = {}) {
 
 	async function shutdown() {
 		await browser.close();
+
+		// In CI, the session's errors once more, each once, where the failing tests are reported: said as they happened,
+		// they're spread through everything else the run printed.
+		if (process.env.CI !== undefined && pageErrors.length > 0) {
+			const counts = new Map();
+
+			for (const text of pageErrors) {
+				counts.set(text, (counts.get(text) ?? 0) + 1);
+			}
+
+			console.error(`[page errors] this session's, ${counts.size} distinct:\n` + [...counts].map(([text, count]) => `  ${count === 1 ? "" : `×${count} `}${text}`).join("\n"));
+		}
 
 		for (const child of processes) {
 			try {
@@ -259,6 +324,7 @@ export async function startSession(options = {}) {
 		"page": page,
 		"workbench": workbench,
 		"until": observed,
+		"eventually": eventually,
 		"snapshot": () => snapshot,
 		"topologySeen": () => topologySeen,
 		/** Everything seen all session: the last snapshot, with every node and channel any look saw. */

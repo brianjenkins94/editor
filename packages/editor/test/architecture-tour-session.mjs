@@ -7,7 +7,6 @@
 import * as path from "node:path";
 import { after, before } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
-import { until } from "@brianjenkins94/util/until";
 
 import { alive, startSession } from "./architecture-harness.mjs";
 
@@ -46,9 +45,10 @@ export function tour(name, options = {}) {
 	});
 }
 
-/** Poll `probe` (in this process) until it's truthy, waiting the way the page does. */
+/** Poll `probe` (in this process) until it's truthy, waiting the way the page does (the session's: failing at once when
+ *  a realm couldn't load). */
 export function eventually(what, probe, timeoutMs = 30_000) {
-	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
+	return session.eventually(what, probe, timeoutMs);
 }
 
 /** The Rules tree's rule rows (VS Code's own tree view, the capabilities extension's): each one's label, as shown. */

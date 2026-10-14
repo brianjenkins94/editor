@@ -1,6 +1,6 @@
 import { polyfillNodeRolldown } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { createServer } from "vite";
-import { hostPlugins, preBuild, root } from "./build";
+import { hostPlugins, logger, preBuild, root } from "./build";
 
 /**
  * Dev server for packages/editor. Mirrors what `vite` (CLI, with the old vite.config.ts) did: the workbench
@@ -24,6 +24,7 @@ const brotliStub = {
 };
 
 const server = await createServer({
+	"customLogger": logger,
 	"root": root,
 	"base": "./",
 	"configFile": false,
