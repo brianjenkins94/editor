@@ -538,7 +538,6 @@ flowchart LR
 | Shell | git | `git.changed` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
 | Workbench | annotations | `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
-| Workbench | baseline | `baseline.ready()` |
 | Workbench | capability | `capability.ask` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |

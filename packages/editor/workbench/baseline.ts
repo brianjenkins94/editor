@@ -1,7 +1,7 @@
 /**
  * The dependency-capability baseline (`.silo/baseline.json`, lib's util/silo/audit.ts `Baseline`), kept by the editor —
- * its `silo init`: what each library the project depends on can do, read off its own code as it's added. Made on the
- * first run that keeps evidence, then synced as the dependencies change (lib's syncPackages): a library added is taken
+ * its `silo init` and `silo install`: what each library the project depends on can do, read off its own code as it's
+ * added. Made as the project opens, then synced as the dependencies change (lib's syncPackages): a library added is taken
  * as it is; a new version that can do more records what it grew, and that asks at the call unless the policy allows it.
  * Runs never change it — a compromised version would approve itself; what's decided at the call, beyond it, is
  * recorded in the runs instead (their effects' `decided`).
@@ -13,6 +13,9 @@
  * node_modules to walk here: the editor serves packages from a CDN.
  *
  * `consumer` (what the project's own code imports, and how) isn't made here — desktop silo's establishBaseline does.
+ *
+ * It's optional: `silo.baseline` off, none is made or synced, and the policy decides every package's call — what's lost
+ * is tracking how the dependencies change over time, and how the project's use of them does.
  */
 import type { BaselinePackages, InstalledPackages } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
@@ -58,9 +61,8 @@ interface BaselineFile { "consumer"?: unknown; "packages"?: BaselinePackages }
  * asks at the call unless the policy allows it. What a package can do is read from its tarball only when it's new or its
  * version is — the version in the baseline is known. Runs never change it.
  * A package that can't be read is left out, and said: its calls will read as a package the baseline doesn't have.
- * `make`: false syncs one that's there and makes none (a dependency changing in a workspace that doesn't keep one).
  */
-export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/workspace"): Promise<void> {
+function syncBaseline(vscode: typeof vscodeApi, root = "/workspace"): Promise<void> {
 	if (queued) {
 		return syncing;
 	}
@@ -72,10 +74,6 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 		const uri = vscode.Uri.file(`${root}/${baselinePath()}`);
 		const read = async (file: vscodeApi.Uri): Promise<unknown> => JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(file))) as unknown;
 		const existing = await read(uri).catch(() => undefined) as BaselineFile | undefined;
-
-		if (existing === undefined && !make) {
-			return;
-		}
 
 		const known = existing?.packages ?? {};
 		// (the versions everything loads — the resolver's: versions.ts)
@@ -128,28 +126,31 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 	return syncing;
 }
 
-/** The baseline as a run's package call is decided: a sync under way finished, or one made if there's none — running
- *  is what makes a workspace keep one. Resolves either way: with none, the call is asked. */
-export async function baselineReady(vscode: typeof vscodeApi, root = "/workspace"): Promise<void> {
-	const there = await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${root}/${baselinePath()}`))).then(() => true, () => false);
-
-	await (there ? syncing : syncBaseline(vscode, true, root));
-}
-
-/** Keep the versions (versions.ts) and `.silo/baseline.json` up to the project's dependencies: both resolved again as a
- *  package.json or package-lock.json changes — the baseline when there's one (made by a run: baselineReady,
- *  or the first that keeps evidence) — and the versions now, so a preview started before any run pins them. */
+/** Keep the versions (versions.ts) and `.silo/baseline.json` up to the project's dependencies: the baseline made as
+ *  the project opens (the editor's silo init) and both resolved again as a package.json or package-lock.json changes
+ *  (its silo install) — the versions now, so a preview started before any run pins them. The baseline only while
+ *  `silo.baseline` is on: turned on, it's made then. */
 export function watchBaseline(vscode: typeof vscodeApi): vscodeApi.Disposable {
+	const keeping = (): boolean => vscode.workspace.getConfiguration("silo").get<boolean>("baseline") !== false;
+	const sync = (): void => {
+		void syncVersions(vscode).then(async () => (keeping() ? syncBaseline(vscode) : undefined));
+	};
+
 	const watcher = vscode.workspace.createFileSystemWatcher("**/{package.json,package-lock.json}");
 	const changed = (uri: vscodeApi.Uri): void => {
 		if (!uri.path.includes("/node_modules/")) {
-			void syncVersions(vscode).then(async () => syncBaseline(vscode, false));
+			sync();
 		}
 	};
 
-	void syncVersions(vscode);
+	sync();
 
-	const listeners = [watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed)];
+	const configured = vscode.workspace.onDidChangeConfiguration((event) => {
+		if (event.affectsConfiguration("silo.baseline") && keeping()) {
+			sync();
+		}
+	});
+	const listeners = [watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed), configured];
 
 	return { "dispose": () => {
 		for (const listener of [...listeners, watcher]) {

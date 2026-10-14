@@ -29,13 +29,19 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 ## The model
 
 - **Baseline: static facts.** When a library is added, its code is analyzed and what it can do is recorded. The
-  baseline changes when dependencies change, never because of runs.
+  baseline is made when silo starts keeping `.silo/` (`silo init`; in the editor, as a project opens), recomputed after
+  each install (in the editor, as the dependencies change), and spot-checked at each call: an entry of another version
+  than the one running says nothing of it. It changes when dependencies change, never because of runs.
+- **Optional.** A project can go without one. Then the policy decides every package call, and what's lost is tracking:
+  how the dependencies change over time, and how the project's use of them does. A missing baseline should be rare,
+  and isn't an error.
 - **Policy: your stance.** Your default, or your org's (the shared contract, then yours), for the trust-on-first-use
   prompt: whether a call outside what the baseline says is allowed, denied or asked about.
 - **Exceptions: in the run.** When a call's outcome differs from the policy's default, the run records it in its
   `runs/<user>.jsonl` envelope. "Always allow" also updates your policy, and it stays in the run record in case you
   never commit your policy file.
-- **At the call.** A package's call outside its baseline asks, the same as the program's own calls.
+- **At the call.** A package's call outside its baseline (or with no baseline) is the policy's to decide, the same as
+  the program's own calls: allowed, denied, or asked; and recorded in the run, however it was decided.
 
 ## The four jobs, and what exists for each
 
@@ -180,14 +186,15 @@ What this asks of the design:
 3. **The editor computes your usage.** It's half the join, and only the command line has it now. In the editor it can
    come from the TypeScript server it already runs (the import surface is a reading of your code, which is analysis's
    job: TypeScript 7, not BABLR).
-4. **Nothing outside the join runs unasked.** Wherever a package's call can't be decided (no baseline yet, nobody to
-   ask), it's refused, as a preview's are, not just counted.
+4. **Nothing outside the join runs undecided.** A package's call the baseline doesn't cover (none kept, or an entry of
+   another version) goes to the policy, and the run records how it went. Where nobody can be asked (a live run, CI), the
+   policy decides alone, and what it would ask about is refused.
 
 ### The jobs, reconciled
 
 | Job | Command line | Editor | Shared in lib |
 |---|---|---|---|
-| Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Syncs the baseline from the registry as dependencies change (today's `workbench/baseline.ts`) | One package analysis, given a package's files however they were read (node_modules or a tarball): the slice of each package the code imports (the import surface, tree-shaken), as the prototype's audit did |
+| Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Makes the baseline from the registry as a project opens, and syncs it as dependencies change (`workbench/baseline.ts`; the `silo.baseline` setting turns it off) | One package analysis, given a package's files however they were read (node_modules or a tarball): the slice of each package the code imports (the import surface, tree-shaken), as the prototype's audit did |
 | Track | `silo install` (nothing under a week old; reports what each upgrade added) | The resolver takes nothing under a week old; the Exceptions view shows growth and the runs' exceptions | The resolver's age rule, growth, `beyondBaseline` |
 | Remember | `silo coverage` (what committed runs ran); `features`/`history` stay, parked (CHANGE-HISTORY.md) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
 | Gate | `silo run <file>` (new): Node with silo's `--import` preload (below), every gated call decided by the policy, the run recorded as the editor does; asks at a terminal, fails where it can't ask (CI) | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |

@@ -16,6 +16,16 @@
     "onLanguage:javascriptreact"
   ],
   "contributes": {
+    "configuration": {
+      "title": "Dependency baseline",
+      "properties": {
+        "silo.baseline": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Keep `.silo/baseline.json`: what each dependency's own code can do, made as the project opens and synced as its dependencies change. A package's call within it runs; one outside it is decided by your policy. Off, none is made and the policy decides every package's call: you lose tracking how your dependencies change over time, and how your use of them does."
+        }
+      }
+    },
     "typescriptServerPlugins": [
       {
         "name": "capabilities-ts-plugin",

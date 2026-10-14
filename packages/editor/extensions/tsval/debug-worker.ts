@@ -376,7 +376,8 @@ function packageOf(dir: string): string {
 
 /** The dependency baseline (`.silo/baseline.json`, read as a run starts): what each package's own code could do when the
  *  library was added (what a newer version grew isn't settled: it asks, unless the policy allows it). Undefined when
- *  there's none yet: every package's call then goes to the editor, which makes it and decides by it (decide.ts). */
+ *  there's none (the editor makes it as a project opens, unless `silo.baseline` is off): the policy decides every
+ *  package's call. */
 let baseline: BaselinePackages | undefined;
 
 /** The baseline as it is now, through the editor's runtime (read as the debugger's own: neither decided nor counted). */
@@ -476,10 +477,11 @@ function packageIn(dir: string): { "name": string; "version"?: string } {
 
 /**
  * How the package in `dir` calling `capability` goes: trusted by the policy (an org's contract, say) — made, no question;
- * within what its baseline settled of it — made; else stopped before it's made and decided at the call by the editor
- * (the baseline as it is now — made if there was none — then redline, the policy, then the person, asked — blocking
- * until it's answered). Nothing outside the baseline is made unasked: where nobody can be asked — a live run (retyping
- * mustn't prompt), no editor, a failure to decide — it's refused.
+ * within what its baseline settled of the version that runs — made (the baseline spot-checked at the call: an entry of
+ * another version says nothing of this one); else the policy decides, at the call — redline, the policy, then the
+ * person, asked, blocking until it's answered (the editor's decide). Where nobody can be asked — a live run (retyping
+ * mustn't prompt), no editor, a failure to decide — the policy decides alone, a call it would ask about refused. Every
+ * call is counted with how it was decided.
  */
 function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecision, "package">): RuntimeVerdict {
 	const pkg = packageIn(dir);
@@ -490,18 +492,20 @@ function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecis
 
 	const entry = baseline?.[pkg.name];
 
-	if (entry !== undefined && covers(settledCaps(entry), capability)) {
+	if (entry !== undefined && (entry.version === undefined || pkg.version === undefined || entry.version === pkg.version) && covers(settledCaps(entry), capability)) {
 		return { "allow": true, "decided": "baseline" };
 	}
 
+	const alone = (): RuntimeVerdict => ({ "allow": verdictOf(policy, capability, call.args[0] ?? "", liveRun) === "allow", "decided": "policy" });
+
 	if (liveRun || editorLink === undefined) {
-		return { "allow": false, "decided": "refused" };
+		return alone();
 	}
 
 	try {
 		return editorLink.decide({ ...call, "package": packageOf(dir) });
 	} catch {
-		return { "allow": false, "decided": "refused" };
+		return alone();
 	}
 }
 

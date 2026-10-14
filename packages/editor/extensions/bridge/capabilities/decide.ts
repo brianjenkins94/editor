@@ -12,13 +12,11 @@
  * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
 import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
-import type { BaselinePackages, Effect } from "@brianjenkins94/util/silo/evidence";
+import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
-import { covers, settledCaps } from "@brianjenkins94/util/silo/evidence";
-import { baselinePath } from "@brianjenkins94/util/silo/layout";
 import { effectiveDisposition, isDangerous, packageDisposition } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { recordEffect } from "../../../shared/capabilities/run-effects";
@@ -267,12 +265,6 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 		(request as { "window"?: string }).window = call.window;
 	}
 
-	// A package's call its debugger couldn't settle by the baseline it read (none yet, or older than a dependency's change):
-	// made if the baseline, as it is now, settles it — else decided as any call outside it is, below.
-	if (call.package !== undefined && await settledInBaseline(call.package, capabilityOf(request))) {
-		return { "allow": true, "decided": "baseline" };
-	}
-
 	const answers = answersOf(call.runId);
 	// (a package's call is counted by its run, as that package's: its debugger's)
 	const counted = call.package === undefined ? call.runId : undefined;
@@ -337,28 +329,6 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 
 		throw error;
 	}
-}
-
-/**
- * Whether the dependency baseline settled `capability` of `pkg` (name@version): what its code could do when the library
- * was added, not what a later version grew. Made first if there's none (core's `baseline.ready`, which a sync under way
- * finishes too) — a debugger that started before there was one, or before a dependency changed, asks here.
- */
-async function settledInBaseline(pkg: string, capability: string): Promise<boolean> {
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-
-	if (root === undefined) {
-		return false;
-	}
-
-	await vscode.window.withProgress({ "location": vscode.ProgressLocation.Window, "title": "Reading what the dependencies can do" }, async () => shellRpc.request("baseline.ready", {}, { "timeoutMs": 600_000, "waitForResponderMs": 2000 }).catch(() => undefined));
-
-	const at = pkg.lastIndexOf("@");
-	const name = at > 0 ? pkg.slice(0, at) : pkg;
-	const baseline = await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, baselinePath()))).then((bytes) => JSON.parse(new TextDecoder().decode(bytes)) as { "packages"?: BaselinePackages }, () => undefined);
-	const entry = baseline?.packages?.[name];
-
-	return entry !== undefined && covers(settledCaps(entry), capability);
 }
 
 /** The bans a preview's run has been told of, by run and package. */
