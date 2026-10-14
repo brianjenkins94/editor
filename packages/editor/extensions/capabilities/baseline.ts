@@ -29,7 +29,7 @@
 import type { Surface, SurfaceEntry, WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages, InstalledPackages } from "@brianjenkins94/util/silo/evidence";
 import { add, consumerOf, surfaceEntries } from "@brianjenkins94/util/silo/detect";
-import { syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
+import { JOIN, joinedBefore, joinsWanted, syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
 import { baselinePath, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 import { tarballUrl } from "../../shared/tarball-url";
@@ -40,10 +40,6 @@ const PARALLEL = 4;
 /** What `.silo/baseline.json` holds: the project's use of its dependencies, and what each package can do (and what a
  *  later version of it grew). */
 interface BaselineFile { "consumer"?: Record<string, WsConsumer>; "packages"?: BaselinePackages; "join"?: number }
-
-/** `join`: 1 when the consumer's package entries hold their joins (what the code's use reaches). A baseline from before
- *  (or made by a front end that doesn't slice) has none to grow from: its consumer is taken as made now. */
-const JOIN = 1;
 
 /** One slice for the package worker to read: its key (`workspace\nspec`), the specifier, and the members used. */
 interface Slice { "key": string; "spec": string; "members": string[] }
@@ -181,33 +177,15 @@ async function consumerFor(root: vscode.Uri, versions: VersionsFile): Promise<Re
 	return consumerOf(Object.fromEntries([...buckets].map(([dir, surface]) => [dir, surfaceEntries(surface)])), (_workspace, pkg) => versions.packages[pkg]?.version);
 }
 
-/** The package a specifier names: `@scope/name` or `name`, without its subpath. */
-const packageName = (spec: string): string => spec.split("/").slice(0, spec.startsWith("@") ? 2 : 1).join("/");
-
 /** `uri` as JSON, or undefined when there's none (or it isn't JSON). */
 async function readJson(uri: vscode.Uri): Promise<unknown> {
 	return Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => JSON.parse(new TextDecoder().decode(bytes)) as unknown, () => undefined);
 }
 
-/** The slices to read, by package: each package entry of the code's use that isn't the same use of the same version as
- *  the baseline's (whose join it keeps, set here). */
+/** The slices to read, by package (lib's joinsWanted — which keeps the join of a use unchanged since the baseline, set
+ *  on `read`), as the package worker takes them: only a resolved package's (one not resolved keeps none). */
 function slicesOf(read: Record<string, WsConsumer> | undefined, existing: BaselineFile | undefined, resolved: VersionsFile["packages"]): Map<string, Slice[]> {
-	const slices = new Map<string, Slice[]>();
-
-	for (const [workspace, entries] of Object.entries(read ?? {})) {
-		for (const [spec, entry] of Object.entries(entries).filter(([, each]) => each.kind === "package")) {
-			const name = packageName(spec);
-			const before = existing?.join === JOIN ? existing.consumer?.[workspace]?.[spec] : undefined;
-
-			if (before?.version === entry.version && before.dynamic === entry.dynamic && before.members.join() === entry.members.join()) {
-				entry.caps = before.caps;
-			} else if (resolved[name] !== undefined) {
-				slices.set(name, [...slices.get(name) ?? [], { "key": workspace + "\n" + spec, "spec": spec, "members": entry.dynamic || entry.members.length === 0 ? ["*"] : entry.members }]);
-			}
-		}
-	}
-
-	return slices;
+	return new Map([...read === undefined ? [] : joinsWanted(read, existing)].filter(([name]) => resolved[name] !== undefined).map(([name, slices]) => [name, slices.map((slice) => ({ "key": slice.workspace + "\n" + slice.spec, "spec": slice.spec, "members": slice.members }))]));
 }
 
 /**
@@ -270,9 +248,7 @@ function consumerNow(existing: BaselineFile | undefined, read: Record<string, Ws
 		return { "consumer": existing?.consumer ?? {}, ...existing?.join === undefined ? {} : { "join": existing.join } };
 	}
 
-	const previous = existing?.join === JOIN && Object.keys(existing.consumer ?? {}).length > 0 ? existing.consumer : undefined;
-
-	return { "consumer": syncConsumer(previous, read, added).consumer, "join": JOIN };
+	return { "consumer": syncConsumer(joinedBefore(existing), read, added).consumer, "join": JOIN };
 }
 
 /**

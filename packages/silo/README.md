@@ -157,7 +157,7 @@ Anticipate and Track watch a dependency from both sides, and its usage. Each vie
 |---|---|---|---|
 | **The package** | What can its own code do? | A new version | `baseline.packages[name].caps`: lib `detect` over every code file of the package. Live in both front ends; what `grew` is recorded on |
 | **Your usage** | Which of its exports does your code import and call? | Your code | `baseline.consumer[workspace][spec].members`, by lib `consumerOf` in both front ends: both from each file's import surface (`surfaceOf`): the editor off its TypeScript server's tree, the command line with the TypeScript 7.1 it bundles |
-| **The join** | What can the part you use reach, tree-shaken? | Either side | `baseline.consumer[workspace][spec].caps`: lib `sliceCaps` (rolldown tree-shakes the package's files from the members you import; `detect` reads what's left). The editor's, in the package worker with `@rolldown/browser`; the command line's, not yet |
+| **The join** | What can the part you use reach, tree-shaken? | Either side | `baseline.consumer[workspace][spec].caps`: lib `sliceCaps` (rolldown tree-shakes the package's files from the members you import; `detect` reads what's left). The editor's off each tarball, in the package worker with `@rolldown/browser`; the command line's off node_modules with rolldown (`ensureBaseline`). Which uses to slice, and which joins to keep, is lib's (`joinsWanted`), so either front end leaves the other's file as it is |
 | **Runs** | What did it actually do? | Running it | Each run's effects, by package (`runs/<user>.jsonl`); the editor's debugger gates and counts them |
 
 As everywhere in this project, the heuristic is the floor and what runs derive is the ceiling: the analysis answers
@@ -176,7 +176,7 @@ signals are in the gaps:
 
 What this asks of the design:
 
-1. **The baseline holds the join, not just the package** (built in the editor). Each `consumer` entry keeps its
+1. **The baseline holds the join, not just the package** (built in both front ends). Each `consumer` entry keeps its
    slice's `caps`, and the gate decides a package's call against them (lib `settledReach`: the joins of every spec
    your code imports of it, else the whole package's caps for one it doesn't import itself, and only while the
    baseline's version is the one installed). A slice that can't be built keeps the whole package: the safe side.
@@ -196,7 +196,7 @@ What this asks of the design:
 | Job | Command line | Editor | Shared in lib |
 |---|---|---|---|
 | Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Makes the baseline from the registry as a project opens, and syncs it as dependencies change (the capabilities extension, in a worker of its own; the `silo.baseline` setting turns it off) | One package analysis, given a package's files however they were read (node_modules or a tarball): the slice of each package the code imports (the import surface, tree-shaken), as the prototype's audit did |
-| Track | `silo install` (nothing under a week old; reports what each upgrade added) | The resolver takes nothing under a week old; the Exceptions view shows growth and the runs' exceptions | The resolver's age rule, growth, `beyondBaseline` |
+| Track | `silo install` (nothing under a week old; reports what each upgrade added, and what your use of a package reaches more) | The resolver takes nothing under a week old; the Exceptions view shows growth and the runs' exceptions | The resolver's age rule, growth, `beyondBaseline` |
 | Remember | `silo coverage` (what committed runs ran); `features`/`history` stay, parked (CHANGE-HISTORY.md) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
 | Gate | `silo run <file>` (new): Node with silo's `--import` preload (below), every gated call decided by the policy, the run recorded as the editor does; asks at a terminal, fails where it can't ask (CI) | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |
 

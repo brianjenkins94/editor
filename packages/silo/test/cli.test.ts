@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as path from "node:path";
 import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
@@ -85,6 +85,40 @@ test("the command line: silo features --json", () => {
 	const output = execFileSync(process.execPath, ["--import", "tsx", CLI, "features", repo, "--json"], { "encoding": "utf8" });
 
 	assert.deepEqual(JSON.parse(output), [], "removed on Oct 5: nothing left");
+});
+
+test("silo init: the baseline holds the join — what the code's use of each package reaches — and says what grew there", async () => {
+	const project = await fs.mkdtemp(path.join(fs.tmpdir(), "silo-join-"));
+	const write = async (file: string, text: string): Promise<void> => {
+		await fs.mkdir(path.dirname(path.join(project, file)), { "recursive": true });
+		fs.writeFileSync(path.join(project, file), text);
+	};
+	const init = (): { "stdout": string; "stderr": string } => spawnSync(process.execPath, ["--import", "tsx", CLI, "init", project], { "encoding": "utf8" });
+
+	execFileSync("git", ["init", "-q"], { "cwd": project });
+	await write("package.json", JSON.stringify({ "name": "app", "private": true, "type": "module" }));
+	await write("node_modules/kit/package.json", JSON.stringify({ "name": "kit", "version": "3.0.0", "type": "module", "exports": "./index.js" }));
+	await write("node_modules/kit/index.js", "export { save } from \"./save.js\";\nexport { ping } from \"./ping.js\";\n");
+	await write("node_modules/kit/save.js", "import { writeFileSync } from \"node:fs\";\nexport const save = (p, d) => writeFileSync(p, d);\n");
+	await write("node_modules/kit/ping.js", "export const ping = (u) => fetch(u);\n");
+	await write("main.js", "import { save } from \"kit\";\nsave(\"a\", \"b\");\n");
+
+	assert.match(init().stdout, /^Made /u);
+
+	const baseline = (): { "join"?: number; "consumer": Record<string, Record<string, { "caps": string[]; "grew"?: Record<string, string> }>>; "packages": Record<string, { "caps": string[] }> } => JSON.parse(fs.readFileSync(path.join(project, ".silo/baseline.json")));
+
+	assert.equal(baseline().join, 1);
+	assert.deepEqual(baseline().consumer["."]["kit"].caps, ["fs:write"], "save's slice: not ping's net");
+	assert.deepEqual(baseline().packages["kit"].caps, ["fs:write", "net"]);
+
+	await write("main.js", "import { save, ping } from \"kit\";\nsave(\"a\", await ping(\"https://example.com\"));\n");
+
+	const { stderr } = init();
+
+	assert.match(stderr, /your code's use of a package reaches more[^\n]*\n {2}kit: can also net \(ping\)/u);
+	assert.deepEqual(baseline().consumer["."]["kit"].grew, { "net": "ping" });
+
+	await fs.rm(project, { "recursive": true, "force": true });
 });
 
 test("silo install: nothing published in the last `days` days — `latest` is the latest a week old", () => {

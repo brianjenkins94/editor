@@ -360,10 +360,7 @@ export async function preBuild(): Promise<void> {
 					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts"),
 					// The event sheet's recognizer worker — built HERE so its `typescript` shares the deduped ts chunk above
 					// (no second copy); the event-sheet extension starts it (extensions/event-sheet/extension.ts).
-					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts"),
-					// The capabilities extension's package worker: what each dependency's tarball says it can do (the baseline),
-					// read off the extension host; the extension starts it for a sync and ends it after (baseline.ts).
-					"lsp/packages-worker": resolvePath("./extensions/capabilities/packages-worker.ts")
+					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
@@ -414,6 +411,28 @@ export async function preBuild(): Promise<void> {
 				"shimMissingExports": true,
 				"input": { "lsp/eslint-engine": resolvePath("./extensions/eslint/engine.ts") },
 				"output": { "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
+			}
+		}
+	});
+
+	// 2b. The capabilities extension's package worker (dist/lsp/packages-worker.js): what each dependency's tarball says it
+	// can do, and the joins (rolldown's browser build, loaded on the first slice), for the baseline — read off the extension
+	// host; the extension starts it for a sync and ends it after (baseline.ts). A build of its own: it reads util (and
+	// util's env, which reads `process` as it loads), so every chunk carries the shim — shared with the debug worker, a
+	// chunk of util would load before the shim on either's entry.
+	await buildPackage(root, {
+		"base": "./",
+		"build": {
+			"outDir": "dist",
+			"emptyOutDir": false,
+			"sourcemap": !isCI,
+			"assetsInlineLimit": 0,
+			// (a worker: no `document` for the preload helper)
+			"modulePreload": false,
+			"rollupOptions": {
+				"preserveEntrySignatures": "strict",
+				"input": { "lsp/packages-worker": resolvePath("./extensions/capabilities/packages-worker.ts") },
+				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/packages-worker-[name]-[hash].js", "assetFileNames": "lsp/packages-worker-[name]-[hash][extname]" }
 			}
 		}
 	});

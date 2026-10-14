@@ -21,13 +21,11 @@ const READ = /(?:\.[cm]?js|^package\.json)$/u;
 interface Slice { "key": string; "spec": string; "members": string[] }
 
 /** What slices: lib's sliceCaps and rolldown's browser build, loaded on the first slice (rolldown's wasm is large: a sync
- *  that slices nothing never loads it) — after `process` is set, which both read (a worker has none; util's env reads it
- *  as it loads, so it's loaded here, not imported: a bundler hoists an import above any shim). */
+ *  that slices nothing never loads it). Both read `process`, which a worker has none of: the build gives each of this
+ *  worker's chunks the shim (build.ts). */
 let slicer: Promise<{ "rolldown": Rolldown; "sliceCaps": typeof import("@brianjenkins94/util/silo/slice").sliceCaps }> | undefined;
 
 function loadSlicer(): NonNullable<typeof slicer> {
-	globalThis.process ??= { "env": {}, "argv": [], "execArgv": [], "versions": {}, "platform": "browser", "cwd": () => "/", "emitWarning": () => undefined } as unknown as NodeJS.Process;
-
 	return Promise.all([import("@rolldown/browser"), import("@brianjenkins94/util/silo/slice")]).then(([bundler, slice]) => ({ "rolldown": bundler.rolldown as unknown as Rolldown, "sliceCaps": slice.sliceCaps }));
 }
 

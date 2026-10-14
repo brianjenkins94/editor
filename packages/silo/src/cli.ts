@@ -16,6 +16,7 @@
 import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
 import type { Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { Step } from "@brianjenkins94/util/silo/history";
+import type { Rolldown } from "@brianjenkins94/util/silo/slice";
 import type { TypeScriptModules } from "@brianjenkins94/util/silo/typescript";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as path from "node:path";
@@ -31,6 +32,7 @@ import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshot
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
+import { rolldown } from "rolldown";
 
 /** The repository a path is in. */
 function repoOf(directory: string): string {
@@ -46,6 +48,20 @@ async function bundledTypeScript(): Promise<TypeScriptModules> {
 	}
 
 	return found;
+}
+
+/** Said when the code's use of a package grew — it reaches more through what it started using (`used`, ensureBaseline's:
+ *  `workspace spec`), which asks at the call unless the policy allows it. */
+function usedGrew(baseline: { "consumer": Record<string, Record<string, { "grew"?: Record<string, string> }>> }, used: string[]): void {
+	if (used.length > 0) {
+		process.stderr.write(`Grew — your code's use of a package reaches more than before (that asks at the call unless your policy allows it):\n${used.map((key) => {
+			const workspace = key.slice(0, key.lastIndexOf(" "));
+			const spec = key.slice(key.lastIndexOf(" ") + 1);
+			const grew = Object.entries(baseline.consumer[workspace]?.[spec]?.grew ?? {});
+
+			return `  ${spec}${workspace === "." ? "" : ` (${workspace})`}: can also ${grew.map(([capability, origin]) => `${capability} (${origin})`).join(", ")}`;
+		}).join("\n")}\n`);
+	}
 }
 
 /** TypeScript's analyzer of `repo`, with the TypeScript silo bundles. */
@@ -180,14 +196,14 @@ export const app = subcommands({
 	"commands": [
 		command({
 			"name": "init",
-			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — as it is now; once it's there, synced with what's installed (a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and asks at the call unless the policy allows it).",
+			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — as it is now; once it's there, synced with what's installed (a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more with the members that brought it in; either asks at the call unless the policy allows it).",
 			"config": juvy({ "repo": repoArgument }),
 			"handler": async (config) => {
 				const paths = siloPaths(repoOf(config.get("repo")));
 
 				await ensureSiloDir(paths);
 
-				const { created, baseline, changed } = await ensureBaseline(paths, paths.root, await bundledTypeScript());
+				const { created, baseline, changed, used } = await ensureBaseline(paths, paths.root, await bundledTypeScript(), rolldown as unknown as Rolldown);
 				const packages = Object.keys(baseline.packages).length;
 				const imports = Object.values(baseline.consumer).reduce((count, workspace) => count + Object.keys(workspace).length, 0);
 				const relative = path.relative(process.cwd(), paths.baseline);
@@ -196,11 +212,12 @@ export const app = subcommands({
 				process.stdout.write(created
 					? `Made ${where}: ${imports} imports, ${packages} packages. Commit it: a change to what they can do is drift from here.\n`
 					: `${where} is there (${imports} imports, ${packages} packages) — synced with what's installed: ${changed.added.length} added, ${changed.updated.length} updated, ${changed.grew.length} grew.\n`);
+				usedGrew(baseline, used);
 			}
 		}),
 		command({
 			"name": "install",
-			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — then sync the baseline with what's installed: a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and said — it asks at the call unless the policy allows it. Exits 1 when the install fails.",
+			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — then sync the baseline with what's installed: a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more (its join: the part it uses, tree-shaken) with the members that brought it in — each said, and each asks at the call unless the policy allows it. Exits 1 when the install fails.",
 			"config": juvy({
 				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "What to add (none: the project's own dependencies), as the package manager takes them: name, name@range, name@tag." },
 				"min-age": { "format": Number, "default": 7, "doc": "The youngest a version may be, in days." },
@@ -235,7 +252,7 @@ export const app = subcommands({
 
 				await ensureSiloDir(paths);
 
-				const { created, baseline, changed } = await ensureBaseline(paths, paths.root, await bundledTypeScript());
+				const { created, baseline, changed, used } = await ensureBaseline(paths, paths.root, await bundledTypeScript(), rolldown as unknown as Rolldown);
 				const relative = path.relative(process.cwd(), paths.baseline);
 				const where = relative.startsWith("..") ? paths.baseline : relative;
 
@@ -250,6 +267,8 @@ export const app = subcommands({
 				if (changed.grew.length > 0) {
 					process.stderr.write(`Grew — a new version can do more than before (that asks at the call unless your policy allows it):\n${changed.grew.map((name) => `  ${name} ${baseline.packages[name]?.version ?? ""}: can also ${grewIn(baseline.packages[name] ?? { "caps": [] }).join(", ")}`).join("\n")}\n`);
 				}
+
+				usedGrew(baseline, used);
 			}
 		}),
 		command({
