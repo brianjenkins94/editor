@@ -281,6 +281,42 @@ test("package prompt: whose call, and why it's asked; Allow always is about that
 	}
 });
 
+// ESLint (extensions/eslint): real ESLint and the preset, under almostnode in the extension's worker, from the toolchain
+// the build packs — a type-aware rule reports with the workspace's types, and fix-all fixes what the editor hides.
+test("eslint: real ESLint in its worker — a type-aware problem reported, and fix-all", async () => {
+	const workbench = session.workbench();
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/src/lint-probe.ts");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("async function load(): Promise<number> {\n\treturn 1;\n}\n\nexport function run(): void {\n\tvar unused = 1;\n\tload();\n\tconsole.log(unused)\n}\n"));
+		await api.window.showTextDocument(uri);
+	});
+
+	try {
+		const codes = await eventually("eslint's problems", () => workbench.evaluate(() => {
+			const { api } = globalThis.__editor;
+			const found = api.languages.getDiagnostics(api.Uri.file("/workspace/src/lint-probe.ts")).filter((diagnostic) => diagnostic.source === "eslint").map((diagnostic) => diagnostic.code);
+
+			return found.includes("ts/no-floating-promises") ? found : undefined;
+		}), 120_000);
+
+		assert.ok(codes.includes("no-var"), "a rule without types, beside it: " + codes.join(", "));
+
+		const fixed = await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+			const actions = await api.commands.executeCommand("vscode.executeCodeActionProvider", api.Uri.file("/workspace/src/lint-probe.ts"), new api.Range(0, 0, 0, 0), "source.fixAll.eslint");
+			const action = actions.find((each) => each.edit !== undefined);
+
+			return action?.edit.entries()[0][1][0].newText;
+		});
+
+		assert.match(fixed, /console\.log\(unused\);/u, "fix-all adds the semicolon the editor hides");
+	} finally {
+		await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file("/workspace/src/lint-probe.ts")));
+	}
+});
+
 // A program's file calls are the editor's to make (EXTENSION-POINTS.md, 2: the runtime's files, through core) — so a read
 // is what the editor has: an open editor's unsaved text, not what's on disk.
 test("a program's read is the editor's: an open editor's unsaved text", async () => {

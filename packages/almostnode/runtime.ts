@@ -294,6 +294,10 @@ export interface Module {
 
 export interface RuntimeOptions {
 	"cwd"?: string;
+  // Whether a package's `browser` field (its string form: a browser build as its entry) is preferred — true by default
+  // (almostnode runs in a browser); false resolves as Node does, which reads only `exports`/`main`. A Node program traced
+  // under Node (eslint's toolchain) loads the same files this way.
+	"browserField"?: boolean;
 	"env"?: Record<string, string>;
 	"onConsole"?: (method: string, args: unknown[]) => void;
 	"onStdout"?: (data: string) => void;
@@ -823,7 +827,7 @@ function createRequire(
           // Prefer browser field (string form) since we're running in a browser
 					let main: string | undefined;
 
-					if (typeof pkg.browser === "string") {
+					if (options.browserField !== false && typeof pkg.browser === "string") {
 						main = pkg.browser;
 					}
 

@@ -1,7 +1,7 @@
 {
   "name": "vscode-eslint",
   "displayName": "ESLint",
-  "description": "The web implementation of dbaeumer.vscode-eslint: lints JS/TS inside tsserver (reusing its typescript) and honors the same eslint.* settings, fix-all on save and formatter.",
+  "description": "The web implementation of dbaeumer.vscode-eslint: real ESLint and the preset under almostnode in a worker, honoring the same eslint.* settings, fix-all on save and formatter.",
   "publisher": "dbaeumer",
   "version": "0.0.1",
   "engines": {
@@ -16,12 +16,6 @@
     "onLanguage:javascriptreact"
   ],
   "contributes": {
-    "typescriptServerPlugins": [
-      {
-        "name": "eslint-ts-plugin",
-        "enableForWorkspaceTypeScriptVersions": true
-      }
-    ],
     "configuration": {
       "type": "object",
       "title": "ESLint",

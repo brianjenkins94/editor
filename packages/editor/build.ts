@@ -10,9 +10,9 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
 import { build, createLogger } from "vite";
+import { eslintToolchain } from "./build/eslint-toolchain";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
-import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
 
 /**
  * The whole packages/editor build, in ONE file — the five vite passes that used to be separate `-c` configs
@@ -158,27 +158,6 @@ function cspellDict(): Plugin {
 	};
 }
 
-/** The eslint engine's `node:module` — no browser polyfill exists, so Node's "nothing installed" semantics (node-module.js)
- *  — and what that module's runtime `require` can hand out, resolved from eslint's own install so they're the SAME
- *  instances the bundle already carries: eslint-utils, and eslint's builtin rule registry (browser-safe; the rest of
- *  `eslint/use-at-your-own-risk` is its Node API). Aliases, which outrank polyfillNode's stub for `module`. */
-function eslintNodeModule(): Plugin {
-	const eslintPackageJson = createRequire(import.meta.url).resolve("eslint/package.json");
-
-	return {
-		"name": "eslint-node-module",
-		"config": () => ({
-			"resolve": {
-				"alias": [
-					{ "find": /^(node:)?module$/u, "replacement": resolvePath("./extensions/eslint/node-module.js") },
-					{ "find": /^eslint-registry:eslint-utils$/u, "replacement": createRequire(eslintPackageJson).resolve("@eslint-community/eslint-utils") },
-					{ "find": /^eslint-registry:builtin-rules$/u, "replacement": path.join(path.dirname(eslintPackageJson), "lib", "rules", "index.js") }
-				]
-			}
-		})
-	};
-}
-
 /** `buffer` → the node-stdlib-browser polyfill, for the SHELL: its repo load clones with isomorphic-git (git-clone.ts),
  *  which uses the `Buffer` global, and the shell's bundle otherwise has no `buffer` to resolve (the package isn't a
  *  direct dependency). As the workbench pass's alias does for git-engine.ts; in dev, Vite pre-bundles it (it resolves
@@ -187,38 +166,8 @@ function shellBuffer(): Plugin {
 	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] } } }) };
 }
 
-/** Plugin code that passes `require` around as a VALUE — `optionalRequire(require, "typescript")` — hides the module id
- *  from the bundler, which leaves its runtime `require` (it throws in a worker). Rewrite `require` in argument position
- *  to the engine's registry-backed require (`globalThis.__eslintRequire`, see engine.ts / node-module.js). */
-function valueRequireToRegistry(): Plugin {
-	return {
-		"name": "value-require-to-registry",
-		"enforce": "pre",
-		"transform": (code, id) => {
-			if (!id.includes("/node_modules/") || !code.includes("require")) {
-				return undefined;
-			}
-
-			const rewritten = code.replace(/([(,]\s*)require(\s*[,)])/gu, "$1globalThis.__eslintRequire$2");
-
-			return rewritten === code ? undefined : { "code": rewritten, "map": null };
-		}
-	};
-}
-
-/** Emit the eslint tsserver plugin VERBATIM next to the engine, so tsserver imports it from a served URL and
- *  its import.meta.url self-locates the sibling engine (copied byte-for-byte, not a vite input). */
-function eslintTsPlugin(): Plugin {
-	return {
-		"name": "eslint-ts-plugin-asset",
-		"generateBundle": function() {
-			this.emitFile({ "type": "asset", "fileName": "lsp/eslint-ts-plugin.js", "source": fs.readFileSync(resolvePath("./extensions/eslint/ts-plugin.js"), { "encoding": null }) });
-		}
-	};
-}
-
-/** Same, for the capabilities tsserver plugin — emitted next to capabilities-engine.js so its import.meta.url
- *  self-locates the sibling engine. */
+/** Emit the capabilities tsserver plugin VERBATIM next to capabilities-engine.js, so tsserver imports it from a served
+ *  URL and its import.meta.url self-locates the sibling engine (copied byte-for-byte, not a vite input). */
 function capabilitiesTsPlugin(): Plugin {
 	return {
 		"name": "capabilities-ts-plugin-asset",
@@ -237,9 +186,6 @@ function historyTsPlugin(): Plugin {
 		}
 	};
 }
-
-// esquery's CJS build, resolved through eslint so it's found under npm's flat tree AND CI's pnpm workspace.
-const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint")).resolve("esquery");
 
 /** The host site's plugins — shared by the host BUILD (hostBuild) and the DEV server (dev.ts): cross-origin
  *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
@@ -381,7 +327,10 @@ export async function preBuild(): Promise<void> {
 					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts"),
 					// The event sheet's recognizer worker — built HERE so its `typescript` shares the deduped ts chunk above
 					// (no second copy); the event-sheet extension starts it (extensions/event-sheet/extension.ts).
-					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts")
+					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts"),
+					// ESLint's worker: real ESLint and the preset under almostnode (the eslint extension starts it), from the
+					// toolchain written beside it (2c).
+					"lsp/eslint-worker": resolvePath("./extensions/eslint/worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
@@ -398,44 +347,11 @@ export async function preBuild(): Promise<void> {
 		}
 	});
 
-	// 3. eslint engine (dist/lsp/eslint-engine.js) — typescript externalized to the shim, node builtins polyfilled.
-	await buildPackage(root, {
-		"customLogger": logger,
-		"base": "./",
-		"resolve": {
-			"alias": [
-				{ "find": /^typescript(\/.*)?$/u, "replacement": resolvePath("./extensions/eslint/ts-external.js") },
-				{ "find": /^esquery$/u, "replacement": esqueryCjs }
-			],
-			"conditions": ["browser", "import", "default"]
-		},
-		// The user's preset (@brianjenkins94/util/eslint) as data + one chunk per plugin, loaded independently (see
-		// extensions/eslint/preset-build.ts). Plugins written for Node degrade PER PLUGIN rather than breaking the build or
-		// the engine: builtin subpaths map onto the parent polyfill (polyfillNode), `node:module` gets Node's "nothing installed" semantics,
-		// missing named exports shim to undefined — a plugin that really needs something absent fails at load and is skipped.
-		"plugins": [polyfillNode(), eslintNodeModule(), valueRequireToRegistry(), eslintTsPlugin(), eslintPresetPlugin()],
-		// CJS plugin builds compute `import.meta.url` from `__filename` when there's no `document` (a worker), and some
-		// call `require.resolve` at load (only ever to name files) — give both inert values rather than a ReferenceError.
-		// And vite's dynamic-import error handler announces a failed import with `window.dispatchEvent(...)` before
-		// rethrowing — in a worker that throws "window is not defined" and MASKS the plugin's real load error.
-		"define": { "__filename": JSON.stringify("/lsp/eslint-engine.js"), "__dirname": JSON.stringify("/lsp"), "require.resolve": "((id) => id)", "window.dispatchEvent": "(() => true)" },
-		"build": {
-			"outDir": "dist",
-			"emptyOutDir": false,
-			// Sourcemap locally only (the ~7MB .map is debug-only, never fetched at runtime) — never in CI.
-			"sourcemap": !isCI,
-			"assetsInlineLimit": 0,
-			// The plugin chunks are dynamic imports; vite's preload helper injects <link rel=modulepreload> via `document`,
-			// which the tsserver worker doesn't have ("document is not defined").
-			"modulePreload": false,
-			"rollupOptions": {
-				"preserveEntrySignatures": "strict",
-				"shimMissingExports": true,
-				"input": { "lsp/eslint-engine": resolvePath("./extensions/eslint/engine.ts") },
-				"output": { "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
-			}
-		}
-	});
+	// 2c. ESLint's toolchain (dist/lsp/eslint-toolchain.tgz): ESLint, the preset and what they load, traced from a real lint
+	// and packed for the eslint worker to unpack (build/eslint-toolchain.ts).
+	const toolchain = await eslintToolchain(path.join(root, "dist/lsp/eslint-toolchain.tgz"));
+
+	logger.info(`eslint toolchain: ${toolchain.packages} packages, ${toolchain.files} files, ${(toolchain.bytes / 1048576).toFixed(1)} MB`);
 
 	// 2b. The capabilities extension's package worker (dist/lsp/packages-worker.js): what each dependency's tarball says it
 	// can do, and the joins (rolldown's browser build, loaded on the first slice), for the baseline — read off the extension

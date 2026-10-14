@@ -689,7 +689,7 @@ function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<Runtime
 
 /** Load the runtime (runtimeReady): the first time a run asks for it. */
 async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
-	const [{ createFsShim, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("./runtime-vfs")]);
+	const [{ createFsShim, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("../../shared/runtime-vfs")]);
 
 	// (its files answered once the editor has the worker's mailbox — without it, the runtime's own)
 	if (editorLink !== undefined) {

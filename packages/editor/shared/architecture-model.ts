@@ -117,6 +117,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "bablr", "label": "BABLR worker", "container": "workers", "hub": true, "detail": "hub · the editor's BABLR", "description": "The editor's BABLR, off the UI thread: classifies git changes as cosmetic or semantic and groups edit bursts (the git SCM and the review panel), and finds the span ids runtime evidence keys on.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
+	{ "id": "eslint", "label": "ESLint worker", "container": "extHostWorker", "hub": true, "detail": "hub · real ESLint under almostnode", "description": "The eslint extension's worker: real ESLint and the preset under almostnode, from the toolchain the build packs beside it (lsp/eslint-toolchain.tgz). Its hub link is the workspace runtime's (run-contract's connectRuntime), through which it reads the workspace — as tooling reads, never asked about; the extension sends it documents to lint and fix by messages of their own.", "observedBy": "its hub reporter", "condition": "once the eslint extension starts" },
 	{ "id": "idb", "label": "IndexedDB", "container": "browser", "detail": "user data, logs, workspace-fs", "description": "monaco's user data / logs / storage, and the workspace filesystem snapshot.", "observedBy": "IDBObjectStore probe" },
 	{ "id": "net:origin", "label": "Page origin", "container": "network", "detail": "app, node_modules overlay, ATA", "description": "The app's own server (dev server or Pages): bundles, the node_modules CDN overlay, type acquisition.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:unpkg.com", "label": "unpkg", "container": "network", "detail": "CDN node_modules", "description": "The service worker's upstream for the node_modules overlay.", "observedBy": "the service worker's fetch probe" },
@@ -145,7 +146,8 @@ export const hubLinks: [string, string][] = [
 	["workbench", "node"],
 	["workbench", "bablr"],
 	["node", "provoke"],
-	["bridge", "debug-worker"]
+	["bridge", "debug-worker"],
+	["workbench", "eslint"]
 ];
 
 export const subjects: SubjectFamily[] = [
@@ -268,6 +270,9 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "rules.make", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "bridge.ready", "from": ["debug-worker"], "to": ["bridge"] },
 	{ "pattern": "runtime.fs.attach", "from": ["debug-worker"], "to": ["bridge"] },
+	// (a runtime link from the web worker extension host — eslint's worker — reaches the bridge through the workbench)
+	{ "pattern": "bridge.ready", "from": ["eslint", "workbench"], "to": ["workbench", "bridge"] },
+	{ "pattern": "runtime.fs.attach", "from": ["eslint", "workbench", "bridge"], "to": ["workbench", "bridge", "eslint"] },
 	{ "pattern": "production.launch", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "production.exit.*", "from": ["workbench"], "to": ["bridge"] },
@@ -287,6 +292,7 @@ export const subjects: SubjectFamily[] = [
 export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "worker:*", "protocol": "WebWorker protocol / postMessage", "transport": "Worker.postMessage", "reason": "platform", "description": "monaco's editor workers (request/reply/events) and the workbench's own workers." },
 	{ "a": "bridge", "b": "debug-worker", "protocol": "the debug protocol (ToWorker / WorkerEvent); the runtime's file calls (run-contract's mailbox)", "transport": "Worker.postMessage; SharedArrayBuffer + Atomics", "reason": "isolation", "description": "The adapter drives its run by messages of their own — launch, steps, decisions; values, stops, coverage back — not over the hub: the worker's hub link is only the workspace runtime's (run-contract), what any debugger's worker is given. And a debugger's worker reads and writes the workspace synchronously through its mailbox (handed over once, runtime.fs.attach): it writes a call and waits; the bridge answers it (runtime-fs.ts), the policy deciding the program's calls. tsval's reads its files from the workspace's buffer instead; another debugger's (editor-contrib's) has only the mailbox." },
+	{ "a": "workbench", "b": "eslint", "protocol": "the workspace runtime's hub link (run-contract); the runtime's file calls (its mailbox)", "transport": "MessagePort (through the web worker host's probe port); SharedArrayBuffer + Atomics", "reason": "isolation", "description": "eslint's worker reads the workspace through the runtime link its extension hands it (workspaceRuntime().connect): its mailbox handed over once (runtime.fs.attach), then each read a synchronous call the bridge answers — as the loader's own, never decided or counted. Linting and fixing are the extension's messages to it, not the hub's." },
 	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "reason": "platform", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
 	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "reason": "platform", "description": "NLS bootstrap, then the MessagePort handoff." },
 	{ "a": "workbench", "b": "exthost:LocalWebWorker:*", "protocol": "RPCProtocol", "transport": "MessagePort (transferred ArrayBuffers)", "reason": "platform", "description": "MainThread / ExtHost proxies." },

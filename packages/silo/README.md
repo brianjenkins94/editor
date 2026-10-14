@@ -258,7 +258,7 @@ The plan, none of it scheduled:
    host has.
 3. **eslint in a realm of its own, with its own TypeScript 6** (a worker, as the cspell server is): its own language
    service and Program over the workspace, its fix-all its own. It's the plugin with a known destination and the
-   hardest to move later. Measured 2026-10-14 (below): moving it as it is costs about 20 MB; giving it types costs a
+   hardest to move later. Built 2026-10-14, under almostnode (below). Measured 2026-10-14 (below): moving it as it is costs about 20 MB; giving it types costs a
    Program, from about 90 MB to 550 MB by project, or about 135 MB on a large one if the Program is rooted at the open
    file.
 
@@ -325,9 +325,17 @@ floating promise: the same 9 messages Node's ESLint gives, `ts/no-floating-promi
 project service, with types, inside almostnode), in 458 ms (Node: 468 ms), 4.5 s the first time with loading.
 Getting there fixed almostnode, not the plugins — top-level `await`, live ES module bindings (its ESM→CommonJS
 transform is TypeScript's own now), `require()` of a folder, `main` before `module`, and a handful of missing
-built-ins (almostnode's README lists them). Next: the same in a browser worker, its packages installed as the debug
-worker installs them (the run read 252 packages, 68 MB unpacked), then the eslint extension talking to it as cspell's
-does.
+built-ins (almostnode's README lists them).
+
+**Built (2026-10-14).** The eslint extension's worker (`extensions/eslint/worker.ts`) runs it in the browser: the build
+traces a real lint and packs the 252 packages it loads (`lsp/eslint-toolchain.tgz`, 9.8 MB — each package whole, less
+maps, type declarations and docs; TypeScript kept to its compiler API and lib files), the worker unpacks them under
+almostnode (resolving as Node does, `browserField: false`) and reads the workspace through the workspace runtime, as
+tooling reads — never asked about. The extension shows its problems as its own diagnostics (so eslint's `info` is
+Information now, not a Warning) and fixes through it. In the editor: ESLint loads in about 4 s, and a floating promise is
+reported, with types. The engine bundled into tsserver, its plugin and the preset's build-time extraction are gone. Not
+yet: a repository's own `eslint.config.*` (the worker lints with the preset; running a repository's config is running
+its code, which the old engine did in `gatedEvalRealm`).
 
 ### Decided
 

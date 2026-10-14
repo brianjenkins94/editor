@@ -300,3 +300,14 @@ test("a package with main and module is required as its main, as Node does; modu
 	assert.equal(runtime.execute("module.exports = require('both').parse();", "/workspace/main.js").exports, "cjs");
 	assert.equal(runtime.execute("module.exports = require('esm-only').which;", "/workspace/main.js").exports, "esm");
 });
+
+test("browserField: false resolves a package as Node does — its main, not its browser build", () => {
+	const files = {
+		"/workspace/node_modules/dual/package.json": JSON.stringify({ "name": "dual", "main": "node.js", "browser": "browser.js" }),
+		"/workspace/node_modules/dual/node.js": "module.exports = 'node';",
+		"/workspace/node_modules/dual/browser.js": "module.exports = 'browser';"
+	};
+
+	assert.equal(runtimeWith(files).execute("module.exports = require('dual');", "/workspace/main.js").exports, "browser", "by default, the browser build");
+	assert.equal(runtimeWith(files, { "browserField": false }).execute("module.exports = require('dual');", "/workspace/main.js").exports, "node");
+});

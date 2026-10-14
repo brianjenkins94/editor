@@ -258,9 +258,9 @@ const SCAFFOLDING = new Set(["editor-ambient.d.ts", ".silo", "node_modules", ".g
 //     copy so the read-only priority-1 base shows through.
 //   .gitignore — read straight off zen-fs by isomorphic-git (a priority-1 base would be invisible to it): MATERIALIZE
 //     the git default (gitEngine.DEFAULT_GITIGNORE) into zen-fs.
-//   ESLINT_CONFIGS — kept overridable so a repo's own is writable; the eslint engine falls back to its BUNDLED flat
-//     config (extensions/eslint/engine.ts) when the workspace has none, so there's nothing to materialize; on omit
-//     we just drop a stale one. Variants are one concept — a repo providing ANY counts.
+//   ESLINT_CONFIGS — kept overridable so a repo's own is writable; eslint's worker lints with the preset
+//     (extensions/eslint/worker.ts), so there's nothing to materialize; on omit we just drop a stale one. Variants are
+//     one concept — a repo providing ANY counts.
 // Keep OVERRIDABLE_DEFAULTS in sync with workspace-fs.ts.
 const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
 const ESLINT_CONFIGS = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"];
@@ -388,7 +388,7 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 		}
 
 		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing
-		// to materialize — the eslint engine falls back to its bundled flat config.
+		// to materialize — eslint's worker lints with the preset.
 		if (!ESLINT_CONFIGS.some((name) => providedAtRoot(name))) {
 			for (const name of ESLINT_CONFIGS) {
 				await dropWritable(name);
@@ -682,26 +682,13 @@ function maybeBoot(): void {
 
 			tsvalExt.registerFileUrl("./extension.js", new URL(tsvalExtensionPath, location.href).href);
 
-			// The eslint extension — a TS server plugin that lints inside tsserver, reusing tsserver's own `ts`
-			// (no bundled copy). Registered in the WEB-WORKER host (where tsserver runs) so the ext-host worker's
-			// patched fetch/importExt resolves the plugin's extension-file:// probe URIs to the data: URLs below —
-			// which is what loads it into the in-browser tsserver. Mirrors the retired preflight ts-plugin wiring.
+			// The eslint extension: real ESLint and the preset under almostnode, in a worker of its own (extensions/eslint/
+			// worker.ts, from the toolchain the build packed beside it), started through a bootstrap as an extension's
+			// workers are.
 			const eslintExt = registerExtension(eslintManifest, ExtensionHostKind.LocalWebWorker);
 
 			eslintExt.registerFileUrl("./extension.js", new URL(eslintExtensionPath, location.href).href);
-
-			// The plugin files, named by the `typescriptServerPlugins` contribution in eslint's manifest. tsserver
-			// discovers `./node_modules/eslint-ts-plugin/` and imports its `browser` entry's default export.
-			const eslintPluginPkg = JSON.stringify({ "name": "eslint-ts-plugin", "version": "0.0.1", "browser": "index.js" });
-
-			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/package.json", "data:application/json," + encodeURIComponent(eslintPluginPkg));
-			// The plugin itself is a SERVED file (built by eslint.engine.config.ts next to the engine), registered
-			// by its URL rather than embedded as a data: blob — its code leaves workbench.js, and tsserver imports
-			// it from that URL so its import.meta.url self-locates the sibling engine. (package.json stays a tiny
-			// data: URL.)
-			const eslintPluginUrl = new URL("./lsp/eslint-ts-plugin.js", location.href).href;
-
-			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/index.js", eslintPluginUrl);
+			eslintExt.registerFileUrl("./worker.js", workerBootstrap("eslint-worker.js"));
 
 			// The capabilities extension — two halves, both INSIDE the tsserver plugin. STATIC: util/silo's findReach, on tsserver's tree.
 			// DYNAMIC: the tsval canary, reusing tsserver's own `ts` (the plugin self-locates both served engines via

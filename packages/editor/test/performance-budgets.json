@@ -8,5 +8,6 @@
   "memoryMB.TS semantic server": { "max": 1000, "warnAbove": 0.25 },
   "memoryMB.TS syntax server": { "max": 550, "warnAbove": 0.25 },
   "memoryMB.cspell": { "max": 200, "warnAbove": 0.25 },
+  "memoryMB.eslint": { "max": 400, "warnAbove": 0.25 },
   "memoryMB.node": { "max": 200, "warnAbove": 0.25 }
 }

@@ -6,6 +6,10 @@ import type { VirtualFS } from "./virtual-fs";
 
 export interface IRuntimeOptions {
 	"cwd"?: string;
+  // Whether a package's `browser` field (its string form: a browser build as its entry) is preferred — true by default
+  // (almostnode runs in a browser); false resolves as Node does, which reads only `exports`/`main`. A Node program traced
+  // under Node (eslint's toolchain) loads the same files this way.
+	"browserField"?: boolean;
 	"env"?: Record<string, string>;
 	"onConsole"?: (method: string, args: unknown[]) => void;
   // Base URL the VFS is served from, used to resolve `file://` dynamic imports to a fetchable same-origin URL

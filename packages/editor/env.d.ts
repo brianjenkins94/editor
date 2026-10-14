@@ -12,20 +12,6 @@ declare module "tsval:extension" {
 	export default path;
 }
 
-/** The user's eslint preset as data (see extensions/eslint/preset-build.ts). */
-declare module "eslint:preset" {
-	const preset: { "source": string; "version": string; "blocks": unknown[] };
-
-	export default preset;
-}
-
-/** One loader per eslint preset plugin, each its own chunk (see extensions/eslint/preset-build.ts). */
-declare module "eslint:preset-plugins" {
-	const loaders: Record<string, () => Promise<{ "rules": Record<string, unknown> }>>;
-
-	export default loaders;
-}
-
 /** dockview's stylesheet — the `dockview` package's dist/styles/dockview.css (see dockviewCssPlugin in build.ts). */
 declare module "dockview:css" {
 	const css: string;
