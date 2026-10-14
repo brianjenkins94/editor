@@ -318,6 +318,17 @@ What follows from it:
   the whole tsconfig, about 135 MB even there, rebuilt as the open file changes. When VS Code moves to TypeScript 7 the
   classic Program in tsserver goes away, so this one is what's left of it rather than a second one.
 
+**Running it under almostnode instead (spike, 2026-10-14).** The bundled engine imitates Node with lib's
+`polyfillNode`, and each plugin finds another gap; almostnode is the editor's Node already (dev servers, debug runs,
+cspell). Real ESLint with the preset, run under almostnode (in Node, as almostnode's tests run it), on a file with a
+floating promise: the same 9 messages Node's ESLint gives, `ts/no-floating-promises` among them (typescript-eslint's
+project service, with types, inside almostnode), in 458 ms (Node: 468 ms), 4.5 s the first time with loading.
+Getting there fixed almostnode, not the plugins — top-level `await`, live ES module bindings (its ESM→CommonJS
+transform is TypeScript's own now), `require()` of a folder, `main` before `module`, and a handful of missing
+built-ins (almostnode's README lists them). Next: the same in a browser worker, its packages installed as the debug
+worker installs them (the run read 252 packages, 68 MB unpacked), then the eslint extension talking to it as cspell's
+does.
+
 ### Decided
 
 - **Analysis: wanted, in both front ends.** Both sides of each dependency and their join, checked against the runs, as

@@ -163,3 +163,140 @@ test("a cycle between program files sees the partial exports, as Node's does", (
 
 	assert.deepEqual(runtime.require("./a.js"), { "early": "a-early", "late": "a-late", "fromB": "early" });
 });
+
+test("top-level await: an ES module's body awaits as Node's does — import() waits for it, require() can't", async () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/later/package.json": JSON.stringify({ "name": "later", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/later/index.js": "import { one } from './one.js';\nexport const two = await Promise.resolve(one + 1);\nfor await (const each of [Promise.resolve(3)]) { globalThis.lastSeen = each; }\nexport const three = globalThis.lastSeen;\n",
+		"/workspace/node_modules/later/default.js": "export default await Promise.resolve('ready');\n",
+		"/workspace/node_modules/later/one.js": "export const one = 1;\n"
+	});
+	const imported = runtime.execute("module.exports = import('later');", "/workspace/main.js").exports as Promise<{ "two": number; "three": number }>;
+
+	const later = await imported;
+
+	assert.equal(later.two, 2, "what it exported once its await was done");
+	assert.equal(later.three, 3, "and after a for await");
+	assert.equal((await (runtime.execute("module.exports = import('later/default.js');", "/workspace/main.js").exports as Promise<{ "default": string }>)).default, "ready", "a default export, assigned once its await is done");
+	assert.throws(() => runtimeWith({
+		"/workspace/node_modules/later/package.json": JSON.stringify({ "name": "later", "main": "index.js" }),
+		"/workspace/node_modules/later/index.js": "export default await new Promise(() => {});\n"
+	}).execute("require('later');", "/workspace/main.js"), (error: { "code"?: string }) => error.code === "ERR_REQUIRE_ASYNC_MODULE");
+	assert.equal(runtimeWith({ "/workspace/node_modules/sync/package.json": JSON.stringify({ "name": "sync", "main": "index.js" }), "/workspace/node_modules/sync/index.js": "async function later() { await 1; }\nexport const named = later;\n" }).execute("module.exports = typeof require('sync').named;", "/workspace/main.js").exports, "function", "an await inside a function isn't the top level's");
+});
+
+test("require() of a folder by its path reads its package.json's main first, as Node's does", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/tool/package.json": JSON.stringify({ "name": "tool", "main": "lib/api.js" }),
+		"/workspace/node_modules/tool/lib/api.js": "module.exports = 'api';"
+	});
+
+	assert.equal(runtime.execute("module.exports = require('/workspace/node_modules/tool/');", "/workspace/main.js").exports, "api");
+	assert.equal(runtime.execute("module.exports = require('./node_modules/tool');", "/workspace/main.js").exports, "api");
+});
+
+test("an ES module's own require (createRequire) isn't what its imports go through", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/rules/package.json": JSON.stringify({ "name": "rules", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/rules/index.js": "import mod from 'node:module';\nconst require = mod.createRequire(import.meta.url);\nimport { two } from './two.js';\nexport const both = require('./one.cjs') + two;\n",
+		"/workspace/node_modules/rules/one.cjs": "module.exports = 1;",
+		"/workspace/node_modules/rules/two.js": "export const two = 2;\n"
+	});
+
+	assert.equal((runtime.execute("module.exports = require('rules');", "/workspace/main.js").exports as { "both": number }).both, 3);
+});
+
+test("an ES module's exported declarations keep their local names, and its exports are live", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/configs/package.json": JSON.stringify({ "name": "configs", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/configs/index.js": [
+			"export const eslintrc = { 'rules': { 'a': 1 } };",
+			"export const flat = { 'rules': eslintrc.rules };",
+			"export function early() { return late(); }",
+			"export class Box { static of() { return new Box(); } }",
+			"export const { left, 'right': [right] } = { 'left': 'L', 'right': ['R'] };",
+			"export let count = 0;",
+			"export function bump() { count += 1; }",
+			"function late() { return 'late'; }",
+			"const hidden = 'h';",
+			"export { hidden as shown };"
+		].join("\n")
+	});
+	const configs = runtime.execute("module.exports = require('configs');", "/workspace/main.js").exports as Record<string, unknown> & { "bump": () => void; "early": () => string; "Box": { "of": () => unknown } };
+
+	assert.deepEqual(configs["flat"], { "rules": { "a": 1 } }, "a later declaration reads an earlier export by its name");
+	assert.equal(configs.early(), "late");
+	assert.ok(configs.Box.of() instanceof (configs.Box as unknown as new () => unknown));
+	assert.deepEqual([configs["left"], configs["right"], configs["shown"]], ["L", "R", "h"]);
+	configs.bump();
+	assert.equal(configs["count"], 1, "live: the module's assignment is seen");
+});
+
+test("a built-in's subpaths, as Node has them: assert/strict, util/types, path/posix, stream/promises", () => {
+	const runtime = runtimeWith({});
+	const found = runtime.execute("module.exports = ['assert/strict', 'node:util/types', 'path/posix', 'stream/promises'].map((id) => typeof require(id));", "/workspace/main.js").exports;
+
+	assert.deepEqual(found, ["function", "object", "object", "object"]);
+});
+
+test("require('.') and require('..') are the folder and its parent, as Node reads them", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/tool/package.json": JSON.stringify({ "name": "tool", "main": "lib/index.js" }),
+		"/workspace/node_modules/tool/lib/index.js": "exports.name = 'lib';",
+		"/workspace/node_modules/tool/lib/util/index.js": "exports.parent = require('..').name; exports.self = require('.').own;\nexports.own = 'util';"
+	});
+
+	assert.equal((runtime.execute("module.exports = require('tool/lib/util');", "/workspace/main.js").exports as { "parent": string }).parent, "lib");
+});
+
+test("a package whose entry is its index.json, as Node finds it", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/ids/package.json": JSON.stringify({ "name": "ids", "version": "1.0.0" }),
+		"/workspace/node_modules/ids/index.json": "[\"MIT\"]"
+	});
+
+	assert.deepEqual(runtime.execute("module.exports = require('ids');", "/workspace/main.js").exports, ["MIT"]);
+});
+
+test("process.getBuiltinModule: a built-in by its name, as require() gives it", () => {
+	const runtime = runtimeWith({});
+
+	assert.equal(runtime.execute("module.exports = process.getBuiltinModule('node:path') === require('path') && process.getBuiltinModule('fs') === require('fs') && process.getBuiltinModule('nope') === undefined;", "/workspace/main.js").exports, true);
+});
+
+test("import.meta.resolve: a specifier as the URL it resolves to", () => {
+	const runtime = runtimeWith({
+		...PACKAGE,
+		"/workspace/node_modules/where/package.json": JSON.stringify({ "name": "where", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/where/index.js": "export const greet = import.meta.resolve('greet');\nexport const path = import.meta.resolve('node:path');\n"
+	});
+
+	assert.deepEqual({ ...runtime.execute("module.exports = require('where');", "/workspace/main.js").exports as object }, { "greet": "file:///workspace/node_modules/greet/index.js", "path": "node:path" });
+});
+
+test("util.isDeepStrictEqual, as Node's", () => {
+	assert.deepEqual(runtimeWith({}).execute("const { isDeepStrictEqual } = require('node:util'); module.exports = [isDeepStrictEqual({ 'a': [1] }, { 'a': [1] }), isDeepStrictEqual({ 'a': 1 }, { 'a': '1' })];", "/workspace/main.js").exports, [true, false]);
+});
+
+test("assert's legacy equal, and assert/strict's equal as strictEqual — as Node has them", () => {
+	const found = runtimeWith({}).execute([
+		"const legacy = require('assert'); const strict = require('node:assert/strict');",
+		"const throws = (run) => { try { run(); return false; } catch { return true; } };",
+		"module.exports = [throws(() => legacy.equal(1, '1')), throws(() => strict.equal(1, '1')), strict.strict === strict, typeof strict.deepEqual];"
+	].join("\n"), "/workspace/main.js").exports;
+
+	assert.deepEqual(found, [false, true, true, "function"]);
+});
+
+test("a package with main and module is required as its main, as Node does; module stands in only with no main", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/both/package.json": JSON.stringify({ "name": "both", "main": "cjs.js", "module": "esm.js" }),
+		"/workspace/node_modules/both/cjs.js": "module.exports = { 'parse': () => 'cjs' };",
+		"/workspace/node_modules/both/esm.js": "export default { 'parse': () => 'esm' };",
+		"/workspace/node_modules/esm-only/package.json": JSON.stringify({ "name": "esm-only", "module": "esm.js" }),
+		"/workspace/node_modules/esm-only/esm.js": "export const which = 'esm';"
+	});
+
+	assert.equal(runtime.execute("module.exports = require('both').parse();", "/workspace/main.js").exports, "cjs");
+	assert.equal(runtime.execute("module.exports = require('esm-only').which;", "/workspace/main.js").exports, "esm");
+});

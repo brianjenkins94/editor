@@ -37,7 +37,17 @@ Just three, all on the core runtime path: `acorn`, `resolve.exports`, `pako`. `c
 - `shims/zlib.ts` — the `brotli-wasm` dynamic import is `@vite-ignore`d.
 - `frameworks/esm-cjs.ts` — `transformEsmToCjsSimple` (the only thing `runtime.ts` used from the old
   `frameworks/code-transforms.ts`) split out so the csstree-backed CSS-modules helper is no longer in the
-  graph. `code-transforms.ts` deleted → **`css-tree` dropped**.
+  graph. `code-transforms.ts` deleted → **`css-tree` dropped**. Since 2026-10-14 it is TypeScript's own CommonJS
+  emit (`transpileModule`), not the hand-written transform: imports are live (a cycle sees a binding once it's
+  set), exported declarations keep their local names, exports follow later assignments, and a module's own
+  `require` (`createRequire`) is renamed so its imports still go through the loader's.
+- Node fidelity, found running real ESLint with a full preset (2026-10-14; each in `test/modules.test.ts`):
+  top-level `await` (the body runs async; `import()` waits for it, `require()` throws ERR_REQUIRE_ASYNC_MODULE);
+  `require()` of a folder reads its package.json `main`, `require(".")`/`("..")`, a package whose entry is
+  `index.json`; a package with `main` and `module` is required as its `main` (`module` only stands in with no
+  `main`); built-in subpaths `assert/strict` (a real strict variant), `stream/promises`;
+  `process.getBuiltinModule`; `import.meta.resolve`; `path.toNamespacedPath`; `util.isDeepStrictEqual`; assert's
+  legacy `equal`/`notEqual`/`deepEqual`/`notDeepEqual`.
 - `shims/child_process.ts` — replaced with an ENOSYS stub (spawning is unavailable in-browser; sync ops throw,
   async report via callback/`error`, `initChildProcess` is a no-op). `shims/vfs-adapter.ts` and
   `shims/child_process-browser.ts` deleted → **`just-bash` (and quickjs) dropped**. The editor's language

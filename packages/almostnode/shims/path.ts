@@ -163,6 +163,11 @@ export function format(pathObject: {
 	return dir + "/" + base;
 }
 
+/** On POSIX, the path as it is (Node's own `path.posix.toNamespacedPath`). */
+export function toNamespacedPath(path: string): string {
+	return path;
+}
+
 // POSIX interface (we only support POSIX)
 export const posix = {
 	"sep": sep,
@@ -176,7 +181,8 @@ export const posix = {
 	"extname": extname,
 	"relative": relative,
 	"parse": parse,
-	"format": format
+	"format": format,
+	"toNamespacedPath": toNamespacedPath
 };
 
 // Win32 interface (stub — we always use POSIX, but packages import this)
@@ -192,7 +198,8 @@ export const win32 = {
 	"extname": extname,
 	"relative": relative,
 	"parse": parse,
-	"format": format
+	"format": format,
+	"toNamespacedPath": toNamespacedPath
 };
 
 // Default export for CommonJS compatibility
@@ -209,6 +216,7 @@ export default {
 	"relative": relative,
 	"parse": parse,
 	"format": format,
+	"toNamespacedPath": toNamespacedPath,
 	"posix": posix,
 	"win32": win32
 };

@@ -690,8 +690,46 @@ assert.ifError = function ifError(value: unknown): void {
 // Export the AssertionError class on the assert function
 assert.AssertionError = AssertionError;
 
-// Strict mode (same behavior for this implementation)
-assert.strict = assert;
+/** Tests loose equality (==), as Node's legacy assert.equal. */
+assert.equal = function equal(actual: unknown, expected: unknown, message?: string | Error): void {
+	// eslint-disable-next-line eqeqeq -- the legacy assertion is the loose comparison
+	if (!(actual == expected || (Number.isNaN(actual) && Number.isNaN(expected)))) {
+		if (message instanceof Error) {
+			throw message;
+		}
+
+		throw new AssertionError({ "message": message, "actual": actual, "expected": expected, "operator": "==", "stackStartFn": equal });
+	}
+};
+
+/** Tests loose inequality (!=), as Node's legacy assert.notEqual. */
+assert.notEqual = function notEqual(actual: unknown, expected: unknown, message?: string | Error): void {
+	// eslint-disable-next-line eqeqeq -- the legacy assertion is the loose comparison
+	if (actual == expected || (Number.isNaN(actual) && Number.isNaN(expected))) {
+		if (message instanceof Error) {
+			throw message;
+		}
+
+		throw new AssertionError({ "message": message, "actual": actual, "expected": expected, "operator": "!=", "stackStartFn": notEqual });
+	}
+};
+
+// Legacy deep equality: the strict comparison stands in (stricter than Node's on primitives that are == but not ===).
+assert.deepEqual = assert.deepStrictEqual;
+assert.notDeepEqual = assert.notDeepStrictEqual;
+
+/** `assert/strict` (assert.strict): the same assertions, with each loose one its strict counterpart, as in Node. */
+const strict = Object.assign(function strict(value: unknown, message?: string | Error): void {
+	assert.ok(value, message);
+}, assert, {
+	"equal": assert.strictEqual,
+	"notEqual": assert.notStrictEqual,
+	"deepEqual": assert.deepStrictEqual,
+	"notDeepEqual": assert.notDeepStrictEqual
+}) as unknown as typeof assert;
+
+strict.strict = strict;
+assert.strict = strict;
 
 export default assert;
 export { assert };

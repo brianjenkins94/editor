@@ -66,6 +66,32 @@ function walkAst(node: ts.Node, callback: (node: ts.Node) => void): void {
 	ts.forEachChild(node, (child) => { walkAst(child, callback); });
 }
 
+/** What a transformed module starts with when its top level awaits (`await`, `for await`, outside any function): it's
+ *  evaluated as an async function (loadModule), as an ES module with top-level await is in Node. */
+const ASYNC_MODULE = "/*almostnode:top-level-await*/";
+
+/** Whether `sourceFile` awaits at its top level — outside any function, where only an ES module may. */
+function hasTopLevelAwait(sourceFile: ts.SourceFile): boolean {
+	let found = false;
+	const visit = (node: ts.Node): void => {
+		if (found || ts.isFunctionLike(node) || ts.isClassStaticBlockDeclaration(node)) {
+			return;
+		}
+
+		if (ts.isAwaitExpression(node) || (ts.isForOfStatement(node) && node.awaitModifier !== undefined)) {
+			found = true;
+
+			return;
+		}
+
+		ts.forEachChild(node, visit);
+	};
+
+	ts.forEachChild(sourceFile, visit);
+
+	return found;
+}
+
 /**
  * Transform dynamic imports in code: import('x') -> __dynamicImport('x')
  * Regex-based fallback for when AST parsing fails.
@@ -143,7 +169,7 @@ function transformEsmToCjsAst(code: string, filename: string): string {
 		}
 	}
 
-	return transformed;
+	return (hasImportDecl || hasExportDecl) && hasTopLevelAwait(sourceFile) ? ASYNC_MODULE + "\n" + transformed : transformed;
 }
 
 /**
@@ -186,6 +212,24 @@ function transformEsmToCjsRegexFallback(code: string, filename: string): string 
 // eslint-disable-next-line no-new-func, ts/no-implied-eval, no-useless-concat -- the Function constructor + split "imp"+"ort" is the DELIBERATE native-import escape hatch (invisible to the bundler and to almostnode's own import() transform); rewriting it defeats the purpose.
 const nativeImport = new Function("url", "return imp" + "ort(url)") as (url: string) => Promise<unknown>;
 
+/** `import.meta.resolve` for a module whose require is `moduleRequire`: a specifier as the URL it resolves to — a file
+ *  URL, or `node:<name>` for a built-in (Node's own answer). */
+function importMetaResolve(moduleRequire: RequireFunction): (specifier: string) => string {
+	return (specifier: string): string => {
+		const resolved = moduleRequire.resolve(specifier);
+
+		return resolved.startsWith("/") ? "file://" + resolved : "node:" + resolved.replace(/^node:/u, "");
+	};
+}
+
+/** Modules with top-level await still evaluating, by the exports they started with: what import() waits for, and the
+ *  module (whose exports may be another object by the end — `export default` assigns `module.exports`). */
+const evaluating = new WeakMap<object, { "done": Promise<void>; "module": { "exports": unknown } }>();
+
+/** How many import() calls are loading a module now: within one, a module with top-level await may load — outside
+ *  one (a plain require()), it can't, as in Node (ERR_REQUIRE_ASYNC_MODULE). */
+let importing = 0;
+
 function createDynamicImport(moduleRequire: RequireFunction, base?: string): (specifier: string) => Promise<unknown> {
 	return async (specifier: string): Promise<unknown> => {
     // A file:// dynamic import — e.g. eslint's flat-config loader importing `pathToFileURL(configPath).href`
@@ -207,7 +251,23 @@ function createDynamicImport(moduleRequire: RequireFunction, base?: string): (sp
 			return nativeImport(url);
 		}
 
-		const mod = moduleRequire(specifier);
+		// (a module with top-level await may be loaded here — import() waits for its evaluation, which require() can't)
+		importing += 1;
+
+		let mod: unknown;
+
+		try {
+			mod = moduleRequire(specifier);
+		} finally {
+			importing -= 1;
+		}
+
+		const pending = mod !== null && typeof mod === "object" ? evaluating.get(mod) : undefined;
+
+		if (pending !== undefined) {
+			await pending.done;
+			mod = pending.module.exports;
+		}
 
     // If the module has a default export or is already ESM-like, return as-is
 		if (mod && typeof mod === "object" && ("default" in (mod) || "__esModule" in (mod))) {
@@ -425,6 +485,9 @@ const builtinModules: Record<string, unknown> = {
 	"vm": vmShim,
 	"inspector": inspectorShim,
 	"inspector/promises": inspectorShim,
+	// (Node's subpaths of a built-in, from the built-in's own shim)
+	"assert/strict": (assertShim as unknown as { "strict": unknown }).strict,
+	"stream/promises": (streamShim as unknown as { "promises": unknown }).promises,
 	"async_hooks": asyncHooksShim,
 	"domain": domainShim,
 	"diagnostics_channel": diagnosticsChannelShim,
@@ -586,7 +649,11 @@ function createRequire(
 			return cached;
 		}
 
-    // Relative paths
+    // Relative paths (`.` and `..` too: the folder itself, or its parent, as Node reads them)
+		if (id === "." || id === "..") {
+			id += "/";
+		}
+
 		if (id.startsWith("./") || id.startsWith("../") || id.startsWith("/")) {
 			const resolved = id.startsWith("/")
 				? id
@@ -602,7 +669,22 @@ function createRequire(
 					return resolved;
 				}
 
-        // Directory - look for its index (a program's may be TypeScript)
+        // Directory - its package.json's `main`, as Node's require() of a folder reads it first
+				const main = getParsedPackageJson(pathShim.join(resolved, "package.json"))?.main;
+
+				if (typeof main === "string" && main !== "") {
+					const mainPath = pathShim.join(resolved, main);
+
+					for (const candidate of [mainPath, mainPath + ".js", mainPath + ".json", mainPath + ".cjs", pathShim.join(mainPath, "index.js")]) {
+						if (vfs.existsSync(candidate) && vfs.statSync(candidate).isFile()) {
+							resolutionCache.set(cacheKey, candidate);
+
+							return candidate;
+						}
+					}
+				}
+
+        // Else its index (a program's may be TypeScript)
 				for (const index of ["index.js", "index.ts", "index.tsx"]) {
 					const indexPath = pathShim.join(resolved, index);
 
@@ -641,11 +723,13 @@ function createRequire(
 					return basePath;
 				}
 
-        // Directory - look for index.js
-				const indexPath = pathShim.join(basePath, "index.js");
+        // Directory - its index, as Node looks for one: index.js, then index.json
+				for (const index of ["index.js", "index.json"]) {
+					const indexPath = pathShim.join(basePath, index);
 
-				if (vfs.existsSync(indexPath)) {
-					return indexPath;
+					if (vfs.existsSync(indexPath)) {
+						return indexPath;
+					}
 				}
 			}
 
@@ -743,13 +827,10 @@ function createRequire(
 						main = pkg.browser;
 					}
 
-					if (!main && pkg.module) {
-            // module field is used by ESM-only packages (e.g., estree-walker)
-						main = pkg.module;
-					}
-
+					// `main`, as Node reads it — `module` (an ESM build) only for a package with no `main` (an ESM-only one): a
+					// package with both is required as its main, which is what its CommonJS consumers were written against
 					if (!main) {
-						main = pkg.main || "index.js";
+						main = pkg.main ?? (typeof pkg.module === "string" ? pkg.module : undefined) ?? "index.js";
 					}
 
 					const mainPath = pathShim.join(pkgRoot, main);
@@ -925,6 +1006,8 @@ function createRequire(
     // - import.meta is provided for ESM code that uses it
 		try {
 			const importMetaUrl = "file://" + resolvedPath;
+			// (top-level await: the module's body is an async function, and import() waits for it)
+			const awaits = code.startsWith(ASYNC_MODULE);
 			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch) {
 var exports = $exports;
 var require = $require;
@@ -940,7 +1023,7 @@ var fetch = $fetch;
 var global = globalThis;
 globalThis.process = $process;
 global.process = $process;
-return (function() {
+return (${awaits ? "async " : ""}function() {
 ${code}
 }).call(this);
 })`;
@@ -959,7 +1042,7 @@ ${code}
       // Create dynamic import function for this module context
 			const dynamicImport = createDynamicImport(moduleRequire, options.base);
 
-			fn(
+			const evaluated = fn(
 				module.exports,
 				moduleRequire,
 				module,
@@ -967,12 +1050,26 @@ ${code}
 				dirname,
 				process,
 				consoleWrapper,
-				{ "url": importMetaUrl, "dirname": dirname, "filename": resolvedPath },
+				{ "url": importMetaUrl, "dirname": dirname, "filename": resolvedPath, "resolve": importMetaResolve(moduleRequire) },
 				dynamicImport,
 				options.globalFor?.("fetch", program ? "program" : "package", dirname) ?? globalThis.fetch
 			);
 
-			module.loaded = true;
+			if (awaits) {
+				const exportsObject = module.exports as object;
+
+				evaluating.set(exportsObject, { "module": module, "done": (evaluated as Promise<unknown>).then(() => {
+					module.loaded = true;
+					evaluating.delete(exportsObject);
+				}, (error: unknown) => {
+					delete moduleCache[resolvedPath];
+					evaluating.delete(exportsObject);
+
+					throw error;
+				}) });
+			} else {
+				module.loaded = true;
+			}
 		} catch (error) {
       // Remove from cache on error
 			delete moduleCache[resolvedPath];
@@ -1095,7 +1192,14 @@ ${code}
 			return builtinModules["prettier"];
 		}
 
-		return loadModule(resolved).exports;
+		const loaded = loadModule(resolved);
+
+		// (a module with top-level await, still evaluating: only import() can wait for it — require() can't, as in Node)
+		if (importing === 0 && loaded.exports !== null && typeof loaded.exports === "object" && evaluating.has(loaded.exports)) {
+			throw Object.assign(new Error(`require() of ${resolved}, an ES module with top-level await: import() it instead`), { "code": "ERR_REQUIRE_ASYNC_MODULE" });
+		}
+
+		return loaded.exports;
 	};
 
 	require.resolve = (id: string): string => {
@@ -1188,6 +1292,21 @@ export class Runtime {
     // Create fs shim with cwd getter for relative path resolution
 		this.fsShim = createFsShim(vfs, () => this.process.cwd(), options.beforeFs, options.afterFs);
 		this.options = options;
+
+    // process.getBuiltinModule (Node 22.3+): a built-in by its name, as require() gives it — undefined for anything else
+		(this.process as unknown as { "getBuiltinModule": (id: string) => unknown }).getBuiltinModule = (id: string): unknown => {
+			const name = id.startsWith("node:") ? id.slice("node:".length) : id;
+
+			if (name === "fs") {
+				return this.fsShim;
+			}
+
+			if (name === "fs/promises") {
+				return this.fsShim.promises;
+			}
+
+			return name === "process" ? this.process : builtinModules[name];
+		};
 
     // Initialize child_process with VFS for bash command support
 		initChildProcess(vfs);
@@ -1555,7 +1674,7 @@ ${code}
 				dirname,
 				this.process,
 				consoleWrapper,
-				{ "url": importMetaUrl, "dirname": dirname, "filename": filename },
+				{ "url": importMetaUrl, "dirname": dirname, "filename": filename, "resolve": importMetaResolve(require) },
 				dynamicImport,
 				this.options.globalFor?.("fetch", "program", dirname) ?? globalThis.fetch
 			);

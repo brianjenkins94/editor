@@ -1,3 +1,4 @@
+import assert from "./assert";
 /* eslint-disable ts/no-explicit-any, ts/use-unknown-in-catch-callback-variable, ts/no-unsafe-function-type -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js util module shim
@@ -306,7 +307,19 @@ export const types = {
 export const { TextEncoder } = globalThis;
 export const { TextDecoder } = globalThis;
 
+/** Whether `left` and `right` are deeply and strictly equal: assert's deepStrictEqual comparison, as Node's is. */
+export function isDeepStrictEqual(left: unknown, right: unknown): boolean {
+	try {
+		assert.deepStrictEqual(left, right);
+
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export default {
+	"isDeepStrictEqual": isDeepStrictEqual,
 	"format": format,
 	"inspect": inspect,
 	"inherits": inherits,
