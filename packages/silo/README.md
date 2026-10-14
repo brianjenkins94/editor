@@ -146,6 +146,39 @@ This removed `silo accept`, the editor's Accept action, and lib's `pending`/`acc
 run does, goes when `silo run` exists. They're replaced by a capability's origin in the baseline, policy rules, and the
 run's own failure in CI.
 
+### Each dependency, seen four ways
+
+Anticipate and Track watch a dependency from both sides, and its usage. Each view is narrower than the one before it:
+
+| View | Question | Changed by | Today |
+|---|---|---|---|
+| **The package** | What can its own code do? | A new version | `baseline.packages[name].caps`: lib `detect` over every code file of the package. Live in both front ends; what `grew` is recorded on |
+| **Your usage** | Which of its exports does your code import and call? | Your code | `baseline.consumer[workspace][spec].members`: lib `audit`'s import surface (oxc, member-level; computed access is `*`). Command line only; the editor never writes `consumer` |
+| **The join** | What can the part you use reach, tree-shaken? | Either side | lib `packages` (rolldown tree-shaking from the members you import, deobfuscated first). Built, never called |
+| **Runs** | What did it actually do? | Running it | Each run's effects, by package (`runs/<user>.jsonl`); the editor's debugger gates and counts them |
+
+The package ⊇ the join ⊇ what ran. The signals are in the gaps:
+
+- **The join grew from the package's side.** A new version reaches more through the members you already use: the
+  supply-chain signal.
+- **The join grew from your side.** Your code started using a member that reaches more (`fetchAll`, and with it `net`).
+  The prototype counted this as drift too: "is my relationship to this package still the one I approved?"
+- **A run did what the join didn't predict.** A blind spot in the analysis, or a package hiding what it does. The
+  strongest of the four.
+- **The join allows what no run used.** A candidate for a narrower policy (least privilege).
+
+What this asks of the design:
+
+1. **The baseline holds the join, not just the package.** The gate decides a package's call against what the part you
+   use can reach, which is tighter than what the whole package can.
+2. **A grown capability's origin is a version or your code.** `grew` today records only a version (the package's
+   side); growth from your side needs the member(s) that brought it in.
+3. **The editor computes your usage.** It's half the join, and only the command line has it now. In the editor it can
+   come from the TypeScript server it already runs (the import surface is a reading of your code, which is analysis's
+   job: TypeScript 7, not BABLR).
+4. **A run beyond the join is its own finding**, apart from a call outside the policy: something static analysis
+   missed, shown in the Exceptions view and by the command line.
+
 ### The jobs, reconciled
 
 | Job | Command line | Editor | Shared in lib |
@@ -180,8 +213,9 @@ a terminal prompt or failure in CI, is what's missing.
 
 ### Decided
 
-- **Analysis: wanted, in both front ends.** The slice of a package the code imports, as the prototype's audit did. The
-  editor needs the import surface for it, which only the command line computes today.
+- **Analysis: wanted, in both front ends.** Both sides of each dependency and their join, checked against the runs, as
+  in "Each dependency, seen four ways". The editor needs your usage (the import surface) for it, which only the command
+  line computes today.
 - **Deobfuscation: later.** It joins the one analysis, in both front ends, when it comes.
 - **The desktop gate is the `--import` preload**, above.
 - **`guard` is not gating.** It's a runtime type check at a boundary (a value against its declared type), reacting
@@ -194,5 +228,9 @@ a terminal prompt or failure in CI, is what's missing.
 
 ### Decisions to make
 
-None open. (The questions above, "What doesn't fit", are answered by this design.)
+- **The shape of a grown capability's origin.** A version (`{"net": {"version": "1.1.0"}}`) or the members that
+  brought it in (`{"net": {"members": ["fetchAll"]}}`); and whether growth from your side is recorded in the baseline at
+  all, or only seen in your code's diff (the baseline's `consumer` already changes in that commit).
+
+(The questions above, "What doesn't fit", are otherwise answered by this design.)
 
