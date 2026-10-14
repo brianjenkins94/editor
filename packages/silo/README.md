@@ -257,9 +257,11 @@ The plan, none of it scheduled:
    (`findings.ts`; or, later, as LSP middleware), so the plugin only answers requests — the shape the TypeScript 7
    host has.
 3. **eslint in a realm of its own, with its own TypeScript 6** (a worker, as the cspell server is): its own language
-   service and Program over the workspace, its fix-all its own. To measure first: a second Program over the same files
-   costs memory (the TS servers are the biggest realms in the performance budgets), and the editor loads two
-   TypeScripts. It's the plugin with a known destination and the hardest to move later.
+   service and Program over the workspace, its fix-all its own. It's the plugin with a known destination and the
+   hardest to move later. Measured 2026-10-14 (below): moving it as it is costs about 20 MB; giving it types costs a
+   Program, from about 90 MB to 550 MB by project, or about 135 MB on a large one if the Program is rooted at the open
+   file.
+
 4. **A TypeScript 7 host for capabilities and history.** What replaces `typescriptServerPlugins` and
    `typescript.tsserverRequest` when VS Code adopts 7.1, per Jake Bailey (TypeScript team, 2026-10-14): "you can ask our
    extension for an api connection, and we support lsp middleware proxying". So an extension asks VS Code's TypeScript
@@ -270,8 +272,48 @@ The plan, none of it scheduled:
    In the browser this needs the server itself to run there (a `tsc.wasm`, not published yet); on the desktop it's
    there.
 
-1 and 2 are mechanical and make the switch one adapter, over a connection we know we'll get; 3 waits on a memory
-measurement; 4 waits on VS Code shipping 7.1 (and, for the browser editor, TypeScript 7 in the browser).
+1 and 2 are mechanical and make the switch one adapter, over a connection we know we'll get; 3 is measured (below):
+cheap to move as it is, a Program's worth to move with types; 4 waits on VS Code shipping 7.1 (and, for the browser
+editor, TypeScript 7 in the browser).
+
+#### What a second TypeScript Program costs (measured 2026-10-14)
+
+eslint in the editor doesn't lint with types today. The plugin hands the engine only a file's text, and the engine
+strips `project`, `projectService` and `programs`; it borrows tsserver's `ts` only to parse. The preset turns on 13
+type-aware typescript-eslint rules (`no-floating-promises`, `no-misused-promises`, `naming-convention`, `no-deprecated`,
+`unbound-method`, `switch-exhaustiveness-check` and more): without a Program each one throws in `create`, the engine's
+`guardRule` records it as broken, and it reports nothing. Checked in the editor: a floating promise isn't reported, a
+`var` beside it is. The desktop's eslint reports both.
+
+So the question is what a Program of its own costs, in a worker: TypeScript 5.9 (the editor's built chunk), a Program
+over each project's tsconfig, as tsserver opens it, then every file checked, as linting the whole project would. Memory
+is the worker's, from `measureUserAgentSpecificMemory` (eager, as the performance suite reads it); the same Program in
+Node, file for file, for comparison.
+
+| Project | Files (own) | TypeScript loaded | Program built | Open file checked | Every file checked | Node, every file |
+|---|---|---|---|---|---|---|
+| the demo | 218 (3) | 20 MB | 69 MB | 86 MB | 86 MB | 125 MB |
+| games | 679 (167) | 20 MB | 165 MB | 201 MB | 230 MB | 362 MB |
+| lib | 1,473 (112) | 20 MB | 164 MB | 207 MB | 293 MB | 520 MB |
+| this editor | 4,361 (1,127) | 20 MB | 362 MB | 451 MB | 552 MB | 1,010 MB |
+| this editor, rooted at the open file | 216 | 20 MB | 112 MB | 134 MB | — | — |
+
+For scale: on the demo, CI's performance run has tsserver's semantic server at 180 MB (eslint's engine and the
+capabilities plugin included), the syntax server at 109 MB, and the tab at 754 MB; the budgets are 1,000 MB for the
+semantic server and 2,200 MB for the tab. A browser Program costs a little over half what Node's does (Chrome compresses
+pointers).
+
+What follows from it:
+
+- **Moving eslint as it is costs about 20 MB**: a TypeScript in another realm. The engine and its plugins move out of
+  the semantic server, so they aren't added.
+- **Type-aware lint, while eslint still runs inside tsserver, costs nothing**: hand typescript-eslint the server's own
+  Program (`parserOptions.programs`, from `getProgram()` in the plugin), and the 13 rules run. That's parity with the
+  desktop now, without a realm.
+- **Type-aware lint in a realm of its own costs a Program**, beside the TypeScript server's own: about 90 MB on the demo
+  and 200 MB on a mid-sized repository, up to 450–550 MB on one this editor's size. Rooted at the open file instead of
+  the whole tsconfig, about 135 MB even there, rebuilt as the open file changes. When VS Code moves to TypeScript 7 the
+  classic Program in tsserver goes away, so this one is what's left of it rather than a second one.
 
 ### Decided
 
