@@ -27,7 +27,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, versionsPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { Unparsable } from "./bablr";
-import { syncBaseline, watchBaseline } from "./baseline";
+import { baselineReady, syncBaseline, watchBaseline } from "./baseline";
 import { tarball } from "./tarballs";
 import { blobOid, headCommit } from "./git-engine";
 
@@ -166,8 +166,15 @@ function repoRelative(path: string): string {
 export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr): void {
 	const rpc = createRpcClient(hub);
 
-	// The dependency baseline, kept up to the dependencies as they change (made by the first run that keeps evidence).
+	// The dependency baseline, kept up to the dependencies as they change — and made when a run's package first makes a
+	// call its debugger couldn't settle (the bridge's decide asks): outside it, a call is stopped and asked.
 	watchBaseline(vscode);
+	serve(hub, "baseline.ready", async () => {
+		await ensureSiloFiles(vscode);
+		await baselineReady(vscode);
+
+		return {};
+	});
 	// A package a debug run's require found nothing of: its tarball, at the version the run read pinned (the bridge asks,
 	// for the run — the debug worker installs it in its own memory). From the lockfile's URL when it names that version.
 	serve(hub, "packages.tarball", async (args) => {

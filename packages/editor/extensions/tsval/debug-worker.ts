@@ -375,8 +375,8 @@ function packageOf(dir: string): string {
 }
 
 /** The dependency baseline (`.silo/baseline.json`, read as a run starts): what each package's own code could do when the
- *  library was added (what a newer version grew isn't settled: it asks, unless the policy allows it). Undefined with
- *  none yet — the first run makes it — when a package's calls are counted, not asked about. */
+ *  library was added (what a newer version grew isn't settled: it asks, unless the policy allows it). Undefined when
+ *  there's none yet: every package's call then goes to the editor, which makes it and decides by it (decide.ts). */
 let baseline: BaselinePackages | undefined;
 
 /** The baseline as it is now, through the editor's runtime (read as the debugger's own: neither decided nor counted). */
@@ -476,31 +476,32 @@ function packageIn(dir: string): { "name": string; "version"?: string } {
 
 /**
  * How the package in `dir` calling `capability` goes: trusted by the policy (an org's contract, say) — made, no question;
- * within what its baseline settled of it — made; else decided at the call by the editor (redline, the policy, then the
- * person, asked — blocking until it's answered). Undefined when it isn't decided at all — no baseline yet, or no editor
- * to ask — and the call is only counted. A failure to decide refuses it.
+ * within what its baseline settled of it — made; else stopped before it's made and decided at the call by the editor
+ * (the baseline as it is now — made if there was none — then redline, the policy, then the person, asked — blocking
+ * until it's answered). Nothing outside the baseline is made unasked: where nobody can be asked — a live run (retyping
+ * mustn't prompt), no editor, a failure to decide — it's refused.
  */
-function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecision, "package">): RuntimeVerdict | undefined {
+function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecision, "package">): RuntimeVerdict {
 	const pkg = packageIn(dir);
 
 	if (policy !== undefined && packageDisposition(policy, pkg) === "allow") {
 		return { "allow": true, "decided": "policy" };
 	}
 
-	if (baseline === undefined || editorLink === undefined) {
-		return undefined;
-	}
-
-	const entry = baseline[pkg.name];
+	const entry = baseline?.[pkg.name];
 
 	if (entry !== undefined && covers(settledCaps(entry), capability)) {
 		return { "allow": true, "decided": "baseline" };
 	}
 
+	if (liveRun || editorLink === undefined) {
+		return { "allow": false, "decided": "refused" };
+	}
+
 	try {
 		return editorLink.decide({ ...call, "package": packageOf(dir) });
-	} catch (error) {
-		return (error as { "code"?: string }).code === "ENOTCONN" ? undefined : { "allow": false, "decided": "refused" };
+	} catch {
+		return { "allow": false, "decided": "refused" };
 	}
 }
 
@@ -524,13 +525,13 @@ function packageFetch(from: string): typeof fetch | undefined {
 			const resource = reachedBy(input);
 			const verdict = packageVerdict(dir, "net", { "kind": "net", "args": [resource] });
 
-			if (verdict?.allow === false) {
+			if (!verdict.allow) {
 				tally("net", resource, "denied", packageOf(dir), verdict.decided);
 
 				throw Object.assign(new TypeError(`EACCES: ${packageOf(dir)} may not reach ${resource} (${verdict.decided === "policy" ? "the policy" : "refused at the call"})`), { "code": "EACCES" });
 			}
 
-			tally("net", resource, "made", packageOf(dir), verdict?.decided);
+			tally("net", resource, "made", packageOf(dir), verdict.decided);
 
 			return globalThis.fetch(input, init);
 		});
@@ -584,14 +585,14 @@ function packageBuiltin(id: string, from: string): unknown {
 
 					const verdict = packageVerdict(dir, capability, { "kind": kind, "method": property as string, ...kind === "fs" ? { "op": capability === "fs:write" ? "write" : "read" } : {}, "args": [resource] });
 
-					if (verdict?.allow === false) {
+					if (!verdict.allow) {
 						tally(capability, resource, "denied", pkg, verdict.decided);
 
 						throw Object.assign(new Error(`EACCES: ${pkg} may not ${capability} ${resource} (${verdict.decided === "policy" ? "the policy" : "refused at the call"})`), { "code": "EACCES" });
 					}
 
 					// (a write decided here is let through the runtime's guard, as a program's allowed one is: madeFor)
-					const writing = verdict?.allow === true && capability === "fs:write";
+					const writing = verdict.allow && capability === "fs:write";
 
 					if (writing) {
 						allowingWrites += 1;
@@ -602,21 +603,21 @@ function packageBuiltin(id: string, from: string): unknown {
 
 						if (typeof (result as { "then"?: unknown } | null)?.then === "function") {
 							return (result as Promise<unknown>).then((settled) => {
-								tally(capability, resource, "made", pkg, verdict?.decided);
+								tally(capability, resource, "made", pkg, verdict.decided);
 
 								return settled;
 							}, (error: unknown) => {
-								tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict?.decided);
+								tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict.decided);
 
 								throw error;
 							});
 						}
 
-						tally(capability, resource, "made", pkg, verdict?.decided);
+						tally(capability, resource, "made", pkg, verdict.decided);
 
 						return result;
 					} catch (error) {
-						tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict?.decided);
+						tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict.decided);
 
 						throw error;
 					} finally {

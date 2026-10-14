@@ -128,9 +128,17 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 	return syncing;
 }
 
+/** The baseline as a run's package call is decided: a sync under way finished, or one made if there's none — running
+ *  is what makes a workspace keep one. Resolves either way: with none, the call is asked. */
+export async function baselineReady(vscode: typeof vscodeApi, root = "/workspace"): Promise<void> {
+	const there = await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${root}/${baselinePath()}`))).then(() => true, () => false);
+
+	await (there ? syncing : syncBaseline(vscode, true, root));
+}
+
 /** Keep the versions (versions.ts) and `.silo/baseline.json` up to the project's dependencies: both resolved again as a
- *  package.json or package-lock.json changes — the baseline when there's one (the first run that keeps evidence makes
- *  it) — and the versions now, so a preview started before any run pins them. */
+ *  package.json or package-lock.json changes — the baseline when there's one (made by a run: baselineReady,
+ *  or the first that keeps evidence) — and the versions now, so a preview started before any run pins them. */
 export function watchBaseline(vscode: typeof vscodeApi): vscodeApi.Disposable {
 	const watcher = vscode.workspace.createFileSystemWatcher("**/{package.json,package-lock.json}");
 	const changed = (uri: vscodeApi.Uri): void => {
