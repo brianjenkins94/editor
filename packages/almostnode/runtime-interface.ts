@@ -10,6 +10,9 @@ export interface IRuntimeOptions {
   // (almostnode runs in a browser); false resolves as Node does, which reads only `exports`/`main`. A Node program traced
   // under Node (eslint's toolchain) loads the same files this way.
 	"browserField"?: boolean;
+	// Whether import() of a `file:` URL goes to the platform's own module loader (the default), or is loaded as any
+	// import is, from this runtime's files (false) — see RuntimeOptions.
+	"nativeFileImports"?: boolean;
 	"env"?: Record<string, string>;
 	"onConsole"?: (method: string, args: unknown[]) => void;
   // Base URL the VFS is served from, used to resolve `file://` dynamic imports to a fetchable same-origin URL

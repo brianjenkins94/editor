@@ -51,6 +51,7 @@ export interface Process {
 	"platform": string;
 	"version": string;
 	"versions": { "node": string; "v8": string; "uv": string };
+	"features": Record<string, boolean | string>;
 	"argv": string[];
 	"argv0": string;
 	"execPath": string;
@@ -251,6 +252,9 @@ export function createProcess(options?: {
 		"platform": "linux", // Pretend to be linux for better compatibility
 		"version": "v20.0.0",
 		"versions": { "node": "20.0.0", "v8": "11.3.244.8", "uv": "1.44.2" },
+		// (what this runtime does as Node's builds do: require() of an ES module, and TypeScript — it transpiles a .ts file
+		// it loads, as Node's "transform" mode does)
+		"features": { "inspector": false, "debug": false, "uv": false, "ipv6": true, "tls_alpn": false, "tls_sni": false, "tls_ocsp": false, "tls": false, "cached_builtins": true, "require_module": true, "typescript": "transform" },
 
 		"argv": ["node", "/index.js"],
 		"argv0": "node",

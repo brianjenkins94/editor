@@ -82,6 +82,12 @@ in). `css-tree` and `just-bash`
   `main`); built-in subpaths `assert/strict` (a real strict variant), `stream/promises`;
   `process.getBuiltinModule`; `import.meta.resolve`; `path.toNamespacedPath`; `util.isDeepStrictEqual`; assert's
   legacy `equal`/`notEqual`/`deepEqual`/`notDeepEqual`.
+- And running a repository's own `eslint.config` (importing that preset): an ES module's static imports are evaluated
+  first, and one still awaiting at its top level is waited for, the importer's body running once it's done (within an
+  `import()`); no module is let go of — the module cache had dropped the oldest past 2,000 modules, loading a second
+  copy of one later; `process.features.typescript` is `"transform"` (ESLint imports a TypeScript config natively);
+  and the `nativeFileImports: false` option, for `import()` of a `file:` URL (ESLint's config loader) from the
+  runtime's own files rather than the platform's loader.
 - `shims/child_process.ts` — replaced with an ENOSYS stub (spawning is unavailable in-browser; sync ops throw,
   async report via callback/`error`, `initChildProcess` is a no-op). `shims/vfs-adapter.ts` and
   `shims/child_process-browser.ts` deleted → **`just-bash` (and quickjs) dropped**. The editor's language

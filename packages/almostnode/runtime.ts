@@ -45,6 +45,31 @@ function walkAst(node: ts.Node, callback: (node: ts.Node) => void): void {
  *  evaluated as an async function (loadModule), as an ES module with top-level await is in Node. */
 const ASYNC_MODULE = "/*almostnode:top-level-await*/";
 
+/** What a transformed ES module says, on its own line, of the modules it statically imports (as JSON): what loadModule
+ *  evaluates first, as Node does an ES module's dependencies — and waits for, when one awaits at its top level. */
+const IMPORTS = "/*almostnode:imports ";
+
+/** The modules `sourceFile` statically imports (`import … from`, `export … from`) that its transformed code still
+ *  requires — TypeScript drops the ones only used as types, which may not exist to load. */
+function staticImports(sourceFile: ts.SourceFile, transformed: string): string[] {
+	const specifiers = sourceFile.statements.flatMap((statement) => ((ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) && statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier) ? [statement.moduleSpecifier.text] : []));
+
+	return [...new Set(specifiers)].filter((specifier) => transformed.includes(`require(${JSON.stringify(specifier)})`) || transformed.includes(`require('${specifier}')`));
+}
+
+/** The modules a transformed module said it statically imports (IMPORTS), or none. */
+function staticImportsOf(code: string): string[] {
+	const at = code.indexOf(IMPORTS);
+
+	if (at === -1 || at > ASYNC_MODULE.length + 1) {
+		return [];
+	}
+
+	const end = code.indexOf("*/\n", at);
+
+	return end === -1 ? [] : JSON.parse(code.slice(at + IMPORTS.length, end)) as string[];
+}
+
 /** Whether `sourceFile` awaits at its top level — outside any function, where only an ES module may. */
 function hasTopLevelAwait(sourceFile: ts.SourceFile): boolean {
 	let found = false;
@@ -144,7 +169,14 @@ function transformEsmToCjsAst(code: string, filename: string): string {
 		}
 	}
 
-	return (hasImportDecl || hasExportDecl) && hasTopLevelAwait(sourceFile) ? ASYNC_MODULE + "\n" + transformed : transformed;
+	if (!hasImportDecl && !hasExportDecl) {
+		return transformed;
+	}
+
+	const imports = staticImports(sourceFile, transformed);
+	const header = imports.length > 0 ? `${IMPORTS}${JSON.stringify(imports).replaceAll("*/", "*\\/")}*/\n` : "";
+
+	return (hasTopLevelAwait(sourceFile) ? ASYNC_MODULE + "\n" : "") + header + transformed;
 }
 
 /**
@@ -205,8 +237,14 @@ const evaluating = new WeakMap<object, { "done": Promise<void>; "module": { "exp
  *  one (a plain require()), it can't, as in Node (ERR_REQUIRE_ASYNC_MODULE). */
 let importing = 0;
 
-function createDynamicImport(moduleRequire: RequireFunction, base?: string): (specifier: string) => Promise<unknown> {
+function createDynamicImport(moduleRequire: RequireFunction, base?: string, nativeFileImports = true): (specifier: string) => Promise<unknown> {
 	return async (specifier: string): Promise<unknown> => {
+		// (or, with nativeFileImports false, loaded as any import is, from this runtime's files — the URL's path, its
+		// query and hash dropped, as Node's loader reads a file URL)
+		if (!nativeFileImports && typeof specifier === "string" && specifier.startsWith("file://")) {
+			specifier = decodeURIComponent(new URL(specifier).pathname);
+		}
+
     // A file:// dynamic import — e.g. eslint's flat-config loader importing `pathToFileURL(configPath).href`
     // (with a `?mtime=` cache-buster) — is handed to the browser's NATIVE ESM loader at the real same-origin
     // path, NOT re-executed through almostnode's require/VFS path. The service-worker module resolver serves
@@ -273,6 +311,11 @@ export interface RuntimeOptions {
   // (almostnode runs in a browser); false resolves as Node does, which reads only `exports`/`main`. A Node program traced
   // under Node (eslint's toolchain) loads the same files this way.
 	"browserField"?: boolean;
+	// Whether import() of a `file:` URL goes to the platform's own module loader — true by default: the service worker
+	// serves the workspace at those paths, for a dev server's config (Vite's) to run as native ESM. False loads it as any
+	// import is, from this runtime's files: what a program that must stay inside the runtime needs (eslint's worker,
+	// importing a repository's eslint.config).
+	"nativeFileImports"?: boolean;
 	"env"?: Record<string, string>;
 	"onConsole"?: (method: string, args: unknown[]) => void;
 	"onStdout"?: (data: string) => void;
@@ -784,15 +827,9 @@ function createRequire(
 			"paths": []
 		};
 
-    // Cache before loading to handle circular dependencies
+    // Cache before loading to handle circular dependencies — and kept, as Node keeps every module it loaded: a module
+		// loaded again would be a second copy, with state of its own (ESLint with a preset loads well over 2,000)
 		moduleCache[resolvedPath] = module;
-
-    // Evict oldest entry if cache exceeds bounds
-		const cacheKeys = Object.keys(moduleCache);
-
-		if (cacheKeys.length > 2000) {
-			delete moduleCache[cacheKeys[0]];
-		}
 
     // Handle JSON files
 		if (resolvedPath.endsWith(".json")) {
@@ -920,9 +957,8 @@ ${code}
 			}
 
       // Create dynamic import function for this module context
-			const dynamicImport = createDynamicImport(moduleRequire, options.base);
-
-			const evaluated = fn(
+			const dynamicImport = createDynamicImport(moduleRequire, options.base, options.nativeFileImports);
+			const evaluate = (): unknown => fn(
 				module.exports,
 				moduleRequire,
 				module,
@@ -935,7 +971,20 @@ ${code}
 				options.globalFor?.("fetch", program ? "program" : "package", dirname) ?? globalThis.fetch
 			);
 
-			if (awaits) {
+			// An ES module's static imports are evaluated before it, as Node does; one still evaluating (its top level
+			// awaits) is waited for — the module's body runs once it's done, and the module is still evaluating meanwhile,
+			// for whoever imports it. Only within an import(): a require() can't wait (ERR_REQUIRE_ASYNC_MODULE, below).
+			const waitingOn = importing > 0
+				? staticImportsOf(code).flatMap((specifier) => {
+					const exported = moduleRequire(specifier);
+					const pending = exported !== null && typeof exported === "object" ? evaluating.get(exported) : undefined;
+
+					return pending === undefined ? [] : [pending.done];
+				})
+				: [];
+			const evaluated = waitingOn.length > 0 ? Promise.all(waitingOn).then(evaluate) : evaluate();
+
+			if (awaits || waitingOn.length > 0) {
 				const exportsObject = module.exports as object;
 
 				evaluating.set(exportsObject, { "module": module, "done": (evaluated as Promise<unknown>).then(() => {
@@ -1546,7 +1595,7 @@ ${code}
 })`;
 
       // Create dynamic import function for this module context
-			const dynamicImport = createDynamicImport(require, this.options.base);
+			const dynamicImport = createDynamicImport(require, this.options.base, this.options.nativeFileImports);
 
       // eslint-disable-next-line no-eval -- executing module code is almostnode's whole purpose; the runtime IS an evaluator.
 			const fn = eval(wrappedCode);

@@ -184,6 +184,43 @@ test("top-level await: an ES module's body awaits as Node's does — import() wa
 	assert.equal(runtimeWith({ "/workspace/node_modules/sync/package.json": JSON.stringify({ "name": "sync", "main": "index.js" }), "/workspace/node_modules/sync/index.js": "async function later() { await 1; }\nexport const named = later;\n" }).execute("module.exports = typeof require('sync').named;", "/workspace/main.js").exports, "function", "an await inside a function isn't the top level's");
 });
 
+test("top-level await, imported: a module importing one waits for it, as Node's does — and so does whoever imports that", async () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/preset/package.json": JSON.stringify({ "name": "preset", "main": "index.js" }),
+		"/workspace/node_modules/preset/index.js": "export default await Promise.resolve(['a', 'b']);\n",
+		"/workspace/config.js": "import preset from 'preset';\nexport default [...preset, 'c'];\n",
+		"/workspace/outer.js": "import config from './config.js';\nexport const count = config.length;\n"
+	});
+	const config = await (runtime.execute("module.exports = import('./config.js');", "/workspace/main.js").exports as Promise<{ "default": string[] }>);
+
+	assert.deepEqual(config.default, ["a", "b", "c"], "its body ran once the preset's await was done");
+	assert.equal((await (runtime.execute("module.exports = import('./outer.js');", "/workspace/main.js").exports as Promise<{ "count": number }>)).count, 3, "and a module importing it waited too");
+});
+
+test("nativeFileImports: false — import() of a file: URL is loaded from the runtime's files, its query dropped, as Node reads one", async () => {
+	const runtime = runtimeWith({ "/workspace/eslint.config.js": "export default { 'rules': {} };\n" }, { "nativeFileImports": false });
+	const config = await (runtime.execute("module.exports = import('file:///workspace/eslint.config.js?mtime=1');", "/workspace/main.js").exports as Promise<{ "default": unknown }>);
+
+	assert.deepEqual(config.default, { "rules": {} });
+});
+
+test("a module is loaded once however many are: none is let go and loaded again as a second copy", () => {
+	const files: Files = {};
+
+	for (let index = 0; index < 2100; index += 1) {
+		files[`/workspace/many/${index}.js`] = `module.exports = { "index": ${index} };`;
+	}
+
+	const runtime = runtimeWith(files);
+	const same = runtime.execute("const first = require('./many/0.js');\nfor (let index = 1; index < 2100; index += 1) { require('./many/' + index + '.js'); }\nmodule.exports = require('./many/0.js') === first;", "/workspace/main.js").exports;
+
+	assert.equal(same, true);
+});
+
+test("process.features: TypeScript, as Node's transform mode — a .ts file is loaded as it is", () => {
+	assert.equal(runtimeWith({}).execute("module.exports = process.features.typescript;", "/workspace/main.js").exports, "transform");
+});
+
 test("require() of a folder by its path reads its package.json's main first, as Node's does", () => {
 	const runtime = runtimeWith({
 		"/workspace/node_modules/tool/package.json": JSON.stringify({ "name": "tool", "main": "lib/api.js" }),
