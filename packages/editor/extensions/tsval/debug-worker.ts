@@ -23,6 +23,7 @@ import type { Effect, LoadedPackage } from "@brianjenkins94/run-contract";
 import type { RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/run-contract/runtime";
 import type { Told, Traced } from "@brianjenkins94/run-contract/values";
 import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
+import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
@@ -36,7 +37,7 @@ import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
 
 import { LiveRecord } from "@brianjenkins94/run-contract/values";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
-import { covers, settledCaps } from "@brianjenkins94/util/silo/evidence";
+import { covers, settledReach } from "@brianjenkins94/util/silo/evidence";
 import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 import { NETWORK_PROBES } from "../../shared/architecture";
@@ -374,18 +375,19 @@ function packageOf(dir: string): string {
 	return ran.version === undefined ? ran.name : `${ran.name}@${ran.version}`;
 }
 
-/** The dependency baseline (`.silo/baseline.json`, read as a run starts): what each package's own code could do when the
- *  library was added (what a newer version grew isn't settled: it asks, unless the policy allows it). Undefined when
+/** The dependency baseline (`.silo/baseline.json`, read as a run starts): what the part of each package the code uses
+ *  could reach when it began to (the join, its `consumer`), and what each package's own code could do when the library
+ *  was added (its `packages`) — what grew since isn't settled: it asks, unless the policy allows it. Undefined when
  *  there's none (the editor makes it as a project opens, unless `silo.baseline` is off): the policy decides every
  *  package's call. */
-let baseline: BaselinePackages | undefined;
+let baseline: { "consumer"?: Record<string, WsConsumer>; "packages"?: BaselinePackages } | undefined;
 
 /** The baseline as it is now, through the editor's runtime (read as the debugger's own: neither decided nor counted). */
-function readBaseline(): BaselinePackages | undefined {
+function readBaseline(): typeof baseline {
 	try {
 		const text = new TextDecoder().decode(editorLink?.fs.readFile("/workspace/.silo/baseline.json", { "load": true }));
 
-		return (JSON.parse(text) as { "packages"?: BaselinePackages }).packages;
+		return JSON.parse(text) as typeof baseline;
 	} catch {
 		return undefined;
 	}
@@ -477,8 +479,9 @@ function packageIn(dir: string): { "name": string; "version"?: string } {
 
 /**
  * How the package in `dir` calling `capability` goes: trusted by the policy (an org's contract, say) — made, no question;
- * within what its baseline settled of the version that runs — made (the baseline spot-checked at the call: an entry of
- * another version says nothing of this one); else the policy decides, at the call — redline, the policy, then the
+ * within what its baseline settled of the version that runs — the join of the code's use of it (what the members it
+ * imports reach), else the whole package's — made (the baseline spot-checked at the call: an entry of another version
+ * says nothing of this one); else the policy decides, at the call — redline, the policy, then the
  * person, asked, blocking until it's answered (the editor's decide). Where nobody can be asked — a live run (retyping
  * mustn't prompt), no editor, a failure to decide — the policy decides alone, a call it would ask about refused. Every
  * call is counted with how it was decided.
@@ -490,9 +493,12 @@ function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecis
 		return { "allow": true, "decided": "policy" };
 	}
 
-	const entry = baseline?.[pkg.name];
+	// (spot-checked: the baseline's version of the package is the one that runs; then what it settled — the join of the
+	// code's use of it, else, for a package only a dependency uses, the whole package's)
+	const recorded = baseline?.packages?.[pkg.name]?.version;
+	const reach = baseline === undefined || (recorded !== undefined && pkg.version !== undefined && recorded !== pkg.version) ? undefined : settledReach(baseline, pkg.name);
 
-	if (entry !== undefined && (entry.version === undefined || pkg.version === undefined || entry.version === pkg.version) && covers(settledCaps(entry), capability)) {
+	if (reach !== undefined && covers(reach, capability)) {
 		return { "allow": true, "decided": "baseline" };
 	}
 

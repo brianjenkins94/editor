@@ -9,10 +9,13 @@
  *
  * Two kinds of row:
  * - Grew: a library whose newer version can do more than it could when it was added — each capability with the version
- *   that grew it (the baseline's `grew`). That's outside the baseline, so it asks at the call unless the policy allows
- *   it ("Allow always" there is the approval, in the policy file's commit). A warning says when one turns up.
+ *   that grew it (the baseline's `packages` … `grew`) — or whose use by the code reaches more than it did, the members
+ *   the code started using bringing it in (the join's: `consumer` … `grew`). That's outside the baseline, so it asks at
+ *   the call unless the policy allows it ("Allow always" there is the approval, in the policy file's commit). A warning
+ *   says when one turns up.
  * - Each run's exceptions, newest first: the answers given at the call, by the package (or the program) that made it.
  */
+import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages, Effect, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import { parseRuns } from "@brianjenkins94/util/silo/evidence";
 import { baselinePath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
@@ -24,8 +27,9 @@ const EXCEPTIONS = new Set<Effect["decided"]>(["once", "always", "refused"]);
 /** How an answer reads. */
 const ANSWER: Record<string, string> = { "once": "allowed once", "always": "allowed always", "refused": "refused" };
 
-/** A library that grew; an exception given at the call, in a run. */
-type Node = { "kind": "grew"; "name": string; "entry": BaselinePackages[string] } | { "kind": "exceptions"; "by": string; "found": { "effect": Effect; "run": RunEnvelope }[] } | { "kind": "exception"; "effect": Effect; "run": RunEnvelope };
+/** A library that grew — a new version of it, or the code's use of it (`by`: what brought it in); an exception given at
+ *  the call, in a run. */
+type Node = { "kind": "grew"; "name": string; "version"?: string; "grew": Record<string, string>; "by": "version" | "code" } | { "kind": "exceptions"; "by": string; "found": { "effect": Effect; "run": RunEnvelope }[] } | { "kind": "exception"; "effect": Effect; "run": RunEnvelope };
 
 /** What `uri` holds, or undefined when there's nothing there. */
 async function textOf(uri: vscode.Uri): Promise<string | undefined> {
@@ -33,17 +37,17 @@ async function textOf(uri: vscode.Uri): Promise<string | undefined> {
 }
 
 /** Every run committed in `.silo/runs/` (each person's file), and the baseline — undefined when there's none yet. */
-async function load(root: vscode.Uri): Promise<{ "runs": RunEnvelope[]; "baseline"?: { "consumer"?: unknown; "packages"?: BaselinePackages } }> {
+async function load(root: vscode.Uri): Promise<{ "runs": RunEnvelope[]; "baseline"?: { "consumer"?: Record<string, WsConsumer>; "packages"?: BaselinePackages } }> {
 	const folder = vscode.Uri.joinPath(root, SILO_DIR, "runs");
 	const names = await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).then((entries) => entries.map(([name]) => name), () => [] as string[]);
 	const runs = (await Promise.all(names.filter((name) => name.endsWith(".jsonl")).map(async (name) => parseRuns(await textOf(vscode.Uri.joinPath(folder, name)) ?? "")))).flat();
 	const baseline = await textOf(vscode.Uri.joinPath(root, baselinePath()));
 
-	return { "runs": runs, ...baseline === undefined ? {} : { "baseline": JSON.parse(baseline) as { "consumer"?: unknown; "packages"?: BaselinePackages } } };
+	return { "runs": runs, ...baseline === undefined ? {} : { "baseline": JSON.parse(baseline) as { "consumer"?: Record<string, WsConsumer>; "packages"?: BaselinePackages } } };
 }
 
-/** What a package grew, each with the version that grew it: `net (1.1.0)`. */
-const grewOf = (entry: BaselinePackages[string]): string[] => Object.entries(entry.grew ?? {}).map(([capability, version]) => `${capability} (${version})`);
+/** What grew, each capability with what brought it in: `net (1.1.0)`, `net (fetchAll)`. */
+const grewOf = (grew: Record<string, string>): string[] => Object.entries(grew).map(([capability, origin]) => `${capability} (${origin})`);
 
 export function registerExceptions(context: vscode.ExtensionContext): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -63,12 +67,11 @@ export function registerExceptions(context: vscode.ExtensionContext): void {
 		},
 		"getTreeItem": (node) => {
 			if (node.kind === "grew") {
-				const { entry } = node;
-				const item = new vscode.TreeItem(`${node.name} ${entry.version ?? ""}`, vscode.TreeItemCollapsibleState.None);
+				const item = new vscode.TreeItem(`${node.name} ${node.version ?? ""}`, vscode.TreeItemCollapsibleState.None);
 
 				item.iconPath = new vscode.ThemeIcon("warning", new vscode.ThemeColor("list.warningForeground"));
-				item.description = `grew: ${grewOf(entry).join(", ")}`;
-				item.tooltip = `${node.name} can do more than when it was added: ${grewOf(entry).join(", ")}. That asks at the call unless your policy allows it.`;
+				item.description = `${node.by === "code" ? "your use grew" : "grew"}: ${grewOf(node.grew).join(", ")}`;
+				item.tooltip = node.by === "code" ? `Your code's use of ${node.name} reaches more than it did: ${grewOf(node.grew).join(", ")} — the members it started using. That asks at the call unless your policy allows it.` : `${node.name} can do more than when it was added: ${grewOf(node.grew).join(", ")}. That asks at the call unless your policy allows it.`;
 
 				return item;
 			}
@@ -102,7 +105,11 @@ export function registerExceptions(context: vscode.ExtensionContext): void {
 		}
 
 		const { runs, baseline } = await load(root);
-		const grew = Object.entries(baseline?.packages ?? {}).filter(([, entry]) => entry.grew !== undefined).map(([name, entry]) => ({ "kind": "grew", "name": name, "entry": entry }) as const);
+		const grew: Extract<Node, { "kind": "grew" }>[] = [
+			...Object.entries(baseline?.packages ?? {}).filter(([, entry]) => entry.grew !== undefined).map(([name, entry]) => ({ "kind": "grew", "name": name, ...entry.version === undefined ? {} : { "version": entry.version }, "grew": entry.grew ?? {}, "by": "version" }) as const),
+			// (the code's use, by workspace: `spec` in a workspace other than the root's says which)
+			...Object.entries(baseline?.consumer ?? {}).flatMap(([workspace, entries]) => Object.entries(entries).filter(([, entry]) => entry.grew !== undefined).map(([spec, entry]) => ({ "kind": "grew", "name": workspace === "." ? spec : `${spec} (${workspace})`, ...entry.version === undefined ? {} : { "version": entry.version }, "grew": entry.grew ?? {}, "by": "code" }) as const))
+		];
 		const byWhom = new Map<string, { "effect": Effect; "run": RunEnvelope }[]>();
 
 		for (const run of runs.toSorted((one, other) => other.endedAt.localeCompare(one.endedAt))) {
@@ -125,7 +132,7 @@ export function registerExceptions(context: vscode.ExtensionContext): void {
 		changed.fire();
 
 		// Growth, said once (what grew before the view first looks isn't news — unless there was no baseline then).
-		const now = new Set(grew.flatMap(({ name, entry }) => grewOf(entry).map((each) => `${name} ${each}`)));
+		const now = new Set(grew.flatMap((row) => grewOf(row.grew).map((each) => `${row.name} ${each}`)));
 		const told = known;
 
 		known = baseline === undefined ? new Set() : now;

@@ -59,7 +59,9 @@ signal** (a scope OBSERVED with no matching STATIC entry is the alarm; silo must
   baseline.json             FACTS · static        what each dependency's own code can do, by static analysis, as libraries are
                                                   added (baseline.ts: made as the project opens, synced as versions.json —
                                                   the dependencies — changes, read in the package worker; what a newer version can do more is in `grew`, with the
-                                                  version that grew it — it asks at the call unless the policy allows it).
+                                                  version that grew it — it asks at the call unless the policy allows it;
+                                                  `consumer`: the code's use of each, with the join — what the part it uses
+                                                  can reach — and what grew there, with the members that brought it in).
                                                   Never taught by runs.
   .gitignore                silo-managed          ignores local/
 ```
@@ -84,8 +86,8 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | `findings.ts` | asks `_capabilities.findings` for each open document (as it opens and its edits settle; again while the canary runs) and shows them as this extension's own diagnostics | ext host |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |
 | `extension.ts` | the "Capability calls" panel + the tripwire error-surface | ext host |
-| `baseline.ts` | keeps `.silo/baseline.json` up to `.silo/versions.json` (the workbench's resolver): new or changed packages read in the package worker, lib's `syncPackages`; and its `consumer` — the code's use of its dependencies — from every file's import surface (`_capabilities.surface`, the plugin's), synced as code changes; off with `silo.baseline` | ext host |
-| `packages-worker.ts` → `lsp/packages-worker.js` | READ — each package's tarball through lib's `packageCaps` (code files, install hooks); started for a sync, ended after | a worker of the extension's |
+| `baseline.ts` | keeps `.silo/baseline.json` up to `.silo/versions.json` (the workbench's resolver): new or changed packages read in the package worker, lib's `syncPackages`; and its `consumer` — the code's use of its dependencies — from every file's import surface (`_capabilities.surface`, the plugin's), each entry with its join (the slice's caps, kept while version, members and dynamic use are unchanged), synced as code changes through lib's `syncConsumer` (growth from code is recorded with the members that brought it in); off with `silo.baseline` | ext host |
+| `packages-worker.ts` → `lsp/packages-worker.js` | READ — each package's tarball through lib's `packageCaps` (code files, install hooks), and the join: lib's `sliceCaps` with `@rolldown/browser` (loaded on the first slice) for each spec the code imports; a slice that can't be built is null, the whole package stands; started for a sync, ended after | a worker of the extension's |
 | `exceptions.ts` | the "Exceptions" view: libraries that grew a capability (the baseline's `grew`), and the policy's exceptions — each run's answers at the call (`decided`: once / always / refused), by package or the program | ext host |
 | `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `silo/policy`) | ext host |
 | `silo-store.ts` | the whole `.silo/` layout: base+override policy merge, observed rollup, run firehose, git-user resolution | ext host |
@@ -97,7 +99,8 @@ The baseline is what each library's own code can do (static analysis, as it's ad
 on a call beyond it: allow, deny, or ask — and it can be about a package as a whole: an org's contract bans a package
 (it doesn't run at all) or trusts one (its calls aren't asked about); a deny wins over an allow (lib's
 `packageDisposition`). In a debug run, a package's call is decided at the call: trusted → made; within its baseline →
-made; else the editor decides (`decide` on the runtime mailbox → decide.ts: redline → the policy → the prompt). The
+made (lib's `settledReach`: the joins of what the code imports of it, else the whole package; only while the
+baseline's version is the one running); else the editor decides (`decide` on the runtime mailbox → decide.ts: redline → the policy → the prompt). The
 answer at a prompt is an exception to the policy, recorded in the run (an effect's `decided`); "Allow always" also adds
 a rule to the person's policy; "Allow once" lasts the run.
 

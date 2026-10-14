@@ -156,8 +156,8 @@ Anticipate and Track watch a dependency from both sides, and its usage. Each vie
 | View | Question | Changed by | Today |
 |---|---|---|---|
 | **The package** | What can its own code do? | A new version | `baseline.packages[name].caps`: lib `detect` over every code file of the package. Live in both front ends; what `grew` is recorded on |
-| **Your usage** | Which of its exports does your code import and call? | Your code | `baseline.consumer[workspace][spec].members`, by lib `consumerOf` in both front ends: the editor reads each file's import surface off its TypeScript server's tree (`surfaceOf`), the command line with oxc (`surfaceOfSource`), the two self-tested to agree |
-| **The join** | What can the part you use reach, tree-shaken? | Either side | lib `packages` (rolldown tree-shaking from the members you import, deobfuscated first). Built, never called |
+| **Your usage** | Which of its exports does your code import and call? | Your code | `baseline.consumer[workspace][spec].members`, by lib `consumerOf` in both front ends: both from each file's import surface (`surfaceOf`): the editor off its TypeScript server's tree, the command line with the TypeScript 7.1 it bundles |
+| **The join** | What can the part you use reach, tree-shaken? | Either side | `baseline.consumer[workspace][spec].caps`: lib `sliceCaps` (rolldown tree-shakes the package's files from the members you import; `detect` reads what's left). The editor's, in the package worker with `@rolldown/browser`; the command line's, not yet |
 | **Runs** | What did it actually do? | Running it | Each run's effects, by package (`runs/<user>.jsonl`); the editor's debugger gates and counts them |
 
 As everywhere in this project, the heuristic is the floor and what runs derive is the ceiling: the analysis answers
@@ -176,10 +176,15 @@ signals are in the gaps:
 
 What this asks of the design:
 
-1. **The baseline holds the join, not just the package.** The gate decides a package's call against what the part you
-   use can reach, which is tighter than what the whole package can.
-2. **A grown capability's origin is a version or your code.** `grew` today records only a version (the package's
-   side); growth from your side needs the member(s) that brought it in.
+1. **The baseline holds the join, not just the package** (built in the editor). Each `consumer` entry keeps its
+   slice's `caps`, and the gate decides a package's call against them (lib `settledReach`: the joins of every spec
+   your code imports of it, else the whole package's caps for one it doesn't import itself, and only while the
+   baseline's version is the one installed). A slice that can't be built keeps the whole package: the safe side.
+2. **A grown capability's origin is a version or your code** (built). The package's `grew` records the version; a
+   `consumer` entry's `grew` records the members that brought it in, else the version (`{"net": "fetchAll"}`,
+   `{"net": "1.1.0"}`; lib `syncConsumer`), and drops a capability once it's no longer reached. Either way it
+   asks until the policy allows it. Nothing grows when the baseline is first made, or for a package just added (trust on
+   first use).
 3. **The editor computes your usage** (built). It's half the join. The editor reads it off the TypeScript server it
    already runs (the capabilities plugin's `_capabilities.surface`), as code changes, into `consumer`.
 4. **Nothing outside the join runs undecided.** A package's call the baseline doesn't cover (none kept, or an entry of
@@ -288,10 +293,6 @@ measurement; 4 waits on VS Code shipping 7.1 (and, for the browser editor, TypeS
   command.
 
 ### Decisions to make
-
-- **The shape of a grown capability's origin.** A version (`{"net": {"version": "1.1.0"}}`) or the members that
-  brought it in (`{"net": {"members": ["fetchAll"]}}`); and whether growth from your side is recorded in the baseline at
-  all, or only seen in your code's diff (the baseline's `consumer` already changes in that commit).
 
 (The questions above, "What doesn't fit", are otherwise answered by this design.)
 
