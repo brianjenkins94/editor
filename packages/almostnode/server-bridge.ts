@@ -5,12 +5,12 @@
  */
 
 import type { ResponseData,	Server } from "./shims/http";
-import { EventEmitter } from "unenv/node/events";
+import EventEmitter from "events/events.js";
 import {
 	setServerCloseCallback,
 	setServerListenCallback
 } from "./shims/http";
-import { Buffer } from "./shims/stream";
+import { Buffer } from "./utils/buffer";
 import { uint8ToBase64 } from "./utils/binary-encoding";
 
 /** A listener, as an EventEmitter takes one. */

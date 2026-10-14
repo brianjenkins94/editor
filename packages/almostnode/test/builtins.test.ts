@@ -5,15 +5,16 @@
  * raise it. Node's names are this Node's own.
  */
 import * as assert from "node:assert/strict";
-import { createRequire, register } from "node:module";
+import { createRequire } from "node:module";
 import { test } from "node:test";
 
-register("./extensionless.mjs", import.meta.url);
+import "./extensionless.mjs";
 
 const { Runtime } = await import("../runtime.ts");
 const { VirtualFS } = await import("../virtual-fs.ts");
 
-/** The least of Node's names each built-in really has (2026-10-14: unenv's as the base). */
+/** The least of Node's names each built-in really has (2026-10-14: unenv's as the base; streams, string_decoder and
+ *  events' EventEmitter Node's own code from npm). */
 const FLOORS: Record<string, number> = {
 	"assert": 19,
 	"assert/strict": 19,
@@ -31,7 +32,7 @@ const FLOORS: Record<string, number> = {
 	"dns": 37,
 	"dns/promises": 33,
 	"domain": 5,
-	"events": 13,
+	"events": 14,
 	"fs": 57,
 	"fs/promises": 13,
 	"http": 15,
@@ -50,7 +51,7 @@ const FLOORS: Record<string, number> = {
 	"readline": 8,
 	"readline/promises": 3,
 	"repl": 2,
-	"stream": 9,
+	"stream": 21,
 	"stream/promises": 2,
 	"string_decoder": 1,
 	"sys": 17,

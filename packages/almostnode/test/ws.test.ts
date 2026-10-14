@@ -3,11 +3,10 @@
  * ways, and a close on either end reaching the other.
  */
 import * as assert from "node:assert/strict";
-import { register } from "node:module";
 import { test } from "node:test";
 
 // (almostnode's sources import each other without extensions: see extensionless.mjs.)
-register("./extensionless.mjs", import.meta.url);
+import "./extensionless.mjs";
 
 const { WebSocket, WebSocketServer } = await import("../shims/ws.ts");
 

@@ -4,8 +4,9 @@
  * Basic Socket and Server classes for virtual networking
  */
 
-import { EventEmitter } from "unenv/node/events";
-import { Buffer, Duplex } from "./stream";
+import EventEmitter from "events/events.js";
+import { Buffer } from "../utils/buffer";
+import stream from "readable-stream/lib/stream.js";
 
 /** A listener, as an EventEmitter takes one. */
 type EventListener = (...args: any[]) => void;
@@ -42,10 +43,9 @@ export interface ListenOptions {
 /**
  * Virtual Socket implementation
  */
-export class Socket extends Duplex {
+export class Socket extends stream.Duplex {
 	private _connecting = false;
 	private _connected = false;
-	private _destroyed = false;
 	private _remoteAddress = "";
 	private _remotePort = 0;
 	private readonly _localAddress = "127.0.0.1";
@@ -57,7 +57,6 @@ export class Socket extends Duplex {
 	remotePort?: number;
 	remoteFamily?: string;
 	connecting = false;
-	destroyed = false;
 	readyState = "closed";
 
 	constructor(options?: SocketOptions) {
@@ -119,10 +118,6 @@ export class Socket extends Duplex {
 		};
 	}
 
-	setEncoding(encoding: BufferEncoding): this {
-		return this;
-	}
-
 	setTimeout(timeout: number, callback?: () => void): this {
 		if (callback) {
 			this.once("timeout", callback);
@@ -147,23 +142,17 @@ export class Socket extends Duplex {
 		return this;
 	}
 
-	destroy(error?: Error): this {
-		if (this._destroyed) { return this; }
+	// (its data is pushed as it arrives — _receiveData — and what's written to it goes nowhere: it has no other end)
+	override _read(): void {}
 
-		this._destroyed = true;
+	override _write(_chunk: unknown, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+		callback();
+	}
+
+	override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
 		this._connected = false;
-		this.destroyed = true;
 		this.readyState = "closed";
-
-		if (error) {
-			this.emit("error", error);
-		}
-
-		queueMicrotask(() => {
-			this.emit("close", Boolean(error));
-		});
-
-		return this;
+		callback(error);
 	}
 
   // Internal: simulate receiving data from remote

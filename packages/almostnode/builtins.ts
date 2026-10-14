@@ -7,12 +7,17 @@
  *     where unenv only says "not implemented" — Vite resolving `localhost` (dns.lookup), util's callbackify, say;
  *   - almostnode's module, unenv filling in what it lacks (`oursOver`): what the editor is behind (the dev servers'
  *     http/net bridge, child_process's ENOSYS), or what almostnode implements and unenv stubs (crypto's hashes, zlib,
- *     streams, vm). almostnode's own code builds on unenv's events and buffer, as a program does.
+ *     vm).
+ *
+ * And where unenv's has none, or isn't Node's, Node's own code from npm: streams (readable-stream — Node's lib/stream.js
+ * and its internals), string_decoder, and events' EventEmitter (unenv's is a class, which code written for Node can't
+ * `EventEmitter.call(this)` — readable-stream's own streams among it), unenv filling in the names it lacks. almostnode's
+ * own code builds on these and on unenv's buffer, as a program does: one EventEmitter, one Buffer.
  *
  * `fs` and `process` aren't here: each runtime has its own (the runtime's require answers them).
  *
- * unenv's modules import each other by Node's names (`node:events`): unenv-resolve.ts makes those unenv's own, in a
- * bundle and in almostnode's tests alike.
+ * unenv's modules import each other by Node's names (`node:events`), and Node's code on npm imports `buffer`, `events`
+ * and `process/`: unenv-resolve.ts makes those unenv's own, in a bundle and in almostnode's tests alike.
  */
 import * as unenvAssert from "unenv/node/assert";
 import * as unenvAsyncHooks from "unenv/node/async_hooks";
@@ -43,9 +48,6 @@ import * as unenvQuerystring from "unenv/node/querystring";
 import * as unenvReadline from "unenv/node/readline";
 import * as unenvReadlinePromises from "unenv/node/readline/promises";
 import * as unenvRepl from "unenv/node/repl";
-import * as unenvStream from "unenv/node/stream";
-import * as unenvStreamPromises from "unenv/node/stream/promises";
-import * as unenvStringDecoder from "unenv/node/string_decoder";
 import * as unenvTimers from "unenv/node/timers";
 import * as unenvTimersPromises from "unenv/node/timers/promises";
 import * as unenvTls from "unenv/node/tls";
@@ -69,11 +71,13 @@ import * as httpsShim from "./shims/https";
 import * as moduleShim from "./shims/module";
 import * as netShim from "./shims/net";
 import * as perfHooksShim from "./shims/perf_hooks";
-import streamShim from "./shims/stream";
 import * as tlsShim from "./shims/tls";
 import * as utilShim from "./shims/util";
 import * as vmShim from "./shims/vm";
 import * as zlibShim from "./shims/zlib";
+import events from "events/events.js";
+import stream from "readable-stream/lib/stream.js";
+import stringDecoder from "string_decoder/lib/string_decoder.js";
 
 type Namespace = Record<string, unknown>;
 
@@ -108,7 +112,8 @@ function unenvWith(namespace: Namespace, ours: Namespace, names: string[]): Reco
 /** almostnode's module, with what unenv's has that it lacks. A function (assert, EventEmitter) is ours, given unenv's
  *  missing names as its own properties; an object, a new one — ours over unenv's. */
 function oursOver<T>(ours: T, namespace: Namespace): T {
-	const theirs = required(namespace);
+	// (its named exports as well as its default's own names: a class's statics — events' `on` — aren't enumerable)
+	const theirs = { ...required(namespace), ...Object.fromEntries(Object.entries(namespace).filter(([name]) => name !== "default")) };
 
 	if (typeof ours === "function") {
 		for (const [name, value] of Object.entries(theirs)) {
@@ -141,12 +146,11 @@ export function fillIn(target: object, namespace: Namespace, bind = false): void
 }
 
 /** The built-ins, by name (`node:` stripped), but `fs` and `process` (each runtime's own). `own`: almostnode's modules
- *  the runtime makes (its string_decoder and console), unenv filling in what they lack. */
-export function nodeBuiltins(own: { "string_decoder": Namespace; "console": Namespace }): Record<string, unknown> {
+ *  the runtime makes (its console), unenv filling in what they lack. */
+export function nodeBuiltins(own: { "console": Namespace }): Record<string, unknown> {
 	const util = unenvWith(unenvUtil, utilShim as unknown as Namespace, ["callbackify", "stripVTControlCharacters"]);
 	const path = unenv(unenvPath);
 	const assert = unenv(unenvAssert);
-	const stream = oursOver(streamShim, unenvStream);
 
 	return {
 		// unenv's, as they are
@@ -189,16 +193,17 @@ export function nodeBuiltins(own: { "string_decoder": Namespace; "console": Name
 		"zlib": oursOver(zlibShim as unknown as Namespace, unenvZlib),
 		"vm": oursOver(vmShim as unknown as Namespace, unenvVm),
 		"module": oursOver(moduleShim as unknown as Namespace, unenvModule),
-		"events": unenv(unenvEvents),
+		"events": oursOver(events, unenvEvents),
 		"buffer": unenv(unenvBuffer),
 		"util": util,
 		"sys": util,
 		"assert": assert,
 		"assert/strict": (assert as unknown as { "strict": unknown }).strict,
 		"async_hooks": oursOver(asyncHooksShim as unknown as Namespace, unenvAsyncHooks),
+		"console": oursOver(own.console, unenvConsole),
+		// Node's own code, from npm
 		"stream": stream,
-		"stream/promises": oursOver((stream as unknown as { "promises": Namespace }).promises, unenvStreamPromises),
-		"string_decoder": oursOver(own.string_decoder, unenvStringDecoder),
-		"console": oursOver(own.console, unenvConsole)
+		"stream/promises": stream.promises,
+		"string_decoder": stringDecoder
 	};
 }

@@ -4,7 +4,7 @@
  * Process is an EventEmitter in Node.js
  */
 
-import { EventEmitter } from "unenv/node/events";
+import EventEmitter from "events/events.js";
 
 /** A listener, as an EventEmitter takes one. */
 type EventListener = (...args: any[]) => void;
@@ -24,11 +24,11 @@ interface ProcessStream {
 	"setMaxListeners": (n: number) => ProcessStream;
 	"getMaxListeners": () => number;
 	"listenerCount": (event: string) => number;
-	"listeners": (event: string) => EventListener[];
-	"rawListeners": (event: string) => EventListener[];
+	"listeners": (event: string) => ReturnType<EventEmitter["listeners"]>;
+	"rawListeners": (event: string) => ReturnType<EventEmitter["rawListeners"]>;
 	"prependListener": (event: string, listener: EventListener) => ProcessStream;
 	"prependOnceListener": (event: string, listener: EventListener) => ProcessStream;
-	"eventNames": () => string[];
+	"eventNames": () => (string | symbol)[];
 	"pause"?: () => ProcessStream;
 	"resume"?: () => ProcessStream;
 	"setEncoding"?: (encoding: string) => ProcessStream;
@@ -77,11 +77,11 @@ export interface Process {
 	"addListener": (event: string, listener: EventListener) => Process;
 	"removeListener": (event: string, listener: EventListener) => Process;
 	"removeAllListeners": (event?: string) => Process;
-	"listeners": (event: string) => EventListener[];
+	"listeners": (event: string) => ReturnType<EventEmitter["listeners"]>;
 	"listenerCount": (event: string) => number;
 	"prependListener": (event: string, listener: EventListener) => Process;
 	"prependOnceListener": (event: string, listener: EventListener) => Process;
-	"eventNames": () => string[];
+	"eventNames": () => (string | symbol)[];
 	"setMaxListeners": (n: number) => Process;
 	"getMaxListeners": () => number;
   // IPC support (used by child_process.fork)
@@ -375,7 +375,7 @@ export function createProcess(options?: {
 			return proc;
 		},
 
-		"listeners": function(event: string): EventListener[] {
+		"listeners": function(event: string): ReturnType<EventEmitter["listeners"]> {
 			return emitter.listeners(event);
 		},
 
@@ -395,7 +395,7 @@ export function createProcess(options?: {
 			return proc;
 		},
 
-		"eventNames": function(): string[] {
+		"eventNames": function(): (string | symbol)[] {
 			return emitter.eventNames();
 		},
 

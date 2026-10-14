@@ -3,7 +3,7 @@
  * isn't implemented), and `create` making one. The module is deprecated, but some packages still use it.
  */
 
-import { EventEmitter } from "unenv/node/events";
+import EventEmitter from "events/events.js";
 
 export class Domain extends EventEmitter {
 	members: unknown[] = [];

@@ -4,8 +4,8 @@
  * Provides cryptographic utilities using Web Crypto API
  */
 
-import { EventEmitter } from "unenv/node/events";
-import { Buffer } from "./stream";
+import EventEmitter from "events/events.js";
+import { Buffer } from "../utils/buffer";
 
 // ============================================================================
 // Random functions

@@ -346,30 +346,6 @@ export interface RequireFunction {
 }
 
 /**
- * Create a basic string_decoder module
- */
-function createStringDecoderModule() {
-	class StringDecoder {
-		encoding: string;
-		constructor(encoding?: string) {
-			this.encoding = encoding || "utf8";
-		}
-
-		write(buffer: Uint8Array): string {
-			return new TextDecoder(this.encoding).decode(buffer);
-		}
-
-		end(buffer?: Uint8Array): string {
-			if (buffer) { return this.write(buffer); }
-
-			return "";
-		}
-	}
-
-	return { "StringDecoder": StringDecoder };
-}
-
-/**
  * Minimal prettier shim - just returns input unchanged
  * This is needed because prettier uses createRequire which conflicts with our runtime
  */
@@ -448,7 +424,7 @@ const consoleModule = {
 
 const builtinModules: Record<string, unknown> = {
 	// Node's built-ins: unenv's, almostnode's own only where it must differ (builtins.ts)
-	...nodeBuiltins({ "string_decoder": createStringDecoderModule(), "console": consoleModule }),
+	...nodeBuiltins({ "console": consoleModule }),
 	"_http_common": {},
 	"_http_incoming": {},
 	"_http_outgoing": {},

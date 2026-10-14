@@ -4,11 +4,10 @@
  * to get every one of them as a 404: the path was resolved against the root twice.
  */
 import * as assert from "node:assert/strict";
-import { register } from "node:module";
 import { test } from "node:test";
 
 // (almostnode's sources import each other without extensions: see extensionless.mjs.)
-register("./extensionless.mjs", import.meta.url);
+import "./extensionless.mjs";
 
 const { ViteDevServer } = await import("../frameworks/vite-dev-server.ts");
 const { VirtualFS } = await import("../virtual-fs.ts");

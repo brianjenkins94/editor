@@ -5,7 +5,7 @@
  */
 
 import pako from "pako";
-import { Buffer } from "./stream";
+import { Buffer } from "../utils/buffer";
 
 // Brotli WASM instance - loaded lazily
 interface BrotliModule { "compress": (data: Uint8Array) => Uint8Array; "decompress": (data: Uint8Array) => Uint8Array }

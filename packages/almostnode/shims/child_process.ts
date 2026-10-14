@@ -14,9 +14,8 @@
 
 // Polyfill process (some deps read globalThis.process at import time).
 import type { VirtualFS } from "../virtual-fs";
-import type { Buffer } from "./stream";
-import { EventEmitter } from "unenv/node/events";
-import { Readable, Writable } from "./stream";
+import EventEmitter from "events/events.js";
+import stream from "readable-stream/lib/stream.js";
 
 if (typeof globalThis.process === "undefined") {
 	(globalThis as any).process = {
@@ -186,16 +185,17 @@ export class ChildProcess extends EventEmitter {
 	spawnargs: string[] = [];
 	spawnfile = "";
 
-	stdin: Writable | null;
-	stdout: Readable | null;
-	stderr: Readable | null;
+	stdin: stream.Writable | null;
+	stdout: stream.Readable | null;
+	stderr: stream.Readable | null;
 
 	constructor() {
 		super();
 		this.pid = Math.floor(Math.random() * 10000) + 1000;
-		this.stdin = new Writable();
-		this.stdout = new Readable();
-		this.stderr = new Readable();
+		// (no process behind it: what's written goes nowhere, nothing is read)
+		this.stdin = new stream.Writable({ "write": (_chunk, _encoding, callback) => { callback(); } });
+		this.stdout = new stream.Readable({ "read": () => {} });
+		this.stderr = new stream.Readable({ "read": () => {} });
 	}
 
 	kill(signal?: string): boolean {

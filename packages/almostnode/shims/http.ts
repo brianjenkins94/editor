@@ -6,9 +6,10 @@
 
 import type { AddressInfo } from "./net";
 import { createHash } from "./crypto";
-import { EventEmitter } from "unenv/node/events";
+import EventEmitter from "events/events.js";
 import { Server as NetServer, Socket } from "./net";
-import { Buffer, Readable, Writable } from "./stream";
+import { Buffer } from "../utils/buffer";
+import stream from "readable-stream/lib/stream.js";
 
 // Save the browser's native WebSocket at module load time, BEFORE any CLI bundle
 // can overwrite it (e.g. Convex CLI does `globalThis.WebSocket = bundledWs`).
@@ -33,7 +34,7 @@ export interface RequestOptions {
 /**
  * Incoming HTTP request (Node.js compatible)
  */
-export class IncomingMessage extends Readable {
+export class IncomingMessage extends stream.Readable {
 	httpVersion = "1.1";
 	httpVersionMajor = 1;
 	httpVersionMinor = 1;
@@ -63,11 +64,8 @@ export class IncomingMessage extends Readable {
 		return this;
 	}
 
-	destroy(error?: Error): this {
-		super.destroy(error);
-
-		return this;
-	}
+	// (its body is pushed whole — _setBody)
+	override _read(): void {}
 
   // Internal: set body data
 	_setBody(body: Buffer | string | null): void {
@@ -117,7 +115,7 @@ export class IncomingMessage extends Readable {
 /**
  * Outgoing HTTP response (Node.js compatible)
  */
-export class ServerResponse extends Writable {
+export class ServerResponse extends stream.Writable {
 	statusCode = 200;
 	statusMessage = "OK";
 	headersSent = false;
@@ -202,7 +200,7 @@ export class ServerResponse extends Writable {
 		return this;
 	}
 
-	write(
+	override write(
 		chunk: Uint8Array | string,
 		encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
 		callback?: (error?: Error | null) => void
@@ -221,7 +219,7 @@ export class ServerResponse extends Writable {
 		return true;
 	}
 
-	end(
+	override end(
 		chunkOrCallback?: Uint8Array | string | (() => void),
 		encodingOrCallback?: BufferEncoding | (() => void),
 		callback?: () => void
@@ -537,7 +535,7 @@ function getCorsProxy(): string | null {
 /**
  * HTTP Client Request - makes real HTTP requests using fetch()
  */
-export class ClientRequest extends Writable {
+export class ClientRequest extends stream.Writable {
 	method: string;
 	path: string;
 	headers: Record<string, string>;
@@ -577,7 +575,7 @@ export class ClientRequest extends Writable {
 		delete this.headers[name.toLowerCase()];
 	}
 
-	write(
+	override write(
 		chunk: Uint8Array | string,
 		encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
 		callback?: (error?: Error | null) => void
@@ -595,7 +593,7 @@ export class ClientRequest extends Writable {
 		return true;
 	}
 
-	end(
+	override end(
 		dataOrCallback?: Uint8Array | string | (() => void),
 		encodingOrCallback?: BufferEncoding | (() => void),
 		callback?: () => void
@@ -811,13 +809,6 @@ export class ClientRequest extends Writable {
     // Create mock socket for the ws library's frame-level I/O
 		const socket = new Socket();
 
-    // ws library calls cork/uncork for batching — add as no-ops if missing
-		if (typeof (socket as any).cork !== "function") { (socket as any).cork = () => {}; }
-		if (typeof (socket as any).uncork !== "function") { (socket as any).uncork = () => {}; }
-    // ws library checks _readableState and _writableState on socket close
-		(socket as any)._readableState = { "endEmitted": false };
-		(socket as any)._writableState = { "finished": false, "errorEmitted": false };
-
     // Buffer for partial frame writes from ws library
 		let writeBuffer = new Uint8Array(0);
 
@@ -924,9 +915,8 @@ export class ClientRequest extends Writable {
 			socket._receiveData(Buffer.from(frame));
 
 			setTimeout(() => {
-				(socket as any)._readableState.endEmitted = true;
 				socket._receiveEnd();
-				socket.emit("close", false);
+				socket.destroy();
 			}, 10);
 		};
 

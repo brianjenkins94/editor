@@ -4,11 +4,10 @@
  * (`builtinFor`), and put a module it evaluated in the cache (`register`).
  */
 import * as assert from "node:assert/strict";
-import { register } from "node:module";
 import { test } from "node:test";
 
 // (almostnode's sources import each other without extensions: see extensionless.mjs.)
-register("./extensionless.mjs", import.meta.url);
+import "./extensionless.mjs";
 
 const { Runtime } = await import("../runtime.ts");
 const { VirtualFS } = await import("../virtual-fs.ts");
@@ -237,6 +236,54 @@ test("a built-in's subpaths, as Node has them: assert/strict, util/types, path/p
 	const found = runtime.execute("module.exports = ['assert/strict', 'node:util/types', 'path/posix', 'stream/promises'].map((id) => typeof require(id));", "/workspace/main.js").exports;
 
 	assert.deepEqual(found, ["function", "object", "object", "object"]);
+});
+
+test("string_decoder holds a character split across chunks, as Node's does", () => {
+	const runtime = runtimeWith({});
+	const text = runtime.execute(`
+const { StringDecoder } = require("string_decoder");
+const decoder = new StringDecoder("utf8");
+const bytes = Buffer.from("h\u00e9\u20ac");
+module.exports = decoder.write(bytes.subarray(0, 2)) + decoder.write(bytes.subarray(2, 4)) + decoder.end(bytes.subarray(4));
+`, "/workspace/main.js").exports;
+
+	assert.equal(text, "h\u00e9\u20ac");
+});
+
+test("streams are Node's: backpressure past the high-water mark, on almostnode's one EventEmitter and Buffer", async () => {
+	const runtime = runtimeWith({});
+	const found = runtime.execute(`
+const { Writable, Readable, pipeline } = require("stream");
+const writable = new Writable({ "highWaterMark": 4, "write": (chunk, encoding, callback) => { setTimeout(callback, 0); } });
+const read = [];
+module.exports = {
+	"full": writable.write("12345"),
+	"emitter": writable instanceof require("events"),
+	"buffer": new Promise((resolve) => { Readable.from(["a", "b"], { "objectMode": false }).on("data", (chunk) => { read.push(Buffer.isBuffer(chunk)); }).on("end", () => { resolve(read); }); }),
+	"piped": require("stream/promises").pipeline(Readable.from(["x"]), new Writable({ "objectMode": true, "write": (chunk, encoding, callback) => { callback(); } })).then(() => true)
+};
+`, "/workspace/main.js").exports as { "full": boolean; "emitter": boolean; "buffer": Promise<boolean[]>; "piped": Promise<boolean> };
+
+	assert.equal(found.full, false, "a write past the high-water mark says to wait for drain");
+	assert.equal(found.emitter, true);
+	assert.deepEqual(await found.buffer, [true, true]);
+	assert.equal(await found.piped, true);
+});
+
+test("EventEmitter is Node's: code written for Node inherits from it by EventEmitter.call(this)", () => {
+	const runtime = runtimeWith({});
+	const heard = runtime.execute(`
+const EventEmitter = require("events");
+function Tool() { EventEmitter.call(this); }
+require("util").inherits(Tool, EventEmitter);
+const tool = new Tool();
+let heard = 0;
+tool.on("ping", () => { heard += 1; });
+tool.emit("ping");
+module.exports = heard;
+`, "/workspace/main.js").exports;
+
+	assert.equal(heard, 1);
 });
 
 test("require('.') and require('..') are the folder and its parent, as Node reads them", () => {

@@ -43,3 +43,16 @@ interface Window {
 	"__esbuild"?: typeof import("esbuild-wasm");
 	"__esbuildInitPromise"?: Promise<void>;
 }
+
+// Node's own code on npm, imported by its files (builtins.ts): typed as Node's modules are
+declare module "readable-stream/lib/stream.js" {
+	export { default } from "node:stream";
+}
+
+declare module "events/events.js" {
+	export { default } from "node:events";
+}
+
+declare module "string_decoder/lib/string_decoder.js" {
+	export { default } from "node:string_decoder";
+}

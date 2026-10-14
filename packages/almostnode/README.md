@@ -20,30 +20,43 @@ Dropped from upstream: `worker-runtime.ts` / `sandbox-runtime.ts` (and `comlink`
 `sandbox-helpers.ts`, `transform.ts`, `agent-workbench-*`, the vite/next plugins, and their deps. The
 `child_process` shim is stubbed (dropping `just-bash`/quickjs); `shims/vfs-adapter.ts` deleted with it.
 
-## Node's built-ins: unenv, and ours where we must differ
+## Node's built-ins: unenv, Node's own code, and ours where we must differ
 
 Since 2026-10-14 the built-in modules are [unenv](https://github.com/unjs/unenv)'s (pinned `2.0.0-rc.24`; what esm.sh
 and Cloudflare's Node compatibility build on), assembled in `builtins.ts`, three ways:
 
-- **unenv's as they are**: events, buffer, assert, path, os, querystring, url, punycode, constants, timers, tty,
-  readline, v8, dgram, cluster, diagnostics_channel, inspector, trace_events, repl, worker_threads, util/types — their
-  shims here are deleted, and almostnode's own code (the http/net bridge, process, streams) extends unenv's EventEmitter.
+- **unenv's as they are**: buffer, assert, path, os, querystring, url, punycode, constants, timers, tty, readline, v8,
+  dgram, cluster, diagnostics_channel, inspector, trace_events, repl, worker_threads, util/types — their shims here are
+  deleted.
 - **unenv's with a few names of ours over them**, where a program here needs them to work and unenv's only say "not
   implemented": dns (lookups answering localhost — Vite resolves `localhost` as it starts), util (callbackify,
   stripVTControlCharacters), perf_hooks (PerformanceObserver), domain (Domain, create). Those shims hold only those names.
 - **ours, unenv filling in what they lack**: what the editor is behind (http/https/http2/net/tls — the dev servers'
   bridge; child_process's ENOSYS; fs over the VFS; module's `createRequire`; each runtime's process), what we implement
-  and unenv stubs (crypto's hashes, zlib, stream, string_decoder, vm), and async_hooks and console. A runtime's fs and
-  process get unenv's missing names too.
+  and unenv stubs (crypto's hashes, zlib, vm), and async_hooks and console. A runtime's fs and process get unenv's
+  missing names too.
 
-unenv's modules import each other by Node's names (`node:events`); `unenv-resolve.ts` makes those unenv's own — a
-bundler of almostnode uses its `unenvResolve()` plugin (the editor's build does), the tests their loader.
+And where unenv has none, or isn't Node's, **Node's own code from npm**: stream and stream/promises are
+[readable-stream](https://github.com/nodejs/readable-stream) (Node's `lib/stream.js` and its internals, pinned `4.7.0`
+— backpressure, `pipeline`, `finished` and destroy as Node has them), string_decoder is npm's `string_decoder` (holds a
+character split across chunks), and events is npm's `events` — Node's `events.js`, whose EventEmitter can be
+`EventEmitter.call(this)`'d as code written for Node (readable-stream's own streams among it) does, which unenv's class
+can't — with unenv's names it lacks filled in. almostnode's own code builds on these as a program does — the http/net
+bridge's IncomingMessage, ServerResponse and Socket are Node's streams; one EventEmitter, one Buffer (unenv's).
+
+unenv's modules import each other by Node's names (`node:events`), and Node's code on npm imports `buffer`, `events`
+and `process/`; `unenv-resolve.ts` makes those almostnode's own (unenv's buffer and process, the one events) — a bundler
+of almostnode uses its `unenvResolve()` plugin (the editor's build does), the tests their loader (in-thread hooks, so a
+CommonJS package's `require()` is resolved too).
 `test/builtins.test.ts` holds each built-in to a floor of Node's names it really has (present, not a stub), so a change
 that loses some fails.
 
 ## Remaining dependencies
 
-`unenv` (and its one dependency, `pathe`), `resolve.exports`, `pako`, `typescript`. `css-tree` and `just-bash`
+`unenv` (and its one dependency, `pathe`), `readable-stream` (with `abort-controller`, bundled but unreached where
+there's a global AbortController), `string_decoder` (with `safe-buffer`), `events`, `resolve.exports`, `pako`,
+`typescript`. readable-stream's own `buffer` and `process` dependencies are installed but never bundled (unenv's stand
+in). `css-tree` and `just-bash`
 (which itself pulled quickjs) were pruned — see below. `brotli-wasm` is a lazy, `@vite-ignore`d import in
 `shims/zlib.ts` that the editor never reaches (it uses the gzip path via `pako`).
 

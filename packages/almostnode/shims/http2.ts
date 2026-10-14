@@ -3,7 +3,7 @@
  * http2 shim - HTTP/2 is not available in browser
  */
 
-import { EventEmitter } from "unenv/node/events";
+import EventEmitter from "events/events.js";
 
 export class Http2Session extends EventEmitter {
 	close(_callback?: () => void): void {

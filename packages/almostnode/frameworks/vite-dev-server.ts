@@ -10,7 +10,7 @@ import type { VirtualFS } from "../virtual-fs";
 import ts from "typescript";
 import { REACT_REFRESH_CDN, REACT_VERSION } from "../config/cdn";
 import { DevServer } from "../dev-server";
-import { Buffer } from "../shims/stream";
+import { Buffer } from "../utils/buffer";
 import { simpleHash } from "../utils/hash";
 import { addReactRefresh as _addReactRefresh, shiftInlineSourceMap } from "./code-transforms";
 import type { InstrumentLevel } from "./instrument";
