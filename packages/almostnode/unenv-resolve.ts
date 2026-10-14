@@ -6,11 +6,12 @@
  */
 // eslint-disable-next-line ts/no-restricted-imports -- almostnode doesn't depend on util (its fs wrapper); this runs in Node, at build and test time
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import * as path from "node:path";
-import * as url from "node:url";
 
-/** Where unenv's Node modules are. */
-const UNENV_NODE = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "node_modules", "unenv", "dist", "runtime", "node");
+/** Where unenv's Node modules are: unenv resolved as Node resolves it, through a pnpm link to its real folder — where
+ *  its own dependency (pathe) is found beside it. */
+const UNENV_NODE = path.join(path.dirname(createRequire(import.meta.url).resolve("unenv/package.json")), "dist", "runtime", "node");
 
 /** The file of unenv's own module for built-in `specifier` imported from `importer` — when the importer is unenv's and
  *  unenv has that module; else undefined (resolved as it would be). */
