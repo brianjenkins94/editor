@@ -3,8 +3,9 @@
  * tsserver and publishes NATIVE `ts.Diagnostic`s (source "capabilities") — real squiggles + Problems entries +
  * hover, and the sole clean data channel out of tsserver, which the "Capability calls" panel reads back.
  *
- * STATIC half (engine.ts, util/silo `findReach`, oxc): synchronous. Flags every capability call whose resource is
- * a static string literal, anchored to the real SourceFile and type-enriched from the real checker.
+ * STATIC half (engine.ts, util/silo `findReach`): synchronous. Reads the SourceFile tsserver holds, with tsserver's own
+ * `ts` (passed to the engine, which parses nothing itself), and flags every capability call whose resource is a string
+ * literal, type-enriched from the real checker.
  *
  * DYNAMIC half (canary.ts, tsval): resolves the resources the static half can't (computed args). It runs the
  * module in the tsval interpreter — which needs `typescript`, so the canary engine is built with ts EXTERNAL and
@@ -442,7 +443,7 @@ export default function init(modules) {
 					// STATIC rows (recomputed on text change), enriched with the canary's runtime value where present.
 					if (engine !== undefined) {
 						if (sourceFile.text !== cacheText) {
-							const rows = engine.analyze(sourceFile.text, fileName);
+							const rows = engine.analyze(ts, sourceFile);
 							const checker = program.getTypeChecker();
 
 							typeRows(rows, sourceFile, checker);

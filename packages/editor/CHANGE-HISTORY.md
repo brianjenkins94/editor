@@ -123,8 +123,9 @@ On this repo's whole history, TypeScript finds 2,362 feature changes to oxc's 2,
 silent commits to 336, in 66 seconds to 25. The extra come from what oxc doesn't follow (the tsconfig's paths into the
 vendored monaco component and BABLR's sources). The 7 are methods reached through an object typed by an interface: the
 checker resolves such a call to the interface's member, not the object that implements it, and the API has no "find
-implementations". The browser keeps oxc until TypeScript ships a browser build (the unreleased Playground v2 runs a
-`tsc.wasm` in a worker); BABLR isn't an analyzer: it joins history at the edge, in step 4, for data anchored by it.
+implementations". In the browser, the editor's own TypeScript server reads the code (the next section), so the editor
+loads no oxc at all; only TypeScript 7's API host waits for a browser build (the unreleased Playground v2 runs a
+`tsc.wasm` in a worker). BABLR isn't an analyzer: it joins history at the edge, in step 4, for data anchored by it.
 
 ## Live from edits (built)
 

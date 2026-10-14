@@ -18,7 +18,7 @@ the core at its own call boundary. Hold to that and the seams stay put.
   where each lives:
   ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
   │ tsserver plugin (in-browser tsserver, ts reused, ~free)                                                      │
-  │   ts-plugin.js  ──loads──▶ capabilities-engine.js  (DETECT: util/silo findReach, oxc)                        │
+  │   ts-plugin.js  ──loads──▶ capabilities-engine.js  (DETECT: util/silo findReach, on tsserver's tree)         │
   │                 ──loads──▶ capabilities-canary.js  (RESOLVE: tsval, at beforeCall)                           │
   │   → emits native ts.Diagnostics (source "capabilities")   ◀── the ONLY clean channel out of tsserver        │
   ├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
@@ -76,8 +76,8 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | file | role | runs in |
 | --- | --- | --- |
 | `@brianjenkins94/util/silo/policy` | pure policy model: `Policy`/`Rule`, `effectiveDisposition`, `findRule`, `matchesResource`, edits, `DANGEROUS`/`isDangerous` (shared with silo; was the local `policy-core.ts` fork) | anywhere (pure) |
-| `capability-breakpoints.ts` | pure call model: `classifyCall`, `shouldBreak`, `findCapabilitySites`, `renderCallee` | anywhere (needs only `ts` types) |
-| `engine.ts` → `capabilities-engine.js` | DETECT — util/silo `findReach` (oxc) | tsserver plugin |
+| `capability-breakpoints.ts` | pure call model: `classifyCall`, `shouldBreak`, `capabilityBreakLines`, `renderCallee` | anywhere (needs only `ts` types) |
+| `engine.ts` → `capabilities-engine.js` | DETECT — util/silo `findReach`, reading the SourceFile tsserver holds with its own `ts` (no parser bundled) | tsserver plugin |
 | `canary.ts` → `capabilities-canary.js` | RESOLVE — tsval run, observes pre-call values (ts **external**, reuses tsserver's) | tsserver plugin |
 | `ts-plugin.js` | loads both engines, runs the canary in the background, merges results into diagnostics | tsserver plugin |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |

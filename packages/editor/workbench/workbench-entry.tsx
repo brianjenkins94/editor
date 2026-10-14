@@ -686,7 +686,7 @@ function maybeBoot(): void {
 
 			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/index.js", eslintPluginUrl);
 
-			// The capabilities extension — two halves, both INSIDE the tsserver plugin. STATIC: util/silo's findReach.
+			// The capabilities extension — two halves, both INSIDE the tsserver plugin. STATIC: util/silo's findReach, on tsserver's tree.
 			// DYNAMIC: the tsval canary, reusing tsserver's own `ts` (the plugin self-locates both served engines via
 			// import.meta.url, like eslint). Both publish NATIVE ts.Diagnostics (source "capabilities"); extension.ts
 			// renders the "Capability calls" panel by READING those diagnostics back — no canary code in the ext host.

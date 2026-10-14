@@ -168,20 +168,6 @@ function shellBuffer(): Plugin {
 	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] } } }) };
 }
 
-/** oxc-parser's WASI binding, its browser build: whichever of its two names is installed (`binding-wasm32-wasip1` from
- *  0.152, `binding-wasm32-wasi` before). */
-function oxcWasiBrowser(): string {
-	const require = createRequire(import.meta.url);
-
-	for (const name of ["@oxc-parser/binding-wasm32-wasip1", "@oxc-parser/binding-wasm32-wasi"]) {
-		try {
-			return require.resolve(name).replace(/parser\.wasi\.cjs$/u, "parser.wasi-browser.js");
-		} catch { /* not this one */ }
-	}
-
-	throw new Error("oxc-parser's WASI binding isn't installed (package.json pins it beside oxc-parser)");
-}
-
 /** Plugin code that passes `require` around as a VALUE — `optionalRequire(require, "typescript")` — hides the module id
  *  from the bundler, which leaves its runtime `require` (it throws in a worker). Rewrite `require` in argument position
  *  to the engine's registry-backed require (`globalThis.__eslintRequire`, see engine.ts / node-module.js). */
@@ -347,9 +333,7 @@ export async function preBuild(): Promise<void> {
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
 		// (and hub/observability to the editor's own: a debugger's worker connects through run-contract's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
-		// `oxc-parser` → a stand-in that says it isn't here: util/silo/detect imports it for the one function the package
-		// worker never calls (packageCaps is regular expressions), so its native binding needn't be bundled.
-		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js"), "oxc-parser": resolvePath("./build/oxc-parser-unavailable.ts") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
+		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		"plugins": [bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
@@ -434,37 +418,13 @@ export async function preBuild(): Promise<void> {
 		}
 	});
 
-	// 3b. capabilities engine (dist/lsp/capabilities-engine.js) — the STATIC capability analysis (util/silo's
-	// reach + policy), run INSIDE the capabilities tsserver plugin (which anchors spans + enriches types). Pure
-	// oxc + AST logic — no typescript, tsval, or bablr (the root `src/` kernel is superseded) — so the only alias
-	// is oxc's wasm binding; oxc's wasm + its ES-module WASI worker emit alongside under lsp/ (worker output
-	// co-located there, else the relative refs split dirs and 404).
-	//
-	// oxc's WASI runtime (@napi-rs/wasm-runtime) drives the wasm parser through node builtins (`node:path`,
-	// `node:fs`, …), so those must be polyfilled for the browser. We pass ONLY the builtins that have a real browser
-	// polyfill (a node-stdlib-browser entry) — never the stub-only ones. That deliberately excludes `node:wasi` (no
-	// polyfill): polyfillNode would otherwise stub it to an empty module (→ "__nodeWASI is not a constructor"),
-	// clobbering oxc's own browser WASI. An empty stub set also avoids polyfillNode's stub-loader syntax errors.
-	const oxcPolyfills = polyfillNode(builtinModules.filter((builtin) => stdlib[builtin] !== undefined));
-
+	// 3b. capabilities engine (dist/lsp/capabilities-engine.js) — the STATIC capability analysis (util/silo's reach +
+	// policy), run INSIDE the capabilities tsserver plugin, which hands it tsserver's own `ts` and SourceFile: it reads
+	// TypeScript's tree and parses nothing itself, so no parser is bundled (no typescript, no oxc).
 	await buildPackage(root, {
 		"base": "./",
-		"resolve": {
-			"alias": [
-				// oxc's browser entry bare-imports its wasm binding, which pnpm only links into THIS package (a direct
-				// devDep) — not into oxc-parser's own store dir, where the bundler resolves the import from. Point it at
-				// the resolved entry so rolldown can bundle it (+ emit the .wasm / WASI worker) under lsp/. Crucially,
-				// resolve to the package's BROWSER entry (parser.wasi-browser.js) — createRequire.resolve picks node's
-				// `main` (parser.wasi.cjs), which imports `node:wasi`/`node:worker_threads` and drives @napi-rs down its
-				// node WASI path (→ "__nodeWASI is not a constructor" in the browser). The browser entry uses @napi-rs's
-				// own browser WASI runtime + the emitted wasi-worker-browser instead.
-				// oxc-parser's WASI binding, browser build — named `binding-wasm32-wasi` up to 0.151, `binding-wasm32-wasip1` from
-				// 0.152: whichever the installed parser imports (package.json pins the parser and its binding as a pair).
-				{ "find": /^@oxc-parser\/binding-wasm32-wasi(?:p1)?$/u, "replacement": oxcWasiBrowser() }
-			]
-		},
-		"worker": { "format": "es", "rollupOptions": { "output": { "sourcemap": !isCI, "banner": PROCESS_SHIM, "entryFileNames": "lsp/[name]-[hash].js", "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" } } },
-		"plugins": [oxcPolyfills, capabilitiesTsPlugin()],
+		"resolve": { "conditions": ["browser", "import", "default"] },
+		"plugins": [polyfillNode(), capabilitiesTsPlugin()],
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
@@ -483,8 +443,8 @@ export async function preBuild(): Promise<void> {
 	// tsval interpreter and observes the concrete pre-call resource at each capability call (the middle column).
 	// It runs INSIDE the tsserver plugin, so `typescript` is EXTERNALIZED to the ts-external shim (the plugin sets
 	// globalThis.__capabilitiesTs = modules.typescript before loading it) — reusing tsserver's own ts and dropping
-	// the ~7MB bundled copy (16.7MB → a few hundred KB). No oxc here either: the canary classifies by injected-
-	// stand-in identity, not silo/reach's AST matchers, precisely to keep oxc out of this bundle.
+	// the ~7MB bundled copy (16.7MB → a few hundred KB). The canary classifies by injected-stand-in identity: it sees
+	// calls as they're made, aliases included, not by their shape in the tree.
 	await buildPackage(root, {
 		"base": "./",
 		"resolve": {
