@@ -436,6 +436,9 @@ flowchart LR
   n_ext_notes -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_notes -->|"reads, writes"| n_store__silo_notes____file__jsonl
   n_ext_notes <-.->|"commands"| n_ext_vscode
+  n_ext_tsval -->|"reads"| n_store__git__file_
+  n_ext_tsval -->|"reads"| n_store__silo__file__json
+  n_ext_tsval -->|"reads"| n_store__silo_policy__file__json
   n_ext_tsval <-.->|"commands"| n_ext_vscode
   n_ext_typescript_language_features_TS_semantic_server <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_typescript_language_features_TS_syntax_server <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
@@ -490,19 +493,19 @@ flowchart LR
 
 | Store | Written by | Read by |
 | --- | --- | --- |
-| `.git/<file>` | Workbench | Workbench, bridge, notes |
+| `.git/<file>` | Workbench | Workbench, bridge, notes, tsval |
 | `.git/objects/…/<file>` | Workbench | Workbench |
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, notes |
 | `.silo/.gitignore` | Workbench | Workbench, bridge |
-| `.silo/<file>.json` | Workbench, bridge, capabilities | Dev-server worker, Workbench, bridge, capabilities |
+| `.silo/<file>.json` | Workbench, bridge, capabilities | Dev-server worker, Workbench, bridge, capabilities, tsval |
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
 | `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
-| `.silo/policy/<file>.json` | Workbench, bridge | Workbench, bridge |
+| `.silo/policy/<file>.json` | Workbench, bridge | Workbench, bridge, tsval |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench, capabilities, history |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
 | `IndexedDB silo-local` | Workspace (zen-fs) | Workspace (zen-fs) |
