@@ -339,10 +339,10 @@ flowchart LR
     subgraph c_extHostIframe["Extension host iframe"]
       n_exthost_iframe["Iframe relay"]
       subgraph c_extHostWorker["Web worker extension host"]
+        n_eslint["ESLint worker"]
         n_ext_capabilities["capabilities"]
         n_ext_capabilities_packages["packages"]
         n_ext_cspell_cspell["cspell"]
-        n_ext_eslint["eslint"]
         n_ext_event_sheet["event-sheet"]
         n_ext_event_sheet_recognizer_js["recognizer.js"]
         n_ext_history["history"]
@@ -353,6 +353,7 @@ flowchart LR
         n_ext_running["running"]
         n_ext_typescript_language_features_TS_semantic_server["TS semantic server"]
         n_ext_typescript_language_features_TS_syntax_server["TS syntax server"]
+        n_ext_vscode_eslint_eslint["eslint"]
         n_exthost_LocalWebWorker_0["Worker extension host"]
       end
     end
@@ -404,6 +405,7 @@ flowchart LR
   n_channel_vscode_web_state_db_global_shared <-.->|"VS Code storage sync"| n_workbench
   n_debug_mcp <==> n_root
   n_debug_worker <-.->|"in-realm calls"| n_server__
+  n_eslint <==> n_workbench
   n_ext_bridge -->|"reads"| n_store__git__file_
   n_ext_bridge -->|"reads"| n_store__silo__gitignore
   n_ext_bridge -->|"reads, writes"| n_store__silo__file__json
@@ -420,7 +422,6 @@ flowchart LR
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
   n_ext_capabilities_packages <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
-  n_ext_eslint <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet_recognizer_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_history -->|"reads"| n_store__silo_runs__file__jsonl
@@ -438,6 +439,7 @@ flowchart LR
   n_ext_tsval <-.->|"commands"| n_ext_vscode
   n_ext_typescript_language_features_TS_semantic_server <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_typescript_language_features_TS_syntax_server <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
+  n_ext_vscode_eslint_eslint <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_exthost_LocalProcess_0 <-.->|"RPCProtocol"| n_workbench
   n_exthost_LocalWebWorker_0 <-.->|"HTTP"| n_sw
   n_exthost_LocalWebWorker_0 <-.->|"RPCProtocol"| n_workbench
