@@ -29,6 +29,7 @@ import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, 
 import type { SiteSums } from "./site-sums";
 
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
+import { unpack } from "@brianjenkins94/almostnode/packages";
 import { verdictOf } from "@brianjenkins94/run-contract/gate";
 import { revive } from "@brianjenkins94/run-contract/recorded";
 import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
@@ -389,6 +390,85 @@ function readBaseline(): AcceptedPackages | undefined {
 	}
 }
 
+/** The version the editor pins of each package (`.silo/versions.json`, read as a run starts): what's installed. */
+let pins: Record<string, string> = {};
+
+/** Where a package nothing in the workspace's node_modules has is installed: this worker's own memory (its root, which
+ *  almostnode looks in last) — the workspace's filesystem is a fixed-size shared buffer, too small for node_modules. */
+const MEMORY_MODULES = "/node_modules";
+
+/** What's installed there, by name: its version. */
+const installed = new Map<string, string>();
+
+/** The pinned versions as they are now, through the editor's runtime (the debugger's own read). */
+function readPins(): Record<string, string> {
+	try {
+		const text = new TextDecoder().decode(editorLink?.fs.readFile("/workspace/.silo/versions.json", { "load": true }));
+		const { packages } = JSON.parse(text) as { "packages"?: Record<string, { "version": string }> };
+
+		return Object.fromEntries(Object.entries(packages ?? {}).map(([name, { version }]) => [name, version]));
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * A package nothing in node_modules has (almostnode's `install`): its tarball, at the version the editor pins, unpacked
+ * into this worker's memory — the run waits on the fetch. A package the policy bans is never fetched: its load fails as
+ * a banned package's does (onPackage). False when nothing pins it (it's no dependency).
+ */
+function installPackage(name: string): boolean {
+	const version = pins[name];
+
+	if (version === undefined || editorLink === undefined || runtime === undefined) {
+		return false;
+	}
+
+	const dir = `${MEMORY_MODULES}/${name}`;
+
+	if (policy !== undefined && packageDisposition(policy, { "name": name, "version": version }) === "deny") {
+		tally("load", `${name}@${version}`, "denied", `${name}@${version}`, "policy");
+
+		throw Object.assign(new Error(`EACCES: ${name}@${version} may not run — the policy bans it`), { "code": "EACCES" });
+	}
+
+	const vfs = runtime.getVFS();
+
+	for (const [path, bytes] of unpack(editorLink.tarball(name, version))) {
+		const file = `${dir}/${path}`;
+
+		vfs.mkdirSync(file.slice(0, file.lastIndexOf("/")), { "recursive": true });
+		vfs.writeFileSync(file, bytes);
+	}
+
+	installed.set(name, version);
+
+	return true;
+}
+
+/** What's installed whose pin has changed since, removed — installed again, at its new version, as it's required. */
+function dropUnpinned(): void {
+	const vfs = runtime?.getVFS();
+	const remove = (path: string): void => {
+		if (vfs?.statSync(path).isDirectory() === true) {
+			for (const entry of vfs.readdirSync(path)) {
+				remove(`${path}/${entry}`);
+			}
+
+			vfs.rmdirSync(path);
+		} else {
+			vfs?.unlinkSync(path);
+		}
+	};
+
+	for (const [name, version] of installed) {
+		if (pins[name] !== version) {
+			remove(`${MEMORY_MODULES}/${name}`);
+			installed.delete(name);
+		}
+	}
+}
+
 /** The package installed in `dir`, by name and version (packagesRan). */
 function packageIn(dir: string): { "name": string; "version"?: string } {
 	return packagesRan.get(dir) ?? { "name": dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length) };
@@ -602,14 +682,8 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 			}
 		},
 		// A package nothing in node_modules has (the editor serves packages from a CDN; type acquisition writes only their
-		// types): installed into the workspace by the editor, at the version it pins — the run waits for it.
-		"install": (name) => {
-			try {
-				return editorLink?.install(name) !== undefined;
-			} catch {
-				return false;
-			}
-		},
+		// types): installed in this worker's memory, at the version the editor pins.
+		"install": (name) => installPackage(name),
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own — its calls counted as its.
 		"builtinFor": (id, requester, from) => {
 			if (requester === "package") {
@@ -2053,6 +2127,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	runtime?.clearCache();
 	packagesRan.clear();
 	baseline = readBaseline();
+	pins = readPins();
+	dropUnpinned();
 
 	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 

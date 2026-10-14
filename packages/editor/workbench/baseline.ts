@@ -18,7 +18,7 @@ import type { AcceptedPackages } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import { detect } from "@brianjenkins94/util/silo/detect";
 import { syncPackages } from "@brianjenkins94/util/silo/evidence";
-import { packageFiles, refreshInstalled } from "./install";
+import { packageFiles } from "./tarballs";
 import { syncVersions } from "./versions";
 import { baselinePath } from "@brianjenkins94/util/silo/layout";
 
@@ -134,16 +134,12 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 
 /** Keep the versions (versions.ts) and `.silo/baseline.json` up to the project's dependencies: both resolved again as a
  *  package.json or package-lock.json changes — the baseline when there's one (the first run that keeps evidence makes
- *  it), and what's installed (install.ts) at its new version — and the versions now, so a preview started before any run
- *  pins them. */
+ *  it) — and the versions now, so a preview started before any run pins them. */
 export function watchBaseline(vscode: typeof vscodeApi): vscodeApi.Disposable {
 	const watcher = vscode.workspace.createFileSystemWatcher("**/{package.json,package-lock.json}");
 	const changed = (uri: vscodeApi.Uri): void => {
 		if (!uri.path.includes("/node_modules/")) {
-			void syncVersions(vscode).then(async (versions) => {
-				await refreshInstalled(vscode, versions);
-				await syncBaseline(vscode, false);
-			});
+			void syncVersions(vscode).then(async () => syncBaseline(vscode, false));
 		}
 	};
 

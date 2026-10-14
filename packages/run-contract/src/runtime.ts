@@ -129,9 +129,10 @@ export interface RuntimeConnection {
 	/** A package's call beyond its baseline, decided by the editor at the call — redline, the policy, then the person,
 	 *  asked — blocking until it's answered (once `ready`). */
 	"decide": (call: RuntimeDecision) => RuntimeVerdict;
-	/** A package nothing in node_modules resolves, installed into the workspace's by the editor at the version it pins —
-	 *  blocking until it's there (once `ready`). Its version; undefined when the editor pins none (not a dependency). */
-	"install": (name: string) => string | undefined;
+	/** `name`@`version`'s published tarball (gzipped), fetched by the editor — for a package nothing in node_modules has,
+	 *  to install in the worker's own memory (the workspace's filesystem is too small for node_modules). Blocks until it's
+	 *  fetched (once `ready`); fails as a read does (`ENOENT`, …) when it can't be. */
+	"tarball": (name: string, version: string) => Uint8Array;
 	/** Answer the preview's requests to `port` with `handler` until the returned disposer runs. */
 	"serve": (port: number, handler: (request: RuntimeRequest) => Promise<RuntimeResponse>) => () => void;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
@@ -188,7 +189,7 @@ export function connectRuntime(port: MessagePort, { name, network = false }: { "
 		},
 		"ready": ready,
 		"decide": (decision) => call({ "op": "decide", "call": decision }).meta as RuntimeVerdict,
-		"install": (name) => (call({ "op": "install", "name": name }).meta as { "version"?: string }).version,
+		"tarball": (name, version) => call({ "op": "tarball", "name": name, "version": version }).payload,
 		"log": log,
 		"serve": (listening, handler) => serve(hub, `virtual.debug.${listening}`, async (raw) => {
 			const request = raw as RuntimeRequest;

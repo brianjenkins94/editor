@@ -183,7 +183,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "parse.status", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "history.texts", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "packages.install", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "packages.tarball", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "tasks.list", "from": ["shell"], "to": ["bridge"] },
 	{ "pattern": "tasks.run", "from": ["shell"], "to": ["bridge"] },
 	{ "pattern": "terminal.run", "from": ["bridge"], "to": ["workbench"] },

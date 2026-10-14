@@ -58,7 +58,8 @@ export function isRegistrySpec(spec: string): boolean {
 	return !/^[a-z][\d+.a-z-]*:/iu.test(spec) && !spec.includes("/");
 }
 
-/** The entries of a ustar archive (gunzipped): regular files, their paths with the leading `package/` dropped. */
+/** The entries of a ustar archive (gunzipped): regular files, their paths with the leading `package/` dropped — a long
+ *  path as pax or GNU tar gives it. */
 export function untar(archive: Uint8Array): Map<string, Uint8Array> {
 	const files = new Map<string, Uint8Array>();
 	const text = (from: number, length: number): string => {
@@ -85,6 +86,9 @@ export function untar(archive: Uint8Array): Map<string, Uint8Array> {
 		if (type === "x") {
 			// A pax header: a long path for the next entry.
 			longName = /(?:^|\n)\d+ path=([^\n]*)\n/u.exec(new TextDecoder().decode(body))?.[1];
+		} else if (type === "L") {
+			// GNU tar's: the next entry's long name.
+			longName = text(offset + 512, size);
 		} else if (type === "0" || type === "\0") {
 			const path = longName ?? (prefix === "" ? name : prefix + "/" + name);
 
@@ -96,6 +100,11 @@ export function untar(archive: Uint8Array): Map<string, Uint8Array> {
 	}
 
 	return files;
+}
+
+/** A package's published tarball (gzipped) → its files, by path within the package (untar's). */
+export function unpack(tarball: Uint8Array): Map<string, Uint8Array> {
+	return untar(pako.ungzip(tarball));
 }
 
 /** The file a package subpath resolves to, by its `exports` (browser/import conditions), else `module`/`main`. */
@@ -283,7 +292,7 @@ export class PackageResolver {
 					throw new Error(`${name}: ${chosen} answered ${response.status}`);
 				}
 
-				const files = untar(pako.ungzip(new Uint8Array(await response.arrayBuffer())));
+				const files = unpack(new Uint8Array(await response.arrayBuffer()));
 				const manifestBytes = files.get("package.json");
 
 				return { "url": chosen, "manifest": manifestBytes === undefined ? {} : JSON.parse(new TextDecoder().decode(manifestBytes)) as Manifest, "files": files };

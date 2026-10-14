@@ -150,9 +150,11 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 			return { "meta": await decideCapabilityAs({ "kind": call.kind, ...call.method === undefined ? {} : { "method": call.method }, ...call.op === undefined ? {} : { "op": call.op }, "args": call.args, "package": call.package, ...typeof runId === "string" ? { "runId": runId } : {} }) as unknown as Record<string, unknown> };
 		}
 
-		// A package the debugger's require found nothing of: installed by the workbench (install.ts) at its pinned version.
-		if (op === "install") {
-			return { "meta": await rpc.request("packages.install", { "name": meta["name"] }, { "timeoutMs": 300_000, "waitForResponderMs": 30_000 }) as Record<string, unknown> };
+		// A package the debugger's require found nothing of: its tarball, fetched by the workbench (tarballs.ts).
+		if (op === "tarball") {
+			return { "meta": {}, "payload": await rpc.request("packages.tarball", { "name": meta["name"], "version": meta["version"] }, { "timeoutMs": 300_000, "waitForResponderMs": 30_000 }).catch((error: unknown) => {
+				throw failure(`ENOENT: ${String(meta["name"])}@${String(meta["version"])}'s tarball: ${error instanceof Error ? error.message : String(error)}`, "ENOENT");
+			}) as Uint8Array };
 		}
 
 		const path = workspacePath(meta["path"]);

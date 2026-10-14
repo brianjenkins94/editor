@@ -22,12 +22,13 @@ import type { ModuleEvidence } from "../shared/preview-evidence";
 import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
+import type { VersionsFile } from "./versions";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
-import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
+import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, versionsPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { Unparsable } from "./bablr";
 import { syncBaseline, watchBaseline } from "./baseline";
-import { installPackage } from "./install";
+import { tarball } from "./tarballs";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -167,11 +168,18 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 	// The dependency baseline, kept up to the dependencies as they change (made by the first run that keeps evidence).
 	watchBaseline(vscode);
-	// A package a debug run's require found nothing of, installed at its pinned version (the bridge asks, for the run).
-	serve(hub, "packages.install", async (args) => {
-		const { name } = (args ?? {}) as { "name"?: unknown };
+	// A package a debug run's require found nothing of: its tarball, at the version the run read pinned (the bridge asks,
+	// for the run — the debug worker installs it in its own memory). From the lockfile's URL when it names that version.
+	serve(hub, "packages.tarball", async (args) => {
+		const { name, version } = (args ?? {}) as { "name"?: unknown; "version"?: unknown };
 
-		return { "version": typeof name === "string" ? await installPackage(vscode, name) : undefined };
+		if (typeof name !== "string" || typeof version !== "string") {
+			throw new TypeError("packages.tarball: a name and a version");
+		}
+
+		const pinned = await vscode.workspace.fs.readFile(vscode.Uri.file(`/workspace/${versionsPath()}`)).then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as VersionsFile).packages[name], () => undefined);
+
+		return tarball(name, version, pinned?.version === version ? pinned.tarball : undefined);
 	});
 	// How much a preview's dev server instruments (`silo.evidence.previews`), asked as each preview starts.
 	serve(hub, "evidence.level", () => vscode.workspace.getConfiguration("silo.evidence").get<string>("previews") ?? "full");
