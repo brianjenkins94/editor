@@ -59,7 +59,8 @@ template's imports change once. *Unlocks:* every extension's `shared/` import.
 **S3. Document what's already used, or replace it.** `_types.at` (the capabilities plugin's; notes and insights depend
 on it), `editor.metrics.read` (the bridge's), `run.policy` (the bridge's; tsval's explore), `editor.arch.commands`
 (command-tap's). Each becomes a documented extension point — `_types.at` named as the capabilities extension's, with
-`extensionDependencies` — or goes (`run.policy` → `__policy` in the launch configuration). *Unlocks:* notes, and insights
+`extensionDependencies` — or goes (~~`run.policy`~~: done 2026-10-14 — tsval's explore, which runs outside a session and so has no
+`__policy`, reads the policy as the capabilities extension does, through `silo-store`). *Unlocks:* notes, and insights
 with S2.
 
 **S4. Commands for the hub's services, both ways.** Only the bridge is on the hub, so a feature that answers a hub

@@ -162,9 +162,6 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 	const served = new Map<string, () => void>();
 
 	context.subscriptions.push(
-		// The policy a run's gated calls are decided by, for a debugger that decides calls outside a session (tsval's
-		// Explore Orderings): what `__policy` gives a launch.
-		vscode.commands.registerCommand("run.policy", async () => policyFor()),
 		vscode.debug.onDidStartDebugSession((session) => {
 			served.set(session.id, serve(hub, `debug.session.${session.id}.decide`, async (args, { signal }): Promise<DebugOutcome | { "session": string; "state": "running" }> => {
 				const { choice = "", rule, give } = (args ?? {}) as { "choice"?: string; "rule"?: Rule; "give"?: unknown };

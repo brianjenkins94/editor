@@ -21,6 +21,7 @@ import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { logger } from "@brianjenkins94/util/logger";
 import { EMPTY_POLICY, given as givenBy, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
+import { loadEffectivePolicy } from "../../shared/capabilities/silo-store";
 import { watchWorker } from "../../shared/failures";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
@@ -823,8 +824,8 @@ function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onE
 export async function exploreProgram(runtime: WorkspaceRuntime, program: string, maxRuns = 100): Promise<Explored> {
 	const uri = vscode.Uri.file(program);
 	const source = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-	// (the policy a launch is given as `__policy` — this runs outside a session, so it asks for it)
-	const policy = await Promise.resolve(vscode.commands.executeCommand<Policy | undefined>("run.policy")).catch(() => undefined) ?? EMPTY_POLICY;
+	// (the policy a launch is given as `__policy` — this runs outside a session, so it reads it as the enforcer does)
+	const policy = await loadEffectivePolicy().catch(() => EMPTY_POLICY);
 	const mocked = givenBy(policy, { "program": vscode.workspace.asRelativePath(uri, false) }, "process.argv")?.values.find((each): each is string[] => Array.isArray(each));
 	let failed: ((reason: Error) => void) | undefined;
 	let resolveExplored: ((explored: Explored) => void) | undefined;
