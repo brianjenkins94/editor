@@ -27,9 +27,9 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, versionsPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { Unparsable } from "./bablr";
-import { watchBaseline } from "./baseline";
 import { tarball } from "./tarballs";
 import { blobOid, headCommit } from "./git-engine";
+import { watchVersions } from "./versions";
 
 const ROOT = "/workspace";
 
@@ -166,9 +166,9 @@ function repoRelative(path: string): string {
 export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr): void {
 	const rpc = createRpcClient(hub);
 
-	// The dependency baseline — the editor's silo init and install: made as the project opens, synced as its dependencies
-	// change (unless `silo.baseline` is off).
-	watchBaseline(vscode);
+	// The versions every package loads at (versions.json), kept up to the dependencies: the baseline follows them (the
+	// capabilities extension keeps it).
+	watchVersions(vscode);
 	// A package a debug run's require found nothing of: its tarball, at the version the run read pinned (the bridge asks,
 	// for the run — the debug worker installs it in its own memory). From the lockfile's URL when it names that version.
 	serve(hub, "packages.tarball", async (args) => {

@@ -11,7 +11,7 @@
  * Kept in `.silo/versions.json`, shared — the editor's lockfile, where there's no package-lock.json: a dependency keeps
  * its version until its range changes (only what's new or changed is resolved), so every collaborator loads what the
  * baseline was made from. The preview's dev server reads it from the workspace (its import map pins these versions),
- * and the baseline is synced to it (baseline.ts).
+ * and the baseline is synced to it (the capabilities extension's baseline.ts, which watches it).
  */
 import type * as vscodeApi from "vscode";
 import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
@@ -225,4 +225,26 @@ export function syncVersions(vscode: typeof vscodeApi, root = "/workspace"): Pro
 	});
 
 	return syncing;
+}
+
+/** Keep `.silo/versions.json` up to the project's dependencies: resolved as the project opens, and again as a
+ *  package.json or package-lock.json changes — so a preview or run started before then pins them, and the baseline (the
+ *  capabilities extension's, which watches this file) follows them. */
+export function watchVersions(vscode: typeof vscodeApi): vscodeApi.Disposable {
+	const watcher = vscode.workspace.createFileSystemWatcher("**/{package.json,package-lock.json}");
+	const changed = (uri: vscodeApi.Uri): void => {
+		if (!uri.path.includes("/node_modules/")) {
+			void syncVersions(vscode);
+		}
+	};
+
+	const listeners = [watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed)];
+
+	void syncVersions(vscode);
+
+	return { "dispose": () => {
+		for (const listener of [...listeners, watcher]) {
+			listener.dispose();
+		}
+	} };
 }

@@ -56,8 +56,8 @@ signal** (a scope OBSERVED with no matching STATIC entry is the alarm; silo must
   capabilities/<user>.json  FACTS · observed      what actually FIRED for this user — a day-coarsened rollup
   runs/<user>.jsonl         FACTS · observed      the run ledger (evidence.ts): each run's envelope, with its `effects`
   baseline.json             FACTS · static        what each dependency's own code can do, by static analysis, as libraries are
-                                                  added (workbench/baseline.ts: made on the first run, synced as package.json /
-                                                  the lockfile change; what a newer version can do more is in `grew`, with the
+                                                  added (baseline.ts: made as the project opens, synced as versions.json —
+                                                  the dependencies — changes, read in the package worker; what a newer version can do more is in `grew`, with the
                                                   version that grew it — it asks at the call unless the policy allows it).
                                                   Never taught by runs.
   .gitignore                silo-managed          ignores local/
@@ -82,6 +82,8 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | `ts-plugin.js` | loads both engines, runs the canary in the background, merges results into diagnostics | tsserver plugin |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |
 | `extension.ts` | the "Capability calls" panel + the tripwire error-surface | ext host |
+| `baseline.ts` | keeps `.silo/baseline.json` up to `.silo/versions.json` (the workbench's resolver): new or changed packages read in the package worker, lib's `syncPackages`; off with `silo.baseline` | ext host |
+| `packages-worker.ts` → `lsp/packages-worker.js` | READ — each package's tarball through lib's `packageCaps` (code files, install hooks); started for a sync, ended after | a worker of the extension's |
 | `exceptions.ts` | the "Exceptions" view: libraries that grew a capability (the baseline's `grew`), and the policy's exceptions — each run's answers at the call (`decided`: once / always / refused), by package or the program | ext host |
 | `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `silo/policy`) | ext host |
 | `silo-store.ts` | the whole `.silo/` layout: base+override policy merge, observed rollup, run firehose, git-user resolution | ext host |

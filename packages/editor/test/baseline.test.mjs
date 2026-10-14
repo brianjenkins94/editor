@@ -1,4 +1,4 @@
-// The editor's dependency baseline (workbench/baseline.ts): a package's own code read out of its published tarball, and
+// The editor's dependency baseline (extensions/capabilities/baseline.ts): a package's own code read out of its published tarball, and
 // the packages a lockfile installs. Run:
 //   node --import tsx --test test/baseline.test.mjs
 import assert from "node:assert/strict";
@@ -7,11 +7,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { detect } from "@brianjenkins94/util/silo/detect";
+import { packageCaps } from "@brianjenkins94/util/silo/detect";
 import { unpack } from "@brianjenkins94/almostnode/packages";
 import { choose, lockedVersions, resolveVersions } from "../workbench/versions.ts";
 
-test("a tarball's files, long paths included — bytes as they are, and what detect makes of its code", async () => {
+test("a tarball's files, long paths included — bytes as they are, and what packageCaps makes of them", async () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "baseline-"));
 	const deep = "lib/" + "very-long-folder-name-".repeat(5) + "/index.js";
 	const binary = Uint8Array.of(0, 97, 115, 109, 255, 1);
@@ -34,11 +34,11 @@ test("a tarball's files, long paths included — bytes as they are, and what det
 		}
 
 		const files = unpack(new Uint8Array(fs.readFileSync(path.join(dir, "probe.tgz"))));
-		const code = [...files].filter(([file]) => file.endsWith(".js"));
 
 		assert.deepEqual([...files.keys()].toSorted(), ["README.md", "index.js", deep, "package.json", "probe.wasm"].toSorted(), `every file, by its path in the package (${format})`);
 		assert.deepEqual(files.get("probe.wasm"), binary);
-		assert.deepEqual([...new Set(code.flatMap(([, bytes]) => detect(new TextDecoder().decode(bytes))))].toSorted(), ["exec", "net"]);
+		// (as the package worker reads it: the README naming fetch isn't code)
+		assert.deepEqual(packageCaps([...files].map(([file, bytes]) => [file, new TextDecoder().decode(bytes)])), ["exec", "net"]);
 	}
 });
 

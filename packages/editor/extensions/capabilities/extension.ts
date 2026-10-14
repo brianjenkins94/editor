@@ -15,12 +15,16 @@
  *
  * 3. The TRIPWIRE (M0 = surface): a `deny`d call the code reaches gets its own ERROR squiggle (a separate
  *    `capabilities-policy` diagnostic collection). Runtime blocking/substituting is the next layer, at real-run.
+ *
+ * 4. The dependency baseline (baseline.ts): what each dependency's own code can do, kept up to the dependencies in a
+ *    worker of this extension's (packages-worker.ts).
  */
 import type { StaticEntry, StaticSurface } from "../../shared/capabilities/silo-store";
 
 import type { Disposition, Effective, Policy } from "./policy";
 import * as vscode from "vscode";
 import { loadStaticSurface, writeStaticSurface } from "../../shared/capabilities/silo-store";
+import { keepBaseline } from "./baseline";
 import { registerExceptions } from "./exceptions";
 import { registerPlacedRules } from "./placed-rules";
 import { effectiveDisposition, policyUri, readPolicy, withoutRule, withRule, writePolicy } from "./policy";
@@ -337,6 +341,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerRulesTree(context);
 	// What's outside the dependency baseline and the policy: versions pending acceptance, and the policy's exceptions (exceptions.ts).
 	registerExceptions(context);
+	keepBaseline(context);
 	// And each placed rule beside its code, in the editor's Margin (placed-rules.ts).
 	registerPlacedRules(context);
 }

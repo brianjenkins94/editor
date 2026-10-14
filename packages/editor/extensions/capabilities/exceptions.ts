@@ -2,7 +2,7 @@
  * Exceptions: what's outside the dependency baseline and the policy, to look at — a tree view beside Capability calls.
  *
  * The model: the baseline (`.silo/baseline.json`) is what each library's own code can do, by static analysis, as
- * libraries are added (the workbench's baseline.ts keeps it, lib's syncPackages). The policy is the default stance on a
+ * libraries are added (baseline.ts keeps it, lib's syncPackages). The policy is the default stance on a
  * call beyond it — allowed, refused, or asked. Asked at the call, the person's answer is an exception to the policy:
  * allowed once, allowed always (a rule in their policy now, too), or refused — each recorded in its run (an effect's
  * `decided`), so it's on record whether or not their policy is committed.
@@ -117,7 +117,7 @@ export function registerExceptions(context: vscode.ExtensionContext): void {
 
 		rows = [...grew.toSorted((one, other) => one.name.localeCompare(other.name)), ...[...byWhom].toSorted(([one], [other]) => one.localeCompare(other)).map(([by, found]) => ({ "kind": "exceptions", "by": by, "found": found }) as const)];
 		if (baseline === undefined) {
-			view.message = "No baseline yet — the first run that keeps evidence makes .silo/baseline.json: what each dependency's own code can do.";
+			view.message = "No baseline: .silo/baseline.json, what each dependency's own code can do, is made as the project's dependencies are read — unless silo.baseline is off. Without it, the policy decides every package's call.";
 		} else {
 			view.message = rows.length === 0 ? "No library grew, and no exceptions to the policy." : undefined;
 		}

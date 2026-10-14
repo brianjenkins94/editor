@@ -701,6 +701,9 @@ function maybeBoot(): void {
 			const capabilitiesPluginUrl = new URL("./lsp/capabilities-ts-plugin.js", location.href).href;
 
 			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/index.js", capabilitiesPluginUrl);
+			// Its package worker, for the dependency baseline (baseline.ts): a bootstrap importing the module worker by its URL, as
+			// the event sheet's recognizer is started.
+			capabilitiesExt.registerFileUrl("./packages.js", "data:text/javascript," + encodeURIComponent(`import(${JSON.stringify(new URL("./lsp/packages-worker.js", location.href).href)}).catch((error) => { postMessage({ "failed": String(error) }); });`));
 
 			// History: what your edits change, as you make them — a TS server plugin that reads the program tsserver holds with
 			// its own `ts` (served beside its engine, like eslint's and capabilities'), and an extension that replays each pause

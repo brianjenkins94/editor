@@ -323,9 +323,7 @@ export async function preBuild(): Promise<void> {
 		// The terminal's commands run on juvy, which parses with node:util's parseArgs: @pkgjs/parseargs (Node's own, as a
 		// package). polyfillNode(["path", "url"]) is for util/env, which juvy imports (it reads node:path/url at load), and
 		// gives the bundle `global`/`process` where they're read.
-		// `oxc-parser` → a stand-in that says it isn't here: util/silo/detect imports it for the one function the workbench
-		// never calls (baseline.ts uses detect, regular expressions), so its native binding needn't be bundled.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"], "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js"), "oxc-parser": resolvePath("./workbench/oxc-parser-unavailable.ts") } },
+		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"], "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,
@@ -349,7 +347,9 @@ export async function preBuild(): Promise<void> {
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
 		// (and hub/observability to the editor's own: a debugger's worker connects through run-contract's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
-		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
+		// `oxc-parser` → a stand-in that says it isn't here: util/silo/detect imports it for the one function the package
+		// worker never calls (packageCaps is regular expressions), so its native binding needn't be bundled.
+		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js"), "oxc-parser": resolvePath("./build/oxc-parser-unavailable.ts") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		"plugins": [bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
@@ -376,7 +376,10 @@ export async function preBuild(): Promise<void> {
 					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts"),
 					// The event sheet's recognizer worker — built HERE so its `typescript` shares the deduped ts chunk above
 					// (no second copy); the event-sheet extension starts it (extensions/event-sheet/extension.ts).
-					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts")
+					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts"),
+					// The capabilities extension's package worker: what each dependency's tarball says it can do (the baseline),
+					// read off the extension host; the extension starts it for a sync and ends it after (baseline.ts).
+					"lsp/packages-worker": resolvePath("./extensions/capabilities/packages-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
