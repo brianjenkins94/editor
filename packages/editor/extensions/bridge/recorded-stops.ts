@@ -2,19 +2,22 @@
  * Recorded stops (RUNNING.md, step 5): a breakpoint in a page's code records what's in scope each time its line runs —
  * a page can't stop, so it's a recorded stop, not a live one — and the notes margin shows it as it shows live values, a
  * column per time it ran. The editor's breakpoints go to every dev server (`preview.stops`: each re-instruments a file
- * whose stops changed, and hot-updates it); what a page reports (`stops.preview`) becomes a session of values for the
- * file (`values.session.*`, live-values.ts), anchored in the text of the version that ran (`preview.version`).
+ * whose stops changed, and hot-updates it); what a page reports (`stops.preview`) becomes the run contract's `values`
+ * for the file, told by the preview's own run — its `production` session (production-adapter.ts) — each report every
+ * hit so far (`replace`), anchored in the text of the version that ran (`preview.version`). The Margin shows them as
+ * it shows any run's.
  *
- * Runs in the workbench realm, beside runtime evidence (evidence.ts), which reads the same pages' counts.
+ * The bridge's: a crossing, from the previews' hub to a debug session's events.
  */
 import type { LiveValue } from "@brianjenkins94/editor-api";
 import type { RecordedStop } from "@brianjenkins94/editor-api/recorded";
 import type { Hub } from "@brianjenkins94/hub";
-import type * as vscodeApi from "vscode";
 import { createRpcClient } from "@brianjenkins94/hub";
+import * as vscode from "vscode";
+import { tellPreview } from "./production-adapter";
 
 /** Each workspace file's breakpoints, enabled, as 1-based lines. */
-function breakpointsOf(vscode: typeof vscodeApi): Record<string, number[]> {
+function breakpointsOf(): Record<string, number[]> {
 	const lines: Record<string, number[]> = {};
 
 	for (const breakpoint of vscode.debug.breakpoints) {
@@ -56,15 +59,15 @@ export function stopValues(stop: RecordedStop, source: string): LiveValue[] {
 	]);
 }
 
-export function installRecordedStops(hub: Hub, vscode: typeof vscodeApi): void {
+export function registerRecordedStops(context: vscode.ExtensionContext, hub: Hub): void {
 	const rpc = createRpcClient(hub);
 	// The dev servers answer from the node worker, which may still be starting: asked again as the breakpoints change.
 	const push = (): void => {
-		void rpc.request("preview.stops", { "stops": breakpointsOf(vscode) }, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }).catch(() => undefined);
+		void rpc.request("preview.stops", { "stops": breakpointsOf() }, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }).catch(() => undefined);
 	};
 
 	push();
-	vscode.debug.onDidChangeBreakpoints(push);
+	context.subscriptions.push(vscode.debug.onDidChangeBreakpoints(push));
 
 	// Each module version's text, asked of the dev server that instrumented it once (a hot update may replace it).
 	const sources = new Map<string, Promise<string | undefined>>();
@@ -79,9 +82,7 @@ export function installRecordedStops(hub: Hub, vscode: typeof vscodeApi): void {
 		return source;
 	};
 
-	let reported = 0;
-
-	hub.subscribe("stops.preview", (data) => {
+	context.subscriptions.push({ "dispose": hub.subscribe("stops.preview", (data) => {
 		const { window, stops } = (data ?? {}) as { "window"?: unknown; "stops"?: unknown };
 		const port = Number(/^preview:(\d+)/u.exec(typeof window === "string" ? window : "")?.[1]);
 
@@ -89,18 +90,14 @@ export function installRecordedStops(hub: Hub, vscode: typeof vscodeApi): void {
 			return;
 		}
 
-		// A report is the page's latest hits of every stop: each file's, a session of its own (replacing its last).
+		// A report is the page's latest hits of every stop: each file's, in place of its last.
 		const byFile = new Map<string, RecordedStop[]>();
 
 		for (const stop of stops as RecordedStop[]) {
 			byFile.set(stop.file, [...byFile.get(stop.file) ?? [], stop]);
 		}
 
-		reported += 1;
-
 		for (const [file, fileStops] of byFile) {
-			const session = `stops-${port}-${reported}`;
-
 			void (async () => {
 				// The text of the version that ran last: its stops' (an earlier version's, from before a hot update, are
 				// another text's).
@@ -108,9 +105,9 @@ export function installRecordedStops(hub: Hub, vscode: typeof vscodeApi): void {
 				const source = await sourceOf(port, version);
 
 				if (source !== undefined) {
-					hub.publish(`values.session.${session}`, { "file": file, "source": source, "values": fileStops.filter((stop) => stop.version === version).flatMap((stop) => stopValues(stop, source)), "calls": [], "dropped": 0 });
+					tellPreview(port, "values", { "file": file, "source": source, "values": fileStops.filter((stop) => stop.version === version).flatMap((stop) => stopValues(stop, source)), "calls": [], "dropped": 0, "replace": true });
 				}
 			})();
 		}
-	});
+	}) });
 }

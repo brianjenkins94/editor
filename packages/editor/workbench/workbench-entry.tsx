@@ -17,7 +17,6 @@ import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
-import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
@@ -31,6 +30,7 @@ import eslintExtension from "eslint:extension";
 import eventSheetExtension from "event-sheet:extension";
 import historyExtension from "history:extension";
 import insightsExtension from "insights:extension";
+import marginExtension from "margin:extension";
 import notesExtension from "notes:extension";
 import { render } from "preact";
 import runningExtension from "running:extension";
@@ -46,7 +46,6 @@ import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
-import { installCoverage } from "./coverage";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
@@ -54,12 +53,10 @@ import { installEvidence } from "./evidence";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import * as gitEngine from "./git-engine";
 import { installGitService } from "./git-service";
-import { installLiveValues, showMarks, showProfile } from "./live-values";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installPaneViews } from "./pane-views";
 import { installProfileFiles } from "./profile-files";
-import { installRecordedStops } from "./recorded-stops";
 import { registerRuleView } from "./rule-view";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
 import { Workbench } from "./Workbench";
@@ -497,7 +494,7 @@ function maybeBoot(): void {
 			"window.customTitleBarVisibility": "never",
 			"window.commandCenter": false,
 			"workbench.layoutControl.enabled": false,
-			// No change bars in the gutter: their place is the notes margin's gutter column (coverage; live-values.ts), and
+			// No change bars in the gutter: their place is the Margin's gutter column (coverage: extensions/margin), and
 			// the shell's Changes panel is the git UI.
 			"scm.diffDecorations": "none"
 		},
@@ -596,18 +593,12 @@ function maybeBoot(): void {
 				const bablr = startBablr(workbenchHub);
 
 				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr);
-				// The notes margin beside every code file (live-values.ts): a debug session's values and capability stops, and
-				// coverage's strip (coverage.ts), read from the evidence through the insights extension's store, here with
-				// core's own API.
-				// The pane's views (pane-views.ts): its tabs, the Margin's and each extension's, and what an extension's draws.
+				// The pane's views (pane-views.ts): its tabs — the Margin's (extensions/margin) and each extension's — and what
+				// each draws beside the code.
 				installPaneViews(api as typeof import("vscode"));
-				installLiveValues(workbenchHub, api as typeof import("vscode"));
 				installEditorState(workbenchHub, api as typeof import("vscode"));
-				// A breakpoint in a page's code: a recorded stop, shown in the margin as live values are (recorded-stops.ts).
-				installRecordedStops(workbenchHub, api as typeof import("vscode"));
 				// The Rule view: the rule editor, for whoever edits a rule (`editor.rules.edit`, rule-view.ts).
 				registerRuleView(api as typeof import("vscode"));
-				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks, showProfile);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// And the bridge's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
@@ -665,10 +656,10 @@ function maybeBoot(): void {
 			// The rest run in the web worker host, each from its folder with the files its manifest lists: eslint (real ESLint
 			// and the preset under almostnode, in its worker); capabilities (static and dynamic halves inside its tsserver
 			// plugin, which finds its engine and canary beside itself; its package worker for the baseline); history (its
-			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the event sheet (its webview's script,
+			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the Margin; the event sheet (its webview's script,
 			// its recognizer worker); running; type queries (`// ^?`); notes; Source Control (on the editor's git); cspell (the real cspell under almostnode, in its
 			// worker). Public API only, but for what EXTENSION-POINTS lists (5).
-			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cspellExtension]) {
+			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, marginExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cspellExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -676,7 +667,7 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "running", "event-sheet", "type-queries", "notes", "cspell"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "margin", "running", "event-sheet", "type-queries", "notes", "cspell"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

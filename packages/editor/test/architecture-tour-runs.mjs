@@ -544,7 +544,7 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// At a stop, the margin's values are VS Code's own inline values too (live-values.ts's InlineValuesProvider): each line's
+// At a stop, the margin's values are VS Code's own inline values too (the margin extension's InlineValuesProvider): each line's
 // latest at its end, as VS Code draws a debugger's — whichever debugger it is, and with no pane beside the editor.
 test("inline values: at a stop, each line's latest value at its end, as VS Code draws them", async () => {
 	const workbench = session.workbench();

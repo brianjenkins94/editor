@@ -12,10 +12,20 @@
  * the capability interceptors. It's declared a LAUNCH, though it starts nothing itself: Stop does end the run, and
  * VS Code calls an attach's stop "Disconnect" — as if the run would go on without it, which it never does.
  */
+import type { Events } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 
 type Dap = Record<string, unknown>;
+
+/** Each preview's run's session, by its port. */
+const previews = new Map<number, ProductionDebugSession>();
+
+/** Tell the run contract's `event` from the preview on `port`'s run (its recorded stops' `values`) — none without one. */
+export function tellPreview<Name extends keyof Events>(port: number, name: Name, body: Events[Name]): void {
+	previews.get(port)?.tell(name, body);
+}
+
 interface DapRequest { "type": "request"; "seq": number; "command": string; "arguments"?: Dap }
 
 class ProductionDebugSession implements vscode.DebugAdapter {
@@ -26,6 +36,7 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 	private id = "";
 	private readonly offs: (() => void)[] = [];
 	private readonly hub: Hub;
+	private port: number | undefined;
 
 	public constructor(hub: Hub) {
 		this.hub = hub;
@@ -50,6 +61,12 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 
 			case "launch":
 				this.id = (args["__prodId"] as string | undefined) ?? "";
+				this.port = typeof args["__port"] === "number" ? args["__port"] : undefined;
+
+				if (this.port !== undefined) {
+					previews.set(this.port, this);
+				}
+
 				// The run's driver streams its output here; relay it to the Debug Console.
 				this.offs.push(this.hub.subscribe(`production.out.${this.id}`, (data) => {
 					const chunk = data as { "stream"?: "out" | "err"; "data"?: string };
@@ -92,7 +109,16 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 		}
 	}
 
+	/** A run contract event, from the run. */
+	public tell<Name extends keyof Events>(name: Name, body: Events[Name]): void {
+		this.event(name, body as unknown as Dap);
+	}
+
 	public dispose(): void {
+		if (this.port !== undefined && previews.get(this.port) === this) {
+			previews.delete(this.port);
+		}
+
 		for (const off of this.offs) {
 			off();
 		}

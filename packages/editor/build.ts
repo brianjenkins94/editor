@@ -316,6 +316,7 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("capabilities", { "node_modules/capabilities-ts-plugin/package.json": { "json": { "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "packages.js": { "worker": "packages-worker.js" } }),
 			bundledExtension("history", { "node_modules/history-ts-plugin/package.json": { "json": { "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" } } }),
 			bundledExtension("insights"),
+			bundledExtension("margin"),
 			bundledExtension("running"),
 			bundledExtension("type-queries"),
 			bundledExtension("notes"),

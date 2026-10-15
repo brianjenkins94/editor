@@ -157,15 +157,8 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 			""
 		].join("\n")
 	});
-	// What the margin is given for the file (live-values.ts draws it).
-	await workbench.evaluate((path) => {
-		globalThis.__stopsSeen = [];
-		globalThis.__stopsOff = globalThis.__architecture.hub.subscribe("values.session.*", (data) => {
-			if (data.file === path) {
-				globalThis.__stopsSeen.push(data);
-			}
-		});
-	}, file);
+	// The file open: its Margin is drawn, and says what it shows (`margin.state`, the Margin's).
+	await workbench.evaluate((path) => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file(path)), file);
 	await session.terminal("cd /workspace/stopsapp && npm run dev", { "fresh": true });
 
 	const run = await eventually("its run", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.cwd === "/workspace/stopsapp" && each.state === "running"));
@@ -183,12 +176,14 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 			document.getElementById("add").click();
 		});
 
-		const values = await eventually("its stops, in the margin", async () => {
-			const seen = await workbench.evaluate(() => globalThis.__stopsSeen.at(-1)?.values ?? []);
+		// Told as the preview's run's values (its production session's), each report every hit so far: the stop's line, a
+		// cell per time it ran — `during = click, step = 2, …`.
+		const { values } = await eventually("its stops, in the margin", async () => {
+			const margin = await session.request("margin.state", { "file": file }, 10_000).catch(() => undefined);
 
-			return seen.filter((value) => value.name === "count").length === 2 ? seen : undefined;
+			return margin?.values.some((row) => row.cells.filter((cell) => cell.includes("count = ")).length === 2) === true ? margin : undefined;
 		});
-		const at = (name, turn) => values.find((value) => value.name === name && value.turns[0] === turn)?.value;
+		const at = (name, turn) => values.map((row) => new RegExp(`(?:^|, )${name} = (.*?)(?=, \\w+ = |$)`, "u").exec(row.cells[turn] ?? "")?.[1]).find((value) => value !== undefined);
 
 		assert.deepEqual([at("count", 0), at("count", 1)], ["0", "2"], "count as it was each time");
 		assert.deepEqual([at("step", 0), at("step", 1)], ["2", "2"]);
@@ -196,8 +191,8 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 		assert.match(at("event", 0), /^(?:Pointer|Mouse)Event click$/u, "a DOM event, by what it is");
 		// eslint-disable-next-line webawesome/no-html-in-strings -- how a stop previews a DOM node, not markup
 		assert.equal(at("button", 1), "<button#add>", "a DOM node, by what it is");
-		assert.ok(values.every((value) => value.line === 6), "on the breakpoint's line");
-		assert.equal(values.find((value) => value.name === "next"), undefined, "not yet set: its own statement");
+		assert.ok(values.every((row) => row.line === 7), "on the breakpoint's line");
+		assert.equal(at("next", 0), undefined, "not yet set: its own statement");
 
 		// Stepping a recorded handler (RUNNING.md, step 6): the second click's call, replayed in the debugger — stopped at
 		// the stop on what it read then, and stepped on.
@@ -226,7 +221,6 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 		await workbench.evaluate(async () => {
 			const { api } = globalThis.__editor;
 
-			globalThis.__stopsOff?.();
 			await api.workspace.fs.delete(api.Uri.file("/workspace/stopsapp"), { "recursive": true }).then(() => undefined, () => undefined);
 		});
 	}

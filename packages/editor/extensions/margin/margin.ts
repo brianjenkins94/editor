@@ -2,9 +2,10 @@
  * Live values, as notes (LIVE-VALUES.md, step 6): a debug session's values — what each line bound, returned or chose,
  * a column per turn of the loop around it — beside the code in the pane's Margin, Bret Victor's binary search. The
  * Margin is a pane view like any extension's (EXTENSION-POINTS.md, 4): this answers `margin.paneView` with its content
- * as data (marginOf), each thing placed by its range in the text that ran, and pane-views.ts draws it; its buttons and
- * cells run `margin.*` commands. The debug adapter publishes them on the pod hub (`values.session.<id>` as they grow, `values.ended`);
- * this keeps the latest session's per file, shows them while the session lives, and takes them away when it ends.
+ * as data (marginOf), each thing placed by its range in the text that ran, and core's pane draws it; its buttons and
+ * cells run `margin.*` commands. Every debugger tells its values as the run contract's custom events (`values` as they
+ * grow, `ended`, a capability stop's `ask`) — read here as any extension reads them; this keeps the latest session's
+ * per file, shows them while the session lives, and takes them away when it ends.
  *
  * A function called more than once shows one call — its latest, or the one picked on its first line (`‹ 3/5 ›`).
  * Columns line up down a call: every line at the same loop depth has the same columns, each as wide as its widest
@@ -13,25 +14,25 @@
  * line.
  *
  * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
- * Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
+ * Allow once*, *Allow always*, *Deny*, the choice sent back to the session (the bridge's `editor.capability.decide`), which
  * resumes it. *Allow this run* lets every call of the capability through until the run ends (a loop asks once), kept
  * nowhere. *Allow always* needs the resource the call reaches — known even when the line computes it (the worker runs a
  * fork of the stop to the call to see it).
  * Rule…* opens the rule editor in the Rule view (core's `editor.rules.edit`, RULES.md), prefilled with the call — *capability is*, *resource
  * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
  * in my policy, the run going on as it decides. Or *give* the call's *result* instead of it (RULES.md, slice 2) —
- * starting from what it returned the last time it ran for real, when that's recorded (`capability.recorded`).
+ * starting from what it returned the last time it ran for real, when that's recorded (editor-api's `recordedResult`).
  *
  * A variable's row has *Mock…* on hover (LIVE-VALUES.md, "Mocking a value"): the rule editor, in the Rule view, prefilled *program is
  * <this file>*, *at* <this statement> (a span reference, followed through edits), *then set* it to the value the run
  * had; the run's other variables are targets too. *Just this once* sets it at this stop and the run goes on with it
- * (`debug.session.<id>.setValue`, as the Variables view's Set Value does); *Save as rule* keeps it, and each run sets it
+ * (the bridge's `editor.debug.setValue`, as the Variables view's Set Value does); *Save as rule* keeps it, and each run sets it
  * each time it gets there, without stopping (the adapter places the rule; the worker sets it after the statement runs).
  * process.argv's row — on the first line that
  * reads it, there before any run — has *Mock…*: the rule editor, in the Rule view, prefilled *program is <this file>*, *then give
  * process.argv* the run's arguments, each value a run of its own; *Run* runs the file with them, once; *Save as rule*
- * keeps it in my policy, and every run of the file is given them (`rules.set`; the row shows what a rule gives,
- * `rules.given`).
+ * keeps it in my policy, and every run of the file is given them (`silo.rules.set`; the row shows what a rule gives,
+ * `silo.rules.given`: the capabilities extension's).
  *
  * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
  * runtime column — coverage in its gutter column, left of the code (`showMarks`, from coverage.ts), values,
@@ -39,27 +40,26 @@
  * the one it was stopped at — until the file runs again.
  *
  * Everything a run put on a line follows its code through edits and cosmetic changes (a reformat, a reindent): each is
- * anchored by its node's range in the text that ran (anchors.ts, BABLR spans) and drawn where that code is now; what
- * lost its code goes.
+ * anchored by its node's range in the text that ran (editor-api's anchors, BABLR spans) and drawn where that code is
+ * now; what lost its code goes.
+ *
+ * A preview's recorded stops come the same way: `values` on its run's `production` session (the bridge's), each report
+ * every hit so far (`replace`).
  */
-import type { AskEvent, LiveBatch, LiveCall, LiveValue, RunEnd } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
-import type { Hub } from "@brianjenkins94/hub";
-import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
-import type * as vscodeApi from "vscode";
-import type { CapabilityChoice } from "../shared/capabilities/capability-breakpoints";
-import type { Range } from "./anchors";
-import type { ProfiledLine } from "./coverage";
+import type { LineMark as PaneMark, ProfiledLine } from "./coverage";
+import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { refreshPane } from "@brianjenkins94/editor-api/pane";
+import { recordedResult } from "@brianjenkins94/editor-api/policy";
 import { argvRunsOf, decisionOf, resultOf } from "@brianjenkins94/editor-api/rules";
-import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
-import { Anchors } from "./anchors";
+import * as vscode from "vscode";
 import { parseInputs } from "./inputs";
-import css from "./live-values.css?raw";
-import { refreshView } from "./pane-views";
 
 /** A capability stop's question, as the margin shows it on its line (the run contract's `ask`, its file and text apart). */
 type CapabilityAsk = Omit<AskEvent, "file" | "source">;
@@ -116,19 +116,18 @@ const open = new Set<string>();
 const CODE = new Set(["javascript", "javascriptreact", "typescript", "typescriptreact"]);
 /** The capability stop a session is at, per file URI: what it asks. */
 const asks = new Map<string, { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }>();
-/** The workbench's extension API (set by `installLiveValues`): the documents' text, BABLR's spans. */
-let api: typeof vscodeApi | undefined;
-/** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
-let choose: ((session: string, choice: CapabilityChoice, rule?: Rule, give?: unknown) => Promise<unknown>) | undefined;
-/** What a call returned the last time it ran for real (a preview's fetch, recorded), or null (set by `installLiveValues`). */
-let recordedOf: ((capability: string, resource: string) => Promise<{ "value": unknown; "at": string } | null>) | undefined;
-/** Sets a variable at a session's stop (set by `installLiveValues`). */
-let setValueAt: ((session: string, name: string, value: string) => Promise<unknown>) | undefined;
-/** What a rule gives a file's process.argv, changing my policy by a rule editor's rule, and running a file with given
- *  arguments, each a run (set by `installLiveValues`). */
-let rulesGiven: ((path: string) => Promise<Given | null>) | undefined;
-let rulesSet: ((previous: Rule | undefined, rule: Rule | undefined) => Promise<unknown>) | undefined;
-let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
+/** A capability stop's choice, back to its session — the bridge's, where the decider is (EXTENSION-POINTS 5). */
+const choose = async (session: string, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<unknown> => vscode.commands.executeCommand("editor.capability.decide", session, choice, rule, give);
+/** What a call returned the last time it ran for real (a preview's fetch, recorded), or null. */
+const recordedOf = async (capability: string, resource: string): Promise<{ "value": unknown; "at": string } | null> => await recordedResult(capability, resource) ?? null;
+/** A variable set at a session's stop (the bridge's). */
+const setValueAt = async (session: string, name: string, value: string): Promise<unknown> => vscode.commands.executeCommand("editor.debug.setValue", session, name, value);
+/** What a rule gives a file's process.argv, and my policy changed by a rule made in the Rule view — the capabilities
+ *  extension's, where the policy is. */
+const rulesGiven = async (path: string): Promise<Given | null> => await vscode.commands.executeCommand<Given | null>("silo.rules.given", path, "process.argv") ?? null;
+const rulesSet = async (previous: Rule | undefined, rule: Rule | undefined): Promise<unknown> => vscode.commands.executeCommand("silo.rules.set", previous, rule);
+/** A file run with given arguments, each a run (Run's, the bridge's). */
+const runFile = async (path: string, cases: string[][]): Promise<unknown> => vscode.commands.executeCommand("editor.debugFile", vscode.Uri.file(path), { "cases": cases });
 /** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
 const givenArgv = new Map<string, Given | null>();
 
@@ -366,11 +365,11 @@ function valueOf(text: string, kind: string): unknown {
  *  then, or null (cancelled, or closed). Kept as being made, by `key`, until it's answered. */
 async function edit(key: string, request: Omit<EditRequest, "id">): Promise<EditAnswer> {
 	making.set(key, () => {
-		void Promise.resolve(api?.commands.executeCommand("editor.rules.cancelEdit", key)).catch(() => undefined);
+		void Promise.resolve(vscode.commands.executeCommand("editor.rules.cancelEdit", key)).catch(() => undefined);
 	});
 
 	try {
-		return await Promise.resolve(api?.commands.executeCommand<EditAnswer>("editor.rules.edit", { "id": key, ...request })).catch(() => null) ?? null;
+		return await Promise.resolve(vscode.commands.executeCommand<EditAnswer>("editor.rules.edit", { "id": key, ...request })).catch(() => null) ?? null;
 	} finally {
 		making.delete(key);
 	}
@@ -382,7 +381,7 @@ const CANCEL: EditButton = { "id": "cancel", "label": "Cancel", "className": "ca
  *  (a preview's fetch) — then *Just this once* (decide this call so), *Save as rule* (in my policy, and decide it so),
  *  *Cancel*. */
 async function ruleAtStop(session: string, ask: CapabilityAsk): Promise<void> {
-	const recorded = ask.resolved ? await recordedOf?.(ask.capability, ask.resource).catch(() => null) ?? null : null;
+	const recorded = ask.resolved ? await recordedOf(ask.capability, ask.resource).catch(() => null) ?? null : null;
 	const answer = await edit(session, {
 		...recorded === null ? {} : {
 			"rule": {
@@ -401,9 +400,9 @@ async function ruleAtStop(session: string, ask: CapabilityAsk): Promise<void> {
 	if (answer?.button === "once") {
 		const given = resultOf(answer.rule);
 
-		await (given === undefined ? choose?.(session, onceChoice(decisionOf(answer.rule))) : choose?.(session, "give-once", undefined, given.value));
+		await (given === undefined ? choose(session, onceChoice(decisionOf(answer.rule))) : choose(session, "give-once", undefined, given.value));
 	} else if (answer?.button === "save") {
-		await choose?.(session, "rule", answer.rule);
+		await choose(session, "rule", answer.rule);
 	}
 }
 
@@ -411,8 +410,8 @@ async function ruleAtStop(session: string, ask: CapabilityAsk): Promise<void> {
  *  process.argv* the run's own arguments — then *Run* (with them, once), *Save as rule* (in my policy: every run of the
  *  file is given them), *Remove* (the rule giving it now), *Cancel*. */
 async function mockArgv(uri: string, text: string): Promise<void> {
-	const path = api?.Uri.parse(uri).path ?? "";
-	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? path;
+	const { path } = vscode.Uri.parse(uri);
+	const program = vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false);
 	const given = givenArgv.get(uri) ?? undefined;
 	const answer = await edit(`${uri}#process.argv`, {
 		"rule": given?.rule ?? {
@@ -430,12 +429,12 @@ async function mockArgv(uri: string, text: string): Promise<void> {
 
 	switch (answer?.button) {
 		case "run":
-			void runFile?.(path, argvRunsOf(answer.rule));
+			void runFile(path, argvRunsOf(answer.rule));
 			break;
 		case "save":
 		case "remove":
-			await rulesSet?.(given?.rule, answer.button === "save" ? answer.rule : undefined);
-			givenArgv.set(uri, await rulesGiven?.(path) ?? null);
+			await rulesSet(given?.rule, answer.button === "save" ? answer.rule : undefined);
+			givenArgv.set(uri, await rulesGiven(path) ?? null);
 			break;
 		// no default
 	}
@@ -443,7 +442,7 @@ async function mockArgv(uri: string, text: string): Promise<void> {
 
 /** The span reference of the statement at `at` in the code a session ran — or why there isn't one. */
 async function statementAt(session: Session, program: string, at: Range): Promise<unknown> {
-	const referred = api === undefined ? { "unavailable": "no editor here" } : await annotations(api.commands).refer(session.anchors.text, program, [{ "start": at[0], "end": at[1] }]);
+	const referred = await annotations(vscode.commands).refer(session.anchors.text, program, [{ "start": at[0], "end": at[1] }]);
 
 	if ("unparsable" in referred) {
 		throw new Error(`This line can't be placed: the code that ran can't be parsed (${referred.unparsable})`);
@@ -466,7 +465,7 @@ async function statementAt(session: Session, program: string, at: Range): Promis
  *  _set_ <it> to the value the run had — then *Just this once* (set at this stop: the run goes on with it), *Save as
  *  rule* (in my policy: each run sets it each time it gets here, without stopping), *Cancel*. */
 async function mockVariable(uri: string, at: Range, cell: { "text": string; "kind": string }, name: string, session: Session): Promise<void> {
-	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? "";
+	const program = vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false);
 	const place = await statementAt(session, program, at);
 
 	// The variables the run saw, each by its latest value: targets to test, and to set.
@@ -495,21 +494,11 @@ async function mockVariable(uri: string, at: Range, cell: { "text": string; "kin
 	if (answer?.button === "once") {
 		for (const action of answer.rule.then) {
 			if (action.action_id === "set" && action.target_id?.startsWith("variables.") === true) {
-				await setValueAt?.(session.id, action.target_id.slice("variables.".length), JSON.stringify(action.argument));
+				await setValueAt(session.id, action.target_id.slice("variables.".length), JSON.stringify(action.argument));
 			}
 		}
 	} else if (answer?.button === "save") {
-		await rulesSet?.(undefined, answer.rule);
-	}
-}
-
-let styled = false;
-
-/** live-values.css in the page, once. */
-function ensureStyled(): void {
-	if (!styled) {
-		styled = true;
-		document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
+		await rulesSet(undefined, answer.rule);
 	}
 }
 
@@ -526,7 +515,7 @@ const statementsRead = new Map<string, { "version": number; "statements": Promis
 const statementTries = new Map<string, number>();
 
 /** `document`'s top-level statements, from tsserver — undefined when it can't say yet (it's loading the project). */
-function statementsOf(document: vscodeApi.TextDocument): Promise<Statement[] | undefined> {
+function statementsOf(document: vscode.TextDocument): Promise<Statement[] | undefined> {
 	const uri = document.uri.toString();
 	const known = statementsRead.get(uri);
 
@@ -534,7 +523,7 @@ function statementsOf(document: vscodeApi.TextDocument): Promise<Statement[] | u
 		return known.statements;
 	}
 
-	const statements = Promise.resolve(api.commands.executeCommand<{ "body"?: { "statements"?: Statement[] | null } } | undefined>("typescript.tsserverRequest", "_statements", { "file": document.uri })).then((response) => response?.body?.statements ?? undefined, () => undefined);
+	const statements = Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "statements"?: Statement[] | null } } | undefined>("typescript.tsserverRequest", "_statements", { "file": document.uri })).then((response) => response?.body?.statements ?? undefined, () => undefined);
 
 	statementsRead.set(uri, { "version": document.version, "statements": statements });
 	void statements.then((read) => {
@@ -568,7 +557,7 @@ function stepTitle(title: string, names: string[]): string {
 /** A file's steps: its top-level statements in paragraphs, the way code is written — those with no blank line between
  *  them are one step, a `//` comment above a statement starts one (and titles it), and a function or class is a step of
  *  its own. */
-function stepsOf(document: vscodeApi.TextDocument, statements: Statement[]): Step[] {
+function stepsOf(document: vscode.TextDocument, statements: Statement[]): Step[] {
 	const text = document.getText();
 	const lines = text.split("\n");
 	const steps: (Step & { "end": number; "count": number; "names": string[] })[] = [];
@@ -656,7 +645,7 @@ function shortCount(count: number): string {
 
 /** The Margin of `uri` drawn again: pane-views asks for it (`margin.paneView`, marginOf). */
 function draw(uri: string): void {
-	refreshView("margin", uri);
+	void refreshPane(vscode.commands, "margin", uri);
 }
 
 /** `items` moved to the lines their code is on now (`anchors`, by each one's `at`), those whose code is gone dropped —
@@ -674,7 +663,7 @@ async function relocate<T extends { "line": number; "at"?: Range }>(anchors: Anc
 
 /** The file's text as it is now, when it's open. */
 function documentText(uri: string): string | undefined {
-	return api?.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
+	return vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
 }
 
 /** Where something a run put on its line `line` is: its range `at` in the text that ran (`anchors`), followed from it to
@@ -784,7 +773,7 @@ function addArgvRow(uri: string, text: string | undefined, rows: Row[]): void {
 	// What a rule gives the file's process.argv, read once (then again as it's changed here), for its row.
 	if (readsArgv && !givenArgv.has(uri)) {
 		givenArgv.set(uri, null);
-		void rulesGiven?.(api?.Uri.parse(uri).path ?? "").then((given) => {
+		void rulesGiven(vscode.Uri.parse(uri).path).then((given) => {
 			givenArgv.set(uri, given);
 			draw(uri);
 		}, () => undefined);
@@ -837,7 +826,7 @@ function endTitle(ending: RunEnd & { "anchors"?: Anchors }): string {
 /** margin.state's plain account of a Margin, an agent's: on the lines each thing is on now (1-based). */
 function marginState(uri: string, session: Session | undefined, stated: Row[], askedAt: CapabilityAsk | undefined, end: (RunEnd & { "anchors"?: Anchors }) | undefined, lineMarks: PaneMark[], steps: Step[], runLog: RunLog | undefined): MarginState {
 	return {
-		"file": api?.Uri.parse(uri).path ?? uri,
+		"file": vscode.Uri.parse(uri).path,
 		"values": stated.map((row) => ({ "line": row.line + 1, "label": row.label, "cells": row.inline === undefined ? row.cells.map((cell) => cell?.text ?? "") : [row.inline.text] })),
 		"dropped": session?.dropped ?? 0,
 		...askedAt === undefined ? {} : { "ask": { "line": askedAt.line + 1, "call": askedAt.callee, "capability": askedAt.capability, "resource": askedAt.resource, "resolved": askedAt.resolved } },
@@ -851,15 +840,13 @@ function marginState(uri: string, session: Session | undefined, stated: Row[], a
 /** What `uri`'s Margin shows, as data (the contract's PaneContent: pane-views draws it) — or nothing, for a file that
  *  isn't code with nothing on it. And margin.state's plain account of it, an agent's. */
 async function marginOf(uri: string): Promise<PaneContent | undefined> {
-	ensureStyled();
-
 	const session = sessions.get(uri);
 	const text = documentText(uri);
 	const rows = rowsShown(session, text);
 	const asking = asks.get(uri);
 	const ending = ends.get(uri);
 	// The program's steps, a card around each (PROJECTIONS.md).
-	const shown = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
+	const shown = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
 	const steps = read === undefined || shown?.getText() !== text ? [] : stepsOf(shown, read);
 
@@ -929,9 +916,7 @@ export function showMarks(uri: string, marks: PaneMark[]): void {
 }
 
 /** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops. */
-export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
-	api = vscode;
-
+export function registerMargin(): void {
 	// The Margin, a pane view (EXTENSION-POINTS.md, 4): its content, asked for by pane-views — and what its buttons and
 	// cells run. Each rule it makes opens in the Rule view (rule-view.ts); its button waits while it's open.
 	const uriArg = (value: unknown): string => {
@@ -957,7 +942,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 			throw new TypeError("margin.decide: a session and a choice");
 		}
 
-		return choose?.(session, choice as CapabilityChoice);
+		return choose(session, choice as CapabilityChoice);
 	});
 	vscode.commands.registerCommand("margin.rule", async (value: unknown) => {
 		const uri = uriArg(value);
@@ -1047,7 +1032,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	const uriOf = (path: string): string => vscode.Uri.file(path).toString();
 	/** The text a session ran, as anchors (the same for its values, its question and its end). */
 	const anchorsFor = (file: string, source: unknown, session?: Session): Anchors | undefined => session?.anchors ?? (typeof source === "string" ? new Anchors(vscode, file, source) : undefined);
-	const follow = (editors: readonly vscodeApi.TextEditor[]): void => {
+	const follow = (editors: readonly vscode.TextEditor[]): void => {
 		for (const editor of editors) {
 			const uri = editor.document.uri.toString();
 
@@ -1095,10 +1080,8 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 	};
 
-	hub.subscribe("values.session.*", (data, envelope) => {
-		const { file, source, ...batch } = (data ?? {}) as Partial<LiveBatch> & { "file"?: unknown; "source"?: unknown };
-		const id = envelope.subject.slice("values.session.".length);
-
+	/** A session's values, as they come (the `values` event). */
+	const valuesCame = (id: string, { file, source, replace, ...batch }: ValuesEvent): void => {
 		if (typeof file !== "string" || !Array.isArray(batch.values)) {
 			return;
 		}
@@ -1106,11 +1089,19 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		const uri = uriOf(file);
 		let session = sessions.get(uri);
 
-		// A new session over the file replaces the last one's values, and how the last run ended.
-		if (session?.id !== id) {
+		// A new session over the file replaces the last one's values, and how the last run ended — as a report of every
+		// value so far (`replace`: a preview's recorded stops) replaces its own last.
+		if (session?.id !== id || replace === true) {
 			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map() };
 			sessions.set(uri, session);
 			ends.delete(uri);
+		}
+
+		// Running again past a capability stop: its question's answered (by the toolbar, say — whoever answered it).
+		if (asks.get(uri)?.session === id && replace !== true) {
+			making.get(id)?.();
+			making.delete(id);
+			asks.delete(uri);
 		}
 
 		session.anchors ??= anchorsFor(file, source);
@@ -1123,13 +1114,11 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		session.dropped = batch.dropped ?? session.dropped;
 		batchedAt.set(uri, Date.now());
 		redraw(uri);
-	});
+	};
 
 	// The run's end: how it ended goes on its line. Its values stay — the margin shows the file's last run until the next
 	// run of it tells its own (a live run as typing pauses, LIVE-VALUES.md), following its code through edits.
-	hub.subscribe("values.ended", (data) => {
-		const { session, file, source, end } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "end"?: RunEnd };
-
+	const endedCame = (session: string, { file, source, end }: Partial<EndedEvent>): void => {
 		// How it ended — crashed, or stopped on a line — replacing the last run's; a run that finished clears it.
 		if (typeof file === "string") {
 			const ran = sessions.get(uriOf(file));
@@ -1143,20 +1132,17 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 			redraw(uriOf(file));
 		}
 
-		if (typeof file === "string" && typeof session === "string" && asks.get(uriOf(file))?.session === session) {
+		if (typeof file === "string" && asks.get(uriOf(file))?.session === session) {
 			making.get(session)?.();
 			making.delete(session);
 			asks.delete(uriOf(file));
 			redraw(uriOf(file));
 		}
-	});
+	};
 
-	// A capability stop's question, and its answer back: the session resumes on it.
-	const rpc = createRpcClient(hub);
-
-	// What a file's Margin shows (the `margin_state` tool): the file open in the editor, or `file`, once it's been drawn.
-	serve(hub, "margin.state", (args) => {
-		const { file } = (args ?? {}) as { "file"?: unknown };
+	// What a file's Margin shows (the `margin_state` tool, which the bridge answers by this): the file open in the
+	// editor, or `file`, once it's been drawn.
+	vscode.commands.registerCommand("margin.state", (file: unknown) => {
 		let path: string | undefined;
 
 		if (typeof file === "string" && file !== "") {
@@ -1174,14 +1160,6 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		return state;
 	});
 
-	choose = (session, choice, rule, give) => rpc.request(`debug.session.${session}.decide`, { "choice": choice, ...rule === undefined ? {} : { "rule": rule }, ...give === undefined ? {} : { "give": give } }, { "timeoutMs": 24 * 60 * 60_000 });
-	recordedOf = async (capability, resource) => rpc.request("capability.recorded", { "capability": capability, "resource": resource }, { "timeoutMs": 10_000 }) as Promise<{ "value": unknown; "at": string } | null>;
-	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
-	// (the capabilities extension's, where the policy is: EXTENSION-POINTS 5)
-	rulesGiven = async (path) => Promise.resolve(vscode.commands.executeCommand<Given | null>("silo.rules.given", path, "process.argv"));
-	rulesSet = async (previous, rule) => Promise.resolve(vscode.commands.executeCommand("silo.rules.set", previous, rule));
-	// A run answers at its first stop, which can be a while: nobody waits on it here.
-	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
 	// The policy files changed: what a rule gives each file's process.argv is read anew (once the pod has), and whoever
 	// lists them is told.
 	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
@@ -1200,13 +1178,8 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	watcher.onDidChange(reread);
 	watcher.onDidCreate(reread);
 	watcher.onDidDelete(reread);
-	hub.subscribe("capability.ask", (data) => {
-		const { session, file, source, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "ask"?: CapabilityAsk };
-
-		if (typeof session !== "string" || typeof file !== "string") {
-			return;
-		}
-
+	/** A capability stop's question, on its line (the `ask` event) — or none (`ask` undefined): it was answered. */
+	const askCame = (session: string, file: string, source: string | undefined, ask: CapabilityAsk | undefined): void => {
 		const uri = uriOf(file);
 
 		// A new stop, or none: the rule being made at the last one goes.
@@ -1222,5 +1195,46 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 
 		redraw(uri);
+	};
+
+	/** The sessions that told an `ended`: their margins are cleared already. */
+	const told = new Set<string>();
+
+	// The run contract's events, from every debugger's sessions (EXTENSION-POINTS 1).
+	vscode.debug.onDidReceiveDebugSessionCustomEvent(({ session, event, body }) => {
+		switch (event) {
+			case "values":
+				valuesCame(session.id, body as ValuesEvent);
+				break;
+			case "ended":
+				told.add(session.id);
+				endedCame(session.id, body as EndedEvent);
+				break;
+			case "ask": {
+				const { file, source, ...question } = body as AskEvent;
+
+				askCame(session.id, file, source, question);
+				break;
+			}
+
+			default:
+				break;
+		}
+	});
+
+	// A debugger that tells no `ended`: the program's values end with its session. And a question no one answered here
+	// goes with it.
+	vscode.debug.onDidTerminateDebugSession((session) => {
+		const { program } = session.configuration;
+
+		if (!told.delete(session.id) && session.type !== "production" && typeof program === "string") {
+			endedCame(session.id, { "file": program });
+		}
+
+		for (const [uri, asking] of asks) {
+			if (asking.session === session.id) {
+				askCame(session.id, vscode.Uri.parse(uri).path, undefined, undefined);
+			}
+		}
 	});
 }

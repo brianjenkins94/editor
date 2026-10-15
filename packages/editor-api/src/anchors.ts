@@ -1,16 +1,16 @@
 /**
- * Ranges of a text that ran, found again in the file as it is now — so what the notes margin places by them (a run's
- * values, its coverage, where it crashed or was stopped, a capability stop's question) follows its code through edits
- * and cosmetic changes: a reindent, a rewrap, spacing, semicolons. Each range is referred to once, against the text that
+ * Ranges of a text that ran, found again in the file as it is now — so what's placed by them (the Margin's run values,
+ * coverage, where a run crashed or was stopped, a capability stop's question; a pane view's `ran` items) follows its
+ * code through edits and cosmetic changes: a reindent, a rewrap, spacing, semicolons. Each range is referred to once, against the text that
  * ran, as the BABLR span standing for it (`editor.annotations.refer`), and found by that span's id in the text as it is
  * (`editor.annotations.resolve`); one whose code is gone — edited past recognizing, or deleted — isn't found, and
  * whatever it placed goes with it.
  *
- * Runs in the workbench realm (core), with the workbench's own extension API.
+ * Core's pane and any extension alike, each with its own VS Code API (it runs `editor.annotations.*`).
  */
-import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type * as vscodeApi from "vscode";
-import { annotations } from "@brianjenkins94/editor-api/annotations";
+import type { SpanRef } from "./annotations.ts";
+import { annotations } from "./annotations.ts";
 
 /** A range of offsets, `[start, end)`. */
 export type Range = [number, number];
@@ -116,7 +116,7 @@ export class Anchors {
 			}
 		}
 
-		const refs = await Promise.all(ranges.map(([start, end]) => this.refs.get(`${start}:${end}`)));
+		const refs = await Promise.all(ranges.map(async ([start, end]) => this.refs.get(`${start}:${end}`)));
 		// Only the ranges BABLR found a span for are looked for (one it couldn't — a file its grammar doesn't take — is gone).
 		const known = refs.flatMap((ref, index) => (ref === undefined ? [] : [index]));
 		const answer = await annotations(this.vscode.commands).resolve(text, this.file, known.map((index) => refs[index]), { "observed": true });

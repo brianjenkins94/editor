@@ -1,4 +1,5 @@
-/* Live values in the notes margin (live-values.ts): a row per line, its label, then its value or a column per turn. */
+/* The pane's look (pane-views.ts draws every view in it, the Margin's look): a row per line, its label, then its value
+   or a column per turn. */
 
 .live-values-row {
   display: flex;
@@ -95,7 +96,7 @@
   color: var(--vscode-button-foreground);
 }
 
-/* A verb and its ▾ (live-values.ts renderAsk's split buttons): one control, the ▾ opening how long — this call, this
+/* A verb and its ▾ (pane-views.ts's split buttons): one control, the ▾ opening how long — this call, this
    run, always — under it. */
 .live-values-split {
   position: relative;
@@ -266,7 +267,7 @@
   font-style: italic;
 }
 
-/* Mocking a value (live-values.ts): a variable's Mock checkbox, on its row's hover or at the cursor, so rows don't grow
+/* Mocking a value (the Margin's): a variable's Mock checkbox, on its row's hover or at the cursor, so rows don't grow
    controls nobody asked for — and, checked, the run's value struck through and a box for the one to set; process.argv's
    Mock… always there, beside what a rule gives it. */
 .live-values-mock {

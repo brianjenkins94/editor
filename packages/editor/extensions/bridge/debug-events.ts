@@ -3,12 +3,10 @@
  * starting point, contrib/README.md) — read the one way: the run contract's custom events (@brianjenkins94/editor-api)
  * into what core shows and keeps.
  *
- * - `values`: the margin's values (`values.session.<id>`, live-values.ts), as they come;
- * - `ended`: a file's values go, and how the run ended short is marked (`values.ended`) — for a debugger that tells none,
- *   the program's, as its session ends;
+ * - `values`, `ended`: the Margin's (extensions/margin), read there from the events themselves;
  * - `coverage`: the run's evidence (`evidence.observed`, evidence.ts — coverage.ts reads the event itself);
  * - `effects`: what the run did to the world, kept for its envelope in the run ledger (editor-api/effects's setEffects);
- * - `ask`: a capability stop's question, on its line — answered as capability-stops.ts says;
+ * - `ask`: a capability stop's question — the Margin shows it; answered as capability-stops.ts says;
  * - `recorded`: what an allowed call returned, for a rule to give back (editor-api/policy's recordResult);
  * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list, its preview).
  *
@@ -24,7 +22,7 @@
  * - a run in core's registry (`runs.begin`), known by one id from start to end — its end the run's, with its exit code
  *   (DAP's `exited`: extension.ts's `node.exit`).
  */
-import type { AskEvent, CoverageEvent, EffectsEvent, EndedEvent, ListeningEvent, RecordedEvent, StdinRequest, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { AskEvent, CoverageEvent, EffectsEvent, ListeningEvent, RecordedEvent, StdinRequest } from "@brianjenkins94/editor-api";
 import { setEffects } from "@brianjenkins94/editor-api/effects";
 import { recordResult } from "@brianjenkins94/editor-api/policy";
 import { createRpcClient } from "@brianjenkins94/hub";
@@ -65,8 +63,6 @@ function caseArgs(given: vscode.DebugConfiguration, cases: string[][] | undefine
 
 export function registerDebugEvents(context: vscode.ExtensionContext): void {
 	const rpc = createRpcClient(bridgeHub);
-	/** The sessions that told an `ended`: their margins are cleared already. */
-	const ended = new Set<string>();
 	/** Each terminal's run's stdin subscription, by its session. */
 	const typing = new Map<string, () => void>();
 
@@ -118,15 +114,6 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 			const runId = session.configuration["__runId"];
 
 			switch (event) {
-				case "values":
-					bridgeHub.publish(`values.session.${session.id}`, body as ValuesEvent);
-					break;
-
-				case "ended":
-					ended.add(session.id);
-					bridgeHub.publish("values.ended", { "session": session.id, ...body as EndedEvent });
-					break;
-
 				// A run's evidence is of the text that ran — each of its files with its own (MODULES.md).
 				case "coverage": {
 					if (typeof runId !== "string") {
@@ -148,7 +135,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					break;
 
 				case "ask":
-					asked(bridgeHub, session, body as AskEvent);
+					asked(session, body as AskEvent);
 					break;
 
 				case "listening":
@@ -218,10 +205,6 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 		vscode.debug.onDidTerminateDebugSession((session) => {
 			typing.get(session.id)?.();
 			typing.delete(session.id);
-
-			if (!ended.delete(session.id) && session.type !== PRODUCTION && typeof session.configuration["program"] === "string") {
-				bridgeHub.publish("values.ended", { "session": session.id, "file": session.configuration["program"] });
-			}
 
 			const end = ends.get(session.id);
 			const config = session.configuration;

@@ -183,13 +183,17 @@ about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
      ask for an edit and do what the button means; the hub's `rules.make` went. The places follow a file's edits through core's
      `editor.history.texts` (was the hub's `history.texts`). The bridge still relays `rules.given`, `.list`, `.set`
      and `.state` to those commands, for agents and the tours — 5d's.
-   - **5b. The Margin → its own extension.** live-values.ts' provider (~1.1k), inputs.ts and coverage.ts into
-     `extensions/margin`, from the run contract's events themselves; what it asks the bridge becomes commands
-     (EXTENSION-POINTS 5): a stop's answer (`editor.capability.decide` — the decider's meaning stays the bridge's), a
-     variable set at a stop (`editor.debug.setValue`), a run with cases (`editor.debugFile`'s options). A recorded
-     result is editor-api's (`./policy`'s recordedResult).
-   - **5c. Recorded stops as a run's values.** A preview's page stops come as `values` on its run's `production` session
-     (the bridge's crossing), so the Margin shows them as any run's; workbench/recorded-stops.ts' stand-in session goes.
+   - ~~**5b. The Margin → its own extension.**~~ Done (2026-10-15): live-values.ts (now margin.ts), inputs.ts and
+     coverage.ts are `extensions/margin` (web worker host), reading the run contract's events themselves — the bridge's
+     `values.session.*`, `values.ended` and `capability.ask` went. What it asked the bridge over the hub is commands
+     (EXTENSION-POINTS 5): `editor.capability.decide`, `editor.debug.setValue`, `editor.debugFile`'s `cases`; a recorded
+     result is editor-api's `recordedResult`; `margin.state` is its command, which the bridge answers the agents' tool
+     by. A question's answered once the session tells `values` again (the contract's `ask` says so). Anchors went to
+     editor-api (`./anchors`): core's pane follows a `ran` item by it too. Core keeps only the pane and its look
+     (pane-views.css, was live-values.css); the Margin is a manifest's `paneViews` like any.
+   - ~~**5c. Recorded stops as a run's values.**~~ Done (2026-10-15): the bridge's recorded-stops.ts tells a page's stops
+     as `values` on its preview's `production` session (production-adapter.ts's `tellPreview`), each report every hit so
+     far — the contract's `replace`. A preview with no production run (none today) shows none.
    - **5d. The agents' answers.** The bridge answers `margin.state` and `rules.state` by the owning extension's command —
      a fixed list, not a relay of the hub.
 6. **tsval's decision, then its move**; the architecture view's realm; command counts in core.

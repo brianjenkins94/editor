@@ -40,7 +40,7 @@ also works over desktop's built-in git.
 | **Shell** (top window) | `shell/`: `main.tsx`'s `renderShell()` branch → `shell/shell.tsx`, `shell/git-panel.tsx` | DOM, the shell hub; *later* the GitHub token (trust boundary) | Surrounding chrome: LHS project picker, top bar, and the RHS **git review panel** (`shell/git-panel.tsx` — GitHub-Desktop-style changes/diff/commit, a pure hub consumer of `git.*`). Loads the app in an iframe pointing back at the same page. |
 | **App iframe** (`/`) | `app/`: `main.tsx`'s app branch, `app/coi.ts`, `app/vscode.tsx`, `app/samples.ts`, `app/tools/` (the tab's MCP tools) | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench/`: `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal/`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(Core lives here too: the git engine and service — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is the source-control extension's, through the `editor.git.*` commands — the editor's BABLR (`bablr.ts`: one worker, its parses cached by blob oid, answering the git panel's verdicts, runtime evidence's span ids, and extensions' annotation references and resolutions), and runtime evidence (`evidence.ts`: each run's envelope, and what tsval sessions and preview pages observed, folded into `.silo/`). The cosmetic classifier the git service asks is the part that should become a standalone extension — see the known debt above.)* |
-| **Extension hosts** (`LocalProcess`, sharing the workbench's realm; `LocalWebWorker`, a worker) | `extensions/<name>/extension.ts`, `extensions/<name>/ts-plugin.js` | the vscode API (files through `vscode.workspace.fs`) — **no DOM, no zen-fs**; the hub only in `bridge` | One extension per feature (*Extensions: which one, which host*, below). `LocalProcess`: `bridge` (core's vscode API is its, and it's the only extension on the hub: every debugger's editor-api events and capability stops, the workspace runtime, tasks, Source Control, core's BABLR to extensions as `editor.annotations.*`) and `tsval`, which needs what only that host has. `LocalWebWorker`: everything else — `running`, `insights`, `notes`, `history`, `type-queries`, `event-sheet`, `cspell`, `eslint`, `capabilities`, and VS Code's own TypeScript extension. `capabilities` and `history` also run a plugin *inside tsserver*, reusing its `ts` and its Program; `eslint` runs real ESLint under almostnode in a worker of its own (below). |
+| **Extension hosts** (`LocalProcess`, sharing the workbench's realm; `LocalWebWorker`, a worker) | `extensions/<name>/extension.ts`, `extensions/<name>/ts-plugin.js` | the vscode API (files through `vscode.workspace.fs`) — **no DOM, no zen-fs**; the hub only in `bridge` | One extension per feature (*Extensions: which one, which host*, below). `LocalProcess`: `bridge` (core's vscode API is its, and it's the only extension on the hub: every debugger's editor-api events and capability stops, the workspace runtime, tasks, Source Control, core's BABLR to extensions as `editor.annotations.*`) and `tsval`, which needs what only that host has. `LocalWebWorker`: everything else — `running`, `insights`, `margin` (the Margin, from the run contract's events), `notes`, `history`, `type-queries`, `event-sheet`, `cspell`, `eslint`, `capabilities`, and VS Code's own TypeScript extension. `capabilities` and `history` also run a plugin *inside tsserver*, reusing its `ts` and its Program; `eslint` runs real ESLint under almostnode in a worker of its own (below). |
 | **Workers** (`dist/lsp/*`) | `workers/` for core's (spawned from the workbench realm: `node-worker`, `provoke-worker`, `bablr-worker`); an extension's own sit in its folder (`extensions/tsval/debug-worker.ts`, `extensions/cspell/server-host.ts`, `extensions/event-sheet/recognizer-worker.ts`) — only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode: dev servers and previews), `bablr-worker` (the editor's BABLR, for `bablr.ts`: parses cached by blob oid in its own IndexedDB; cosmetic verdicts, span ids for runtime evidence, annotation references and resolutions), `debug-worker` (tsval stepping a program, almostnode for its packages; top-level, from the `LocalProcess` host), and — nested in the `LocalWebWorker` host, as any of its extensions' workers are, each named by its extension (`ext:<extension>/<worker>`) — VS Code's two tsservers, the cspell server (almostnode running cspell), eslint's worker (`extensions/eslint/worker.ts`: almostnode running real ESLint with the workspace's `eslint.config.*` or else the preset, from the toolchain the build traces and packs — `build/eslint-toolchain.ts` → `lsp/eslint-toolchain.tgz` — over the workspace through the workspace runtime), the event sheet's recognizer, and the capabilities extension's package worker (`extensions/capabilities/packages-worker.ts`: each dependency's tarball read for the baseline, started per sync). |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (upstream BABLR and our grammar, `bablr-language-ts`, bundled: `cstSpans`, span ids, `reidentify`/`follow`, `classifyChange`), `tsval` (the interpreter, and its `observe` hook), `almostnode` (the node runtime and previews' dev server, which instruments workspace modules for runtime evidence), `util/silo` (the shared policy model, runtime evidence and span annotations: pure models and layouts), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
 
@@ -246,7 +246,7 @@ flowchart TB
     end
   end
 
-  EXT["Extension host — LocalProcess + LocalWebWorker<br/>bridge · tsval · running · insights · notes · history · type-queries · event-sheet · cspell · eslint (real ESLint under almostnode, a worker) · capabilities + history (run inside tsserver, reuse ts)"]
+  EXT["Extension host — LocalProcess + LocalWebWorker<br/>bridge · tsval · running · insights · margin · notes · history · type-queries · event-sheet · cspell · eslint (real ESLint under almostnode, a worker) · capabilities + history (run inside tsserver, reuse ts)"]
 
   NW["node-worker<br/>almostnode · preview dev servers (instrumented)"]
   DW["debug-worker<br/>tsval stepping / time-travel · coverage + observe"]
@@ -350,6 +350,7 @@ flowchart LR
         n_ext_history["history"]
         n_ext_insights["insights"]
         n_ext_json_language_features_jsonServerMain_js["jsonServerMain.js"]
+        n_ext_margin["margin"]
         n_ext_markdown_language_features_serverWorkerMain_js["serverWorkerMain.js"]
         n_ext_notes["notes"]
         n_ext_running["running"]
@@ -418,6 +419,7 @@ flowchart LR
   n_ext_bridge <-.->|"commands"| n_ext_capabilities
   n_ext_bridge <-.->|"commands"| n_ext_event_sheet
   n_ext_bridge <-.->|"commands"| n_ext_insights
+  n_ext_bridge <-.->|"commands"| n_ext_margin
   n_ext_bridge <-.->|"commands"| n_ext_notes
   n_ext_bridge <-.->|"commands"| n_ext_tsval
   n_ext_bridge <-.->|"commands"| n_ext_vscode
@@ -426,6 +428,7 @@ flowchart LR
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
   n_ext_capabilities -->|"reads, writes"| n_store__silo_policy__file__json
   n_ext_capabilities <-.->|"commands"| n_ext_capabilities
+  n_ext_capabilities <-.->|"commands"| n_ext_margin
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
   n_ext_capabilities_packages <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
@@ -437,6 +440,10 @@ flowchart LR
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_insights <-.->|"commands"| n_ext_vscode
   n_ext_json_language_features_jsonServerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
+  n_ext_margin -->|"reads"| n_store__silo_evidence____file__jsonl
+  n_ext_margin -->|"reads"| n_store__silo_local____file__jsonl
+  n_ext_margin -->|"reads"| n_store__silo_local__file__json
+  n_ext_margin <-.->|"commands"| n_ext_vscode
   n_ext_markdown_language_features_serverWorkerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_notes -->|"reads"| n_store__git__file_
   n_ext_notes -->|"reads"| n_store__silo__gitattributes
@@ -507,10 +514,10 @@ flowchart LR
 | `.silo/.gitignore` | Workbench | Workbench, bridge |
 | `.silo/<file>.json` | Workbench, capabilities | Dev-server worker, Workbench, bridge, capabilities |
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
-| `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
+| `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, margin, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
-| `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
-| `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge |
+| `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights, margin |
+| `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge, margin |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/policy/<file>.json` | Workbench, bridge, capabilities | Workbench, bridge, capabilities, tsval |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench, capabilities, history |
@@ -527,6 +534,7 @@ flowchart LR
 | Bridge | bridge | `bridge.ready` |
 | Bridge | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
 | Bridge | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
+| Bridge | margin | `margin.state()` |
 | Bridge | node | `node.stdin.*` |
 | Bridge | parse | `parse.status` |
 | Bridge | production | `production.exit.*`, `production.launch`, `production.out.*` |
@@ -553,7 +561,6 @@ flowchart LR
 | Shell | git | `git.changed` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
 | Workbench | annotations | `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
-| Workbench | capability | `capability.ask` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
 | Workbench | editor | `editor.state()` |
@@ -561,7 +568,6 @@ flowchart LR
 | Workbench | files | `files.edit()`, `files.glob()`, `files.grep()`, `files.read()`, `files.write()` |
 | Workbench | git | `git.classify()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.status()` |
 | Workbench | history | `history.chunks()` |
-| Workbench | margin | `margin.state()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | notifications | `notifications.list()` |
 | Workbench | packages | `packages.tarball()` |
@@ -570,10 +576,8 @@ flowchart LR
 | Workbench | production | `production.stop.*` |
 | Workbench | runs | `runs.begin()`, `runs.ledger()`, `runs.list()`, `runs.stop()` |
 | Workbench | shell | `shell.run()` |
-| Workbench | stops | `stops.preview` |
 | Workbench | terminal | `terminal.in.*`, `terminal.out.*`, `terminal.run()`, `terminal.state()`, `terminal.stop.*` |
 | Workbench | theme | `theme.colorScheme` |
-| Workbench | values | `values.ended`, `values.session.*` |
 | Workbench | workbench | `workbench.files()`, `workbench.openProject` |
 | Workbench | workspace | `workspace.buffer()`, `workspace.changed` |
 <!-- architecture-tour:end -->

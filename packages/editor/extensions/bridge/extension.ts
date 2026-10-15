@@ -26,6 +26,7 @@ import { registerLaunch } from "./launch";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { registerParseStatus } from "./parse-status";
 import { registerProductionDebug } from "./production-adapter";
+import { registerRecordedStops } from "./recorded-stops";
 import { registerReplay } from "./replay";
 import { serveRuntimeFiles } from "./runtime-fs";
 import { registerTasks } from "./tasks";
@@ -135,8 +136,9 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	// A recorded stop's call, stepped in the debugger (replay.ts).
 	registerReplay(context);
 	// The editor's ▷: Run (RUNNING.md) — the file, as every way in runs it.
-	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", (uri?: vscode.Uri) => {
-		void runProgram({ ...uri instanceof vscode.Uri ? { "program": uri.path } : {} }).catch(() => undefined);
+	// (`cases`: each a run's arguments, one run after another — the Margin's Mock… of process.argv)
+	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", (uri?: vscode.Uri, options?: { "cases"?: string[][] }) => {
+		void runProgram({ ...uri instanceof vscode.Uri ? { "program": uri.path } : {}, ...Array.isArray(options?.cases) ? { "cases": options.cases } : {} }).catch(() => undefined);
 	}));
 	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
 	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
@@ -228,6 +230,8 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	// to bridgeHub); we start its session (a launch, so VS Code's toolbar says Stop), and the adapter rides the run's
 	// `production.*` channels.
 	registerProductionDebug(context, bridgeHub);
+	// A breakpoint in a page's code: a recorded stop, told as its preview's run's values (recorded-stops.ts).
+	registerRecordedStops(context, bridgeHub);
 
 	// Mirror the active debug session's toolbar (state out, commands in) so the preview titlebar can host a replica
 	// of VS Code's in-iframe debug controls. See extensions/bridge/debug-toolbar.ts + shell-preview.ts.

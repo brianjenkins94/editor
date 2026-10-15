@@ -19,7 +19,8 @@
     "./policy": "./src/policy.ts",
     "./effects": "./src/effects.ts",
     "./git": "./src/git.ts",
-    "./rules": "./src/rules.ts"
+    "./rules": "./src/rules.ts",
+    "./anchors": "./src/anchors.ts"
   },
   "license": "MIT",
   "scripts": {

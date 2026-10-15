@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseInputs } from "../workbench/inputs.ts";
+import { parseInputs } from "../extensions/margin/inputs.ts";
 
 test("inputs: runs by |, arguments by spaces, quotes keeping a space", () => {
 	assert.deepEqual(parseInputs("US | CA | FR --coupon \"SPRING 10\""), [["US"], ["CA"], ["FR", "--coupon", "SPRING 10"]]);

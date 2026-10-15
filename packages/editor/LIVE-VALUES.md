@@ -55,17 +55,18 @@ Decided 2026-10-05.
 ## How it fits
 
 ```
-debug worker ──(records, in memory)──▶ debug adapter ──bridge hub──▶ workbench (core) ──▶ the overlay (component)
-                                        the bridge                 live-values.ts        registerLiveValues
+debug worker ──(records, in memory)──▶ debug adapter ──DAP custom events──▶ the margin extension ──▶ core's pane
+                                        (tsval's)        (the run contract)      margin.ts            pane-views.ts
 ```
 
 - **The debug worker** records as it runs (the next section), and hands the adapter what's new — batched, a few times a
   second, and all of it when the run pauses or ends.
-- **The debug adapter** (tsval's) passes it on over the bridge's hub: `values.session.<id>` as it grows, `values.ended`
-  when the session ends. The bridge extension stays the only way between extensions and core.
-- **Core** keeps the latest session's record per file and tells the overlay what to draw for the editor showing it:
-  rows by line, columns by iteration, the selection.
-- **The component** draws it, and says what the cursor and the pointer are on (a line, a column), so core can expand
+- **The debug adapter** (tsval's, or any debugger's) passes it on as the run contract's custom events: `values` as it
+  grows, `ended` when the run does, `ask` at a capability stop — which every extension host is handed.
+- **The margin extension** (extensions/margin, since 2026-10-15) keeps the latest session's record per file and answers
+  the Margin's pane view with it, as data: rows by line, columns by iteration, the selection. A preview's recorded stops
+  come the same way — `values` on its run's `production` session (the bridge's recorded-stops.ts).
+- **Core's pane** (pane-views.ts, the component's pane) draws it, and says what the cursor and the pointer are on (a line, a column), so core can expand
   the line under the cursor and light a column across lines.
 
 ## The record

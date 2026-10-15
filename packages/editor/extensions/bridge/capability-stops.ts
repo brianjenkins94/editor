@@ -1,7 +1,8 @@
 /**
  * Capability stops, whichever debugger's (the run contract, @brianjenkins94/editor-api): a run stopped at a gated call
- * asks on its line (`ask`), the question shows in the margin (`capability.ask`, live-values.ts), and the answer — the
- * margin's buttons, an agent's `debug.session.<id>.decide` — goes back to the debugger as a `decide` request.
+ * asks on its line (`ask`: the Margin shows it, reading the event itself), and the answer — the Margin's buttons
+ * (`editor.capability.decide`, EXTENSION-POINTS 5), an agent's `debug.session.<id>.decide` — goes back to the debugger
+ * as a `decide` request.
  *
  * What an answer means is the editor's, not the debugger's: Allow, Skip or Deny for this call, this run (every call of
  * its capability, until the run ends — a rule kept here, never written) or always (my policy override, as the preview's
@@ -9,10 +10,9 @@
  * result given in the call's place. The debugger is told the verdict, and — when the answer changed it — the policy in
  * effect from now on. Every debugger is given the policy as it launches (`__policy`, debug-events.ts).
  */
-import type { AskEvent, DecideRequest } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, DecideRequest } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityChoice } from "../../shared/capabilities/capability-breakpoints";
 import type { DebugOutcome } from "./debug-control";
 import { loadEffectivePolicy, persistOverride, replaceRule } from "@brianjenkins94/editor-api/policy";
 import { serve } from "@brianjenkins94/hub";
@@ -59,22 +59,14 @@ export async function policyFor(session?: string): Promise<Policy> {
 	return kept.length === 0 ? policy : { ...policy, "rules": [...kept, ...policy.rules] };
 }
 
-/** A session asking (its `ask` event): the question on its line, in its file's margin. */
-export function asked(hub: Hub, session: vscode.DebugSession, ask: AskEvent): void {
-	const { file, source, ...question } = ask;
-
+/** A session asking (its `ask` event): the question it's stopped at, to decide by. */
+export function asked(session: vscode.DebugSession, ask: AskEvent): void {
 	asks.set(session.id, ask);
-	hub.publish("capability.ask", { "session": session.id, "file": file, ...source === undefined ? {} : { "source": source }, "ask": question });
 }
 
-/** The question answered — or gone (the run resumed some other way, or ended): off its margin. */
-function answered(hub: Hub, session: string): void {
-	const ask = asks.get(session);
-
-	if (ask !== undefined) {
-		asks.delete(session);
-		hub.publish("capability.ask", { "session": session, "file": ask.file });
-	}
+/** The question answered — or gone (the run resumed some other way, or ended). */
+function answered(session: string): void {
+	asks.delete(session);
 }
 
 /** The call `session` is stopped at (`ask`), decided by `rule`: the rule kept, and what it decides for the debugger. */
@@ -100,7 +92,7 @@ async function ruleRequest(session: vscode.DebugSession, ask: AskEvent, rule?: R
 }
 
 /** What `choice` means for the call `session` is stopped at, told the debugger (`decide`), which continues. */
-async function decide(hub: Hub, session: vscode.DebugSession, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<void> {
+async function decide(session: vscode.DebugSession, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<void> {
 	const ask = asks.get(session.id);
 
 	if (ask === undefined) {
@@ -152,7 +144,7 @@ async function decide(hub: Hub, session: vscode.DebugSession, choice: Capability
 
 	await session.customRequest("decide", { ...request, "decided": decided });
 	// (answered, the run goes on — a debugger in another extension host is seen by no tracker resuming)
-	answered(hub, session.id);
+	answered(session.id);
 }
 
 /** Every session's capability stops: answered over `debug.session.<id>.decide` (the margin's buttons, an agent's
@@ -160,9 +152,22 @@ async function decide(hub: Hub, session: vscode.DebugSession, choice: Capability
  *  ends. */
 export function registerCapabilityStops(context: vscode.ExtensionContext, hub: Hub): void {
 	const served = new Map<string, () => void>();
+	/** Every session running, by its id. */
+	const running = new Map<string, vscode.DebugSession>();
 
 	context.subscriptions.push(
+		// The Margin's buttons (EXTENSION-POINTS 5): a session's stop answered — answered itself once it's told.
+		vscode.commands.registerCommand("editor.capability.decide", async (id: unknown, choice: unknown, rule?: Rule, give?: unknown) => {
+			const session = typeof id === "string" ? running.get(id) : undefined;
+
+			if (session === undefined || typeof choice !== "string" || !CHOICES.has(choice)) {
+				throw new Error(session === undefined ? "no such session" : `unknown choice ${JSON.stringify(choice)} — one of ${[...CHOICES].join(", ")}`);
+			}
+
+			await decide(session, choice as CapabilityChoice, rule ?? undefined, give ?? undefined);
+		}),
 		vscode.debug.onDidStartDebugSession((session) => {
+			running.set(session.id, session);
 			served.set(session.id, serve(hub, `debug.session.${session.id}.decide`, async (args, { signal }): Promise<DebugOutcome | { "session": string; "state": "running" }> => {
 				const { choice = "", rule, give } = (args ?? {}) as { "choice"?: string; "rule"?: Rule; "give"?: unknown };
 
@@ -173,7 +178,7 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 				// (waiting from before it's told, so the stop it reaches isn't missed)
 				const next = controllable(session.id)?.next(signal);
 
-				await decide(hub, session, choice as CapabilityChoice, rule, give);
+				await decide(session, choice as CapabilityChoice, rule, give);
 
 				return next ?? { "session": session.id, "state": "running" };
 			}));
@@ -183,18 +188,19 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 			"createDebugAdapterTracker": (session) => ({
 				"onDidSendMessage": (message: { "type"?: string; "event"?: string }) => {
 					if (message.type === "event" && message.event === "continued") {
-						answered(hub, session.id);
+						answered(session.id);
 					}
 				},
 				"onWillReceiveMessage": (message: { "type"?: string; "command"?: string }) => {
 					if (message.type === "request" && ["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"].includes(message.command ?? "")) {
-						answered(hub, session.id);
+						answered(session.id);
 					}
 				}
 			})
 		}),
 		vscode.debug.onDidTerminateDebugSession((session) => {
-			answered(hub, session.id);
+			running.delete(session.id);
+			answered(session.id);
 			runRules.delete(session.id);
 			onceFor.delete(session.id);
 			served.get(session.id)?.();

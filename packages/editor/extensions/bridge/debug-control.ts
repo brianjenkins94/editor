@@ -458,6 +458,18 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 	trackSessions(context, hub);
 
 	context.subscriptions.push(
+		// The Margin's Mock… (EXTENSION-POINTS 5): a variable set at a session's stop, to a literal as code writes it.
+		vscode.commands.registerCommand("editor.debug.setValue", async (id: unknown, name: unknown, value: unknown) => {
+			const session = typeof id === "string" ? sessions.get(id) : undefined;
+
+			if (session === undefined || typeof name !== "string" || typeof value !== "string") {
+				throw new TypeError(session === undefined ? "no such session" : "a variable's name, and a literal as code writes it");
+			}
+
+			return session.setValue(name, value);
+		}),
+		// What a file's Margin shows, for an agent (the `margin_state` tool): the Margin's own account of it.
+		{ "dispose": serve(hub, "margin.state", async (args) => vscode.commands.executeCommand("margin.state", (args as { "file"?: unknown } | null)?.file)) },
 		{ "dispose": serve(hub, "debug.sessions", async () => Promise.all([...sessions.values()].map(async (session) => {
 			const { "output": _output, "locals": _locals, ...summary } = await session.outcome();
 

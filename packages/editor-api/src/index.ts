@@ -66,8 +66,9 @@ export interface LiveCall { "id": number; "name": string; "line": number; "at"?:
 /** What's new since the last batch, and how many values were dropped so far (a debugger keeps them bounded). */
 export interface LiveBatch { "values": LiveValue[]; "calls": LiveCall[]; "dropped": number }
 
-/** The `values` event: a batch, of `file` — with the text that ran the first time a file's values are told. */
-export interface ValuesEvent extends LiveBatch { "file": string; "source"?: string }
+/** The `values` event: a batch, of `file` — with the text that ran the first time a file's values are told. `replace`:
+ *  every value of the file so far, in place of those told before (a preview's recorded stops, each report all its hits). */
+export interface ValuesEvent extends LiveBatch { "file": string; "source"?: string; "replace"?: boolean }
 
 /** One statement's coverage: its range and how often it ran. */
 export interface StatementCoverage {
@@ -133,7 +134,9 @@ export interface EndedEvent { "file": string; "source"?: string; "end"?: RunEnd 
 
 /** The `ask` event: a gated call stopped at — on `line` (at `at`) of `file`, whose text that ran is `source` — the
  *  capability, the callee as written, and the resource it would reach (`resolved`: known from the run's own values,
- *  not just the argument as written); `dangerous` when the capability is (a write, a command). */
+ *  not just the argument as written); `dangerous` when the capability is (a write, a command). Answered — by the
+ *  editor's `decide`, or the run resumed some other way — once the session tells `values` again, `ended`, or another
+ *  `ask`: so a debugger tells a stop's values before its `ask`, not after. */
 export interface AskEvent { "file": string; "source"?: string; "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean }
 
 /** The `recorded` event: what an allowed call returned, for a rule to give back. */
@@ -169,6 +172,12 @@ export interface DecideRequest {
 	 *  `once` (or for this run), `always` (a rule in their policy now), or `refused`. */
 	"decided"?: "once" | "always" | "refused";
 }
+
+/** An answer at a capability stop, as the editor words it (`editor.capability.decide`, the bridge's): allowed, skipped
+ *  or denied — this call, for this run, or always (a rule in my policy) — `rule`, a rule made there (in the Rule view)
+ *  saved in my policy and deciding the call as it does, or giving its result; `give-once`, a result given the call in
+ *  its place, just this once. */
+export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "skip" | "skip-run" | "skip-always" | "deny" | "deny-run" | "deny-always" | "rule" | "give-once";
 
 /** The `stdin` request: input for the program's standard input; `end`, it's closed. */
 export interface StdinRequest { "data": string; "end"?: boolean }

@@ -11,20 +11,17 @@
  *    the text that ran (sent with it). Each statement is anchored there (anchors.ts: its BABLR span) and marked on the
  *    line it's on now, so it follows its code through edits and cosmetic changes — a reformat keeps every mark; a
  *    statement edited past recognizing loses its.
- *  - the evidence kept in git (RUNTIME-EVIDENCE.md; read through the insights extension's evidence store, here with core's
- *    own API): everyone's runs, in every environment, folded together. It outlives the session and follows the code: a
+ *  - the evidence kept in git (RUNTIME-EVIDENCE.md; read through editor-api's evidence store, as the insights extension
+ *    reads it): everyone's runs, in every environment, folded together. It outlives the session and follows the code: a
  *    statement you didn't touch keeps its marks when code around it moves or changes; one you edited loses them until it
  *    runs again. A file BABLR's grammar doesn't take yet has no evidence, only its sessions' reports.
- *
- * Runs in the workbench realm (core), with the workbench's own extension API.
  */
 import type { CoverageEvent as CoverageReport } from "@brianjenkins94/editor-api";
 import type { EvidenceStore } from "@brianjenkins94/editor-api/evidence";
 import type { PaneMark as ContentMark } from "@brianjenkins94/editor-api/pane";
-import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
 import type * as vscodeApi from "vscode";
-import { Anchors, offsetOf } from "./anchors";
-import { refreshView } from "./pane-views";
+import { Anchors, offsetOf } from "@brianjenkins94/editor-api/anchors";
+import { refreshPane } from "@brianjenkins94/editor-api/pane";
 
 /** A mark's kind, as the pane-view contract names it. */
 const KINDS: Record<string, ContentMark["kind"]> = { "coverage-ran": "ran", "coverage-partial": "partial", "coverage-missed": "missed" };
@@ -79,17 +76,20 @@ function lines(report: CoverageReport, lineOf: (index: number) => number | undef
 	return byLine;
 }
 
+/** A mark beside a line in the Margin's gutter column (0-based), its kind, and what it says on hover. */
+export interface LineMark { "line": number; "kind": string; "title"?: string }
+
 /** A top-level statement's share of the last run (tsval's profile), on the line its code is on now. */
 export interface ProfiledLine { "line": number; "statements": number; "waited": number; "first": number }
 
 /** Mark each editor's lines in its margin's gutter column (`mark`: by file URI) and its scrollbar, as sessions report and
- *  evidence changes — and hand on where the last run's work went (`profiled`: the run log, live-values.ts). */
-export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, mark: (uri: string, marks: PaneMark[]) => void, profiled: (uri: string, lines: ProfiledLine[] | undefined) => void = () => undefined): void {
+ *  evidence changes — and hand on where the last run's work went (`profiled`: the run log, margin.ts). */
+export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, mark: (uri: string, marks: LineMark[]) => void, profiled: (uri: string, lines: ProfiledLine[] | undefined) => void = () => undefined): void {
 	// The scrollbar's marks: a decoration with no gutter icon, so breakpoints can still be set on the line.
 	const ran = vscode.window.createTextEditorDecorationType({ "overviewRulerColor": "#2ea04340", "overviewRulerLane": vscode.OverviewRulerLane.Left });
 	const missed = vscode.window.createTextEditorDecorationType({ "overviewRulerColor": "#f85149a0", "overviewRulerLane": vscode.OverviewRulerLane.Left });
 	/** Each file's marks as last painted: coverage's pane view, into the Margin (`coverage.paneView`). */
-	const marked = new Map<string, PaneMark[]>();
+	const marked = new Map<string, LineMark[]>();
 
 	vscode.commands.registerCommand("coverage.paneView", (uri: unknown) => {
 		const marks = typeof uri === "string" ? marked.get(uri) : undefined;
@@ -100,7 +100,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 	/** The latest session's coverage, by file path, with its statements' anchors in the text that ran. */
 	const reports = new Map<string, { "report": CoverageReport; "anchors"?: Anchors }>();
 	const paint = (editor: vscodeApi.TextEditor, marks: Iterable<[number, { "covered": Covered; "hover": string }]>): void => {
-		const shown: PaneMark[] = [];
+		const shown: LineMark[] = [];
 		const ranLines: vscodeApi.Range[] = [];
 		const missedLines: vscodeApi.Range[] = [];
 
@@ -114,7 +114,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 
 		mark(editor.document.uri.toString(), shown);
 		marked.set(editor.document.uri.toString(), shown);
-		refreshView("coverage", editor.document.uri.toString());
+		void refreshPane(vscode.commands, "coverage", editor.document.uri.toString());
 		editor.setDecorations(ran, ranLines);
 		editor.setDecorations(missed, missedLines);
 	};

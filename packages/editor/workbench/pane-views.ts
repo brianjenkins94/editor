@@ -1,11 +1,11 @@
 /**
- * Pane views (EXTENSION-POINTS.md, 4): the tabs on the pane's first line, and what each draws beside the code. A view
- * is core's (the Margin, live-values.ts's) or an extension's — declared in its manifest (`contributes.paneViews`) — and
- * either way provided by its command `<id>.paneView`, run with a file's URI whenever the view is shown, the file is, or
+ * Pane views (EXTENSION-POINTS.md, 4): the tabs on the pane's first line, and what each draws beside the code. Every view
+ * is an extension's — the Margin too (extensions/margin), shown first — declared in its manifest
+ * (`contributes.paneViews`) and provided by its command `<id>.paneView`, run with a file's URI whenever the view is shown, the file is, or
  * it changes (or the provider says so: `editor.pane.refresh`). Its content is data (@brianjenkins94/editor-api/pane):
  * drawn here, in the Margin's look, each item on the lines its `at` is on now — lines as given, a span reference
- * resolved by the editor's BABLR, or a range in a text that ran followed from it (anchors.ts). A view declared `into`
- * another adds its items to that one's.
+ * resolved by the editor's BABLR, or a range in a text that ran followed from it (editor-api's anchors). A view declared
+ * `into` another adds its items to that one's. The pane's look is pane-views.css.
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
@@ -13,21 +13,16 @@ import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup,
 import type { PaneMark as FrameMark, PaneEntry, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
 import type * as vscodeApi from "vscode";
 import type { NativeDrawing } from "./pane-native";
+import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
-import { Anchors } from "./anchors";
 import { installNativeFace } from "./pane-native";
+import css from "./pane-views.css?raw";
 
-/** The Margin: core's own view (live-values.ts provides it, as `margin.paneView`). */
+/** The Margin (the margin extension's): the view shown first, and the one shown until another is chosen. */
 const MARGIN = "margin";
 
-/** Core's views, before any extension's: the Margin. */
-const CORE_VIEWS: PaneView[] = [{ "id": MARGIN, "label": "Margin", "title": "Values, cards and the run beside the code" }];
-
-/** Core's views into another: coverage's marks, into the Margin (coverage.ts). */
-const CORE_INTO: PaneViewDeclaration[] = [{ "id": "coverage", "into": MARGIN }];
-
-/** How a mark's kind is styled in the pane's gutter column (live-values.css). */
+/** How a mark's kind is styled in the pane's gutter column (pane-views.css). */
 const MARK_CLASSES: Record<string, string> = { "ran": "coverage-ran", "partial": "coverage-partial", "missed": "coverage-missed", "crashed": "run-crashed", "stopped": "run-stopped", "rule": "rule-placed", "rule-uncertain": "rule-placed uncertain" };
 
 /** How a group's state reads on its card. */
@@ -56,8 +51,6 @@ let native = ((): boolean => {
 })();
 let nativeFace: ReturnType<typeof installNativeFace> | undefined;
 let declared: PaneViewDeclaration[] = [];
-/** Every view declared: core's into another, then each extension's. */
-const allDeclared = (): PaneViewDeclaration[] => [...CORE_INTO, ...declared];
 /** Each text that ran, its anchors (by file and text). */
 const anchored = new Map<string, Anchors>();
 /** The latest draw of each file, so an older one finishing late doesn't overwrite it. */
@@ -350,7 +343,7 @@ function renderGroup(group: PaneGroup, element: HTMLElement): void {
 
 /** What `view` and the views `into` it provide for `uri` — none from one that has nothing, or isn't there. */
 async function contentOf(view: string, uri: string): Promise<PaneContent[]> {
-	const providers = [view, ...allDeclared().filter((each) => each.into === view).map((each) => each.id)];
+	const providers = [view, ...declared.filter((each) => each.into === view).map((each) => each.id)];
 	const answers = await Promise.all(providers.map(async (id) => Promise.resolve(api?.commands.executeCommand<PaneContent | undefined>(`${id}.paneView`, uri)).catch(() => undefined)));
 
 	return answers.filter((answer): answer is PaneContent => answer !== undefined && answer !== null && Array.isArray(answer.items));
@@ -447,9 +440,11 @@ function shownFiles(): string[] {
 	return [...new Set((api?.window.visibleTextEditors ?? []).filter((editor) => editor.document.uri.scheme === "file").map((editor) => editor.document.uri.toString()))];
 }
 
-/** The views with tabs: core's, then each extension's own (a view `into` another has none). */
+/** The views with tabs, the Margin first (a view `into` another has none). */
 function tabs(): PaneView[] {
-	return [...CORE_VIEWS, ...declared.filter((view) => view.into === undefined && !CORE_VIEWS.some((core) => core.id === view.id)).map((view) => ({ "id": view.id, "label": view.label ?? view.id, ...view.title === undefined ? {} : { "title": view.title } }))];
+	const own = declared.filter((view) => view.into === undefined);
+
+	return [...own.filter((view) => view.id === MARGIN), ...own.filter((view) => view.id !== MARGIN)].map((view) => ({ "id": view.id, "label": view.label ?? view.id, ...view.title === undefined ? {} : { "title": view.title } }));
 }
 
 /** Show view `id`, every shown file's. */
@@ -468,9 +463,9 @@ function showStrip(): void {
 }
 
 /** Draw `uri` again — or every shown file — for `view`, if it's the one shown (or in it): its provider's word that its
- *  content changed (core's views say so this way; an extension's through `editor.pane.refresh`). */
-export function refreshView(view: string, uri?: string): void {
-	if (view !== active && !allDeclared().some((each) => each.id === view && each.into === active)) {
+ *  content changed (`editor.pane.refresh`). */
+function refreshView(view: string, uri?: string): void {
+	if (view !== active && !declared.some((each) => each.id === view && each.into === active)) {
 		return;
 	}
 
@@ -482,6 +477,7 @@ export function refreshView(view: string, uri?: string): void {
 /** Read the views extensions declare, offer them, and draw the one shown as files show and change. */
 export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable[] {
 	api = vscode;
+	document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
 
 	const read = async (): Promise<void> => {
 		declared = (await extensionContributions("paneViews")).flatMap(({ value }) => (Array.isArray(value) ? value.filter((view): view is PaneViewDeclaration => typeof view?.id === "string") : []));

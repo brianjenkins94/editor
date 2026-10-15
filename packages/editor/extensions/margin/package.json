@@ -1,0 +1,27 @@
+{
+  "name": "margin",
+  "displayName": "Margin",
+  "description": "The file's runtime column, beside the code in the pane: a run's values on the lines that made them (a column per turn of a loop), a capability stop's question with its answers and Rule…, Mock… for process.argv and a variable, how the last run ended, the program's steps as cards, and its coverage in the gutter column — from every debugger's run contract events.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "paneViews": [
+      {
+        "id": "margin",
+        "label": "Margin",
+        "title": "Values, cards and the run beside the code"
+      },
+      {
+        "id": "coverage",
+        "into": "margin"
+      }
+    ]
+  }
+}
