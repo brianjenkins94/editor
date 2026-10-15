@@ -20,7 +20,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
-import type { CosmeticClassifier } from "./cosmetic-classifier";
+import type { Bablr } from "./bablr";
 import { serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs } from "@zenfs/core";
@@ -92,7 +92,10 @@ function repoRelative(uri: vscodeApi.Uri): string | undefined {
 	return CLASSIFIABLE.test(path) ? path : undefined;
 }
 
-export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifier: CosmeticClassifier, log: Logger): void {
+/** One node-grouped chunk for the "your edits" timeline (the BABLR worker's `editGroups`). */
+interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
+
+export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Bablr, log: Logger): void {
 	// Per-file in-memory doc + its pending-flush timer. The doc is the source of truth; the binary on disk is a mirror.
 	const docs = new Map<string, AutomergeDoc>();
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -236,7 +239,8 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 		}
 
 		// The last entry is the current working text, so line ranges land in working coords.
-		const { groups, bursts } = await classifier.editGroups(chain);
+		// (decomposed by the BABLR worker: node-grouped chunks over the burst chain [HEAD, …afters])
+		const { groups, bursts } = await bablr.request<{ "groups": EditGroup[]; "bursts": number }>("editGroups", { "chain": chain });
 
 		return { "groups": groups, "bursts": bursts, "lastTime": lastTime };
 	});

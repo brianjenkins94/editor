@@ -18,6 +18,7 @@
  * cooperatively (the worker stays warm); a still-queued call is dropped unsent. A worker that fails to load, or dies,
  * fails what's in flight and every later call.
  */
+import type { ChangeVerdict } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
@@ -69,6 +70,9 @@ export interface Bablr {
 	 *  span is: what an observed site keeps, so unrelated sites never pool into one enclosing span. Throws Unparsable
 	 *  when BABLR's grammar doesn't take `source` — reported as `file`'s (parse.status) when it's given. */
 	"anchors": (source: string, ranges: { "start": number; "end": number }[], exact?: boolean, file?: string) => Promise<(string | undefined)[]>;
+	/** What a change from `before` to `after` is (the worker's `verdict`, from its cached parses): cosmetic or semantic,
+	 *  the nodes that changed and their lines in `after` — the session's answers kept, by the two texts. */
+	"classify": (before: string, after: string, signal?: AbortSignal) => Promise<ChangeVerdict>;
 	"dispose": () => void;
 }
 
@@ -88,6 +92,18 @@ async function changedFiles(file: string): Promise<Record<string, string>> {
 	}
 
 	return others;
+}
+
+/** FNV-1a 32-bit — a cheap key for the session's verdicts. */
+function fnv32(text: string): number {
+	let hash = 0x811C9DC5;
+
+	for (let index = 0; index < text.length; index += 1) {
+		hash ^= text.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+
+	return hash >>> 0;
 }
 
 export function startBablr(hub: Hub): Bablr {
@@ -282,8 +298,35 @@ export function startBablr(hub: Hub): Bablr {
 		}
 	};
 
-	// The pod's `editor.annotations.spans`, `editor.annotations.refer` and `editor.annotations.resolve` (for extensions)
-	// ask here, so they share the worker and its cache.
+	// The session's verdicts, keyed by a cheap content-pair hash: both changes panes, and the cosmetic extension, ask once
+	// per content pair, not once per refresh.
+	const verdicts = new Map<string, ChangeVerdict>();
+	const classify = async (before: string, after: string, signal?: AbortSignal): Promise<ChangeVerdict> => {
+		if (before === after) {
+			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [] }; // identical — the only provably-correct shortcut
+		}
+
+		const key = before.length + ":" + after.length + ":" + fnv32(before) + ":" + fnv32(after);
+		const known = verdicts.get(key);
+
+		if (known !== undefined) {
+			return known;
+		}
+
+		// Over [before, after]: verdict + changed nodes + their lines (from the worker's cached parses).
+		const verdict = await request<ChangeVerdict>("verdict", { "contents": [before, after] }, signal);
+
+		if (verdicts.size > 200) {
+			verdicts.clear();
+		}
+
+		verdicts.set(key, verdict);
+
+		return verdict;
+	};
+
+	// The pod's `editor.annotations.*` (for extensions) and the shell's review panel ask here, so they share the worker
+	// and its cache.
 	const offServe = [
 		serve(hub, "annotations.spans", async (args) => {
 			const { source } = (args ?? {}) as { "source"?: unknown };
@@ -313,6 +356,15 @@ export function startBablr(hub: Hub): Bablr {
 			}
 
 			return answer(async () => resolveRefs(source, file, refs as SpanRef[], { "observed": observed === true, "types": known, "texts": before }));
+		}),
+		serve(hub, "annotations.classify", async (args) => {
+			const { before, after } = (args ?? {}) as { "before"?: unknown; "after"?: unknown };
+
+			if (typeof before !== "string" || typeof after !== "string") {
+				throw new TypeError("annotations.classify: the two texts");
+			}
+
+			return answer(async () => classify(before, after));
 		})
 	];
 
@@ -322,6 +374,7 @@ export function startBablr(hub: Hub): Bablr {
 		"anchors": anchors,
 		"refer": refer,
 		"resolve": resolveRefs,
+		"classify": classify,
 		"follow": async (baseline, current, span) => {
 			const found = await request<{ "id"?: string; "how"?: "kept" | "replaced" }>("follow", { "baseline": baseline, "current": current, "span": span });
 

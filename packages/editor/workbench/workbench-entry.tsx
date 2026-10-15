@@ -46,7 +46,6 @@ import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
-import { createCosmeticClassifier } from "./cosmetic-classifier";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
@@ -618,15 +617,11 @@ function maybeBoot(): void {
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
 					// shell's review panel, and VS Code's Source Control view (the source-control extension, by the editor.git.* commands). See
 					// git-service.ts / git-engine.ts.
-					// One classifier, shared by both panes: its verdicts come from the BABLR worker's cached parses
-					// (bablr.ts), so each version of a file is parsed once, across refreshes and reloads.
-				const cosmeticClassifier = createCosmeticClassifier(bablr, workbenchHub);
-
 				installGitService(api as typeof import("vscode"), workbenchHub, paneLog);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.
-				installEditHistory(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
+				installEditHistory(api as typeof import("vscode"), workbenchHub, bablr, paneLog);
 
 					// Editor theme follows the OS, like the shell chrome. `window.autoDetectColorScheme` isn't wired to
 					// `prefers-color-scheme` in this monaco-vscode-api build, so drive `workbench.colorTheme` ourselves.
