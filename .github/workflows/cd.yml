@@ -40,6 +40,33 @@
       "secrets": {
         "NPM_TOKEN": "${{ secrets.NPM_TOKEN }}"
       }
+    },
+    "api-dev": {
+      # The API Worker's dev deployment (packages/api/README.md), after the same gate as the site. It stays off until
+      # the repository variable CLOUDFLARE_ACCOUNT_ID exists, so the workflow is green before the Cloudflare account
+      # is set up. The API token is a secret of the `development` environment, scoped to Workers on this one
+      # account; production deploys are a separate, approval-gated job (A7).
+      "if": "${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') && vars.CLOUDFLARE_ACCOUNT_ID != '' }}",
+      "runs-on": "ubuntu-latest",
+      "environment": "development",
+      "permissions": {
+        "contents": "read"
+      },
+      "steps": [
+        # The commit CI passed, not whatever main is by now.
+        { "uses": "actions/checkout@v4", "with": { "ref": "${{ github.event.workflow_run.head_sha || github.sha }}" } },
+        # Only the api package in the ephemeral workspace: the cooldown install, nothing else of the repo's.
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/api" } },
+        {
+          "run": "pnpm exec wrangler deploy --env dev",
+          "working-directory": "packages/api",
+          "env": {
+            "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+            "CLOUDFLARE_ACCOUNT_ID": "${{ vars.CLOUDFLARE_ACCOUNT_ID }}"
+          }
+        }
+      ],
+      "timeout-minutes": 10
     }
   }
 }

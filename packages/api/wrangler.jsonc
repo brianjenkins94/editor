@@ -1,0 +1,40 @@
+// The editor's API Worker (README.md). Secrets are never in this file: `wrangler secret put`.
+// The top level is local `wrangler dev` and the tests; `--env dev` and `--env production` are the deployments.
+// vars and observability are repeated per environment on purpose: wrangler doesn't inherit vars, and each
+// deployment's telemetry settings should be readable where it's declared.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "editor-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // Cloudflare's own invocation logs record each request's URL, and the docs don't say what else; with no way to
+  // redact them, they're off, and the Worker writes its own request line from an allowlist (src/log.ts).
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": true }
+  },
+  "vars": { "ENVIRONMENT": "local" },
+  "env": {
+    "dev": {
+      "workers_dev": true,
+      "observability": {
+        "enabled": true,
+        "logs": { "enabled": true, "invocation_logs": false },
+        "traces": { "enabled": true }
+      },
+      "vars": { "ENVIRONMENT": "dev" }
+    },
+    // Not deployed until A7: no workers.dev URL, and its route (our own domain) arrives with the domain.
+    "production": {
+      "name": "editor-api",
+      "workers_dev": false,
+      "observability": {
+        "enabled": true,
+        "logs": { "enabled": true, "invocation_logs": false },
+        "traces": { "enabled": true }
+      },
+      "vars": { "ENVIRONMENT": "production" }
+    }
+  }
+}

@@ -1,0 +1,289 @@
+# Log in with GitHub: design
+
+Status: **approved 2026-10-15**. A1 (this package's skeleton) is built; A0 (accounts) is pending. This replaces the pasted PAT (`packages/editor/shell/github-auth.ts`) with a
+real sign-in, and lays down the account backbone that paid tiers (Stripe) will hang off later. Stripe is out of
+scope here, but nothing in this design should have to change when it arrives.
+
+This is the part we can't get wrong, so the doc leads with what's at stake and states each guarantee so it can be
+checked.
+
+## Where we are today, and why it's not OK to keep it
+
+- **The PAT is in `localStorage["shell:githubPat"]` on `brianjenkins94.github.io`.** Every GitHub Pages site under
+  that account shares the origin (`/lib`, `/games`, …), so a bug or third-party script in any of them can read it.
+- **Everything in the editor shares that origin, unsandboxed.** The app iframe, the workbench iframe, preview
+  iframes running *repo code*, and extensions loaded by `?extension=<url>` are all same-origin with the shell
+  (the editor's `ARCHITECTURE.md` already says previews are "not a security boundary"). "The token stays in the shell" is a
+  convention, not a guarantee.
+- **The clone sends the PAT through a third party.** `packages/editor/shell/git-clone.ts` uses `cors.isomorphic-git.org`, which
+  sees the token on every clone.
+
+The design follows from these three facts: **the GitHub token never comes to the browser**, the browser holds only
+a credential that's useless if it's stolen, and anything that runs repo code is moved off the origin that holds it.
+
+## The shape
+
+```
+ browser (shell realm)                    Cloudflare Worker (packages/api, Hono)               GitHub
+ ─────────────────────                    ──────────────────────────────────────              ──────
+ non-extractable ES256 key (IndexedDB)    OAuth 2.1 authorization server (ours)
+ DPoP-bound access + refresh token  ───▶  verifies DPoP on every request          ──────▶   OAuth (GitHub App)
+                                          Grant Durable Object (one per sign-in):            api.github.com
+                                            GitHub tokens, encrypted                          github.com git
+                                            our refresh family + jti cache                    smart-HTTP
+                                          D1: users, grants index, audit log
+                                          allowlisting proxy for the GitHub API + git
+```
+
+**Our Worker is an OAuth 2.1 authorization server that federates to GitHub.** GitHub signs the user in, but the
+tokens the browser holds are *ours*: short-lived, DPoP-bound (RFC 9449), and only good at our Worker. The Worker
+keeps the GitHub user token and spends it on the user's behalf through a proxy that allows only the GitHub calls
+the editor makes.
+
+Why not hand the GitHub token to the browser and use the Worker only for the code exchange? Because GitHub doesn't
+do DPoP. Once a GitHub token is in the browser, anything on the origin can copy it out and use it anywhere for 8
+hours. "Full DPoP" only means something if the thing DPoP protects is the only credential the browser has.
+
+### What DPoP does and doesn't buy (be honest about this)
+
+- **It does:** a stolen access or refresh token (logs, a leaked trace, a copied IndexedDB dump, a malicious
+  extension reading storage) is worthless without the private key, and the key is created `extractable: false`, so
+  no script can export it.
+- **It does not:** stop code running *on our origin* from using the key in place, because same-origin script can
+  open the same IndexedDB and sign proofs. That's why the proxy allowlist exists (a hijacked session can only do
+  what the editor does) and why **moving previews and `?extension=` code to a separate origin is a prerequisite
+  for production** (step A6).
+
+## Decisions
+
+### Platform: Cloudflare Workers + Durable Objects + D1, with Hono
+
+Workers is the right call, and not only because it's cheap:
+
+- **Durable Objects give us serialized, strongly consistent state per sign-in**, which is exactly what this flow
+  needs. GitHub refresh tokens are single-use, so two concurrent refreshes would log the user out; our own refresh
+  rotation needs reuse detection; DPoP `jti` replay checking needs read-then-write without a race. One Grant DO per
+  sign-in handles all three by construction. KV is eventually consistent and wrong for every one of them (this is
+  also why we don't use `@cloudflare/workers-oauth-provider`: it's KV-backed and has no DPoP).
+- **The same platform can host production.** Workers static assets serve the built site and set COOP/COEP as real
+  response headers, so production doesn't need the `coi-serviceworker` reload trick at all.
+- **Cost:** the free plan covers development (100k requests/day, SQLite-backed DOs, D1). Once the git proxy carries
+  clones, the $5/month paid plan (10M requests) is the realistic floor.
+- **Hono** is Workers-native, tiny, and has the CORS/secure-headers middleware we'd otherwise write. The
+  sms-reference-app is Express on Node and doesn't port as a server; its *logic* does (below).
+
+Alternatives considered: Deno Deploy (no equivalent of DOs' per-key serialization), Vercel/Netlify functions (same,
+plus cold starts), Fly.io (a real server to run and patch). None beats Workers here.
+
+### GitHub side: a GitHub App, not an OAuth App
+
+- An OAuth App's `repo` scope is read/write on *every* private repo the user can reach. A GitHub App asks for
+  fine-grained permissions and the user picks which repos it's installed on.
+- GitHub App user tokens expire after 8 hours with a 6-month refresh token, so a leaked server-side token has a
+  short life too.
+- GitHub supports PKCE (S256) since 2025-07, but **the token exchange still requires the client secret** and the
+  endpoint has no CORS, so a server is mandatory regardless of what else we decide.
+- Permissions we'd ask for: Metadata (read, mandatory), Contents (read/write, for commit-back), Pages (write, for
+  `enablePages`). **No email permission**: we don't need an email address to run an editor, and not having it is
+  the cheapest privacy measure there is. Repo creation needs Administration (write); decide when we wire it.
+- **Two GitHub Apps**: one for development (callbacks on `workers.dev` and `localhost`), one for production.
+  Separate secrets, separate blast radius.
+
+### Identity and the data we keep
+
+| Data | Where | Why | Retention |
+|---|---|---|---|
+| GitHub numeric user id | D1 `users` | stable identity (logins can be renamed) | until account deletion |
+| our user id (random) | D1 `users` | what everything else (grants, later Stripe) keys on | until account deletion |
+| GitHub user access + refresh token | Grant DO, **AES-GCM encrypted** with a key from a Worker secret (with a key id, so it can rotate) | to call GitHub for the user | until sign-out, refresh expiry, or deletion |
+| our refresh-token family, hashed | Grant DO | rotation + reuse detection | lifetime of the grant |
+| grants index (grant id, user id, created, last used, coarse device label) | D1 `grants` | "your sessions", sign out everywhere | lifetime of the grant |
+| audit events | D1 `audit` | security record, user-visible | 90 days, then aggregated |
+
+We **don't** store login name, avatar, email, or raw IPs. Login and avatar are fetched live through the proxy.
+Audit rows carry country (from Cloudflare) and an IP hash salted per day, which is enough to spot abuse but can't
+be reversed into an address.
+
+**Account deletion** (required before production): revoke every grant, revoke the GitHub App's authorization for
+the user (`DELETE /applications/{client_id}/grant`), delete the D1 rows, and keep only anonymized audit aggregates.
+
+### Tokens and the flow
+
+Ported from the sms-reference-app, which already has spec-faithful pieces: `app/auth/dpop.ts` (proof verifier),
+`token.ts` / `resource.ts` (binding checks, rotation), and `app/src/oauth-client.ts` (the oauth4webapi browser
+client with a non-extractable key in IndexedDB, nonce retry, and single-flight refresh). What needs changing: swap
+`Buffer` for `jose`'s base64url, replace the in-memory Maps with the Grant DO, and move the hard-coded HS256 secret
+to asymmetric signing.
+
+1. **Start.** The shell makes (or loads) its DPoP key pair and a PKCE verifier, then does a top-level navigation
+   to `GET /auth/github/start?code_challenge=…&dpop_jkt=…&state=…&redirect_uri=…`. The `redirect_uri` must
+   exactly match an allowlisted app origin. The Worker makes its *own* PKCE pair for GitHub and packs everything
+   into an encrypted, 10-minute `state` (JWE) that it sends to GitHub, so this step needs no storage. (Full-page
+   redirect, not a popup: the shell is `COOP: same-origin`, which severs a popup's opener anyway.)
+2. **GitHub callback.** `GET /auth/github/callback` decrypts the state, exchanges GitHub's code (client secret plus
+   GitHub PKCE verifier), reads `GET /user` for the numeric id, upserts the user, and creates a Grant DO holding
+   the encrypted GitHub tokens and a **single-use, 60-second authorization code** bound to the browser's
+   `code_challenge` and `dpop_jkt`. It then redirects to the app's `redirect_uri` with `code` and `state`.
+3. **Token.** The shell checks `state`, strips the query with `history.replaceState`, and `POST /token` with
+   `code` + `code_verifier` + a DPoP proof. The Worker checks PKCE, checks that the proof's key thumbprint equals
+   the `dpop_jkt` from step 1 (so a stolen code is useless to anyone without the key), burns the code, and issues:
+   - **an access token**: a 5-minute ES256 JWT (`typ: at+jwt`) with `cnf.jkt`, `sub` (our user id) and `grant`
+     (the DO id), signed with a key whose public half is published at `/.well-known/jwks.json`;
+   - **a refresh token**: opaque, DPoP-bound, rotated on every use. Presenting an already-used one revokes the
+     whole grant (reuse detection).
+4. **Every API request** carries `Authorization: DPoP <at>` and a `DPoP` proof. The Worker verifies the JWT, then
+   the proof (`typ`, an asymmetric alg from an allowlist, no private key material in the header, `htm`, `htu`,
+   `iat` within 60 s, `ath` = hash of the access token, the server nonce), then routes to the Grant DO. The DO
+   checks the `jti` hasn't been seen, rejects the request if the grant is revoked, and refreshes the GitHub token
+   if it's within a few minutes of expiry, serialized so it happens exactly once.
+5. **Nonces** (`DPoP-Nonce`) are stateless: an HMAC over a 5-minute time window, so issuing and checking them needs
+   no storage, and old proofs can't be pre-computed.
+6. **Sign-out** revokes the grant (DO + D1) and deletes the browser's key. "Sign out everywhere" revokes every grant
+   for the user.
+
+The shell gets a `dpopProvider` that replaces `patProvider`. It's still `typeof fetch`, so `github.ts` and fido
+don't change; only its base URL moves from `api.github.com` to the Worker's `/github/api/`.
+
+### The proxy
+
+- `/github/api/*` → `api.github.com`, **allowlisted** by method + path pattern to what `packages/editor/shell/github.ts` calls
+  (`/user`, repos, git trees/blobs/commits/refs, pages). Anything else gets a 403 and an audit row.
+- `/github/git/*` → `github.com` git smart-HTTP (`info/refs`, `git-upload-pack`) for isomorphic-git, streamed, not
+  buffered. This **retires `cors.isomorphic-git.org`**. Push (`git-receive-pack`) is added only when commit-back
+  moves to git.
+- The proxy never forwards our `Authorization`/`DPoP` headers upstream and never returns GitHub's token-bearing
+  headers.
+
+### Hosts and origins
+
+| Environment | App | Worker | GitHub App |
+|---|---|---|---|
+| local | `editor.localhost:5173` | `wrangler dev` (`localhost:8787`) | dev |
+| development | `brianjenkins94.github.io/editor/` (unchanged) | `editor-api-dev.<account>.workers.dev` | dev |
+| production | a domain of ours, served by the Worker's static assets | same origin as the app (`/api`) | prod |
+
+The dev split is cross-origin, and that's fine *because* of DPoP: the credential is an `Authorization` header, not
+a cookie, so third-party-cookie blocking doesn't affect us and there's no CSRF surface. CORS is an explicit origin
+allowlist, never `*`, never reflected.
+
+**editor-contrib forks** (`<owner>.github.io/<repo>/`) are not on the allowlist. A fork that wants sign-in brings
+its own Worker and GitHub App; the README says so.
+
+**Production needs its own domain** (about $10/year, bought through Cloudflare). It gets the editor off the shared
+`github.io` origin, puts the app and API on one origin (no CORS at all), and gives us real COOP/COEP headers.
+
+## Visibility: tracing the whole flow
+
+There are three separate streams with three different audiences. Keeping them separate is what lets us trace
+everything without leaking anything.
+
+1. **Traces (for us, to debug).** Workers' automatic OpenTelemetry tracing (open beta since 2025-11) traces every
+   request, including each `fetch` to GitHub and each DO and D1 call, with no code. We add a few spans of our own
+   around the steps that matter (`auth.start`, `auth.callback`, `auth.token`, `grant.refresh_github`,
+   `proxy.request`). These land in **Cloudflare's own Observability dashboard** (logs, traces, metrics, and a query
+   builder), with no third-party vendor. It's private to the account even though the code is public. Each sign-in
+   gets a `login.id` attribute carried from start to callback to token, so the funnel is one query: how many starts
+   never came back from GitHub, how many callbacks never redeemed, and why.
+   - **Its limits:** retention is 3 days on Free and 7 days on Paid, which is fine for debugging. Anything we need
+     longer is the audit log's job (below), which was always going to be ours. Tracing is still in beta. Logs are
+     included up to 200k events/day on Free and 20M/month on Paid, with pricing moving to "Cloudflare
+     Observability" on 2026-12-01.
+   - **The way out, if we outgrow it:** OTLP export to an outside backend (Honeycomb, Grafana Cloud) is a
+     destination set in the dashboard, not code. Adding one later changes nothing in the Worker.
+   - **Across the browser boundary:** the shell's spans already use W3C-shaped ids (`util/logger`). The
+     `dpopProvider` sends a `traceparent` header so a sign-in is one trace from the shell's click to GitHub and
+     back. Browser spans themselves stay on-device (debug-mcp) for now. Shipping end-user browser telemetry off the
+     device is a privacy decision of its own, and it's deferred.
+   - *To verify on the first deploy (it needs A0):* whether automatic tracing adopts an incoming `traceparent` as
+     the parent, or whether we link it as an attribute, and **what the automatic spans record about a request**.
+     If they keep query strings or `Authorization` headers, the redaction rule needs an answer for traces too.
+2. **The audit log (for security, and for the user).** These are append-only D1 rows: `login`, `token_issued`,
+   `refresh`, `refresh_reuse_detected`, `grant_revoked`, `proxy_denied`, `account_deleted`. It's not sampled and
+   doesn't depend on a vendor, and a user can see their own (their sessions, recent sign-ins).
+3. **Workers Logs (for the operator).** These are structured `console.log` objects, kept by Cloudflare. They're
+   correlated with traces by trace id. Cloudflare's own *invocation logs* are **off** (`invocation_logs: false`):
+   they record each request's URL, the docs don't say what else, and they can't be redacted. The Worker writes its
+   own span per request instead (`src/log.ts`: method, path without the query, status, duration).
+
+**The redaction rule, enforced in code rather than by convention:** spans, logs and audit rows are built from an
+*allowlist* of attribute names. Nothing ever records tokens, codes, verifiers, DPoP proofs, `Authorization`
+headers, `state`, emails, or raw IPs. A test pushes a full sign-in through the Worker with a capturing exporter and
+fails if any secret value appears anywhere in the output.
+
+## Building it in the open
+
+Public code is fine for an auth server. Its security has to hold with the code visible (that's the standard), and
+public code means anyone can review it. The limits are operational:
+
+- **Secrets live only in Cloudflare** (`wrangler secret put`): `GITHUB_CLIENT_SECRET`, `TOKEN_KEK` (encrypts GitHub
+  tokens), `SIGNING_JWK` (access tokens), `NONCE_KEY`, `STATE_KEY`. The account id and binding names in
+  `wrangler.jsonc` aren't secret.
+- **Deploys use a scoped Cloudflare API token** (Workers edit on this account only) stored as a GitHub *Environment*
+  secret. The `production` environment requires your approval for every deploy, so a merge to main can't ship an
+  auth change by itself. `development` deploys automatically after CI.
+- **No `pull_request_target`**, and nothing that hands secrets to fork PRs. PRs get tests, never deploys.
+- **Telemetry is private.** It lives in the Cloudflare account, not in public view, even though the code that emits it
+  is public.
+- **Dependencies:** `hono`, `jose`, and `oauth4webapi` in the browser. That's all; each is small, widely audited,
+  and has no runtime dependencies. Pin exact versions, at least a week old (CI already enforces that).
+
+## Steps
+
+Each step lands green and is useful on its own.
+
+- **A0 · accounts (you).** A Cloudflare account and the dev GitHub App. Nothing in this step is code, and none of
+  the secrets ever go into the repo or this chat.
+- **A1 · `packages/api` skeleton.** Hono on Workers, `wrangler.jsonc` with `dev`/`production` environments,
+  `/health`, `observability` (logs + traces) on, tests running in workerd, and CI deploying `dev` to workers.dev.
+  Verify the `traceparent` question, and that a request shows up as one trace in the dashboard.
+  *Built 2026-10-15:* `src/index.ts` (Hono, secure headers, JSON 404/500, one span per request), `src/log.ts`
+  (util's logger, with every record gated to an allowlist of fields before any output), and `test/api.test.ts`
+  (wrangler's `createTestHarness`: the Worker in workerd, including a test that a request's query string and
+  `Authorization` never reach the logs). Spans come from `@brianjenkins94/util/logger`. On Workers it logs JSON
+  objects at their own console level, and with `setTracer(tracing)` every span has a counterpart in Cloudflare's
+  traces (the native custom-spans API, `cloudflare:workers`). The request span is opened with a function
+  (`log.span("request", attrs, async (span) => …)`), which makes it the runtime's active span for the whole request,
+  so the runtime's own `fetch`, D1 and Durable Object spans nest under it. The allowlist gates both outputs: log
+  records, and every attribute set on a trace span. A span's util ids ride along as `logger.trace_id` /
+  `logger.span_id`. That's how a trace continued from the browser will be found in the dashboard, since Cloudflare
+  exposes no span context of its own yet. The `api-dev` job in `.github/workflows/cd.yml` deploys `--env dev` once
+  the repository variable `CLOUDFLARE_ACCOUNT_ID` and the `development` environment's `CLOUDFLARE_API_TOKEN` secret
+  exist. Until then it's skipped. Still open: both verifications above, which need the first deploy.
+- **A2 · DPoP core.** Port `dpop.ts`, add stateless nonces and the access-token signer with JWKS. Test against
+  RFC 9449's examples, plus a negative test for every check: a wrong `htu`/`htm`, a stale `iat`, a replayed `jti`, a
+  missing or wrong `ath`, a private JWK in the header, `alg: none`/HS256, and a mismatched `cnf.jkt`.
+  - **Where it lives: `lib/util/auth/dpop.ts`** (decided 2026-10-15). Verifying a proof is RFC 9449 with nothing of
+    the editor in it, so it's util's, beside the logger the Worker already uses. The contract keeps it free of
+    storage and frameworks:
+    - It takes the request's method and URL, the `DPoP` header, and the access token if there is one.
+    - The caller supplies two things: whether a `jti` has been seen (the API answers from the Grant DO), and the
+      current nonce.
+    - It returns the key's thumbprint (RFC 7638) or a typed failure that names the check that failed.
+  - The stateless nonce (an HMAC over a time window) goes there too. So, later, may the `at+jwt` access-token
+    signer and verifier with `cnf.jkt`, since they're RFC 9068 plus a binding, also generic.
+  - What stays in `packages/api`: which origins and methods are allowed, where `jti`s are stored, and the HTTP
+    responses (`use_dpop_nonce`, `WWW-Authenticate`).
+  - `jose` does the JWS work (it's audited, and it supports workerd), so it becomes one more util peer. Tests are
+    the module's own `isEntry` self-test, as everywhere in util.
+- **A3 · sign-in.** The Grant DO, D1 schema and migrations, start/callback/token/refresh/revoke, token encryption,
+  the audit log, and the redaction test. End-to-end against the dev GitHub App.
+- **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"
+  popover for "Sign in with GitHub" plus a sessions list. **Remove the PAT path** once this works: keeping a token
+  in `localStorage` as a fallback keeps the problem.
+- **A5 · the proxy.** Allowlisted API and git smart-HTTP; retire `cors.isomorphic-git.org`; update
+  `architecture-model.ts` (network nodes) and `ARCHITECTURE.md` (the shell row: it no longer holds a GitHub token).
+- **A6 · hardening, before any real user.** Previews and `?extension=` code on a separate origin; rate limits on
+  `/auth/*` (Workers rate-limiting binding); account deletion; a privacy page that says what's in the table above;
+  a security review of the whole flow (`/security-review` plus a manual walk through RFC 9449 §11 and the OAuth 2.0
+  Security BCP, RFC 9700).
+- **A7 · production.** The domain, the static-assets deploy with COOP/COEP headers, the prod GitHub App, and the
+  deploy approval gate.
+
+Then Stripe: customers keyed by our user id, webhooks verified by signature and processed idempotently (a D1 table
+of seen event ids), and entitlements read by the Worker, never trusted from the client.
+
+## Open questions
+
+- Production domain name.
+- Whether signed-out users keep cloning public repos through our proxy (costs requests) or straight from GitHub's
+  API (no auth needed for public repos, but no git clone without a CORS proxy).
