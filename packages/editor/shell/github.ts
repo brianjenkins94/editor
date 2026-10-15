@@ -14,9 +14,12 @@
  */
 import type { AuthProvider } from "./github-auth";
 import { withDefaults } from "@brianjenkins94/util/fido";
-import { patProvider } from "./github-auth";
+import { API as SESSION_API, dpopFetch, isSignedIn } from "./session";
 
 const API = "https://api.github.com";
+
+/** GitHub through the API's proxy (packages/api/src/proxy.ts): the sign-in's token stays on the server. */
+const PROXY = `${SESSION_API}/github/api`;
 
 /** A GitHub API error carrying the status + parsed body, whether fido threw it (retried GET) or we did (4xx). */
 export class GitHubError extends Error {
@@ -107,21 +110,23 @@ export interface RepoFile {
 }
 
 /**
- * Build the GitHub client. `provider` is the auth seam — defaults to the pasted-PAT provider; pass the App's
- * provider later without changing anything below.
+ * Build the GitHub client. Signed in, it goes through the API's proxy with `dpopFetch`; signed out, straight to GitHub
+ * with no credential (public repos only). `provider` and `base` are the seam, for tests.
  */
-export function createGitHub(provider: AuthProvider = patProvider()) {
+export function createGitHub(provider: AuthProvider = isSignedIn() ? dpopFetch : fetch, base: string = isSignedIn() ? PROXY : API) {
 	// fido injects its own `Cache: no-store` directive into the request HEADERS. A non-safelisted header forces a CORS
 	// preflight that GitHub rejects ("Failed to fetch"). fido reads that directive from the options before calling
 	// fetch, so stripping it here (at the fetch boundary) leaves fido's caching intact while keeping the wire request
 	// CORS-simple. Wrapping the passed-in provider covers both the PAT path and the future App (badgateway) provider.
+	// And fido resolves a path like "/user" against its base's ORIGIN, so it keeps GitHub's as its base, and the request is
+	// moved onto `base` here: the proxy serves GitHub's paths under its own (pagination links already point at it).
 	const sanitized: AuthProvider = (input, init = {}) => {
 		const headers = new Headers(init.headers);
 
 		headers.delete("Cache");
 		headers.delete("cache");
 
-		return provider(input, { ...init, "headers": headers });
+		return provider(String(input instanceof Request ? input.url : input).replace(API, base), { ...init, "headers": headers });
 	};
 
 	const gh = withDefaults(API, {

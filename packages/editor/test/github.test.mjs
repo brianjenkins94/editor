@@ -1,10 +1,9 @@
-// The GitHub data plane, proven against a fake provider (a recording fetch) — no network. Covers the auth seam
-// (the PAT provider attaches the bearer, per request, without clobbering an explicit one), the Git Data commit flow
+// The GitHub data plane, proven against a fake provider (a recording fetch) — no network. Covers where requests go
+// (GitHub's paths under the API's proxy, signed in), the Git Data commit flow
 // (ref → base commit → blobs → tree → commit → move ref, with text inline and binary uploaded as a blob), and the
 // error surface (a 404 is `undefined` for existence checks, a real error otherwise). Run: tsx --test.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { patProvider } from "../shell/github-auth.ts";
 import { createGitHub, decodeBase64ToText, GitHubError } from "../shell/github.ts";
 
 /** A provider (fetch) that records calls and replies from a routing table; parses JSON bodies for assertions. */
@@ -32,49 +31,18 @@ function fakeProvider(routes) {
 	return { "provider": provider, "calls": calls };
 }
 
-test("patProvider attaches the bearer per request, and leaves an explicit Authorization alone", async () => {
-	const seen = [];
-	const realFetch = globalThis.fetch;
+test("the client goes where it's pointed: GitHub's paths under the API's proxy when signed in", async () => {
+	const { provider } = fakeProvider([[{ "method": "GET", "path": "/user" }, () => ({ "json": { "login": "me" } })]]);
+	const requested = [];
 
-	globalThis.fetch = async (input, init) => {
-		seen.push(new Headers(init?.headers).get("Authorization"));
+	const me = await createGitHub(async (input, init) => {
+		requested.push(String(input));
 
-		return new Response("{}", { "status": 200, "headers": { "Content-Type": "application/json" } });
-	};
+		return provider(input, init);
+	}, "https://api.example.dev/github/api").viewer();
 
-	try {
-		const provider = patProvider(() => "abc123");
-
-		await provider("https://api.github.com/user", {});
-		await provider("https://api.github.com/user", { "headers": { "Authorization": "Bearer explicit" } });
-
-		assert.deepEqual(seen, ["Bearer abc123", "Bearer explicit"]);
-	} finally {
-		// eslint-disable-next-line require-atomic-updates -- restoring the fetch this test saved; nothing else swaps globalThis.fetch meanwhile
-		globalThis.fetch = realFetch;
-	}
-});
-
-test("the token is resolved fresh per request (changing it needs no new client)", async () => {
-	let token = "first";
-	const { provider, calls } = fakeProvider([[{ "method": "GET", "path": "/user" }, () => ({ "json": { "login": "me" } })]]);
-	// Wrap the recording provider in the PAT provider so we exercise per-request token resolution.
-	const gh = createGitHub(patProvider(() => token));
-	// Redirect the PAT provider's underlying fetch at our recorder.
-	const realFetch = globalThis.fetch;
-
-	globalThis.fetch = provider;
-
-	try {
-		await gh.viewer();
-		token = "second";
-		await gh.viewer();
-
-		assert.deepEqual(calls.map((call) => call.auth), ["Bearer first", "Bearer second"]);
-	} finally {
-		// eslint-disable-next-line require-atomic-updates -- restoring the fetch this test saved; nothing else swaps globalThis.fetch meanwhile
-		globalThis.fetch = realFetch;
-	}
+	assert.equal(me.login, "me");
+	assert.deepEqual(requested, ["https://api.example.dev/github/api/user"]);
 });
 
 test("commitFiles runs the Git Data flow in order, inlining text and uploading binary as a blob", async () => {

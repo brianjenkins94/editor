@@ -3,11 +3,10 @@
  * request at a time through the API (230 files took 2.5 minutes behind fido's 100-a-minute limiter). One pack, so a
  * repo loads in seconds.
  *
- * A browser can't reach github.com's git endpoints directly (they send no CORS headers), so the clone goes through
- * isomorphic-git's public proxy, cors.isomorphic-git.org — and when it's authenticated, the PAT goes with it: the proxy
- * relays the request, so its operator could read the token. Accepted for now (2026-10-02): the PAT is retired once
- * login with GitHub lands, and a proxy of our own (the workbench plan's Cloudflare Worker) is the way back to the
- * token reaching only GitHub.
+ * A browser can't reach github.com's git endpoints directly (they send no CORS headers). Signed in, the clone goes through
+ * the API's proxy (packages/api/src/proxy.ts), every request with our DPoP-bound token: GitHub's token is added there and
+ * never reaches the browser. Signed out, a public repo clones through isomorphic-git's public proxy,
+ * cors.isomorphic-git.org, with no credential at all.
  *
  * The clone lands in memory, in a zen-fs mount of its own in the SHELL's realm (never the workspace's FS — that's the
  * app's: the token stays here), and ALL of it is returned — its working tree and its `.git` — for the shell to publish
@@ -17,8 +16,10 @@
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
 import { fs, InMemory } from "@zenfs/core";
+import type { HttpClient } from "isomorphic-git";
 import { clone, currentBranch } from "isomorphic-git";
 import http from "isomorphic-git/http/web";
+import { API, dpopFetch } from "./session";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); see git-engine.ts.
 // eslint-disable-next-line ts/naming-convention -- the `Buffer` global isomorphic-git reads
@@ -37,9 +38,42 @@ export interface ClonedRepo {
 	"files": { "path": string; "bytes": Uint8Array }[];
 }
 
-/** Shallow-clone `owner/repo` into memory and return its files, `.git` included. `token`, when given, authenticates the clone
- *  (through the proxy — see above); without one, only a public repo clones. */
-export async function cloneRepo(owner: string, repo: string, token?: string): Promise<ClonedRepo> {
+/** isomorphic-git's HTTP client over `dpopFetch`: each request carries our token and a proof (a clone is two requests). */
+const signedInHttp: HttpClient = {
+	"request": async ({ url, method = "GET", headers = {}, body }) => {
+		const chunks: Uint8Array[] = [];
+
+		for await (const chunk of body ?? []) {
+			chunks.push(chunk);
+		}
+
+		const sent = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+
+		chunks.reduce((offset, chunk) => {
+			sent.set(chunk, offset);
+
+			return offset + chunk.length;
+		}, 0);
+
+		const response = await dpopFetch(url, { "method": method, "headers": headers, ...sent.length === 0 ? {} : { "body": sent } });
+		const received = new Uint8Array(await response.arrayBuffer());
+
+		return {
+			"url": url,
+			"method": method,
+			"statusCode": response.status,
+			"statusMessage": response.statusText,
+			"headers": Object.fromEntries(response.headers),
+			"body": (async function* () {
+				yield received;
+			})()
+		};
+	}
+};
+
+/** Shallow-clone `owner/repo` into memory and return its files, `.git` included: through the API's proxy when signed in
+ *  (any repo the sign-in can see), through the public proxy when not (public repos only). */
+export async function cloneRepo(owner: string, repo: string, signedIn: boolean): Promise<ClonedRepo> {
 	const dir = MOUNT + "/" + owner + "-" + repo;
 
 	fs.mount(MOUNT, InMemory.create({ "label": "clone" }));
@@ -47,13 +81,12 @@ export async function cloneRepo(owner: string, repo: string, token?: string): Pr
 	try {
 		await clone({
 			"fs": fs,
-			"http": http,
 			"dir": dir,
-			"url": "https://github.com/" + owner + "/" + repo + ".git",
-			"corsProxy": CORS_PROXY,
+			...signedIn
+				? { "http": signedInHttp, "url": `${API}/github/git/${owner}/${repo}.git` }
+				: { "http": http, "url": "https://github.com/" + owner + "/" + repo + ".git", "corsProxy": CORS_PROXY },
 			"singleBranch": true,
-			"depth": 1,
-			...token === undefined ? {} : { "onAuth": () => ({ "username": token }) }
+			"depth": 1
 		});
 
 		const files: ClonedRepo["files"] = [];

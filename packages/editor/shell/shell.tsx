@@ -28,7 +28,7 @@ import { reportShellMetrics } from "../shared/editor-metrics";
 import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
 import { css, globalCss, iconSvg } from "../shared/theme";
 import { renderGitPanel } from "./git-panel";
-import { getPat, getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
+import { forgetPat, getRepoBinding, GITHUB_APP_INSTALL, setRepoBinding } from "./github-auth";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
 import "@awesome.me/webawesome/dist/components/page/page.js";
@@ -342,13 +342,14 @@ function Shell() {
 	const [runOpen, setRunOpen] = useState(false);
 	const [targets, setTargets] = useState<LaunchTarget[]>([]);
 	const [runs, setRuns] = useState<RunInfo[]>([]);
-	// GitHub connection: `githubUser` is the logged-in login (undefined = not connected). The heavy client (fido) is
-	// only imported when we actually talk to GitHub, so it code-splits out of the cold-start bundle.
+	// Signing in with GitHub (session.ts): `githubUser` is the signed-in login (undefined = signed out), fetched live through
+	// the API's proxy. The session (oauth4webapi) and the client (fido) are only imported when needed, so they code-split
+	// out of the cold-start bundle.
 	const [githubUser, setGithubUser] = useState<string | undefined>(undefined);
 	const [githubOpen, setGithubOpen] = useState(false);
 	const [githubBusy, setGithubBusy] = useState(false);
 	const [githubError, setGithubError] = useState<string | undefined>(undefined);
-	const [patInput, setPatInput] = useState("");
+	const [signInHere, setSignInHere] = useState(false);
 	const [repoInput, setRepoInput] = useState("");
 	const [loadingRepo, setLoadingRepo] = useState(false);
 	const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -590,72 +591,81 @@ function Shell() {
 		setRunOpen(false);
 	};
 
-	// If a PAT was stored from a past session, quietly confirm it still works and show who we're connected as. A stale
-	// token just leaves us disconnected — no error surfaced until the user actively tries to connect.
+	// On load: finish a sign-in this page is the end of, and if signed in, show who as (GitHub's login, fetched live through
+	// the API's proxy: the API keeps no login). The retired PAT is deleted wherever one was kept.
 	useEffect(() => {
-		if (!hasPat()) {
-			return;
-		}
-
 		let cancelled = false;
+		const signedOut = (): void => {
+			setGithubUser(undefined);
+		};
+
+		forgetPat();
+		window.addEventListener("shell:signedOut", signedOut);
 
 		void (async () => {
-			try {
-				const { createGitHub } = await import("./github");
-				const me = await createGitHub().viewer();
+			const session = await import("./session");
+			const span = githubLog.span("github.session");
 
-				if (!cancelled) {
-					setGithubUser(me.login);
+			try {
+				if (await session.completeSignIn()) {
+					span.info("signed in");
 				}
-			} catch {
-				/* stale / revoked token — stay disconnected; the user can reconnect from the popover */
+			} catch (error) {
+				setGithubError(error instanceof Error && /access_denied/u.test(error.message) ? "Sign-in was cancelled at GitHub." : "Sign-in didn't complete. Try again.");
+				setGithubOpen(true);
+				span.error("sign-in failed", { "error": errText(error) });
+			}
+
+			setSignInHere(session.canSignIn());
+
+			try {
+				if (session.isSignedIn()) {
+					const { createGitHub } = await import("./github");
+					const me = await createGitHub().viewer();
+
+					if (!cancelled) {
+						setGithubUser(me.login);
+					}
+				}
+			} catch (error) {
+				span.warn("couldn't read who's signed in", { "error": errText(error), "status": statusOf(error) });
+			} finally {
+				span.end();
 			}
 		})();
 
 		return () => {
 			cancelled = true;
+			window.removeEventListener("shell:signedOut", signedOut);
 		};
 	}, []);
 
-	// Connect: store the pasted PAT, then verify it by fetching the viewer (the cheapest authed call). On failure the
-	// token is dropped again so we never keep a bad one. This is the ONLY place the token is read from the UI.
-	const connectGithub = async (): Promise<void> => {
-		const token = patInput.trim();
-
-		if (token === "") {
-			return;
-		}
-
+	// Sign in: a full-page round trip through the API and GitHub (session.ts); this page loads again at the end of it.
+	const signInGithub = async (): Promise<void> => {
 		setGithubBusy(true);
 		setGithubError(undefined);
-		setPat(token);
-
-		const span = githubLog.span("github.connect");
 
 		try {
-			const { createGitHub } = await import("./github");
-			const me = await createGitHub().viewer();
-
-			setGithubUser(me.login);
-			setPatInput("");
-			setGithubOpen(false);
-			span.info("connected", { "login": me.login });
+			await (await import("./session")).signIn();
 		} catch (error) {
-			setPat(undefined);
-			setGithubUser(undefined);
-			setGithubError(error instanceof Error ? error.message : "Could not connect");
-			span.error("connect failed", { "error": errText(error), "status": statusOf(error) });
-		} finally {
-			span.end();
 			setGithubBusy(false);
+			setGithubError("Couldn't start signing in.");
+			githubLog.error("sign-in didn't start", { "error": errText(error) });
 		}
 	};
 
-	const disconnectGithub = (): void => {
-		setPat(undefined);
-		setGithubUser(undefined);
-		setGithubError(undefined);
-		setGithubOpen(false);
+	// Sign out: the session ends at the API (and GitHub's token with it), and this browser forgets its key.
+	const signOutGithub = async (): Promise<void> => {
+		setGithubBusy(true);
+
+		try {
+			await (await import("./session")).signOut();
+		} finally {
+			setGithubUser(undefined);
+			setGithubError(undefined);
+			setGithubOpen(false);
+			setGithubBusy(false);
+		}
 	};
 
 	// Load a GitHub repo into the workspace: the SHELL fetches the files (token stays here) and publishes them to the
@@ -682,20 +692,20 @@ function Shell() {
 			const meta = await gh.getRepo(owner, repo);
 
 			if (meta === undefined) {
-				setLoadError("Repo not found, or your token can't see it");
+				setLoadError(githubUser === undefined ? "Repo not found. A private one needs you signed in." : "Repo not found, or not one you've given the editor access to.");
 				span.error("repo not found or not visible");
 
 				return;
 			}
 
-			// Clone it — one shallow pack through isomorphic-git's proxy, the PAT along (git-clone.ts) — rather than read
-			// it blob by blob through the API, which fido's limiter holds to 100 requests a minute. The API is the fallback.
+			// Clone it — one shallow pack, through the API's proxy when signed in (git-clone.ts) — rather than read it blob by
+			// blob through the API, which fido's limiter holds to 100 requests a minute. The API is the fallback.
 			let files: { "path": string; "bytes": Uint8Array }[];
 
 			try {
 				const { cloneRepo } = await import("./git-clone");
 
-				({ files } = await cloneRepo(owner, repo, getPat()));
+				({ files } = await cloneRepo(owner, repo, githubUser !== undefined));
 				span.info("cloned", { "files": files.length });
 			} catch (error) {
 				span.warn("clone failed — reading through the API", { "error": errText(error) });
@@ -810,7 +820,7 @@ function Shell() {
 	// The Commit popover's body: what it needs first, until it has it — then the repo it pushes to, and the message.
 	const commitBody = (): ComponentChildren => {
 		if (githubUser === undefined) {
-			return <span class={ghHint()}>Connect GitHub first.</span>;
+			return <span class={ghHint()}>Sign in with GitHub first.</span>;
 		}
 
 		if (boundRepo === undefined) {
@@ -917,99 +927,90 @@ function Shell() {
 		);
 	};
 
-	// The GitHub popover's body: who it's connected as, and a repo to load — or, not connected, how to connect.
-	const githubBody = (): ComponentChildren => {
-		if (githubUser !== undefined) {
-			return (
-				<>
-					<span class={ghTitle()}>GitHub</span>
+	// Loading a repo, signed in or out: signed out, only a public one.
+	const loadSection = (): ComponentChildren => (
+		<>
+			<span class={ghTitle()}>{githubUser === undefined ? "Load a public repo" : "Load a repo"}</span>
 
-					<span class={ghConnected()}>
-						Connected as
-						{" "}
+			<span class={ghHint()}>Its files open in the workspace.</span>
 
-						<strong>{githubUser}</strong>
-					</span>
+			<wa-input
+				class={ghInput()}
+				size="small"
+				placeholder="owner/repo"
+				value={repoInput}
+				autocapitalize="off"
+				autocorrect="off"
+				spellcheck={false}
+				aria-label="Repository to load"
+				onInput={(event: Event) => { setRepoInput((event.currentTarget as HTMLInputElement).value); }}
+				onKeyDown={(event: KeyboardEvent) => {
+					if (event.key === "Enter") {
+						event.preventDefault();
+						void loadRepo();
+					}
+				}}
+			/>
 
-					<div class={ghActions()}>
-						<wa-button appearance="outlined" size="small" onClick={disconnectGithub}>
-							<Icon node={LogOut} />
+			{loadError !== undefined && <span class={ghError()}>{loadError}</span>}
 
+			<div class={ghActions()}>
+				<wa-button variant="brand" size="small" disabled={loadingRepo || repoInput.trim() === ""} onClick={() => { void loadRepo(); }}>{loadingRepo ? "Loading…" : "Load"}</wa-button>
+			</div>
+		</>
+	);
+
+	// The GitHub popover's body: who's signed in (and signing out), or signing in; then a repo to load.
+	const githubBody = (): ComponentChildren => (
+		<>
+			<span class={ghTitle()}>GitHub</span>
+
+			{githubUser !== undefined
+				? (
+					<>
+						<span class={ghConnected()}>
+							Signed in as
 							{" "}
-							Disconnect
-						</wa-button>
-					</div>
 
-					<wa-divider />
+							<strong>{githubUser}</strong>
+						</span>
 
-					<span class={ghTitle()}>Load a repo</span>
+						<span class={ghHint()}>
+							A private repo needs the editor's GitHub App on it.
+							{" "}
 
-					<span class={ghHint()}>Its files open in the workspace.</span>
+							<a class={ghLink()} href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
+						</span>
 
-					<wa-input
-						class={ghInput()}
-						size="small"
-						placeholder="owner/repo"
-						value={repoInput}
-						autocapitalize="off"
-						autocorrect="off"
-						spellcheck={false}
-						aria-label="Repository to load"
-						onInput={(event: Event) => { setRepoInput((event.currentTarget as HTMLInputElement).value); }}
-						onKeyDown={(event: KeyboardEvent) => {
-							if (event.key === "Enter") {
-								event.preventDefault();
-								void loadRepo();
-							}
-						}}
-					/>
+						<div class={ghActions()}>
+							<wa-button appearance="outlined" size="small" disabled={githubBusy} onClick={() => { void signOutGithub(); }}>
+								<Icon node={LogOut} />
 
-					{loadError !== undefined && <span class={ghError()}>{loadError}</span>}
+								{" "}
+								Sign out
+							</wa-button>
+						</div>
+					</>
+				)
+				: signInHere
+					? (
+						<>
+							<span class={ghHint()}>GitHub's token stays on the editor's server: this browser never holds it, and only what you allow the editor's GitHub App can be reached.</span>
 
-					<div class={ghActions()}>
-						<wa-button variant="brand" size="small" disabled={loadingRepo || repoInput.trim() === ""} onClick={() => { void loadRepo(); }}>{loadingRepo ? "Loading…" : "Load"}</wa-button>
-					</div>
-				</>
-			);
-		}
+							{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
 
-		return (
-			<>
-				<span class={ghTitle()}>Connect GitHub</span>
+							<div class={ghActions()}>
+								<wa-button variant="brand" size="small" disabled={githubBusy} onClick={() => { void signInGithub(); }}>{githubBusy ? "Signing in…" : "Sign in with GitHub"}</wa-button>
+							</div>
+						</>
+					)
+					: <span class={ghHint()}>Signing in isn't available on this copy of the editor.</span>}
 
-				<span class={ghHint()}>
-					Paste a fine-grained token with Contents read/write on your games repo. It stays in this browser and is sent only to GitHub.
-					{" "}
+			<wa-divider />
 
-					<a class={ghLink()} href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">Create one →</a>
-				</span>
-
-				<wa-input
-					class={ghInput()}
-					size="small"
-					type="password"
-					placeholder="github_pat_…"
-					value={patInput}
-					autocomplete="off"
-					spellcheck={false}
-					aria-label="GitHub personal access token"
-					onInput={(event: Event) => { setPatInput((event.currentTarget as HTMLInputElement).value); }}
-					onKeyDown={(event: KeyboardEvent) => {
-						if (event.key === "Enter") {
-							event.preventDefault();
-							void connectGithub();
-						}
-					}}
-				/>
-
-				{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
-
-				<div class={ghActions()}>
-					<wa-button variant="brand" size="small" disabled={githubBusy || patInput.trim() === ""} onClick={() => { void connectGithub(); }}>{githubBusy ? "Connecting…" : "Connect"}</wa-button>
-				</div>
-			</>
-		);
-	};
+			{loadSection()}
+		</>
+	);
 
 	const shellClass = ["wa-shell", lhsCollapsed ? "lhs-collapsed" : "", rhsCollapsed ? "rhs-collapsed" : ""].filter(Boolean).join(" ");
 
@@ -1152,7 +1153,7 @@ function Shell() {
 				<span class={spacer()} />
 
 				<span class={runWrap()}>
-					<wa-button appearance="plain" size="small" title={githubUser !== undefined ? "GitHub · " + githubUser : "Connect GitHub"} aria-label="Connect GitHub" aria-expanded={githubOpen} onClick={() => { setGithubOpen((value) => !value); }}><Icon node={GitBranch} /></wa-button>
+					<wa-button appearance="plain" size="small" title={githubUser !== undefined ? "GitHub · " + githubUser : "GitHub"} aria-label="GitHub" aria-expanded={githubOpen} onClick={() => { setGithubOpen((value) => !value); }}><Icon node={GitBranch} /></wa-button>
 
 					{githubOpen && (
 						<>

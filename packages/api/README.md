@@ -187,22 +187,28 @@ availability instead of money), anyone probing for a weak spot, and anyone sendi
   code or refresh token is checked against D1 before its Durable Object is addressed.
 - **The proxy allows only the editor's calls.** Each refusal is a `proxy_denied` row in the audit log.
 
-**Next, before any real user (A6):**
-1. **Rate limits**, with the Workers Rate Limiting binding, checked first and before any D1, Durable Object or crypto
-   work:
-   - Per IP hash: `/auth/github/*`, `/token` and `/revoke`, on the order of 20 a minute.
-   - Per grant: the proxy, on the order of 600 a minute.
+**Next, before any real user (A6), in the order to reach for them:**
+1. **The Workers Rate Limiting binding**, checked first, before any D1, Durable Object or crypto work. It's the first
+   layer we can have on `workers.dev`:
+   - per IP on `/auth/github/*`, `/token` and `/revoke`, on the order of 20 a minute;
+   - **per target as well as per IP:** the grant named by a code or refresh token at `/token`, and the user on the
+     proxy (on the order of 600 a minute). Distributed abuse rotates IPs but keeps hitting the same grant or account.
 
-   The binding counts per location and approximately, which is enough to stop abuse, though not for accounting.
-2. **Fail2ban:** count each failure per IP hash: a refused proof, `invalid_grant`, `invalid_token`, `proxy_denied`,
-   an oversized request.
-   - Past a threshold (say 20 in a minute), the IP is banned for a while. The ban is held in a Durable Object keyed
-     by the IP hash, so it takes effect at once everywhere, and checked first on every request.
-   - At the grant level, repeated `proxy_denied` revokes the grant: a session probing the allowlist is a
-     compromised session.
-3. **A cost ceiling:** `limits.cpu_ms` in `wrangler.jsonc`, plus Cloudflare's usage notifications on the account.
-4. **With our own domain (A7):** a WAF rate-limiting rule (the free plan includes one), Bot Fight Mode, and the
-   managed DDoS rules apply in front of the Worker. `workers.dev` gets the network protection but no zone rules.
+   The binding counts per location and approximately, which is right for abuse control.
+2. **A WAF rate-limiting rule, once we have our own domain (A7).** It blocks before the Worker runs, so a blocked
+   request costs no invocation or CPU. The free plan includes one rule. Bot Fight Mode and the managed DDoS rules come
+   with the zone too. `workers.dev` has no zone, so none of this applies until then.
+3. **Durable Object bans (fail2ban semantics: exact counts, escalating bans, one global list), only if repeat
+   offenders get past 1 and 2.** Not first. KV is never the counter: it's eventually consistent. One grant-level rule
+   is worth having from the start: repeated `proxy_denied` revokes the grant, since a session probing the allowlist is
+   a compromised session.
+4. **A cost ceiling:** `limits.cpu_ms` in `wrangler.jsonc`, plus Cloudflare's usage notifications on the account.
+
+Turnstile doesn't apply: there's no password or signup form here. GitHub takes the credentials, and has its own
+brute-force protection, and every input our endpoints take is unguessable (a code, a token, a signed proof).
+
+Cloudflare's volumetric DDoS protection catches floods, not low-rate abuse: a few requests a second at an expensive
+route looks like a user. That's what the binding limits are for.
 
 GitHub's own limit (5,000 requests an hour per user) comes back through the proxy's rate-limit headers, and fido backs
 off on them.
@@ -430,6 +436,27 @@ Each step lands green and is useful on its own.
   in `localStorage` as a fallback keeps the problem.
 - **A5 · the proxy.** Allowlisted API and git smart-HTTP; retire `cors.isomorphic-git.org`; update
   `architecture-model.ts` (network nodes) and `ARCHITECTURE.md` (the shell row: it no longer holds a GitHub token).
+  - *A4 and A5 built together, 2026-10-15* (the PAT could only go once GitHub was reachable through the proxy):
+    - **Worker:**
+      - `src/proxy.ts` allows exactly `shell/github.ts`'s calls, plus a clone's git reads, never a push.
+      - `Link` headers are rewritten to point back at the proxy, and rate-limit headers are exposed.
+      - The Grant refreshes GitHub's token one refresh at a time, and revokes it at GitHub on sign-out.
+    - **Shell:**
+      - `shell/session.ts` is the oauth4webapi client: a non-extractable key in IndexedDB, a full-page sign-in, the
+        landing checked for its state and `iss`, a nonce retry, and one refresh at a time.
+      - `dpopFetch` is the AuthProvider. `github.ts` maps fido's GitHub origin onto the proxy, and the clone gets a
+        DPoP `http` client.
+      - The popover reads "Sign in with GitHub", then "Signed in as …" with a "Choose repositories" link to the app's
+        installation page and sign-out.
+      - Signed out, public repos still load, from GitHub directly and through isomorphic-git's proxy, with no
+        credential.
+      - The PAT is gone, and a stored one is deleted on load.
+    - **Verified in Chrome against the dev Worker:** sign-in, "Signed in as brianjenkins94" (GitHub's `/user` through
+      the proxy), two public repos loaded through the proxied API and clone (all 200), then sign-out (`/revoke` 200,
+      `grant_revoked` in the audit log).
+    - **Tests:** 11 proxy tests in workerd (9 guards, each failing a test when disabled), and the shell's GitHub client
+      test. The editor's full architecture suite passes, apart from one test that fails only under 5-way load and passes
+      alone.
 - **A6 · hardening, before any real user.** Previews and `?extension=` code on a separate origin; rate limits on
   `/auth/*` (Workers rate-limiting binding); account deletion; a privacy page that says what's in the table above;
   a security review of the whole flow (`/security-review` plus a manual walk through RFC 9449 §11 and the OAuth 2.0
