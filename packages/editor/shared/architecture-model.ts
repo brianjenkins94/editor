@@ -177,7 +177,6 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.status", "from": ["shell", "bridge", "root"], "to": ["workbench"] },
 	{ "pattern": "git.file", "from": ["shell", "bridge"], "to": ["workbench"] },
-	{ "pattern": "git.classify", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "git.commit", "from": ["shell", "bridge", "root"], "to": ["workbench"] },
 	{ "pattern": "git.diff", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"] },
@@ -278,12 +277,15 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.prompt", "from": ["bridge"], "to": ["shell"] },
 	// ── workers ──
 	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"] },
-	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] }
+	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "annotations.classify", "from": ["shell"], "to": ["workbench"] }
 ];
 
 export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "worker:*", "protocol": "WebWorker protocol / postMessage", "transport": "Worker.postMessage", "reason": "platform", "description": "monaco's editor workers (request/reply/events) and the workbench's own workers." },
 	{ "a": "bridge", "b": "debug-worker", "protocol": "the debug protocol (ToWorker / WorkerEvent); the runtime's file calls (editor-api's mailbox)", "transport": "Worker.postMessage; SharedArrayBuffer + Atomics", "reason": "isolation", "description": "The adapter drives its run by messages of their own — launch, steps, decisions; values, stops, coverage back — not over the hub: the worker's hub link is only the workspace runtime's (editor-api), what any debugger's worker is given. And a debugger's worker reads and writes the workspace synchronously through its mailbox (handed over once, runtime.fs.attach): it writes a call and waits; the bridge answers it (runtime-fs.ts), the policy deciding the program's calls. tsval's reads its files from the workspace's buffer instead; another debugger's (editor-contrib's) has only the mailbox." },
+	{ "a": "workbench", "b": "ext:*", "protocol": "the workspace runtime's hub link (editor-api's observeExtension)", "transport": "MessagePort (through the web worker host's probe port)", "reason": "isolation", "description": "Any extension in the web worker host on the observability plane — a contributed one too: its logs and metrics ride the hub as ext:<name>'s, and nothing of the editor's services crosses. The Margin's warnings, say." },
+	{ "a": "bridge", "b": "ext:*", "protocol": "the workspace runtime's hub link (editor-api's observeExtension)", "transport": "MessagePort", "reason": "isolation", "description": "Any extension in the bridge's host on the observability plane, as in the web worker host's: its logs and metrics as ext:<name>'s." },
 	{ "a": "workbench", "b": "eslint", "protocol": "the workspace runtime's hub link (editor-api); the runtime's file calls (its mailbox)", "transport": "MessagePort (through the web worker host's probe port); SharedArrayBuffer + Atomics", "reason": "isolation", "description": "eslint's worker reads the workspace through the runtime link its extension hands it (workspaceRuntime().connect): its mailbox handed over once (runtime.fs.attach), then each read a synchronous call the bridge answers — as the loader's own, never decided or counted. Linting and fixing are the extension's messages to it, not the hub's." },
 	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "reason": "platform", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
 	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "reason": "platform", "description": "NLS bootstrap, then the MessagePort handoff." },

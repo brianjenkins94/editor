@@ -70,6 +70,12 @@ test("boot: every realm reports", async () => {
 	await session.until("tsserver's sync file system", hasLabel(/^exthost:LocalWebWorker:/u, /^ext:typescript-language-features\/TS /u, /^fileSystem\//u));
 });
 
+// Any extension on the editor's observability plane (editor-api's observeExtension): the Margin's log, as ext:margin's,
+// collected with the rest of the tree's records — no hub of its own, no console tap.
+test("observability: an extension's log reaches the tree's collector, as ext:<name>'s", async () => {
+	await session.eventually("the Margin's record", () => session.printed().find((line) => /^\[ext:margin(?:#\w+)?\] .*the Margin is up/u.test(line)), 60_000);
+});
+
 test("preview: npm run dev in the terminal serves the demo", async () => {
 	await session.terminal("npm run dev");
 	await session.until("the preview's first module", hasLabel(PREVIEW, "sw", /^GET \/src\/main\.tsx$/u));

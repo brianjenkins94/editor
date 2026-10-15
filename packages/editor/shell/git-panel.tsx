@@ -7,7 +7,7 @@
  * refreshes on `git.changed`. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
  * decoupling was for. The diff opens in a shell-owned overlay the codehike island mounts into (overlay.body).
  */
-import type { ChangeKind, GitFileChange } from "@brianjenkins94/editor-api/git";
+import type { ChangeVerdict, GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
 import type { DiffRowInfo } from "./git-codehike";
@@ -306,8 +306,10 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 }
 
 /** One changed-file row: tri-state pick, status, name, and a tail (your-edits expander, cosmetic badge, discard). */
-function FileRow({ file, state, current, expanded, onPick, onOpen, onToggleExpand, onDiscard }: {
+function FileRow({ file, cosmetic, state, current, expanded, onPick, onOpen, onToggleExpand, onDiscard }: {
 	"file": GitFileChange;
+	/** Its change is formatting or comments only (BABLR's verdict). */
+	"cosmetic": boolean;
 	"state": "all" | "partial" | "off";
 	"current": boolean;
 	"expanded": boolean;
@@ -350,7 +352,7 @@ function FileRow({ file, state, current, expanded, onPick, onOpen, onToggleExpan
 	};
 
 	return (
-		<div class={"file" + (file.cosmetic ? " cosmetic" : "")} aria-current={current} onClick={clickRow}>
+		<div class={"file" + (cosmetic ? " cosmetic" : "")} aria-current={current} onClick={clickRow}>
 			<wa-checkbox class="pick" checked={state !== "off"} indeterminate={state === "partial"} onChange={(event: Event) => { onPick((event.target as HTMLInputElement).checked); }} />
 
 			<span class={"st " + file.status}>{file.status}</span>
@@ -360,7 +362,7 @@ function FileRow({ file, state, current, expanded, onPick, onOpen, onToggleExpan
 			<span class="tail">
 				{isCodeFile(file) && <wa-button class="exp" appearance="plain" size="small" title="Your edits" aria-label="Your edits" onClick={clickExpand}>{expanded ? "▾" : "▸"}</wa-button>}
 
-				{file.cosmetic && <wa-badge class="cos" variant="neutral">cosmetic</wa-badge>}
+				{cosmetic && <wa-badge class="cos" variant="neutral">cosmetic</wa-badge>}
 
 				<wa-button class={"discard" + (armed ? " armed" : "")} appearance="plain" size="small" variant="danger" title="Discard changes" aria-label="Discard changes" onClick={clickDiscard}>{armed ? "Discard?" : "⨯"}</wa-button>
 			</span>
@@ -376,6 +378,8 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const rpc = rpcRef.current;
 
 	const [files, setFiles] = useState<GitFileChange[]>([]);
+	/** The changed files whose change is cosmetic, by path (BABLR's verdict, asked as they're listed). */
+	const [cosmetic, setCosmetic] = useState<ReadonlySet<string>>(new Set());
 	const [selected, setSelected] = useState<string | undefined>(undefined);
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 	const [committing, setCommitting] = useState(false);
@@ -431,6 +435,32 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		overlay.body.replaceChildren(diff);
 	};
 
+	/** What BABLR says of a change from `before` to `after` (the workbench's classifier: `annotations.classify`). */
+	const classify = async (before: string, after: string): Promise<ChangeVerdict | undefined> => {
+		if (before === "" || after === "") {
+			return undefined;
+		}
+
+		const answer = await rpc.request("annotations.classify", { "before": before, "after": after }, { "timeoutMs": 120_000 }).catch(() => undefined) as { "value"?: ChangeVerdict } | undefined;
+
+		return answer?.value;
+	};
+
+	/** Each modified code file's verdict, asked one at a time (BABLR's worker is one): the cosmetic ones badged. */
+	const classifyAll = async (changed: GitFileChange[]): Promise<void> => {
+		const found = new Set<string>();
+
+		for (const file of changed.filter((each) => each.status === "M" && isCodeFile(each))) {
+			const texts = await rpc.request("git.file", { "path": file.path }).catch(() => undefined) as { "head": string; "working": string } | undefined;
+
+			if (texts !== undefined && (await classify(texts.head, texts.working))?.verdict === "cosmetic") {
+				found.add(file.path);
+			}
+		}
+
+		setCosmetic(found);
+	};
+
 	const showDiff = async (path: string): Promise<void> => {
 		setSelected(path);
 
@@ -469,9 +499,9 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 					force();
 				},
 				"classify": async () => {
-					const result = await rpc.request("git.classify", { "path": path }) as { "verdict": ChangeKind | "none"; "changedLines"?: number[] };
+					const verdict = await classify(head, working);
 
-					return { "verdict": result.verdict, "changedLines": result.changedLines ?? [] };
+					return { "verdict": verdict?.verdict ?? "none", "changedLines": verdict?.changedLines ?? [] };
 				},
 				"onDiscardRows": async (hunkRows) => {
 					const fresh = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
@@ -494,6 +524,8 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 
 	const refresh = async (options?: { "timeoutMs": number }): Promise<void> => {
 		const { "files": next } = await rpc.request("git.status", undefined, options) as { "files": GitFileChange[] };
+
+		void classifyAll(next);
 		const stillChanged = (path: string): boolean => next.some((file) => file.path === path);
 
 		for (const path of [...deselected]) {
@@ -700,6 +732,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 							<Fragment key={file.path}>
 								<FileRow
 									file={file}
+									cosmetic={cosmetic.has(file.path)}
 									state={fileState(file.path)}
 									current={file.path === selected}
 									expanded={expanded.has(file.path)}

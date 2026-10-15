@@ -6,12 +6,21 @@
  * core's Rule view.
  */
 import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
+import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import { installCoverage } from "./coverage";
 import { registerMargin, showMarks, showProfile } from "./margin";
 
 export function activate(context: vscode.ExtensionContext): void {
-	registerMargin();
+	// On the editor's observability plane, as any extension can be (editor-api's observeExtension): its log.
+	const observed = observeExtension("margin");
+
+	if (observed !== undefined) {
+		context.subscriptions.push(observed);
+		observed.log.info("the Margin is up");
+	}
+
+	registerMargin(observed?.log);
 	// Coverage's marks, into the Margin: each session's report, and the evidence kept in git.
 	installCoverage(vscode, evidenceStore(vscode, context.subscriptions), showMarks, showProfile);
 }

@@ -166,6 +166,9 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 		// what spans of the text are beyond their shape (by span id: TypeScript's type, observed tags), for the typed
 		// strategy. `texts`: texts the file went through that the caller knows (its edit history's), each a baseline a
 		// reference made against it is followed from by the structural diff, as one made against a commit is.
+		// …and what a change from one text to another is: cosmetic or semantic, the nodes that changed and their lines
+		// (core's classifier, sharing the worker's cached parses — the cosmetic extension's badge).
+		vscode.commands.registerCommand("editor.annotations.classify", async (before: unknown, after: unknown) => annotation("classify", { "before": before, "after": after })),
 		vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] }) => annotation("resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types, "texts": options?.texts ?? [] }))
 	);
 

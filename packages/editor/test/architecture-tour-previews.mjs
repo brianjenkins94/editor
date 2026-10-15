@@ -480,7 +480,8 @@ test("git review: a diff in the shell", async () => {
 	await session.until("Code Hike", hasLabel("sw", "net:lighter.codehike.org", /./u), 30_000);
 
 	// A modified file's cosmetic/semantic verdict, derived from the BABLR worker's cached parses: commit what's there,
-	// change a committed file, and deriving its verdict parses the new version into the cache (bablr IndexedDB).
+	// change a committed file, and the cosmetic extension's verdict (editor.annotations.classify) parses the new version
+	// into the cache (bablr IndexedDB) — a comment added, so a cosmetic change, marked.
 	const parses = () => session.workbench().evaluate(() => new Promise((resolve) => {
 		const open = indexedDB.open("bablr");
 
@@ -514,6 +515,7 @@ test("git review: a diff in the shell", async () => {
 		await api.commands.executeCommand("sourceControl.refresh");
 	});
 	await eventually("the change's verdict, from parses the cache now keeps", async () => (await parses()) > before || undefined, 60_000);
+	await eventually("the file marked cosmetic, by the cosmetic extension", async () => ((await session.execute("cosmetic.list"))?.["src/index.ts"] === "cosmetic" ? true : undefined), 60_000);
 
 	// The edits typed above were recorded as edit history in silo's local/ (its own IndexedDB-backed mount), not in .git/.
 	const history = await eventually("the edit history, in silo's local/", () => session.workbench().evaluate(async () => {

@@ -50,10 +50,12 @@ import type { AskEvent, CapabilityChoice, EndedEvent, LiveCall, LiveValue, RunEn
 import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
+import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
 import type { LineMark as PaneMark, ProfiledLine } from "./coverage";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { failureText } from "@brianjenkins94/editor-api/failures";
 import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { recordedResult } from "@brianjenkins94/editor-api/policy";
 import { argvRunsOf, decisionOf, resultOf } from "@brianjenkins94/editor-api/rules";
@@ -116,6 +118,9 @@ const open = new Set<string>();
 const CODE = new Set(["javascript", "javascriptreact", "typescript", "typescriptreact"]);
 /** The capability stop a session is at, per file URI: what it asks. */
 const asks = new Map<string, { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }>();
+/** Where the Margin says what went wrong: its log on the editor's observability plane (extension.ts), when there is one. */
+let log: ObservedExtension["log"] | undefined;
+
 /** A capability stop's choice, back to its session — the bridge's, where the decider is (EXTENSION-POINTS 5). */
 const choose = async (session: string, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<unknown> => vscode.commands.executeCommand("editor.capability.decide", session, choice, rule, give);
 /** What a call returned the last time it ran for real (a preview's fetch, recorded), or null. */
@@ -369,7 +374,11 @@ async function edit(key: string, request: Omit<EditRequest, "id">): Promise<Edit
 	});
 
 	try {
-		return await Promise.resolve(vscode.commands.executeCommand<EditAnswer>("editor.rules.edit", { "id": key, ...request })).catch(() => null) ?? null;
+		return await Promise.resolve(vscode.commands.executeCommand<EditAnswer>("editor.rules.edit", { "id": key, ...request })).catch((error: unknown) => {
+			log?.warn("a rule couldn't be edited: the Rule view didn't answer", { "key": key, "error": failureText(error) });
+
+			return null;
+		}) ?? null;
 	} finally {
 		making.delete(key);
 	}
@@ -915,8 +924,10 @@ export function showMarks(uri: string, marks: PaneMark[]): void {
 	draw(uri);
 }
 
-/** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops. */
-export function registerMargin(): void {
+/** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops — saying what goes
+ *  wrong to `logger`. */
+export function registerMargin(logger?: ObservedExtension["log"]): void {
+	log = logger;
 	// The Margin, a pane view (EXTENSION-POINTS.md, 4): its content, asked for by pane-views — and what its buttons and
 	// cells run. Each rule it makes opens in the Rule view (rule-view.ts); its button waits while it's open.
 	const uriArg = (value: unknown): string => {

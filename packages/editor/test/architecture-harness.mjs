@@ -149,6 +149,8 @@ export async function startSession(options = {}) {
 	const page = await context.newPage();
 	// What went wrong in the page, kept to say why when the editor doesn't boot (and printed as it happens in CI).
 	const pageErrors = [];
+	// What the page printed lately — the root prints every record the hub tree collects ([source] text).
+	const printed = [];
 	// Who hears of a realm that couldn't load: each wait in progress, which fails on it at once (failFast).
 	const realmFailed = new Set();
 
@@ -160,6 +162,12 @@ export async function startSession(options = {}) {
 		}
 	});
 	page.on("console", (message) => {
+		printed.push(message.text());
+
+		if (printed.length > 5000) {
+			printed.shift();
+		}
+
 		if (message.type() === "error") {
 			// (a resource that failed says only its status: where it was is the message's location)
 			const { url } = message.location();
@@ -324,6 +332,8 @@ export async function startSession(options = {}) {
 	return {
 		"page": page,
 		"workbench": workbench,
+		/** What the page printed lately: each line as the console has it — a collected record as `[source] text`. */
+		"printed": () => printed,
 		"until": observed,
 		"eventually": eventually,
 		"snapshot": () => snapshot,

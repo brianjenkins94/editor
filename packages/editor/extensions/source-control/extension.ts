@@ -1,7 +1,7 @@
 /**
- * VS Code's Source Control view for the workspace's git: its staged and unstaged changes (a cosmetic-only change dimmed
- * — formatting or comments, by BABLR's verdict), the HEAD side of each for the diff editor and the gutters, and
- * commit-all from the input box.
+ * VS Code's Source Control view for the workspace's git: its staged and unstaged changes, the HEAD side of each for the
+ * diff editor and the gutters, and commit-all from the input box. (A change that's formatting or comments only is marked
+ * by the cosmetic extension, over any git.)
  *
  * Git is the editor's (git-engine.ts, isomorphic-git on the shared workspace, behind git-service.ts — the shell's review
  * panel reads it too); this is its VS Code face, through the commands the editor documents (EXTENSION-POINTS 5):
@@ -36,7 +36,8 @@ export function activate(context: vscode.ExtensionContext): void {
 			"resourceUri": resourceUri,
 			// Clicking a change opens the diff (HEAD ↔ working tree), the standard SCM gesture.
 			"command": { "command": "vscode.diff", "title": "Open Changes", "arguments": [resourceUri.with({ "scheme": HEAD_SCHEME }), resourceUri, change.path + " (Working Tree)"] },
-			"decorations": { "strikeThrough": change.status === "D", "faded": change.cosmetic, "tooltip": change.cosmetic ? "Cosmetic — formatting / comments only" : change.status }
+			// (whether it's cosmetic is the cosmetic extension's, a file decoration of its own)
+			"decorations": { "strikeThrough": change.status === "D", "tooltip": change.status }
 		};
 	};
 

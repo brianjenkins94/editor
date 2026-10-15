@@ -29,9 +29,10 @@ this?**
 
 Reserve `workbench-entry` (the workbench realm) for host-**boot glue** proper (the monaco `boot()` call, mounting
 zen-fs, the terminal process factory, registering extensions) — and for browser-parity shims that have nowhere more
-natural to sit. **Known debt:** the BABLR classifier is currently welded into our browser git SCM (workbench realm);
-as *novel* functionality it should be extracted into a standalone extension, decoupled from our git provider, so it
-also works over desktop's built-in git.
+natural to sit. **The BABLR classifier** was welded into our browser git SCM; since 2026-10-15 its verdict is the
+`cosmetic` extension's badge (a file decoration), on `editor.annotations.classify` (core's BABLR worker and its parse
+cache) and the editor's git commands — decoupled from the git service, which no longer classifies. Reading changes
+from desktop's built-in git, and a BABLR of its own there, are what's left for it to run on desktop.
 
 ## The realms
 
@@ -40,7 +41,7 @@ also works over desktop's built-in git.
 | **Shell** (top window) | `shell/`: `main.tsx`'s `renderShell()` branch → `shell/shell.tsx`, `shell/git-panel.tsx` | DOM, the shell hub; *later* the GitHub token (trust boundary) | Surrounding chrome: LHS project picker, top bar, and the RHS **git review panel** (`shell/git-panel.tsx` — GitHub-Desktop-style changes/diff/commit, a pure hub consumer of `git.*`). Loads the app in an iframe pointing back at the same page. |
 | **App iframe** (`/`) | `app/`: `main.tsx`'s app branch, `app/coi.ts`, `app/vscode.tsx`, `app/samples.ts`, `app/tools/` (the tab's MCP tools) | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench/`: `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal/`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(Core lives here too: the git engine and service — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is the source-control extension's, through the `editor.git.*` commands — the editor's BABLR (`bablr.ts`: one worker, its parses cached by blob oid, answering the git panel's verdicts, runtime evidence's span ids, and extensions' annotation references and resolutions), and runtime evidence (`evidence.ts`: each run's envelope, and what tsval sessions and preview pages observed, folded into `.silo/`). The cosmetic classifier the git service asks is the part that should become a standalone extension — see the known debt above.)* |
-| **Extension hosts** (`LocalProcess`, sharing the workbench's realm; `LocalWebWorker`, a worker) | `extensions/<name>/extension.ts`, `extensions/<name>/ts-plugin.js` | the vscode API (files through `vscode.workspace.fs`) — **no DOM, no zen-fs**; the hub only in `bridge` | One extension per feature (*Extensions: which one, which host*, below). `LocalProcess`: `bridge` (core's vscode API is its, and it's the only extension on the hub: every debugger's editor-api events and capability stops, the workspace runtime, tasks, Source Control, core's BABLR to extensions as `editor.annotations.*`) and `tsval`, which needs what only that host has. `LocalWebWorker`: everything else — `running`, `insights`, `margin` (the Margin, from the run contract's events), `notes`, `history`, `type-queries`, `event-sheet`, `cspell`, `eslint`, `capabilities`, and VS Code's own TypeScript extension. `capabilities` and `history` also run a plugin *inside tsserver*, reusing its `ts` and its Program; `eslint` runs real ESLint under almostnode in a worker of its own (below). |
+| **Extension hosts** (`LocalProcess`, sharing the workbench's realm; `LocalWebWorker`, a worker) | `extensions/<name>/extension.ts`, `extensions/<name>/ts-plugin.js` | the vscode API (files through `vscode.workspace.fs`) — **no DOM, no zen-fs**; the hub only in `bridge` | One extension per feature (*Extensions: which one, which host*, below). `LocalProcess`: `bridge` (core's vscode API is its, and it's the only extension on the hub: every debugger's editor-api events and capability stops, the workspace runtime, tasks, Source Control, core's BABLR to extensions as `editor.annotations.*`) and `tsval`, which needs what only that host has. `LocalWebWorker`: everything else — `running`, `insights`, `margin` (the Margin, from the run contract's events), `cosmetic` (a change's cosmetic mark), `notes`, `history`, `type-queries`, `event-sheet`, `cspell`, `eslint`, `capabilities`, and VS Code's own TypeScript extension. `capabilities` and `history` also run a plugin *inside tsserver*, reusing its `ts` and its Program; `eslint` runs real ESLint under almostnode in a worker of its own (below). |
 | **Workers** (`dist/lsp/*`) | `workers/` for core's (spawned from the workbench realm: `node-worker`, `provoke-worker`, `bablr-worker`); an extension's own sit in its folder (`extensions/tsval/debug-worker.ts`, `extensions/cspell/server-host.ts`, `extensions/event-sheet/recognizer-worker.ts`) — only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode: dev servers and previews), `bablr-worker` (the editor's BABLR, for `bablr.ts`: parses cached by blob oid in its own IndexedDB; cosmetic verdicts, span ids for runtime evidence, annotation references and resolutions), `debug-worker` (tsval stepping a program, almostnode for its packages; top-level, from the `LocalProcess` host), and — nested in the `LocalWebWorker` host, as any of its extensions' workers are, each named by its extension (`ext:<extension>/<worker>`) — VS Code's two tsservers, the cspell server (almostnode running cspell), eslint's worker (`extensions/eslint/worker.ts`: almostnode running real ESLint with the workspace's `eslint.config.*` or else the preset, from the toolchain the build traces and packs — `build/eslint-toolchain.ts` → `lsp/eslint-toolchain.tgz` — over the workspace through the workspace runtime), the event sheet's recognizer, and the capabilities extension's package worker (`extensions/capabilities/packages-worker.ts`: each dependency's tarball read for the baseline, started per sync). |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (upstream BABLR and our grammar, `bablr-language-ts`, bundled: `cstSpans`, span ids, `reidentify`/`follow`, `classifyChange`), `tsval` (the interpreter, and its `observe` hook), `almostnode` (the node runtime and previews' dev server, which instruments workspace modules for runtime evidence), `util/silo` (the shared policy model, runtime evidence and span annotations: pure models and layouts), and tsval's `capability-calls` (how a call is told for a capability), which the capabilities plugin's canary is built with. Built/aliased into the realms above. |
 
@@ -345,6 +346,7 @@ flowchart LR
         n_eslint["ESLint worker"]
         n_ext_capabilities["capabilities"]
         n_ext_capabilities_packages["packages"]
+        n_ext_cosmetic["cosmetic"]
         n_ext_cspell_cspell["cspell"]
         n_ext_event_sheet["event-sheet"]
         n_ext_event_sheet_recognizer_js["recognizer.js"]
@@ -419,6 +421,7 @@ flowchart LR
   n_ext_bridge -->|"reads, writes"| n_store__silo_local__file__json
   n_ext_bridge -->|"reads, writes"| n_store__silo_policy__file__json
   n_ext_bridge <-.->|"commands"| n_ext_capabilities
+  n_ext_bridge <-.->|"commands"| n_ext_cosmetic
   n_ext_bridge <-.->|"commands"| n_ext_event_sheet
   n_ext_bridge <-.->|"commands"| n_ext_insights
   n_ext_bridge <-.->|"commands"| n_ext_margin
@@ -433,6 +436,7 @@ flowchart LR
   n_ext_capabilities <-.->|"commands"| n_ext_margin
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
   n_ext_capabilities_packages <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
+  n_ext_cosmetic <-.->|"commands"| n_ext_vscode
   n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_event_sheet <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet_recognizer_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
@@ -446,6 +450,7 @@ flowchart LR
   n_ext_margin -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_margin -->|"reads"| n_store__silo_local__file__json
   n_ext_margin <-.->|"commands"| n_ext_vscode
+  n_ext_margin <-.->|"the workspace runtime's hub link (editor-api's observeExtension)"| n_workbench
   n_ext_markdown_language_features_serverWorkerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_notes -->|"reads"| n_store__git__file_
   n_ext_notes -->|"reads"| n_store__silo__gitattributes
@@ -562,13 +567,13 @@ flowchart LR
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
-| Workbench | annotations | `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
+| Workbench | annotations | `annotations.classify()`, `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
 | Workbench | editor | `editor.state()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | files | `files.edit()`, `files.glob()`, `files.grep()`, `files.read()`, `files.write()` |
-| Workbench | git | `git.classify()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.status()` |
+| Workbench | git | `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.status()` |
 | Workbench | history | `history.chunks()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | notifications | `notifications.list()` |
@@ -592,8 +597,8 @@ Ask, in order:
    (no vscode dep), `silo/policy`, tsval's `capability-calls`.*
 2. **NOVEL product functionality** (desktop VS Code does *not* provide it)? → a self-contained **extension** in the
    ext host, reaching the workspace through **`vscode.workspace.fs`** (never a direct `zen-fs` import), and
-   **spawning any heavy worker itself**. Model: the `capabilities` extension. *The BABLR cosmetic classifier belongs
-   here — it is currently welded into our browser git SCM (debt).*
+   **spawning any heavy worker itself**. Model: the `capabilities` extension. *The BABLR cosmetic classifier is here
+   now — the `cosmetic` extension, its verdicts core's BABLR's (`editor.annotations.classify`).*
    - **2b. Browser parity for a desktop built-in** (desktop provides it; we only rebuilt it for the browser — e.g.
      git SCM)? → keep it **browser-side** (the workbench realm, or a browser-only extension). It does **not** port,
      so do not make it a portable product extension.
@@ -623,11 +628,11 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
   `editor.git.*` commands; a change is a file change, as its watcher sees it) and the
   shell's GitHub-Desktop review panel (`git-panel`). We do not ship SCM to desktop; desktop already has it.
   (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.)
-- `bablr-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. It is
-  currently welded into our browser git (the git service asks it, and *our* Source Control view paints it). Its right
-  home is a **standalone extension**, decoupled from our git provider, that reads HEAD vs working through vscode's own
-  SCM/diff/fs APIs and adds the badge — so it works over desktop's built-in git too. *(This is the "bablr belongs in
-  the extension" correction, correctly scoped: the classifier ports; the SCM shim does not.)* Recorded as debt.
+- `bablr-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. Since
+  2026-10-15 it's a **standalone extension** (`extensions/cosmetic`): HEAD vs working through the editor's git commands,
+  BABLR's verdict through `editor.annotations.classify`, the badge a file decoration VS Code draws wherever the file is
+  listed. The git service no longer asks it. *(The "bablr belongs in the extension" correction, correctly scoped: the
+  classifier ports; the SCM shim does not.)* Left for desktop: its changes from the built-in git's API, and BABLR.
 
 The capability overlay is the template for that classifier extension: pure core (`silo/policy`,
 tsval's `capability-calls`) → a tsserver plugin (ext host) that emits diagnostics → an ext-host binding

@@ -1,5 +1,5 @@
 /**
- * Git service — exposes `git-engine` (+ the cosmetic classifier) over the hub: the one git the editor has, read by the
+ * Git service — exposes `git-engine` over the hub: the one git the editor has, read by the
  * shell's GitHub-Desktop-style review panel and by VS Code's Source Control view (the source-control extension). The
  * engine is vscode-free, so each face reads it over the hub without knowing about the other. Runs in the workbench
  * realm (where zen-fs lives); the shell reaches it shell → app → workbench, the Source Control view bridge → workbench.
@@ -8,13 +8,11 @@ import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
-import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import * as engine from "./git-engine";
 
 const DIR = "/workspace";
-const CLASSIFIABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 
 /** Past this many changed lines a diff says so rather than listing them (a rewrite, a generated file). */
 const MOST_EDITS = 5000;
@@ -34,7 +32,7 @@ export function unifiedDiff(path: string, before: string, after: string): string
 /** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub — and the same as
  *  commands for extensions (EXTENSION-POINTS 5): `editor.git.status`, `editor.git.file(path)`, `editor.git.commit(message)`.
  *  (An extension learns of a change as VS Code's own git does: a save, or a file watcher — the repository is files too.) */
-export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier: CosmeticClassifier, log: Logger): void {
+export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
 	const status = async (): Promise<{ "files": GitFileChange[] }> => {
@@ -45,7 +43,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			let entry = byPath.get(change.path);
 
 			if (entry === undefined) {
-				entry = { "path": change.path, "status": change.status, "staged": false, "unstaged": false, "cosmetic": false };
+				entry = { "path": change.path, "status": change.status, "staged": false, "unstaged": false };
 				byPath.set(change.path, entry);
 			}
 
@@ -60,24 +58,6 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		for (const change of current.unstaged) {
 			record(change, "unstaged");
 		}
-
-		// Cosmetic verdict for modified, classifiable files — read-through cached in the classifier (in-memory + the
-		// durable cache in `.silo/local/bablr/`), so a refresh re-derives nothing: an unchanged file's verdict is a cache hit and
-		// BABLR (slow) is never re-run for it. Shares the cache with git.classify below and the SCM viewlet.
-		const entries = [...byPath.values()];
-		const cosmetic = await Promise.all(entries.map(async (entry) => {
-			if (entry.status === "M" && CLASSIFIABLE.test(entry.path)) {
-				try {
-					return (await classifier.verdict(await engine.headContent(entry.path), await readWorking(entry.path))).verdict === "cosmetic";
-				} catch { /* unreadable / unparsable → no badge */ }
-			}
-
-			return false;
-		}));
-
-		entries.forEach((entry, index) => {
-			entry.cosmetic = cosmetic[index];
-		});
 
 		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)) };
 	};
@@ -97,7 +77,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 	});
 	const file = async (path: unknown): Promise<{ "head": string; "working": string }> => {
 		if (typeof path !== "string") {
-			return { "head": "", "working": "", "verdict": "none" };
+			return { "head": "", "working": "" };
 		}
 
 		let working = "";
@@ -106,54 +86,12 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			working = await readWorking(path);
 		} catch { /* deleted in the working tree */ }
 
-		// Fast path — no BABLR here (it's slow); the shell asks for the verdict separately via git.classify.
+		// The two texts only: what BABLR says of the change is the classifier's (annotations.classify), asked by whoever shows it.
 		return { "head": await engine.headContent(path), "working": working };
 	};
 
 	serve(hub, "git.file", async (args) => file((args as { "path"?: string } | null)?.path));
 	vscode.commands.registerCommand("editor.git.file", file);
-
-	// BABLR verdict for the whole change, requested LAZILY after the diff is shown so BABLR never blocks the open.
-	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Only ONE diff is open at a time,
-	// so a new request SUPERSEDES the previous: we abort the older run (the yielding worker bails cooperatively). The
-	// content-addressed cache lives in the classifier now (in-memory + the durable cache in `.silo/local/bablr/`), shared with the
-	// status badges + SCM viewlet — so a hit skips BABLR and this handler just guards inputs and supersession.
-	let classifyInFlight: AbortController | undefined;
-
-	serve(hub, "git.classify", async (args) => {
-		const path = (args as { "path"?: string } | null)?.path;
-
-		if (typeof path !== "string" || !CLASSIFIABLE.test(path)) {
-			return { "verdict": "none" };
-		}
-
-		let working = "";
-
-		try {
-			working = await readWorking(path);
-		} catch { /* deleted */ }
-
-		const head = await engine.headContent(path);
-
-		if (head === "" || working === "") {
-			return { "verdict": "none" };
-		}
-
-		classifyInFlight?.abort();
-		const controller = new AbortController();
-
-		classifyInFlight = controller;
-
-		try {
-			return await classifier.verdict(head, working, controller.signal);
-		} catch {
-			return { "verdict": "none" }; // aborted (superseded) or worker error — the newer request will answer
-		} finally {
-			if (classifyInFlight === controller) {
-				classifyInFlight = undefined;
-			}
-		}
-	});
 
 	const commit = async (request: { "message"?: string; "files"?: engine.CommitFile[] } | null): Promise<{ "oid": string }> => {
 		const message = request?.message?.trim();

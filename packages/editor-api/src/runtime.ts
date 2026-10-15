@@ -19,10 +19,10 @@
  * The extension's own code never joins the editor's hub: only its worker's runtime link does, through this.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { Observed, ObserveOptions } from "@brianjenkins94/observability";
+import type { MetricsReporter, Observed, ObserveOptions } from "@brianjenkins94/observability";
 import type { Effect } from "./index.ts";
 import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
-import { observe } from "@brianjenkins94/observability";
+import { observe, relayLoggerToHub, reportMetrics } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "./probes.ts";
 
 /** What `workspaceRuntime()` gives a debugger's extension. */
@@ -325,6 +325,45 @@ const RUNTIME = Symbol.for("@brianjenkins94/run-contract/workspaceRuntime");
 /** The workspace runtime of this extension host — undefined outside the editor. */
 export function workspaceRuntime(): WorkspaceRuntime | undefined {
 	return (globalThis as { [RUNTIME]?: WorkspaceRuntime })[RUNTIME];
+}
+
+/** An extension on the editor's observability plane (`observeExtension`): its log, its metrics, and its leaving. */
+export interface ObservedExtension {
+	/** Its records, on `$sys.log` — where the editor's own are, and debug-mcp's `logs_query` reads them. */
+	"log": Observed["log"];
+	/** Its gauges, sampled to `$sys.metrics` (the editor's metrics plane: `editor.metrics.read`, the insights monitor). */
+	"metrics": MetricsReporter;
+	"dispose": () => void;
+}
+
+/**
+ * The extension `name` on the editor's hub, for observability alone — any extension, a contributed one too: its logs
+ * and metrics ride the hub as `ext:<name>`'s, through the workspace runtime's link (the way a debugger's worker joins,
+ * EXTENSION-POINTS 2), which carries them and nothing of the editor's services. Not its console: the extension host is
+ * every extension's, so what an extension logs is what it hands `log`. Undefined outside the editor.
+ */
+export function observeExtension(name: string): ObservedExtension | undefined {
+	const runtime = workspaceRuntime();
+
+	if (runtime === undefined) {
+		return undefined;
+	}
+
+	const id = `ext:${name}`;
+	const { port, dispose } = runtime.connect(id);
+	const hub = createHub({ "id": id });
+	const unlink = hub.link(portTransport(port), { "uplink": true });
+	const metrics = reportMetrics(hub);
+
+	return {
+		"log": relayLoggerToHub(hub, hub.id),
+		"metrics": metrics,
+		"dispose": () => {
+			metrics.dispose();
+			unlink();
+			dispose();
+		}
+	};
 }
 
 /** Core: the workspace runtime of this extension host is `runtime`. */

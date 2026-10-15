@@ -40,6 +40,7 @@
  */
 
 import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
+import type { ChangeVerdict } from "./git.ts";
 
 export type { Resolution, SpanRef, Status } from "@brianjenkins94/util/silo/annotations";
 
@@ -78,6 +79,8 @@ export function annotations(commands: Commands) {
 	return {
 		"spans": async (source: string): Promise<Answer<Span[]>> => (source === "" ? { "value": [] } : run<Span[]>("editor.annotations.spans", source)),
 		"refer": async (source: string, file: string, ranges: { "start": number; "end": number }[]): Promise<Answer<(SpanRef | undefined)[]>> => (ranges.length === 0 ? { "value": [] } : run<(SpanRef | undefined)[]>("editor.annotations.refer", source, file, ranges)),
-		"resolve": async (source: string, file: string, refs: SpanRef[], options: ResolveOptions = {}): Promise<Answer<Resolved[]>> => (refs.length === 0 ? { "value": [] } : run<Resolved[]>("editor.annotations.resolve", source, file, refs, options))
+		"resolve": async (source: string, file: string, refs: SpanRef[], options: ResolveOptions = {}): Promise<Answer<Resolved[]>> => (refs.length === 0 ? { "value": [] } : run<Resolved[]>("editor.annotations.resolve", source, file, refs, options)),
+		// What a change from `before` to `after` is: cosmetic or semantic, and where (BABLR's identity analysis).
+		"classify": async (before: string, after: string): Promise<Answer<ChangeVerdict>> => run<ChangeVerdict>("editor.annotations.classify", before, after)
 	};
 }

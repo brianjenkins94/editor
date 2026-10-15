@@ -204,7 +204,8 @@ about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
      the packages every build dedupes), tarball-url into editor-api's `./runtime`, the canary and capability-breakpoints
      (now capability-calls.ts) into extensions/tsval — the capabilities plugin's canary is built from there — and the
      preview taps into the dev-server worker, for every server. tsval, eslint and capabilities left the lint's
-     still-in-shared list; the bridge (core's) and cspell (its server mounts the buffer) remain.
+     still-in-shared list; only the bridge (core's) remains — cspell left too (2026-10-15): its server's in-memory
+     filesystem is almostnode's own VirtualFS, not zen-fs (it never read the workspace).
    - **The architecture view stays in the workbench**: core's own diagnostic view, a VS Code tab, where the raw hub is.
    - **Command counts stay command-tap's**: core's command service can't tell which extension made a call — the view's
      point — so a contributed extension (loaded by URL: editor-contrib's) goes unattributed. S8's item dropped.

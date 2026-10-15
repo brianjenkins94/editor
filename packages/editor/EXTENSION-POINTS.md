@@ -148,6 +148,11 @@ It gets **synchronous files through core** instead, each call answered by the br
   (for one that runs almostnode), `tarballUrl` — or its own: how a call is told for a capability and where a run stops
   for one (capability-calls.ts), and the stand-ins a run gets (canary.ts, which the capabilities plugin's dynamic half
   is built from).
+- **Any extension on the observability plane** (2026-10-15): `observeExtension(name)` (editor-api's `./runtime`) joins
+  an extension — a contributed one too — to the editor's hub through the same link, as `ext:<name>`, for its logs (`log`:
+  records on `$sys.log`, debug-mcp's `logs_query`) and metrics (`metrics`: gauges on `$sys.metrics`) alone; nothing of
+  the editor's services crosses. Not its console — the extension host is every extension's — only what it hands `log`.
+  The Margin is the first (its warnings, as `ext:margin`). The architecture view may draw the link; nothing depends on it.
 - **A run's server serves as it wrote** (2026-10-15): the preview's taps — the page's, a worker entry's — are put in by
   the dev-server worker, which every preview request goes through, for a dev server's answer and any debugger's
   (`virtual.debug.<port>`) alike. A debugger's `serve` answers plainly.
@@ -310,6 +315,7 @@ A command not here is core's own, and an extension that calls one doesn't pass.
 | Command | Answered by | What it is |
 | --- | --- | --- |
 | `editor.annotations.spans`, `.refer`, `.resolve` | core's BABLR (the bridge registers them) | span annotations (3), through editor-api's `annotations()` — never by hand |
+| `editor.annotations.classify(before, after)` | core's classifier (cosmetic-classifier.ts, on the BABLR worker's cached parses) | what a change from one text to another is (editor-api's `ChangeVerdict`): cosmetic or semantic, the nodes that changed and their lines — through `annotations().classify`. The cosmetic extension's badge; the shell's review panel asks the same (`annotations.classify` on the hub) |
 | `editor.pane.refresh(view, uri?)` | core's pane (pane-views.ts) | a pane view's content changed (4), through editor-api's `refreshPane()` |
 | `editor.rules.edit(request)`, `.cancelEdit(id)` | core's Rule view (rule-view.ts) | a rule edited under the Rules tree — as it starts, what it's judged against (a call, a program's `process.argv`, a variable at a place, or the rule alone), its buttons — answered `{ button, rule }` as pressed, or `null` (closed, cancelled, or replaced by another edit). The caller does what its buttons mean: the Rules tree's open and New Rule, the Margin's Rule… and Mock…, the bridge's preview prompt. `EditRequest`, and a rule's sentence and verdict, are editor-api's `./rules`. Core's, not an extension's view: a webview can't paint in this workbench (the coi-serviceworker keeps one origin; a webview's content needs its own), and nothing native edits predicates |
 | `editor.history.texts(path)` | core's edit history (edit-history.ts) | `string[]`: a file's texts through its recorded edits, oldest first — what a placed rule's place is followed through (the capabilities extension's rules.ts) |

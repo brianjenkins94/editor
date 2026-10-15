@@ -14,12 +14,18 @@
  * TRANSPORT: the worker serves `bablr.verdict` / `bablr.editGroups` on its own hub, linked to the workbench hub (so the
  * calls are visible on the architecture view). bablr.ts queues them, one at a time, behind its other callers' — and
  * passes on cancellation: aborting a call stops it mid-parse, or drops it unsent while it's still queued.
+ *
+ * Its verdicts are everyone's on the hub as `annotations.classify` { before, after }: the shell's review panel asks it,
+ * and so does the bridge's `editor.annotations.classify` (the cosmetic extension's badge, any extension's) — editor-api's
+ * Answer, as the other annotations are. No git here: whoever asks has the two texts.
  */
-import type { ChangeKind } from "@brianjenkins94/editor-api/git";
+import type { ChangeVerdict } from "@brianjenkins94/editor-api/git";
+import type { Hub } from "@brianjenkins94/hub";
 import type { Bablr } from "./bablr";
+import { serve } from "@brianjenkins94/hub";
 
 /** A change's verdict + the changed node ids and the working lines they land on — the badge AND the diff-focus data. */
-export interface VerdictEntry { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[] }
+export type VerdictEntry = ChangeVerdict;
 
 export interface CosmeticClassifier {
 	/** The verdict of a change + its changed-node detail. Cached in memory for the session. Pass an
@@ -44,15 +50,15 @@ function fnv32(text: string): number {
 	return hash >>> 0;
 }
 
-/** Create a classifier over the editor's BABLR worker (bablr.ts). */
-export function createCosmeticClassifier(bablr: Bablr): CosmeticClassifier {
+/** Create a classifier over the editor's BABLR worker (bablr.ts), answering `annotations.classify` on `hub`. */
+export function createCosmeticClassifier(bablr: Bablr, hub: Hub): CosmeticClassifier {
 	const request = <T>(name: string, args: unknown, signal: AbortSignal | undefined): Promise<T> => bablr.request<T>(name, args, signal);
 
 	// The session's verdicts — keyed by a cheap content-pair hash.
 	const memo = new Map<string, VerdictEntry>();
 	const memoKey = (before: string, after: string): string => before.length + ":" + after.length + ":" + fnv32(before) + ":" + fnv32(after);
 
-	return {
+	const classifier: CosmeticClassifier = {
 		"verdict": async (before, after, signal) => {
 			if (before === after) {
 				return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [] }; // identical — the only provably-correct shortcut
@@ -78,4 +84,20 @@ export function createCosmeticClassifier(bablr: Bablr): CosmeticClassifier {
 		},
 		"editGroups": (chain, signal) => request("editGroups", { "chain": chain }, signal)
 	};
+
+	serve(hub, "annotations.classify", async (args) => {
+		const { before, after } = (args ?? {}) as { "before"?: unknown; "after"?: unknown };
+
+		if (typeof before !== "string" || typeof after !== "string") {
+			throw new TypeError("annotations.classify: the two texts");
+		}
+
+		try {
+			return { "value": await classifier.verdict(before, after) };
+		} catch (error) {
+			return { "unparsable": error instanceof Error ? error.message : "BABLR can't read the texts" };
+		}
+	});
+
+	return classifier;
 }

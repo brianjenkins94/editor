@@ -18,12 +18,14 @@ import type { ShellDockHost } from "../shared/dock-host";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 import { failureText } from "@brianjenkins94/editor-api/failures";
+import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
 import capabilitiesExtension from "capabilities:extension";
+import cosmeticExtension from "cosmetic:extension";
 import cspellExtension from "cspell:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtension from "eslint:extension";
@@ -38,7 +40,6 @@ import sourceControlExtension from "source-control:extension";
 import tsvalExtension from "tsval:extension";
 import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
-import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
@@ -619,9 +620,9 @@ function maybeBoot(): void {
 					// git-service.ts / git-engine.ts.
 					// One classifier, shared by both panes: its verdicts come from the BABLR worker's cached parses
 					// (bablr.ts), so each version of a file is parsed once, across refreshes and reloads.
-				const cosmeticClassifier = createCosmeticClassifier(bablr);
+				const cosmeticClassifier = createCosmeticClassifier(bablr, workbenchHub);
 
-				installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
+				installGitService(api as typeof import("vscode"), workbenchHub, paneLog);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.
@@ -657,9 +658,9 @@ function maybeBoot(): void {
 			// and the preset under almostnode, in its worker); capabilities (static and dynamic halves inside its tsserver
 			// plugin, which finds its engine and canary beside itself; its package worker for the baseline); history (its
 			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the Margin; the event sheet (its webview's script,
-			// its recognizer worker); running; type queries (`// ^?`); notes; Source Control (on the editor's git); cspell (the real cspell under almostnode, in its
+			// its recognizer worker); running; type queries (`// ^?`); notes; Source Control (on the editor's git); cosmetic changes (BABLR's verdict on them, a file decoration); cspell (the real cspell under almostnode, in its
 			// worker). Public API only, but for what EXTENSION-POINTS lists (5).
-			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, marginExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cspellExtension]) {
+			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, marginExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cosmeticExtension, cspellExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -667,7 +668,7 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "margin", "running", "event-sheet", "type-queries", "notes", "cspell"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "margin", "running", "event-sheet", "type-queries", "notes", "source-control", "cosmetic", "cspell"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

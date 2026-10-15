@@ -10,8 +10,8 @@ const REALMS = ["app", "shell", "workbench", "workers", "previews", "extensions"
 const EXTENSIONS = readdirSync(new URL(EDITOR + "/extensions", import.meta.url), { "withFileTypes": true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 const SOURCES = "*.{ts,tsx,mts,js,mjs}";
 // An extension imports core's code from editor-api, never shared/ (FEATURES-AS-EXTENSIONS.md) — but the bridge, which is
-// core's, and cspell, until its server reads the workspace through the runtime rather than its buffer.
-const STILL_IN_SHARED = new Set(["bridge", "cspell"]);
+// core's.
+const STILL_IN_SHARED = new Set(["bridge"]);
 // And tsval's privilege (EXTENSION-POINTS.md, 2): almostnode on the workspace's buffer, as core runs it — only these.
 const PRIVILEGED = { "tsval": ["workspace-runtime", "zenfs-vfs.js"] };
 

@@ -7,22 +7,21 @@
  * message channel — which the client connects to directly. So the client sees an ordinary worker server; almostnode is
  * invisible to it.
  *
- * almostnode runs on a zen-fs VFS of this worker's own (zenfs-vfs.ts, in memory): the server reads only its dictionary
+ * almostnode runs on a VirtualFS of this worker's own (almostnode's, in memory): the server reads only its dictionary
  * from it, never the workspace — documents come over LSP. The dictionary (a gzipped trie, too big to bundle — served
  * next to this worker under /__vscode__/lsp/, resolved relative to this module's URL) and the server bundle are written
  * into it before the server runs.
  */
-import { createRuntime } from "@brianjenkins94/almostnode";
+import { createRuntime, VirtualFS } from "@brianjenkins94/almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string (bundledNodeServer in build.ts); run below.
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import serverNodeCode from "cspell:server-node";
-import { createZenfsVFS } from "../../shared/zenfs-vfs.js";
 
 // Kept in one place, matched by server-node's DICT_PATH.
 const DICT_PATH = "/dicts/en_US.trie.gz";
 
 async function main(): Promise<void> {
-	const vfs = await createZenfsVFS();
+	const vfs = new VirtualFS();
 
 	// Resolve the dict relative to this served worker's URL. `import.meta.url` is the real worker URL here (a
 	// served module, not a data: URL like the manager extension), so a relative asset resolves correctly. Held
