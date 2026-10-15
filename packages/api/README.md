@@ -378,8 +378,18 @@ Each step lands green and is useful on its own.
       - **Tests** (`test/github.test.ts`, 10) run against a mock GitHub. They check what GitHub is sent (our secret,
         the verifier matching the challenge GitHub saw, our callback), and that no login or email is kept. Each of
         the 9 guards, disabled in turn, fails a test.
-    - **Still to do:** refreshing GitHub's token inside the Grant (A5 uses it), and a sessions list with "sign out
-      everywhere".
+    - **A real sign-in, against the deployed dev Worker (2026-10-15):** start → GitHub (authorized in Chrome) → callback
+      → the app's page with its state and `iss` → `/token` 200 DPoP → `/me` 200 → refresh 200 (new refresh token) →
+      `/me` 200 → `/revoke` 200 → `/me` 401. The live audit log shows one user for three sign-ins. A code that
+      arrived after it expired was refused (`token_rejected`).
+    - **Abandoned sign-ins end.** That first live run showed that a code never redeemed left its Grant holding
+      GitHub's tokens indefinitely. Now `begin` sets an alarm for the code's expiry, and `abandon()` revokes a Grant
+      that never got its first refresh token. Live: `login@+0s grant_revoked@+60s`.
+    - **Still to do:**
+      - Refreshing GitHub's token inside the Grant (A5 uses it).
+      - Revoking GitHub's token at GitHub when we revoke a grant (`DELETE /applications/{client_id}/token`). Ours is
+        wiped, so nothing can use it, but it stays valid at GitHub until it expires.
+      - A sessions list with "sign out everywhere".
 - **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"
   popover for "Sign in with GitHub" plus a sessions list. **Remove the PAT path** once this works: keeping a token
   in `localStorage` as a fallback keeps the problem.
