@@ -216,8 +216,8 @@ Public code is fine for an auth server. Its security has to hold with the code v
 public code means anyone can review it. The limits are operational:
 
 - **Secrets live only in Cloudflare** (`wrangler secret put`): `GITHUB_CLIENT_SECRET`, `TOKEN_KEK` (encrypts GitHub
-  tokens), `SIGNING_JWK` (access tokens), `NONCE_KEY`, `STATE_KEY`. The account id and binding names in
-  `wrangler.jsonc` aren't secret.
+  tokens), `SIGNING_JWK` (access tokens), `NONCE_KEY`, `AUDIT_KEY` (the audit log's IP hashes), `STATE_KEY`. The
+  account id and binding names in `wrangler.jsonc` aren't secret.
 - **Deploys use a scoped Cloudflare API token** (Workers edit on this account only) stored as a GitHub *Environment*
   secret. The `production` environment requires your approval for every deploy, so a merge to main can't ship an
   auth change by itself. `development` deploys automatically after CI.
@@ -289,6 +289,48 @@ Each step lands green and is useful on its own.
     `verifyAccessToken` and `verifyProof` in front of a route.
 - **A3 · sign-in.** The Grant DO, D1 schema and migrations, start/callback/token/refresh/revoke, token encryption,
   the audit log, and the redaction test. End-to-end against the dev GitHub App.
+  - *Built 2026-10-15, everything but GitHub's round trip (that waits for A0):*
+    - **`migrations/0001_accounts.sql`** (D1): `users` (our id, GitHub's numeric id), `grants` (one row per sign-in)
+      and `audit`.
+    - **`src/grant.ts`**, the Grant Durable Object, one per sign-in.
+      - `begin` is the one call the GitHub callback will make. It creates the user on their first sign-in, seals
+        GitHub's tokens (`src/seal.ts`: AES-GCM under `TOKEN_KEK`, bound to the grant's id), and returns a 60-second
+        code.
+      - `redeem` spends the code on any attempt, and needs the PKCE verifier and the key the sign-in started with.
+      - `rotate` replaces the refresh token. If an old refresh token is presented again, it revokes the grant.
+      - `use` records a proof's `jti` and reports whether the grant is live. `revokeWith` and `revoke` end it.
+      - Codes and refresh tokens are `<grant id>.<secret>`, and only their hashes are stored.
+    - **`src/tokens.ts`**: `POST /token` (authorization_code, refresh_token), `POST /revoke` (RFC 7009), and the
+      `session` middleware.
+      - Every request needs a DPoP proof with a server nonce. A `use_dpop_nonce` answer brings a fresh one.
+      - A code or refresh token is checked against D1's `grants` before its Durable Object is addressed, since
+        addressing one creates it. A token for a revoked grant is still audited.
+      - `session` checks our access token, a proof from its key carrying its hash, a new `jti`, and a live grant.
+        `GET /me` returns the user id behind it.
+    - **`src/audit.ts`**: `login`, `token_issued`, `refreshed`, `token_rejected`, `refresh_reuse_detected` and
+      `grant_revoked`, each with Cloudflare's country and an IP hash (an HMAC keyed by `AUDIT_KEY` and the date).
+    - **CORS:** only the origins in `ALLOWED_ORIGINS`. `DPoP-Nonce` and `WWW-Authenticate` are exposed to the browser.
+    - **Tests** (`test/sessions.test.ts`, workerd, 12 of them) cover:
+      - the whole flow, and the same GitHub user signing in twice;
+      - a code used with the wrong verifier, used twice, or with another key;
+      - refresh-token reuse, which revokes the grant;
+      - a refresh with another key's proof, which is refused while the grant lives on;
+      - `/me` refusing a missing token, `Bearer`, another key, a proof without `ath`, a replayed proof, or a token we
+        didn't sign;
+      - revocation;
+      - a forged grant id, which creates no Durable Object;
+      - sealing at rest, and the sealed tokens gone after revocation;
+      - IP hashing, and CORS;
+      - last, a test that none of the 50+ secret values the run handled (codes, verifiers, our tokens, proofs,
+        GitHub's tokens) appears in the logs.
+    - **Mutation check:** disabling each guard in turn (9 mutations) makes a test fail. The first run found the
+      unchecked `ath` gap, now covered.
+    - **Secrets for A0**, made without being printed, each piped to `npx wrangler secret put <NAME> --env dev`:
+      - `NONCE_KEY` and `AUDIT_KEY`: `node -e 'process.stdout.write(crypto.randomBytes(32).toString("base64url"))'`
+      - `TOKEN_KEK`: the same command; it must be exactly 32 bytes.
+      - `SIGNING_JWK`: see A2.
+    - **Still to do:** `/auth/github/start` and `/callback` (A0's GitHub App), refreshing GitHub's token inside the
+      Grant (A5 uses it), and a sessions list with "sign out everywhere".
 - **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"
   popover for "Sign in with GitHub" plus a sessions list. **Remove the PAT path** once this works: keeping a token
   in `localStorage` as a fallback keeps the problem.

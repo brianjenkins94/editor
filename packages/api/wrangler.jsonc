@@ -1,7 +1,9 @@
-// The editor's API Worker (README.md). Secrets are never in this file: `wrangler secret put`.
+// The editor's API Worker (README.md). Secrets are never in this file: `wrangler secret put` (SIGNING_JWK, NONCE_KEY,
+// TOKEN_KEK, AUDIT_KEY; README.md says how to make each).
 // The top level is local `wrangler dev` and the tests; `--env dev` and `--env production` are the deployments.
-// vars and observability are repeated per environment on purpose: wrangler doesn't inherit vars, and each
-// deployment's telemetry settings should be readable where it's declared.
+// vars, bindings and observability are repeated per environment on purpose: wrangler doesn't inherit them, and each
+// deployment's settings should be readable where it's declared. The D1 ids are placeholders until A0 creates the
+// databases (`wrangler d1 create editor-api-dev`).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "editor-api",
@@ -14,7 +16,11 @@
     "logs": { "enabled": true, "invocation_logs": false },
     "traces": { "enabled": true }
   },
-  "vars": { "ENVIRONMENT": "local" },
+  // One Grant per sign-in (src/grant.ts), on SQLite storage.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Grant"] }],
+  "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
+  "d1_databases": [{ "binding": "DB", "database_name": "editor-api-local", "database_id": "local", "migrations_dir": "migrations" }],
+  "vars": { "ENVIRONMENT": "local", "ALLOWED_ORIGINS": "http://localhost:5173,http://editor.localhost:5173" },
   "env": {
     "dev": {
       "workers_dev": true,
@@ -23,7 +29,9 @@
         "logs": { "enabled": true, "invocation_logs": false },
         "traces": { "enabled": true }
       },
-      "vars": { "ENVIRONMENT": "dev" }
+      "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
+      "d1_databases": [{ "binding": "DB", "database_name": "editor-api-dev", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+      "vars": { "ENVIRONMENT": "dev", "ALLOWED_ORIGINS": "https://brianjenkins94.github.io,http://localhost:5173,http://editor.localhost:5173" }
     },
     // Not deployed until A7: no workers.dev URL, and its route (our own domain) arrives with the domain.
     "production": {
@@ -34,7 +42,9 @@
         "logs": { "enabled": true, "invocation_logs": false },
         "traces": { "enabled": true }
       },
-      "vars": { "ENVIRONMENT": "production" }
+      "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
+      "d1_databases": [{ "binding": "DB", "database_name": "editor-api", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+      "vars": { "ENVIRONMENT": "production", "ALLOWED_ORIGINS": "" }
     }
   }
 }
