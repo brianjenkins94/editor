@@ -301,6 +301,7 @@ A command not here is core's own, and an extension that calls one doesn't pass.
 | `editor.annotations.spans`, `.refer`, `.resolve` | core's BABLR (the bridge registers them) | span annotations (3), through editor-api's `annotations()` — never by hand |
 | `editor.pane.refresh(view, uri?)` | core's pane (pane-views.ts) | a pane view's content changed (4), through editor-api's `refreshPane()` |
 | `silo.rules.list`, `.open`, `.new`, `.remove`, `.replace` | core's rules (rules-view.ts) | the workspace's capability rules, as the Rules tree reads and edits them (6) |
+| `editor.git.status`, `.file(path)`, `.commit(message)` | core's git (git-service.ts) | the workspace's changes (`{ files: GitFileChange[] }`, editor-api's `./git`: path, status, staged, unstaged, cosmetic), a file's HEAD text (`{ head, working }`), a commit of everything (`{ oid }`). No change event: a change is a file change, as a watcher sees it (the Source Control view refreshes so) |
 | `editor.debugFile(uri?)` | the bridge | Run (▷): a program file in `run.debugger`, an app's file its app (RUNNING.md) |
 | `editor.metrics.read(since?)` | the bridge, from the metrics plane | `{ [source]: MetricsSample[] }`, oldest first: every context's samples (`$sys.metrics.<source>`) from the last few minutes, only those newer than `since` when it's given. `MetricsSample` is observability's type. The insights monitor reads it |
 | `typescript.tsserverRequest("_types.at", { file, ranges })` | the capabilities extension's tsserver plugin | `{ body: { types: (string \| null)[] } }`: TypeScript's type of each range (`{ start, end }`, offsets), `null` where no node has it — and every `null`, or no answer, when the capabilities extension isn't there, so a caller degrades. Notes and insights' hovers read it |
@@ -308,8 +309,7 @@ A command not here is core's own, and an extension that calls one doesn't pass.
 **Not for extensions:** `editor.arch.commands` — command-tap's (extensions/command-tap.ts), which core's build puts in
 every extension it bundles, so the architecture view sees which extension registers and calls what. A contributed
 extension isn't tapped, so the view doesn't see it; counting in core's command service instead is FEATURES-AS-EXTENSIONS'
-S8. `editor.pane.native.*` are the native pane face's own buttons, and `editor.git.commit` and `.refresh` the Source
-Control view's (the bridge's source-control.ts).
+S8. `editor.pane.native.*` are the native pane face's own buttons.
 
 ## 6. VS Code's own contribution points
 

@@ -1,6 +1,6 @@
 /**
- * The git service's answers (workbench/git-service.ts, on the hub), as its two faces read them: the shell's review panel
- * and VS Code's Source Control view (the bridge's source-control.ts).
+ * The editor's git's answers (workbench/git-service.ts): `editor.git.status`'s files, as the Source Control view reads
+ * them (EXTENSION-POINTS 5), and the hub's `git.*`, as the shell's review panel does.
  */
 
 /** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`). */

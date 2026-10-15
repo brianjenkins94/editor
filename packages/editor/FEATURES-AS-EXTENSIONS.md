@@ -33,7 +33,7 @@ isn't held to it.
 | capabilities | no | its plugin and canary engine built by core from `shared/capabilities/`; ~780 lines of its logic in the bridge (the decider, what an answer at a stop means, rule places, `rules.*`); `workbench/rules-view.ts` (a custom view on monaco internals) |
 | tsval | no | the workspace's buffer and zen-fs directly; `shared/workspace-runtime` (core's preview taps), `NETWORK_PROBES`, canary, preview-evidence; `run.policy` (undocumented); its Margin is `workbench/live-values.ts` |
 | running's other half | — | ~525 bridge lines: preview runs as `production` sessions, tasks, the terminal's `node` auto-attach, live runs |
-| git's Source Control view | — | the bridge's `source-control.ts` over `git.*` hub subjects |
+| Source Control view | yes (since S4) | — (`extensions/source-control`, on the `editor.git.*` commands) |
 | architecture view | — | `workbench/architecture-view.ts` (2.6k with its CSS) on the raw hub; command counts from command-tap, which contributed extensions don't get |
 | the Margin, recorded stops, coverage, profiles | — | `workbench/live-values.ts`, `recorded-stops.ts`, `coverage.ts`, `profile-files.ts` — fed by hub subjects only the bridge publishes |
 
@@ -139,7 +139,7 @@ mailbox batching loads. The rest is ordinary: preview taps added core-side behin
 | Running | `extensions/running` | bridge: live-run.ts, production-adapter.ts, tasks provider, launch helpers, auto-attach | S2, S4 (live-run.ts: done) |
 | Capabilities | `extensions/capabilities` | bridge: decide.ts, coalesce.ts, stops' meanings, rule places, `rules.*`; `workbench/rules-view.ts`; `shared/capabilities` (→ S2) | S1, S2, S4, rich view; S5 (deferred) for the decision logic |
 | Debugger | `extensions/tsval` (+ the Margin as an extension) | `workbench/live-values.ts`, `inputs.ts`; bridge: replay.ts | S6, S7, S4, tsval's decision |
-| Git | `extensions/git-scm` (the view) + core's engine | bridge: source-control.ts | S4 |
+| Git | `extensions/source-control` (the view) + core's engine | ~~bridge: source-control.ts~~ (done) | S4 |
 | History | `extensions/history` | `workbench/edit-history.ts` (its store via `storageUri`) | S1, S2, BABLR commands, S4 |
 | Evidence and insights | `extensions/insights` | `workbench/coverage.ts`, `profile-files.ts`, `sourcemap.ts`, `recorded-stops.ts` | S2, S3, S6, S7, one view reading another |
 | Event sheet, eslint, cspell | as now | their built files into their folders | S1 |

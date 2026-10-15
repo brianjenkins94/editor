@@ -519,7 +519,7 @@ test("git review: a diff in the shell", async () => {
 		const text = new TextDecoder().decode(await api.workspace.fs.readFile(uri));
 
 		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text + "\n// reformatted\n"));
-		await api.commands.executeCommand("editor.git.refresh");
+		await api.commands.executeCommand("sourceControl.refresh");
 	});
 	await eventually("the change's verdict, from parses the cache now keeps", async () => (await parses()) > before || undefined, 60_000);
 

@@ -15,7 +15,7 @@
  * calls are visible on the architecture view). bablr.ts queues them, one at a time, behind its other callers' — and
  * passes on cancellation: aborting a call stops it mid-parse, or drops it unsent while it's still queued.
  */
-import type { ChangeKind } from "../shared/git";
+import type { ChangeKind } from "@brianjenkins94/editor-api/git";
 import type { Bablr } from "./bablr";
 
 /** A change's verdict + the changed node ids and the working lines they land on — the badge AND the diff-focus data. */

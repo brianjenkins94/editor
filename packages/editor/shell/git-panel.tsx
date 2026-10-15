@@ -7,9 +7,9 @@
  * refreshes on `git.changed`. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
  * decoupling was for. The diff opens in a shell-owned overlay the codehike island mounts into (overlay.body).
  */
+import type { ChangeKind, GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
-import type { ChangeKind, GitFileChange } from "../shared/git";
 import type { DiffRowInfo } from "./git-codehike";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { Fragment, render } from "preact";

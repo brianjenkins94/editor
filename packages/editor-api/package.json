@@ -17,7 +17,8 @@
     "./failures": "./src/failures.ts",
     "./gated-eval": "./src/gated-eval.ts",
     "./policy": "./src/policy.ts",
-    "./effects": "./src/effects.ts"
+    "./effects": "./src/effects.ts",
+    "./git": "./src/git.ts"
   },
   "license": "MIT",
   "scripts": {

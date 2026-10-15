@@ -1,0 +1,28 @@
+{
+  "name": "source-control",
+  "displayName": "Source Control",
+  "description": "VS Code's Source Control view for the workspace's git: staged and unstaged changes (one that's formatting or comments only, by BABLR's verdict, dimmed), each file's HEAD side for the diff editor and the gutters, and commit from the input box — on the editor's git (the editor.git.* commands), which a desktop build has its own of. Public API only.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "sourceControl.commit",
+        "title": "Commit",
+        "category": "Source Control"
+      },
+      {
+        "command": "sourceControl.refresh",
+        "title": "Refresh",
+        "category": "Source Control"
+      }
+    ]
+  }
+}

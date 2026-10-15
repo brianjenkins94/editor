@@ -28,7 +28,6 @@ import { registerParseStatus } from "./parse-status";
 import { registerProductionDebug } from "./production-adapter";
 import { registerReplay } from "./replay";
 import { serveRuntimeFiles } from "./runtime-fs";
-import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
 
 /** This extension's exports — the bridge->workbench half of the hub uplink (ext host is an isolated realm, so it
@@ -139,8 +138,6 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", (uri?: vscode.Uri) => {
 		void runProgram({ ...uri instanceof vscode.Uri ? { "program": uri.path } : {} }).catch(() => undefined);
 	}));
-	// VS Code's Source Control view, on core's git service (source-control.ts).
-	registerSourceControl(context);
 	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
 	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
 	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call, through

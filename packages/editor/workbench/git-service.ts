@@ -1,13 +1,13 @@
 /**
  * Git service — exposes `git-engine` (+ the cosmetic classifier) over the hub: the one git the editor has, read by the
- * shell's GitHub-Desktop-style review panel and by VS Code's Source Control view (the bridge's source-control.ts). The
+ * shell's GitHub-Desktop-style review panel and by VS Code's Source Control view (the source-control extension). The
  * engine is vscode-free, so each face reads it over the hub without knowing about the other. Runs in the workbench
  * realm (where zen-fs lives); the shell reaches it shell → app → workbench, the Source Control view bridge → workbench.
  */
+import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
-import type { GitFileChange } from "../shared/git";
 import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
@@ -31,12 +31,14 @@ export function unifiedDiff(path: string, before: string, after: string): string
 	return patch === undefined ? `--- ${from}\n+++ ${to}\n(more than ${MOST_EDITS} lines differ)\n` : formatPatch(patch, FILE_HEADERS_ONLY);
 }
 
-/** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub. */
+/** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub — and the same as
+ *  commands for extensions (EXTENSION-POINTS 5): `editor.git.status`, `editor.git.file(path)`, `editor.git.commit(message)`.
+ *  (An extension learns of a change as VS Code's own git does: a save, or a file watcher — the repository is files too.) */
 export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier: CosmeticClassifier, log: Logger): void {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
-	serve(hub, "git.status", async () => {
-		const status = await engine.status();
+	const status = async (): Promise<{ "files": GitFileChange[] }> => {
+		const current = await engine.status();
 		const byPath = new Map<string, GitFileChange>();
 
 		const record = (change: engine.GitChange, kind: "staged" | "unstaged"): void => {
@@ -51,11 +53,11 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			entry.status = change.status;
 		};
 
-		for (const change of status.staged) {
+		for (const change of current.staged) {
 			record(change, "staged");
 		}
 
-		for (const change of status.unstaged) {
+		for (const change of current.unstaged) {
 			record(change, "unstaged");
 		}
 
@@ -78,21 +80,22 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		});
 
 		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)) };
-	});
+	};
+
+	serve(hub, "git.status", status);
+	vscode.commands.registerCommand("editor.git.status", status);
 
 	// What changed, as `git diff HEAD` says it: one file's (`path`), or every changed file's — a unified diff of the
 	// working tree against the last commit (debug-mcp's git tool).
 	serve(hub, "git.diff", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
-		const status = typeof path === "string" && path !== "" ? undefined : await engine.status();
-		const paths = status === undefined ? [path] : [...status.unstaged, ...status.staged].map((change) => change.path);
+		const current = typeof path === "string" && path !== "" ? undefined : await engine.status();
+		const paths = current === undefined ? [path] : [...current.unstaged, ...current.staged].map((change) => change.path);
 		const diffs = await Promise.all([...new Set(paths)].sort().map(async (each) => unifiedDiff(each, await engine.headContent(each).catch(() => ""), await readWorking(each).catch(() => ""))));
 
 		return { "diff": diffs.join("") };
 	});
-	serve(hub, "git.file", async (args) => {
-		const path = (args as { "path"?: string } | null)?.path;
-
+	const file = async (path: unknown): Promise<{ "head": string; "working": string }> => {
 		if (typeof path !== "string") {
 			return { "head": "", "working": "", "verdict": "none" };
 		}
@@ -105,7 +108,10 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 
 		// Fast path — no BABLR here (it's slow); the shell asks for the verdict separately via git.classify.
 		return { "head": await engine.headContent(path), "working": working };
-	});
+	};
+
+	serve(hub, "git.file", async (args) => file((args as { "path"?: string } | null)?.path));
+	vscode.commands.registerCommand("editor.git.file", file);
 
 	// BABLR verdict for the whole change, requested LAZILY after the diff is shown so BABLR never blocks the open.
 	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Only ONE diff is open at a time,
@@ -149,8 +155,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		}
 	});
 
-	serve(hub, "git.commit", async (args) => {
-		const request = args as { "message"?: string; "files"?: engine.CommitFile[] } | null;
+	const commit = async (request: { "message"?: string; "files"?: engine.CommitFile[] } | null): Promise<{ "oid": string }> => {
 		const message = request?.message?.trim();
 
 		if (message === undefined || message === "") {
@@ -166,7 +171,10 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		log.info("git commit (service)", { "oid": oid.slice(0, 7), "files": request?.files?.length });
 
 		return { "oid": oid };
-	});
+	};
+
+	serve(hub, "git.commit", async (args) => commit(args));
+	vscode.commands.registerCommand("editor.git.commit", async (message: unknown) => commit({ "message": typeof message === "string" ? message : undefined }));
 
 	// Discard a file's working-tree changes: whole file (restore HEAD / delete), or a PARTIAL discard when the shell
 	// sends the exact post-discard `content` (working with the chosen hunks reverted).

@@ -34,6 +34,7 @@ import insightsExtension from "insights:extension";
 import notesExtension from "notes:extension";
 import { render } from "preact";
 import runningExtension from "running:extension";
+import sourceControlExtension from "source-control:extension";
 import tsvalExtension from "tsval:extension";
 import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
@@ -622,7 +623,7 @@ function maybeBoot(): void {
 				// The metrics plane: memory by realm, workspace fill, long frames, hub traffic, storage (editor-metrics.ts).
 				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer, architectureStore(workbenchHub));
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
-					// shell's review panel and VS Code's Source Control view (the bridge's source-control.ts). See
+					// shell's review panel, and VS Code's Source Control view (the source-control extension, by the editor.git.* commands). See
 					// git-service.ts / git-engine.ts.
 					// One classifier, shared by both panes: its verdicts come from the BABLR worker's cached parses
 					// (bablr.ts), so each version of a file is parsed once, across refreshes and reloads.
@@ -664,9 +665,9 @@ function maybeBoot(): void {
 			// and the preset under almostnode, in its worker); capabilities (static and dynamic halves inside its tsserver
 			// plugin, which finds its engine and canary beside itself; its package worker for the baseline); history (its
 			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the event sheet (its webview's script,
-			// its recognizer worker); running; type queries (`// ^?`); notes; cspell (the real cspell under almostnode, in its
+			// its recognizer worker); running; type queries (`// ^?`); notes; Source Control (on the editor's git); cspell (the real cspell under almostnode, in its
 			// worker). Public API only, but for what EXTENSION-POINTS lists (5).
-			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, cspellExtension]) {
+			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cspellExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 

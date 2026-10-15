@@ -23,10 +23,10 @@
  * `script-src 'wasm-unsafe-eval'` and `connect-src https://lighter.codehike.org` IF a CSP is ever added (our app
  * sets none today).
  */
+import type { ChangeKind } from "@brianjenkins94/editor-api/git";
 import type { AnnotationHandler, HighlightedCode, Tokens } from "codehike/code";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
-import type { ChangeKind } from "../shared/git";
 import { highlight, InnerLine, Pre } from "codehike/code";
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";

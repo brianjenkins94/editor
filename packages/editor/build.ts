@@ -318,6 +318,7 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("running"),
 			bundledExtension("type-queries"),
 			bundledExtension("notes"),
+			bundledExtension("source-control"),
 			// (its webview's script, which it inlines into the page it serves; its recognizer worker)
 			bundledExtension("event-sheet", { "view.js": { "script": "view.ts", "format": "iife" }, "recognizer.js": { "worker": "recognizer-worker.js" } }),
 			// (its worker: cspell under almostnode — a classic script is done at once, so the client's first messages are
