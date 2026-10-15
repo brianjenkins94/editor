@@ -15,6 +15,8 @@ import { seal } from "./seal.ts";
  *   - the authorization code (its hash, its PKCE challenge, 60 seconds to live) until it's redeemed;
  *   - the current refresh token's hash, and every earlier one's, for reuse detection;
  *   - the jtis of proofs it has seen, until they'd be too old anyway.
+ * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
+ * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
  * Its id is the grant's id; codes and refresh tokens are `<grant id>.<secret>`, so the Worker knows where to send them.
  * Only hashes of them are stored.
  */
@@ -103,6 +105,7 @@ export class Grant extends DurableObject<Bindings> {
 
 		this.sql.exec("INSERT INTO state (id, user_id, jkt, github, code_hash, code_challenge, code_expires) VALUES (1, ?, ?, ?, ?, ?, ?)", userId, jkt, await seal(this.env.TOKEN_KEK, JSON.stringify(github), this.id), await hash(code), codeChallenge, now + CODE_TTL);
 		await audit(this.env.DB, "login", { "userId": userId, "grantId": this.id }, from);
+		await this.ctx.storage.setAlarm(now + CODE_TTL);
 
 		return { "code": code };
 	}
@@ -199,6 +202,20 @@ export class Grant extends DurableObject<Bindings> {
 		this.sql.exec("UPDATE state SET revoked_at = ?, github = NULL, refresh_hash = NULL, code_hash = NULL WHERE id = 1", now);
 		await this.env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(now, this.id).run();
 		await audit(this.env.DB, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from);
+	}
+
+	/** The platform's call, when the code would have expired (begin sets it). */
+	public async alarm(): Promise<void> {
+		await this.abandon();
+	}
+
+	/** A sign-in that never got its first refresh token is abandoned, so it ends. */
+	public async abandon(): Promise<void> {
+		const state = this.state();
+
+		if (state !== undefined && state.revoked_at === null && state.refresh_hash === null) {
+			await this.revoke({ "from": { "country": null, "ipHash": null } });
+		}
 	}
 
 	private async issue(): Promise<string> {

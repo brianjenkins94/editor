@@ -17,7 +17,7 @@ const server = createTestHarness({ "root": new URL("..", import.meta.url).pathna
 const worker = server.getWorker();
 let base: URL;
 // The Worker's bindings, as the GitHub callback has them: the Grant namespace and D1.
-let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };
+let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "idFromString": (id: string) => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }>; "abandon": () => Promise<void> } }; "DB": D1Database };
 
 // Every secret value the flow handles, for the redaction test at the end.
 const handled = new Set<string>();
@@ -259,6 +259,25 @@ test("GitHub's tokens are sealed at rest, and gone once the sign-in is revoked",
 
 	await send(client, "POST", "/revoke", { "form": { "token": issued.refresh_token } });
 	assert.deepEqual(await storage.exec("SELECT github FROM state"), [{ "github": null }]);
+});
+
+// The alarm is the platform's to fire when the code would expire (alarm() is reserved over RPC); it calls abandon().
+test("a sign-in never redeemed ends when its code would have: GitHub's tokens wiped", async () => {
+	const client = await browser();
+	const abandoned = await signIn(client, 110);
+	const storage = await worker.getDurableObjectStorage("GRANTS", { "id": abandoned.grantId });
+
+	await env.GRANTS.get(env.GRANTS.idFromString(abandoned.grantId)).abandon();
+	assert.deepEqual(await storage.exec("SELECT github FROM state"), [{ "github": null }]);
+	assert.deepEqual((await audit(abandoned.grantId)).slice(-1), ["grant_revoked"]);
+	assert.deepEqual(await (await redeem(client, abandoned.code, abandoned.verifier)).json(), { "error": "invalid_grant" });
+
+	// One that was redeemed is the browser's now: the alarm leaves it alone.
+	const finished = await signIn(client, 110);
+	const issued = await tokens(await redeem(client, finished.code, finished.verifier));
+
+	await env.GRANTS.get(env.GRANTS.idFromString(finished.grantId)).abandon();
+	assert.equal((await send(client, "GET", "/me", { "accessToken": issued.access_token })).status, 200);
 });
 
 test("the audit log keeps an IP only as a hash", async () => {
