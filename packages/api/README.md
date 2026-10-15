@@ -234,14 +234,18 @@ Each step lands green and is useful on its own.
 - **A0 · accounts (you).** A Cloudflare account and the dev GitHub App. Nothing in this step is code, and none of
   the secrets ever go into the repo or this chat. The runbook, in order (production repeats it in A7, with its own
   app, database and secrets). Commands run in `packages/api`:
-  1. **Cloudflare account**, and its `workers.dev` subdomain (Workers & Pages asks for it on the first visit). The dev
-     Worker will be `https://editor-api-dev.<subdomain>.workers.dev`. Then `npx wrangler login`.
+  1. **Cloudflare account**, and its `workers.dev` subdomain. It belongs to the account, not to a Worker, so none has to
+     exist yet: Workers & Pages shows it in the account details beside the list (Subdomain, with Change), and if none
+     is set, that's where to choose one (the first `wrangler deploy` would ask for one too). The dev Worker will be
+     `https://editor-api-dev.<subdomain>.workers.dev`. Then `npx wrangler login`.
   2. **D1:** `npx wrangler d1 create editor-api-dev`. Its `database_id` isn't secret; it goes in `wrangler.jsonc`'s
-     `env.dev`.
+     `env.dev` (binding `DB`, whatever binding name wrangler's snippet suggests). Done for dev, 2026-10-15.
   3. **The dev GitHub App** (GitHub → Settings → Developer settings → GitHub Apps → New GitHub App):
      - Name: anything unique, e.g. `editor-dev-<you>`. Homepage: `https://brianjenkins94.github.io/editor/`.
-     - Callback URLs: `https://editor-api-dev.<subdomain>.workers.dev/auth/github/callback`, and
-       `http://localhost:8787/auth/github/callback` for `wrangler dev`.
+     - Callback URLs, under "Identifying and authorizing users" on the app's settings page (General → Edit, for an app
+       that already exists): `https://editor-api-dev.<subdomain>.workers.dev/auth/github/callback`, then "Add Callback
+       URL" for `http://localhost:8787/auth/github/callback` (`wrangler dev`). The same section has the token-expiry,
+       authorize-during-installation and device-flow settings.
      - **Expire user authorization tokens: on.** Request user authorization during installation: off. Device flow:
        off. Setup URL: empty. Webhook: **Active off**.
      - Permissions:

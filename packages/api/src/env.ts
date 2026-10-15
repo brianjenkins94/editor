@@ -14,6 +14,11 @@ export interface Bindings {
 	"TOKEN_KEK": string;
 	/** The secret the audit log's IP hashes are keyed by (with the date). */
 	"AUDIT_KEY": string;
+	/** The GitHub App's client id (not secret), and its secret. */
+	"GITHUB_CLIENT_ID": string;
+	"GITHUB_CLIENT_SECRET": string;
+	/** The key the sign-in's state is sealed under on its way through GitHub. */
+	"STATE_KEY": string;
 	"DB": D1Database;
 	"GRANTS": DurableObjectNamespace<Grant>;
 }
