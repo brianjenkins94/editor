@@ -315,6 +315,10 @@ every extension it bundles, so the architecture view sees which extension regist
 extension isn't tapped, so the view doesn't see it; counting in core's command service instead is FEATURES-AS-EXTENSIONS'
 S8. `editor.pane.native.*` are the native pane face's own buttons.
 
+**What agents ask** (debug-mcp's tools, over the hub) of an extension is answered by the bridge with that extension's
+command, from one fixed list (extensions/bridge/answers.ts): `margin.state` by the Margin's `margin.state`, `rules.state` by
+`silo.rules.list`. A hub request names an answer there, never a command.
+
 **Another extension's:** the capabilities extension answers the rules (FEATURES-AS-EXTENSIONS step 5a) — not core's, so
 not in the table; one that runs them is the capabilities extension's consumer, and degrades without it, as `_types.at`'s
 callers do. (The bridge's preview prompt doesn't: it saves its rule by editor-api's `./policy`, as the rest of the

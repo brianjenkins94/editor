@@ -249,10 +249,10 @@ test("preview prompt: Rule… makes the rule in the Rules view, and the call wai
 	// Allowed: the fetch goes out (wherever it gets) instead of the gate's 403.
 	assert.notEqual(await decided, "Capability denied");
 
-	const { mine } = await session.request("rules.list", undefined, 10_000);
+	const { mine } = await session.execute("silo.rules.files");
 
 	assert.deepEqual(mine.rules[0].when.predicates.map(({ "target_id": targetId, argument }) => [targetId, argument]), [["capability", "net"], ["resource", "esm.sh"]]);
-	await session.request("rules.set", { "previous": mine.rules[0] }, 10_000);
+	await session.execute("silo.rules.set", mine.rules[0]);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 

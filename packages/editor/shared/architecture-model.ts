@@ -260,9 +260,6 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "debug.session.*.setValue", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "debug.session.*.pace", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "debug.session.*.stdin", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "rules.given", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "rules.set", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "rules.list", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "bridge.ready", "from": ["debug-worker"], "to": ["bridge"] },
 	{ "pattern": "runtime.fs.attach", "from": ["debug-worker"], "to": ["bridge"] },
 	// (a runtime link from the web worker extension host — eslint's worker — reaches the bridge through the workbench)

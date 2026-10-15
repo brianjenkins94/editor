@@ -7,11 +7,7 @@
  *   pod     `debug.start` { program?, breakpoints?, args?, eventLoop? } → starts a session and answers with its first stop
  *   pod     `debug.explore` { program, maxRuns? }  → every ordering of its events run: the distinct outcomes (tsval's `tsval.explore`)
  *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
- *   pod     `rules.given` { program?, target } → what a rule gives the file's `target` (process.argv): { rule, values } | null
- *   pod     `rules.set` { previous?, rule? } → my policy changed by a rule editor: previous replaced by rule (or added, or removed)
- *   pod     `rules.list`                       → every rule, apart: { mine: { file, rules, places }, shared: … } | null
- *   pod     `rules.state`                      → every rule as the Rules tree lists it: { rules }
- *   (the rules' four are the capabilities extension's, by its commands: silo.rules.given, .set, .files, .list)
+ *   (what agents ask of other extensions — the Margin's state, the rules — is answers.ts')
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
@@ -468,8 +464,6 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 			return session.setValue(name, value);
 		}),
-		// What a file's Margin shows, for an agent (the `margin_state` tool): the Margin's own account of it.
-		{ "dispose": serve(hub, "margin.state", async (args) => vscode.commands.executeCommand("margin.state", (args as { "file"?: unknown } | null)?.file)) },
 		{ "dispose": serve(hub, "debug.sessions", async () => Promise.all([...sessions.values()].map(async (session) => {
 			const { "output": _output, "locals": _locals, ...summary } = await session.outcome();
 
@@ -484,21 +478,6 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 			return { "program": path, "lines": lines ?? [] };
 		}) },
-		// The rules, for an agent: the capabilities extension's (its rules.ts and rules-tree.ts) — what a rule gives a
-		// file's process.argv, each policy file's rules and where each placed one is now, a rule's change, and every rule
-		// as the Rules tree lists it.
-		{ "dispose": serve(hub, "rules.given", async (args) => {
-			const { program, target } = (args ?? {}) as { "program"?: string; "target"?: string };
-
-			return vscode.commands.executeCommand("silo.rules.given", resolveProgram(program), target ?? "process.argv");
-		}) },
-		{ "dispose": serve(hub, "rules.list", async () => vscode.commands.executeCommand("silo.rules.files")) },
-		{ "dispose": serve(hub, "rules.set", async (args) => {
-			const { previous, rule } = (args ?? {}) as { "previous"?: unknown; "rule"?: unknown };
-
-			return vscode.commands.executeCommand("silo.rules.set", previous, rule);
-		}) },
-		{ "dispose": serve(hub, "rules.state", async () => ({ "rules": await vscode.commands.executeCommand<unknown[] | null>("silo.rules.list") ?? [] })) },
 		// Run (RUNNING.md): every button's, the margin's, an agent's — one path.
 		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => runProgram(args, signal)) },
 		// Every ordering of a program's events, run (tsval's Explore Orderings, its command).

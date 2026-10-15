@@ -538,7 +538,7 @@ flowchart LR
 | Bridge | node | `node.stdin.*` |
 | Bridge | parse | `parse.status` |
 | Bridge | production | `production.exit.*`, `production.launch`, `production.out.*` |
-| Bridge | rules | `rules.given()`, `rules.list()`, `rules.set()`, `rules.state()` |
+| Bridge | rules | `rules.state()` |
 | Bridge | run | `run.effects()` |
 | Bridge | runtime | `runtime.fs.attach()` |
 | Bridge | stops | `stops.preview` |

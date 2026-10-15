@@ -264,10 +264,10 @@ test("package prompt: whose call, and why it's asked; Allow always is about that
 		await prompt.locator("wa-button", { "hasText": "Allow always" }).click();
 		assert.deepEqual((await ran).output, ["wrote"], "allowed: the call made");
 
-		const { mine } = await session.request("rules.list", undefined, 10_000);
+		const { mine } = await session.execute("silo.rules.files");
 
 		assert.deepEqual(mine.rules[0].when.predicates.filter(({ "target_id": targetId }) => targetId !== "resource").map(({ "target_id": targetId, argument }) => [targetId, argument]), [["capability", "fs:write"], ["package", "sneaky"]], "a rule about sneaky's calls");
-		await session.request("rules.set", { "previous": mine.rules[0] }, 10_000);
+		await session.execute("silo.rules.set", mine.rules[0]);
 
 		if (alone) {
 			await eventually("the prompt's own window, closed", async () => (await ownWindows() === 0) || undefined);
@@ -397,7 +397,7 @@ test("capability decisions and placed rules: in a file the program imports, as i
 		const [place] = await workbench.evaluate(([text, start, end]) => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", text, "tally.js", [{ "start": start, "end": end }]).then((answer) => answer.value), [source, source.indexOf(statement), source.indexOf(statement) + statement.length]);
 
 		rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "tally.js" }, { "target_id": "at", "operator_id": "is", "argument": place }] }, "then": [{ "action_id": "set", "target_id": "variables.total", "argument": 100 }] };
-		await session.request("rules.set", { "rule": rule }, 10_000);
+		await session.execute("silo.rules.set", undefined, rule);
 
 		const ruled = await session.request("debug.start", { "program": "/workspace/tallied.js", "breakpoints": [] }, 60_000);
 
@@ -408,7 +408,7 @@ test("capability decisions and placed rules: in a file the program imports, as i
 		}
 
 		if (rule !== undefined) {
-			await session.request("rules.set", { "previous": rule }, 10_000).catch(() => undefined);
+			await session.execute("silo.rules.set", rule).catch(() => undefined);
 		}
 
 		await workbench.evaluate(async () => {
@@ -660,7 +660,7 @@ test("rules view: every rule as a sentence, opened and removed there", async () 
 	const lines = () => ruleRows(workbench);
 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("silo.rules.focus"));
-	await session.request("rules.set", { "rule": rule }, 10_000);
+	await session.execute("silo.rules.set", undefined, rule);
 	assert.deepEqual(await eventually("the rule, listed", async () => ((await lines())?.length === 1 ? lines() : undefined)), ["capability is fs:write and resource matches /workspace/*.txt → allow"]);
 
 	// Opened: the rule editor (the Rule view), with Remove.
@@ -668,7 +668,7 @@ test("rules view: every rule as a sentence, opened and removed there", async () 
 	await eventually("its editor", () => inRuleView(() => [...document.querySelectorAll(".rule-panel-choice")].some((button) => button.textContent === "Remove") || undefined));
 	await pressInRuleView("Remove");
 	assert.deepEqual(await eventually("no rules", async () => ((await lines())?.length === 0 ? lines() : undefined)), []);
-	assert.deepEqual((await session.request("rules.list", undefined, 10_000)).mine.rules, []);
+	assert.deepEqual((await session.execute("silo.rules.files")).mine.rules, []);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
@@ -689,9 +689,9 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 	// A place in code that isn't there any more.
 	const [gone] = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", "let gone = 0;\n", "placed.js", [{ "start": 0, "end": 13 }]).then((answer) => answer.value));
 	const rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "placed.js" }, { "target_id": "at", "operator_id": "is", "argument": gone }] }, "then": [{ "action_id": "set", "target_id": "variables.x", "argument": 5 }] };
-	const listed = () => session.request("rules.list", undefined, 10_000);
+	const listed = () => session.execute("silo.rules.files");
 
-	await session.request("rules.set", { "rule": rule }, 10_000);
+	await session.execute("silo.rules.set", undefined, rule);
 	assert.equal((await listed()).mine.places[0].status, "orphaned");
 	assert.match(await eventually("the broken rule", async () => (await ruleRows(workbench))?.find((label) => /place in the code is lost/u.test(label))), /place in the code is lost/u);
 
@@ -714,7 +714,7 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 
 	assert.equal(placed.places[0].line, 2);
 	assert.deepEqual(placed.rules[0].then, rule.then);
-	await session.request("rules.set", { "previous": placed.rules[0] }, 10_000);
+	await session.execute("silo.rules.set", placed.rules[0]);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
@@ -726,7 +726,7 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 test("placed rules: marked beside their code, followed through edits, and kept placed on save", async () => {
 	const workbench = session.workbench();
 	const marks = () => workbench.evaluate(() => [...document.querySelectorAll(".notes-margin-mark.rule-placed")].map((mark) => ({ "title": mark.title, "uncertain": mark.classList.contains("uncertain") })));
-	const listed = () => session.request("rules.list", undefined, 10_000);
+	const listed = () => session.execute("silo.rules.files");
 	const read = (path) => workbench.evaluate(async (file) => {
 		const { api } = globalThis.__editor;
 
@@ -761,7 +761,7 @@ test("placed rules: marked beside their code, followed through edits, and kept p
 	const contract = await read("/workspace/.silo/policy.json");
 
 	await write("/workspace/.silo/policy.json", JSON.stringify({ "version": 1, "rules": [shared, ...contract === null ? [] : JSON.parse(contract).rules ?? []] }, null, "\t") + "\n");
-	await session.request("rules.set", { "rule": rule }, 10_000);
+	await session.execute("silo.rules.set", undefined, rule);
 
 	const [mark] = await eventually("the rules' mark", async () => {
 		const shown = await marks();
@@ -806,7 +806,7 @@ test("placed rules: marked beside their code, followed through edits, and kept p
 	assert.deepEqual([kept.mine.places[0].status, kept.mine.places[0].line], ["attached", 4]);
 	assert.deepEqual([kept.shared.places[0].status, kept.shared.places[0].line], ["attached", 4]);
 	assert.equal(kept.mine.rules[0].added, added, "moving a place isn't deciding anything");
-	await session.request("rules.set", { "previous": kept.mine.rules[0] }, 10_000);
+	await session.execute("silo.rules.set", kept.mine.rules[0]);
 	await write("/workspace/.silo/policy.json", contract);
 	await eventually("no mark", async () => ((await marks()).length === 0 || undefined));
 	await workbench.evaluate(async () => {
@@ -869,9 +869,9 @@ test("mock a call's result: given at its capability stop, from what it returned 
 	assert.equal(paused.function, "main");
 	await session.request(`debug.session.${paused.session}.stop`, undefined, 30_000);
 
-	const { mine } = await session.request("rules.list", undefined, 10_000);
+	const { mine } = await session.execute("silo.rules.files");
 
-	await session.request("rules.set", { "previous": mine.rules[0] }, 10_000);
+	await session.execute("silo.rules.set", mine.rules[0]);
 	await session.request("debug.breakpoints", { "program": program, "lines": [] }, 30_000);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
@@ -1227,7 +1227,7 @@ test("explore orderings: a race's endings, each debugged by its schedule", async
 		].join("\n")));
 	}, program);
 	// (The fetches allowed: a debug run doesn't stop at them to ask.)
-	await session.request("rules.set", { "rule": allowNet }, 10_000);
+	await session.execute("silo.rules.set", undefined, allowNet);
 
 	const explored = await session.request("debug.explore", { "program": program }, 120_000);
 
@@ -1239,9 +1239,9 @@ test("explore orderings: a race's endings, each debugged by its schedule", async
 
 	assert.deepEqual(ran.output, ["a"], "the ordering, run again in the debugger");
 
-	const [rule] = (await session.request("rules.list", undefined, 10_000)).mine.rules;
+	const [rule] = (await session.execute("silo.rules.files")).mine.rules;
 
-	await session.request("rules.set", { "previous": rule }, 10_000);
+	await session.execute("silo.rules.set", rule);
 	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
 });
 

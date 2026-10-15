@@ -181,8 +181,7 @@ about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
      (rules-tree.ts, out of workbench/rules-view.ts). A rule's sentence and what it would do are editor-api's `./rules`,
      shared by the view and the tree. The Rules tree, the Margin's Rule… and Mock… and the bridge's preview prompt each
      ask for an edit and do what the button means; the hub's `rules.make` went. The places follow a file's edits through core's
-     `editor.history.texts` (was the hub's `history.texts`). The bridge still relays `rules.given`, `.list`, `.set`
-     and `.state` to those commands, for agents and the tours — 5d's.
+     `editor.history.texts` (was the hub's `history.texts`). What agents ask of the rules is 5d's.
    - ~~**5b. The Margin → its own extension.**~~ Done (2026-10-15): live-values.ts (now margin.ts), inputs.ts and
      coverage.ts are `extensions/margin` (web worker host), reading the run contract's events themselves — the bridge's
      `values.session.*`, `values.ended` and `capability.ask` went. What it asked the bridge over the hub is commands
@@ -194,8 +193,10 @@ about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
    - ~~**5c. Recorded stops as a run's values.**~~ Done (2026-10-15): the bridge's recorded-stops.ts tells a page's stops
      as `values` on its preview's `production` session (production-adapter.ts's `tellPreview`), each report every hit so
      far — the contract's `replace`. A preview with no production run (none today) shows none.
-   - **5d. The agents' answers.** The bridge answers `margin.state` and `rules.state` by the owning extension's command —
-     a fixed list, not a relay of the hub.
+   - ~~**5d. The agents' answers.**~~ Done (2026-10-15): the bridge answers `margin.state` and `rules.state` (the
+     `margin_state` and `rules_list` tools) by the owning extension's command, from one fixed list (bridge/answers.ts);
+     the tours run the rules' commands themselves (the harness's `session.execute`), so `rules.given`, `.list` and
+     `.set` left the hub.
 6. **tsval's decision, then its move**; the architecture view's realm; command counts in core.
 
 Each step ends with its features passing and nothing left behind them: a feature that moves takes its tests, and core

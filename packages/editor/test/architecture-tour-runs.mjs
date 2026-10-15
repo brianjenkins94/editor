@@ -703,7 +703,7 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 	await mockHigh("Save as rule");
 
 	const [rule] = await eventually("the rule", async () => {
-		const listed = await session.request("rules.list", undefined, 10_000);
+		const listed = await session.execute("silo.rules.files");
 
 		return listed.mine.rules.length === 1 ? listed.mine.rules : undefined;
 	});
@@ -724,7 +724,7 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 
 	assert.deepEqual(ruled["5"], ["mid =", "1", "2", "3"]);
 	await session.request(`debug.session.${third.session}.stop`, undefined, 30_000);
-	await session.request("rules.set", { "previous": rule }, 10_000);
+	await session.execute("silo.rules.set", rule);
 	await session.request("debug.breakpoints", { "program": "/workspace/setvalue.js", "lines": [] }, 30_000);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
@@ -736,7 +736,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 	const workbench = session.workbench();
 	const program = "/workspace/tax.js";
 	const runsOf = async () => (await session.request("runs.list", undefined, 5000)).filter((run) => run.title.includes("tax.js"));
-	const givenNow = () => session.request("rules.given", { "program": program, "target": "process.argv" }, 10_000);
+	const givenNow = () => session.execute("silo.rules.given", program, "process.argv");
 	const row = () => workbench.evaluate(() => {
 		const line = document.querySelector(".live-values-row[data-line=\"0\"]");
 
@@ -794,7 +794,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 	const before = await givenNow();
 
 	if (before !== null) {
-		await session.request("rules.set", { "previous": before.rule }, 10_000);
+		await session.execute("silo.rules.set", before.rule);
 	}
 
 	// Before any run: its row, nothing given.

@@ -16,6 +16,7 @@ import { observe } from "@brianjenkins94/observability";
 import * as vscode from "vscode";
 import { storeNode } from "../../shared/architecture-zenfs";
 import { ARCH_COMMANDS } from "../command-tap";
+import { serveAnswers } from "./answers";
 import { decideCapability } from "./capabilities/decide";
 import { registerCapabilityStops } from "./capability-stops";
 import { runProgram, serveDebugControl } from "./debug-control";
@@ -130,6 +131,8 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	registerCapabilityStops(context, bridgeHub);
 	// Every debugger's sessions driven over the hub (debug-mcp's debug_* tools): followed and stepped through DAP.
 	serveDebugControl(context, bridgeHub);
+	// What agents ask of the editor's extensions, each by its command (answers.ts: a fixed list).
+	serveAnswers(context, bridgeHub);
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);

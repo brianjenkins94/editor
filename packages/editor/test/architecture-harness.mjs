@@ -246,6 +246,7 @@ export async function startSession(options = {}) {
 			stop = (text) => {
 				reject(new Error(`gave up waiting for ${what}: ${text.slice(text.search(COULD_NOT_LOAD))}`));
 			};
+
 			realmFailed.add(stop);
 		});
 
@@ -330,6 +331,8 @@ export async function startSession(options = {}) {
 		/** Everything seen all session: the last snapshot, with every node and channel any look saw. */
 		"seen": () => ({ ...snapshot, "nodes": [...nodesSeen.values()], "channels": [...channelsSeen.values()], "topology": topologySeen }),
 		"conformance": async () => workbench().evaluate(() => globalThis.__architecture.conformance()),
+		/** A command run, as an extension runs one: the editor's (EXTENSION-POINTS 5) or an extension's. */
+		"execute": async (command, ...args) => workbench().evaluate(([name, given]) => globalThis.__editor.api.commands.executeCommand(name, ...given), [command, args]),
 		/** An RPC into the hub tree, from the workbench realm. */
 		"request": async (subject, data, timeoutMs) => workbench().evaluate(([sentSubject, sentData, sentTimeoutMs]) => globalThis.__architecture.request(sentSubject, sentData, sentTimeoutMs), [subject, data, timeoutMs]),
 		/** Type a command into a terminal: the current one, or a new one (the current may be busy with a server). */
