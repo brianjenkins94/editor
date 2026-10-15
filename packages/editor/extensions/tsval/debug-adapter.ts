@@ -11,18 +11,18 @@
  */
 import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/editor-api";
 import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
+import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
-import type { Span } from "@brianjenkins94/util/logger";
 
+import type { Span } from "@brianjenkins94/util/logger";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { Replay } from "../../shared/preview-evidence";
 import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { watchWorker } from "@brianjenkins94/editor-api/failures";
+import { loadEffectivePolicy } from "@brianjenkins94/editor-api/policy";
 import { logger } from "@brianjenkins94/util/logger";
 import { EMPTY_POLICY, given as givenBy, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { loadEffectivePolicy } from "../../shared/capabilities/silo-store";
-import { watchWorker } from "../../shared/failures";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;

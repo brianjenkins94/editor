@@ -8,9 +8,9 @@
  * Runs in the workbench realm, beside runtime evidence (evidence.ts), which reads the same pages' counts.
  */
 import type { LiveValue } from "@brianjenkins94/editor-api";
+import type { RecordedStop } from "@brianjenkins94/editor-api/recorded";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
-import type { RecordedStop } from "../shared/preview-evidence";
 import { createRpcClient } from "@brianjenkins94/hub";
 
 /** Each workspace file's breakpoints, enabled, as 1-based lines. */

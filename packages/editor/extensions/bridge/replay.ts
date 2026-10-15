@@ -7,7 +7,7 @@
  * The bridge hears what the preview pages report (`stops.preview`, as the margin does: recorded-stops.ts) and keeps each
  * file's latest; the text of the version that ran comes from the dev server that served it (`preview.version`).
  */
-import type { RecordedStop, Replay, StopHit } from "../../shared/preview-evidence";
+import type { RecordedStop, Replay, StopHit } from "@brianjenkins94/editor-api/recorded";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { bridgeHub } from "./hub";

@@ -10,10 +10,10 @@
  */
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
-import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { observedRef } from "@brianjenkins94/util/silo/annotations";
 import { parseEvidence, parseSamples } from "@brianjenkins94/util/silo/evidence";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
+import { annotations } from "./annotations.ts";
 
 /** What every run observed at one span, folded: strict counts summed, faded runs summed, the latest report's time. */
 export interface SpanEvidence {

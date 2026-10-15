@@ -18,9 +18,9 @@
  *     file, saying why and that the preset lints meanwhile, and a change to one starts the worker afresh, as the
  *     desktop server reloads its config.
  */
+import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { workspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
-import { watchWorker } from "../../shared/failures";
 
 const LANGUAGES = ["javascript", "javascriptreact", "typescript", "typescriptreact"];
 const FIX_ALL = vscode.CodeActionKind.SourceFixAll.append("eslint");

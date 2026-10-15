@@ -12,10 +12,10 @@
  * And without being asked: a window that keeps running slow — much of its time in long animation frames — is profiled
  * once per slow stretch, and published on `preview.profiled` (installAutoProfiler).
  */
+import type { CpuProfile, ProfileEntry, ProfilerTrace } from "@brianjenkins94/editor-api/cpuprofile";
 import type { Hub } from "@brianjenkins94/hub";
-import type { CpuProfile, ProfileEntry, ProfilerTrace } from "./cpuprofile";
+import { summarize, toCpuProfile } from "@brianjenkins94/editor-api/cpuprofile";
 import { serve } from "@brianjenkins94/hub";
-import { summarize, toCpuProfile } from "./cpuprofile";
 
 /** RPC: `{ window or port, durationMs?, sampleIntervalMs?, top? }` → `{ profile, summary }`. */
 export const PREVIEW_PROFILE = "preview.profile";

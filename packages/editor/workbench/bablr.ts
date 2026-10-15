@@ -20,10 +20,10 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
+import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs } from "@zenfs/core";
-import { watchWorker } from "../shared/failures";
 import { blobText, status } from "./git-engine";
 
 /** BABLR's grammar doesn't take a text: `message` is why. */

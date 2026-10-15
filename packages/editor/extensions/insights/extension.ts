@@ -6,8 +6,8 @@
  * all of them read the evidence kept in git through evidence.ts; a slow preview's profile, with where its time went, is
  * profiles.ts. (Coverage is the notes margin's strip, drawn by core: coverage.ts, through this same evidence store.)
  */
+import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
 import * as vscode from "vscode";
-import { evidenceStore } from "../../shared/evidence-store";
 import { registerFixes } from "./fixes";
 import { registerHover } from "./hover";
 import { registerMonitor } from "./monitor";

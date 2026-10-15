@@ -9,19 +9,19 @@
  * (the fixed order), `redline` (BERNARD catastrophic scopes), and the intercept helpers (CAP_FS + scope
  * builders) as the single classification source. The decider is a VS Code popup today (Allow / Allow always /
  * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
- * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
+ * policy merge, the observed-capability rollup, the run firehose — lives in editor-api/policy.
  */
 import type { AskedWhy } from "@brianjenkins94/editor-api/runtime";
 import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
+import { recordEffect } from "@brianjenkins94/editor-api/effects";
+import { loadEffectivePolicy, persistOverride, recordObservation } from "@brianjenkins94/editor-api/policy";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
 import { effectiveDisposition, isDangerous, packageDisposition } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { recordEffect } from "../../../shared/capabilities/run-effects";
-import { loadEffectivePolicy, persistOverride, recordObservation } from "../../../shared/capabilities/silo-store";
 import { bridgeHub } from "../hub";
 import { coalesce } from "./coalesce";
 
@@ -42,7 +42,7 @@ export interface CapabilityCall {
 	"resource"?: string;
 	"args"?: readonly unknown[];
 	/** The run this call belongs to, when known (a preview's, by its port): counted among that run's effects, which its
-	 *  envelope in the run ledger lists (run-effects.ts's recordEffect). */
+	 *  envelope in the run ledger lists (editor-api/effects's recordEffect). */
 	"runId"?: string;
 	/** The preview port a shell-forwarded call (the WS/WebRTC shim) originates from — the ext host resolves it to
 	 *  the run that owns the port (mirroring the SW's runId for net), since the shim can't know the runId itself. */

@@ -82,7 +82,7 @@ function readOnly(files: RuntimeFs, shadowed: Set<string>): RuntimeFs {
 }
 
 /** Shut this worker's ways out — every network global and every way to start another context, as code we only evaluate
- *  gets (shared/gated-eval.ts) — for what runs here from now on: the repository's config and its plugins. */
+ *  gets (editor-api/gated-eval) — for what runs here from now on: the repository's config and its plugins. */
 function lockNetwork(): void {
 	const scope = globalThis as unknown as Record<string, unknown>;
 

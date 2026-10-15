@@ -11,7 +11,7 @@
 import type { Juvy } from "@brianjenkins94/util/juvy";
 import type { CommandHost, Handler } from "../../catalog";
 
-import { lifecycleOfSource } from "../../../../shared/lifecycle";
+import { lifecycleOfSource } from "@brianjenkins94/editor-api/lifecycle";
 
 /** POSIX resolve of `path` against `base` (collapsing `.`/`..`). */
 function resolvePosix(base: string, path: string): string {

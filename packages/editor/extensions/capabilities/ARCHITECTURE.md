@@ -27,7 +27,7 @@ the core at its own call boundary. Hold to that and the seams stay put.
   │   extension.ts  reads those diagnostics + .silo/policy.json → PANEL (dispositions, editing)                  │
   │                 TRIPWIRE (surface): a denied call → its own error diagnostic (source "capabilities-policy")  │
   │   policy.ts     the vscode file I/O for the base .silo/policy.json (the panel edits the contract)            │
-  │   silo-store.ts the .silo/ layout: base+override merge · observed rollup · run firehose  (decide.ts uses it) │
+  │   editor-api/policy.ts the .silo/ layout: base+override merge · observed rollup · run firehose  (decide.ts uses it) │
   ├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
   │ run contexts (where ENFORCE lives — plural, because the app runs in different runtimes)                      │
   │   tsval debugger  (tsval: debug-adapter.ts + debug-worker.ts)  → HARD-STOP breakpoint that ASKS on its   │
@@ -69,10 +69,10 @@ signal** (a scope OBSERVED with no matching STATIC entry is the alarm; silo must
 Enforcement reads the **effective** policy = `policy/<user>.json` layered over `policy.json` (override wins,
 contract next, computed default last). Timestamps land per axis: `added` (when I authorized) on the override rule;
 `firstObserved`/`lastObserved` on the observed rollup; each run's own in its envelope's `effects` (a debug run's from
-its worker, a preview's from `decide`, counted by run in `silo-store.ts` and asked for over `run.effects` as the
+its worker, a preview's from `decide`, counted by run in `editor-api/policy.ts` and asked for over `run.effects` as the
 envelope is written). "lastAllowed"
 and "was I exposed to compromised dep X in window W" are QUERIES over the observed side, never stored decision state.
-`silo-store.ts` owns all of this I/O; `policy.ts` handles only the base file the panel curates.
+`editor-api/policy.ts` owns all of this I/O; `policy.ts` handles only the base file the panel curates.
 
 ## Files (what lives where)
 
@@ -90,7 +90,7 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | `packages-worker.ts` → `lsp/packages-worker.js` | READ — each package's tarball through lib's `packageCaps` (code files, install hooks), and the join: lib's `sliceCaps` with `@rolldown/browser` (loaded on the first slice) for each spec the code imports; a slice that can't be built is null, the whole package stands; started for a sync, ended after. Built on its own (build.ts 2b): every chunk carries the `process` shim, and none is shared with the debug worker's | a worker of the extension's |
 | `exceptions.ts` | the "Exceptions" view: libraries that grew a capability (the baseline's `grew`), and the policy's exceptions — each run's answers at the call (`decided`: once / always / refused), by package or the program | ext host |
 | `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `silo/policy`) | ext host |
-| `silo-store.ts` | the whole `.silo/` layout: base+override policy merge, observed rollup, run firehose, git-user resolution | ext host |
+| `editor-api/policy.ts` | the whole `.silo/` layout: base+override policy merge, observed rollup, run firehose, git-user resolution | ext host |
 | `decide.ts` | the single capability decision endpoint every interceptor round-trips to (classify → gate → decide) | ext host |
 
 ## Baseline, policy, exceptions
@@ -121,7 +121,7 @@ answer for the run is that package's, not every caller's.
   derive from it, so the editor never misses a method the runtime asks about (as `rm` / `rename` / `copyFile` once
   were).
 - **One policy model.** `@brianjenkins94/util/silo/policy` is the single source of dispositions + matching (shared
-  with silo, no longer a local fork); `silo-store` is the single source of `.silo/` I/O (base+override merge,
+  with silo, no longer a local fork); `editor-api/policy` is the single source of `.silo/` I/O (base+override merge,
   observed facts). `policy.ts` only adds the panel's base-file I/O.
 - **The plugin only answers.** Everything it computes is the engine's (lib's readings over the host's tree); the extension asks with `typescript.tsserverRequest` and shows what comes back. So moving to TypeScript 7 is one adapter — its API connection answering the same requests (the silo README's "Where analysis lives when TypeScript 7 arrives").
 - **One decision endpoint; thin interceptors.** Every runtime interceptor (the service-worker net gate, the
@@ -136,7 +136,7 @@ answer for the run is that package's, not every caller's.
   (panel with allow/deny/review dispositions + a view badge) · TRIPWIRE surface (denied call → error squiggle) ·
   the pure core (`@brianjenkins94/util/silo/policy`, `capability-breakpoints`) · unified classification · ENFORCE round-trip
   (`decide.ts` endpoint; net gate in the SW, fs write/delete + read gate in the almostnode shim) · the `.silo/`
-  layout (`silo-store.ts`: base+override policy, observed rollup, each run's effects) · production debug adapter.
+  layout (`editor-api/policy.ts`: base+override policy, observed rollup, each run's effects) · production debug adapter.
 - **Next:** persist the STATIC surface to `.silo/capabilities.json` (the panel/engine side) so static-vs-observed
   drift is queryable · the "was I exposed to compromised dep X" audit, a query over the run ledger (each envelope has its
   files' oids and its effects) · the elicitation/AI decider behind the

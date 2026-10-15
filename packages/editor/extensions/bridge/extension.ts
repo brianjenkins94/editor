@@ -7,14 +7,14 @@
  */
 import type { CommandTotals } from "../command-tap";
 import type { CapabilityCall } from "./capabilities/decide";
+import { takeEffects } from "@brianjenkins94/editor-api/effects";
+import { recordedResult, recordResult } from "@brianjenkins94/editor-api/policy";
+
 import { provideWorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-
 import { observe } from "@brianjenkins94/observability";
 import * as vscode from "vscode";
 import { storeNode } from "../../shared/architecture-zenfs";
-import { takeEffects } from "../../shared/capabilities/run-effects";
-import { recordedResult, recordResult } from "../../shared/capabilities/silo-store";
 import { ARCH_COMMANDS } from "../command-tap";
 import { decideCapability } from "./capabilities/decide";
 import { registerCapabilityStops } from "./capability-stops";
@@ -251,7 +251,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "launch", "name": name, "__prodId": id, "__port": info.port }, { "noDebug": true });
 
 		// A preview's run (a port-bound one): the SW tags that port's gated net calls with `id`, so they're counted among
-		// its effects (run-effects.ts's recordEffect), which its envelope takes when it ends (`run.effects`).
+		// its effects (editor-api/effects's recordEffect), which its envelope takes when it ends (`run.effects`).
 		if (typeof info.port !== "number") {
 			return;
 		}

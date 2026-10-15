@@ -12,7 +12,7 @@
  * manifests, plugin metadata, …) can use this. `imports` maps bare specifiers the code `require`s to plain data;
  * anything unlisted resolves to an inert stub so evaluation survives without granting anything.
  */
-import { watchWorker } from "./failures";
+import { watchWorker } from "./failures.ts";
 
 export interface GatedEvalResult {
 	/** The value the code exported (default export, else module.exports), structured-clonable only. */

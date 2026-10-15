@@ -91,7 +91,7 @@ export const hasLabel = (one, other, label) => (snapshot) => between(snapshot, o
  *  loader tries (module resolution asks for files that may not exist). Not counted among the page's errors. */
 const EXPECTED_MISSES = [/\/favicon\.ico$/u, /\/workspace\/node_modules\/.+\.d\.ts(?:\?|$)/u];
 
-/** A realm that couldn't load, as its starter says it (shared/failures.ts' watchWorker): `[debug-worker] couldn't load: …`. */
+/** A realm that couldn't load, as its starter says it (editor-api/failures' watchWorker): `[debug-worker] couldn't load: …`. */
 const COULD_NOT_LOAD = /\[([\w-]+)\] couldn't load: /u;
 
 /** The dev server the run's global setup started, if it had to: every suite file's sessions find it answering and use it. */

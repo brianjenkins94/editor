@@ -15,9 +15,9 @@
  *
  * Runs in the workbench realm: the workspace filesystem, and the run registry that knows where each dev server serves.
  */
+import type { CpuProfile } from "@brianjenkins94/editor-api/cpuprofile";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
-import type { CpuProfile } from "../shared/cpuprofile";
 import type { PreviewProfile } from "../shared/preview-profile";
 import type { RunRegistry } from "./runs";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";

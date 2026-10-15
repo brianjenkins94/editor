@@ -26,10 +26,10 @@
  * adapted from github.com/gzuidhof/coi-serviceworker (MIT). Bundled as an ES MODULE (sw.config.ts) so it can
  * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
+import { esmPackage } from "@brianjenkins94/editor-api/recorded";
 import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "./shared/architecture";
-import { esmPackage } from "./shared/preview-evidence";
 import { parseVirtual } from "./shared/virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,

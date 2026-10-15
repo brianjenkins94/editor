@@ -7,9 +7,9 @@
  * - `ended`: a file's values go, and how the run ended short is marked (`values.ended`) — for a debugger that tells none,
  *   the program's, as its session ends;
  * - `coverage`: the run's evidence (`evidence.observed`, evidence.ts — coverage.ts reads the event itself);
- * - `effects`: what the run did to the world, kept for its envelope in the run ledger (run-effects.ts's setEffects);
+ * - `effects`: what the run did to the world, kept for its envelope in the run ledger (editor-api/effects's setEffects);
  * - `ask`: a capability stop's question, on its line — answered as capability-stops.ts says;
- * - `recorded`: what an allowed call returned, for a rule to give back (silo-store's recordResult);
+ * - `recorded`: what an allowed call returned, for a rule to give back (editor-api/policy's recordResult);
  * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list, its preview).
  *
  * A run a terminal started (`__startedBy: "terminal"`, its `__runId` the terminal's run) prints there — its `output`
@@ -25,11 +25,11 @@
  *   (DAP's `exited`: extension.ts's `node.exit`).
  */
 import type { AskEvent, CoverageEvent, EffectsEvent, EndedEvent, ListeningEvent, RecordedEvent, StdinRequest, ValuesEvent } from "@brianjenkins94/editor-api";
+import { setEffects } from "@brianjenkins94/editor-api/effects";
+import { recordResult } from "@brianjenkins94/editor-api/policy";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { given as givenBy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { setEffects } from "../../shared/capabilities/run-effects";
-import { recordResult } from "../../shared/capabilities/silo-store";
 import { asked, policyFor } from "./capability-stops";
 import { bridgeHub } from "./hub";
 import { appRootOf, runApp } from "./launch";

@@ -17,6 +17,8 @@ import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
+import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
+import { failureText } from "@brianjenkins94/editor-api/failures";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
@@ -50,8 +52,6 @@ import { NETWORK_PROBES } from "../shared/architecture";
 import { classifyUrl, identifyWorker } from "../shared/architecture-ids";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
-import { evidenceStore } from "../shared/evidence-store";
-import { failureText } from "../shared/failures";
 import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
@@ -185,7 +185,7 @@ window.addEventListener("unhandledrejection", (event) => {
 /**
  * An extension's worker, as a classic bootstrap (an extension's workers start classic) that imports the module worker at
  * `lsp/<file>` by its URL, so its own imports resolve beside it. A module that didn't load is said back as `{ failed }`
- * with its stack, which names where it failed (shared/failures.ts' watchWorker says it). `hold`: messages that arrive
+ * with its stack, which names where it failed (editor-api/failures' watchWorker says it). `hold`: messages that arrive
  * before the module listens are kept, and handed on once it has loaded (a classic script is done at once, so a client's
  * first messages would arrive before the module worker listens).
  */

@@ -17,7 +17,10 @@ one.
 
 What an extension author imports is one package, `packages/editor-api` (released like hub, on the site as
 `packages/editor-api@latest.tgz`): the run contract's types, the workspace runtime's (`./runtime`), span annotations
-(`./annotations`) and pane views (`./pane`). It was `run-contract` until it carried more than the run contract (renamed
+(`./annotations`) and pane views (`./pane`) — and what an extension reads of what the editor keeps: runtime evidence
+(`./evidence`), the capability policy and a run's effects (`./policy`, `./effects`), a preview's reports
+(`./recorded`), profiles (`./cpuprofile`), run classification (`./lifecycle`), the gated realm (`./gated-eval`) and a
+worker's failures (`./failures`). It was `run-contract` until it carried more than the run contract (renamed
 2026-10-14; its `Symbol.for` keys keep the old name — they're how a published copy and core find each other).
 editor-contrib depends on it; the bridge and tsval import the same types.
 
@@ -113,7 +116,7 @@ It gets **synchronous files through core** instead, each call answered by the br
   write. The session is the one the extension named to `connect(name, session)`, bound to the link — the worker, and
   the program in it, can't run under another. The gate protects the workspace from the *program*, uniformly, whichever
   debugger runs it — it isn't a wall against the extension, which has `vscode.workspace.fs` like any extension.
-- **Effects, kept by core.** Each program call is counted among its run's effects as it's answered (run-effects.ts), so
+- **Effects, kept by core.** Each program call is counted among its run's effects as it's answered (editor-api/effects), so
   a debugger's `effects` event tells only what the editor didn't see — the requests and commands it made itself.
 - **Reaching it from either host.** `workspaceRuntime()` (editor-api's `./runtime`) finds it where core put it: in the
   bridge's host, the bridge's — the buffer included, for tsval, our own code built with the same zen-fs; in the web

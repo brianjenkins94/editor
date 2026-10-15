@@ -15,9 +15,9 @@ import type { PaneContent, PaneItem } from "@brianjenkins94/editor-api/pane";
 import type { GameModel, NodeLoc } from "./recognizer";
 import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import * as vscode from "vscode";
-import { watchWorker } from "../../shared/failures";
 import { anchorGame } from "./anchors";
 
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;

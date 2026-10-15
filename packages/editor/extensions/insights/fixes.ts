@@ -4,7 +4,7 @@
  * under it, so the lightbulb offers its fix (never applied for you). And every file's, open or not, for the
  * Suggestions view (suggestions-view.ts): VS Code's Problems view doesn't list hints.
  */
-import type { EvidenceStore } from "../../shared/evidence-store";
+import type { EvidenceStore } from "@brianjenkins94/editor-api/evidence";
 import type { Suggestion } from "./suggestions";
 import * as vscode from "vscode";
 import { suggestions } from "./suggestions";

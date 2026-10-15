@@ -6,8 +6,8 @@
  * same file is going — that run is what its margin shows (a service of yours running elsewhere doesn't stop them).
  * Off with `run.liveRuns`.
  */
+import { appRootOf } from "@brianjenkins94/editor-api/lifecycle";
 import * as vscode from "vscode";
-import { appRootOf } from "../../shared/lifecycle";
 
 /** How long typing has to pause before the file runs again. */
 const PAUSE_MS = 400;

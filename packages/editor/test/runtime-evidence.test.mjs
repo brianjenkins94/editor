@@ -3,10 +3,10 @@
 //   node --test test/runtime-evidence.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { esmPackage } from "@brianjenkins94/editor-api/recorded";
 import { evidenceText, foldBranches, foldReached, foldSamples, foldValues, HALF_LIFE_RUNS, MAX_SAMPLES, MAX_TAGS, parseEvidence, parseSamples, samplesText } from "@brianjenkins94/util/silo/evidence";
 import { samplesPath } from "@brianjenkins94/util/silo/layout";
 import { loadedPackages } from "../previews/page-evidence.ts";
-import { esmPackage } from "../shared/preview-evidence.ts";
 
 const run = (index) => ({ "id": `run-${index}`, "at": `2026-10-04T00:00:0${index}Z` });
 const fade = 2 ** (-1 / HALF_LIFE_RUNS);

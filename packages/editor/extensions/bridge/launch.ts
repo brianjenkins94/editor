@@ -4,9 +4,9 @@
  * only the crossing: tasks are VS Code's, and this asks VS Code for them.
  */
 import type { LaunchTarget } from "../../shared/runs";
+import { appRootOf as appRootIn } from "@brianjenkins94/editor-api/lifecycle";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { appRootOf as appRootIn } from "../../shared/lifecycle";
 import { bridgeHub } from "./hub";
 
 const idOf = (task: vscode.Task): string => `${task.source}:${task.name}`;
@@ -34,7 +34,7 @@ export function runDebugger(): string {
 	return vscode.workspace.getConfiguration("run").get<string>("debugger") || "tsval";
 }
 
-/** Where a file's app is, if it's an app's (shared/lifecycle.ts), read through the workspace. */
+/** Where a file's app is, if it's an app's (editor-api/lifecycle), read through the workspace. */
 export async function appRootOf(path: string): Promise<string | undefined> {
 	return appRootIn(path, readText);
 }

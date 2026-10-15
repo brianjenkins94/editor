@@ -13,14 +13,14 @@ import type { ExchangeCall, WireResponse } from "@brianjenkins94/editor-api/runt
 import type { WorkspaceChange } from "../shared/workspace-changes";
 import type { RequestHandler, VirtualRequest, VirtualResponse } from "../shared/workspace-runtime";
 
+import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { exchanges } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { identifyWorker } from "../shared/architecture-ids";
-import { ZENFS_NODE } from "../shared/architecture-zenfs";
 
-import { watchWorker } from "../shared/failures";
+import { ZENFS_NODE } from "../shared/architecture-zenfs";
 import { WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { answerServer, workerTapResponse } from "../shared/workspace-runtime";
 import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "../shared/zenfs-vfs.js";

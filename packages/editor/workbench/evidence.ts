@@ -15,10 +15,10 @@
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
 import type { LoadedPackage, SiteObservation, StatementCoverage } from "@brianjenkins94/editor-api";
+import type { ModuleEvidence } from "@brianjenkins94/editor-api/recorded";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Effect, Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
-import type { ModuleEvidence } from "../shared/preview-evidence";
 import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
@@ -428,7 +428,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			envelope.packages = ran;
 		}
 
-		// What it did to the world: the pod counted each gated call (run-effects.ts), for whichever run it was.
+		// What it did to the world: the pod counted each gated call (editor-api/effects), for whichever run it was.
 		const effects = await rpc.request("run.effects", { "id": run.id }, { "timeoutMs": 5_000, "waitForResponderMs": 2_000 }).catch(() => []);
 
 		if (Array.isArray(effects) && effects.length > 0) {

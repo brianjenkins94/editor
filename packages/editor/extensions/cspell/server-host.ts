@@ -14,8 +14,8 @@
  */
 import { createRuntime } from "@brianjenkins94/almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string (bundledNodeServer in build.ts); run below.
+import { failureText } from "@brianjenkins94/editor-api/failures";
 import serverNodeCode from "cspell:server-node";
-import { failureText } from "../../shared/failures";
 import { createZenfsVFS } from "../../shared/zenfs-vfs.js";
 
 // Kept in one place, matched by server-node's DICT_PATH.

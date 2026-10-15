@@ -14,9 +14,9 @@
  * and the baseline is synced to it (the capabilities extension's baseline.ts, which watches it).
  */
 import type * as vscodeApi from "vscode";
+import { failureText } from "@brianjenkins94/editor-api/failures";
 import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
-import { failureText } from "../shared/failures";
 
 /** The youngest a version may be, in days. */
 export const MIN_AGE_DAYS = 7;

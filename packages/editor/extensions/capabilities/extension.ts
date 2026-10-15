@@ -20,11 +20,11 @@
  * 4. The dependency baseline (baseline.ts): what each dependency's own code can do, kept up to the dependencies in a
  *    worker of this extension's (packages-worker.ts).
  */
-import type { StaticEntry, StaticSurface } from "../../shared/capabilities/silo-store";
+import type { StaticEntry, StaticSurface } from "@brianjenkins94/editor-api/policy";
 
 import type { Disposition, Effective, Policy } from "./policy";
+import { loadStaticSurface, writeStaticSurface } from "@brianjenkins94/editor-api/policy";
 import * as vscode from "vscode";
-import { loadStaticSurface, writeStaticSurface } from "../../shared/capabilities/silo-store";
 import { keepBaseline } from "./baseline";
 import { registerExceptions } from "./exceptions";
 import { publishFindings } from "./findings";

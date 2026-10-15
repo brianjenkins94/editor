@@ -23,13 +23,13 @@ isn't held to it.
 | Feature | Passes? | What it reaches that isn't public |
 | --- | --- | --- |
 | type-queries | yes | — |
-| running | yes, in substance | `shared/lifecycle` (pure functions) |
+| running | yes (since S2) | — |
 | notes | yes (since S3) | — (`_types.at` is documented now: EXTENSION-POINTS 5) |
 | event sheet | packaging only | core builds and registers its `view.js` and recognizer worker (the editor's TypeScript chunk) |
 | cspell | packaging only | core builds its worker, server bundle and dictionary; `shared/zenfs-vfs` (in-memory) |
-| history | packaging | its tsserver plugin built and served by core, its `node_modules` faked by workbench-entry; `shared/evidence-store`; the edit history itself is `workbench/edit-history.ts` (zen-fs, git-engine, the classifier) |
-| eslint | packaging | as history, plus the preset built by core's Vite plugin; `shared/gated-eval` |
-| insights | no | `shared/evidence-store`, `cpuprofile` (S2); its commands are documented now (EXTENSION-POINTS 5) |
+| history | packaging | its tsserver plugin built and served by core, its `node_modules` faked by workbench-entry; the edit history itself is `workbench/edit-history.ts` (zen-fs, git-engine, the classifier) |
+| eslint | packaging | as history, plus the preset built by core's Vite plugin |
+| insights | yes (since S2, S3) | — |
 | capabilities | no | its plugin and canary engine built by core from `shared/capabilities/`; ~780 lines of its logic in the bridge (the decider, what an answer at a stop means, rule places, `rules.*`); `workbench/rules-view.ts` (a custom view on monaco internals) |
 | tsval | no | the workspace's buffer and zen-fs directly; `shared/workspace-runtime` (core's preview taps), `NETWORK_PROBES`, canary, preview-evidence; `run.policy` (undocumented); its Margin is `workbench/live-values.ts` |
 | running's other half | — | ~525 bridge lines: preview runs as `production` sessions, tasks, the terminal's `node` auto-attach, live runs |
@@ -49,7 +49,14 @@ capabilities instead. Either the loader registers what a manifest declares (`typ
 assets from the extension's folder), or each extension inlines everything into one file. *Unlocks:* five extensions'
 packaging, the biggest group by count.
 
-**S2. Core's libraries as packages.** What extensions import from `shared/` is library code — `evidence-store`,
+**S2. Core's libraries as packages** — done for what extensions import (2026-10-14): evidence, policy, effects,
+lifecycle, cpuprofile, gated-eval, failures and a preview's reports are editor-api's (`./evidence`, `./policy`,
+`./effects`, `./lifecycle`, `./cpuprofile`, `./gated-eval`, `./failures`, `./recorded`), their tests with them. Left in
+`shared/`: the canary, capability-breakpoints and runtime-vfs (they bring tsval, almostnode and a runtime TypeScript —
+they go with tsval's decision), tarball-url (capabilities' baseline; three lines), and what only core's realms run. The
+realm lint now bans `shared/` to every extension but the bridge, capabilities, cspell, eslint and tsval.
+
+*Was:* What extensions import from `shared/` is library code — `evidence-store`,
 `cpuprofile`, `lifecycle`, `gated-eval`, `preview-evidence`, `capabilities/{canary,capability-breakpoints,silo-store,
 run-effects}` — that runs wherever it's imported. It goes to editor-api (what a debugger or an extension needs of the
 editor: `./recorded`, `./gate` already) or util (pure). Mechanical. (It was `run-contract` until 2026-10-14; renamed
@@ -62,7 +69,7 @@ extension may run, `editor.arch.commands` named as core's own.
 on it), `editor.metrics.read` (the bridge's), `run.policy` (the bridge's; tsval's explore), `editor.arch.commands`
 (command-tap's). Each becomes a documented extension point — `_types.at` named as the capabilities extension's, with
 `extensionDependencies` — or goes (~~`run.policy`~~: done 2026-10-14 — tsval's explore, which runs outside a session and so has no
-`__policy`, reads the policy as the capabilities extension does, through `silo-store`). *Unlocks:* notes, and insights
+`__policy`, reads the policy as the capabilities extension does, through editor-api's `./policy`). *Unlocks:* notes, and insights
 with S2.
 
 **S4. Commands for the hub's services, both ways.** Only the bridge is on the hub, so a feature that answers a hub

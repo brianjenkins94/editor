@@ -37,7 +37,7 @@ import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, POLICY_GLOB, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { recordEffect } from "./run-effects";
+import { recordEffect } from "./effects.ts";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
 

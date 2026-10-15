@@ -14,10 +14,10 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityChoice } from "../../shared/capabilities/capability-breakpoints";
 import type { DebugOutcome } from "./debug-control";
+import { loadEffectivePolicy, persistOverride, replaceRule } from "@brianjenkins94/editor-api/policy";
 import { serve } from "@brianjenkins94/hub";
 import { EMPTY_POLICY, problemOf, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { loadEffectivePolicy, persistOverride, replaceRule } from "../../shared/capabilities/silo-store";
 import { controllable } from "./debug-control";
 
 const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always", "rule", "give-once"] satisfies CapabilityChoice[]);

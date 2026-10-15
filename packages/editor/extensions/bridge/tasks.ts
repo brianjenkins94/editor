@@ -9,9 +9,9 @@
  * for a just-bash process that runs its command (terminal/index.ts's serveTaskTerminals), over the hub.
  */
 import type { TaskDefinition } from "vscode";
+import { lifecycleOfScript } from "@brianjenkins94/editor-api/lifecycle";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { lifecycleOfScript } from "../../shared/lifecycle";
 import { bridgeHub } from "./hub";
 
 /** A `run` task: a command, as typed in a terminal, and where to run it. */

@@ -4,7 +4,7 @@
  * here — an open editor's unsaved text for a read, a write as the workspace's (editors, Source Control and watchers see
  * it). A call of the program's (not the debugger's own `load`) is decided as tsval decides its own: by the session's
  * policy (`policyFor`, its "this run" answers included, and a call it was just told to make once), and a live run makes
- * nothing but a read the policy allows. What a call did is kept among the run's effects here (run-effects.ts's recordEffect)
+ * nothing but a read the policy allows. What a call did is kept among the run's effects here (editor-api/effects's recordEffect)
  * — the debugger doesn't tell it.
  *
  * The gate keeps the program to the policy, whichever debugger runs it; the debugger's extension is trusted as any
@@ -14,11 +14,11 @@ import type { Effect } from "@brianjenkins94/editor-api";
 import type { RuntimeDecision } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
+import { recordEffect } from "@brianjenkins94/editor-api/effects";
 import { verdictOf } from "@brianjenkins94/editor-api/gate";
 import { answerMailbox, runtimeSession } from "@brianjenkins94/editor-api/runtime";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { recordEffect } from "../../shared/capabilities/run-effects";
 import { decideCapabilityAs } from "./capabilities/decide";
 import { policyFor, takeOnce } from "./capability-stops";
 

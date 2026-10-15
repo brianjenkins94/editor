@@ -8,8 +8,8 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunRegistry } from "./runs";
+import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
-import { watchWorker } from "../shared/failures";
 import { createRunRegistry } from "./runs";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */

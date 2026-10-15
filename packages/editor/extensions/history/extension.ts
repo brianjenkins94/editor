@@ -19,6 +19,7 @@ import type { Exercise, Ran } from "@brianjenkins94/util/silo/exercise";
 import type { WayIn } from "@brianjenkins94/util/silo/features";
 import type { Analysis, Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { FileAnalysis } from "@brianjenkins94/util/silo/ts-analysis";
+import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
 import { parseRuns } from "@brianjenkins94/util/silo/evidence";
 import { exerciseOf } from "@brianjenkins94/util/silo/exercise";
 import { featuresOf, waysInManifest } from "@brianjenkins94/util/silo/features";
@@ -26,7 +27,6 @@ import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
 import * as vscode from "vscode";
-import { evidenceStore } from "../../shared/evidence-store";
 
 /** How long after the last keystroke a burst ends. */
 const IDLE_MS = 1500;

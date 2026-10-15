@@ -29,11 +29,11 @@ import type { Hub } from "@brianjenkins94/hub";
 
 import type { Rule } from "@brianjenkins94/util/silo/policy";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "@brianjenkins94/editor-api/policy";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { given, placesOf } from "@brianjenkins94/util/silo/policy";
-import * as vscode from "vscode";
 
-import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../../shared/capabilities/silo-store";
+import * as vscode from "vscode";
 import { appRootOf, runApp, runDebugger } from "./launch";
 
 /** How a stopped session resumes: DAP's own requests. */

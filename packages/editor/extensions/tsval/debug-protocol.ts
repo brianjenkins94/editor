@@ -10,8 +10,8 @@
  * launch.
  */
 import type { CoverageEvent, Effect, LiveBatch } from "@brianjenkins94/editor-api";
+import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { Replay } from "../../shared/preview-evidence";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
 export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/editor-api";

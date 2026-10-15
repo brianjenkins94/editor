@@ -52,10 +52,12 @@ CDN `node_modules` overlay. Not a place you put feature code. It sits at the pac
 **The folders are the realms.** A file's folder says which realm runs it: `shell/`, `app/`, `workbench/`, `workers/`,
 `previews/` (what runs inside a preview's own pages: the page and worker taps, page evidence), and `extensions/<name>/`
 (that extension's host, and the workers it spawns). What more than one realm runs is in `shared/` (the architecture
-model and probes, `virtual-path`, `workspace-changes`, `cpuprofile`, `lifecycle`, `theme`, the capability canary and
-classifier, the `.silo/` stores that more than one extension reads: `evidence-store`, `capabilities/silo-store`; almostnode on
-the workspace, as every worker that runs a program has it: `zenfs-vfs`, `workspace-runtime`; `playground-link`), and the
-shapes one realm serves and another reads (`runs`, `git`, `preview-evidence`); build-time Vite plugins are in `build/`.
+model and probes, `virtual-path`, `workspace-changes`, `theme`, the capability canary and classifier; almostnode on the
+workspace, as every worker that runs a program has it: `zenfs-vfs`, `workspace-runtime`; `playground-link`), and the
+shapes one realm serves and another reads (`runs`, `git`); build-time Vite plugins are in `build/`. What an *extension*
+imports of core's is editor-api's, not `shared/`'s — the `.silo/` stores (`./evidence`, `./policy`, `./effects`), run
+classification (`./lifecycle`), profiles (`./cpuprofile`), the gated realm (`./gated-eval`), worker failures
+(`./failures`), a preview's reports (`./recorded`) — so an extension passes FEATURES-AS-EXTENSIONS.md's test.
 Lint holds the line (`no-restricted-imports`, the root `eslint.config.js`): a relative import that climbs into another
 realm's folder — or, from an extension, another extension's — is an error. Only `workbench-entry` reaches into
 `extensions/`, to register them; `main.tsx`, `build.ts`, `dev.ts` and the tests may reach anywhere. What a debugger's worker needs of a run — the values recorder,
@@ -637,7 +639,7 @@ whose code needs a shim gets a build of its own, with the shim on every chunk (`
 the tsserver engines); and `test/worker-realms.mjs` loads every `dist/lsp` entry as it's started, in its realm (a bare
 worker, or tsserver's with its `ts` handed in), and names any that can't load.
 
-Whoever starts a worker watches it (`shared/failures.ts`' `watchWorker`): its failure to load, or an uncaught error in
+Whoever starts a worker watches it (editor-api's `./failures`: `watchWorker`): its failure to load, or an uncaught error in
 it, is said once, by its name and with where it happened (`[debug-worker] couldn't load: … (…/lsp/env-….js:12)`), and
 kept from going on up — unwatched, it reaches the realm that started it and that realm's starter in turn, each saying it
 under its own name. An extension's bootstrap reports its module's failure the same way (`{ failed }`, with the stack).

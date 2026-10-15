@@ -4,9 +4,9 @@
  * server with a vscode-languageclient. Public API only: the worker reads nothing of the workspace (documents come over
  * LSP; its dictionary is its own), so nothing the editor's core has is needed here.
  */
+import { failureText, watchWorker } from "@brianjenkins94/editor-api/failures";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
-import { failureText, watchWorker } from "../../shared/failures";
 
 // The documents it checks. The react language ids matter: a .tsx file's languageId is `typescriptreact`, and a client
 // only forwards documents its selector names.

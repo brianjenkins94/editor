@@ -2,7 +2,7 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { lifecycleOfScript, lifecycleOfSource } from "../shared/lifecycle.ts";
+import { lifecycleOfScript, lifecycleOfSource } from "../src/lifecycle.ts";
 
 const script = (name, command) => lifecycleOfScript(name, command).lifecycle;
 const source = (code) => lifecycleOfSource(code).lifecycle;

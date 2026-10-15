@@ -1,7 +1,7 @@
 /**
  * Capability policy — the vscode I/O half (read/write the workspace `.silo/policy.json`). The PURE model (types,
  * disposition logic, rule edits, resource matching) lives in silo's shared policy layer
- * (`@brianjenkins94/util/silo/policy`) so the runtime enforcer (silo-store.ts, consulted by decide.ts) — and any
+ * (`@brianjenkins94/util/silo/policy`) so the runtime enforcer (editor-api/policy, consulted by decide.ts) — and any
  * other silo harness — governs by the exact same rules the panel shows.
  *
  * This panel edits the BASE policy — the shared, human-authored contract at `.silo/policy.json`. A person clicking

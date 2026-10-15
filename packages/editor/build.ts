@@ -25,6 +25,9 @@ import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./bu
 export const root = url.fileURLToPath(new URL(".", import.meta.url));
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
+/** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */
+const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability"];
+
 // Every node builtin, bare (`fs`) and `node:`-prefixed — kept external so almostnode resolves them to its own
 // shims at runtime instead of vite bundling/polyfilling them.
 const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
@@ -81,6 +84,9 @@ function bundledModule(folder: string, file: string, id: string, format: "cjs" |
 				"configFile": false,
 				"logLevel": "silent",
 				"root": root,
+				// One util, hub and observability — the editor's: editor-api's modules, linked from its own folder, would find
+				// the copies its dev dependencies installed beside it (a stale util once cost a rule its package).
+				"resolve": { "dedupe": SHARED_PACKAGES },
 				"plugins": plugins,
 				"build": {
 					"write": false,
@@ -265,7 +271,7 @@ export async function preBuild(): Promise<void> {
 		// package). polyfillNode(["path", "url", "buffer"]) is for util/env, which juvy imports (it reads node:path/url at
 		// load), and for isomorphic-git (the git SCM engine), which uses `Buffer` — unenv's, injected where it's read (and
 		// git-engine.ts sets the global, for the dev optimizer's copy) — and gives the bundle `global`/`process` too.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
+		"resolve": { "dedupe": SHARED_PACKAGES, "alias": { "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,
@@ -290,7 +296,7 @@ export async function preBuild(): Promise<void> {
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
 		// (and hub/observability to the editor's own: a debugger's worker connects through editor-api's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
-		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
+		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", ...SHARED_PACKAGES] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
@@ -496,7 +502,7 @@ async function hostBuild(): Promise<void> {
 		"customLogger": logger,
 		"base": "./",
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
-		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
+		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", ...SHARED_PACKAGES] },
 		"build": { "outDir": "../../docs", "emptyOutDir": false },
 		"plugins": [...hostPlugins(), shellPreloadPlugin()]
 	});

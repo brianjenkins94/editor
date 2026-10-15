@@ -116,7 +116,7 @@ rule*) — the same two buttons wherever the editor opens.
   followed exactly, where the two at once would be only a weak match. It's followed from the latest text it's found in
   by its own id, so no lookalike from before then can take it; a save starting flushes the burst typed so far, so a
   fix the save makes is a step of its own. The shared contract's rules are kept placed too: the one write silo makes to
-  `policy.json` (silo-store's movePlace) — not a decision but a re-anchoring, committed with the code change that moved
+  `policy.json` (editor-api/policy's movePlace) — not a decision but a re-anchoring, committed with the code change that moved
   the code. Moving a place keeps the rule's `added`. Each step is asked of BABLR once (2026-10-13): the bridge keeps
   each answer by the text, the texts before it and the place, so listing the rules again — the Rules tree, the margin,
   a save — asks only about a new burst, and the walk back to the latest text it's found in asks by its id alone.
