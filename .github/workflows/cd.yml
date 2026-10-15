@@ -57,6 +57,15 @@
         { "uses": "actions/checkout@v4", "with": { "ref": "${{ github.event.workflow_run.head_sha || github.sha }}" } },
         # Only the api package in the ephemeral workspace: the cooldown install, nothing else of the repo's.
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/api" } },
+        # The schema first: the Worker being deployed may need a migration the database hasn't had yet.
+        {
+          "run": "pnpm exec wrangler d1 migrations apply editor-api-dev --env dev --remote",
+          "working-directory": "packages/api",
+          "env": {
+            "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+            "CLOUDFLARE_ACCOUNT_ID": "${{ vars.CLOUDFLARE_ACCOUNT_ID }}"
+          }
+        },
         {
           "run": "pnpm exec wrangler deploy --env dev",
           "working-directory": "packages/api",

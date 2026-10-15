@@ -232,7 +232,37 @@ public code means anyone can review it. The limits are operational:
 Each step lands green and is useful on its own.
 
 - **A0 · accounts (you).** A Cloudflare account and the dev GitHub App. Nothing in this step is code, and none of
-  the secrets ever go into the repo or this chat.
+  the secrets ever go into the repo or this chat. The runbook, in order (production repeats it in A7, with its own
+  app, database and secrets). Commands run in `packages/api`:
+  1. **Cloudflare account**, and its `workers.dev` subdomain (Workers & Pages asks for it on the first visit). The dev
+     Worker will be `https://editor-api-dev.<subdomain>.workers.dev`. Then `npx wrangler login`.
+  2. **D1:** `npx wrangler d1 create editor-api-dev`. Its `database_id` isn't secret; it goes in `wrangler.jsonc`'s
+     `env.dev`.
+  3. **The dev GitHub App** (GitHub → Settings → Developer settings → GitHub Apps → New GitHub App):
+     - Name: anything unique, e.g. `editor-dev-<you>`. Homepage: `https://brianjenkins94.github.io/editor/`.
+     - Callback URLs: `https://editor-api-dev.<subdomain>.workers.dev/auth/github/callback`, and
+       `http://localhost:8787/auth/github/callback` for `wrangler dev`.
+     - **Expire user authorization tokens: on.** Request user authorization during installation: off. Device flow:
+       off. Setup URL: empty. Webhook: **Active off**.
+     - Permissions:
+       - Repository: Contents (read and write), Metadata (read; it's required), Pages (read and write).
+       - Account: none. In particular, no email addresses.
+     - Where it can be installed: **only on this account**, while it's the dev app.
+     - After creating it:
+       - Keep the **Client ID** (`Iv23…`). It isn't secret; it goes in `wrangler.jsonc`.
+       - **Generate a client secret** and paste it only into `npx wrangler secret put GITHUB_CLIENT_SECRET --env dev`.
+       - Don't generate a private key: signing in uses user tokens, which need none.
+  4. **Secrets**, made without being printed. Each one goes to `npx wrangler secret put <NAME> --env dev`:
+     - `SIGNING_JWK`: the jose one-liner in A2.
+     - `NONCE_KEY`, `TOKEN_KEK`, `AUDIT_KEY` and `STATE_KEY`:
+       `node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))'`.
+     - `GITHUB_CLIENT_SECRET`: step 3.
+  5. **A Cloudflare API token for CI:** My Profile → API Tokens → Create Token. Start from the "Edit Cloudflare
+     Workers" template, add Account → D1 → Edit, and limit Account Resources to this account. Then, in this repo:
+     - Settings → Environments → New environment `development`. Limit its deployment branches to `main`, and add
+       the secret `CLOUDFLARE_API_TOKEN`.
+     - Settings → Secrets and variables → Actions → Variables: `CLOUDFLARE_ACCOUNT_ID` (on the Workers overview).
+       It isn't secret, and setting it turns on cd's `api-dev` job.
 - **A1 · `packages/api` skeleton.** Hono on Workers, `wrangler.jsonc` with `dev`/`production` environments,
   `/health`, `observability` (logs + traces) on, tests running in workerd, and CI deploying `dev` to workers.dev.
   Verify the `traceparent` question, and that a request shows up as one trace in the dashboard.
