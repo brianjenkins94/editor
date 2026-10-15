@@ -32,7 +32,7 @@ isn't held to it.
 | insights | yes (since S2, S3) | — |
 | capabilities | no | its plugin and canary engine built by core from `shared/capabilities/`; ~780 lines of its logic in the bridge (the decider, what an answer at a stop means, rule places, `rules.*`); `workbench/rules-view.ts` (a custom view on monaco internals) |
 | tsval | no | the workspace's buffer and zen-fs directly; `shared/workspace-runtime` (core's preview taps), `NETWORK_PROBES`, canary, preview-evidence; `run.policy` (undocumented); its Margin is `workbench/live-values.ts` |
-| running's other half | — | ~525 bridge lines: preview runs as `production` sessions, tasks, the terminal's `node` auto-attach, live runs |
+| running's other half | the bridge's, by right (2026-10-14) | preview runs as `production` debug sessions, the `run` task provider, the terminal's `node` auto-attach and the run picker's tasks: each shows a core thing as VS Code's own (a debug session, a task) — the crossing, not running's logic. Live runs moved (S2) |
 | Source Control view | yes (since S4) | — (`extensions/source-control`, on the `editor.git.*` commands) |
 | architecture view | — | `workbench/architecture-view.ts` (2.6k with its CSS) on the raw hub; command counts from command-tap, which contributed extensions don't get |
 | the Margin, recorded stops, coverage, profiles | — | `workbench/live-values.ts`, `recorded-stops.ts`, `coverage.ts`, `profile-files.ts` — fed by hub subjects only the bridge publishes |
@@ -81,14 +81,19 @@ with S2.
 **S4. Commands for the hub's services, both ways.** Only the bridge is on the hub, so a feature that answers a hub
 request or calls a core service stays where the hub is. Two halves:
 
-- *Core's services as commands* — git (`status`, `file`, `commit`, `changed` as an event), runs (`list`, `stop`),
-  previews (`open`) — so the Source Control view, the run picker's tasks and preview runs need no hub.
+- *Core's services as commands* — git (`status`, `file`, `commit`; done 2026-10-14, a change seen as a file change) —
+  so the Source Control view needs no hub. (Runs and previews needn't: what showed them in VS Code is the bridge's
+  crossing — below.)
 - *A hub subject answered by an extension's command* — a manifest declares it
   (`contributes.hubServices: [{ "subject": "rules.list", "command": "capabilities.rulesList" }]`), the bridge serves the
   subject and forwards it. `rules.*`, `margin.state`, `rules.state`, `history.chunks|texts`, `runs.ledger`, `editor.state`
   and the agents' `files.*` move out of core with it.
 
-*Unlocks:* the Source Control view and ~525 lines of running into their extensions, the rules view into capabilities,
+*Decided (2026-10-14):* running's ~525 bridge lines stay — preview runs as debug sessions, the task provider, the
+terminal's auto-attach and the run picker's tasks translate core's runtime into VS Code's own run UI, which is the
+bridge's job; moving them would take a channel pushing core's streams into an extension (callback commands — typed by
+editor-api as annotations are, but each a new seam), for no simpler shape. *Unlocks:* the Source Control view into its
+extension, the rules view into capabilities,
 and the agent tools' answers into the features they're about.
 
 **S5. The decider (EXTENSION-POINTS §7).** What a capability call or a stop's answer *means* is capabilities' — the
@@ -136,7 +141,7 @@ mailbox batching loads. The rest is ordinary: preview taps added core-side behin
 
 | Feature | Its folder | Moves in | Needs |
 | --- | --- | --- | --- |
-| Running | `extensions/running` | bridge: live-run.ts, production-adapter.ts, tasks provider, launch helpers, auto-attach | S2, S4 (live-run.ts: done) |
+| Running | `extensions/running` | ~~bridge: live-run.ts~~ (done); its crossings — production-adapter.ts, the tasks provider, launch helpers, auto-attach — stay the bridge's | — |
 | Capabilities | `extensions/capabilities` | bridge: decide.ts, coalesce.ts, stops' meanings, rule places, `rules.*`; `workbench/rules-view.ts`; `shared/capabilities` (→ S2) | S1, S2, S4, rich view; S5 (deferred) for the decision logic |
 | Debugger | `extensions/tsval` (+ the Margin as an extension) | `workbench/live-values.ts`, `inputs.ts`; bridge: replay.ts | S6, S7, S4, tsval's decision |
 | Git | `extensions/source-control` (the view) + core's engine | ~~bridge: source-control.ts~~ (done) | S4 |
@@ -149,8 +154,8 @@ mailbox batching loads. The rest is ordinary: preview taps added core-side behin
 service, BABLR's worker, the pane views' frame, the run registry, evidence's ledger, the runner, the terminal (zen-fs
 and the runner). The bridge: the uplink, the run contract's reader (debug-events, agent control in debug-control),
 runtime-fs, the annotation commands, metrics and parse status, and the crossings into core's own UI (the run picker,
-the debug toolbar, the task terminal) — about 1.5k of its 3.1k, and capabilities' decision logic (~500) until the
-decider.
+the debug toolbar, the task terminal, preview runs as debug sessions, the task provider, the terminal's auto-attach) —
+about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
 
 ## Order
 
@@ -159,7 +164,8 @@ decider.
    out of `shared/`, with the `editor-api` rename. Small, no design; type-queries, running and notes pass after it.
 2. **S1, the loader** — cspell, the event sheet, history and eslint pass on packaging; capabilities' plugin loads like
    any extension's.
-3. **S4, commands for the hub** — the Source Control view, running's bridge half, the rules view, the agents' answers.
+3. **S4, commands for the hub** — ~~the Source Control view~~ (done), the rules view, the agents' answers. (Running's
+   bridge half stays: S4's note.)
 4. ~~**S5, the decider**~~ — deferred (S5's note); capabilities' decision logic stays in the bridge until then.
 5. **S6 and S7, run events and preview pages** — the Margin, recorded stops, coverage, profiles and evidence move into
    extensions.
@@ -172,4 +178,4 @@ keeps no fallback for the old way.
 
 The realm lint (root `eslint.config.js`) already stops an extension reaching another's folder or a realm's. When a
 feature passes, its extension's lint block gets one more ban — `shared/` — so it can't start reaching core again. The
-measure of done is the bridge at its plumbing (~1.5k, ~2k while the decider waits) and `workbench/` at its boot.
+measure of done is the bridge at its plumbing (~2k, ~2.5k while the decider waits) and `workbench/` at its boot.
