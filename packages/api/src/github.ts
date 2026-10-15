@@ -28,7 +28,7 @@ interface Pending {
 }
 
 /** GitHub's origins: the real ones, but for tests (GITHUB_ORIGIN / GITHUB_API, never set in wrangler.jsonc). */
-const github = (env: AppEnv["Bindings"]): { "web": string; "api": string } => ({ "web": env.GITHUB_ORIGIN ?? "https://github.com", "api": env.GITHUB_API ?? "https://api.github.com" });
+export const github = (env: AppEnv["Bindings"]): { "web": string; "api": string } => ({ "web": env.GITHUB_ORIGIN ?? "https://github.com", "api": env.GITHUB_API ?? "https://api.github.com" });
 
 /** Our callback, at the origin we were reached at: it has to be one of the GitHub App's redirect URIs. */
 const callback = (context: Context<AppEnv>): string => `${new URL(context.req.url).origin}/auth/github/callback`;

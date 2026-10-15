@@ -13,7 +13,8 @@ const secrets = {
 	"TOKEN_KEK": base64url.encode(crypto.getRandomValues(new Uint8Array(32))),
 	"AUDIT_KEY": "audit key for the tests"
 };
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets }] });
+// GitHub nowhere: revoking a grant also revokes its token at GitHub, best effort, and these tests have no GitHub.
+const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } }] });
 const worker = server.getWorker();
 let base: URL;
 // The Worker's bindings, as the GitHub callback has them: the Grant namespace and D1.

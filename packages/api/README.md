@@ -172,6 +172,41 @@ its own Worker and GitHub App; the README says so.
 **Production needs its own domain** (about $10/year, bought through Cloudflare). It gets the editor off the shared
 `github.io` origin, puts the app and API on one origin (no CORS at all), and gives us real COOP/COEP headers.
 
+## Hardening: floods, abuse and sizes
+
+Cloudflare absorbs volumetric DDoS (layers 3, 4 and 7) in front of every Worker, `workers.dev` included. What's left is
+ours: the cost of each request (the paid plan bills per request; the free plan just stops at 100k a day, which costs
+availability instead of money), anyone probing for a weak spot, and anyone sending something huge.
+
+**In place (2026-10-15):**
+- **Sizes**, checked before anything is parsed or verified:
+  - Bodies: 4 KB for `/token` and `/revoke`, 1 MB for a clone's request, 32 MB for the API proxy (a commit's
+    blobs). They're counted as the body streams, so a missing or false `Content-Length` doesn't get past them.
+  - `DPoP` and `Authorization` headers over 8 KB get a 431.
+- **No unauthenticated request creates storage.** A Grant exists only after GitHub has signed someone in, and a
+  code or refresh token is checked against D1 before its Durable Object is addressed.
+- **The proxy allows only the editor's calls.** Each refusal is a `proxy_denied` row in the audit log.
+
+**Next, before any real user (A6):**
+1. **Rate limits**, with the Workers Rate Limiting binding, checked first and before any D1, Durable Object or crypto
+   work:
+   - Per IP hash: `/auth/github/*`, `/token` and `/revoke`, on the order of 20 a minute.
+   - Per grant: the proxy, on the order of 600 a minute.
+
+   The binding counts per location and approximately, which is enough to stop abuse, though not for accounting.
+2. **Fail2ban:** count each failure per IP hash: a refused proof, `invalid_grant`, `invalid_token`, `proxy_denied`,
+   an oversized request.
+   - Past a threshold (say 20 in a minute), the IP is banned for a while. The ban is held in a Durable Object keyed
+     by the IP hash, so it takes effect at once everywhere, and checked first on every request.
+   - At the grant level, repeated `proxy_denied` revokes the grant: a session probing the allowlist is a
+     compromised session.
+3. **A cost ceiling:** `limits.cpu_ms` in `wrangler.jsonc`, plus Cloudflare's usage notifications on the account.
+4. **With our own domain (A7):** a WAF rate-limiting rule (the free plan includes one), Bot Fight Mode, and the
+   managed DDoS rules apply in front of the Worker. `workers.dev` gets the network protection but no zone rules.
+
+GitHub's own limit (5,000 requests an hour per user) comes back through the proxy's rate-limit headers, and fido backs
+off on them.
+
 ## Visibility: tracing the whole flow
 
 There are three separate streams with three different audiences. Keeping them separate is what lets us trace

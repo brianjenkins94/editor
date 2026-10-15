@@ -5,7 +5,10 @@ import { base64url } from "jose";
  * hash that only matches within a day. Never sampled, and kept apart from logs and traces: it's the security record.
  */
 
-export type AuditEvent = "login" | "token_issued" | "refreshed" | "token_rejected" | "refresh_reuse_detected" | "grant_revoked";
+export type AuditEvent = "login" | "token_issued" | "refreshed" | "token_rejected" | "refresh_reuse_detected" | "grant_revoked" | "github_refresh_refused" | "proxy_denied";
+
+/** For what no request started (an alarm, a refresh GitHub refused): no country, no IP. */
+export const NOWHERE: Origin = { "country": null, "ipHash": null };
 
 /** Where a request came from, as much as the audit log keeps. */
 export interface Origin {

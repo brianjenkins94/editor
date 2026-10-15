@@ -2,9 +2,10 @@ import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 import { base64url } from "jose";
 import { DurableObject } from "cloudflare:workers";
 import type { Origin } from "./audit.ts";
-import { audit } from "./audit.ts";
+import { audit, NOWHERE } from "./audit.ts";
 import type { Bindings } from "./env.ts";
-import { seal } from "./seal.ts";
+import { github as githubOrigins } from "./github.ts";
+import { open, seal } from "./seal.ts";
 
 /**
  * One sign-in (README.md, "Tokens and the flow"). A Durable Object, so everything about the sign-in happens one call at a
@@ -17,11 +18,16 @@ import { seal } from "./seal.ts";
  *   - the jtis of proofs it has seen, until they'd be too old anyway.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
  * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
+ * GitHub's token is spent here, for the proxy (src/proxy.ts), and refreshed here, one refresh at a time: GitHub's refresh
+ * tokens work once, so two requests refreshing together would end the sign-in.
  * Its id is the grant's id; codes and refresh tokens are `<grant id>.<secret>`, so the Worker knows where to send them.
  * Only hashes of them are stored.
  */
 
 const CODE_TTL = 60_000;
+
+/** GitHub's token is refreshed when it has less than this left. */
+const REFRESH_MARGIN = 5 * 60_000;
 
 /** A secret's hash as stored: base64url(SHA-256). */
 const hash = s256;
@@ -189,7 +195,61 @@ export class Grant extends DurableObject<Bindings> {
 		}
 	}
 
-	/** End the sign-in: its tokens (ours and GitHub's) gone, its row marked. */
+	/**
+	 * GitHub's token for this sign-in, refreshed first when it's close to expiring; undefined once the sign-in is over. A
+	 * refresh GitHub refuses (its refresh token expired, or the user revoked the app) ends the sign-in; one GitHub didn't
+	 * answer just fails this request.
+	 */
+	public async githubToken(): Promise<string | undefined> {
+		let token: string | undefined;
+
+		// Nothing else reaches this object while a refresh is out: a second one would spend the same refresh token.
+		await this.ctx.blockConcurrencyWhile(async () => {
+			try {
+				token = await this.currentGithubToken();
+			} catch {
+				token = undefined;
+			}
+		});
+
+		return token;
+	}
+
+	private async currentGithubToken(): Promise<string | undefined> {
+		const [row] = this.sql.exec<{ "github": string | null; "revoked_at": number | null; "user_id": string }>("SELECT github, revoked_at, user_id FROM state WHERE id = 1").toArray();
+
+		if (row === undefined || row.revoked_at !== null || row.github === null) {
+			return undefined;
+		}
+
+		const current = JSON.parse(await open(this.env.TOKEN_KEK, row.github, this.id)) as GitHubTokens;
+
+		if (current.expiresAt - REFRESH_MARGIN > Date.now()) {
+			return current.accessToken;
+		}
+
+		const refreshed = await fetch(`${githubOrigins(this.env).web}/login/oauth/access_token`, {
+			"method": "POST",
+			"headers": { "accept": "application/json", "content-type": "application/x-www-form-urlencoded" },
+			"body": new URLSearchParams({ "client_id": this.env.GITHUB_CLIENT_ID, "client_secret": this.env.GITHUB_CLIENT_SECRET, "grant_type": "refresh_token", "refresh_token": current.refreshToken })
+		}).then((response) => response.json() as Promise<{ "access_token"?: string; "refresh_token"?: string; "expires_in"?: number; "refresh_token_expires_in"?: number; "error"?: string }>);
+
+		if (typeof refreshed.access_token !== "string" || typeof refreshed.refresh_token !== "string") {
+			await audit(this.env.DB, "github_refresh_refused", { "userId": row.user_id, "grantId": this.id }, NOWHERE);
+			await this.revoke({ "from": NOWHERE });
+
+			return undefined;
+		}
+
+		const now = Date.now();
+		const next: GitHubTokens = { "accessToken": refreshed.access_token, "refreshToken": refreshed.refresh_token, "expiresAt": now + (refreshed.expires_in ?? 28_800) * 1000, "refreshExpiresAt": now + (refreshed.refresh_token_expires_in ?? 15_897_600) * 1000 };
+
+		this.sql.exec("UPDATE state SET github = ? WHERE id = 1", await seal(this.env.TOKEN_KEK, JSON.stringify(next), this.id));
+
+		return next.accessToken;
+	}
+
+	/** End the sign-in: its tokens (ours and GitHub's) gone, its row marked. GitHub's token is revoked at GitHub too. */
 	public async revoke({ from }: { "from": Origin }): Promise<void> {
 		const state = this.state();
 
@@ -198,6 +258,22 @@ export class Grant extends DurableObject<Bindings> {
 		}
 
 		const now = Date.now();
+		const [sealed] = this.sql.exec<{ "github": string | null }>("SELECT github FROM state WHERE id = 1").toArray();
+
+		if (sealed?.github !== null && sealed?.github !== undefined) {
+			// Best effort: ours is wiped below whatever GitHub says, and a token GitHub doesn't revoke expires on its own.
+			try {
+				const { accessToken } = JSON.parse(await open(this.env.TOKEN_KEK, sealed.github, this.id)) as GitHubTokens;
+
+				await fetch(`${githubOrigins(this.env).api}/applications/${this.env.GITHUB_CLIENT_ID}/token`, {
+					"method": "DELETE",
+					"headers": { "authorization": `Basic ${btoa(`${this.env.GITHUB_CLIENT_ID}:${this.env.GITHUB_CLIENT_SECRET}`)}`, "accept": "application/vnd.github+json", "user-agent": "editor-api", "content-type": "application/json" },
+					"body": JSON.stringify({ "access_token": accessToken })
+				});
+			} catch {
+				/* GitHub unreachable: the token runs out by itself */
+			}
+		}
 
 		this.sql.exec("UPDATE state SET revoked_at = ?, github = NULL, refresh_hash = NULL, code_hash = NULL WHERE id = 1", now);
 		await this.env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(now, this.id).run();
@@ -214,7 +290,7 @@ export class Grant extends DurableObject<Bindings> {
 		const state = this.state();
 
 		if (state !== undefined && state.revoked_at === null && state.refresh_hash === null) {
-			await this.revoke({ "from": { "country": null, "ipHash": null } });
+			await this.revoke({ "from": NOWHERE });
 		}
 	}
 
