@@ -367,8 +367,19 @@ Each step lands green and is useful on its own.
       - `NONCE_KEY` and `AUDIT_KEY`: `node -e 'process.stdout.write(crypto.randomBytes(32).toString("base64url"))'`
       - `TOKEN_KEK`: the same command; it must be exactly 32 bytes.
       - `SIGNING_JWK`: see A2.
-    - **Still to do:** `/auth/github/start` and `/callback` (A0's GitHub App), refreshing GitHub's token inside the
-      Grant (A5 uses it), and a sessions list with "sign out everywhere".
+    - **GitHub's round trip** (`src/github.ts`, built 2026-10-15):
+      - `/auth/github/start` takes the app's `redirect_uri` (an exact match against `REDIRECT_URIS`; otherwise a 400
+        and no redirect), its S256 challenge, its key's `dpop_jkt` and its `state`. It sends the browser to GitHub
+        with a PKCE pair of our own, and seals the rest into GitHub's `state` under `STATE_KEY` for 10 minutes.
+      - `/auth/github/callback` exchanges GitHub's code (client secret plus our verifier), reads `/user` for the
+        numeric id only, starts the Grant, and returns to the app with our code, its `state`, and `iss` (RFC 9207).
+        A refusal at GitHub comes back as `access_denied`, and a failure as `server_error`.
+      - `/.well-known/oauth-authorization-server` (RFC 8414) lets the shell's client find everything.
+      - **Tests** (`test/github.test.ts`, 10) run against a mock GitHub. They check what GitHub is sent (our secret,
+        the verifier matching the challenge GitHub saw, our callback), and that no login or email is kept. Each of
+        the 9 guards, disabled in turn, fails a test.
+    - **Still to do:** refreshing GitHub's token inside the Grant (A5 uses it), and a sessions list with "sign out
+      everywhere".
 - **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"
   popover for "Sign in with GitHub" plus a sessions list. **Remove the PAT path** once this works: keeping a token
   in `localStorage` as a fallback keeps the problem.

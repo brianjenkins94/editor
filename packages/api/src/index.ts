@@ -3,13 +3,14 @@ import { publicKey } from "@brianjenkins94/util/auth/dpop";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
+import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
 import { log } from "./log.ts";
 import { revokeEndpoint, session, tokenEndpoint } from "./tokens.ts";
 
 export { Grant } from "./grant.ts";
 
 // The editor's API Worker (README.md): health, logging, errors (A1); the access-token key's JWKS (A2); our tokens, and
-// DPoP in front of routes (A3).
+// DPoP in front of routes, and signing in through GitHub (A3).
 
 const app = new Hono<AppEnv>();
 
@@ -44,6 +45,12 @@ app.get("/.well-known/jwks.json", (context) => {
 
 	return context.json({ "keys": [publicKey(JSON.parse(context.env.SIGNING_JWK))] });
 });
+
+app.get("/.well-known/oauth-authorization-server", metadataEndpoint);
+
+app.get("/auth/github/start", startEndpoint);
+
+app.get("/auth/github/callback", callbackEndpoint);
 
 app.post("/token", tokenEndpoint);
 

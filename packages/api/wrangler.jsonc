@@ -22,7 +22,7 @@
   "d1_databases": [{ "binding": "DB", "database_name": "editor-api-local", "database_id": "local", "migrations_dir": "migrations" }],
   // GITHUB_CLIENT_ID isn't secret (its secret is GITHUB_CLIENT_SECRET): local `wrangler dev` uses the dev GitHub App too,
   // through its localhost callback.
-  "vars": { "ENVIRONMENT": "local", "ALLOWED_ORIGINS": "http://localhost:5173,http://editor.localhost:5173", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" },
+  "vars": { "ENVIRONMENT": "local", "ALLOWED_ORIGINS": "http://localhost:5173,http://editor.localhost:5173", "REDIRECT_URIS": "http://localhost:5173/,http://editor.localhost:5173/", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" },
   "env": {
     "dev": {
       "workers_dev": true,
@@ -33,7 +33,7 @@
       },
       "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "editor-api-dev", "database_id": "296ad75a-302e-4aa6-97cd-360f3481617e", "migrations_dir": "migrations" }],
-      "vars": { "ENVIRONMENT": "dev", "ALLOWED_ORIGINS": "https://brianjenkins94.github.io,http://localhost:5173,http://editor.localhost:5173", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" }
+      "vars": { "ENVIRONMENT": "dev", "ALLOWED_ORIGINS": "https://brianjenkins94.github.io,http://localhost:5173,http://editor.localhost:5173", "REDIRECT_URIS": "https://brianjenkins94.github.io/editor/,http://localhost:5173/,http://editor.localhost:5173/", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" }
     },
     // Not deployed until A7: no workers.dev URL, and its route (our own domain) arrives with the domain.
     "production": {
@@ -46,7 +46,7 @@
       },
       "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "editor-api", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
-      "vars": { "ENVIRONMENT": "production", "ALLOWED_ORIGINS": "" }
+      "vars": { "ENVIRONMENT": "production", "ALLOWED_ORIGINS": "", "REDIRECT_URIS": "" }
     }
   }
 }

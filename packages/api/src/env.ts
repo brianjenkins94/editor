@@ -6,6 +6,11 @@ export interface Bindings {
 	"ENVIRONMENT": string;
 	/** The app origins allowed to call this API from a browser, comma-separated. */
 	"ALLOWED_ORIGINS": string;
+	/** The app pages a sign-in may return to, comma-separated: exact URLs, matched exactly. */
+	"REDIRECT_URIS": string;
+	/** Only in tests: where GitHub's web and API are, instead of github.com and api.github.com. */
+	"GITHUB_ORIGIN"?: string;
+	"GITHUB_API"?: string;
 	/** A private JWK with `alg` and `kid`: what access tokens are signed with. */
 	"SIGNING_JWK": string;
 	/** The secret DPoP nonces are an HMAC under. */
