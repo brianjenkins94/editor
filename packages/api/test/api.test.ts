@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import { exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
 
+// A signing key of the test's own, as the SIGNING_JWK secret.
+const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };
+
 // The Worker runs in workerd, built from wrangler.jsonc exactly as `wrangler dev` builds it.
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc" }] });
+const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", "secrets": { "SIGNING_JWK": JSON.stringify(signing) } }] });
 
 before(async () => {
 	await server.listen();
@@ -43,4 +47,13 @@ test("a request is logged without its query string or headers", async () => {
 
 	assert.match(logs, /path: '\/health'/u);
 	assert.doesNotMatch(logs, /SECRET/u);
+});
+
+test("the JWKS has the signing key's public half, and nothing private", async () => {
+	const response = await server.fetch("/.well-known/jwks.json");
+	const { keys } = await response.json() as { "keys": Record<string, string>[] };
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(keys, [{ "kty": "EC", "crv": "P-256", "x": signing.x, "y": signing.y, "alg": "ES256", "kid": "test" }]);
+	assert.equal(JSON.stringify(keys).includes(signing.d as string), false);
 });

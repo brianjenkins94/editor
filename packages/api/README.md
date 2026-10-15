@@ -265,6 +265,28 @@ Each step lands green and is useful on its own.
     responses (`use_dpop_nonce`, `WWW-Authenticate`).
   - `jose` does the JWS work (it's audited, and it supports workerd), so it becomes one more util peer. Tests are
     the module's own `isEntry` self-test, as everywhere in util.
+  - *Built 2026-10-15:* `@brianjenkins94/util/auth/dpop` has the following.
+    - `verifyProof(request, { seen, nonce?, maxAge?, now? })` returns `{ ok, jkt, jti }` or `{ ok: false, error, reason }`.
+      `error` is `invalid_dpop_proof` or `use_dpop_nonce`. `reason` is a fixed string that names the failed check and
+      never quotes the proof.
+    - `thumbprint` (RFC 7638) and `accessTokenHash` (`ath`).
+    - `nonces(secret)` has `issue` and `check`: an HMAC of a 5-minute window, good for that window and the next.
+    - `signAccessToken` and `verifyAccessToken`: `at+jwt`, with `cnf.jkt`, `iss`, `aud`, `exp` and `jti`. `publicKey`
+      gives a key's public half, for the JWKS.
+    - The self-test verifies RFC 9449's own example proofs (Figures 2 and 13). The key's thumbprint equals the RFC's
+      example `cnf.jkt`. The test also fails a proof for each check: missing, malformed, wrong `typ`, private key, HS256,
+      `none`, wrong key, too old, in the future, `htm`, `htu`, `jti`, `ath`, bound key, replay, nonce. A proof that's
+      rejected records no `jti`.
+    - Disabling any one check in turn (8 mutations) makes the self-test fail.
+  - The Worker serves `/.well-known/jwks.json` from the `SIGNING_JWK` secret (tested: the public half, never `d`). To
+    make that key, without it ever being printed:
+
+    ```sh
+    node -e 'import("jose").then(async ({ exportJWK, generateKeyPair }) => { const { privateKey } = await generateKeyPair("ES256", { extractable: true }); process.stdout.write(JSON.stringify({ ...await exportJWK(privateKey), alg: "ES256", kid: new Date().toISOString().slice(0, 10) })); })' | npx wrangler secret put SIGNING_JWK --env dev
+    ```
+
+  - Left for A3: the `seen` store (the Grant DO), issuing nonces in `DPoP-Nonce` headers, and the middleware that puts
+    `verifyAccessToken` and `verifyProof` in front of a route.
 - **A3 · sign-in.** The Grant DO, D1 schema and migrations, start/callback/token/refresh/revoke, token encryption,
   the audit log, and the redaction test. End-to-end against the dev GitHub App.
 - **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"

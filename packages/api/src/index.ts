@@ -1,12 +1,13 @@
 import type { Span } from "@brianjenkins94/util/logger";
+import { publicKey } from "@brianjenkins94/util/auth/dpop";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { log } from "./log.ts";
 
-// The editor's API Worker (README.md). A1: the skeleton — health, logging, errors.
+// The editor's API Worker (README.md): health, logging, errors (A1); the access-token key's JWKS (A2).
 
 /** Bindings and its vars are named by Hono and wrangler.jsonc, not by us. */
-interface Env { "Bindings": { "ENVIRONMENT": string }; "Variables": { "span": Span } }
+interface Env { "Bindings": { "ENVIRONMENT": string; "SIGNING_JWK": string }; "Variables": { "span": Span } }
 
 const app = new Hono<Env>();
 
@@ -23,6 +24,14 @@ app.use((context, next) => log.span("request", { "method": context.req.method, "
 app.use(secureHeaders());
 
 app.get("/health", (context) => context.json({ "ok": true, "environment": context.env.ENVIRONMENT }));
+
+// The public half of the key access tokens are signed with (SIGNING_JWK, a secret: a private JWK with alg and kid), so
+// anyone can check a token we issued. Only ever the public members: publicKey drops the private ones.
+app.get("/.well-known/jwks.json", (context) => {
+	context.header("cache-control", "public, max-age=300");
+
+	return context.json({ "keys": [publicKey(JSON.parse(context.env.SIGNING_JWK))] });
+});
 
 app.notFound((context) => context.json({ "error": "not_found" }, 404));
 
