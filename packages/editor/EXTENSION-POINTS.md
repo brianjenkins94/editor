@@ -134,12 +134,23 @@ It gets **synchronous files through core** instead, each call answered by the br
   every worker of the name; the architecture view counts each as an instance of `<name>`), and the link carries only the
   runtime — the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and answers. No
   other service of the editor's, tsval's worker's included.
-- **tsval's program's calls too** (2026-10-11): its `fs` is almostnode's over runtime-vfs.ts (a VirtualFS whose
+- **tsval's program's calls too** (2026-10-11): its `fs` is almostnode's over editor-api's `./runtime-vfs` (a VirtualFS whose
   workspace paths go through `runtime.fs`; others — temp files — stay in the worker's memory), so core is the one gate
   for every debugger's programs. tsval still stops and asks at a call (a debugger's job), and gives a rule's result in
   a call's place; core decides, makes and keeps the call. Its module loading stays on the buffer: never gated, and
   measured, a mailbox call costs ~0.5–0.7 ms (the read ~0.17 ms of it) and a run's loading makes 2 (a script) to 10
   (two local modules) calls — 32 for one package it couldn't find, hundreds with real packages, every live run again.
+- **tsval's privilege, decided** (2026-10-15): its module loading keeps the buffer — the editor's own debugger, built
+  with core's zen-fs, almostnode on the workspace as core runs it (shared/workspace-runtime, shared/zenfs-vfs: the
+  two `shared/` files the realm lint lets tsval import, and no others). Never a contributed debugger's: one gets the
+  runtime's files through core. Everything else tsval uses is a contributed debugger's too — editor-api's
+  `connectRuntime` (probing the worker's network as the editor's realms do, by default: `./probes`), `./runtime-vfs`
+  (for one that runs almostnode), `tarballUrl` — or its own: how a call is told for a capability and where a run stops
+  for one (capability-calls.ts), and the stand-ins a run gets (canary.ts, which the capabilities plugin's dynamic half
+  is built from).
+- **A run's server serves as it wrote** (2026-10-15): the preview's taps — the page's, a worker entry's — are put in by
+  the dev-server worker, which every preview request goes through, for a dev server's answer and any debugger's
+  (`virtual.debug.<port>`) alike. A debugger's `serve` answers plainly.
 
 ## 3. Span annotations — done (2026-10-10)
 

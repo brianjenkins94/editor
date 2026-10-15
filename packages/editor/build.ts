@@ -26,7 +26,7 @@ export const root = url.fileURLToPath(new URL(".", import.meta.url));
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
 /** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */
-const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability"];
+const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode"];
 
 // Every node builtin, bare (`fs`) and `node:`-prefixed — kept external so almostnode resolves them to its own
 // shims at runtime instead of vite bundling/polyfilling them.
@@ -487,7 +487,7 @@ export async function preBuild(): Promise<void> {
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
-				"input": { "extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-canary": resolvePath("./shared/capabilities/canary.ts") },
+				"input": { "extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-canary": resolvePath("./extensions/tsval/canary.ts") },
 				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
 		}

@@ -12,7 +12,6 @@
  *   cards (projections).
  */
 import type { SurfaceEntry } from "@brianjenkins94/util/silo/detect";
-import type { CanaryObservation } from "../../shared/capabilities/canary";
 import { surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import { findReach, surfaceOf } from "@brianjenkins94/util/silo/reach";
@@ -28,6 +27,10 @@ export interface Finding {
 	"dangerous": boolean;
 	"message": string;
 }
+
+/** What the canary (the plugin's dynamic half: tsval's, extensions/tsval/canary.ts, built beside the plugin) saw of a
+ *  capability call as the module ran. */
+interface CanaryObservation { "capability": string; "callee": string; "value": string; "observed": boolean; "static"?: string; "start": number; "end": number; "dangerous": boolean }
 
 /** A finding's message: the static resource when it's a literal, else the canary's (`(ran)`), else that it needs a run;
  *  and its type, when the checker says one. */

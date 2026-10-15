@@ -125,8 +125,8 @@ editor-api events of its run. *Unlocks:* recorded stops, profiles and stepping a
   view it moves with the rest.
 - *BABLR beyond annotations* — the cosmetic verdict and edit groups are `Bablr` function calls; as commands, the
   classifier becomes the standalone extension ARCHITECTURE.md already names as debt, and the edit history can follow.
-- *Command counts in core* — command-tap wraps each built-in extension's `vscode`; counting in core's command service
-  covers contributed extensions too.
+- ~~*Command counts in core*~~ — dropped (2026-10-15): core's command service sees calls but not which extension made
+  them, so command-tap (bundled extensions only) stays.
 
 ## tsval's exceptions — decide, don't assume
 
@@ -197,7 +197,17 @@ about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
      `margin_state` and `rules_list` tools) by the owning extension's command, from one fixed list (bridge/answers.ts);
      the tours run the rules' commands themselves (the harness's `session.execute`), so `rules.given`, `.list` and
      `.set` left the hub.
-6. **tsval's decision, then its move**; the architecture view's realm; command counts in core.
+6. ~~**tsval's decision, then its move**; the architecture view's realm; command counts in core.~~ Done (2026-10-15):
+   - **tsval keeps the buffer** — a documented editor-only privilege (EXTENSION-POINTS 2): the realm lint lets it import
+     shared/workspace-runtime and shared/zenfs-vfs, nothing else of `shared/`. The rest moved: the network probes to
+     editor-api (`./probes`, `connectRuntime`'s default), runtime-vfs to editor-api (`./runtime-vfs`; almostnode one of
+     the packages every build dedupes), tarball-url into editor-api's `./runtime`, the canary and capability-breakpoints
+     (now capability-calls.ts) into extensions/tsval — the capabilities plugin's canary is built from there — and the
+     preview taps into the dev-server worker, for every server. tsval, eslint and capabilities left the lint's
+     still-in-shared list; the bridge (core's) and cspell (its server mounts the buffer) remain.
+   - **The architecture view stays in the workbench**: core's own diagnostic view, a VS Code tab, where the raw hub is.
+   - **Command counts stay command-tap's**: core's command service can't tell which extension made a call — the view's
+     point — so a contributed extension (loaded by URL: editor-contrib's) goes unattributed. S8's item dropped.
 
 Each step ends with its features passing and nothing left behind them: a feature that moves takes its tests, and core
 keeps no fallback for the old way.

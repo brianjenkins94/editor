@@ -29,11 +29,11 @@
 import type { Surface, SurfaceEntry, WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages, InstalledPackages } from "@brianjenkins94/util/silo/evidence";
 import { failureText, watchWorker } from "@brianjenkins94/editor-api/failures";
+import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 import { add, consumerOf, surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { JOIN, joinedBefore, joinsWanted, syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
 import { baselinePath, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
-import { tarballUrl } from "../../shared/tarball-url";
 
 /** How many packages are read at once. */
 const PARALLEL = 4;

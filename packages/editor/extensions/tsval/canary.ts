@@ -20,12 +20,12 @@
  * one); `env` is a member read the static half already resolves, so the canary skips it.
  */
 import type { HostCallSite } from "@brianjenkins94/tsval";
-import type { CapabilityHit } from "./capability-breakpoints";
+import type { CapabilityHit } from "./capability-calls";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { createVM } from "@brianjenkins94/tsval";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
-import { classifyCall, renderCallee } from "./capability-breakpoints";
+import { classifyCall, renderCallee } from "./capability-calls";
 
 export interface CanaryObservation {
 	/** Capability class (silo vocabulary): net / fs:read / fs:write / exec. */

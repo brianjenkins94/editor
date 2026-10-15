@@ -42,7 +42,7 @@ also works over desktop's built-in git.
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench/`: `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal/`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(Core lives here too: the git engine and service — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is the source-control extension's, through the `editor.git.*` commands — the editor's BABLR (`bablr.ts`: one worker, its parses cached by blob oid, answering the git panel's verdicts, runtime evidence's span ids, and extensions' annotation references and resolutions), and runtime evidence (`evidence.ts`: each run's envelope, and what tsval sessions and preview pages observed, folded into `.silo/`). The cosmetic classifier the git service asks is the part that should become a standalone extension — see the known debt above.)* |
 | **Extension hosts** (`LocalProcess`, sharing the workbench's realm; `LocalWebWorker`, a worker) | `extensions/<name>/extension.ts`, `extensions/<name>/ts-plugin.js` | the vscode API (files through `vscode.workspace.fs`) — **no DOM, no zen-fs**; the hub only in `bridge` | One extension per feature (*Extensions: which one, which host*, below). `LocalProcess`: `bridge` (core's vscode API is its, and it's the only extension on the hub: every debugger's editor-api events and capability stops, the workspace runtime, tasks, Source Control, core's BABLR to extensions as `editor.annotations.*`) and `tsval`, which needs what only that host has. `LocalWebWorker`: everything else — `running`, `insights`, `margin` (the Margin, from the run contract's events), `notes`, `history`, `type-queries`, `event-sheet`, `cspell`, `eslint`, `capabilities`, and VS Code's own TypeScript extension. `capabilities` and `history` also run a plugin *inside tsserver*, reusing its `ts` and its Program; `eslint` runs real ESLint under almostnode in a worker of its own (below). |
 | **Workers** (`dist/lsp/*`) | `workers/` for core's (spawned from the workbench realm: `node-worker`, `provoke-worker`, `bablr-worker`); an extension's own sit in its folder (`extensions/tsval/debug-worker.ts`, `extensions/cspell/server-host.ts`, `extensions/event-sheet/recognizer-worker.ts`) — only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode: dev servers and previews), `bablr-worker` (the editor's BABLR, for `bablr.ts`: parses cached by blob oid in its own IndexedDB; cosmetic verdicts, span ids for runtime evidence, annotation references and resolutions), `debug-worker` (tsval stepping a program, almostnode for its packages; top-level, from the `LocalProcess` host), and — nested in the `LocalWebWorker` host, as any of its extensions' workers are, each named by its extension (`ext:<extension>/<worker>`) — VS Code's two tsservers, the cspell server (almostnode running cspell), eslint's worker (`extensions/eslint/worker.ts`: almostnode running real ESLint with the workspace's `eslint.config.*` or else the preset, from the toolchain the build traces and packs — `build/eslint-toolchain.ts` → `lsp/eslint-toolchain.tgz` — over the workspace through the workspace runtime), the event sheet's recognizer, and the capabilities extension's package worker (`extensions/capabilities/packages-worker.ts`: each dependency's tarball read for the baseline, started per sync). |
-| **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (upstream BABLR and our grammar, `bablr-language-ts`, bundled: `cstSpans`, span ids, `reidentify`/`follow`, `classifyChange`), `tsval` (the interpreter, and its `observe` hook), `almostnode` (the node runtime and previews' dev server, which instruments workspace modules for runtime evidence), `util/silo` (the shared policy model, runtime evidence and span annotations: pure models and layouts), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
+| **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (upstream BABLR and our grammar, `bablr-language-ts`, bundled: `cstSpans`, span ids, `reidentify`/`follow`, `classifyChange`), `tsval` (the interpreter, and its `observe` hook), `almostnode` (the node runtime and previews' dev server, which instruments workspace modules for runtime evidence), `util/silo` (the shared policy model, runtime evidence and span annotations: pure models and layouts), and tsval's `capability-calls` (how a call is told for a capability), which the capabilities plugin's canary is built with. Built/aliased into the realms above. |
 
 There is also a **service worker** (`coi-serviceworker.js`, registered by `app/coi.ts`): one per origin, it stamps the
 COOP/COEP headers that make every realm cross-origin-isolated (SharedArrayBuffer) on a static host, and resolves the
@@ -52,12 +52,13 @@ CDN `node_modules` overlay. Not a place you put feature code. It sits at the pac
 **The folders are the realms.** A file's folder says which realm runs it: `shell/`, `app/`, `workbench/`, `workers/`,
 `previews/` (what runs inside a preview's own pages: the page and worker taps, page evidence), and `extensions/<name>/`
 (that extension's host, and the workers it spawns). What more than one realm runs is in `shared/` (the architecture
-model and probes, `virtual-path`, `workspace-changes`, `theme`, the capability canary and classifier; almostnode on the
-workspace, as every worker that runs a program has it: `zenfs-vfs`, `workspace-runtime`; `playground-link`), and the
+model, `virtual-path`, `workspace-changes`, `theme`, almostnode on the workspace, as every worker that runs a program has it: `zenfs-vfs`, `workspace-runtime`; `playground-link`), and the
 shapes one realm serves and another reads (`runs`, `git`); build-time Vite plugins are in `build/`. What an *extension*
 imports of core's is editor-api's, not `shared/`'s — the `.silo/` stores (`./evidence`, `./policy`, `./effects`), run
 classification (`./lifecycle`), profiles (`./cpuprofile`), the gated realm (`./gated-eval`), worker failures
-(`./failures`), a preview's reports (`./recorded`) — so an extension passes FEATURES-AS-EXTENSIONS.md's test.
+(`./failures`), a preview's reports (`./recorded`), the network probes (`./probes`), almostnode over the runtime's
+files (`./runtime-vfs`) — so an extension passes FEATURES-AS-EXTENSIONS.md's test. One exception, decided: tsval, the
+editor's own debugger, mounts the workspace's buffer as core does (`zenfs-vfs`, `workspace-runtime`; EXTENSION-POINTS.md, 2).
 Lint holds the line (`no-restricted-imports`, the root `eslint.config.js`): a relative import that climbs into another
 realm's folder — or, from an extension, another extension's — is an error. Only `workbench-entry` reaches into
 `extensions/`, to register them; `main.tsx`, `build.ts`, `dev.ts` and the tests may reach anywhere. What a debugger's worker needs of a run — the values recorder,
@@ -253,7 +254,7 @@ flowchart TB
   SH["server-host<br/>LSP"]
   CW["bablr-worker<br/>parses cached by blob oid · verdicts · spans · references"]
 
-  PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · almostnode · util/silo · capability-breakpoints"]
+  PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · almostnode · util/silo"]
 
   S -.->|"loads iframe (src = self)"| A
   A -.->|"creates iframe (src = host.html)"| W
@@ -409,6 +410,7 @@ flowchart LR
   n_channel_vscode_web_state_db_global_shared <-.->|"VS Code storage sync"| n_workbench
   n_debug_mcp <==> n_root
   n_debug_worker <-.->|"in-realm calls"| n_server__
+  n_eslint <-.->|"HTTP"| n_sw
   n_eslint <==> n_workbench
   n_ext_bridge -->|"reads"| n_store__git__file_
   n_ext_bridge -->|"reads"| n_store__silo__file__json
@@ -587,7 +589,7 @@ flowchart LR
 Ask, in order:
 
 1. **Pure logic, no host deps?** → a **package / engine module** (node-testable). *e.g. `classifyChange`, `git-engine`
-   (no vscode dep), `silo/policy`, `capability-breakpoints`.*
+   (no vscode dep), `silo/policy`, tsval's `capability-calls`.*
 2. **NOVEL product functionality** (desktop VS Code does *not* provide it)? → a self-contained **extension** in the
    ext host, reaching the workspace through **`vscode.workspace.fs`** (never a direct `zen-fs` import), and
    **spawning any heavy worker itself**. Model: the `capabilities` extension. *The BABLR cosmetic classifier belongs
@@ -628,7 +630,7 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
   the extension" correction, correctly scoped: the classifier ports; the SCM shim does not.)* Recorded as debt.
 
 The capability overlay is the template for that classifier extension: pure core (`silo/policy`,
-`capability-breakpoints`) → a tsserver plugin (ext host) that emits diagnostics → an ext-host binding
+tsval's `capability-calls`) → a tsserver plugin (ext host) that emits diagnostics → an ext-host binding
 (`extensions/capabilities/extension.ts`) that renders the panel. See `extensions/capabilities/ARCHITECTURE.md`.
 
 ## The one gotcha the realms impose

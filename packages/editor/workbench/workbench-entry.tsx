@@ -38,7 +38,7 @@ import sourceControlExtension from "source-control:extension";
 import tsvalExtension from "tsval:extension";
 import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
-import { classifyUrl, identifyWorker } from "../shared/architecture-ids";
+import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";

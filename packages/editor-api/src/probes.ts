@@ -1,8 +1,13 @@
 /**
  * The node id a probe gives what it sees — a worker by its file, a request by where it goes, an IndexedDB database by
- * its owner — in every realm the probes run in (the service worker and every worker too). Kept apart from the declared
- * model (architecture-model.ts), which only the view and the tests read, so a probe doesn't carry the declarations.
+ * its owner — in every realm the probes run in (the service worker and every worker too), the editor's and a debugger's
+ * worker's alike (`connectRuntime` probes with these unless told otherwise). Kept apart from the declared model (the
+ * editor's architecture-model.ts), which only the view and the tests read, so a probe doesn't carry the declarations.
  */
+import type { NetworkProbeOptions } from "@brianjenkins94/observability";
+
+/** How the editor's realms probe their network: URLs classified as the editor's model names them. */
+export const NETWORK_PROBES: NetworkProbeOptions = { "classifyUrl": (url) => classifyUrl(url), "idbOwner": (database) => idbOwner(database) };
 
 /** Node id owning an IndexedDB database, when it isn't the realm that opens it: the workspace's zen-fs, persisting its
  *  shared buffer (`workspace-fs`) and mounting silo's local/ (`silo-local`). */

@@ -9,14 +9,17 @@ const EDITOR = "packages/editor";
 const REALMS = ["app", "shell", "workbench", "workers", "previews", "extensions"];
 const EXTENSIONS = readdirSync(new URL(EDITOR + "/extensions", import.meta.url), { "withFileTypes": true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 const SOURCES = "*.{ts,tsx,mts,js,mjs}";
-// An extension imports core's code from editor-api, never shared/ (FEATURES-AS-EXTENSIONS.md) — but these, until they
-// pass: the bridge is core's, and the rest still use what goes with tsval's decision or S1.
-const STILL_IN_SHARED = new Set(["bridge", "capabilities", "cspell", "eslint", "tsval"]);
+// An extension imports core's code from editor-api, never shared/ (FEATURES-AS-EXTENSIONS.md) — but the bridge, which is
+// core's, and cspell, until its server reads the workspace through the runtime rather than its buffer.
+const STILL_IN_SHARED = new Set(["bridge", "cspell"]);
+// And tsval's privilege (EXTENSION-POINTS.md, 2): almostnode on the workspace's buffer, as core runs it — only these.
+const PRIVILEGED = { "tsval": ["workspace-runtime", "zenfs-vfs.js"] };
 
-/** `files` may not climb into any of the `banned` folders. */
-function realmImports(files, banned, ignores = []) {
+/** `files` may not climb into any of the `banned` folders — but for `allowed`, shared/ files they may import. */
+function realmImports(files, banned, ignores = [], allowed = []) {
+	const shared = allowed.length === 0 ? "" : "|shared/(?!(?:" + allowed.map((file) => file.replaceAll(".", "\\.")).join("|") + ")$)";
 	const pattern = {
-		"regex": "^(?:\\.\\./)+(?:" + banned.join("|") + ")(?:/|$)",
+		"regex": "^(?:\\.\\./)+(?:(?:" + banned.join("|") + ")(?:/|$)" + shared + ")",
 		"message": "Realms import each other only through shared/, and extensions core's code only through editor-api (packages/editor/ARCHITECTURE.md, \"The realms\"; FEATURES-AS-EXTENSIONS.md)."
 	};
 
@@ -31,7 +34,7 @@ const realmBoundaries = [
 	realmImports([`${EDITOR}/workbench/workbench-entry.tsx`], otherRealms("workbench", "extensions")),
 	// What sits directly in extensions/ is every extension's; an extension reaches no other extension's folder.
 	realmImports([`${EDITOR}/extensions/${SOURCES}`], otherRealms("extensions")),
-	...EXTENSIONS.map((name) => realmImports([`${EDITOR}/extensions/${name}/**/${SOURCES}`], [...otherRealms("extensions"), ...EXTENSIONS.filter((other) => other !== name), ...STILL_IN_SHARED.has(name) ? [] : ["shared"]]))
+	...EXTENSIONS.map((name) => realmImports([`${EDITOR}/extensions/${name}/**/${SOURCES}`], [...otherRealms("extensions"), ...EXTENSIONS.filter((other) => other !== name), ...STILL_IN_SHARED.has(name) || name in PRIVILEGED ? [] : ["shared"]], [], PRIVILEGED[name]))
 ];
 
 export default [

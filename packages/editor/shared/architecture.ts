@@ -6,10 +6,10 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchReporter, NetworkProbeOptions } from "@brianjenkins94/observability";
 import { createArchReporter, installNetworkProbes } from "@brianjenkins94/observability";
-import { classifyUrl, idbOwner } from "./architecture-ids";
+import { NETWORK_PROBES } from "@brianjenkins94/editor-api/probes";
 
 /** How the editor's realms probe their network: URLs classified by the declared model (`observe(hub, { network })`). */
-export const NETWORK_PROBES: NetworkProbeOptions = { "classifyUrl": classifyUrl, "idbOwner": idbOwner };
+export { NETWORK_PROBES };
 
 /** Just the architecture reporter, for a context that collects logs rather than relaying them (the root, the shell). */
 export function reportArchitecture(hub: Hub): ArchReporter {

@@ -1,7 +1,7 @@
 {
   "name": "@brianjenkins94/editor-api",
   "version": "0.0.0",
-  "description": "What an extension of brianjenkins94/editor imports — the editor's API: the run contract (what the editor reads from a run, and asks of it — the custom debug events a debugger sends: values, coverage, effects, ended, ask, recorded, listening, idle; the requests it answers: decide, stdin, getCoverage), the workspace runtime a debugger's worker connects to (./runtime), span annotations — placing something on code so it stays on that code (./annotations) — pane views, a tab beside every editor drawn from an extension's data (./pane), and what a debugger's worker uses to tell them: the live-values recorder (./values), recorded calls' values for replay (./recorded) and the gate's verdict by the policy (./gate). And what an extension reads of what the editor keeps: runtime evidence (./evidence), the capability policy and a run's effects (./policy, ./effects), profiles (./cpuprofile), run classification (./lifecycle), the capability-gated realm (./gated-eval) and a worker's failures (./failures). Was run-contract.",
+  "description": "What an extension of brianjenkins94/editor imports — the editor's API: the run contract (what the editor reads from a run, and asks of it — the custom debug events a debugger sends: values, coverage, effects, ended, ask, recorded, listening, idle; the requests it answers: decide, stdin, getCoverage), the workspace runtime a debugger's worker connects to (./runtime), span annotations — placing something on code so it stays on that code (./annotations) — pane views, a tab beside every editor drawn from an extension's data (./pane), and what a debugger's worker uses to tell them: the live-values recorder (./values), recorded calls' values for replay (./recorded) and the gate's verdict by the policy (./gate). And what an extension reads of what the editor keeps: runtime evidence (./evidence), the capability policy and a run's effects (./policy, ./effects), profiles (./cpuprofile), run classification (./lifecycle), the capability-gated realm (./gated-eval) and a worker's failures (./failures). And for a debugger's worker: the workspace runtime's files as almostnode's VirtualFS (./runtime-vfs, for one that runs almostnode), and the editor's network probes (./probes, connectRuntime's default). Was run-contract.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -20,7 +20,9 @@
     "./effects": "./src/effects.ts",
     "./git": "./src/git.ts",
     "./rules": "./src/rules.ts",
-    "./anchors": "./src/anchors.ts"
+    "./anchors": "./src/anchors.ts",
+    "./probes": "./src/probes.ts",
+    "./runtime-vfs": "./src/runtime-vfs.ts"
   },
   "license": "MIT",
   "scripts": {
@@ -36,13 +38,17 @@
   "peerDependencies": {
     "@brianjenkins94/util": "*",
     "@brianjenkins94/hub": "*",
-    "@brianjenkins94/observability": "*"
+    "@brianjenkins94/observability": "*",
+    "@brianjenkins94/almostnode": "*"
   },
   "peerDependenciesMeta": {
     "@brianjenkins94/hub": {
       "optional": true
     },
     "@brianjenkins94/observability": {
+      "optional": true
+    },
+    "@brianjenkins94/almostnode": {
       "optional": true
     }
   }

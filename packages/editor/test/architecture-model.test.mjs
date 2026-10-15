@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import test from "node:test";
-import { classifyUrl, identifyWorker } from "../shared/architecture-ids.ts";
+import { classifyUrl, identifyWorker } from "../../editor-api/src/probes.ts";
 import { allowedOnLink, appLayout, appNodes, channels, checkConformance, declaredBetween, declaredOn, familiesOnLink, nodes, subjectMatches, subjectOfLabel, subjects } from "../shared/architecture-model.ts";
 
 const patterns = (from, to) => familiesOnLink(from, to).map((family) => family.pattern);

@@ -40,9 +40,8 @@ import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@b
 import { covers, settledReach } from "@brianjenkins94/util/silo/evidence";
 import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
-import { NETWORK_PROBES } from "../../shared/architecture";
-import { capabilityStandins, givenAs, standinCapability } from "../../shared/capabilities/canary";
-import { capabilityBreakLines, classifyCall, shouldBreak } from "../../shared/capabilities/capability-breakpoints";
+import { capabilityStandins, givenAs, standinCapability } from "./canary";
+import { capabilityBreakLines, classifyCall, shouldBreak } from "./capability-calls";
 import { replayGuard, replayProgram } from "./replay-run";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 
@@ -689,7 +688,7 @@ function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<Runtime
 
 /** Load the runtime (runtimeReady): the first time a run asks for it. */
 async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
-	const [{ createFsShim, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("../../shared/runtime-vfs")]);
+	const [{ createFsShim, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
 
 	// (its files answered once the editor has the worker's mailbox — without it, the runtime's own)
 	if (editorLink !== undefined) {
@@ -765,11 +764,12 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 			const server = serverOn(port);
 
 			if (server === undefined) {
-				return workerTapResponse(request.url) ?? { "status": 502, "statusText": "Bad Gateway", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`nothing listens on ${port} any more`) };
+				return { "status": 502, "statusText": "Bad Gateway", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`nothing listens on ${port} any more`) };
 			}
 
-			// As a run's server answers (workspace-runtime.ts): the preview's taps in what it serves.
-			return workerTapResponse(request.url) ?? answerServer(server, request);
+			// As the program's server answers it: the preview's taps are put in by the dev-server worker, as for any
+			// debugger's server.
+			return answerServer(server, request);
 		});
 		post({ "type": "listening", "port": port });
 	} });
@@ -2338,7 +2338,7 @@ function decide(message: Extract<Control, { "type": "decide" }>): void {
 
 globalThis.addEventListener("message", (event: MessageEvent<ToWorker>): void => {
 	if (event.data.kind === "runtime") {
-		editorLink = connectRuntime(event.data.port, { "name": "debug-worker", "network": NETWORK_PROBES });
+		editorLink = connectRuntime(event.data.port, { "name": "debug-worker" });
 
 		return;
 	}

@@ -14,15 +14,15 @@ import type { WorkspaceChange } from "../shared/workspace-changes";
 import type { RequestHandler, VirtualRequest, VirtualResponse } from "../shared/workspace-runtime";
 
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
-import { exchanges } from "@brianjenkins94/editor-api/runtime";
+import { identifyWorker } from "@brianjenkins94/editor-api/probes";
+import { drain, exchanges } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "../shared/architecture";
-import { identifyWorker } from "../shared/architecture-ids";
 
 import { ZENFS_NODE } from "../shared/architecture-zenfs";
 import { WORKSPACE_CHANGED } from "../shared/workspace-changes";
-import { answerServer, workerTapResponse } from "../shared/workspace-runtime";
+import { answerServer, tapsInto, withTap, workerTapResponse } from "../shared/workspace-runtime";
 import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "../shared/zenfs-vfs.js";
 
 /** The exact version the preview loads of each package — the editor's shared resolver's (workbench/versions.ts). */
@@ -99,13 +99,38 @@ async function answerVirtual(request: VirtualRequest): Promise<VirtualResponse> 
 
 	const serverNode = "vite:" + request.port;
 
-	return answerServer(server, request, (direction, label, bytes) => {
+	const response = await answerServer(server, request, (direction, label, bytes) => {
 		if (direction === "request") {
 			architecture.record(architecture.self, serverNode, "request", label, bytes);
 		} else {
 			architecture.record(serverNode, architecture.self, direction, label, bytes);
 		}
 	});
+
+	return tapsInto(request, response) ? withTap(request, { ...response, "body": response.body instanceof ReadableStream ? await drain(response.body) : response.body }) : response;
+}
+
+/** A debug run's server's answer to a preview's call (`virtual.debug.<port>`), with the preview's tap put in when it
+ *  takes one — its body read whole first, when it came streamed. */
+async function answerDebugServer(port: number, call: ExchangeCall): Promise<unknown> {
+	const answer = await rpc.request(`virtual.debug.${port}`, call, { "timeoutMs": 60_000 }) as WireResponse;
+
+	if (!("method" in call) || !tapsInto(call, answer)) {
+		return answer;
+	}
+
+	const pieces = [new Uint8Array(answer.body)];
+
+	for (let done = answer.stream === undefined; !done;) {
+		const piece = await rpc.request(`virtual.debug.${port}`, { "port": port, "stream": answer.stream, "read": true }, { "timeoutMs": 60_000 }) as { "body": Uint8Array; "done": boolean };
+
+		pieces.push(piece.body);
+		({ done } = piece);
+	}
+
+	const { "stream": _stream, ...head } = answer;
+
+	return withTap(call, { ...head, "body": new Uint8Array(await new Blob(pieces).arrayBuffer()) });
 }
 
 const devServerExchanges = exchanges(answerVirtual);
@@ -126,7 +151,7 @@ serve(hub, "virtual.request", async (raw) => {
 	// is the hub's call prefix) — or nobody's.
 	const { port } = call;
 
-	return hub.interested(`$rpc.call.virtual.debug.${port}`) ? rpc.request(`virtual.debug.${port}`, raw, { "timeoutMs": 60_000 }).catch(() => notListening(port)) : notListening(port);
+	return hub.interested(`$rpc.call.virtual.debug.${port}`) ? answerDebugServer(port, call).catch(() => notListening(port)) : notListening(port);
 });
 
 // M1: start almostnode's ViteDevServer in THIS worker on the shared workspace zen-fs, so the preview runs off

@@ -23,6 +23,7 @@ import type { Observed, ObserveOptions } from "@brianjenkins94/observability";
 import type { Effect } from "./index.ts";
 import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
+import { NETWORK_PROBES } from "./probes.ts";
 
 /** What `workspaceRuntime()` gives a debugger's extension. */
 export interface WorkspaceRuntime {
@@ -312,6 +313,10 @@ export function exchanges(handler: (request: RuntimeRequest) => Promise<RuntimeR
 	};
 }
 
+/** `name`@`version`'s published tarball: a lockfile's `resolved`, else npm's registry's — what a run installs a package
+ *  from (the editor fetches it: `RuntimeConnection.tarball`) and the capabilities baseline reads it from. */
+export const tarballUrl = (name: string, version: string, resolved?: string): string => resolved ?? `https://registry.npmjs.org/${name}/-/${name.slice(name.lastIndexOf("/") + 1)}-${version}.tgz`;
+
 /** Where core puts the workspace runtime in an extension host (the bridge's, in the bridge's; core's bootstrap's, in
  *  the web worker host).
  *  (The key keeps the package's old name, run-contract: it's how a published copy and core find each other, so it never changes.) */
@@ -390,8 +395,9 @@ export interface RuntimeConnection {
 
 /** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect(name, session)`'s), as
  *  `name` — what the editor knows it by. `network`: probes for the worker's own requests, as observability's `observe`
- *  takes them. */
-export function connectRuntime(port: MessagePort, { name, network = false }: { "name": string; "network"?: ObserveOptions["network"] }): RuntimeConnection {
+ *  takes them — by default the editor's (./probes), so the architecture view names what the worker reaches as it names
+ *  the editor's own. */
+export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROBES }: { "name": string; "network"?: ObserveOptions["network"] }): RuntimeConnection {
 	const hub = createHub({ "id": name });
 
 	// (up, to the editor: the id it knows the worker by is the worker's — its calls are answered there)

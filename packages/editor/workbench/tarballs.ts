@@ -4,7 +4,7 @@
  * `packages.tarball`). Nothing is written to the workspace: its filesystem is a fixed-size shared buffer, too small for
  * anyone's node_modules.
  */
-import { tarballUrl } from "../shared/tarball-url";
+import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 
 /** Each tarball fetched this session, by URL (its bytes never change: a version is published once). */
 const fetched = new Map<string, Promise<Uint8Array>>();

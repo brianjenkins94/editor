@@ -9,8 +9,8 @@ import { test } from "node:test";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import ts from "typescript";
 
-import { capabilityStandins } from "../shared/capabilities/canary.ts";
-import { classifyCall } from "../shared/capabilities/capability-breakpoints.ts";
+import { capabilityStandins } from "../extensions/tsval/canary.ts";
+import { classifyCall } from "../extensions/tsval/capability-calls.ts";
 
 function call(source) {
 	const file = ts.createSourceFile("x.ts", source, ts.ScriptTarget.Latest);

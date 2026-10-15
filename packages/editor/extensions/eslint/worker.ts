@@ -24,7 +24,7 @@ import type { RuntimeFs } from "@brianjenkins94/editor-api/runtime";
 import { createRuntime } from "@brianjenkins94/almostnode";
 import { unpack } from "@brianjenkins94/almostnode/packages";
 import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
-import { RuntimeVfs } from "../../shared/runtime-vfs";
+import { RuntimeVfs } from "@brianjenkins94/editor-api/runtime-vfs";
 
 /** What a lint says of a file: eslint's messages, as LintMessage has them (what the extension shows). */
 interface Message { "line": number; "column": number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }

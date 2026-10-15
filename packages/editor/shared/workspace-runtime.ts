@@ -1,9 +1,12 @@
 /**
  * almostnode on the shared workspace, as a run has it (MODULES.md, step 4): the debug worker's (extensions/tsval/debug-worker.ts) — the
- * workspace's zen-fs, the deploy base, cwd and built-ins, the program's globals; a listening server answered one way,
- * the preview's taps put in what it serves (the dev-server worker, node-worker.ts, answers its dev servers' requests
- * with the same `answerServer` and taps). What's passed in: the fs policy, where output goes, the evaluator of the
- * program's own files and its stand-ins.
+ * workspace's zen-fs, the deploy base, cwd and built-ins, the program's globals; a listening server answered one way
+ * (`answerServer`, the dev-server worker's for its dev servers too). What's passed in: the fs policy, where output goes,
+ * the evaluator of the program's own files and its stand-ins. tsval's privilege (EXTENSION-POINTS 2: the workspace's
+ * buffer, mounted with zen-fs), with zenfs-vfs.
+ *
+ * And the preview's taps, which the dev-server worker puts in whatever a preview is answered — a dev server's or any
+ * debugger's server (`withTap`) — so a run's server serves its pages as it wrote them.
  */
 import type { RuntimeOptions, VirtualFS } from "@brianjenkins94/almostnode";
 import type { RuntimeRequest, RuntimeResponse } from "@brianjenkins94/editor-api/runtime";
@@ -105,11 +108,36 @@ export function workerTapResponse(url: string): VirtualResponse | undefined {
 	return url.split("?")[0] === WORKER_TAP_PATH ? { "status": 200, "statusText": "OK", "headers": { "content-type": "text/javascript", "cache-control": "no-cache" }, "body": new TextEncoder().encode(workerTap) } : undefined;
 }
 
-/** `server`'s answer to `request`, as the preview gets it: an HTML document with the page tap first in it, a worker's
- *  entry script with the worker tap; anything else as it was. `observed` hears the request and its response (the
- *  architecture's record of the server's traffic). */
+/** Whether `response` to `request` gets a tap — an HTML document, or a worker's entry script — and so is wanted whole. */
+export function tapsInto(request: { "entry"?: VirtualRequest["entry"] }, response: { "status": number; "headers": Record<string, string> }): boolean {
+	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
+
+	return contentType.includes("text/html") || (request.entry !== undefined && response.status < 300 && /javascript|typescript/u.test(contentType));
+}
+
+/** `response` (its body whole) as the preview gets it: an HTML document with the page tap first in it, a worker's entry
+ *  script with the worker tap — re-encoded, its content-length fixed; anything else as it was. */
+export function withTap(request: { "url": string; "entry"?: VirtualRequest["entry"] }, response: { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }): VirtualResponse {
+	if (!tapsInto(request, response)) {
+		return response;
+	}
+
+	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
+	const text = new TextDecoder().decode(new Uint8Array(response.body));
+	const bytes = new TextEncoder().encode(contentType.includes("text/html") ? injectObsTap(text) : injectWorkerTap(text, request.url));
+	const headers = { ...response.headers };
+
+	delete headers["content-length"];
+	delete headers["Content-Length"];
+	headers["content-length"] = String(bytes.byteLength);
+
+	return { "status": response.status, "statusText": response.statusText, "headers": headers, "body": bytes };
+}
+
+/** `server`'s answer to `request`, as it wrote it (its body whole, or streamed). `observed` hears the request and its
+ *  response (the architecture's record of the server's traffic). */
 export async function answerServer(server: RequestHandler, request: VirtualRequest, observed?: (direction: "request" | "reply" | "error", label: string, bytes: number) => void): Promise<VirtualResponse> {
-	const { method, url, headers, body, entry } = request;
+	const { method, url, headers, body } = request;
 	const [path] = url.split("?");
 	const streamed = body instanceof ReadableStream;
 
@@ -117,30 +145,8 @@ export async function answerServer(server: RequestHandler, request: VirtualReque
 
 	// A program's own server streams both ways; a dev server takes and answers whole bodies.
 	const response = server.serve === undefined ? await server.handleRequest(method, url, headers, streamed ? await drain(body) : body) : await server.serve(method, url, headers, body);
-	const whole = async (): Promise<Uint8Array> => (response.body instanceof ReadableStream ? drain(response.body) : new Uint8Array(response.body));
 
 	observed?.(response.statusCode >= 400 ? "error" : "reply", String(response.statusCode) + " " + path, response.body instanceof ReadableStream ? 0 : response.body.length);
-
-	// Re-encoded, with its content-length fixed; only HTML and a worker's entry are touched.
-	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
-	const rewritten = (text: string): VirtualResponse => {
-		const bytes = new TextEncoder().encode(text);
-		const nextHeaders = { ...response.headers };
-
-		delete nextHeaders["content-length"];
-		delete nextHeaders["Content-Length"];
-		nextHeaders["content-length"] = String(bytes.byteLength);
-
-		return { "status": response.statusCode, "statusText": response.statusMessage, "headers": nextHeaders, "body": bytes };
-	};
-
-	if (entry !== undefined && response.statusCode < 300 && /javascript|typescript/u.test(contentType)) {
-		return rewritten(injectWorkerTap(new TextDecoder().decode(await whole()), url));
-	}
-
-	if (contentType.includes("text/html")) {
-		return rewritten(injectObsTap(new TextDecoder().decode(await whole())));
-	}
 
 	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
 }
