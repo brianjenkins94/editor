@@ -124,6 +124,10 @@ test("an agent's run of editor-contrib's interpreter answers with how it ended",
 	assert.equal(ran.program, "/workspace/contrib-probe.ts");
 });
 
+test("editor-contrib's extension is on the editor's observability plane: its log, as ext:contrib's", async () => {
+	await session.eventually("its record", () => session.printed().find((line) => /^\[ext:contrib(?:#\w+)?\] .*editor-contrib's extension is up/u.test(line)), 60_000);
+});
+
 test("editor.annotations.spans gives an extension the editor's spans for a text", async () => {
 	const answer = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.spans", "const greeting = \"hello\";\n"));
 	const spans = answer?.value;

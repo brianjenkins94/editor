@@ -87,6 +87,12 @@ rules use.
 A custom text editor: **Reopen Editor With… → Rendered (contrib)**. The file's text stays the truth — render from it
 and write changes back as `WorkspaceEdit`s, and the editor's history, annotations and live runs keep working.
 
+## Its log, the editor's
+
+`observeExtension(name)` (`@brianjenkins94/editor-api/runtime`) puts the extension on the editor's observability plane:
+what it hands `log` is the editor's log too — debug-mcp's `logs_query` reads it, as `ext:<name>`'s — and `metrics` its
+gauges. `src/extension.ts` does it as it activates. (Not its `console`: the extension host is every extension's.)
+
 ## Where this comes from
 
 This repository is kept up to date from [`contrib/`](https://github.com/brianjenkins94/editor/tree/main/contrib) in
