@@ -167,8 +167,25 @@ about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
 3. **S4, commands for the hub** — ~~the Source Control view~~ (done), the rules view, the agents' answers. (Running's
    bridge half stays: S4's note.)
 4. ~~**S5, the decider**~~ — deferred (S5's note); capabilities' decision logic stays in the bridge until then.
-5. **S6 and S7, run events and preview pages** — the Margin, recorded stops, coverage, profiles and evidence move into
-   extensions.
+5. **S6 and S7, run events and preview pages** — with the rules view and the agents' answers folded in (2026-10-14).
+   S6 needs no new seam: VS Code hands every extension host each debug session's custom events
+   (`onDidReceiveDebugSessionCustomEvent`), so the run contract's `values`, `ended` and `ask` are public already —
+   the bridge only re-published them on the hub (debug-events.ts, unchanged). Evidence and profiles stay core's: they
+   capture into `.silo/` (evidence.ts, profile-files.ts), the files being the seam insights reads. In order:
+   - **5a. Rule editing → capabilities.** The rules view (rules-view.ts), the Margin's rule and mock panels
+     (live-values.ts' rulePanel, openRule, openMock, openVariableMock: ~350 lines) and the bridge's rule places
+     (debug-control.ts: `rules.list`, `.set`, `.given`, places kept through edits: ~200) into the capabilities
+     extension, the rule editor (components/monaco-vscode-api/rule-editor.ts — DOM only) bundled into its webview view.
+     The Margin opens its Rule… and Mock… there by capabilities' commands.
+   - **5b. The Margin → its own extension.** live-values.ts' provider (~1.1k), inputs.ts and coverage.ts into
+     `extensions/margin`, from the run contract's events themselves; what it asks the bridge becomes commands
+     (EXTENSION-POINTS 5): a stop's answer (`editor.capability.decide` — the decider's meaning stays the bridge's), a
+     variable set at a stop (`editor.debug.setValue`), a run with cases (`editor.debugFile`'s options). A recorded
+     result is editor-api's (`./policy`'s recordedResult).
+   - **5c. Recorded stops as a run's values.** A preview's page stops come as `values` on its run's `production` session
+     (the bridge's crossing), so the Margin shows them as any run's; workbench/recorded-stops.ts' stand-in session goes.
+   - **5d. The agents' answers.** The bridge answers `margin.state` and `rules.state` by the owning extension's command —
+     a fixed list, not a relay of the hub.
 6. **tsval's decision, then its move**; the architecture view's realm; command counts in core.
 
 Each step ends with its features passing and nothing left behind them: a feature that moves takes its tests, and core
