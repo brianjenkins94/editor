@@ -8,6 +8,7 @@
     "vscode": "*"
   },
   "browser": "extension.js",
+  "files": ["view.js", "recognizer.js"],
   "activationEvents": [
     "onView:eventSheet.view",
     "onCommand:eventSheet.paneView"

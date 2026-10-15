@@ -15,6 +15,12 @@ what's contributed stays portable to the desktop (extension boundaries: the hub 
 That's for VS Code augmentations; core's own runtime UI — the shell, previews, the prompt in a preview window — isn't
 one.
 
+**An extension is a folder** (2026-10-14): its package.json, its `browser` entry, and each file its manifest's `files`
+lists (npm's field: each a file's path in the folder) — a worker it starts, a tsserver plugin's package, a webview's
+script — registered at that path, so it opens them as `extensionUri`'s (workbench/extensions.ts). The editor's own load
+that way too (build.ts builds each into `extensions/<name>/`), so a contributed one can ship what they do instead of
+inlining it.
+
 What an extension author imports is one package, `packages/editor-api` (released like hub, on the site as
 `packages/editor-api@latest.tgz`): the run contract's types, the workspace runtime's (`./runtime`), span annotations
 (`./annotations`) and pane views (`./pane`) — and what an extension reads of what the editor keeps: runtime evidence
@@ -73,7 +79,7 @@ cases, the run's registration, its exit code from DAP's `exited`). On a desktop 
 `fs` and `net`.
 
 **For editor-contrib too** (2026-10-11). An extension loaded from outside the editor runs in the web worker extension
-host (contributed-extensions.ts — its code kept out of the workbench realm), and an extension's exports reach only its
+host (workbench/extensions.ts — its code kept out of the workbench realm), and an extension's exports reach only its
 own host — so the runtime is put in each host by core, not exported (below), and the template's interpreter runs in a
 worker on it. What handing a port across hosts meets (measured 2026-10-10, Brave, the dev build):
 

@@ -1,10 +1,14 @@
 /**
- * Extensions from outside the editor — an interpreter or a code renderer built from editor-contrib's template
- * (contrib/README.md) — loaded by URL: the URL its package.json is at or the folder it's in. Two lists name them:
- * the site's own `extensions.json` beside its index.html, its URLs relative to the site (a site that's the editor with
- * extensions of its own: editor-contrib's is the editor's tarball, its extension added), and the page's `?extension=`s
- * (one served from anywhere, while it's developed — reloading the editor as it's rebuilt: `followChanges`). Its code runs in the web worker extension host, with the access every
- * extension there has. Its `browser` entry is all that loads: an extension bundles its code into that one file.
+ * Every extension loads from a folder: its package.json, its `browser` entry, and the files its manifest's `files`
+ * lists (a worker it starts, a tsserver plugin's package, a webview's script) — each registered at its path in the
+ * folder, so the extension opens it as `extensionUri`'s (registerExtensionFolder). The editor's own are built into
+ * `extensions/<name>/` (build.ts, bundledExtension) and registered by workbench-entry; extensions from outside the
+ * editor — an interpreter or a code renderer built from editor-contrib's template (contrib/README.md) — the same way,
+ * by URL: the URL its package.json is at or the folder it's in. Two lists name those: the site's own `extensions.json`
+ * beside its index.html, its URLs relative to the site (a site that's the editor with extensions of its own:
+ * editor-contrib's is the editor's tarball, its extension added), and the page's `?extension=`s (one served from
+ * anywhere, while it's developed — reloading the editor as it's rebuilt: `followChanges`). Their code runs in the web
+ * worker extension host, with the access every extension there has.
  *
  * The extension host's CSP takes its code from https, or http on `localhost:*` / `127.0.0.1:*` (one under
  * development) — not a `*.localhost` name.
@@ -12,7 +16,31 @@
 import type * as vscodeApi from "vscode";
 import { ExtensionHostKind, registerExtension } from "@brianjenkins94/monaco-vscode-api/main";
 
-interface Manifest { "name": string; "publisher": string; "version": string; "browser"?: string }
+/** A manifest (VS Code's), its entry and the files it lists. */
+type Manifest = Parameters<typeof registerExtension>[0] & { "browser"?: string; "files"?: unknown };
+
+/** An extension in its folder (`base`): registered in host `kind`, its entry and its manifest's `files` at their paths
+ *  in it. A `files` entry is a file's path in the folder — not a pattern, nor a folder. */
+export function registerExtensionFolder(manifest: Manifest, base: URL, kind: ExtensionHostKind): ReturnType<typeof registerExtension> {
+	if (typeof manifest.browser !== "string") {
+		throw new TypeError("its package.json names no `browser` entry (a web extension's)");
+	}
+
+	const files = Array.isArray(manifest.files) ? manifest.files : [];
+	const odd = files.find((file) => typeof file !== "string" || file === "" || file.endsWith("/") || /[*?]/u.test(file));
+
+	if (odd !== undefined) {
+		throw new TypeError(`its package.json's files lists ${JSON.stringify(odd)}: each is a file's path in its folder`);
+	}
+
+	const extension = registerExtension(manifest, kind);
+
+	for (const file of [manifest.browser, ...files as string[]].map((each) => each.replace(/^\.\//u, ""))) {
+		extension.registerFileUrl("./" + file, new URL(file, base).href);
+	}
+
+	return extension;
+}
 
 /** The folder an extension's URL names: its package.json's, or the folder itself — where the extension host's CSP lets
  *  its code come from. */
@@ -85,18 +113,7 @@ export async function loadContributedExtensions(vscode: typeof vscodeApi, log: {
 					throw new Error(`its package.json answered ${response.status}`);
 				}
 
-				const manifest = await response.json() as Manifest;
-
-				if (typeof manifest.browser !== "string") {
-					throw new TypeError("its package.json names no `browser` entry (a web extension's)");
-				}
-
-				const entry = manifest.browser.replace(/^\.\//u, "");
-
-				const extension = registerExtension(manifest, ExtensionHostKind.LocalWebWorker);
-
-				extension.registerFileUrl("./" + entry, new URL(entry, base).href);
-				await extension.whenReady();
+				await registerExtensionFolder(await response.json() as Manifest, base, ExtensionHostKind.LocalWebWorker).whenReady();
 				followChanges(base);
 			} catch (error) {
 				log.error("contributed extension failed to load", { "url": base.href, "error": String(error) });

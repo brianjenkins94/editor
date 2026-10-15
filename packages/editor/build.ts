@@ -63,71 +63,115 @@ const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\
  *  every extension shares, where a global `process` makes other extensions (VS Code's TypeScript) take it for Node. */
 const MODULE_PROCESS_SHIM = "var process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
 
-/** Bundle `<folder>/<file>.ts` (a folder of this package, e.g. `extensions/bridge`; deps inlined) into a virtual
- *  module `<name>:<id>`, named for the folder's last segment, exposing the built code as a default-export string.
+/** Bundle `<folder>/<file>` (a folder of this package, e.g. `extensions/bridge`; deps inlined) into one chunk's code.
  *  `externals` stay unbundled. `configFile:false` isolates the nested build. */
-function bundledModule(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), served = false, plugins: Plugin[] = [], banner?: string): Plugin {
-	const name = folder.split("/").at(-1);
-	const virtual = `${name}:${id}`;
-	const resolved = "\0" + virtual;
+async function bundleCode(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), plugins: Plugin[] = [], banner?: string): Promise<string> {
 	const dir = url.fileURLToPath(new URL(`./${folder}/`, import.meta.url));
+	const output = await build({
+		"configFile": false,
+		"logLevel": "silent",
+		"root": root,
+		// One util, hub and observability — the editor's: editor-api's modules, linked from its own folder, would find
+		// the copies its dev dependencies installed beside it (a stale util once cost a rule its package).
+		"resolve": { "dedupe": SHARED_PACKAGES },
+		"plugins": plugins,
+		"build": {
+			"write": false,
+			"minify": isCI,
+			// Script text, not a file: its map rides inline (locally only, as every pass's).
+			"sourcemap": isCI ? false : "inline",
+			"target": "esnext",
+			"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
+			// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
+			// into siblings we don't capture (we grab only the entry chunk as a string).
+			"rollupOptions": { "external": externals, "output": { "codeSplitting": false, ...banner === undefined ? {} : { "banner": banner } } }
+		}
+	}) as RollupOutput[];
+
+	return output[0].output.find((chunk) => chunk.type === "chunk")?.code ?? "";
+}
+
+/** `<folder>/<file>` bundled (bundleCode) as a virtual module `<name>:<id>`, named for the folder's last segment, whose
+ *  default export is the code, a string. */
+function bundledModule(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), plugins: Plugin[] = [], banner?: string): Plugin {
+	const virtual = `${folder.split("/").at(-1)}:${id}`;
+	const resolved = "\0" + virtual;
 
 	return {
-		"name": `${name}-${id}`,
+		"name": virtual.replace(":", "-"),
 		"resolveId": (source) => (source === virtual ? resolved : undefined),
-		"load": async function(moduleId) {
-			if (moduleId !== resolved) {
-				return undefined;
-			}
-
-			const output = await build({
-				"configFile": false,
-				"logLevel": "silent",
-				"root": root,
-				// One util, hub and observability — the editor's: editor-api's modules, linked from its own folder, would find
-				// the copies its dev dependencies installed beside it (a stale util once cost a rule its package).
-				"resolve": { "dedupe": SHARED_PACKAGES },
-				"plugins": plugins,
-				"build": {
-					"write": false,
-					"minify": isCI,
-					// Script text, not a file: its map rides inline (locally only, as every pass's).
-					"sourcemap": isCI ? false : "inline",
-					"target": "esnext",
-					"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
-					// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
-					// into siblings we don't capture (we grab only the entry chunk as a string).
-					"rollupOptions": { "external": externals, "output": { "codeSplitting": false, ...banner === undefined ? {} : { "banner": banner } } }
-				}
-			}) as RollupOutput[];
-
-			const code = output[0].output.find((chunk) => chunk.type === "chunk")?.code ?? "";
-
-			if (served) {
-				// Emitted beside the entry (content-hashed, so a deploy never pairs a new entry with a stale copy) and
-				// exported as its path: the code stays out of workbench.js, and whoever runs it fetches it.
-				const fileName = `extensions/${name}-${createHash("sha256").update(code).digest("hex").slice(0, 8)}.js`;
-
-				this.emitFile({ "type": "asset", "fileName": fileName, "source": code });
-
-				return `export default ${JSON.stringify("./" + fileName)};`;
-			}
-
-			return `export default ${JSON.stringify(code)};`;
-		}
+		"load": async (moduleId) => (moduleId === resolved ? `export default ${JSON.stringify(await bundleCode(folder, file, id, format, externals, plugins, banner))};` : undefined)
 	};
 }
 
 /** The module an extension's `vscode` imports resolve to (commandTap). */
 const TAPPED_VSCODE = "\0vscode-tapped";
 
-/** An extension's `extension.ts` → a served browser CJS file (`<name>:extension` is its path), `vscode` external. The
- *  extension host fetches it on activation, so none of it is on the workbench's boot path. Its `vscode` is tapped
- *  (commandTap): the architecture view discovers its commands. */
-function bundledExtension(name: string): Plugin {
-	// `vscode` is external only from the tapped module: the extension's own imports of it go to that module first.
-	// The extension host has no `process`; util reads it as it loads.
-	return bundledModule("extensions/" + name, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, true, [commandTap(name)], MODULE_PROCESS_SHIM);
+/** What goes in an extension's folder beside its entry, by the path its manifest's `files` lists it at: a classic
+ *  bootstrap for one of its workers (a module worker built with the LSP workers, in lsp/, sharing their chunks — an
+ *  extension's workers start classic; `hold` keeps the messages that come before the module has loaded), a script
+ *  bundled from its folder, or JSON. A file the manifest lists that's none of these is another pass's (a tsserver
+ *  plugin and its engine). */
+type ExtensionFile = { "worker": string; "hold"?: boolean } | { "script": string; "format": "es" | "iife" } | { "json": unknown };
+
+/** A classic worker script that imports module worker `file` (lsp/'s) from `depth` folders below the site, telling the
+ *  worker's starter if it couldn't (watchWorker reads `failed`). */
+function workerBootstrapSource(file: string, depth: number, hold: boolean): string {
+	const target = JSON.stringify("../".repeat(depth) + "lsp/" + file);
+	const failed = "(error) => { postMessage({ \"failed\": String(error && error.stack || error) }); }";
+
+	return hold
+		? `const held = []; const hold = (event) => { held.push(event.data); }; addEventListener("message", hold); import(${target}).then(() => { removeEventListener("message", hold); for (const data of held) { dispatchEvent(new MessageEvent("message", { "data": data })); } }, ${failed});\n`
+		: `import(${target}).catch(${failed});\n`;
+}
+
+/**
+ * An extension, as a folder the editor loads it from — the way an extension from outside the editor is loaded
+ * (workbench/extensions.ts): `extensions/<name>/` holds its package.json (its manifest, `browser` its content-hashed
+ * entry), the entry (`extension.ts`, browser CJS, `vscode` external, its `vscode` tapped — commandTap — so the
+ * architecture view discovers its commands) and `files`' files. `<name>:extension` is `{ base, manifest }`. The
+ * extension host fetches the entry on activation, so none of it is on the workbench's boot path.
+ */
+function bundledExtension(name: string, files: Record<string, ExtensionFile> = {}): Plugin {
+	const virtual = `${name}:extension`;
+	const resolved = "\0" + virtual;
+	const folder = `extensions/${name}`;
+
+	return {
+		"name": `${name}-extension`,
+		"resolveId": (source) => (source === virtual ? resolved : undefined),
+		"load": async function(moduleId) {
+			if (moduleId !== resolved) {
+				return undefined;
+			}
+
+			// `vscode` is external only from the tapped module: the extension's own imports of it go to that module first.
+			// The extension host has no `process`; util reads it as it loads.
+			const code = await bundleCode(folder, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, [commandTap(name)], MODULE_PROCESS_SHIM);
+			// (content-hashed, so a deploy never pairs a new manifest with a stale entry)
+			const entry = `extension-${createHash("sha256").update(code).digest("hex").slice(0, 8)}.js`;
+			const manifest = { ...JSON.parse(fs.readFileSync(resolvePath(`./${folder}/package.json`), "utf8")) as Record<string, unknown>, "browser": entry };
+
+			this.emitFile({ "type": "asset", "fileName": `${folder}/${entry}`, "source": code });
+			this.emitFile({ "type": "asset", "fileName": `${folder}/package.json`, "source": JSON.stringify(manifest, null, "\t") + "\n" });
+
+			for (const [path, made] of Object.entries(files)) {
+				let source: string;
+
+				if ("worker" in made) {
+					source = workerBootstrapSource(made.worker, `${folder}/${path}`.split("/").length - 1, made.hold === true);
+				} else if ("script" in made) {
+					source = await bundleCode(folder, made.script, path.replace(/\.js$/u, ""), made.format, []);
+				} else {
+					source = JSON.stringify(made.json, null, "\t") + "\n";
+				}
+
+				this.emitFile({ "type": "asset", "fileName": `${folder}/${path}`, "source": source });
+			}
+
+			return `export default ${JSON.stringify({ "base": `./${folder}/`, "manifest": manifest })};`;
+		}
+	};
 }
 
 /** Hand extension `name` a `vscode` whose commands and file operations are counted (extensions/command-tap.ts;
@@ -164,23 +208,24 @@ function cspellDict(): Plugin {
 	};
 }
 
-/** Emit the capabilities tsserver plugin VERBATIM next to capabilities-engine.js, so tsserver imports it from a served
- *  URL and its import.meta.url self-locates the sibling engine (copied byte-for-byte, not a vite input). */
+/** Emit the capabilities tsserver plugin VERBATIM into its extension's folder, as the package tsserver loads
+ *  (node_modules/capabilities-ts-plugin/index.js), beside its engine and canary — its import.meta.url finds them (copied
+ *  byte-for-byte, not a vite input). */
 function capabilitiesTsPlugin(): Plugin {
 	return {
 		"name": "capabilities-ts-plugin-asset",
 		"generateBundle": function() {
-			this.emitFile({ "type": "asset", "fileName": "lsp/capabilities-ts-plugin.js", "source": fs.readFileSync(resolvePath("./extensions/capabilities/ts-plugin.js"), { "encoding": null }) });
+			this.emitFile({ "type": "asset", "fileName": "extensions/capabilities/node_modules/capabilities-ts-plugin/index.js", "source": fs.readFileSync(resolvePath("./extensions/capabilities/ts-plugin.js"), { "encoding": null }) });
 		}
 	};
 }
 
-/** Same, for the history tsserver plugin — emitted next to history-engine.js so its import.meta.url self-locates it. */
+/** Same, for the history tsserver plugin — beside history-engine.js in its extension's folder. */
 function historyTsPlugin(): Plugin {
 	return {
 		"name": "history-ts-plugin-asset",
 		"generateBundle": function() {
-			this.emitFile({ "type": "asset", "fileName": "lsp/history-ts-plugin.js", "source": fs.readFileSync(resolvePath("./extensions/history/ts-plugin.js"), { "encoding": null }) });
+			this.emitFile({ "type": "asset", "fileName": "extensions/history/node_modules/history-ts-plugin/index.js", "source": fs.readFileSync(resolvePath("./extensions/history/ts-plugin.js"), { "encoding": null }) });
 		}
 	};
 }
@@ -261,7 +306,26 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("bridge"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledExtension("cspell"), bundledModule("extensions/event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url", "buffer"])],
+		"plugins": [
+			bundledExtension("bridge"),
+			bundledExtension("tsval"),
+			// (its worker: ESLint and the preset under almostnode, from the toolchain built beside it — 2c)
+			bundledExtension("eslint", { "worker.js": { "worker": "eslint-worker.js" } }),
+			// (its tsserver plugin: the plugin, its engine and canary are the plugin passes'; its package worker, for the baseline)
+			bundledExtension("capabilities", { "node_modules/capabilities-ts-plugin/package.json": { "json": { "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "packages.js": { "worker": "packages-worker.js" } }),
+			bundledExtension("history", { "node_modules/history-ts-plugin/package.json": { "json": { "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" } } }),
+			bundledExtension("insights"),
+			bundledExtension("running"),
+			bundledExtension("type-queries"),
+			bundledExtension("notes"),
+			// (its webview's script, which it inlines into the page it serves; its recognizer worker)
+			bundledExtension("event-sheet", { "view.js": { "script": "view.ts", "format": "iife" }, "recognizer.js": { "worker": "recognizer-worker.js" } }),
+			// (its worker: cspell under almostnode — a classic script is done at once, so the client's first messages are
+			// held until the module's server listens)
+			bundledExtension("cspell", { "server.js": { "worker": "server-host.js", "hold": true } }),
+			editorSettingsDefaultsPlugin(),
+			polyfillNode(["path", "url", "buffer"])
+		],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `@automerge/automerge` → its base64-INLINED-WASM entry (fullfat_base64): the default browser condition wants a
@@ -390,7 +454,7 @@ export async function preBuild(): Promise<void> {
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
-				"input": { "lsp/capabilities-engine": resolvePath("./extensions/capabilities/engine.ts") },
+				"input": { "extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-engine": resolvePath("./extensions/capabilities/engine.ts") },
 				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
 		}
@@ -420,7 +484,7 @@ export async function preBuild(): Promise<void> {
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
-				"input": { "lsp/capabilities-canary": resolvePath("./shared/capabilities/canary.ts") },
+				"input": { "extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-canary": resolvePath("./shared/capabilities/canary.ts") },
 				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
 		}
@@ -445,7 +509,7 @@ export async function preBuild(): Promise<void> {
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
-				"input": { "lsp/history-engine": resolvePath("./extensions/history/engine.ts") },
+				"input": { "extensions/history/node_modules/history-ts-plugin/history-engine": resolvePath("./extensions/history/engine.ts") },
 				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
 		}
@@ -465,6 +529,41 @@ export async function preBuild(): Promise<void> {
 			}
 		}
 	});
+
+	checkExtensionFolders(path.join(root, "dist"));
+}
+
+/** Every extension's folder holds what its manifest says it does — its entry and each of `files` — and each worker
+ *  bootstrap in it names a module that was built: a file missing fails the build, not a worker that never starts. */
+function checkExtensionFolders(dist: string): void {
+	const missing: string[] = [];
+
+	for (const name of fs.readdirSync(path.join(dist, "extensions"))) {
+		const folder = path.join(dist, "extensions", name);
+		const manifest = path.join(folder, "package.json");
+
+		if (fs.existsSync(manifest)) {
+			const { browser, files = [] } = JSON.parse(fs.readFileSync(manifest, "utf8")) as { "browser": string; "files"?: string[] };
+
+			for (const file of [browser, ...files]) {
+				const at = path.join(folder, file);
+
+				if (fs.existsSync(at)) {
+					const target = /^(?:const held[^\n]*)?import\("([^"]+)"\)/u.exec(fs.readFileSync(at, "utf8"))?.[1] ?? /import\("([^"]+)"\)\.(?:then|catch)/u.exec(fs.readFileSync(at, "utf8"))?.[1];
+
+					if (target !== undefined && !fs.existsSync(path.resolve(path.dirname(at), target))) {
+						missing.push(`${name}/${file} imports ${target}, which wasn't built`);
+					}
+				} else {
+					missing.push(`${name}/${file}`);
+				}
+			}
+		}
+	}
+
+	if (missing.length > 0) {
+		throw new Error("the extensions' folders lack what their manifests list: " + missing.join("; "));
+	}
 }
 
 /** Preload the shell's chunk (and its imports + CSS) from index.html. main.tsx imports it dynamically (so its

@@ -1,15 +1,9 @@
-/** The bridge extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension in build.ts). */
-declare module "bridge:extension" {
-	const path: string;
+/** Each of the editor's extensions (`<name>:extension`): the folder build.ts built it into (bundledExtension), relative to
+ *  the workbench, and its manifest — `browser` its entry there, `files` what else is. */
+declare module "*:extension" {
+	const extension: { "base": string; "manifest": Parameters<typeof import("@brianjenkins94/monaco-vscode-api/main").registerExtension>[0] & { "browser": string; "files"?: string[] } };
 
-	export default path;
-}
-
-/** The tsval extension (the stepping debugger), bundled like the others: its path. */
-declare module "tsval:extension" {
-	const path: string;
-
-	export default path;
+	export default extension;
 }
 
 /** dockview's stylesheet — the `dockview` package's dist/styles/dockview.css (see dockviewCssPlugin in build.ts). */
@@ -24,65 +18,6 @@ declare module "editor:settings-defaults" {
 	const defaults: Record<string, unknown>;
 
 	export default defaults;
-}
-
-/** The eslint extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension
- *  in build.ts) — a TS server plugin that lints inside tsserver, reusing tsserver's own typescript. */
-declare module "eslint:extension" {
-	const path: string;
-
-	export default path;
-}
-
-/** The history extension (what your edits change, read by its TypeScript server plugin), bundled like the others: its
- *  path. */
-declare module "history:extension" {
-	const path: string;
-
-	export default path;
-}
-
-/** The insights extension (what runs say — hover, purple suggestions; the metrics monitor), bundled like the others: its
- *  path. */
-declare module "insights:extension" {
-	const path: string;
-
-	export default path;
-}
-
-/** The event-sheet extension, bundled like the others: its path. */
-declare module "event-sheet:extension" {
-	const path: string;
-
-	export default path;
-}
-
-/** The event sheet's webview script (served beside the entry; the extension inlines it into its webview): its path. */
-declare module "event-sheet:view" {
-	const path: string;
-
-	export default path;
-}
-
-/** The running extension (what's running, from VS Code's public API), bundled like the others: its path. */
-declare module "running:extension" {
-	const path: string;
-
-	export default path;
-}
-
-/** The notes extension (notes that stay with their code: durable span annotations), bundled like the others: its path. */
-declare module "notes:extension" {
-	const path: string;
-
-	export default path;
-}
-
-/** The type-queries extension (`// ^?` → the type, from VS Code's public API), bundled like the others: its path. */
-declare module "type-queries:extension" {
-	const path: string;
-
-	export default path;
 }
 
 declare module "previews:page-tap" {
@@ -102,13 +37,6 @@ declare module "cspell:server-node" {
 	const code: string;
 
 	export default code;
-}
-
-/** The cspell extension, bundled like the others: its path. */
-declare module "cspell:extension" {
-	const path: string;
-
-	export default path;
 }
 
 /** Vite `?raw` imports — file contents as a string (used to register the TS server plugin source). */

@@ -23,31 +23,19 @@ import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
-import bridgeExtensionPath from "bridge:extension";
-import capabilitiesExtensionPath from "capabilities:extension";
-import cspellExtensionPath from "cspell:extension";
+import bridgeExtension from "bridge:extension";
+import capabilitiesExtension from "capabilities:extension";
+import cspellExtension from "cspell:extension";
 import settingsDefaults from "editor:settings-defaults";
-import eslintExtensionPath from "eslint:extension";
-import eventSheetExtensionPath from "event-sheet:extension";
-import eventSheetViewPath from "event-sheet:view";
-import historyExtensionPath from "history:extension";
-import insightsExtensionPath from "insights:extension";
-import notesExtensionPath from "notes:extension";
+import eslintExtension from "eslint:extension";
+import eventSheetExtension from "event-sheet:extension";
+import historyExtension from "history:extension";
+import insightsExtension from "insights:extension";
+import notesExtension from "notes:extension";
 import { render } from "preact";
-import runningExtensionPath from "running:extension";
-import tsvalExtensionPath from "tsval:extension";
-import typeQueriesExtensionPath from "type-queries:extension";
-import bridgeManifest from "../extensions/bridge/package.json";
-import capabilitiesManifest from "../extensions/capabilities/package.json";
-import cspellManifest from "../extensions/cspell/package.json";
-import eslintManifest from "../extensions/eslint/package.json";
-import eventSheetManifest from "../extensions/event-sheet/package.json";
-import historyManifest from "../extensions/history/package.json";
-import insightsManifest from "../extensions/insights/package.json";
-import notesManifest from "../extensions/notes/package.json";
-import runningManifest from "../extensions/running/package.json";
-import tsvalManifest from "../extensions/tsval/package.json";
-import typeQueriesManifest from "../extensions/type-queries/package.json";
+import runningExtension from "running:extension";
+import tsvalExtension from "tsval:extension";
+import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { classifyUrl, identifyWorker } from "../shared/architecture-ids";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
@@ -56,13 +44,13 @@ import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
-import { loadContributedExtensions } from "./contributed-extensions";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import { installCoverage } from "./coverage";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
 import { installEvidence } from "./evidence";
+import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import * as gitEngine from "./git-engine";
 import { installGitService } from "./git-service";
 import { installLiveValues, showMarks, showProfile } from "./live-values";
@@ -182,20 +170,10 @@ window.addEventListener("unhandledrejection", (event) => {
 	});
 });
 
-/**
- * An extension's worker, as a classic bootstrap (an extension's workers start classic) that imports the module worker at
- * `lsp/<file>` by its URL, so its own imports resolve beside it. A module that didn't load is said back as `{ failed }`
- * with its stack, which names where it failed (editor-api/failures' watchWorker says it). `hold`: messages that arrive
- * before the module listens are kept, and handed on once it has loaded (a classic script is done at once, so a client's
- * first messages would arrive before the module worker listens).
- */
-function workerBootstrap(file: string, hold = false): string {
-	const url = JSON.stringify(new URL("./lsp/" + file, location.href).href);
-	const failed = "(error) => { postMessage({ \"failed\": String(error && error.stack || error) }); }";
-
-	return "data:text/javascript," + encodeURIComponent(hold
-		? `const held = []; const hold = (event) => { held.push(event.data); }; addEventListener("message", hold); import(${url}).then(() => { removeEventListener("message", hold); for (const data of held) { dispatchEvent(new MessageEvent("message", { "data": data })); } }, ${failed});`
-		: `import(${url}).catch(${failed});`);
+/** One of the editor's own extensions (`<name>:extension`: its folder, as build.ts built it, and its manifest), registered
+ *  from that folder as any extension is (extensions.ts). */
+function builtIn(extension: { "base": string; "manifest": Parameters<typeof registerExtensionFolder>[0] }, kind: ExtensionHostKind): ReturnType<typeof registerExtensionFolder> {
+	return registerExtensionFolder(extension.manifest, new URL(extension.base, location.href), kind);
 }
 
 /** Readable text for a caught `unknown` — Error message when it is one, a string as-is, else JSON (avoids
@@ -584,10 +562,10 @@ function maybeBoot(): void {
 			// else of core's crosses. It also hosts the language servers (on the main-thread LocalProcess host, so it
 			// spawns top-level, non-throttled server workers), the debug adapters, tasks and Source Control. Registered
 			// as CJS by the URL of its bundle, served beside this entry (bundledExtension in build.ts), so its code is
-			// fetched on activation rather than carried in workbench.js; the other extensions below register the same way.
-			const bridgeExt = registerExtension(bridgeManifest, ExtensionHostKind.LocalProcess);
+			// fetched on activation rather than carried in workbench.js; the other extensions below register the same way —
+			// each from its folder, as an extension from outside the editor is (extensions.ts).
+			const bridgeExt = builtIn(bridgeExtension, ExtensionHostKind.LocalProcess);
 
-			bridgeExt.registerFileUrl("./extension.js", new URL(bridgeExtensionPath, location.href).href);
 			bridgeExt.setAsDefaultApi().catch((error: unknown) => {
 				bootSpan.error("setAsDefaultApi failed", { "error": errText(error) });
 			});
@@ -680,93 +658,20 @@ function maybeBoot(): void {
 			// tsval, the stepping debugger — an extension of its own, in the bridge's host (LocalProcess: it spawns its debug
 			// workers top-level, as the bridge does its servers). It reaches the editor as any debugger does: the run contract,
 			// and the workspace runtime the bridge exports.
-			const tsvalExt = registerExtension(tsvalManifest, ExtensionHostKind.LocalProcess);
+			builtIn(tsvalExtension, ExtensionHostKind.LocalProcess);
 
-			tsvalExt.registerFileUrl("./extension.js", new URL(tsvalExtensionPath, location.href).href);
-
-			// The eslint extension: real ESLint and the preset under almostnode, in a worker of its own (extensions/eslint/
-			// worker.ts, from the toolchain the build packed beside it), started through a bootstrap as an extension's
-			// workers are.
-			const eslintExt = registerExtension(eslintManifest, ExtensionHostKind.LocalWebWorker);
-
-			eslintExt.registerFileUrl("./extension.js", new URL(eslintExtensionPath, location.href).href);
-			eslintExt.registerFileUrl("./worker.js", workerBootstrap("eslint-worker.js"));
-
-			// The capabilities extension — two halves, both INSIDE the tsserver plugin. STATIC: util/silo's findReach, on tsserver's tree.
-			// DYNAMIC: the tsval canary, reusing tsserver's own `ts` (the plugin self-locates both served engines via
-			// import.meta.url, like eslint). Both publish NATIVE ts.Diagnostics (source "capabilities"); extension.ts
-			// renders the "Capability calls" panel by READING those diagnostics back — no canary code in the ext host.
-			const capabilitiesExt = registerExtension(capabilitiesManifest, ExtensionHostKind.LocalWebWorker);
-
-			capabilitiesExt.registerFileUrl("./extension.js", new URL(capabilitiesExtensionPath, location.href).href);
-
-			const capabilitiesPluginPkg = JSON.stringify({ "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" });
-
-			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/package.json", "data:application/json," + encodeURIComponent(capabilitiesPluginPkg));
-
-			const capabilitiesPluginUrl = new URL("./lsp/capabilities-ts-plugin.js", location.href).href;
-
-			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/index.js", capabilitiesPluginUrl);
-			// Its package worker, for the dependency baseline (baseline.ts): a bootstrap importing the module worker by its URL, as
-			// the event sheet's recognizer is started.
-			capabilitiesExt.registerFileUrl("./packages.js", workerBootstrap("packages-worker.js"));
-
-			// History: what your edits change, as you make them — a TS server plugin that reads the program tsserver holds with
-			// its own `ts` (served beside its engine, like eslint's and capabilities'), and an extension that replays each pause
-			// against the last and keeps what changed in `.silo/history/<user>.jsonl`. Public API only: no hub.
-			const historyExt = registerExtension(historyManifest, ExtensionHostKind.LocalWebWorker);
-
-			historyExt.registerFileUrl("./extension.js", new URL(historyExtensionPath, location.href).href);
-
-			const historyPluginPkg = JSON.stringify({ "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" });
-
-			historyExt.registerFileUrl("./node_modules/history-ts-plugin/package.json", "data:application/json," + encodeURIComponent(historyPluginPkg));
-			historyExt.registerFileUrl("./node_modules/history-ts-plugin/index.js", new URL("./lsp/history-ts-plugin.js", location.href).href);
-
-			// Insights: every run's coverage marked in its file's gutter, and the metrics monitor, from whatever the debug
-			// sessions and the metrics plane report — public API only, so it runs in the web worker host.
-			const insightsExt = registerExtension(insightsManifest, ExtensionHostKind.LocalWebWorker);
-
-			insightsExt.registerFileUrl("./extension.js", new URL(insightsExtensionPath, location.href).href);
-
-			// The Event Sheet: its webview view's script (inlined into the page it serves) and the recognizer worker it starts,
-			// built with the LSP workers so it shares the editor's TypeScript — public API only.
-			const eventSheetExt = registerExtension(eventSheetManifest, ExtensionHostKind.LocalWebWorker);
-
-			eventSheetExt.registerFileUrl("./extension.js", new URL(eventSheetExtensionPath, location.href).href);
-			eventSheetExt.registerFileUrl("./view.js", new URL(eventSheetViewPath, location.href).href);
-			// (An extension's workers start classic: recognizer.js is a bootstrap importing the module worker by its URL, so the
-			// worker's own imports — the shared ts chunk — resolve beside it.)
-			eventSheetExt.registerFileUrl("./recognizer.js", workerBootstrap("recognizer-worker.js"));
-
-			// Running: what's running and how it ended, from terminal shell integration, debug sessions and tasks — public
-			// API only, as a desktop extension would see it.
-			const runningExt = registerExtension(runningManifest, ExtensionHostKind.LocalWebWorker);
-
-			runningExt.registerFileUrl("./extension.js", new URL(runningExtensionPath, location.href).href);
-
-			// Type queries: `// ^?` beneath an expression shows its type, as in the TypeScript Playground — public API only.
-			const typeQueriesExt = registerExtension(typeQueriesManifest, ExtensionHostKind.LocalWebWorker);
-
-			typeQueriesExt.registerFileUrl("./extension.js", new URL(typeQueriesExtensionPath, location.href).href);
-
-			// Notes that stay with their code: durable span annotations, kept in .silo/notes/ and resolved by the editor's
-			// BABLR (the bridge's editor.annotations.* commands) — public API only.
-			const notesExt = registerExtension(notesManifest, ExtensionHostKind.LocalWebWorker);
-
-			notesExt.registerFileUrl("./extension.js", new URL(notesExtensionPath, location.href).href);
-
-			// cspell: the real cspell engine, a Node program run under almostnode in its own worker — public API only.
-			const cspellExt = registerExtension(cspellManifest, ExtensionHostKind.LocalWebWorker);
-
-			cspellExt.registerFileUrl("./extension.js", new URL(cspellExtensionPath, location.href).href);
-			// (an extension's workers start classic: server.js imports the module worker. A classic script is done at once, so
-			// the client's first messages arrive before the server listens: held until the import resolves — server-host
-			// awaits its server's start — then handed on.)
-			cspellExt.registerFileUrl("./server.js", workerBootstrap("server-host.js", true));
+			// The rest run in the web worker host, each from its folder with the files its manifest lists: eslint (real ESLint
+			// and the preset under almostnode, in its worker); capabilities (static and dynamic halves inside its tsserver
+			// plugin, which finds its engine and canary beside itself; its package worker for the baseline); history (its
+			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the event sheet (its webview's script,
+			// its recognizer worker); running; type queries (`// ^?`); notes; cspell (the real cspell under almostnode, in its
+			// worker). Public API only, but for what EXTENSION-POINTS lists (5).
+			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, cspellExtension]) {
+				builtIn(extension, ExtensionHostKind.LocalWebWorker);
+			}
 
 			// And any from outside the editor, by URL — the site's own (`extensions.json`) and `?extension=`'s:
-			// editor-contrib's interpreters and renderers (contributed-extensions.ts).
+			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
 			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "running", "event-sheet", "type-queries", "notes", "cspell"] });

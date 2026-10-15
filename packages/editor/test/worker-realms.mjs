@@ -18,15 +18,22 @@ import { launchChromium } from "@brianjenkins94/util/playwright/chromium";
 
 import { URL_UNDER_TEST } from "./architecture-harness.mjs";
 
-/** What's built into dist/lsp that runs in a realm of its own: every entry, none of the chunks they share. The
- *  TypeScript server plugins aren't: they're CommonJS, loaded by tsserver into its own worker, where its tours run them. */
-const LSP = path.join(import.meta.dirname, "../dist/lsp");
-const ENTRIES = fs.readdirSync(LSP).filter((file) => /^[a-z]+(?:-[a-z]+)*\.js$/u.test(file) && !file.endsWith("-ts-plugin.js")).sort();
+/** What's built that runs in a realm of its own, by its path in dist/: every entry in lsp/, none of the chunks they share;
+ *  and the engines a TypeScript server plugin loads, beside it in its extension's folder (extensions/<name>/node_modules/
+ *  <plugin>/). The plugins themselves aren't: tsserver loads them into its own worker, where their tours run them. */
+const DIST = path.join(import.meta.dirname, "../dist");
+const LSP = path.join(DIST, "lsp");
+const ENGINES = fs.readdirSync(path.join(DIST, "extensions")).flatMap((name) => {
+	const modules = path.join(DIST, "extensions", name, "node_modules");
+
+	return fs.existsSync(modules) ? fs.readdirSync(modules).flatMap((plugin) => fs.readdirSync(path.join(modules, plugin)).filter((file) => file.endsWith(".js") && file !== "index.js").map((file) => `extensions/${name}/node_modules/${plugin}/${file}`)) : [];
+});
+const ENTRIES = [...fs.readdirSync(LSP).filter((file) => /^[a-z]+(?:-[a-z]+)*\.js$/u.test(file)).map((file) => "lsp/" + file), ...ENGINES].sort();
 /** The TypeScript the build shares between its workers (a chunk of dist/lsp, and the export that gives it), to hand an
  *  engine as the TypeScript server hands it its own. */
 const TYPESCRIPT = (() => {
-	for (const file of ENTRIES) {
-		const found = /import \{[^}]*\b(\w+) as require_typescript\b[^}]*\} from "\.\/(typescript-[\w-]+\.js)"/u.exec(fs.readFileSync(path.join(LSP, file)));
+	for (const file of ENTRIES.filter((each) => each.startsWith("lsp/"))) {
+		const found = /import \{[^}]*\b(\w+) as require_typescript\b[^}]*\} from "\.\/(typescript-[\w-]+\.js)"/u.exec(fs.readFileSync(path.join(DIST, file)));
 
 		if (found !== null) {
 			return { "file": found[2], "export": found[1] };
@@ -54,14 +61,15 @@ after(async () => {
 });
 
 test("the entries are found", () => {
-	assert.ok(ENTRIES.includes("debug-worker.js") && ENTRIES.includes("packages-worker.js"), "dist/lsp has its entries: " + ENTRIES.join(", "));
+	assert.ok(ENTRIES.includes("lsp/debug-worker.js") && ENTRIES.includes("lsp/packages-worker.js"), "dist/lsp has its entries: " + ENTRIES.join(", "));
+	assert.ok(ENTRIES.includes("extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-engine.js") && ENTRIES.includes("extensions/history/node_modules/history-ts-plugin/history-engine.js"), "the tsserver plugins' engines are beside them: " + ENGINES.join(", "));
 });
 
 /** Load `entry` as its starter does, in its realm: undefined when it loaded, else why it couldn't. */
 async function load(entry) {
-	const url = new URL("__vscode__/lsp/" + entry, URL_UNDER_TEST).href;
+	const url = new URL("__vscode__/" + entry, URL_UNDER_TEST).href;
 	// (an engine the TypeScript server loads: the `ts` globals it reads, set to TypeScript first)
-	const handed = [...new Set(fs.readFileSync(path.join(LSP, entry)).match(/(?<=globalThis\.)__\w+Ts\b/gu) ?? [])];
+	const handed = [...new Set(fs.readFileSync(path.join(DIST, entry)).match(/(?<=globalThis\.)__\w+Ts\b/gu) ?? [])];
 
 	assert.ok(handed.length === 0 || TYPESCRIPT !== undefined, `${entry} is handed TypeScript, and dist/lsp has no TypeScript chunk to hand it`);
 

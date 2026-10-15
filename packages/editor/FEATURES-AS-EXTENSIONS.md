@@ -25,10 +25,10 @@ isn't held to it.
 | type-queries | yes | — |
 | running | yes (since S2) | — |
 | notes | yes (since S3) | — (`_types.at` is documented now: EXTENSION-POINTS 5) |
-| event sheet | packaging only | core builds and registers its `view.js` and recognizer worker (the editor's TypeScript chunk) |
-| cspell | packaging only | core builds its worker, server bundle and dictionary; `shared/zenfs-vfs` (in-memory) |
-| history | packaging | its tsserver plugin built and served by core, its `node_modules` faked by workbench-entry; the edit history itself is `workbench/edit-history.ts` (zen-fs, git-engine, the classifier) |
-| eslint | packaging | as history, plus the preset built by core's Vite plugin |
+| event sheet | yes (since S1) | — (core's build makes its folder, its recognizer sharing lsp/'s TypeScript) |
+| cspell | nearly | `shared/zenfs-vfs` (an in-memory one: its own copy, or almostnode's own VFS, would do) |
+| history | yes, but its core half | the extension passes (S1, S2); the edit history it reads is `workbench/edit-history.ts` (zen-fs, git-engine, the classifier) |
+| eslint | no | `shared/runtime-vfs`; its preset built by core's Vite plugin (virtual modules) |
 | insights | yes (since S2, S3) | — |
 | capabilities | no | its plugin and canary engine built by core from `shared/capabilities/`; ~780 lines of its logic in the bridge (the decider, what an answer at a stop means, rule places, `rules.*`); `workbench/rules-view.ts` (a custom view on monaco internals) |
 | tsval | no | the workspace's buffer and zen-fs directly; `shared/workspace-runtime` (core's preview taps), `NETWORK_PROBES`, canary, preview-evidence; `run.policy` (undocumented); its Margin is `workbench/live-values.ts` |
@@ -42,7 +42,13 @@ feature code that could move.
 
 ## The missing seams
 
-**S1. The loader ships an extension's files.** `contributed-extensions.ts` registers only a manifest's `browser` entry,
+**S1. The loader ships an extension's files** — done (2026-10-14): every extension, the editor's own and contributed
+ones, loads from a folder — its entry and each file its manifest's `files` lists (workbench/extensions.ts) — and the
+build makes each of the editor's into `extensions/<name>/` (its workers' bootstraps, its tsserver plugin with the engine
+beside it, its webview's script); workbench-entry's per-extension wiring is gone. What core's build shares between
+workers (lsp/'s chunks, TypeScript among them) an extension's files import from there.
+
+*Was:* `contributed-extensions.ts` registered only a manifest's `browser` entry,
 so an extension with a tsserver plugin, a worker or a webview script can't load the way contrib does — contrib inlines
 its worker for that reason. Core builds and registers those files for cspell, the event sheet, history, eslint and
 capabilities instead. Either the loader registers what a manifest declares (`typescriptServerPlugins`' files, extra

@@ -8,6 +8,7 @@
     "vscode": "*"
   },
   "browser": "extension.js",
+  "files": ["node_modules/capabilities-ts-plugin/package.json", "node_modules/capabilities-ts-plugin/index.js", "packages.js"],
   "activationEvents": [
     "onStartupFinished",
     "onLanguage:typescript",

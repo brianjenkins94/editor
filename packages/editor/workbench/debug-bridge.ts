@@ -46,7 +46,7 @@ export function installDebugBridge(getApi: () => Api): void {
 
 	const bridge = {
 		"ready": readyPromise,
-		/** Resolves once the extensions from outside the editor are loaded (contributed-extensions.ts). */
+		/** Resolves once the extensions from outside the editor are loaded (extensions.ts). */
 		"contributed": contributedPromise,
 
 		/** The raw vscode extension API namespace, for anything not wrapped below. */

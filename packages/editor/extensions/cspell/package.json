@@ -8,6 +8,7 @@
     "vscode": "*"
   },
   "browser": "extension.js",
+  "files": ["server.js"],
   "activationEvents": [
     "onLanguage:typescript",
     "onLanguage:typescriptreact",
