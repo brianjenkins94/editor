@@ -63,11 +63,6 @@ const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\
  *  every extension shares, where a global `process` makes other extensions (VS Code's TypeScript) take it for Node. */
 const MODULE_PROCESS_SHIM = "var process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
 
-/** unenv's `process` (and Node's other globals) for util's own modules only — env reads `process` at module eval — in a
- *  bundle that also carries code which reads `process` to tell whether it's in Node: TypeScript and almostnode in the LSP
- *  workers, the user's app around a preview tap. Given one, they'd take their Node path. */
-const utilNodeGlobals = (): Plugin[] => [polyfillNode([], { "inject": /[\\/]@brianjenkins94[\\/]util[\\/]/u })] as Plugin[];
-
 /** Bundle `<folder>/<file>` (a folder of this package, e.g. `extensions/bridge`; deps inlined) into one chunk's code.
  *  `externals` stay unbundled. `configFile:false` isolates the nested build. */
 async function bundleCode(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), plugins: Plugin[] = [], banner?: string): Promise<string> {
@@ -373,7 +368,7 @@ export async function preBuild(): Promise<void> {
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
-		"plugins": [utilNodeGlobals(), unenvResolve(), bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", [], utilNodeGlobals()), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", [], utilNodeGlobals()), cspellDict()],
+		"plugins": [unenvResolve(), bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
 		"build": {
 			"outDir": "dist",
