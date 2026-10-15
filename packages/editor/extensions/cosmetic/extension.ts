@@ -15,7 +15,11 @@ import * as vscode from "vscode";
 const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 
 /** How long after a change the files are read again. */
-const SETTLE_MS = 500;
+const SETTLE_MS = 2000;
+
+/** How long after the editor starts before the first read: a git status and BABLR's parses are work the boot (and
+ *  TypeScript's first answers) shouldn't share a thread with, and a change made sooner is read as it's saved. */
+const FIRST_READ_MS = 30_000;
 
 export function activate(context: vscode.ExtensionContext): void {
 	const changed = new vscode.EventEmitter<vscode.Uri[]>();
@@ -56,6 +60,19 @@ export function activate(context: vscode.ExtensionContext): void {
 		}, SETTLE_MS);
 	};
 
+	/** Whether to follow file changes yet: not while the workspace is still being written at boot. */
+	let following = false;
+	const follow = (): void => {
+		following = true;
+		later();
+	};
+
+	const changedFile = (): void => {
+		if (following) {
+			later();
+		}
+	};
+
 	const watcher = vscode.workspace.createFileSystemWatcher("**/*");
 
 	context.subscriptions.push(
@@ -66,12 +83,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			"provideFileDecoration": (uri) => (verdicts.get(uri.toString()) === "cosmetic" ? { "badge": "≈", "tooltip": "Cosmetic — formatting or comments only", "color": new vscode.ThemeColor("disabledForeground") } : undefined)
 		}),
 		// (a save, or any file the repository changes — a commit too: git's own files are files)
-		vscode.workspace.onDidSaveTextDocument(later),
-		watcher.onDidChange(later),
-		watcher.onDidCreate(later),
-		watcher.onDidDelete(later),
+		vscode.workspace.onDidSaveTextDocument(follow),
+		watcher.onDidChange(changedFile),
+		watcher.onDidCreate(changedFile),
+		watcher.onDidDelete(changedFile),
 		vscode.commands.registerCommand("cosmetic.list", () => Object.fromEntries([...verdicts].map(([uri, verdict]) => [vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false), verdict])))
 	);
 
-	later();
+	const first = setTimeout(follow, FIRST_READ_MS);
+
+	context.subscriptions.push({
+		"dispose": () => {
+			clearTimeout(first);
+			clearTimeout(timer);
+		}
+	});
 }
