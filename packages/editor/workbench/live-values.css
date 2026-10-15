@@ -167,31 +167,6 @@
   outline: 1px solid var(--vscode-focusBorder);
 }
 
-/* The rule being made at a capability stop (live-values.ts, the component's rule editor): its rows, whether it covers
-   the call, then its buttons. */
-.live-values-rule {
-  margin-top: 4px;
-  padding: 6px 8px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: 3px;
-  background: var(--vscode-editorWidget-background);
-}
-
-.live-values-rule-status {
-  margin-top: 6px;
-  color: var(--vscode-descriptionForeground);
-  font-family: var(--vscode-font-family);
-}
-
-.live-values-rule-status.refused {
-  color: var(--vscode-errorForeground);
-}
-
-.live-values-choice.save {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-}
-
 .live-values-ask-error {
   margin-top: 4px;
   color: var(--vscode-errorForeground);

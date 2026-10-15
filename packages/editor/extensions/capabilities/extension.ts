@@ -30,6 +30,7 @@ import { registerExceptions } from "./exceptions";
 import { publishFindings } from "./findings";
 import { registerPlacedRules } from "./placed-rules";
 import { effectiveDisposition, policyUri, readPolicy, withoutRule, withRule, writePolicy } from "./policy";
+import { registerRules } from "./rules";
 import { registerRulesTree } from "./rules-tree";
 
 interface Row {
@@ -339,7 +340,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	void refresh();
-	// The Rules view, beside this one: the policy's rules as a tree (rules-tree.ts).
+	// The policy files and placed rules (rules.ts); the Rules view beside this one, the policy's rules as a tree, and its
+	// commands (rules-tree.ts) — a rule edited in core's Rule view.
+	registerRules(context);
 	registerRulesTree(context);
 	// What's outside the dependency baseline and the policy: versions pending acceptance, and the policy's exceptions (exceptions.ts).
 	registerExceptions(context);

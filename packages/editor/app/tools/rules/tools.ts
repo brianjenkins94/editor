@@ -1,4 +1,4 @@
-/** The rules, as the Rules view shows them (`rules.state`, rules-view.ts). */
+/** The rules, as the Rules view shows them (`rules.state`: the capabilities extension's `silo.rules.list`, relayed by the bridge). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 

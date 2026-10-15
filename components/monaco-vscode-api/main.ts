@@ -690,6 +690,4 @@ export { OPEN_ARCHITECTURE_COMMAND, registerLiveArchitecture } from "./architect
 export type { HostedEditorOptions } from "./hosted-editor";
 export type { PaneEntry, PaneMark, PaneRender, PaneView } from "./pane";
 export { renderMarkdown, showPane, showPaneViews } from "./pane";
-export type { EditedRule, RuleAction, RuleCatalog, RuleComparison, RuleCompound, RuleEditor, RuleEditorOptions, RulePredicate, RuleSchema } from "./rule-editor";
-export { describeRule, ruleEditor, schemaInput } from "./rule-editor";
 export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

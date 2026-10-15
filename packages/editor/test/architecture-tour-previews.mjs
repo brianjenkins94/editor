@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { alive, hasLabel } from "./architecture-harness.mjs";
-import { eventually, session, tour } from "./architecture-tour-session.mjs";
+import { eventually, pressInRuleView, ruleStatus, session, tour } from "./architecture-tour-session.mjs";
 
 tour("architecture-tour-previews", { "debugMcp": true, "debugMcpPort": 7398 });
 
@@ -250,10 +250,8 @@ test("preview prompt: Rule… makes the rule in the Rules view, and the call wai
 
 	await rule.first().waitFor({ "timeout": 30_000 });
 	await rule.first().click();
-	await eventually("the rule, in the Rules view", () => workbench.evaluate(() => document.querySelector(".rules-view .live-values-rule-status")?.textContent).then((text) => (text === "Covers this call: allows it" ? text : undefined)));
-	await workbench.evaluate(() => {
-		[...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Save as rule").click();
-	});
+	await eventually("the rule, in the Rule view", () => ruleStatus().then((text) => (text === "Covers this call: allows it" ? text : undefined)));
+	await pressInRuleView("Save as rule");
 	// Allowed: the fetch goes out (wherever it gets) instead of the gate's 403.
 	assert.notEqual(await decided, "Capability denied");
 

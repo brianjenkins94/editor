@@ -17,7 +17,7 @@
  * resumes it. *Allow this run* lets every call of the capability through until the run ends (a loop asks once), kept
  * nowhere. *Allow always* needs the resource the call reaches — known even when the line computes it (the worker runs a
  * fork of the stop to the call to see it).
- * Rule…* opens the rule editor in the Rule view (the component's, RULES.md; editInRuleView), prefilled with the call — *capability is*, *resource
+ * Rule…* opens the rule editor in the Rule view (core's `editor.rules.edit`, RULES.md), prefilled with the call — *capability is*, *resource
  * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
  * in my policy, the run going on as it decides. Or *give* the call's *result* instead of it (RULES.md, slice 2) —
  * starting from what it returned the last time it ran for real, when that's recorded (`capability.recorded`).
@@ -44,21 +44,22 @@
  */
 import type { AskEvent, LiveBatch, LiveCall, LiveValue, RunEnd } from "@brianjenkins94/editor-api";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem } from "@brianjenkins94/editor-api/pane";
+import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
 import type { Hub } from "@brianjenkins94/hub";
-import type { EditedRule, PaneMark, RuleCatalog, RulePredicate, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
+import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
+import type { Rule } from "@brianjenkins94/util/silo/policy";
 import type * as vscodeApi from "vscode";
 import type { CapabilityChoice } from "../shared/capabilities/capability-breakpoints";
 import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { argvRunsOf, decisionOf, resultOf } from "@brianjenkins94/editor-api/rules";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { ruleEditor } from "@brianjenkins94/monaco-vscode-api/main";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 import { Anchors } from "./anchors";
 import { parseInputs } from "./inputs";
 import css from "./live-values.css?raw";
 import { refreshView } from "./pane-views";
-import { editInRuleView } from "./rules-view";
 
 /** A capability stop's question, as the margin shows it on its line (the run contract's `ask`, its file and text apart). */
 type CapabilityAsk = Omit<AskEvent, "file" | "source">;
@@ -67,7 +68,7 @@ type CapabilityAsk = Omit<AskEvent, "file" | "source">;
 interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean }
 
 /** What a rule gives a file's process.argv: the rule, and its values, each a run's arguments. */
-interface Given { "rule": EditedRule; "values": string[][] }
+interface Given { "rule": Rule; "values": string[][] }
 
 /** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
 interface Picker { "function": string; "index": number; "count": number }
@@ -118,7 +119,7 @@ const asks = new Map<string, { "session": string; "ask": CapabilityAsk; "anchors
 /** The workbench's extension API (set by `installLiveValues`): the documents' text, BABLR's spans. */
 let api: typeof vscodeApi | undefined;
 /** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
-let choose: ((session: string, choice: CapabilityChoice, rule?: EditedRule, give?: unknown) => Promise<unknown>) | undefined;
+let choose: ((session: string, choice: CapabilityChoice, rule?: Rule, give?: unknown) => Promise<unknown>) | undefined;
 /** What a call returned the last time it ran for real (a preview's fetch, recorded), or null (set by `installLiveValues`). */
 let recordedOf: ((capability: string, resource: string) => Promise<{ "value": unknown; "at": string } | null>) | undefined;
 /** Sets a variable at a session's stop (set by `installLiveValues`). */
@@ -126,32 +127,10 @@ let setValueAt: ((session: string, name: string, value: string) => Promise<unkno
 /** What a rule gives a file's process.argv, changing my policy by a rule editor's rule, and running a file with given
  *  arguments, each a run (set by `installLiveValues`). */
 let rulesGiven: ((path: string) => Promise<Given | null>) | undefined;
-let rulesSet: ((previous: EditedRule | undefined, rule: EditedRule | undefined) => Promise<unknown>) | undefined;
+let rulesSet: ((previous: Rule | undefined, rule: Rule | undefined) => Promise<unknown>) | undefined;
 let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
 /** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
 const givenArgv = new Map<string, Given | null>();
-
-/** The variables a rule tests or sets (`variables.<name>`), by name. */
-export function variablesOf(rule: EditedRule): string[] {
-	const names = new Set<string>();
-	const walk = (predicate: RulePredicate): void => {
-		if ("predicates" in predicate) {
-			predicate.predicates.forEach(walk);
-		} else if (predicate.target_id.startsWith("variables.")) {
-			names.add(predicate.target_id.slice("variables.".length));
-		}
-	};
-
-	walk(rule.when);
-
-	for (const action of rule.then) {
-		if (action.target_id?.startsWith("variables.") === true) {
-			names.add(action.target_id.slice("variables.".length));
-		}
-	}
-
-	return [...names];
-}
 
 /** Arguments as a command line, as the Mock box takes them. */
 function commandLine(args: string[]): string {
@@ -355,142 +334,10 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 	return rows;
 }
 
-/** The rules being made in the Rule view (editInRuleView), by where — a capability stop's session, `<uri>#process.argv`,
- *  `<uri>#<variable>` — each with how to close it: its button here waits while it's open. */
+/** The rules being made in the Rule view (core's, `editor.rules.edit`), by where — a capability
+ *  stop's session, `<uri>#process.argv`, `<uri>#<variable>` — each with how to close it: its button here waits while
+ *  it's open. */
 const making = new Map<string, () => void>();
-
-export type PolicyModule = typeof import("@brianjenkins94/util/silo/policy");
-
-/** What a rule as edited would do here: said under it, and whether its buttons can act on it. */
-export interface Verdict { "text": string; "ok": boolean; "refused"?: boolean }
-
-/** silo's catalog, as the rule editor takes it. */
-export const catalogOf = (policy: PolicyModule): RuleCatalog => ({ "targets": policy.TARGETS, "types": policy.TYPES, "operators": policy.OPERATORS, "actions": policy.ACTIONS, "argumentSchema": policy.argumentSchema, "actionSchema": policy.actionSchema });
-
-/** A button under a rule: what it does with the rule as edited (resolving once done — the panel's host closes it, or
- *  its stop goes on and takes it away); `always`, enabled whatever the verdict. */
-export interface PanelButton { "label": string; "className": string; "title": string; "act": (rule: EditedRule) => Promise<unknown>; "always"?: boolean }
-
-/** The rule editor (the component's, RULES.md), with silo's catalog — in the margin, and in the Rules view: under it,
- *  what the rule as edited would do here (`judge`), then its buttons. silo's policy (and ajv with it) loads on first
- *  use, not with the workbench. */
-export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedRule) => Verdict, actions: PanelButton[], catalog: RuleCatalog = catalogOf(policy)): HTMLElement {
-	const panel = Object.assign(document.createElement("div"), { "className": "live-values-rule" });
-	const status = Object.assign(document.createElement("div"), { "className": "live-values-rule-status" });
-	const buttons = Object.assign(document.createElement("div"), { "className": "live-values-choices" });
-	const update = (edited: EditedRule): void => {
-		const verdict = judge(edited);
-
-		status.textContent = verdict.text;
-		status.classList.toggle("refused", verdict.refused === true);
-
-		for (const [index, each] of [...buttons.children].entries()) {
-			(each as HTMLButtonElement).disabled = actions[index]?.always !== true && !verdict.ok;
-		}
-	};
-
-	const editor = ruleEditor({
-		"catalog": catalog,
-		"rule": rule,
-		"onChange": update
-	});
-
-	for (const { label, className, title, act } of actions) {
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		const each = Object.assign(document.createElement("button"), { "className": `live-values-choice ${className}`, "textContent": label, "title": title });
-
-		each.addEventListener("click", () => {
-			for (const other of buttons.querySelectorAll("button")) {
-				other.disabled = true;
-			}
-
-			void act(editor.rule()).catch((error: unknown) => {
-				update(editor.rule());
-				// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: one that isn't an Error is said as String() says it
-				status.textContent = error instanceof Error ? error.message : String(error);
-				status.classList.add("refused");
-			});
-		});
-		buttons.append(each);
-	}
-
-	panel.append(editor.element, status, buttons);
-	update(editor.rule());
-
-	return panel;
-}
-
-/** The first allow / deny / ask a rule has. */
-export const decisionOf = (rule: EditedRule): string | undefined => rule.then.find(({ "action_id": actionId }) => ["allow", "deny", "skip", "ask"].includes(actionId))?.action_id;
-
-/** What a rule that covers a call does to it: gives it a result (`gives`: only where something stands in for it), or
- *  decides it. */
-function coversText(gives: boolean, canGive: boolean, decision: string | undefined): string {
-	if (gives) {
-		return canGive ? "Covers this call: gives it this result instead" : "A result can only be given in the debugger, where nothing real is called";
-	}
-
-	switch (decision) {
-		case "allow":
-			return "Covers this call: allows it";
-		case "deny":
-			return "Covers this call: denies it";
-		case "skip":
-			return "Covers this call: skips it";
-		case "ask":
-			return "Covers this call, and asks — as now";
-		default:
-			return "Covers this call, but doesn't decide it";
-	}
-}
-
-/** What a rule as edited would do to a call: whether it covers it (`resolved`: what it reaches is known) and what it
- *  decides — ok when it allows or denies it. */
-export function callVerdict(policy: PolicyModule, rule: EditedRule, subject: { "capability": string; "resource"?: string }, resolved = true, canGive = false): Verdict {
-	const problem = policy.problemOf(rule);
-	const covers = problem === undefined && policy.ruleMatches(rule, subject);
-	const decision = decisionOf(rule);
-	// A result given instead of the call: only where something stands in for it (the debugger), not a real call.
-	const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
-
-	return {
-		"text": problem ?? (!covers
-			? `Doesn't cover this call${resolved ? "" : " — what it reaches isn't known before the line runs"}`
-			: coversText(gives, canGive, decision)),
-		"ok": covers && (gives ? canGive : decision === "allow" || decision === "deny" || decision === "skip"),
-		"refused": problem !== undefined
-	};
-}
-
-/** The result a rule gives a call, when it gives one. */
-function resultOf(rule: EditedRule): { "value": unknown } | undefined {
-	const give = rule.then.find((action) => action.action_id === "give" && action.target_id === "result");
-
-	return give === undefined ? undefined : { "value": give.argument };
-}
-
-/** A rule about a call, as it starts: its capability, its resource (when known), the package making it (when it's a
- *  package's), then allow. */
-export function callRule(capability: string, resource?: string, pkg?: string): EditedRule {
-	return {
-		"when": {
-			"logicalType_id": "all",
-			"predicates": [
-				{ "target_id": "capability", "operator_id": "is", "argument": capability },
-				...resource === undefined ? [] : [{ "target_id": "resource", "operator_id": "is", "argument": resource }],
-				...pkg === undefined ? [] : [{ "target_id": "package", "operator_id": "is", "argument": pkg }]
-			]
-		},
-		"then": [{ "action_id": "allow" }]
-	};
-}
-
-/** A button's act, from `run`: what it returns, as a Promise — rejected if it throws, as an async function's would be. */
-function acting(run: () => unknown): Promise<unknown> {
-	return new Promise((resolve) => {
-		resolve(run());
-	});
-}
 
 /** The choice *Just this once* makes of a rule's decision: deny, skip, or else allow (this call). */
 function onceChoice(decision: string | undefined): CapabilityChoice {
@@ -499,113 +346,6 @@ function onceChoice(decision: string | undefined): CapabilityChoice {
 	}
 
 	return decision === "skip" ? "skip" : "allow-once";
-}
-
-/** The rule editor at a capability stop, prefilled with the call: whether the rule as edited covers this call and what
- *  it decides, then *Just this once* (decide this call so), *Save as rule* (in my policy, and decide it so), *Cancel*. */
-async function openRule(session: string, ask: CapabilityAsk, close: () => void): Promise<HTMLElement> {
-	const policy = await import("@brianjenkins94/util/silo/policy");
-	const subject = ask.resolved ? { "capability": ask.capability, "resource": ask.resource } : { "capability": ask.capability };
-	// What this call returned the last time it ran for real (a preview's fetch): given instead, to start with.
-	const recorded = ask.resolved ? await recordedOf?.(ask.capability, ask.resource).catch(() => null) ?? null : null;
-	const rule = callRule(ask.capability, ask.resolved ? ask.resource : undefined);
-
-	if (recorded !== null) {
-		rule.then = [{ "action_id": "give", "target_id": "result", "argument": recorded.value }];
-	}
-
-	return rulePanel(policy, rule, (edited) => {
-		const verdict = callVerdict(policy, edited, subject, ask.resolved, true);
-
-		return recorded !== null && verdict.ok && JSON.stringify(resultOf(edited)?.value) === JSON.stringify(recorded.value) ? { ...verdict, "text": `Covers this call: gives it what it returned on ${new Date(recorded.at).toLocaleString()}` } : verdict;
-	}, [
-		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (edited) => (resultOf(edited) === undefined ? choose?.(session, onceChoice(decisionOf(edited))) : choose?.(session, "give-once", undefined, resultOf(edited).value)) },
-		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it", "act": async (rule) => choose?.(session, "rule", rule) },
-		{ "label": "Cancel", "className": "cancel", "title": "Back to the choices", "act": () => acting(close), "always": true }
-	]);
-}
-
-/** What a rule on process.argv's row would do to `program`: cover it, and give it `runs` runs' arguments. */
-function argvVerdictText(program: string, covers: boolean, runs: number): string {
-	if (!covers) {
-		return `Doesn't cover ${program}`;
-	}
-
-	if (runs === 0) {
-		return "Gives process.argv nothing";
-	}
-
-	return `Gives ${program} ${runs === 1 ? "these arguments" : `${runs} runs, one after another`}`;
-}
-
-/** The rule editor on process.argv's row: the rule giving it now, or one prefilled — *program is <this file>*, *then
- *  give process.argv* the run's own arguments — then whether it covers this file and how many runs it gives, and *Run*
- *  (with them, once), *Save as rule* (in my policy: every run of the file is given them), *Remove* (the rule giving it
- *  now), *Cancel*. */
-async function openMock(uri: string, row: Row, close: () => void): Promise<HTMLElement> {
-	const policy = await import("@brianjenkins94/util/silo/policy");
-	const path = api?.Uri.parse(uri).path ?? "";
-	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? path;
-	const given = givenArgv.get(uri) ?? undefined;
-	const valuesOf = (rule: EditedRule): string[][] => {
-		const give = rule.then.find((action) => action.action_id === "give" && action.target_id === "process.argv");
-
-		return Array.isArray(give?.argument) ? (give.argument as unknown[]).filter((each): each is string[] => Array.isArray(each)) : [];
-	};
-
-	const judge = (rule: EditedRule): Verdict => {
-		const problem = policy.problemOf(rule);
-		const covers = problem === undefined && policy.ruleMatches(rule, { "program": program });
-		const runs = valuesOf(rule).length;
-
-		return {
-			"text": problem ?? argvVerdictText(program, covers, runs),
-			"ok": covers && runs > 0,
-			"refused": problem !== undefined
-		};
-	};
-
-	const saved = async (): Promise<void> => {
-		givenArgv.set(uri, await rulesGiven?.(path) ?? null);
-		close();
-	};
-
-	return rulePanel(policy, given?.rule ?? {
-		"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }] },
-		"then": [{ "action_id": "give", "target_id": "process.argv", "argument": [parseInputs(row.inline?.text ?? "")[0] ?? []] }]
-	}, judge, [
-		{
-			"label": "Run",
-			"className": "once",
-			"title": "Run the file with them, once — each a run of its own",
-			"act": (rule) => acting(() => {
-				void runFile?.(path, valuesOf(rule));
-				close();
-			})
-		},
-		{
-			"label": "Save as rule",
-			"className": "save",
-			"title": "Keep it in your policy (.silo/policy/<you>.json): every run of the file is given them",
-			"act": async (rule) => {
-				await rulesSet?.(given?.rule, rule);
-				await saved();
-			}
-		},
-		...given === undefined
-			? []
-			: [{
-					"label": "Remove",
-					"className": "remove",
-					"title": "Take the rule away: the file's runs get their own arguments again",
-					"act": async () => {
-						await rulesSet?.(given.rule, undefined);
-						await saved();
-					},
-					"always": true
-				}],
-		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": () => acting(close), "always": true }
-	]);
 }
 
 /** A value as a rule holds it, from its text in a cell: a number, a boolean, a string's text, else the text. */
@@ -622,54 +362,112 @@ function valueOf(text: string, kind: string): unknown {
 	}
 }
 
-/** The schema of a value of a cell's kind — what a rule's input for it is drawn from. */
-const schemaOfKind = (kind: string): RuleSchema => (kind === "number" || kind === "string" || kind === "boolean" ? { "type": kind } : true);
+/** `request` edited in the Rule view (`editor.rules.edit`, EXTENSION-POINTS 5): the button pressed and the rule as it was
+ *  then, or null (cancelled, or closed). Kept as being made, by `key`, until it's answered. */
+async function edit(key: string, request: Omit<EditRequest, "id">): Promise<EditAnswer> {
+	making.set(key, () => {
+		void Promise.resolve(api?.commands.executeCommand("editor.rules.cancelEdit", key)).catch(() => undefined);
+	});
 
-/** silo's catalog, with `variables.<name>` for each variable `values` saw (its latest value's kind): what a rule placed
- *  where they're in scope can test, and set. */
-export function withVariables(policy: PolicyModule, values: { "name": string; "kind": string }[]): RuleCatalog {
-	const base = catalogOf(policy);
-	const variables = new Map(values.map(({ name, kind }) => [`variables.${name}`, { "name": name, "kind": kind }]));
-
-	return {
-		...base,
-		"targets": { ...base.targets, ...Object.fromEntries([...variables].map(([id, { name, kind }]) => [id, { "label": name, "type_id": kind === "number" || kind === "boolean" ? kind : "string", "description": `The variable ${name}, where the rule is placed` }])) },
-		"actions": { ...base.actions, "set": { ...base.actions["set"], "targets": [...variables.keys()] } },
-		"argumentSchema": (targetId, operatorId) => (variables.has(targetId) ? policy.OPERATORS[operatorId]?.argument(schemaOfKind(variables.get(targetId).kind)) : base.argumentSchema(targetId, operatorId)),
-		"actionSchema": (actionId, targetId) => (actionId === "set" && targetId !== undefined && variables.has(targetId) ? schemaOfKind(variables.get(targetId).kind) : base.actionSchema(actionId, targetId))
-	};
+	try {
+		return await Promise.resolve(api?.commands.executeCommand<EditAnswer>("editor.rules.edit", { "id": key, ...request })).catch(() => null) ?? null;
+	} finally {
+		making.delete(key);
+	}
 }
 
-/** What a rule on a variable's row would do here: cover this place, and set `names`. */
-function placeVerdictText(covers: boolean, names: string[]): string {
-	if (!covers) {
-		return "Doesn't cover this place, as the run is now";
-	}
+const CANCEL: EditButton = { "id": "cancel", "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "always": true };
 
-	return names.length === 0 ? "Sets nothing" : `Sets ${names.join(", ")} each time the program gets here`;
+/** Rule… at a capability stop: a rule about the call — given what it returned last time it ran for real, when it did
+ *  (a preview's fetch) — then *Just this once* (decide this call so), *Save as rule* (in my policy, and decide it so),
+ *  *Cancel*. */
+async function ruleAtStop(session: string, ask: CapabilityAsk): Promise<void> {
+	const recorded = ask.resolved ? await recordedOf?.(ask.capability, ask.resource).catch(() => null) ?? null : null;
+	const answer = await edit(session, {
+		...recorded === null ? {} : {
+			"rule": {
+				"when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }, { "target_id": "resource", "operator_id": "is", "argument": ask.resource }] },
+				"then": [{ "action_id": "give", "target_id": "result", "argument": recorded.value }]
+			}
+		},
+		"judge": { "kind": "call", "capability": ask.capability, "resource": ask.resource, "resolved": ask.resolved, "canGive": true, ...recorded === null ? {} : { "recorded": recorded } },
+		"buttons": [
+			{ "id": "once", "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time" },
+			{ "id": "save", "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it" },
+			{ ...CANCEL, "title": "Back to the choices" }
+		]
+	});
+
+	if (answer?.button === "once") {
+		const given = resultOf(answer.rule);
+
+		await (given === undefined ? choose?.(session, onceChoice(decisionOf(answer.rule))) : choose?.(session, "give-once", undefined, given.value));
+	} else if (answer?.button === "save") {
+		await choose?.(session, "rule", answer.rule);
+	}
 }
 
-/** The rule editor on a variable's row: *program is <this file>*, *at* <this statement> (a span reference, followed
- *  through edits), *then set* <it> to the value the run had — then *Just this once* (set at this stop: the run goes on
- *  with it), *Save as rule* (in my policy: each run sets it each time it gets here, without stopping), *Cancel*. */
-async function openVariableMock(uri: string, row: Row, name: string, session: Session, close: () => void): Promise<HTMLElement> {
-	const policy = await import("@brianjenkins94/util/silo/policy");
-	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? "";
-	const answer = api === undefined ? { "unavailable": "no editor here" } : await annotations(api.commands).refer(session.anchors.text, program, [{ "start": row.at[0], "end": row.at[1] }]);
+/** Mock… on process.argv's row: the rule giving it now, or one prefilled — *program is <this file>*, *then give
+ *  process.argv* the run's own arguments — then *Run* (with them, once), *Save as rule* (in my policy: every run of the
+ *  file is given them), *Remove* (the rule giving it now), *Cancel*. */
+async function mockArgv(uri: string, text: string): Promise<void> {
+	const path = api?.Uri.parse(uri).path ?? "";
+	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? path;
+	const given = givenArgv.get(uri) ?? undefined;
+	const answer = await edit(`${uri}#process.argv`, {
+		"rule": given?.rule ?? {
+			"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }] },
+			"then": [{ "action_id": "give", "target_id": "process.argv", "argument": [parseInputs(text)[0] ?? []] }]
+		},
+		"judge": { "kind": "argv", "program": program },
+		"buttons": [
+			{ "id": "run", "label": "Run", "className": "once", "title": "Run the file with them, once — each a run of its own" },
+			{ "id": "save", "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json): every run of the file is given them" },
+			...given === undefined ? [] : [{ "id": "remove", "label": "Remove", "className": "remove", "title": "Take the rule away: the file's runs get their own arguments again", "always": true }],
+			CANCEL
+		]
+	});
 
-	if ("unparsable" in answer) {
-		throw new Error(`This line can't be placed: the code that ran can't be parsed (${answer.unparsable})`);
+	switch (answer?.button) {
+		case "run":
+			void runFile?.(path, argvRunsOf(answer.rule));
+			break;
+		case "save":
+		case "remove":
+			await rulesSet?.(given?.rule, answer.button === "save" ? answer.rule : undefined);
+			givenArgv.set(uri, await rulesGiven?.(path) ?? null);
+			break;
+		// no default
+	}
+}
+
+/** The span reference of the statement at `at` in the code a session ran — or why there isn't one. */
+async function statementAt(session: Session, program: string, at: Range): Promise<unknown> {
+	const referred = api === undefined ? { "unavailable": "no editor here" } : await annotations(api.commands).refer(session.anchors.text, program, [{ "start": at[0], "end": at[1] }]);
+
+	if ("unparsable" in referred) {
+		throw new Error(`This line can't be placed: the code that ran can't be parsed (${referred.unparsable})`);
 	}
 
-	if ("unavailable" in answer) {
-		throw new Error(`This line can't be placed: the editor's BABLR isn't available (${answer.unavailable})`);
+	if ("unavailable" in referred) {
+		throw new Error(`This line can't be placed: the editor's BABLR isn't available (${referred.unavailable})`);
 	}
 
-	const [place] = answer.value;
+	const [place] = referred.value;
 
 	if (place === undefined || place === null) {
 		throw new Error("This line can't be placed: nothing on it a rule can stand at");
 	}
+
+	return place;
+}
+
+/** Mock… on a variable's row: *program is <this file>*, *at* <this statement> (a span reference, followed through edits), then
+ *  _set_ <it> to the value the run had — then *Just this once* (set at this stop: the run goes on with it), *Save as
+ *  rule* (in my policy: each run sets it each time it gets here, without stopping), *Cancel*. */
+async function mockVariable(uri: string, at: Range, cell: { "text": string; "kind": string }, name: string, session: Session): Promise<void> {
+	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? "";
+	const place = await statementAt(session, program, at);
 
 	// The variables the run saw, each by its latest value: targets to test, and to set.
 	const latest = new Map<string, LiveValue>();
@@ -680,55 +478,35 @@ async function openVariableMock(uri: string, row: Row, name: string, session: Se
 		}
 	}
 
-	const cell = row.inline ?? row.cells.findLast((each) => each !== undefined);
-	const catalog = withVariables(policy, [...latest].map(([each, value]) => ({ "name": each, "kind": kindOf(value) })));
-	const variables = Object.fromEntries([...latest].map(([each, value]) => [each, valueOf(value.value, kindOf(value))]));
-	const sets = (rule: EditedRule): { "name": string; "value": unknown }[] => rule.then.filter((action) => action.action_id === "set" && action.target_id?.startsWith("variables.") === true).map((action) => ({ "name": action.target_id.slice("variables.".length), "value": action.argument }));
-	const judge = (rule: EditedRule): Verdict => {
-		const problem = policy.problemOf(rule);
-		const covers = problem === undefined && policy.ruleMatches(rule, { "program": program, "at": place, "variables": variables });
-		const names = sets(rule).map((each) => each.name);
-
-		return {
-			"text": problem ?? placeVerdictText(covers, names),
-			"ok": covers && names.length > 0,
-			"refused": problem !== undefined
-		};
-	};
-
-	return rulePanel(policy, {
-		"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }, { "target_id": "at", "operator_id": "is", "argument": place }] },
-		"then": [{ "action_id": "set", "target_id": `variables.${name}`, "argument": valueOf(cell?.text ?? "", cell?.kind ?? "") }]
-	}, judge, [
-		{
-			"label": "Just this once",
-			"className": "once",
-			"title": "Set it at this stop: the run goes on with it",
-			"act": async (rule) => {
-				for (const each of sets(rule)) {
-					await setValueAt?.(session.id, each.name, JSON.stringify(each.value));
-				}
-
-				close();
-			}
+	const answer = await edit(`${uri}#${name}`, {
+		"rule": {
+			"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }, { "target_id": "at", "operator_id": "is", "argument": place }] },
+			"then": [{ "action_id": "set", "target_id": `variables.${name}`, "argument": valueOf(cell.text, cell.kind) }]
 		},
-		{
-			"label": "Save as rule",
-			"className": "save",
-			"title": "Keep it in your policy (.silo/policy/<you>.json): each run sets it each time it gets here",
-			"act": async (rule) => {
-				await rulesSet?.(undefined, rule);
-				close();
+		"judge": { "kind": "place", "program": program, "place": place, "variables": Object.fromEntries([...latest].map(([each, value]) => [each, valueOf(value.value, kindOf(value))])) },
+		"variables": [...latest].map(([each, value]) => ({ "name": each, "kind": kindOf(value) })),
+		"buttons": [
+			{ "id": "once", "label": "Just this once", "className": "once", "title": "Set it at this stop: the run goes on with it" },
+			{ "id": "save", "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json): each run sets it each time it gets here" },
+			CANCEL
+		]
+	});
+
+	if (answer?.button === "once") {
+		for (const action of answer.rule.then) {
+			if (action.action_id === "set" && action.target_id?.startsWith("variables.") === true) {
+				await setValueAt?.(session.id, action.target_id.slice("variables.".length), JSON.stringify(action.argument));
 			}
-		},
-		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": () => acting(close), "always": true }
-	], catalog);
+		}
+	} else if (answer?.button === "save") {
+		await rulesSet?.(undefined, answer.rule);
+	}
 }
 
 let styled = false;
 
-/** live-values.css in the page, once — the margin's, and the rule panel's wherever it's shown. */
-export function ensureStyled(): void {
+/** live-values.css in the page, once. */
+function ensureStyled(): void {
 	if (!styled) {
 		styled = true;
 		document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
@@ -1155,7 +933,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	api = vscode;
 
 	// The Margin, a pane view (EXTENSION-POINTS.md, 4): its content, asked for by pane-views — and what its buttons and
-	// cells run. Each rule it makes opens in the Rule view (editInRuleView); its button waits while it's open there.
+	// cells run. Each rule it makes opens in the Rule view (rule-view.ts); its button waits while it's open.
 	const uriArg = (value: unknown): string => {
 		if (typeof value !== "string") {
 			throw new TypeError("a file's URI");
@@ -1164,10 +942,13 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		return value;
 	};
 
-	const editing = (key: string, uri: string): () => void => () => {
-		making.get(key)?.();
-		making.delete(key);
+	/** `edited` (an edit in the Rule view), the Margin drawn as it opens (its button waiting) and again as it closes. */
+	const editing = (uri: string, edited: Promise<void>): Promise<void> => {
 		draw(uri);
+
+		return edited.finally(() => {
+			draw(uri);
+		});
 	};
 
 	vscode.commands.registerCommand("margin.paneView", async (uri: unknown) => (typeof uri === "string" ? marginOf(uri) : undefined));
@@ -1186,15 +967,12 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 			throw new Error("not stopped at a capability call");
 		}
 
-		making.set(asking.session, editInRuleView(await openRule(asking.session, asking.ask, editing(asking.session, uri))));
-		draw(uri);
+		await editing(uri, ruleAtStop(asking.session, asking.ask));
 	});
 	vscode.commands.registerCommand("margin.mockArgv", async (value: unknown, text: unknown) => {
 		const uri = uriArg(value);
-		const key = `${uri}#process.argv`;
 
-		making.set(key, editInRuleView(await openMock(uri, { "inline": { "text": typeof text === "string" ? text : "", "kind": "argv" } } as Row, editing(key, uri))));
-		draw(uri);
+		await editing(uri, mockArgv(uri, typeof text === "string" ? text : ""));
 	});
 	vscode.commands.registerCommand("margin.mockVariable", async (value: unknown, name: unknown, at: unknown, text: unknown, kind: unknown) => {
 		const uri = uriArg(value);
@@ -1204,10 +982,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 			throw new Error("nothing to mock here: the run's values are gone");
 		}
 
-		const key = `${uri}#${name}`;
-
-		making.set(key, editInRuleView(await openVariableMock(uri, { "at": at as Range, "inline": { "text": typeof text === "string" ? text : "", "kind": typeof kind === "string" ? kind : "" }, "cells": [] } as unknown as Row, name, session, editing(key, uri))));
-		draw(uri);
+		await editing(uri, mockVariable(uri, at as Range, { "text": typeof text === "string" ? text : "", "kind": typeof kind === "string" ? kind : "" }, name, session));
 	});
 	// A function's call picked on its first line (the latest is no pick: it follows the calls still coming).
 	vscode.commands.registerCommand("margin.pick", (value: unknown, key: unknown, index: unknown, count: unknown) => {
@@ -1402,8 +1177,9 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	choose = (session, choice, rule, give) => rpc.request(`debug.session.${session}.decide`, { "choice": choice, ...rule === undefined ? {} : { "rule": rule }, ...give === undefined ? {} : { "give": give } }, { "timeoutMs": 24 * 60 * 60_000 });
 	recordedOf = async (capability, resource) => rpc.request("capability.recorded", { "capability": capability, "resource": resource }, { "timeoutMs": 10_000 }) as Promise<{ "value": unknown; "at": string } | null>;
 	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
-	rulesGiven = async (path) => rpc.request("rules.given", { "program": path, "target": "process.argv" }, { "timeoutMs": 10_000 }) as Promise<Given | null>;
-	rulesSet = async (previous, rule) => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
+	// (the capabilities extension's, where the policy is: EXTENSION-POINTS 5)
+	rulesGiven = async (path) => Promise.resolve(vscode.commands.executeCommand<Given | null>("silo.rules.given", path, "process.argv"));
+	rulesSet = async (previous, rule) => Promise.resolve(vscode.commands.executeCommand("silo.rules.set", previous, rule));
 	// A run answers at its first stop, which can be a while: nobody waits on it here.
 	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
 	// The policy files changed: what a rule gives each file's process.argv is read anew (once the pod has), and whoever

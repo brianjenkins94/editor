@@ -1,0 +1,64 @@
+/* The Rule view (rule-view.ts, under the Rules tree): the rule editor (rule-editor.css), what the rule as edited would
+   do, then its buttons. */
+
+.rule-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 4px 12px 8px 20px;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+}
+
+.rule-view-empty {
+  padding: 2px 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+.rule-panel {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background);
+}
+
+.rule-panel-status {
+  margin-top: 6px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.rule-panel-status.refused {
+  color: var(--vscode-errorForeground);
+}
+
+.rule-panel-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.rule-panel-choice {
+  padding: 1px 8px;
+  white-space: nowrap;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  cursor: pointer;
+}
+
+.rule-panel-choice.save {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.rule-panel-choice:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

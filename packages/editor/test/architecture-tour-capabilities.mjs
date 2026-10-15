@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { hasLabel } from "./architecture-harness.mjs";
-import { eventually, openRule, ruleRows, session, tour } from "./architecture-tour-session.mjs";
+import { eventually, inRuleView, openRule, pressInRuleView, ruleRows, ruleStatus, session, tour } from "./architecture-tour-session.mjs";
 
 tour("architecture-tour-capabilities");
 
@@ -110,10 +110,10 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	assert.deepEqual(again.output, ["wrote /workspace/out.txt"]);
 
 	// A rule: Rule… — the call's capability and resource, then allow — the resource widened to a glob, and saved.
-	const status = () => workbench.evaluate(() => document.querySelector(".live-values-rule-status")?.textContent);
-	const saveable = () => workbench.evaluate(() => [...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule")?.disabled === false);
-	const resourceRow = (change) => workbench.evaluate(([selector, value, event]) => {
-		const field = document.querySelectorAll(".live-values-rule .rule-editor-group.top > .rule-editor-rows > .rule-editor-row")[1].querySelector(selector);
+	const status = ruleStatus;
+	const saveable = () => inRuleView(() => [...document.querySelectorAll(".rule-panel-choice")].find((button) => button.textContent === "Save as rule")?.disabled === false);
+	const resourceRow = (change) => inRuleView(([selector, value, event]) => {
+		const field = document.querySelectorAll(".rule-panel .rule-editor-group.top > .rule-editor-rows > .rule-editor-row")[1].querySelector(selector);
 
 		field.value = value;
 		field.dispatchEvent(new Event(event));
@@ -138,9 +138,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	await resourceRow([".rule-editor-argument", "/workspace/*.txt", "input"]);
 	assert.equal(await status(), "Covers this call: allows it");
 	assert.equal(await saveable(), true);
-	await workbench.evaluate(() => {
-		[...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click();
-	});
+	await pressInRuleView("Save as rule");
 	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
 	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ "when": when, "then": then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "matches", "argument": "/workspace/*.txt" }] }, "then": [{ "action_id": "allow" }] }]);
 
@@ -285,6 +283,7 @@ test("package prompt: whose call, and why it's asked; Allow always is about that
 // the build packs — a type-aware rule reports with the workspace's types, and fix-all fixes what the editor hides.
 test("eslint: real ESLint in its worker — a type-aware problem reported, and fix-all", async () => {
 	const workbench = session.workbench();
+
 	await workbench.evaluate(async () => {
 		const { api } = globalThis.__editor;
 		const uri = api.Uri.file("/workspace/src/lint-probe.ts");
@@ -653,7 +652,7 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 	}, [program, ...written]);
 });
 
-// The Rules view (the capabilities extension's tree, rules-tree.ts; its editor, rules-view.ts): every rule as a sentence,
+// The Rules view (the capabilities extension's tree, rules-tree.ts; its editor, the Rule view, rule-view.ts): every rule as a sentence,
 // mine first; a rule saved anywhere shows up in it, and one opened can be removed.
 test("rules view: every rule as a sentence, opened and removed there", async () => {
 	const workbench = session.workbench();
@@ -666,10 +665,8 @@ test("rules view: every rule as a sentence, opened and removed there", async () 
 
 	// Opened: the rule editor (the Rule view), with Remove.
 	await openRule(workbench, "first");
-	await eventually("its editor", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Remove") || undefined));
-	await workbench.evaluate(() => {
-		[...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Remove").click();
-	});
+	await eventually("its editor", () => inRuleView(() => [...document.querySelectorAll(".rule-panel-choice")].some((button) => button.textContent === "Remove") || undefined));
+	await pressInRuleView("Remove");
 	assert.deepEqual(await eventually("no rules", async () => ((await lines())?.length === 0 ? lines() : undefined)), []);
 	assert.deepEqual((await session.request("rules.list", undefined, 10_000)).mine.rules, []);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
@@ -706,10 +703,8 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 		editor.selection = new api.Selection(1, 0, 1, 10);
 	});
 	await openRule(workbench, "broken");
-	await eventually("Re-place at selection", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Re-place at selection") || undefined));
-	await workbench.evaluate(() => {
-		[...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Re-place at selection").click();
-	});
+	await eventually("Re-place at selection", () => inRuleView(() => [...document.querySelectorAll(".rule-panel-choice")].some((button) => button.textContent === "Re-place at selection") || undefined));
+	await pressInRuleView("Re-place at selection");
 
 	const placed = await eventually("the rule, re-placed", async () => {
 		const { mine } = await listed();
@@ -855,13 +850,9 @@ test("mock a call's result: given at its capability stop, from what it returned 
 		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Rule…").click();
 	});
 
-	const status = () => workbench.evaluate(() => document.querySelector(".live-values-rule-status")?.textContent);
-
-	assert.match(await eventually("the rule, given what it returned", status), /^Covers this call: gives it what it returned on /u);
-	assert.equal(await workbench.evaluate(() => document.querySelector(".live-values-rule .rule-editor-then .rule-editor-action-target select").value), "result");
-	await workbench.evaluate(() => {
-		[...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click();
-	});
+	assert.match(await eventually("the rule, given what it returned", async () => ((await ruleStatus() ?? "").startsWith("Covers this call: gives it what it returned on ") ? ruleStatus() : undefined)), /^Covers this call: gives it what it returned on /u);
+	assert.equal(await inRuleView(() => document.querySelector(".rule-panel .rule-editor-then .rule-editor-action-target select").value), "result");
+	await pressInRuleView("Save as rule");
 
 	// Saved, the run goes on with it (and ends); the next run is given it with no stop, past both awaits.
 	await eventually("the question answered", () => workbench.evaluate(() => document.querySelector("[data-item=\"ask\"]") === null || undefined));

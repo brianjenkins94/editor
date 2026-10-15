@@ -410,18 +410,22 @@ flowchart LR
   n_debug_worker <-.->|"in-realm calls"| n_server__
   n_eslint <==> n_workbench
   n_ext_bridge -->|"reads"| n_store__git__file_
+  n_ext_bridge -->|"reads"| n_store__silo__file__json
   n_ext_bridge -->|"reads"| n_store__silo__gitignore
-  n_ext_bridge -->|"reads, writes"| n_store__silo__file__json
   n_ext_bridge -->|"reads, writes"| n_store__silo_capabilities__file__json
   n_ext_bridge -->|"reads, writes"| n_store__silo_local__file__json
   n_ext_bridge -->|"reads, writes"| n_store__silo_policy__file__json
-  n_ext_bridge <-.->|"commands"| n_ext_bridge
+  n_ext_bridge <-.->|"commands"| n_ext_capabilities
   n_ext_bridge <-.->|"commands"| n_ext_event_sheet
   n_ext_bridge <-.->|"commands"| n_ext_insights
   n_ext_bridge <-.->|"commands"| n_ext_notes
   n_ext_bridge <-.->|"commands"| n_ext_tsval
+  n_ext_bridge <-.->|"commands"| n_ext_vscode
+  n_ext_capabilities -->|"reads"| n_store__git__file_
   n_ext_capabilities -->|"reads"| n_store__silo_runs__file__jsonl
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
+  n_ext_capabilities -->|"reads, writes"| n_store__silo_policy__file__json
+  n_ext_capabilities <-.->|"commands"| n_ext_capabilities
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
   n_ext_capabilities_packages <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
@@ -441,7 +445,6 @@ flowchart LR
   n_ext_notes <-.->|"commands"| n_ext_vscode
   n_ext_source_control <-.->|"commands"| n_ext_vscode
   n_ext_tsval -->|"reads"| n_store__git__file_
-  n_ext_tsval -->|"reads"| n_store__silo__file__json
   n_ext_tsval -->|"reads"| n_store__silo_policy__file__json
   n_ext_tsval <-.->|"commands"| n_ext_vscode
   n_ext_typescript_language_features_TS_semantic_server <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
@@ -497,19 +500,19 @@ flowchart LR
 
 | Store | Written by | Read by |
 | --- | --- | --- |
-| `.git/<file>` | Workbench | Workbench, bridge, notes, tsval |
+| `.git/<file>` | Workbench | Workbench, bridge, capabilities, notes, tsval |
 | `.git/objects/…/<file>` | Workbench | Workbench |
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, notes |
 | `.silo/.gitignore` | Workbench | Workbench, bridge |
-| `.silo/<file>.json` | Workbench, bridge, capabilities | Dev-server worker, Workbench, bridge, capabilities, tsval |
+| `.silo/<file>.json` | Workbench, capabilities | Dev-server worker, Workbench, bridge, capabilities |
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
 | `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
-| `.silo/policy/<file>.json` | Workbench, bridge | Workbench, bridge, tsval |
+| `.silo/policy/<file>.json` | Workbench, bridge, capabilities | Workbench, bridge, capabilities, tsval |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench, capabilities, history |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
 | `IndexedDB silo-local` | Workspace (zen-fs) | Workspace (zen-fs) |
@@ -527,7 +530,7 @@ flowchart LR
 | Bridge | node | `node.stdin.*` |
 | Bridge | parse | `parse.status` |
 | Bridge | production | `production.exit.*`, `production.launch`, `production.out.*` |
-| Bridge | rules | `rules.given()`, `rules.list()`, `rules.set()` |
+| Bridge | rules | `rules.given()`, `rules.list()`, `rules.set()`, `rules.state()` |
 | Bridge | run | `run.effects()` |
 | Bridge | runtime | `runtime.fs.attach()` |
 | Bridge | stops | `stops.preview` |
@@ -557,7 +560,7 @@ flowchart LR
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | files | `files.edit()`, `files.glob()`, `files.grep()`, `files.read()`, `files.write()` |
 | Workbench | git | `git.classify()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.status()` |
-| Workbench | history | `history.chunks()`, `history.texts()` |
+| Workbench | history | `history.chunks()` |
 | Workbench | margin | `margin.state()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | notifications | `notifications.list()` |
@@ -565,7 +568,6 @@ flowchart LR
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
 | Workbench | problems | `problems.list()` |
 | Workbench | production | `production.stop.*` |
-| Workbench | rules | `rules.make()`, `rules.state()` |
 | Workbench | runs | `runs.begin()`, `runs.ledger()`, `runs.list()`, `runs.stop()` |
 | Workbench | shell | `shell.run()` |
 | Workbench | stops | `stops.preview` |

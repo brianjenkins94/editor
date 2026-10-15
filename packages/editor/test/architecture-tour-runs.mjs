@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { alive, hasLabel } from "./architecture-harness.mjs";
-import { eventually, session, tour } from "./architecture-tour-session.mjs";
+import { eventually, inRuleView, session, tour } from "./architecture-tour-session.mjs";
 
 tour("architecture-tour-runs");
 
@@ -666,13 +666,13 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 		await workbench.evaluate(() => {
 			[...document.querySelectorAll(".live-values-row[data-line=\"2\"] button")].find((each) => each.textContent === "Mock…").click();
 		});
-		await eventually("high's rule editor", () => workbench.evaluate(() => document.querySelector(".live-values-rule .rule-editor-then input") !== null || undefined));
-		await workbench.evaluate((label) => {
-			const input = document.querySelector(".live-values-rule .rule-editor-then input");
+		await eventually("high's rule editor", () => inRuleView(() => document.querySelector(".rule-panel .rule-editor-then input") !== null || undefined));
+		await inRuleView((label) => {
+			const input = document.querySelector(".rule-panel .rule-editor-then input");
 
 			input.value = "3";
 			input.dispatchEvent(new Event("input"));
-			[...document.querySelectorAll(".live-values-rule .live-values-choices button")].find((each) => each.textContent === label).click();
+			[...document.querySelectorAll(".rule-panel-choice")].find((each) => each.textContent === label).click();
 		}, button);
 	};
 
@@ -742,19 +742,20 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 
 		return line === null ? undefined : { "label": line.querySelector(".live-values-label")?.textContent.trim(), "given": line.querySelector(".live-values-given")?.textContent ?? null };
 	});
-	// The Mock's panel: open it, read what it says, give process.argv these runs' command lines, press a button.
-	const mock = (action, argument) => workbench.evaluate(([what, value]) => {
-		const panel = document.querySelector(".live-values-rule");
+	// The Mock's editor (the Rule view): open it (on the row), read what it says, give process.argv these runs' command
+	// lines, press a button.
+	const mock = (action, argument) => (action === "open" ? workbench.evaluate(() => {
+		[...document.querySelectorAll(".live-values-row[data-line=\"0\"] button")].find((button) => button.textContent === "Mock…").click();
+
+		return true;
+	}) : inRuleView(([what, value]) => {
+		const panel = document.querySelector(".rule-panel");
 		const outer = () => panel.querySelector(".rule-editor-then .rule-editor-list.nested");
 		const runs = () => [...outer().children].filter((child) => child.classList.contains("rule-editor-list-item"));
 
 		switch (what) {
-			case "open":
-				[...document.querySelectorAll(".live-values-row[data-line=\"0\"] button")].find((button) => button.textContent === "Mock…").click();
-
-				return true;
 			case "status":
-				return panel?.querySelector(".live-values-rule-status")?.textContent;
+				return panel?.querySelector(".rule-panel-status")?.textContent;
 			case "give":
 				while (runs().length < value.length) {
 					[...outer().children].at(-1).click();
@@ -768,13 +769,13 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 					input.dispatchEvent(new Event("input"));
 				}
 
-				return panel.querySelector(".live-values-rule-status").textContent;
+				return panel.querySelector(".rule-panel-status").textContent;
 			default:
-				[...panel.querySelectorAll(".live-values-choices button")].find((button) => button.textContent === what).click();
+				[...panel.querySelectorAll(".rule-panel-choice")].find((button) => button.textContent === what).click();
 
 				return true;
 		}
-	}, [action, argument]);
+	}, [action, argument]));
 	const opened = async () => {
 		await mock("open");
 

@@ -60,7 +60,7 @@ import { createNodeRunner } from "./node-runner";
 import { installPaneViews } from "./pane-views";
 import { installProfileFiles } from "./profile-files";
 import { installRecordedStops } from "./recorded-stops";
-import { registerRulesView } from "./rules-view";
+import { registerRuleView } from "./rule-view";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -605,7 +605,8 @@ function maybeBoot(): void {
 				installEditorState(workbenchHub, api as typeof import("vscode"));
 				// A breakpoint in a page's code: a recorded stop, shown in the margin as live values are (recorded-stops.ts).
 				installRecordedStops(workbenchHub, api as typeof import("vscode"));
-				registerRulesView(workbenchHub, api as typeof import("vscode"));
+				// The Rule view: the rule editor, for whoever edits a rule (`editor.rules.edit`, rule-view.ts).
+				registerRuleView(api as typeof import("vscode"));
 				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks, showProfile);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));

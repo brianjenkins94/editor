@@ -172,11 +172,17 @@ about 2k of its 3.1k, and capabilities' decision logic (~500) until the decider.
    (`onDidReceiveDebugSessionCustomEvent`), so the run contract's `values`, `ended` and `ask` are public already —
    the bridge only re-published them on the hub (debug-events.ts, unchanged). Evidence and profiles stay core's: they
    capture into `.silo/` (evidence.ts, profile-files.ts), the files being the seam insights reads. In order:
-   - **5a. Rule editing → capabilities.** The rules view (rules-view.ts), the Margin's rule and mock panels
-     (live-values.ts' rulePanel, openRule, openMock, openVariableMock: ~350 lines) and the bridge's rule places
-     (debug-control.ts: `rules.list`, `.set`, `.given`, places kept through edits: ~200) into the capabilities
-     extension, the rule editor (components/monaco-vscode-api/rule-editor.ts — DOM only) bundled into its webview view.
-     The Margin opens its Rule… and Mock… there by capabilities' commands.
+   - ~~**5a. Rule editing → capabilities.**~~ Done (2026-10-14), but not as planned: the rule *editor* stays core's. A
+     webview — an extension's own view — can't paint in this workbench (the coi-serviceworker keeps one origin; a
+     webview's content needs its own: tsval-debugger's WV-1), so the Rule view is core's real-DOM view
+     (workbench/rule-view.ts, rule-editor.ts out of the component) and one core command edits any rule —
+     `editor.rules.edit(request)`, answered with the button pressed (EXTENSION-POINTS 5). Everything else about rules
+     moved to the capabilities extension: the rules and their places (rules.ts, out of the bridge), the tree's commands
+     (rules-tree.ts, out of workbench/rules-view.ts). A rule's sentence and what it would do are editor-api's `./rules`,
+     shared by the view and the tree. The Rules tree, the Margin's Rule… and Mock… and the bridge's preview prompt each
+     ask for an edit and do what the button means; the hub's `rules.make` went. The places follow a file's edits through core's
+     `editor.history.texts` (was the hub's `history.texts`). The bridge still relays `rules.given`, `.list`, `.set`
+     and `.state` to those commands, for agents and the tours — 5d's.
    - **5b. The Margin → its own extension.** live-values.ts' provider (~1.1k), inputs.ts and coverage.ts into
      `extensions/margin`, from the run contract's events themselves; what it asks the bridge becomes commands
      (EXTENSION-POINTS 5): a stop's answer (`editor.capability.decide` — the decider's meaning stays the bridge's), a

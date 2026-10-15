@@ -60,6 +60,27 @@ export function ruleRows(workbench) {
 	});
 }
 
+/** Run `script` in the workbench once the Rule view (rule-view.ts) shows an edit. */
+export async function inRuleView(script, argument) {
+	const workbench = session.workbench();
+
+	await eventually("the Rule view", () => workbench.evaluate(() => document.querySelector(".rule-panel") !== null || undefined));
+
+	return workbench.evaluate(script, argument);
+}
+
+/** What the Rule view says the rule as edited would do. */
+export function ruleStatus() {
+	return inRuleView(() => document.querySelector(".rule-panel-status")?.textContent);
+}
+
+/** Press the Rule view's button `label` (Save as rule, Remove, …). */
+export function pressInRuleView(label) {
+	return inRuleView((text) => {
+		[...document.querySelectorAll(".rule-panel-choice")].find((button) => button.textContent === text).click();
+	}, label);
+}
+
 /** Open the listed rule `which` picks in the rule editor (the Rule view), as its row does: `silo.rules.open`. */
 export function openRule(workbench, which) {
 	return workbench.evaluate(async (pick) => {

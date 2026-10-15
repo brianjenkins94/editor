@@ -11,12 +11,14 @@
  * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
  * policy merge, the observed-capability rollup, the run firehose — lives in editor-api/policy.
  */
+import type { EditAnswer } from "@brianjenkins94/editor-api/rules";
 import type { AskedWhy } from "@brianjenkins94/editor-api/runtime";
 import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { recordEffect } from "@brianjenkins94/editor-api/effects";
-import { loadEffectivePolicy, persistOverride, recordObservation } from "@brianjenkins94/editor-api/policy";
+import { loadEffectivePolicy, persistOverride, recordObservation, replaceRule } from "@brianjenkins94/editor-api/policy";
+import { decisionOf } from "@brianjenkins94/editor-api/rules";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
@@ -167,6 +169,31 @@ function aboutOf(request: object): Record<string, string> {
 
 const shellRpc = createRpcClient(bridgeHub);
 
+/** Rule… at a preview's prompt: a rule about the call made in the Rule view (core's
+ *  `editor.rules.edit`) — *Just this once* (decided by it, not kept), *Save as rule* (kept in my policy, and decided by
+ *  it), or *Cancel* (null: back to the question). Answers the rule's decision. */
+async function ruleMade(capability: string, resource: string, about: Record<string, string>): Promise<string | null> {
+	const answer = await Promise.resolve(vscode.commands.executeCommand<EditAnswer>("editor.rules.edit", {
+		"id": "preview-prompt",
+		"judge": { "kind": "call", "capability": capability, "resource": resource, ...about },
+		"buttons": [
+			{ "id": "once", "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and ask again next time" },
+			{ "id": "save", "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it" },
+			{ "id": "cancel", "label": "Cancel", "className": "cancel", "title": "Back to the preview's question", "always": true }
+		]
+	})).catch(() => null);
+
+	if (answer === null || answer === undefined || answer.button === "cancel") {
+		return null;
+	}
+
+	if (answer.button === "save") {
+		await replaceRule(undefined, answer.rule);
+	}
+
+	return decisionOf(answer.rule) ?? null;
+}
+
 /** The TOFU prompt: OUR WebAwesome overlay INSIDE the preview window (shell-preview.ts), reached over the hub —
  *  never a VS Code notification. Returns the user's choice, or undefined if the shell can't be reached at all
  *  (then we fail CLOSED: if we can't ask, we don't allow — an unreachable shell is a bigger problem anyway). */
@@ -209,16 +236,9 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 
 	let choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request), ...askerOf(request) });
 
-	// Rule…: the rule is made in the Rules view (rules-view.ts `rules.make`), and the call waits on it; cancelled, the
-	// question comes back.
+	// Rule…: the rule is made in the Rule view (ruleMade), and the call waits on it; cancelled, the question comes back.
 	while (choice === "rule") {
-		let made: unknown;
-
-		try {
-			made = await shellRpc.request("rules.make", { "capability": capability, "resource": resource, ...aboutOf(request) }, { "timeoutMs": 300000 });
-		} catch {
-			made = null;
-		}
+		const made = await ruleMade(capability, resource, aboutOf(request));
 
 		// (a rule made at the call is the person's answer, in their policy now: as Allow always, or a refusal)
 		if (made === "allow" || made === "deny") {

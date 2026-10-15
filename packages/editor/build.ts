@@ -311,7 +311,8 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("tsval"),
 			// (its worker: ESLint and the preset under almostnode, from the toolchain built beside it — 2c)
 			bundledExtension("eslint", { "worker.js": { "worker": "eslint-worker.js" } }),
-			// (its tsserver plugin: the plugin, its engine and canary are the plugin passes'; its package worker, for the baseline)
+			// (its tsserver plugin: the plugin, its engine and canary are the plugin passes'; its package worker, for the baseline;
+			// the Rule view's page)
 			bundledExtension("capabilities", { "node_modules/capabilities-ts-plugin/package.json": { "json": { "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "packages.js": { "worker": "packages-worker.js" } }),
 			bundledExtension("history", { "node_modules/history-ts-plugin/package.json": { "json": { "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" } } }),
 			bundledExtension("insights"),

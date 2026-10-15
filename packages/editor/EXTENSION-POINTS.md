@@ -300,7 +300,8 @@ A command not here is core's own, and an extension that calls one doesn't pass.
 | --- | --- | --- |
 | `editor.annotations.spans`, `.refer`, `.resolve` | core's BABLR (the bridge registers them) | span annotations (3), through editor-api's `annotations()` — never by hand |
 | `editor.pane.refresh(view, uri?)` | core's pane (pane-views.ts) | a pane view's content changed (4), through editor-api's `refreshPane()` |
-| `silo.rules.list`, `.open`, `.new`, `.remove`, `.replace` | core's rules (rules-view.ts) | the workspace's capability rules, as the Rules tree reads and edits them (6) |
+| `editor.rules.edit(request)`, `.cancelEdit(id)` | core's Rule view (rule-view.ts) | a rule edited under the Rules tree — as it starts, what it's judged against (a call, a program's `process.argv`, a variable at a place, or the rule alone), its buttons — answered `{ button, rule }` as pressed, or `null` (closed, cancelled, or replaced by another edit). The caller does what its buttons mean: the Rules tree's open and New Rule, the Margin's Rule… and Mock…, the bridge's preview prompt. `EditRequest`, and a rule's sentence and verdict, are editor-api's `./rules`. Core's, not an extension's view: a webview can't paint in this workbench (the coi-serviceworker keeps one origin; a webview's content needs its own), and nothing native edits predicates |
+| `editor.history.texts(path)` | core's edit history (edit-history.ts) | `string[]`: a file's texts through its recorded edits, oldest first — what a placed rule's place is followed through (the capabilities extension's rules.ts) |
 | `editor.git.status`, `.file(path)`, `.commit(message)` | core's git (git-service.ts) | the workspace's changes (`{ files: GitFileChange[] }`, editor-api's `./git`: path, status, staged, unstaged, cosmetic), a file's HEAD text (`{ head, working }`), a commit of everything (`{ oid }`). No change event: a change is a file change, as a watcher sees it (the Source Control view refreshes so) |
 | `editor.debugFile(uri?)` | the bridge | Run (▷): a program file in `run.debugger`, an app's file its app (RUNNING.md) |
 | `editor.metrics.read(since?)` | the bridge, from the metrics plane | `{ [source]: MetricsSample[] }`, oldest first: every context's samples (`$sys.metrics.<source>`) from the last few minutes, only those newer than `since` when it's given. `MetricsSample` is observability's type. The insights monitor reads it |
@@ -311,6 +312,18 @@ every extension it bundles, so the architecture view sees which extension regist
 extension isn't tapped, so the view doesn't see it; counting in core's command service instead is FEATURES-AS-EXTENSIONS'
 S8. `editor.pane.native.*` are the native pane face's own buttons.
 
+**Another extension's:** the capabilities extension answers the rules (FEATURES-AS-EXTENSIONS step 5a) — not core's, so
+not in the table; one that runs them is the capabilities extension's consumer, and degrades without it, as `_types.at`'s
+callers do. (The bridge's preview prompt doesn't: it saves its rule by editor-api's `./policy`, as the rest of the
+decider does.)
+
+| Command | What it is |
+| --- | --- |
+| `silo.rules.set(previous?, rule?)` | my policy changed: `previous` replaced by `rule`, `rule` added, or `previous` removed |
+| `silo.rules.given(program, target)` | what a rule gives a program's `target` (`process.argv`): `{ rule, values }`, or `null` |
+| `silo.rules.files` | each policy file's rules (mine, the shared contract's) and where each placed one is now |
+| `silo.rules.list`, `.open`, `.new`, `.remove`, `.replace` | the Rules tree's: every rule as it lists them, and its actions — a rule opened in core's Rule view (6) |
+
 ## 6. VS Code's own contribution points
 
 Where VS Code has a contract for what we built ourselves, we move onto it — the run contract's lesson, applied to the UI
@@ -319,7 +332,7 @@ workbench, the chat service isn't.
 
 | Ours | VS Code's | Decision |
 | --- | --- | --- |
-| The Rules view (core UI) | A tree view (`contributes.views`, a TreeDataProvider, inline actions) | **Moved** (2026-10-10): the capabilities extension's tree (rules-tree.ts) beside Capability calls — Yours / Shared, a rule's sentence and its line, Remove and Re-place at selection inline, New Rule in its title — from the editor's commands (`silo.rules.list`, `.open`, `.new`, `.remove`, `.replace`). The rule editor stays ours, in the Rule view under it — nothing native edits predicates |
+| The Rules view (core UI) | A tree view (`contributes.views`, a TreeDataProvider, inline actions) | **Moved** (2026-10-10): the capabilities extension's tree (rules-tree.ts) beside Capability calls — Yours / Shared, a rule's sentence and its line, Remove and Re-place at selection inline, New Rule in its title — and its own commands (`silo.rules.*`, 5) since 2026-10-14. The rule editor stays core's, in the Rule view under it (`editor.rules.edit`, 5) — nothing native edits predicates, and a webview can't paint here |
 | Live values at a stop | `InlineValuesProvider`, the debugger's own contract for values beside the code | **Added** (2026-10-10, live-values.ts): at a stop, each line's latest value at its end, on the line its code is on now — the margin's values, for the session whose frame is in focus, whichever debugger's. Answered once the stop's values are in (they come by the hub; VS Code asks as it stops, and doesn't ask again when they change) |
 | Margin entries — the question, a run's end, coverage counts | CodeLens, inlay hints, decorations | **Added** (2026-10-12, 4's step 5): every pane view's content is data, drawn by the pane or natively by these (pane-native.ts) — the Margin's desktop face |
 | Agent tools (page-tools.ts, every tool in one place) | `contributes.languageModelTools`, `vscode.lm.registerTool` | **Not adopted:** those are tools for an agent inside VS Code — its chat — and VS Code isn't an MCP server that hands them to one outside. Our agent is outside: debug-mcp reaches the tab over the hub. A contributed tool would connect nothing we have |

@@ -63,11 +63,12 @@ rule*) — the same two buttons wherever the editor opens.
   `ACTIONS`. Saved in the same files: the shared contract
   (`.silo/policy.json`) and mine (`.silo/policy/<you>.json`); a recorded value (a real fetch response) in
   `.silo/local/`, referred to by the rule.
-- **One editor**, in the component (rule-editor.ts: vanilla DOM, VS Code-styled — the workbench realm loads no Web
-  Awesome and no React but in islands): rows of selects and argument inputs, *all/any/none*, *−* and *+* (⌥: a group),
+- **One editor**, core's (workbench/rule-editor.ts: vanilla DOM, VS Code-styled, in the Rule view — the workbench realm
+  loads no Web Awesome, and a webview can't paint here; the component's until 2026-10-14): rows of selects and argument inputs, *all/any/none*, *−* and *+* (⌥: a group),
   and an actions list. It knows no targets: its host passes the catalog, and each argument's input is drawn from its
   schema.
-- **Two places it opens**: a **Rules** view listing every rule (rules-view.ts, in the Explorer: mine, then the shared
+- **Two places it opens**, both by one command — `editor.rules.edit`, answered with the button pressed
+  (EXTENSION-POINTS.md 5): a **Rules** view listing every rule (the capabilities extension's rules-tree.ts, in the Explorer: mine, then the shared
   contract's, each a sentence in the catalog's words, in the order they're matched; a click opens it in the same panel
   — *Save*, *Remove* for mine, a shared rule's edit saved as mine ahead of it; *New Rule* in its title; collapsed until
   opened, so silo's policy loads then; it and the margin redraw as the policy files change), and

@@ -34,7 +34,7 @@ import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import type { Disposition, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
-import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, POLICY_GLOB, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
+import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { recordEffect } from "./effects.ts";
@@ -102,58 +102,53 @@ async function readUser(folder: vscode.WorkspaceFolder): Promise<void> {
 
 // ── policy: base contract + my overrides ─────────────────────────────────────────────────────────────────────
 
-let baseCache: Policy | undefined;
-let overrideCache: Policy | undefined;
-let policyWatcher: vscode.Disposable | undefined;
+/** Each policy file as last read, with its stamp then (mtime and size) — kept while the file's stamp is the same. More
+ *  than one bundle has its own copy of this module (the bridge's decider, the capabilities extension's rules), each
+ *  writing the files: a file watcher reports another's write too late for the next decision, a stat doesn't. */
+const policies = new Map<string, { "policy": Policy; "stamp": string }>();
 
-/** Invalidate the policy caches when a policy file changes UNDER US — the panel edits the base contract
- *  from a SEPARATE extension bundle (so its writes don't touch these caches), and a user may hand-edit either
- *  file. Lazily installed for the session; matches both `policy.json` and `policy/<user>.json`. */
-function ensurePolicyWatcher(): void {
-	if (policyWatcher !== undefined) {
-		return;
-	}
-
+/** A file's stamp: when it last changed, and its size — or "absent". */
+async function stampOf(uri: vscode.Uri): Promise<string> {
 	try {
-		const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
-		const invalidate = (): void => {
-			baseCache = undefined;
-			overrideCache = undefined;
-		};
+		const { mtime, size } = await vscode.workspace.fs.stat(uri);
 
-		watcher.onDidChange(invalidate);
-		watcher.onDidCreate(invalidate);
-		watcher.onDidDelete(invalidate);
-		policyWatcher = watcher;
+		return `${mtime}:${size}`;
 	} catch {
-		policyWatcher = { "dispose": () => undefined }; // watcher API unavailable → skip (we simply keep our cache)
+		return "absent";
 	}
+}
+
+/** A policy file, from the cache while its stamp is unchanged — else read again, and kept. */
+async function loadPolicy(uri: vscode.Uri): Promise<Policy> {
+	const stamp = await stampOf(uri);
+	const cached = policies.get(uri.toString());
+
+	if (cached?.stamp === stamp) {
+		return cached.policy;
+	}
+
+	const text = stamp === "absent" ? undefined : await readText(uri);
+	const policy = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
+
+	policies.set(uri.toString(), { "policy": policy, "stamp": stamp });
+
+	return policy;
 }
 
 async function loadBase(root: vscode.Uri): Promise<Policy> {
-	return baseCache ?? await readBase(root);
-}
-
-/** `loadBase`'s read, kept. */
-async function readBase(root: vscode.Uri): Promise<Policy> {
-	const text = await readText(fileIn(root, policyPath()));
-
-	baseCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
-
-	return baseCache;
+	return loadPolicy(fileIn(root, policyPath()));
 }
 
 async function loadOverride(root: vscode.Uri, user: string): Promise<Policy> {
-	return overrideCache ?? await readOverride(root, user);
+	return loadPolicy(fileIn(root, userPolicyPath(user)));
 }
 
-/** `loadOverride`'s read, kept. */
-async function readOverride(root: vscode.Uri, user: string): Promise<Policy> {
-	const text = await readText(fileIn(root, userPolicyPath(user)));
+/** Write my policy file as `policy`, kept as it's written. */
+async function writeOverride(root: vscode.Uri, user: string, policy: Policy): Promise<void> {
+	const uri = fileIn(root, userPolicyPath(user));
 
-	overrideCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
-
-	return overrideCache;
+	await writeText(uri, JSON.stringify(policy, null, "\t") + "\n");
+	policies.set(uri.toString(), { "policy": policy, "stamp": await stampOf(uri) });
 }
 
 /** The effective policy consulted at decision time: MY overrides layered over the base contract. Overrides go
@@ -165,8 +160,6 @@ export async function loadEffectivePolicy(): Promise<Policy> {
 	if (root === undefined) {
 		return { ...EMPTY_POLICY };
 	}
-
-	ensurePolicyWatcher();
 
 	const base = await loadBase(root);
 	const override = await loadOverride(root, await currentUser());
@@ -182,8 +175,6 @@ export async function loadPolicyFiles(): Promise<{ "mine": { "file": string; "ru
 	if (root === undefined) {
 		return undefined;
 	}
-
-	ensurePolicyWatcher();
 
 	const user = await currentUser();
 	const relative = (file: vscode.Uri): string => vscode.workspace.asRelativePath(file, false);
@@ -205,11 +196,7 @@ export async function persistOverride(capability: string, resource: string, disp
 
 	const user = await currentUser();
 
-	// Written from the file as it is now, not the cache: a change by hand (or a delete) the watcher hasn't reported yet
-	// must not come back.
-	overrideCache = undefined;
-	overrideCache = withRule(await loadOverride(root, user), capability, resource, disposition, new Date().toISOString(), about);
-	await writeText(fileIn(root, userPolicyPath(user)), JSON.stringify(overrideCache, null, "\t") + "\n");
+	await writeOverride(root, user, withRule(await loadOverride(root, user), capability, resource, disposition, new Date().toISOString(), about));
 }
 
 /** The same rule, whenever it was decided. */
@@ -228,16 +215,12 @@ export async function replaceRule(previous: Rule | undefined, rule: Rule | undef
 
 	const user = await currentUser();
 
-	// From the file as it is now, not the cache (as persistOverride).
-	overrideCache = undefined;
-
 	const override = await loadOverride(root, user);
 	const index = previous === undefined ? -1 : override.rules.findIndex((each) => sameRule(each, previous));
 	const stamped = rule === undefined ? [] : [{ ...rule, "added": new Date().toISOString() }];
 	const rules = index === -1 ? [...stamped, ...override.rules] : [...override.rules.slice(0, index), ...stamped, ...override.rules.slice(index + 1)];
 
-	overrideCache = { "version": override.version, "rules": rules };
-	await writeText(fileIn(root, userPolicyPath(user)), JSON.stringify(overrideCache, null, "\t") + "\n");
+	await writeOverride(root, user, { "version": override.version, "rules": rules });
 }
 
 /** Keep a placed rule's place up with its code (RULES.md: a placed rule keeps its place on its own): `previous`, in my
@@ -262,8 +245,6 @@ export async function movePlace(whose: "mine" | "shared", previous: Rule, rule: 
 
 	const moved = { "version": policy.version, "rules": policy.rules.map((each, at) => (at === index ? rule : each)) };
 
-	baseCache = undefined;
-	overrideCache = undefined;
 	await writeText(file, JSON.stringify(moved, null, "\t") + "\n");
 }
 
