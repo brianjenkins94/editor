@@ -232,7 +232,11 @@ public code means anyone can review it. The limits are operational:
 Each step lands green and is useful on its own.
 
 - **A0 · accounts (you).** A Cloudflare account and the dev GitHub App. Nothing in this step is code, and none of
-  the secrets ever go into the repo or this chat. The runbook, in order (production repeats it in A7, with its own
+  the secrets ever go into the repo or this chat. *Done for dev 2026-10-15:* the GitHub App
+  `editor-dev-brianjenkins94`; the Worker at `https://editor-api-dev.brianjenkins94.workers.dev`, with its D1 database
+  migrated and all six secrets set; CI deploying it through the `development` environment's scoped account token. Two
+  things GitHub renamed: the callback URL is "Redirect URI" ("Add redirect URI"), and token expiry is under "Optional
+  features" (on by default; the page offers only "Opt-out"). The runbook, in order (production repeats it in A7, with its own
   app, database and secrets). Commands run in `packages/api`:
   1. **Cloudflare account**, and its `workers.dev` subdomain. It belongs to the account, not to a Worker, so none has to
      exist yet: Workers & Pages shows it in the account details beside the list (Subdomain, with Change), and if none
