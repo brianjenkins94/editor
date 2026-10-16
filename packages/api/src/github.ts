@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 import { base64url } from "jose";
+import { deviceLabel } from "./account.ts";
 import { audit, origin } from "./audit.ts";
 import { open, seal } from "./seal.ts";
 
@@ -143,7 +144,8 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 		"github": { "accessToken": exchanged.access_token, "refreshToken": exchanged.refresh_token, "expiresAt": now + (exchanged.expires_in ?? 28_800) * 1000, "refreshExpiresAt": now + (exchanged.refresh_token_expires_in ?? 15_897_600) * 1000 },
 		"codeChallenge": pending.codeChallenge,
 		"jkt": pending.jkt,
-		"from": await origin(context)
+		"from": await origin(context),
+		"label": deviceLabel(context.req.header("user-agent"))
 	});
 
 	return answer(context, pending, { "code": ours });

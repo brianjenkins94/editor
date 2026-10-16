@@ -6,6 +6,7 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
+import { deleteAccountEndpoint, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
 import { audit, expire, origin } from "./audit.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
@@ -61,6 +62,8 @@ const limit = (maxSize: number): ReturnType<typeof bodyLimit> => bodyLimit({
 // MB a request); a clone's upload-pack request is its wants and haves.
 app.use("/token", limit(4 * 1024));
 app.use("/revoke", limit(4 * 1024));
+app.use("/sessions/*", limit(4 * 1024));
+app.use("/account/*", limit(4 * 1024));
 app.use("/github/api/*", limit(32 * 1024 * 1024));
 app.use("/github/git/*", limit(1024 * 1024));
 
@@ -99,6 +102,15 @@ app.post("/revoke", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", 
 
 // Who the access token is for: our user id (README.md: GitHub's login and avatar are fetched live, never stored).
 app.get("/me", session, (context) => context.json({ "user": context.get("user") }));
+
+// Your sessions, and your account (src/account.ts).
+app.get("/sessions", session, sessionsEndpoint);
+
+app.post("/sessions/revoke-all", session, revokeAllEndpoint);
+
+app.post("/sessions/:id/revoke", session, revokeSessionEndpoint);
+
+app.post("/account/delete", session, deleteAccountEndpoint);
 
 // GitHub, for a signed-in browser (src/proxy.ts): the API calls the editor makes, and a clone's fetch.
 app.on(["GET", "POST", "PATCH"], "/github/api/*", session, rateLimit("PROXY_BY_USER", byUser), githubApi);

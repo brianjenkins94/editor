@@ -19,7 +19,8 @@ export type AuditEvent =
 	| "login" | "token_issued" | "refreshed" | "grant_revoked" | "github_refresh_refused"
 	| "token_rejected" | "refresh_reuse_detected" | "auth_refused" | "sign_in_refused"
 	| "rate_limited" | "oversized"
-	| "proxy_call" | "proxy_denied" | "proxy_abuse";
+	| "proxy_call" | "proxy_denied" | "proxy_abuse"
+	| "account_deleted";
 
 /** The everyday record — sign-ins and what they did — kept ROUTINE_DAYS; everything else (every refusal, every alert) is
  *  what an investigation needs most, and is kept SUSPICIOUS_DAYS. */

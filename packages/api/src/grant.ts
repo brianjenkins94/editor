@@ -75,6 +75,10 @@ export class Grant extends DurableObject<Bindings> {
 	public constructor(ctx: DurableObjectState, env: Bindings) {
 		super(ctx, env);
 
+		this.schema();
+	}
+
+	private schema(): void {
 		this.sql.exec(`
 			CREATE TABLE IF NOT EXISTS state (
 				id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -107,7 +111,7 @@ export class Grant extends DurableObject<Bindings> {
 	 * tokens sealed, and a code the browser redeems at /token with its PKCE verifier and a proof from key `jkt`. This is the
 	 * one call A0's GitHub callback makes.
 	 */
-	public async begin({ githubId, github, codeChallenge, jkt, from }: { "githubId": number; "github": GitHubTokens; "codeChallenge": string; "jkt": string; "from": Origin }): Promise<{ "code": string }> {
+	public async begin({ githubId, github, codeChallenge, jkt, from, label }: { "githubId": number; "github": GitHubTokens; "codeChallenge": string; "jkt": string; "from": Origin; "label"?: string }): Promise<{ "code": string }> {
 		if (this.state() !== undefined) {
 			throw new Error("a grant begins once");
 		}
@@ -119,7 +123,7 @@ export class Grant extends DurableObject<Bindings> {
 		const user = await this.env.DB.prepare("SELECT id FROM users WHERE github_id = ?").bind(githubId).first<{ "id": string }>();
 		const userId = user?.id as string;
 
-		await this.env.DB.prepare("INSERT INTO grants (id, user_id, created_at, last_used_at) VALUES (?, ?, ?, ?)").bind(this.id, userId, now, now).run();
+		await this.env.DB.prepare("INSERT INTO grants (id, user_id, created_at, last_used_at, label) VALUES (?, ?, ?, ?, ?)").bind(this.id, userId, now, now, label ?? null).run();
 
 		const code = token(this.id);
 
@@ -269,7 +273,7 @@ export class Grant extends DurableObject<Bindings> {
 	}
 
 	/** End the sign-in: its tokens (ours and GitHub's) gone, its row marked. GitHub's token is revoked at GitHub too. */
-	public async revoke({ from }: { "from": Origin }): Promise<void> {
+	public async revoke({ from, reason }: { "from": Origin; "reason"?: string }): Promise<void> {
 		const state = this.state();
 
 		if (state === undefined || state.revoked_at !== null) {
@@ -296,7 +300,7 @@ export class Grant extends DurableObject<Bindings> {
 
 		this.sql.exec("UPDATE state SET revoked_at = ?, github = NULL, refresh_hash = NULL, code_hash = NULL WHERE id = 1", now);
 		await this.env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(now, this.id).run();
-		await audit(this.env, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from);
+		await audit(this.env, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from, reason === undefined ? {} : { "reason": reason });
 	}
 
 	/**
@@ -320,6 +324,40 @@ export class Grant extends DurableObject<Bindings> {
 		await this.revoke({ "from": from });
 
 		return true;
+	}
+
+	/**
+	 * Revoke the GitHub App's authorization for this sign-in's user, at GitHub (DELETE /applications/{client_id}/grant):
+	 * every token GitHub gave the app for them stops working, and signing in again asks them to authorize it again. Says
+	 * whether GitHub confirmed it; it needs a GitHub token that still works, so a sign-in GitHub won't refresh can't.
+	 */
+	public async deauthorize(): Promise<boolean> {
+		const token = await this.githubToken();
+
+		if (token === undefined) {
+			return false;
+		}
+
+		try {
+			const response = await fetch(`${githubOrigins(this.env).api}/applications/${this.env.GITHUB_CLIENT_ID}/grant`, {
+				"method": "DELETE",
+				"headers": { "authorization": `Basic ${btoa(`${this.env.GITHUB_CLIENT_ID}:${this.env.GITHUB_CLIENT_SECRET}`)}`, "accept": "application/vnd.github+json", "user-agent": "editor-api", "content-type": "application/json" },
+				"body": JSON.stringify({ "access_token": token })
+			});
+
+			return response.status === 204;
+		} catch {
+			return false;
+		}
+	}
+
+	/** For account deletion: the sign-in ended, then everything this object kept erased. Its tables are made again, empty,
+	 *  so a token still in someone's hands meets a sign-in that's over rather than an error. */
+	public async forget({ from }: { "from": Origin }): Promise<void> {
+		await this.revoke({ "from": from, "reason": "account deleted" });
+		await this.ctx.storage.deleteAlarm();
+		await this.ctx.storage.deleteAll();
+		this.schema();
 	}
 
 	/** A slot for one proxied request, if fewer than CONCURRENT are in flight; release() it when the answer has streamed. */
