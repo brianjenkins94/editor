@@ -108,11 +108,16 @@ async function rows(event: string): Promise<{ "reason": string | null; "detail":
 test("sign-in is limited per IP: 20 a minute, then a 429 that's recorded — and another IP is unaffected", async () => {
 	const start = `${at("/auth/github/start")}?client_id=editor`;
 
-	for (let attempt = 1; attempt <= 20; attempt += 1) {
-		assert.equal((await server.fetch(start, from("203.0.113.20", { "redirect": "manual" }))).status, 400, `attempt ${attempt}`);
+	// Until the first 429: the binding counts in one-minute windows, so crossing into the next minute delays it.
+	let allowed = 0;
+	let limited = await server.fetch(start, from("203.0.113.20", { "redirect": "manual" }));
+
+	while (limited.status === 400 && allowed < 40) {
+		allowed += 1;
+		limited = await server.fetch(start, from("203.0.113.20", { "redirect": "manual" }));
 	}
 
-	const limited = await server.fetch(start, from("203.0.113.20", { "redirect": "manual" }));
+	assert.ok(allowed >= 20, `refused after only ${allowed}`);
 
 	assert.equal(limited.status, 429);
 	assert.equal(limited.headers.get("retry-after"), "60");
@@ -130,11 +135,13 @@ test("the token endpoint is limited per grant, whatever IPs the requests come fr
 	const grant = `${env.GRANTS.newUniqueId().toString()}.secret`;
 	const statuses: number[] = [];
 
-	for (let attempt = 1; attempt <= 11; attempt += 1) {
-		statuses.push((await server.fetch(at("/token"), from(`203.0.113.${100 + attempt}`, { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams({ "grant_type": "refresh_token", "refresh_token": grant, "client_id": "editor" }).toString() }))).status);
+	// Until the first 429 (a minute boundary can delay it), each request from another IP.
+	while (!statuses.includes(429) && statuses.length < 21) {
+		statuses.push((await server.fetch(at("/token"), from(`203.0.113.${100 + statuses.length}`, { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams({ "grant_type": "refresh_token", "refresh_token": grant, "client_id": "editor" }).toString() }))).status);
 	}
 
-	assert.deepEqual(statuses, [...Array.from({ "length": 10 }, () => 400), 429]);
+	assert.equal(statuses.at(-1), 429);
+	assert.ok(statuses.length >= 11, `refused after only ${statuses.length - 1}`);
 	assert.equal((await rows("rate_limited")).some((row) => row.reason === "TOKEN_BY_GRANT"), true);
 });
 
@@ -190,15 +197,21 @@ test("every call through the proxy is recorded — reads and writes, with GitHub
 test("the proxy is limited per user: 300 a minute", async () => {
 	const holder = await key();
 	const { accessToken } = await signedIn(holder);
-	const statuses: number[] = [];
+	let succeeded = 0;
+	let limited = false;
 
-	// In batches within the in-flight cap (the next test), so it's the per-minute limit that's met.
-	for (let sent = 0; sent < 301; sent += 8) {
-		statuses.push(...await Promise.all(Array.from({ "length": Math.min(8, 301 - sent) }, async () => (await holder.send("GET", "/github/api/user", { "token": accessToken })).status)));
+	// Until the first 429, in batches within the in-flight cap (another test). The binding counts in one-minute windows,
+	// so a run that crosses into the next minute (CI is slow) starts a fresh count: the 429 can come as late as twice the
+	// limit, but it comes.
+	while (!limited && succeeded <= 600) {
+		const statuses = await Promise.all(Array.from({ "length": 8 }, async () => (await holder.send("GET", "/github/api/user", { "token": accessToken })).status));
+
+		succeeded += statuses.filter((status) => status === 200).length;
+		limited = statuses.includes(429);
 	}
 
-	assert.equal(statuses.filter((status) => status === 200).length, 300);
-	assert.equal(statuses.filter((status) => status === 429).length, 1);
+	assert.equal(limited, true, `${succeeded} went through and none was refused`);
+	assert.ok(succeeded >= 300, `refused after only ${succeeded}`);
 });
 
 test("retention: routine rows go after 90 days, refusals and alerts after a year", async () => {
