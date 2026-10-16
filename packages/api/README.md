@@ -212,6 +212,8 @@ priority: whatever abuse gets past every limit should still be seen, and immedia
 
   Alerts go to `ALERT_WEBHOOK` (a secret: ntfy, Discord or Slack), at most one a minute per event and subject. They
   say what the audit row says (ids, reason, country, IP hash, trace id) and never a token or an address.
+  *Decided 2026-10-15: no alert channel for now.* `ALERT_WEBHOOK` isn't set, so these events are recorded and nothing
+  is sent; `npm run audit -- --suspicious` is where to look. Setting the secret turns alerts on, with no code change.
 - **A sign-in that probes is ended:** 5 `proxy_denied` in 10 minutes revokes the grant.
 - **At most 8 proxied requests in flight per sign-in.** The Grant hands out leases (`lease()`, exact, since it handles
   one call at a time), returned when GitHub's answer has finished streaming or after 2 minutes if the connection
