@@ -470,8 +470,16 @@ Each step lands green and is useful on its own.
     - **Abandoned sign-ins end.** That first live run showed that a code never redeemed left its Grant holding
       GitHub's tokens indefinitely. Now `begin` sets an alarm for the code's expiry, and `abandon()` revokes a Grant
       that never got its first refresh token. Live: `login@+0s grant_revoked@+60s`.
-    - **Still to do:** a sessions list with "sign out everywhere". GitHub's token is refreshed inside the Grant, and
-      revoked at GitHub on sign-out; both were done with A5.
+    - **Sessions and account deletion, built 2026-10-15** (`src/account.ts`, the shell's GitHub popover):
+      - The popover's "Where you're signed in" lists each live sign-in with a coarse label ("Chrome on macOS", from the
+        User-Agent at sign-in, which isn't kept), when it was last used, and a Sign out for each of the others.
+      - Below it: Sign out everywhere, and Delete account… behind a confirmation step.
+      - **Verified against the dev Worker in Chrome:**
+        - The list surfaced two forgotten pre-fix sign-ins and a second one held by a script; signing that one out
+          killed its token (401).
+        - Sign out everywhere ended the rest (0 live grants; the three revocations share one trace id).
+        - Deleting the account revoked the GitHub App's authorization (GitHub answered 204) and left 0 users and 0
+          grants. All 28 audit rows remain, with no user id on any of them.
 - **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"
   popover for "Sign in with GitHub" plus a sessions list. **Remove the PAT path** once this works: keeping a token
   in `localStorage` as a fallback keeps the problem.

@@ -214,6 +214,14 @@ export async function completeSignIn(): Promise<boolean> {
 	return true;
 }
 
+/** Forget the session in this browser: our tokens, and the key (the next sign-in makes one). Nothing is asked of the API. */
+async function forget(): Promise<void> {
+	store(undefined);
+	keyPair = undefined;
+	handle = undefined;
+	await keys("readwrite", (store) => store.delete("dpop")).catch(() => undefined);
+}
+
 /** Forget the session here, and end it at the API (which ends GitHub's token too). The key goes; the next sign-in makes one. */
 export async function signOut(): Promise<void> {
 	const tokens = stored();
@@ -229,9 +237,47 @@ export async function signOut(): Promise<void> {
 		}
 	}
 
-	keyPair = undefined;
-	handle = undefined;
-	await keys("readwrite", (store) => store.delete("dpop")).catch(() => undefined);
+	await forget();
+}
+
+// ── Your sessions and your account (packages/api/src/account.ts) ────────────────────────────────────────────────
+
+export interface Session { "id": string; "current": boolean; "label": string | null; "createdAt": number; "lastUsedAt": number }
+
+/** One of the account calls: the API's JSON answer, or what went wrong. */
+async function account<T>(path: string, form?: Record<string, string>): Promise<T> {
+	const response = await dpopFetch(`${API}${path}`, form === undefined ? {} : { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams(form).toString() });
+
+	if (!response.ok) {
+		throw new Error(`${path}: ${response.status}`);
+	}
+
+	return response.json() as Promise<T>;
+}
+
+/** Where you're signed in, the most recently used first; this browser's marked `current`. */
+export async function sessions(): Promise<Session[]> {
+	return (await account<{ "sessions": Session[] }>("/sessions")).sessions;
+}
+
+/** End one of your other sessions (this one's is `signOut`). */
+export async function endSession(id: string): Promise<void> {
+	await account(`/sessions/${id}/revoke`, {});
+}
+
+/** End every session you have, this one included. */
+export async function signOutEverywhere(): Promise<void> {
+	await account("/sessions/revoke-all", {});
+	await forget();
+}
+
+/** Delete the account: at GitHub too (the app's authorization), every session, and everything that points at you. */
+export async function deleteAccount(): Promise<{ "githubAuthorizationRevoked": boolean }> {
+	const answer = await account<{ "githubAuthorizationRevoked": boolean }>("/account/delete", { "confirm": "delete" });
+
+	await forget();
+
+	return answer;
 }
 
 // ── Requests ────────────────────────────────────────────────────────────────────────────────────────────────────

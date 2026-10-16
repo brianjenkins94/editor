@@ -29,6 +29,7 @@ import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
 import { css, globalCss, iconSvg } from "../shared/theme";
 import { renderGitPanel } from "./git-panel";
 import { forgetPat, getRepoBinding, GITHUB_APP_INSTALL, setRepoBinding } from "./github-auth";
+import type { Session } from "./session";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
 import "@awesome.me/webawesome/dist/components/page/page.js";
@@ -36,6 +37,7 @@ import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "@awesome.me/webawesome/dist/components/input/input.js";
+import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
 import "./webawesome";
 import "theme"; // our brand tokens, layered on Web Awesome's default theme (must come after it)
 
@@ -156,6 +158,8 @@ const ghError = css({ "fontSize": "11px", "color": "var(--wa-color-danger-fill-l
 const ghOk = css({ "fontSize": "11px", "color": "var(--wa-color-success-fill-loud, #3a9d5d)", "lineHeight": 1.4 });
 const ghConnected = css({ "fontSize": "12px", "color": "var(--wa-color-text-normal)" });
 const ghActions = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-xs)", "marginBlockStart": "var(--wa-space-2xs)" });
+const ghSession = css({ "display": "flex", "alignItems": "center", "justifyContent": "space-between", "gap": "var(--wa-space-xs)" });
+const ghSessionText = css({ "display": "flex", "flexDirection": "column", "minWidth": 0 });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
 // list and the (kept) git-panel each fill their side and scroll internally. `--header-height` is published by wa-page.
@@ -350,6 +354,10 @@ function Shell() {
 	const [githubBusy, setGithubBusy] = useState(false);
 	const [githubError, setGithubError] = useState<string | undefined>(undefined);
 	const [signInHere, setSignInHere] = useState(false);
+	// Where you're signed in (listed when the popover opens, signed in), and the account deletion's confirmation step.
+	const [mySessions, setMySessions] = useState<Session[] | undefined>(undefined);
+	const [confirmingDelete, setConfirmingDelete] = useState(false);
+	const [githubNotice, setGithubNotice] = useState<string | undefined>(undefined);
 	const [repoInput, setRepoInput] = useState("");
 	const [loadingRepo, setLoadingRepo] = useState(false);
 	const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -653,6 +661,74 @@ function Shell() {
 			githubLog.error("sign-in didn't start", { "error": errText(error) });
 		}
 	};
+
+	// Where you're signed in: listed each time the popover opens, signed in.
+	useEffect(() => {
+		if (!githubOpen || githubUser === undefined) {
+			return;
+		}
+
+		let cancelled = false;
+
+		void (async () => {
+			try {
+				const list = await (await import("./session")).sessions();
+
+				if (!cancelled) {
+					setMySessions(list);
+				}
+			} catch (error) {
+				githubLog.warn("couldn't list sessions", { "error": errText(error) });
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [githubOpen, githubUser]);
+
+	// A session's way out, an account's way out: each ends here signed out, with what happened said.
+	const accountAction = async (run: (session: typeof import("./session")) => Promise<string | undefined>, failure: string): Promise<void> => {
+		setGithubBusy(true);
+		setGithubError(undefined);
+		setGithubNotice(undefined);
+
+		try {
+			const notice = await run(await import("./session"));
+
+			setGithubNotice(notice);
+		} catch (error) {
+			setGithubError(failure);
+			githubLog.error(failure, { "error": errText(error) });
+		} finally {
+			setConfirmingDelete(false);
+			setGithubBusy(false);
+		}
+	};
+
+	const endOtherSession = async (id: string): Promise<void> => accountAction(async (session) => {
+		await session.endSession(id);
+		setMySessions(await session.sessions());
+
+		return undefined;
+	}, "Couldn't end that session.");
+
+	const signOutEverywhere = async (): Promise<void> => accountAction(async (session) => {
+		await session.signOutEverywhere();
+		setGithubUser(undefined);
+		setMySessions(undefined);
+
+		return "Signed out everywhere.";
+	}, "Couldn't sign out everywhere.");
+
+	const deleteAccount = async (): Promise<void> => accountAction(async (session) => {
+		const { githubAuthorizationRevoked } = await session.deleteAccount();
+
+		setGithubUser(undefined);
+		setMySessions(undefined);
+
+		return githubAuthorizationRevoked ? "Your account is deleted, and the editor's GitHub App no longer has access." : "Your account is deleted. GitHub didn't confirm the app's access ended: remove it under GitHub's Settings → Applications.";
+	}, "Couldn't delete the account.");
 
 	// Sign out: the session ends at the API (and GitHub's token with it), and this browser forgets its key.
 	const signOutGithub = async (): Promise<void> => {
@@ -982,6 +1058,34 @@ function Shell() {
 							<a class={ghLink()} href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
 						</span>
 
+						<wa-divider />
+
+						<span class={ghTitle()}>Where you're signed in</span>
+
+						{mySessions === undefined
+							? <span class={ghHint()}>Loading…</span>
+							: mySessions.map((session) => (
+								<div class={ghSession()} key={session.id}>
+									<span class={ghSessionText()}>
+										<span class={ghConnected()}>
+											{session.label ?? "A browser"}
+											{session.current ? " · this browser" : ""}
+										</span>
+
+										<span class={ghHint()}>
+											last used
+											{" "}
+
+											<wa-relative-time date={new Date(session.lastUsedAt).toISOString()} />
+										</span>
+									</span>
+
+									{!session.current && <wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { void endOtherSession(session.id); }}>Sign out</wa-button>}
+								</div>
+							))}
+
+						{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
+
 						<div class={ghActions()}>
 							<wa-button appearance="outlined" size="small" disabled={githubBusy} onClick={() => { void signOutGithub(); }}>
 								<Icon node={LogOut} />
@@ -989,13 +1093,30 @@ function Shell() {
 								{" "}
 								Sign out
 							</wa-button>
+
+							<wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { void signOutEverywhere(); }}>Sign out everywhere</wa-button>
 						</div>
+
+						{confirmingDelete
+							? (
+								<>
+									<span class={ghError()}>Deleting your account ends every session, takes away the editor's GitHub App's access, and leaves nothing we keep pointing at you. Your repositories on GitHub aren't touched.</span>
+
+									<div class={ghActions()}>
+										<wa-button variant="danger" size="small" disabled={githubBusy} onClick={() => { void deleteAccount(); }}>Delete my account</wa-button>
+										<wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(false); }}>Cancel</wa-button>
+									</div>
+								</>
+							)
+							: <wa-button appearance="plain" variant="danger" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(true); }}>Delete account…</wa-button>}
 					</>
 				)
 				: signInHere
 					? (
 						<>
 							<span class={ghHint()}>GitHub's token stays on the editor's server: this browser never holds it, and only what you allow the editor's GitHub App can be reached.</span>
+
+							{githubNotice !== undefined && <span class={ghOk()}>{githubNotice}</span>}
 
 							{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
 

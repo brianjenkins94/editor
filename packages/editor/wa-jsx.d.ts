@@ -29,6 +29,7 @@ declare module "preact" {
 			"wa-spinner": WaAttributes;
 			"wa-dialog": WaAttributes;
 			"wa-drawer": WaAttributes;
+			"wa-relative-time": WaAttributes;
 		}
 	}
 }
