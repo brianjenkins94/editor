@@ -104,8 +104,10 @@ We **don't** store login name, avatar, email, or raw IPs. Login and avatar are f
 Audit rows carry country (from Cloudflare) and an IP hash salted per day, which is enough to spot abuse but can't
 be reversed into an address.
 
-**Account deletion** (required before production): revoke every grant, revoke the GitHub App's authorization for
-the user (`DELETE /applications/{client_id}/grant`), delete the D1 rows, and keep only anonymized audit aggregates.
+**Account deletion** (built 2026-10-15, `POST /account/delete`): revoke the GitHub App's authorization for the user
+(`DELETE /applications/{client_id}/grant`), end every grant and erase its storage, and delete the user's D1 rows. The
+audit log keeps its rows with the user's id removed: what happened stays on record (it's the security record), but
+no longer whom it happened to.
 
 ### Tokens and the flow
 
