@@ -73,6 +73,11 @@ after(async () => {
 
 const at = (path: string): string => new URL(path, base).href;
 
+/** A request from an IP of its own (TEST-NET-2), so the functional tests never meet the per-IP rate limits. */
+const anyIp = (): string => `198.51.100.${Math.floor(Math.random() * 254) + 1}`;
+
+const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...init.headers } });
+
 /** The app: a DPoP key, a PKCE verifier, and a state of its own, as oauth4webapi makes them. */
 async function app(): Promise<{ "jkt": string; "verifier": string; "challenge": string; "state": string; "proof": (method: string, url: string, claims?: Record<string, unknown>) => Promise<string> }> {
 	const { privateKey, publicKey } = await generateKeyPair("ES256");
@@ -96,9 +101,9 @@ function startUrl(client: App, overrides: Record<string, string> = {}): string {
 
 /** /auth/github/start → GitHub's authorize URL (the user says yes) → our callback with GitHub's code → the app's page. */
 async function signIn(client: App): Promise<{ "authorize": URL; "landing": URL }> {
-	const started = await server.fetch(startUrl(client), { "redirect": "manual" });
+	const started = await fetchFrom(startUrl(client), { "redirect": "manual" });
 	const authorize = new URL(started.headers.get("location") as string);
-	const returned = await server.fetch(`${at("/auth/github/callback")}?${new URLSearchParams({ "code": `github-code-${crypto.randomUUID()}`, "state": authorize.searchParams.get("state") as string })}`, { "redirect": "manual" });
+	const returned = await fetchFrom(`${at("/auth/github/callback")}?${new URLSearchParams({ "code": `github-code-${crypto.randomUUID()}`, "state": authorize.searchParams.get("state") as string })}`, { "redirect": "manual" });
 
 	assert.equal(returned.status, 302);
 
@@ -110,7 +115,7 @@ async function redeem(client: App, code: string): Promise<{ "status": number; "b
 	let nonce: string | undefined;
 
 	for (;;) {
-		const response = await server.fetch(at("/token"), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded", "dpop": await client.proof("POST", at("/token"), nonce === undefined ? {} : { "nonce": nonce }) }, "body": new URLSearchParams({ "grant_type": "authorization_code", "code": code, "code_verifier": client.verifier, "client_id": "editor" }).toString() });
+		const response = await fetchFrom(at("/token"), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded", "dpop": await client.proof("POST", at("/token"), nonce === undefined ? {} : { "nonce": nonce }) }, "body": new URLSearchParams({ "grant_type": "authorization_code", "code": code, "code_verifier": client.verifier, "client_id": "editor" }).toString() });
 		const body = await response.json() as Record<string, string>;
 
 		if (body["error"] === "use_dpop_nonce" && nonce === undefined) {
@@ -124,7 +129,7 @@ async function redeem(client: App, code: string): Promise<{ "status": number; "b
 
 test("start sends the browser to GitHub with our own PKCE, and the app's state sealed", async () => {
 	const client = await app();
-	const response = await server.fetch(startUrl(client), { "redirect": "manual" });
+	const response = await fetchFrom(startUrl(client), { "redirect": "manual" });
 	const authorize = new URL(response.headers.get("location") as string);
 
 	assert.equal(response.status, 302);
@@ -144,7 +149,7 @@ test("start refuses an unregistered redirect_uri, without redirecting anywhere",
 	const client = await app();
 
 	for (const redirect of ["https://evil.example.com/", "http://localhost:5173/elsewhere", "http://localhost:5173", "https://brianjenkins94.github.io/editor/"]) {
-		const response = await server.fetch(startUrl(client, { "redirect_uri": redirect }), { "redirect": "manual" });
+		const response = await fetchFrom(startUrl(client, { "redirect_uri": redirect }), { "redirect": "manual" });
 
 		assert.equal(response.status, 400, redirect);
 		assert.equal(response.headers.get("location"), null);
@@ -155,7 +160,7 @@ test("start refuses without S256 PKCE, a thumbprint, a state, or our client id",
 	const client = await app();
 
 	for (const overrides of [{ "code_challenge_method": "plain" }, { "code_challenge": "short" }, { "dpop_jkt": "" }, { "state": "" }, { "client_id": "someone-else" }, { "response_type": "token" }]) {
-		assert.equal((await server.fetch(startUrl(client, overrides), { "redirect": "manual" })).status, 400, JSON.stringify(overrides));
+		assert.equal((await fetchFrom(startUrl(client, overrides), { "redirect": "manual" })).status, 400, JSON.stringify(overrides));
 	}
 });
 
@@ -198,22 +203,22 @@ test("our code is bound to the app that started: another key can't redeem it", a
 });
 
 test("the callback refuses a state it didn't seal, or one that's expired", async () => {
-	const forged = await server.fetch(`${at("/auth/github/callback")}?code=x&state=v1.AAAA.BBBB`, { "redirect": "manual" });
+	const forged = await fetchFrom(`${at("/auth/github/callback")}?code=x&state=v1.AAAA.BBBB`, { "redirect": "manual" });
 
 	assert.equal(forged.status, 400);
 	assert.equal(forged.headers.get("location"), null);
 
 	const client = await app();
 	const expired = await seal(secrets.STATE_KEY, JSON.stringify({ "redirectUri": APP, "state": client.state, "codeChallenge": client.challenge, "jkt": client.jkt, "verifier": "v", "expires": Date.now() - 1 }), "github-state");
-	const late = await server.fetch(`${at("/auth/github/callback")}?${new URLSearchParams({ "code": "x", "state": expired })}`, { "redirect": "manual" });
+	const late = await fetchFrom(`${at("/auth/github/callback")}?${new URLSearchParams({ "code": "x", "state": expired })}`, { "redirect": "manual" });
 
 	assert.equal(late.status, 400);
 });
 
 test("a refusal at GitHub goes back to the app as access_denied, a failed exchange as server_error", async () => {
 	const client = await app();
-	const started = new URL((await server.fetch(startUrl(client), { "redirect": "manual" })).headers.get("location") as string);
-	const denied = await server.fetch(`${at("/auth/github/callback")}?${new URLSearchParams({ "error": "access_denied", "state": started.searchParams.get("state") as string })}`, { "redirect": "manual" });
+	const started = new URL((await fetchFrom(startUrl(client), { "redirect": "manual" })).headers.get("location") as string);
+	const denied = await fetchFrom(`${at("/auth/github/callback")}?${new URLSearchParams({ "error": "access_denied", "state": started.searchParams.get("state") as string })}`, { "redirect": "manual" });
 	const deniedAt = new URL(denied.headers.get("location") as string);
 
 	assert.equal(deniedAt.searchParams.get("error"), "access_denied");
@@ -248,7 +253,7 @@ test("a GitHub /user without a numeric id is a server_error, and starts no grant
 });
 
 test("the metadata a client discovers us by", async () => {
-	const metadata = await (await server.fetch(at("/.well-known/oauth-authorization-server"))).json() as Record<string, unknown>;
+	const metadata = await (await fetchFrom(at("/.well-known/oauth-authorization-server"))).json() as Record<string, unknown>;
 
 	assert.equal(metadata["issuer"], base.origin);
 	assert.equal(metadata["authorization_endpoint"], at("/auth/github/start"));

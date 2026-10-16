@@ -187,22 +187,51 @@ availability instead of money), anyone probing for a weak spot, and anyone sendi
   code or refresh token is checked against D1 before its Durable Object is addressed.
 - **The proxy allows only the editor's calls.** Each refusal is a `proxy_denied` row in the audit log.
 
-**Next, before any real user (A6), in the order to reach for them:**
-1. **The Workers Rate Limiting binding**, checked first, before any D1, Durable Object or crypto work. It's the first
-   layer we can have on `workers.dev`:
-   - per IP on `/auth/github/*`, `/token` and `/revoke`, on the order of 20 a minute;
-   - **per target as well as per IP:** the grant named by a code or refresh token at `/token`, and the user on the
-     proxy (on the order of 600 a minute). Distributed abuse rotates IPs but keeps hitting the same grant or account.
+**Detection: knowing at once when someone does something abnormal through us (2026-10-15).** Decided as the
+priority: whatever abuse gets past every limit should still be seen, and immediately.
+- **The audit log records every refusal, with its reason.** That covers a refused token or proof (`auth_refused`), a
+  refused code or refresh token (`token_rejected`, saying whether it was expired, unknown, the wrong PKCE verifier,
+  or **another key**), a refused sign-in, a rate-limit trip and an oversized request. The one exception is the
+  routine nonce challenge.
+- **Every write through the proxy is recorded** (`proxy_write`), with the call and GitHub's answer. Reads stay in the
+  request logs.
+- **Every row carries its request's trace id**, so it joins to the full logs and spans in Cloudflare's dashboard
+  (`migrations/0002_audit_detail.sql` adds `reason`, `detail` and `trace_id`).
+- **Some events raise an alert at once** (`audit.ts`):
+  - **token theft:** a refresh token reused; a token presented with **another key's** proof; a replayed proof;
+  - **probing:** `proxy_denied`, and a grant ended for it (`proxy_abuse`);
+  - **flooding:** a rate-limit trip.
 
-   The binding counts per location and approximately, which is right for abuse control.
-2. **A WAF rate-limiting rule, once we have our own domain (A7).** It blocks before the Worker runs, so a blocked
-   request costs no invocation or CPU. The free plan includes one rule. Bot Fight Mode and the managed DDoS rules come
-   with the zone too. `workers.dev` has no zone, so none of this applies until then.
-3. **Durable Object bans (fail2ban semantics: exact counts, escalating bans, one global list), only if repeat
-   offenders get past 1 and 2.** Not first. KV is never the counter: it's eventually consistent. One grant-level rule
-   is worth having from the start: repeated `proxy_denied` revokes the grant, since a session probing the allowlist is
-   a compromised session.
-4. **A cost ceiling:** `limits.cpu_ms` in `wrangler.jsonc`, plus Cloudflare's usage notifications on the account.
+  Alerts go to `ALERT_WEBHOOK` (a secret: ntfy, Discord or Slack), at most one a minute per event and subject. They
+  say what the audit row says (ids, reason, country, IP hash, trace id) and never a token or an address.
+- **A sign-in that probes is ended:** 5 `proxy_denied` in 10 minutes revokes the grant.
+- **Rate limits** (`src/limits.ts`; the numbers are in `wrangler.jsonc`, per environment):
+  - sign-in at 20 a minute per IP;
+  - `/token` and `/revoke` at 30 a minute per IP **and** 10 a minute per grant named;
+  - the proxy at 300 a minute per user.
+
+  A trip is a 429 with `Retry-After: 60`, recorded, and alerted.
+- **Tests** (`test/detection.test.ts`): each limit; a stolen access token and a stolen refresh token, each alerting
+  once (the second within the minute is recorded but not alerted, and neither alert carries the token); writes
+  recorded and reads not; refusals and oversized requests recorded with why. Each of the 12 guards, disabled in
+  turn, fails a test.
+
+**Decided 2026-10-15:**
+- **Stay on Workers Free for now.** A flood that uses up the 100k daily requests takes the API down until midnight UTC.
+  Workers Paid ($5/month) would keep it up at a small cost; revisit before real users.
+- **Preview isolation is deferred.** Code running on the editor's origin (previews, `?extension=`, almostnode) can use
+  the signed-in session in place. DPoP keeps the token from being used anywhere else, and the allowlist keeps it to
+  the editor's calls, but neither stops code already on our origin; only a separate origin does, which needs our
+  own domain. Detection is the mitigation meanwhile: any such misuse shows up as proxy writes and, past the
+  allowlist, as alerts.
+
+**Still to do, in the order to reach for them:**
+1. **A WAF rate-limiting rule, once we have our own domain (A7).** It blocks before the Worker runs, so blocked
+   requests cost nothing, and it's the only layer that protects the daily request budget. The free plan includes one
+   rule. Bot Fight Mode and the managed DDoS rules come with the zone too.
+2. **Durable Object IP bans** (fail2ban semantics) only if repeat offenders get past the limits. KV is never the
+   counter: it's eventually consistent.
+3. **On Paid,** `limits.cpu_ms`. Free already caps CPU at 10 ms a request.
 
 Turnstile doesn't apply: there's no password or signup form here. GitHub takes the credentials, and has its own
 brute-force protection, and every input our endpoints take is unguessable (a code, a token, a signed proof).

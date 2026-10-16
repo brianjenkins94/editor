@@ -26,6 +26,11 @@ import { open, seal } from "./seal.ts";
 
 const CODE_TTL = 60_000;
 
+/** This many proxy refusals within DENIAL_WINDOW end the sign-in (denied()). */
+const DENIALS = 5;
+
+const DENIAL_WINDOW = 10 * 60_000;
+
 /** GitHub's token is refreshed when it has less than this left. */
 const REFRESH_MARGIN = 5 * 60_000;
 
@@ -77,6 +82,7 @@ export class Grant extends DurableObject<Bindings> {
 			);
 			CREATE TABLE IF NOT EXISTS used_refresh (hash TEXT PRIMARY KEY);
 			CREATE TABLE IF NOT EXISTS seen_jti (jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+			CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL);
 		`);
 	}
 
@@ -110,7 +116,7 @@ export class Grant extends DurableObject<Bindings> {
 		const code = token(this.id);
 
 		this.sql.exec("INSERT INTO state (id, user_id, jkt, github, code_hash, code_challenge, code_expires) VALUES (1, ?, ?, ?, ?, ?, ?)", userId, jkt, await seal(this.env.TOKEN_KEK, JSON.stringify(github), this.id), await hash(code), codeChallenge, now + CODE_TTL);
-		await audit(this.env.DB, "login", { "userId": userId, "grantId": this.id }, from);
+		await audit(this.env, "login", { "userId": userId, "grantId": this.id }, from);
 		await this.ctx.storage.setAlarm(now + CODE_TTL);
 
 		return { "code": code };
@@ -124,18 +130,23 @@ export class Grant extends DurableObject<Bindings> {
 		const state = this.state();
 
 		if (state === undefined || state.revoked_at !== null || state.code_hash === null) {
-			return this.reject(state, from);
+			return this.reject(state, from, state?.revoked_at === null ? "code already used" : "grant revoked");
 		}
 
 		this.sql.exec("UPDATE state SET code_hash = NULL, code_challenge = NULL, code_expires = NULL WHERE id = 1");
 
-		if ((state.code_expires as number) < Date.now() || await hash(code) !== state.code_hash || await s256(verifier) !== state.code_challenge || jkt !== state.jkt) {
-			return this.reject(state, from);
+		const refused = (state.code_expires as number) < Date.now() ? "code expired"
+			: await hash(code) !== state.code_hash ? "code unknown"
+				: await s256(verifier) !== state.code_challenge ? "PKCE verifier"
+					: jkt !== state.jkt ? "another key" : undefined;
+
+		if (refused !== undefined) {
+			return this.reject(state, from, refused);
 		}
 
 		const refreshToken = await this.issue();
 
-		await audit(this.env.DB, "token_issued", { "userId": state.user_id, "grantId": this.id }, from);
+		await audit(this.env, "token_issued", { "userId": state.user_id, "grantId": this.id }, from);
 
 		return { "ok": true, "userId": state.user_id, "refreshToken": refreshToken };
 	}
@@ -148,20 +159,20 @@ export class Grant extends DurableObject<Bindings> {
 		const state = this.state();
 
 		if (state === undefined || state.revoked_at !== null) {
-			return this.reject(state, from);
+			return this.reject(state, from, "grant revoked");
 		}
 
 		const presented = await hash(refreshToken);
 
 		if (this.sql.exec("SELECT 1 FROM used_refresh WHERE hash = ?", presented).toArray().length > 0) {
-			await audit(this.env.DB, "refresh_reuse_detected", { "userId": state.user_id, "grantId": this.id }, from);
+			await audit(this.env, "refresh_reuse_detected", { "userId": state.user_id, "grantId": this.id }, from);
 			await this.revoke({ "from": from });
 
 			return { "ok": false };
 		}
 
 		if (presented !== state.refresh_hash || jkt !== state.jkt) {
-			return this.reject(state, from);
+			return this.reject(state, from, presented !== state.refresh_hash ? "refresh token unknown" : "another key");
 		}
 
 		this.sql.exec("INSERT INTO used_refresh (hash) VALUES (?)", presented);
@@ -169,7 +180,7 @@ export class Grant extends DurableObject<Bindings> {
 		const next = await this.issue();
 
 		await this.env.DB.prepare("UPDATE grants SET last_used_at = ? WHERE id = ?").bind(Date.now(), this.id).run();
-		await audit(this.env.DB, "refreshed", { "userId": state.user_id, "grantId": this.id }, from);
+		await audit(this.env, "refreshed", { "userId": state.user_id, "grantId": this.id }, from);
 
 		return { "ok": true, "userId": state.user_id, "refreshToken": next };
 	}
@@ -235,7 +246,7 @@ export class Grant extends DurableObject<Bindings> {
 		}).then((response) => response.json() as Promise<{ "access_token"?: string; "refresh_token"?: string; "expires_in"?: number; "refresh_token_expires_in"?: number; "error"?: string }>);
 
 		if (typeof refreshed.access_token !== "string" || typeof refreshed.refresh_token !== "string") {
-			await audit(this.env.DB, "github_refresh_refused", { "userId": row.user_id, "grantId": this.id }, NOWHERE);
+			await audit(this.env, "github_refresh_refused", { "userId": row.user_id, "grantId": this.id }, NOWHERE);
 			await this.revoke({ "from": NOWHERE });
 
 			return undefined;
@@ -277,7 +288,30 @@ export class Grant extends DurableObject<Bindings> {
 
 		this.sql.exec("UPDATE state SET revoked_at = ?, github = NULL, refresh_hash = NULL, code_hash = NULL WHERE id = 1", now);
 		await this.env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(now, this.id).run();
-		await audit(this.env.DB, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from);
+		await audit(this.env, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from);
+	}
+
+	/**
+	 * The proxy refused this sign-in a call the editor never makes. A few in a short while is a session probing the
+	 * allowlist — a compromised one, or someone scripting it — so it ends. Says whether it did.
+	 */
+	public async denied({ from }: { "from": Origin }): Promise<boolean> {
+		const now = Date.now();
+
+		this.sql.exec("DELETE FROM denials WHERE at < ?", now - DENIAL_WINDOW);
+		this.sql.exec("INSERT INTO denials (at) VALUES (?)", now);
+
+		const [{ "count": count } = { "count": 0 }] = this.sql.exec<{ "count": number }>("SELECT COUNT(*) AS count FROM denials").toArray();
+		const state = this.state();
+
+		if (count < DENIALS || state === undefined || state.revoked_at !== null) {
+			return false;
+		}
+
+		await audit(this.env, "proxy_abuse", { "userId": state.user_id, "grantId": this.id }, from, { "reason": `${count} refused calls in ${DENIAL_WINDOW / 60_000} minutes` });
+		await this.revoke({ "from": from });
+
+		return true;
 	}
 
 	/** The platform's call, when the code would have expired (begin sets it). */
@@ -302,8 +336,8 @@ export class Grant extends DurableObject<Bindings> {
 		return refreshToken;
 	}
 
-	private async reject(state: State | undefined, from: Origin): Promise<Issued> {
-		await audit(this.env.DB, "token_rejected", { "userId": state?.user_id, "grantId": state === undefined ? null : this.id }, from);
+	private async reject(state: State | undefined, from: Origin, reason: string): Promise<Issued> {
+		await audit(this.env, "token_rejected", { "userId": state?.user_id, "grantId": state === undefined ? null : this.id }, from, { "reason": reason });
 
 		return { "ok": false };
 	}

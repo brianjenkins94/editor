@@ -24,6 +24,15 @@ export interface Bindings {
 	"GITHUB_CLIENT_SECRET": string;
 	/** The key the sign-in's state is sealed under on its way through GitHub. */
 	"STATE_KEY": string;
+	/** Where alerts go (audit.ts): a webhook URL, a secret; without one, nothing is sent and the audit log is the record. */
+	"ALERT_WEBHOOK"?: string;
+	/** Rate limits (wrangler.jsonc `ratelimits`, src/limits.ts): sign-in by IP, the token endpoint by IP and by grant, the
+	 *  proxy by user — and one alert a minute per event and subject. */
+	"SIGN_IN_BY_IP": RateLimit;
+	"TOKEN_BY_IP": RateLimit;
+	"TOKEN_BY_GRANT": RateLimit;
+	"PROXY_BY_USER": RateLimit;
+	"ALERTS": RateLimit;
 	"DB": D1Database;
 	"GRANTS": DurableObjectNamespace<Grant>;
 }

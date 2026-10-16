@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 import { base64url } from "jose";
-import { origin } from "./audit.ts";
+import { audit, origin } from "./audit.ts";
 import { open, seal } from "./seal.ts";
 
 /**
@@ -36,8 +36,9 @@ const callback = (context: Context<AppEnv>): string => `${new URL(context.req.ur
 /** A base64url SHA-256 (43 characters): what a PKCE S256 challenge and a JWK thumbprint both are. */
 const DIGEST = /^[\w-]{43}$/u;
 
-function refuse(context: Context<AppEnv>, reason: string): Response {
+async function refuse(context: Context<AppEnv>, reason: string): Promise<Response> {
 	context.get("span").info("sign-in refused", { "reason": reason });
+	await audit(context.env, "sign_in_refused", {}, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
 
 	return context.json({ "error": "invalid_request" }, 400);
 }
@@ -142,7 +143,7 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 		"github": { "accessToken": exchanged.access_token, "refreshToken": exchanged.refresh_token, "expiresAt": now + (exchanged.expires_in ?? 28_800) * 1000, "refreshExpiresAt": now + (exchanged.refresh_token_expires_in ?? 15_897_600) * 1000 },
 		"codeChallenge": pending.codeChallenge,
 		"jkt": pending.jkt,
-		"from": await origin(context.req.raw, context.env.AUDIT_KEY)
+		"from": await origin(context)
 	});
 
 	return answer(context, pending, { "code": ours });

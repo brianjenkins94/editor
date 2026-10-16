@@ -3,6 +3,7 @@ import type { JWK } from "jose";
 import type { Grant } from "./grant.ts";
 import { nonces, publicKey, signAccessToken, verifyAccessToken, verifyProof } from "@brianjenkins94/util/auth/dpop";
 import { createMiddleware } from "hono/factory";
+import type { Subject } from "./audit.ts";
 import { audit, origin } from "./audit.ts";
 import type { AppEnv, Bindings } from "./env.ts";
 
@@ -27,7 +28,7 @@ const nonce = (env: Bindings): ReturnType<typeof nonces> => nonces(env.NONCE_KEY
  * The Grant a `<grant id>.<secret>` code or refresh token belongs to — if that grant exists and is live. A token for a
  * revoked one is still audited: someone holds it after the sign-in ended.
  */
-async function grantOf(context: Context<AppEnv>, value: string | undefined): Promise<{ "id": string; "stub": DurableObjectStub<Grant> } | undefined> {
+async function grantOf(context: Context<AppEnv>, value: string | undefined): Promise<{ "id": string; "stub": DurableObjectStub<Grant> } | "revoked" | undefined> {
 	const id = value?.split(".")[0];
 	// D1 first: addressing a Durable Object creates it, and the id here is the caller's to choose.
 	const row = id === undefined ? null : await context.env.DB.prepare("SELECT user_id, revoked_at FROM grants WHERE id = ?").bind(id).first<{ "user_id": string; "revoked_at": number | null }>();
@@ -37,17 +38,24 @@ async function grantOf(context: Context<AppEnv>, value: string | undefined): Pro
 	}
 
 	if (row.revoked_at !== null) {
-		await audit(context.env.DB, "token_rejected", { "userId": row.user_id, "grantId": id }, await origin(context.req.raw, context.env.AUDIT_KEY));
+		await audit(context.env, "token_rejected", { "userId": row.user_id, "grantId": id }, await origin(context), { "reason": "grant revoked" });
 
-		return undefined;
+		return "revoked";
 	}
 
 	return { "id": id as string, "stub": context.env.GRANTS.get(context.env.GRANTS.idFromString(id as string)) };
 }
 
-/** An OAuth error (RFC 6749 §5.2, RFC 9449 §8) — with a fresh nonce when that's what's missing. */
-async function oauthError(context: Context<AppEnv>, error: string, reason: string): Promise<Response> {
+/**
+ * An OAuth error (RFC 6749 §5.2, RFC 9449 §8) — with a fresh nonce when that's what's missing. Recorded (`auth_refused`),
+ * but for the nonce challenge, which every client meets routinely, and for what a Grant recorded already (`recorded`).
+ */
+async function oauthError(context: Context<AppEnv>, error: string, reason: string, { subject = {}, recorded = false }: { "subject"?: Subject; "recorded"?: boolean } = {}): Promise<Response> {
 	context.get("span").info("token request refused", { "reason": reason });
+
+	if (error !== "use_dpop_nonce" && !recorded) {
+		await audit(context.env, "auth_refused", subject, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+	}
 
 	if (error === "use_dpop_nonce") {
 		context.header("dpop-nonce", await nonce(context.env).issue());
@@ -74,23 +82,27 @@ export async function tokenEndpoint(context: Context<AppEnv>): Promise<Response>
 
 	const grant = await grantOf(context, presented);
 
+	if (grant === "revoked") {
+		return oauthError(context, "invalid_grant", "grant revoked", { "recorded": true });
+	}
+
 	if (grant === undefined) {
-		return oauthError(context, "invalid_grant", "no such live grant");
+		return oauthError(context, "invalid_grant", "no such grant");
 	}
 
 	const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, { "nonce": nonce(context.env).check, "seen": async (jti, expires) => (await grant.stub.use(jti, expires)).seen });
 
 	if ("error" in proof) {
-		return oauthError(context, proof.error, proof.reason);
+		return oauthError(context, proof.error, proof.reason, { "subject": { "grantId": grant.id } });
 	}
 
-	const from = await origin(context.req.raw, context.env.AUDIT_KEY);
+	const from = await origin(context);
 	const issued = grantType === "authorization_code"
 		? await grant.stub.redeem({ "code": presented, "verifier": form["code_verifier"] as string, "jkt": proof.jkt, "from": from })
 		: await grant.stub.rotate({ "refreshToken": presented, "jkt": proof.jkt, "from": from });
 
 	if (!issued.ok) {
-		return oauthError(context, "invalid_grant", "code or refresh token refused");
+		return oauthError(context, "invalid_grant", "code or refresh token refused", { "recorded": true });
 	}
 
 	const iss = issuer(context);
@@ -108,13 +120,15 @@ export async function revokeEndpoint(context: Context<AppEnv>): Promise<Response
 	const presented = typeof form["token"] === "string" ? form["token"] : undefined;
 	const grant = await grantOf(context, presented);
 
-	if (grant !== undefined) {
+	if (grant !== undefined && grant !== "revoked") {
 		const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, { "nonce": nonce(context.env).check, "seen": async (jti, expires) => (await grant.stub.use(jti, expires)).seen });
 
 		if (!("error" in proof)) {
-			await grant.stub.revokeWith({ "refreshToken": presented as string, "jkt": proof.jkt, "from": await origin(context.req.raw, context.env.AUDIT_KEY) });
+			await grant.stub.revokeWith({ "refreshToken": presented as string, "jkt": proof.jkt, "from": await origin(context) });
 		} else if (proof.error === "use_dpop_nonce") {
 			return oauthError(context, proof.error, proof.reason);
+		} else {
+			await audit(context.env, "auth_refused", { "grantId": grant.id }, await origin(context), { "reason": proof.reason, "detail": "POST /revoke" });
 		}
 	}
 
@@ -122,8 +136,14 @@ export async function revokeEndpoint(context: Context<AppEnv>): Promise<Response
 }
 
 /** 401 for a resource (RFC 9449 §7.1): `WWW-Authenticate: DPoP`, and a fresh nonce when that's what's missing. */
-async function unauthorized(context: Context<AppEnv>, error: "invalid_token" | "invalid_dpop_proof" | "use_dpop_nonce", reason: string): Promise<Response> {
+async function unauthorized(context: Context<AppEnv>, error: "invalid_token" | "invalid_dpop_proof" | "use_dpop_nonce", reason: string, subject: Subject = {}): Promise<Response> {
 	context.get("span").info("request unauthorized", { "reason": reason });
+
+	// Recorded, but for the nonce challenge, which every client meets routinely.
+	if (error !== "use_dpop_nonce") {
+		await audit(context.env, "auth_refused", subject, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+	}
+
 	context.header("www-authenticate", `DPoP error="${error}", algs="ES256 ES384 ES512 PS256 PS384 PS512 EdDSA"`);
 
 	if (error === "use_dpop_nonce") {
@@ -172,11 +192,11 @@ export const session = createMiddleware<AppEnv>(async (context, next) => {
 	});
 
 	if ("error" in proof) {
-		return unauthorized(context, proof.error, proof.reason);
+		return unauthorized(context, proof.error, proof.reason, { "userId": token.claims.sub, "grantId": grantId });
 	}
 
 	if (!active) {
-		return unauthorized(context, "invalid_token", "grant revoked");
+		return unauthorized(context, "invalid_token", "grant revoked", { "userId": token.claims.sub, "grantId": grantId });
 	}
 
 	context.set("user", token.claims.sub as string);

@@ -52,11 +52,20 @@ async function token(context: Context<AppEnv>): Promise<string | Response> {
 	return value;
 }
 
-async function deny(context: Context<AppEnv>): Promise<Response> {
+/** A call the editor never makes: refused, recorded (it alerts), and counted against the sign-in, which a few end. */
+async function deny(context: Context<AppEnv>, detail: string): Promise<Response> {
+	const from = await origin(context);
+
 	context.get("span").info("proxy refused", { "reason": "not a call the editor makes" });
-	await audit(context.env.DB, "proxy_denied", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context.req.raw, context.env.AUDIT_KEY));
+	await audit(context.env, "proxy_denied", { "userId": context.get("user"), "grantId": context.get("grant") }, from, { "detail": detail });
+	await context.env.GRANTS.get(context.env.GRANTS.idFromString(context.get("grant"))).denied({ "from": from });
 
 	return context.json({ "error": "forbidden" }, 403);
+}
+
+/** A write that went through (a commit's parts, a repo made, Pages switched on): every one recorded, with GitHub's answer. */
+async function wrote(context: Context<AppEnv>, detail: string, status: number): Promise<void> {
+	await audit(context.env, "proxy_write", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `GitHub ${status}`, "detail": detail });
 }
 
 /** GitHub's answer, streamed, with only PASSED headers; `link` pointed back here so pagination stays on the proxy. */
@@ -81,7 +90,7 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 	const method = context.req.method;
 
 	if (!API.some(([allowed, pattern]) => allowed === method && pattern.test(path))) {
-		return deny(context);
+		return deny(context, `${method} ${path}`);
 	}
 
 	const bearer = await token(context);
@@ -103,6 +112,10 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 		...method === "GET" ? {} : { "body": context.req.raw.body }
 	});
 
+	if (method !== "GET") {
+		await wrote(context, `${method} ${path}`, upstream.status);
+	}
+
 	return relay(upstream, [api, `${url.origin}/github/api`]);
 }
 
@@ -113,7 +126,7 @@ export async function githubGit(context: Context<AppEnv>): Promise<Response> {
 	const method = context.req.method;
 
 	if (!GIT.some(([allowed, pattern, search]) => allowed === method && pattern.test(path) && url.search === search)) {
-		return deny(context);
+		return deny(context, `${method} ${path}${url.search}`);
 	}
 
 	const bearer = await token(context);

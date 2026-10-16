@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 import { publicKey } from "@brianjenkins94/util/auth/dpop";
 import { Hono } from "hono";
@@ -5,6 +6,8 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
+import { audit, origin } from "./audit.ts";
+import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
 import { githubApi, githubGit } from "./proxy.ts";
 import { revokeEndpoint, session, tokenEndpoint } from "./tokens.ts";
@@ -35,6 +38,7 @@ const HEADER_CAP = 8 * 1024;
 app.use(async (context, next) => {
 	if ((context.req.header("dpop")?.length ?? 0) > HEADER_CAP || (context.req.header("authorization")?.length ?? 0) > HEADER_CAP) {
 		context.get("span").info("request refused", { "reason": "header too large" });
+		await audit(context.env, "oversized", {}, await origin(context), { "reason": "header too large", "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
 
 		return context.json({ "error": "request_header_fields_too_large" }, 431);
 	}
@@ -45,8 +49,9 @@ app.use(async (context, next) => {
 /** A route's body limit: counted as it streams, so a body without (or lying about) Content-Length can't get past it. */
 const limit = (maxSize: number): ReturnType<typeof bodyLimit> => bodyLimit({
 	"maxSize": maxSize,
-	"onError": (context) => {
+	"onError": async (context) => {
 		(context.get("span") as AppEnv["Variables"]["span"] | undefined)?.info("request refused", { "reason": "body too large" });
+		await audit(context.env as AppEnv["Bindings"], "oversized", {}, await origin(context as Context<AppEnv>), { "reason": "body too large", "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
 
 		return context.json({ "error": "payload_too_large" }, 413);
 	}
@@ -82,21 +87,23 @@ app.get("/.well-known/jwks.json", (context) => {
 
 app.get("/.well-known/oauth-authorization-server", metadataEndpoint);
 
-app.get("/auth/github/start", startEndpoint);
+// Rate limits (src/limits.ts; the numbers are wrangler.jsonc's): sign-in and the token endpoint by IP, the token endpoint
+// by the grant a token names too, the proxy by the signed-in user.
+app.get("/auth/github/start", rateLimit("SIGN_IN_BY_IP", byIp), startEndpoint);
 
-app.get("/auth/github/callback", callbackEndpoint);
+app.get("/auth/github/callback", rateLimit("SIGN_IN_BY_IP", byIp), callbackEndpoint);
 
-app.post("/token", tokenEndpoint);
+app.post("/token", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), tokenEndpoint);
 
-app.post("/revoke", revokeEndpoint);
+app.post("/revoke", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), revokeEndpoint);
 
 // Who the access token is for: our user id (README.md: GitHub's login and avatar are fetched live, never stored).
 app.get("/me", session, (context) => context.json({ "user": context.get("user") }));
 
 // GitHub, for a signed-in browser (src/proxy.ts): the API calls the editor makes, and a clone's fetch.
-app.on(["GET", "POST", "PATCH"], "/github/api/*", session, githubApi);
+app.on(["GET", "POST", "PATCH"], "/github/api/*", session, rateLimit("PROXY_BY_USER", byUser), githubApi);
 
-app.on(["GET", "POST"], "/github/git/*", session, githubGit);
+app.on(["GET", "POST"], "/github/git/*", session, rateLimit("PROXY_BY_USER", byUser), githubGit);
 
 app.notFound((context) => context.json({ "error": "not_found" }, 404));
 

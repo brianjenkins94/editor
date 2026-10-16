@@ -78,6 +78,11 @@ after(async () => {
 
 const at = (path: string): string => new URL(path, base).href;
 
+/** A request from an IP of its own (TEST-NET-2), so the functional tests never meet the per-IP rate limits. */
+const anyIp = (): string => `198.51.100.${Math.floor(Math.random() * 254) + 1}`;
+
+const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...init.headers } });
+
 type Answer = Awaited<ReturnType<typeof server.fetch>>;
 
 /** A signed-in browser: a key, a sign-in begun with these GitHub tokens, and its access token redeemed. */
@@ -96,7 +101,7 @@ async function signedIn(github: { "accessToken": string; "expiresAt": number }):
 	const send = async (method: string, path: string, { body, headers = {}, token }: { "body"?: string; "headers"?: Record<string, string>; "token"?: string } = {}): Promise<Answer> => {
 		for (let attempt = 0; ; attempt += 1) {
 			const ath = token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) };
-			const response = await server.fetch(at(path), { "method": method, "headers": { "dpop": await proof(method, at(path), ath), ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...headers }, ...body === undefined ? {} : { "body": body } });
+			const response = await fetchFrom(at(path), { "method": method, "headers": { "dpop": await proof(method, at(path), ath), ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...headers }, ...body === undefined ? {} : { "body": body } });
 
 			nonce = response.headers.get("dpop-nonce") ?? nonce;
 
@@ -155,19 +160,38 @@ test("a commit's writes go through: blobs, trees, commits, then moving the ref",
 	}
 });
 
-test("anything the editor doesn't call is refused, and audited", async () => {
-	const session = await signedIn(fresh());
+test("anything the editor doesn't call is refused, and audited with what it was", async () => {
 	const before = seen.length;
+	const calls = [["GET", "/github/api/user/emails"], ["GET", "/github/api/repos/octo/hello/collaborators"], ["POST", "/github/api/repos/octo/hello/git/refs/heads/main"], ["GET", "/github/api/repos/octo/hello/git/ref/heads%2F..%2F..%2Fsecret"], ["POST", "/github/git/octo/hello.git/git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs?service=git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs"]] as const;
 
-	for (const [method, path] of [["GET", "/github/api/user/emails"], ["GET", "/github/api/repos/octo/hello/collaborators"], ["POST", "/github/api/repos/octo/hello/git/refs/heads/main"], ["GET", "/github/api/repos/octo/hello/git/ref/heads%2F..%2F..%2Fsecret"], ["POST", "/github/git/octo/hello.git/git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs?service=git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs"]] as const) {
-		assert.equal((await session.call(method, path)).status, 403, `${method} ${path}`);
+	// Two sign-ins, fewer than five refusals each: five in ten minutes end a sign-in (the next test).
+	for (const batch of [calls.slice(0, 4), calls.slice(4)]) {
+		const session = await signedIn(fresh());
+
+		for (const [method, path] of batch) {
+			assert.equal((await session.call(method, path)).status, 403, `${method} ${path}`);
+		}
+
+		const details = (await env.DB.prepare("SELECT detail FROM audit WHERE grant_id = ? AND event = 'proxy_denied' ORDER BY id").bind(session.grantId).all<{ "detail": string }>()).results.map((row) => row.detail);
+
+		assert.deepEqual(details, batch.map(([method, path]) => `${method} ${path.replace(/^\/github\/(?:api|git)/u, "")}`));
 	}
 
 	assert.equal(seen.length, before, "none of it reached GitHub");
+});
 
-	const denied = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE grant_id = ? AND event = 'proxy_denied'").bind(session.grantId).first<{ "n": number }>();
+test("a sign-in that keeps asking for what the editor never does is ended", async () => {
+	const session = await signedIn(fresh());
 
-	assert.equal(denied?.n, 7);
+	for (let attempt = 1; attempt <= 5; attempt += 1) {
+		assert.equal((await session.call("GET", "/github/api/user/emails")).status, 403);
+	}
+
+	assert.equal((await session.call("GET", "/github/api/user")).status, 401, "the sign-in is over");
+
+	const events = (await env.DB.prepare("SELECT event, reason FROM audit WHERE grant_id = ? AND event IN ('proxy_abuse', 'grant_revoked') ORDER BY id").bind(session.grantId).all<{ "event": string; "reason": string | null }>()).results;
+
+	assert.deepEqual(events, [{ "event": "proxy_abuse", "reason": "5 refused calls in 10 minutes" }, { "event": "grant_revoked", "reason": null }]);
 });
 
 test("a clone's two requests go to github.com with the token as git's password", async () => {
@@ -186,8 +210,8 @@ test("a clone's two requests go to github.com with the token as git's password",
 });
 
 test("signed out, there's no proxy", async () => {
-	assert.equal((await server.fetch(at("/github/api/user"))).status, 401);
-	assert.equal((await server.fetch(at("/github/git/octo/hello.git/info/refs?service=git-upload-pack"))).status, 401);
+	assert.equal((await fetchFrom(at("/github/api/user"))).status, 401);
+	assert.equal((await fetchFrom(at("/github/git/octo/hello.git/info/refs?service=git-upload-pack"))).status, 401);
 });
 
 test("GitHub's token is refreshed once it's close to expiring — once, however many requests arrive together", async () => {
@@ -212,7 +236,7 @@ test("a refresh GitHub refuses ends the sign-in", async () => {
 
 		const events = (await env.DB.prepare("SELECT event FROM audit WHERE grant_id = ? ORDER BY id").bind(session.grantId).all<{ "event": string }>()).results.map((row) => row.event);
 
-		assert.deepEqual(events.slice(-2), ["github_refresh_refused", "grant_revoked"]);
+		assert.deepEqual(events.slice(-3), ["github_refresh_refused", "grant_revoked", "auth_refused"]);
 	} finally {
 		refresh = "ok";
 	}
@@ -235,9 +259,9 @@ test("signing out revokes GitHub's token at GitHub too", async () => {
 test("sizes: an oversized form, clone request or proof header is refused before it's read", async () => {
 	const session = await signedIn(fresh());
 
-	assert.equal((await server.fetch(at("/token"), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": `grant_type=refresh_token&refresh_token=${"x".repeat(8 * 1024)}` })).status, 413);
+	assert.equal((await fetchFrom(at("/token"), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": `grant_type=refresh_token&refresh_token=${"x".repeat(8 * 1024)}` })).status, 413);
 	assert.equal((await session.call("POST", "/github/git/octo/hello.git/git-upload-pack", { "headers": { "content-type": "application/x-git-upload-pack-request" }, "body": "0".repeat(2 * 1024 * 1024) })).status, 413);
-	assert.equal((await server.fetch(at("/me"), { "headers": { "authorization": `DPoP ${session.accessToken}`, "dpop": "x".repeat(9 * 1024) } })).status, 431);
+	assert.equal((await fetchFrom(at("/me"), { "headers": { "authorization": `DPoP ${session.accessToken}`, "dpop": "x".repeat(9 * 1024) } })).status, 431);
 });
 
 test("no GitHub token or client secret reaches the logs", async () => {

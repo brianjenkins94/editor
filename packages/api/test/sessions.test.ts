@@ -35,6 +35,11 @@ after(async () => {
 
 const at = (path: string): string => new URL(path, base).href;
 
+/** A request from an IP of its own (TEST-NET-2), so the functional tests never meet the per-IP rate limits. */
+const anyIp = (): string => `198.51.100.${Math.floor(Math.random() * 254) + 1}`;
+
+const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...init.headers } });
+
 /** A response, as the harness gives it (miniflare's Response, not the Workers one). */
 type Answer = Awaited<ReturnType<typeof server.fetch>>;
 
@@ -70,7 +75,7 @@ async function send(client: Browser, method: string, path: string, { form, acces
 			headers["authorization"] = `DPoP ${accessToken}`;
 		}
 
-		const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? {} : { "body": new URLSearchParams(form).toString(), "headers": { ...headers, "content-type": "application/x-www-form-urlencoded" } } });
+		const response = await fetchFrom(at(path), { "method": method, "headers": headers, ...form === undefined ? {} : { "body": new URLSearchParams(form).toString(), "headers": { ...headers, "content-type": "application/x-www-form-urlencoded" } } });
 
 		client.nonce = response.headers.get("dpop-nonce") ?? client.nonce;
 
@@ -185,7 +190,12 @@ test("a refresh token used twice revokes the sign-in", async () => {
 
 	assert.equal(me.status, 401);
 	assert.match(me.headers.get("www-authenticate") ?? "", /^DPoP error="invalid_token"/u);
-	assert.deepEqual(await audit(grantId), ["login", "token_issued", "refreshed", "refresh_reuse_detected", "grant_revoked", "token_rejected"]);
+	assert.deepEqual(await audit(grantId), ["login", "token_issued", "refreshed", "refresh_reuse_detected", "grant_revoked", "token_rejected", "auth_refused"]);
+
+	// Every row says why, and joins to its request's trace.
+	const refused = await env.DB.prepare("SELECT reason, detail, trace_id FROM audit WHERE grant_id = ? AND event = 'auth_refused'").bind(grantId).first<{ "reason": string; "detail": string; "trace_id": string }>();
+
+	assert.deepEqual({ ...refused, "trace_id": /^[0-9a-f]{32}$/u.test(refused?.trace_id ?? "") }, { "reason": "grant revoked", "detail": "GET /me", "trace_id": true });
 	assert.notEqual((await env.DB.prepare("SELECT revoked_at FROM grants WHERE id = ?").bind(grantId).first<{ "revoked_at": number | null }>())?.revoked_at, null);
 });
 
@@ -207,17 +217,17 @@ test("/me refuses without the token, with Bearer, with another key's proof, with
 		assert.match(response.headers.get("www-authenticate") ?? "", new RegExp(`^DPoP error="${error}"`, "u"));
 	};
 
-	await unauthorized(await server.fetch(at("/me")), "invalid_token");
-	await unauthorized(await server.fetch(at("/me"), { "headers": { "authorization": `Bearer ${issued.access_token}` } }), "invalid_token");
+	await unauthorized(await fetchFrom(at("/me")), "invalid_token");
+	await unauthorized(await fetchFrom(at("/me"), { "headers": { "authorization": `Bearer ${issued.access_token}` } }), "invalid_token");
 	await unauthorized(await send(await browser(), "GET", "/me", { "accessToken": issued.access_token }), "invalid_dpop_proof");
 	// The right key, but a proof that doesn't carry this token's hash (ath): it could be paired with another token.
-	await unauthorized(await server.fetch(at("/me"), { "headers": { "authorization": `DPoP ${issued.access_token}`, "dpop": await client.proof("GET", at("/me")) } }), "invalid_dpop_proof");
+	await unauthorized(await fetchFrom(at("/me"), { "headers": { "authorization": `DPoP ${issued.access_token}`, "dpop": await client.proof("GET", at("/me")) } }), "invalid_dpop_proof");
 
 	const proof = await client.proof("GET", at("/me"), { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(issued.access_token)))) });
 	const headers = { "authorization": `DPoP ${issued.access_token}`, "dpop": proof };
 
-	assert.equal((await server.fetch(at("/me"), { "headers": headers })).status, 200);
-	await unauthorized(await server.fetch(at("/me"), { "headers": headers }), "invalid_dpop_proof");
+	assert.equal((await fetchFrom(at("/me"), { "headers": headers })).status, 200);
+	await unauthorized(await fetchFrom(at("/me"), { "headers": headers }), "invalid_dpop_proof");
 
 	const forged = await new SignJWT({ "client_id": "editor", "cnf": { "jkt": client.jkt }, "grant": "x" })
 		.setProtectedHeader({ "typ": "at+jwt", "alg": "ES256", "kid": "test" })
@@ -236,7 +246,7 @@ test("/revoke ends a sign-in", async () => {
 	assert.equal(response.status, 200);
 	assert.deepEqual(await (await refresh(client, issued.refresh_token)).json(), { "error": "invalid_grant" });
 	assert.equal((await send(client, "GET", "/me", { "accessToken": issued.access_token })).status, 401);
-	assert.deepEqual((await audit(grantId)).slice(-2), ["grant_revoked", "token_rejected"], "and the refresh tried after it");
+	assert.deepEqual((await audit(grantId)).slice(-3), ["grant_revoked", "token_rejected", "auth_refused"], "and the refresh and /me tried after it");
 });
 
 test("a code for a grant that doesn't exist is refused without creating one", async () => {
@@ -286,7 +296,7 @@ test("the audit log keeps an IP only as a hash", async () => {
 	const { code, verifier, grantId } = await signIn(client, 109);
 	const proof = await client.proof("POST", at("/token"));
 
-	await server.fetch(at("/token"), { "method": "POST", "headers": { "dpop": proof, "cf-connecting-ip": "203.0.113.7", "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams({ "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": "editor" }).toString() });
+	await fetchFrom(at("/token"), { "method": "POST", "headers": { "dpop": proof, "cf-connecting-ip": "203.0.113.7", "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams({ "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": "editor" }).toString() });
 	await tokens(await redeem(client, code, verifier)).catch(() => undefined);
 
 	const rows = (await env.DB.prepare("SELECT ip_hash FROM audit WHERE grant_id = ? AND ip_hash IS NOT NULL").bind(grantId).all<{ "ip_hash": string }>()).results;
@@ -296,13 +306,13 @@ test("the audit log keeps an IP only as a hash", async () => {
 });
 
 test("CORS: the allowed origins, and no others", async () => {
-	const preflight = async (origin: string): Promise<Answer> => server.fetch(at("/token"), { "method": "OPTIONS", "headers": { "origin": origin, "access-control-request-method": "POST", "access-control-request-headers": "dpop, content-type" } });
+	const preflight = async (origin: string): Promise<Answer> => fetchFrom(at("/token"), { "method": "OPTIONS", "headers": { "origin": origin, "access-control-request-method": "POST", "access-control-request-headers": "dpop, content-type" } });
 	const allowed = await preflight("http://localhost:5173");
 
 	assert.equal(allowed.headers.get("access-control-allow-origin"), "http://localhost:5173");
 	assert.equal((await preflight("https://evil.example.com")).headers.get("access-control-allow-origin"), null);
 
-	const exposed = await server.fetch(at("/health"), { "headers": { "origin": "http://localhost:5173" } });
+	const exposed = await fetchFrom(at("/health"), { "headers": { "origin": "http://localhost:5173" } });
 
 	assert.match(exposed.headers.get("access-control-expose-headers") ?? "", /dpop-nonce/u);
 });
