@@ -5,6 +5,8 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
+import type { Copy, Row } from "../src/audit-copies.ts";
+import { compare, copyKey, parseKey } from "../src/audit-copies.ts";
 
 // The GitHub proxy in workerd (README.md, "The proxy"): a signed-in browser's calls go through with the sign-in's GitHub
 // token, refreshed when it's close to expiring; anything the editor doesn't call is refused; sizes are capped.
@@ -63,7 +65,7 @@ const githubOrigin = `http://127.0.0.1:${(mock.address() as AddressInfo).port}`;
 const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": githubOrigin, "GITHUB_API": githubOrigin } }] });
 const worker = server.getWorker();
 let base: URL;
-let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };
+let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database; "AUDIT_COPIES": R2Bucket };
 
 before(async () => {
 	({ "url": base } = await server.listen());
@@ -269,4 +271,75 @@ test("no GitHub token or client secret reaches the logs", async () => {
 
 	assert.ok(issued.size > 10);
 	assert.deepEqual([...issued, secrets.GITHUB_CLIENT_SECRET].filter((value) => logs.includes(value)), []);
+});
+
+/** D1's audit rows, and the bucket's copies as `npm run audit -- --verify` reads them. */
+async function ledger(): Promise<{ "rows": Row[]; "copies": Map<number, Copy> }> {
+	const rows = (await env.DB.prepare("SELECT id, at, event, user_id, grant_id, country, ip_hash, reason, detail, trace_id FROM audit ORDER BY id").all<Row>()).results;
+	const copies = new Map<number, Copy>();
+
+	for (const { key } of (await env.AUDIT_COPIES.list({ "limit": 1000 })).objects) {
+		const parsed = parseKey(key);
+		const body = await (await env.AUDIT_COPIES.get(key))?.json() as Row;
+
+		if (parsed !== undefined) {
+			const entry = copies.get(parsed.id) ?? { "row": body };
+
+			if (parsed.finished) {
+				entry.finished = body.reason ?? undefined;
+			} else {
+				entry.row = body;
+			}
+
+			copies.set(parsed.id, entry);
+		}
+	}
+
+	return { "rows": rows, "copies": copies };
+}
+
+test("every audit row has its write-once copy, the same; a proxied call's copy has its bytes", async () => {
+	const { rows, copies } = await ledger();
+	const verdict = compare(rows, copies);
+
+	assert.ok(rows.length > 20, "the run wrote rows");
+	assert.deepEqual(verdict.findings, []);
+	assert.equal(verdict.matching, rows.length);
+	assert.ok([...copies.values()].some((copy) => copy.row.event === "proxy_call" && /bytes$/u.test(copy.finished ?? "")), "a call's bytes are in its .finished part");
+
+	// The Worker's own binding can't replace a copy: `if-none-match: *` refuses an existing key.
+	const first = rows[0] as Row;
+
+	assert.equal(await env.AUDIT_COPIES.put(copyKey(first.event, first.id), "{}", { "onlyIf": new Headers({ "if-none-match": "*" }) }), null);
+	assert.equal((await (await env.AUDIT_COPIES.get(copyKey(first.event, first.id)))?.json() as Row).id, first.id);
+});
+
+test("verifying finds a row edited, a row deleted, and a row that was never copied", async () => {
+	const { rows } = await ledger();
+	const [edited, deleted] = rows as [Row, Row];
+
+	await env.DB.batch([
+		env.DB.prepare("UPDATE audit SET detail = 'nothing to see' WHERE id = ?").bind(edited.id),
+		env.DB.prepare("DELETE FROM audit WHERE id = ?").bind(deleted.id),
+		env.DB.prepare("INSERT INTO audit (at, event, reason) VALUES (?, 'proxy_denied', 'written around the Worker')").bind(Date.now())
+	]);
+
+	const found = compare(...Object.values(await ledger()) as [Row[], Map<number, Copy>]).findings.map((finding) => `${finding.kind} ${finding.id}`);
+	const last = (await env.DB.prepare("SELECT MAX(id) AS id FROM audit").first<{ "id": number }>())?.id;
+
+	assert.deepEqual(found, [`edited ${edited.id}`, `deleted ${deleted.id}`, `not copied ${last}`].sort((a, b) => Number(a.split(" ").pop()) - Number(b.split(" ").pop())));
+});
+
+
+test("the Worker never replaces a copy: one already at its next id stays as it was", async () => {
+	const next = ((await env.DB.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'audit'").first<{ "seq": number }>())?.seq ?? 0) + 1;
+	const planted = copyKey("auth_refused", next);
+
+	await env.AUDIT_COPIES.put(planted, JSON.stringify({ "planted": true }));
+	await fetchFrom(at("/me"), { "headers": { "authorization": "DPoP not-a-token" } });
+
+	const written = await env.DB.prepare("SELECT id, event FROM audit WHERE id = ?").bind(next).first<{ "id": number; "event": string }>();
+
+	assert.equal(written?.event, "auth_refused", "the refusal took that id");
+	assert.deepEqual(await (await env.AUDIT_COPIES.get(planted))?.json(), { "planted": true });
 });

@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { base64url } from "jose";
+import { copyKey, ROUTINE, ROUTINE_DAYS, SUSPICIOUS_DAYS } from "./audit-copies.ts";
 
 /**
  * The audit log (D1 `audit`; migrations/0001 and 0002): the security record. Never sampled, and kept apart from logs and
@@ -12,6 +13,9 @@ import { base64url } from "jose";
  *   carried back — if something gets through, what it read is what matters;
  * - where a request came from: Cloudflare's country, and an IP hash that only matches within a day.
  *
+ * Each row is copied, once, to a locked R2 bucket (audit-copies.ts), so the record can be checked: what the Worker wrote
+ * can't later be edited or deleted unnoticed.
+ *
  * The events that look like someone doing something they shouldn't through us also raise an alert at once (`alert`).
  */
 
@@ -22,15 +26,8 @@ export type AuditEvent =
 	| "proxy_call" | "proxy_denied" | "proxy_abuse"
 	| "account_deleted";
 
-/** The everyday record — sign-ins and what they did — kept ROUTINE_DAYS; everything else (every refusal, every alert) is
- *  what an investigation needs most, and is kept SUSPICIOUS_DAYS. */
-const ROUTINE: AuditEvent[] = ["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call"];
-
-const ROUTINE_DAYS = 90;
-
-const SUSPICIOUS_DAYS = 365;
-
-/** The retention above, applied (daily, by the Worker's cron trigger). Says how many rows went. */
+/** The retention (audit-copies.ts: ROUTINE_DAYS for the everyday record, SUSPICIOUS_DAYS for the rest), applied daily by
+ *  the Worker's cron trigger. Says how many rows went. The copies expire on their own (the bucket's lifecycle rules). */
 export async function expire(db: D1Database, now = Date.now()): Promise<number> {
 	const day = 86_400_000;
 	const [routine, rest] = await db.batch([
@@ -82,15 +79,46 @@ const THEFT = new Set(["key is not the one bound", "jti was seen before", "anoth
 
 /** Record an event (and alert, if it's one that does). The row's id, for what's only known later (a proxied call's bytes). */
 export async function audit(env: Bindings, event: AuditEvent, subject: Subject, from: Origin, particulars: Particulars = {}): Promise<number> {
+	const row = { "at": Date.now(), "event": event, "user_id": subject.userId ?? null, "grant_id": subject.grantId ?? null, "country": from.country ?? null, "ip_hash": from.ipHash ?? null, "reason": particulars.reason ?? null, "detail": particulars.detail ?? null, "trace_id": from.traceId ?? null };
 	const { meta } = await env.DB.prepare("INSERT INTO audit (at, event, user_id, grant_id, country, ip_hash, reason, detail, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-		.bind(Date.now(), event, subject.userId ?? null, subject.grantId ?? null, from.country ?? null, from.ipHash ?? null, particulars.reason ?? null, particulars.detail ?? null, from.traceId ?? null)
+		.bind(row.at, row.event, row.user_id, row.grant_id, row.country, row.ip_hash, row.reason, row.detail, row.trace_id)
 		.run();
+
+	await copy(env, copyKey(event, meta.last_row_id), { "id": meta.last_row_id, ...row });
 
 	if (ALARMING.has(event) || THEFT.has(particulars.reason ?? "")) {
 		await alert(env, event, subject, from, particulars);
 	}
 
 	return meta.last_row_id;
+}
+
+/** A proxied call finished: its reason with the bytes it carried, in D1 and as its copy's second, `.finished` part. */
+export async function finish(env: Bindings, id: number, reason: string): Promise<void> {
+	await env.DB.prepare("UPDATE audit SET reason = ? WHERE id = ?").bind(reason, id).run();
+	await copy(env, copyKey("proxy_call", id, ".finished"), { "reason": reason });
+}
+
+/**
+ * Write a copy once: `if-none-match: *` refuses a key that exists, so not even the Worker can replace one (the bucket
+ * lock refuses it too, once applied). Tried twice; a copy that can't be written never fails the request, but is logged,
+ * and shows as "not copied" when the log is verified.
+ */
+async function copy(env: Bindings, key: string, body: object): Promise<void> {
+	for (let attempt = 1; attempt <= 2; attempt += 1) {
+		try {
+			await env.AUDIT_COPIES.put(key, JSON.stringify(body), { "onlyIf": new Headers({ "if-none-match": "*" }), "httpMetadata": { "contentType": "application/json" } });
+
+			return;
+		} catch (error) {
+			if (attempt === 2) {
+				// Imported here, not above: log.ts is Worker-only (cloudflare:workers), and Node tests import this module.
+				const { log } = await import("./log.ts");
+
+				log.error("audit copy not written", { "error": error instanceof Error ? error.message : String(error) });
+			}
+		}
+	}
 }
 
 /**

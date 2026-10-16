@@ -22,6 +22,9 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Grant"] }],
   "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
   "d1_databases": [{ "binding": "DB", "database_name": "editor-api-local", "database_id": "local", "migrations_dir": "migrations" }],
+  // The audit log's write-once copies (src/audit-copies.ts). The deployed buckets have lock rules (`routine/` 90 days,
+  // `suspicious/` 365) and expiry rules a day after, made with `wrangler r2 bucket lock add` / `lifecycle add` (README.md).
+  "r2_buckets": [{ "binding": "AUDIT_COPIES", "bucket_name": "editor-api-audit-local" }],
   // Rate limits (src/limits.ts), a minute each: sign-in by IP, the token endpoint by IP and by the grant a token names,
   // the proxy by user, and one alert a minute per event and subject. namespace_id is account-wide and shared by every
   // binding that names it, so each environment has its own range (90xx here, never deployed; 10xx dev; 20xx production).
@@ -40,6 +43,7 @@
       },
       "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "editor-api-dev", "database_id": "296ad75a-302e-4aa6-97cd-360f3481617e", "migrations_dir": "migrations" }],
+      "r2_buckets": [{ "binding": "AUDIT_COPIES", "bucket_name": "editor-api-audit-dev" }],
       "ratelimits": [{ "name": "SIGN_IN_BY_IP", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }, { "name": "TOKEN_BY_IP", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }, { "name": "TOKEN_BY_GRANT", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }, { "name": "PROXY_BY_USER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } }, { "name": "ALERTS", "namespace_id": "1005", "simple": { "limit": 1, "period": 60 } }],
       "vars": { "ENVIRONMENT": "dev", "ALLOWED_ORIGINS": "https://brianjenkins94.github.io,http://localhost:5173,http://editor.localhost:5173", "REDIRECT_URIS": "https://brianjenkins94.github.io/editor/,http://localhost:5173/,http://editor.localhost:5173/", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" }
     },
@@ -56,6 +60,7 @@
       },
       "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "editor-api", "database_id": "a81ff6d8-f4af-4b21-bbee-265203df0a72", "migrations_dir": "migrations" }],
+      "r2_buckets": [{ "binding": "AUDIT_COPIES", "bucket_name": "editor-api-audit" }],
       "ratelimits": [{ "name": "SIGN_IN_BY_IP", "namespace_id": "2001", "simple": { "limit": 20, "period": 60 } }, { "name": "TOKEN_BY_IP", "namespace_id": "2002", "simple": { "limit": 30, "period": 60 } }, { "name": "TOKEN_BY_GRANT", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } }, { "name": "PROXY_BY_USER", "namespace_id": "2004", "simple": { "limit": 300, "period": 60 } }, { "name": "ALERTS", "namespace_id": "2005", "simple": { "limit": 1, "period": 60 } }],
       "vars": { "ENVIRONMENT": "production", "ALLOWED_ORIGINS": "https://editor.unusuallygood.dev", "REDIRECT_URIS": "https://editor.unusuallygood.dev/", "GITHUB_CLIENT_ID": "Iv23liFJepSEiExenSOI" }
     }

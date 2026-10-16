@@ -217,6 +217,26 @@ priority: whatever abuse gets past every limit should still be seen, and immedia
 - **Reading it:** `npm run audit` prints a timeline, oldest first, each row with its trace id. It can be filtered by
   `--grant`, `--user`, `--ip <hash>` or `--event`, with `--suspicious` (refusals, limits and alerts only) and
   `--since 24h`.
+- **It's tamper-evident** (`src/audit-copies.ts`, 2026-10-16). Each row the Worker writes to D1 is also written, once,
+  to R2: `editor-api-audit` (production) and `editor-api-audit-dev`, binding `AUDIT_COPIES`, one object per row under
+  `routine/` or `suspicious/` by its retention class. A proxied call's bytes go in a second `.finished` object, since
+  they're only known later.
+  - **Write-once twice over:** the Worker writes with `if-none-match: *`, so even it can't replace a copy, and each
+    bucket's lock rules (`routine/` 90 days, `suspicious/` 365) refuse any overwrite or delete until the row's own
+    retention ends. Expiry rules delete the copies a day after, so R2 keeps nothing longer than D1 does.
+  - **D1's ids are AUTOINCREMENT,** never reused, so the id sequence is the chain: no hash chain is needed, and no
+    single writer in the request path.
+  - **`npm run audit -- --verify [--env production]`** compares the two and lists every row **edited**, **deleted**
+    before its time, **not copied**, or **missing** (an id with neither). It exits 1 when it finds anything. Rows
+    gone after their retention count as expired; a user id removed by account deletion counts as anonymized. The copy
+    keeps that id, which nothing points at once the account's `users` and `grants` rows are gone.
+  - **What it protects against:** a compromised Worker, or someone with D1 access, rewriting history. **Not:** a
+    compromised Cloudflare account, which can remove lock rules; or a compromised Worker from then on, since it could
+    stop writing copies (that shows as "not copied" for any row it does write to D1).
+  - A copy that can't be written (tried twice) never fails the request; it's logged, and `--verify` reports it.
+  - Made with `wrangler r2 bucket create`, `wrangler r2 bucket lock add <bucket> routine-90d routine/ --retention-days 90`
+    (and `suspicious-365d suspicious/ --retention-days 365`), and `wrangler r2 bucket lifecycle add <bucket>
+    routine-expire routine/ --expire-days 91` (and `suspicious-expire … 366`).
 - **Every row carries its request's trace id**, so it joins to the full logs and spans in Cloudflare's dashboard
   (`migrations/0002_audit_detail.sql` adds `reason`, `detail` and `trace_id`).
 - **Some events raise an alert at once** (`audit.ts`):

@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
-import { audit, origin } from "./audit.ts";
+import { audit, finish, origin } from "./audit.ts";
 import { github } from "./github.ts";
 
 /**
@@ -72,7 +72,7 @@ async function called(context: Context<AppEnv>, detail: string, status: number):
 	const row = await audit(context.env, "proxy_call", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `GitHub ${status}`, "detail": detail });
 
 	return async (bytes) => {
-		await context.env.DB.prepare("UPDATE audit SET reason = ? WHERE id = ?").bind(`GitHub ${status}, ${bytes} bytes`, row).run();
+		await finish(context.env, row, `GitHub ${status}, ${bytes} bytes`);
 	};
 }
 

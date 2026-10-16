@@ -34,6 +34,8 @@ export interface Bindings {
 	"PROXY_BY_USER": RateLimit;
 	"ALERTS": RateLimit;
 	"DB": D1Database;
+	/** The audit log's write-once copies (audit-copies.ts), in a bucket whose lock rules keep each as long as D1 keeps its row. */
+	"AUDIT_COPIES": R2Bucket;
 	"GRANTS": DurableObjectNamespace<Grant>;
 }
 
