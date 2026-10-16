@@ -470,11 +470,8 @@ Each step lands green and is useful on its own.
     - **Abandoned sign-ins end.** That first live run showed that a code never redeemed left its Grant holding
       GitHub's tokens indefinitely. Now `begin` sets an alarm for the code's expiry, and `abandon()` revokes a Grant
       that never got its first refresh token. Live: `login@+0s grant_revoked@+60s`.
-    - **Still to do:**
-      - Refreshing GitHub's token inside the Grant (A5 uses it).
-      - Revoking GitHub's token at GitHub when we revoke a grant (`DELETE /applications/{client_id}/token`). Ours is
-        wiped, so nothing can use it, but it stays valid at GitHub until it expires.
-      - A sessions list with "sign out everywhere".
+    - **Still to do:** a sessions list with "sign out everywhere". GitHub's token is refreshed inside the Grant, and
+      revoked at GitHub on sign-out; both were done with A5.
 - **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"
   popover for "Sign in with GitHub" plus a sessions list. **Remove the PAT path** once this works: keeping a token
   in `localStorage` as a fallback keeps the problem.
