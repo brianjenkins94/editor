@@ -67,7 +67,7 @@ app.use("/account/*", limit(4 * 1024));
 app.use("/github/api/*", limit(32 * 1024 * 1024));
 app.use("/github/git/*", limit(1024 * 1024));
 
-// The app calls from its own origin (GitHub Pages, in development): the ones in ALLOWED_ORIGINS, no others, and never
+// The app calls from its own origin (GitHub Pages, in dev): the ones in ALLOWED_ORIGINS, no others, and never
 // with cookies — the credential is the DPoP-bound Authorization header.
 app.use(cors({
 	"origin": (requested, context) => (context.env.ALLOWED_ORIGINS.split(",").includes(requested) ? requested : null),

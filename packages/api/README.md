@@ -86,7 +86,7 @@ plus cold starts), Fly.io (a real server to run and patch). None beats Workers h
 - Permissions we'd ask for: Metadata (read, mandatory), Contents (read/write, for commit-back), Pages (write, for
   `enablePages`). **No email permission**: we don't need an email address to run an editor, and not having it is
   the cheapest privacy measure there is. Repo creation needs Administration (write); decide when we wire it.
-- **Two GitHub Apps**: one for development (callbacks on `workers.dev` and `localhost`), one for production.
+- **Two GitHub Apps**: one for dev (callbacks on `workers.dev` and `localhost`), one for production.
   Separate secrets, separate blast radius.
 
 ### Identity and the data we keep
@@ -161,7 +161,7 @@ don't change; only its base URL moves from `api.github.com` to the Worker's `/gi
 | Environment | App | Worker | GitHub App |
 |---|---|---|---|
 | local | `editor.localhost:5173` | `wrangler dev` (`localhost:8787`) | dev |
-| development | `brianjenkins94.github.io/editor/` (unchanged) | `editor-api-dev.<account>.workers.dev` | dev |
+| dev | `brianjenkins94.github.io/editor/` (unchanged) | `editor-api-dev.<account>.workers.dev` | dev |
 | production | `editor.unusuallygood.dev`, Workers static assets (`packages/site`) | `api.unusuallygood.dev` | prod |
 
 The dev split is cross-origin, and that's fine *because* of DPoP: the credential is an `Authorization` header, not
@@ -319,7 +319,7 @@ public code means anyone can review it. The limits are operational:
   account id and binding names in `wrangler.jsonc` aren't secret.
 - **Deploys use a scoped Cloudflare API token** (Workers edit on this account only) stored as a GitHub *Environment*
   secret. The `production` environment requires your approval for every deploy, so a merge to main can't ship an
-  auth change by itself. `development` deploys automatically after CI.
+  auth change by itself. `dev` deploys automatically after CI.
 - **No `pull_request_target`**, and nothing that hands secrets to fork PRs. PRs get tests, never deploys.
 - **Telemetry is private.** It lives in the Cloudflare account, not in public view, even though the code that emits it
   is public.
@@ -332,8 +332,9 @@ Each step lands green and is useful on its own.
 
 - **A0 · accounts (you).** A Cloudflare account and the dev GitHub App. Nothing in this step is code, and none of
   the secrets ever go into the repo or this chat. *Done for dev 2026-10-15:* the GitHub App
-  `editor-dev-brianjenkins94`; the Worker at `https://editor-api-dev.brianjenkins94.workers.dev`, with its D1 database
-  migrated and all six secrets set; CI deploying it through the `development` environment's scoped account token. Two
+  `unusually-good-editor-dev` ("Unusually Good Editor (dev)"; created as `editor-dev-brianjenkins94`, renamed to pair with
+  production's `unusually-good-editor`); the Worker at `https://editor-api-dev.brianjenkins94.workers.dev`, with its D1 database
+  migrated and all six secrets set; CI deploying it through the `dev` environment's scoped account token. Two
   things GitHub renamed: the callback URL is "Redirect URI" ("Add redirect URI"), and token expiry is under "Optional
   features" (on by default; the page offers only "Opt-out"). The runbook, in order (production repeats it in A7, with its own
   app, database and secrets). Commands run in `packages/api`:
@@ -366,10 +367,10 @@ Each step lands green and is useful on its own.
      - `GITHUB_CLIENT_SECRET`: step 3.
   5. **A Cloudflare API token for CI:** My Profile → API Tokens → Create Token. Start from the "Edit Cloudflare
      Workers" template, add Account → D1 → Edit, and limit Account Resources to this account. Then, in this repo:
-     - Settings → Environments → New environment `development`. Limit its deployment branches to `main`, and add
+     - Settings → Environments → New environment `dev`. Limit its deployment branches to `main`, and add
        the secret `CLOUDFLARE_API_TOKEN`.
      - Settings → Secrets and variables → Actions → Variables: `CLOUDFLARE_ACCOUNT_ID` (on the Workers overview).
-       It isn't secret, and setting it turns on cd's `api-dev` job.
+       It isn't secret, and setting it turns on cd's `dev` job.
 - **A1 · `packages/api` skeleton.** Hono on Workers, `wrangler.jsonc` with `dev`/`production` environments,
   `/health`, `observability` (logs + traces) on, tests running in workerd, and CI deploying `dev` to workers.dev.
   Verify the `traceparent` question, and that a request shows up as one trace in the dashboard.
@@ -383,8 +384,8 @@ Each step lands green and is useful on its own.
   so the runtime's own `fetch`, D1 and Durable Object spans nest under it. The allowlist gates both outputs: log
   records, and every attribute set on a trace span. A span's util ids ride along as `logger.trace_id` /
   `logger.span_id`. That's how a trace continued from the browser will be found in the dashboard, since Cloudflare
-  exposes no span context of its own yet. The `api-dev` job in `.github/workflows/cd.yml` deploys `--env dev` once
-  the repository variable `CLOUDFLARE_ACCOUNT_ID` and the `development` environment's `CLOUDFLARE_API_TOKEN` secret
+  exposes no span context of its own yet. The `dev` job in `.github/workflows/cd.yml` deploys `--env dev` once
+  the repository variable `CLOUDFLARE_ACCOUNT_ID` and the `dev` environment's `CLOUDFLARE_API_TOKEN` secret
   exist. Until then it's skipped. Still open: both verifications above, which need the first deploy.
 - **A2 · DPoP core.** Port `dpop.ts`, add stateless nonces and the access-token signer with JWKS. Test against
   RFC 9449's examples, plus a negative test for every check: a wrong `htu`/`htm`, a stale `iat`, a replayed `jti`, a

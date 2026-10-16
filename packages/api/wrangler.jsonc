@@ -31,6 +31,7 @@
   "vars": { "ENVIRONMENT": "local", "ALLOWED_ORIGINS": "http://localhost:5173,http://editor.localhost:5173", "REDIRECT_URIS": "http://localhost:5173/,http://editor.localhost:5173/", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" },
   "env": {
     "dev": {
+      "name": "editor-api-dev",
       "workers_dev": true,
       "observability": {
         "enabled": true,

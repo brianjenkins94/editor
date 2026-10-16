@@ -6,11 +6,11 @@
 
 /**
  * The production site, its API, and its GitHub App (packages/api/README.md, A7). The build is one for every host, so what it
- * talks to is decided by host: production's on the production site, development's everywhere else (Pages, localhost).
+ * talks to is decided by host: production's on the production site, dev's everywhere else (Pages, localhost).
  */
 export const PRODUCTION = { "site": "https://editor.unusuallygood.dev", "api": "https://api.unusuallygood.dev", "app": "unusually-good-editor" };
 
-// `globalThis.`: the tests import the shell's GitHub modules in Node, where there's no location (and so, development).
+// `globalThis.`: the tests import the shell's GitHub modules in Node, where there's no location (and so, dev).
 export const isProduction = (): boolean => globalThis.location?.origin === PRODUCTION.site;
 
 /** The site's root: where index.html is, with no query or fragment, whatever path this page is at. */

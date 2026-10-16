@@ -16,7 +16,7 @@ import { isProduction, PRODUCTION } from "./address";
 export type AuthProvider = typeof fetch;
 
 /** Where a signed-in user chooses the repositories the editor's GitHub App (production's, or the dev one) may reach. */
-export const GITHUB_APP_INSTALL = `https://github.com/apps/${isProduction() ? PRODUCTION.app : "editor-dev-brianjenkins94"}/installations/new`;
+export const GITHUB_APP_INSTALL = `https://github.com/apps/${isProduction() ? PRODUCTION.app : "unusually-good-editor-dev"}/installations/new`;
 
 /** Where the retired pasted PAT was kept: deleted on load, so none outlives the PAT path (session.ts replaced it). */
 const PAT_KEY = "shell:githubPat";
