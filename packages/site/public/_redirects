@@ -1,0 +1,5 @@
+# The editor opened to a repo lives on the editor's own origin (packages/api/README.md, A7). 302, not 301: browsers keep a 301 forever, and
+# where these go may change.
+/env/* https://editor.unusuallygood.dev/env/:splat 302
+# No landing page yet: the root is the editor.
+/ https://editor.unusuallygood.dev/ 302

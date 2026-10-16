@@ -1,0 +1,13 @@
+{
+  "name": "@brianjenkins94/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "4.148.0"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:editor": "wrangler dev --config editor.jsonc"
+  }
+}

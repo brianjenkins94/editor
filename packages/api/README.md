@@ -162,7 +162,7 @@ don't change; only its base URL moves from `api.github.com` to the Worker's `/gi
 |---|---|---|---|
 | local | `editor.localhost:5173` | `wrangler dev` (`localhost:8787`) | dev |
 | development | `brianjenkins94.github.io/editor/` (unchanged) | `editor-api-dev.<account>.workers.dev` | dev |
-| production | a domain of ours, served by the Worker's static assets | same origin as the app (`/api`) | prod |
+| production | `editor.unusuallygood.dev`, Workers static assets (`packages/site`) | `api.unusuallygood.dev` | prod |
 
 The dev split is cross-origin, and that's fine *because* of DPoP: the credential is an `Authorization` header, not
 a cookie, so third-party-cookie blocking doesn't affect us and there's no CSRF surface. CORS is an explicit origin
@@ -171,8 +171,20 @@ allowlist, never `*`, never reflected.
 **editor-contrib forks** (`<owner>.github.io/<repo>/`) are not on the allowlist. A fork that wants sign-in brings
 its own Worker and GitHub App; the README says so.
 
-**Production needs its own domain** (about $10/year, bought through Cloudflare). It gets the editor off the shared
-`github.io` origin, puts the app and API on one origin (no CORS at all), and gives us real COOP/COEP headers.
+**Production has its own domain**, `unusuallygood.dev` (bought through Cloudflare, 2026-10-15). It gets the editor off
+the shared `github.io` origin and gives us real COOP/COEP headers. The app and the API are two origins of one site, so
+production keeps dev's CORS allowlist (one origin) rather than putting the API under the app's path: the editor's
+origin serves only static files, never a Worker, so none of its requests count against the daily request budget.
+The build is one for every host; `packages/editor/shell/address.ts` picks production's API and GitHub App by host.
+
+| Address | What | Served by |
+|---|---|---|
+| `unusuallygood.dev/` | the editor, until there's a landing page (302) | `packages/site` (`wrangler.jsonc`), its `_redirects` |
+| `unusuallygood.dev/env/<owner>/<repo>` | 302 to the editor's `env/<owner>/<repo>` | the same |
+| `unusuallygood.dev/tools/`, `/log/` | marketing per tool, a blog: not yet | the same, when they exist |
+| `editor.unusuallygood.dev/` | the editor: Pages' `docs/` build | `packages/site` (`editor.jsonc`), static assets |
+| `editor.unusuallygood.dev/env/<owner>/<repo>` | the editor, opened to that repo | the same (`_redirects` rewrite; Pages' 404.html does it there) |
+| `api.unusuallygood.dev` | this Worker | `wrangler.jsonc`, `env.production` |
 
 ## Hardening: floods, abuse and sizes
 
@@ -513,13 +525,46 @@ Each step lands green and is useful on its own.
   a security review of the whole flow (`/security-review` plus a manual walk through RFC 9449 §11 and the OAuth 2.0
   Security BCP, RFC 9700).
 - **A7 · production.** The domain, the static-assets deploy with COOP/COEP headers, the prod GitHub App, and the
-  deploy approval gate.
+  deploy approval gate. *Built 2026-10-15, not deployed:*
+  - `packages/site`: two static-assets-only Workers (no script, so no request runs one): the apex, whose
+    `public/_redirects` sends `/` and `/env/*` to the editor, and the editor's (`editor.jsonc`), whose assets are the
+    same `docs/` build Pages serves. The build writes the host's files beside it (`packages/editor/build.ts`,
+    `staticHostPlugin`): `_headers` (COOP/COEP, `nosniff`), `_redirects` (`/env/*` serves the editor's page),
+    `.assetsignore` (the package tarballs stay Pages') and `404.html` (deep links on Pages). 2,381 files, none near the
+    25 MiB limit.
+  - `env/<owner>/<repo>` opens that repo (`shell/address.ts`): index.html puts a `<base>` at the site's root there, the
+    shell loads the repo once the app listens (after a sign-in completes, so a private one is read signed in), a
+    reload keeps a workspace that's already that repo's, and loading a repo or a project updates the address. The
+    sign-in's redirect URI is the site's root wherever the page is, and `returnTo` brings it back to the deep link.
+  - `env.production` here: the custom domain `api.unusuallygood.dev`, the editor's origin as the only allowed origin
+    and redirect URI.
+  - `.github/workflows/production.yml`: after each successful cd (or by hand, for a commit cd passed), and once its
+    reviewer approves: build, migrate, deploy the API, the editor, the apex. Off until `PRODUCTION_DEPLOYS` is `on`.
+
+  The runbook (yours; nothing here goes into the repo or chat but the two ids). Commands run in `packages/api`:
+  1. **The production GitHub App**, as A0's step 3 with these differences:
+     - Name: `Unusually Good Editor`, so its slug is `unusually-good-editor` (`PRODUCTION.app` in
+       `packages/editor/shell/address.ts`; if GitHub gives another, change it there). Homepage:
+       `https://editor.unusuallygood.dev/`.
+     - One callback URL: `https://api.unusuallygood.dev/auth/github/callback`.
+     - Where it can be installed: **any account**.
+     - Its Client ID goes in `env.production`'s `GITHUB_CLIENT_ID`; its client secret only into
+       `npx wrangler secret put GITHUB_CLIENT_SECRET --env production`.
+  2. **D1:** `npx wrangler d1 create editor-api`. Its `database_id` replaces `env.production`'s placeholder.
+  3. **Secrets:** A0's step 4 with `--env production`, all six made fresh (none shared with dev).
+  4. **A Cloudflare API token for production**, separate from dev's: Account → Workers Scripts → Edit and
+     Account → D1 → Edit on this account, plus, on the zone `unusuallygood.dev`, Zone → Workers Routes → Edit,
+     DNS → Edit and Zone → Read (the custom domains are created on the first deploy).
+  5. **GitHub:** Settings → Environments → New environment `production`. Required reviewers: you. Deployment
+     branches: `main`. Secret: `CLOUDFLARE_API_TOKEN` (step 4).
+  6. Commit the two ids, then set the repository variable `PRODUCTION_DEPLOYS` to `on`. The next cd asks for approval.
+  7. After the first deploy: sign in at `https://editor.unusuallygood.dev/`, then add the WAF rate-limiting rule
+     (Hardening, "Still to do").
 
 Then Stripe: customers keyed by our user id, webhooks verified by signature and processed idempotently (a D1 table
 of seen event ids), and entitlements read by the Worker, never trusted from the client.
 
 ## Open questions
 
-- Production domain name.
 - Whether signed-out users keep cloning public repos through our proxy (costs requests) or straight from GitHub's
   API (no auth needed for public repos, but no git clone without a CORS proxy).

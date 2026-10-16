@@ -27,6 +27,7 @@ import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
 import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
 import { css, globalCss, iconSvg } from "../shared/theme";
+import { envRepo, showRepo, site } from "./address";
 import { renderGitPanel } from "./git-panel";
 import { forgetPat, getRepoBinding, GITHUB_APP_INSTALL, setRepoBinding } from "./github-auth";
 import type { Session } from "./session";
@@ -381,6 +382,17 @@ function Shell() {
 	const overlayBodyRef = useRef<HTMLDivElement>(null);
 	const overlayCloseRef = useRef<HTMLElement>(null);
 	const hubRef = useRef<Hub>();
+	// Settles once the app answers (below): a repo opened from the address (`env/<owner>/<repo>`) is published only then.
+	const appReadyRef = useRef<{ "promise": Promise<void>; "resolve": () => void }>();
+
+	appReadyRef.current ??= (() => {
+		let resolve: () => void;
+		const promise = new Promise<void>((done) => {
+			resolve = done;
+		});
+
+		return { "promise": promise, "resolve": () => { resolve(); } };
+	})();
 
 	// Mount-once wiring: the shell hub linked to the app iframe, the review panel, and the preview window. A LAYOUT
 	// effect, so it runs right after the first render: a plain effect waits for the first paint, which a page opened
@@ -452,6 +464,7 @@ function Shell() {
 
 					if (Array.isArray(list)) {
 						setSamples(list);
+						appReadyRef.current?.resolve();
 
 						// The app is listening now. A playground project replaces the workspace like a repo load, and isn't
 						// any repo's, so a commit has nowhere to push until one is opened.
@@ -459,6 +472,7 @@ function Shell() {
 							shellHub.publish("project.openFiles", playground);
 							setRepoBinding(undefined);
 							setBoundRepo(undefined);
+							showRepo(undefined);
 						}
 
 						return;
@@ -626,6 +640,19 @@ function Shell() {
 
 			setSignInHere(session.canSignIn());
 
+			// An `env/<owner>/<repo>` address opens that repo, once the app listens — after the sign-in above, so a private
+			// one is read signed in. The workspace already being that repo's (a reload) keeps it, and the edits made in it. The
+			// GitHub popover opens over the load, to show it going and say what went wrong (it closes on success).
+			const wanted = envRepo();
+			const bound = getRepoBinding();
+
+			if (wanted !== undefined && `${bound?.owner}/${bound?.repo}`.toLowerCase() !== `${wanted.owner}/${wanted.repo}`.toLowerCase()) {
+				void appReadyRef.current?.promise.then(async () => {
+					setGithubOpen(true);
+					await loadRepo(`${wanted.owner}/${wanted.repo}`);
+				});
+			}
+
 			try {
 				if (session.isSignedIn()) {
 					const { createGitHub } = await import("./github");
@@ -747,8 +774,8 @@ function Shell() {
 	// Load a GitHub repo into the workspace: the SHELL fetches the files (token stays here) and publishes them to the
 	// app over the hub, which writes them into zen-fs. Repo paths are rooted under /workspace. github.ts is lazy so
 	// fido loads only when a repo is actually fetched.
-	const loadRepo = async (): Promise<void> => {
-		const match = /^([^\s/]+)\/([^\s/]+)$/u.exec(repoInput.trim());
+	const loadRepo = async (input = repoInput): Promise<void> => {
+		const match = /^([^\s/]+)\/([^\s/]+)$/u.exec(input.trim());
 
 		if (match === null) {
 			setLoadError("Use the form owner/repo");
@@ -759,16 +786,18 @@ function Shell() {
 		setLoadingRepo(true);
 		setLoadError(undefined);
 
-		const span = githubLog.span("github.loadRepo", { "repo": repoInput.trim() });
+		const span = githubLog.span("github.loadRepo", { "repo": input.trim() });
 
 		try {
 			const [, owner, repo] = match;
+			// Signed in by the session itself, not `githubUser` (fetched after it): a load from the address runs before that.
+			const signedIn = (await import("./session")).isSignedIn();
 			const { createGitHub } = await import("./github");
 			const gh = createGitHub();
 			const meta = await gh.getRepo(owner, repo);
 
 			if (meta === undefined) {
-				setLoadError(githubUser === undefined ? "Repo not found. A private one needs you signed in." : "Repo not found, or not one you've given the editor access to.");
+				setLoadError(signedIn ? "Repo not found, or not one you've given the editor access to." : "Repo not found. A private one needs you signed in.");
 				span.error("repo not found or not visible");
 
 				return;
@@ -781,7 +810,7 @@ function Shell() {
 			try {
 				const { cloneRepo } = await import("./git-clone");
 
-				({ files } = await cloneRepo(owner, repo, githubUser !== undefined));
+				({ files } = await cloneRepo(owner, repo, signedIn));
 				span.info("cloned", { "files": files.length });
 			} catch (error) {
 				span.warn("clone failed — reading through the API", { "error": errText(error) });
@@ -806,6 +835,7 @@ function Shell() {
 
 			setRepoBinding(binding);
 			setBoundRepo(binding);
+			showRepo(binding);
 			setGithubOpen(false);
 			setRepoInput("");
 			span.info("loaded", { "branch": meta.default_branch, "files": files.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0) });
@@ -818,8 +848,8 @@ function Shell() {
 		}
 	};
 
-	// Share the workspace as a Playground v2 link (playground-link.ts) on this page's address: ask the app for the files and
-	// the editor in front, encode them, and copy the link. It opens here, or in the TypeScript Playground.
+	// Share the workspace as a Playground v2 link (playground-link.ts) on the site's root (not a repo's address): ask the
+	// app for the files and the editor in front, encode them, and copy the link. It opens here, or in the TypeScript Playground.
 	const copyShare = async (url: string): Promise<boolean> => navigator.clipboard.writeText(url).then(() => true, () => false);
 	const openShare = async (): Promise<void> => {
 		setShareOpen(true);
@@ -827,7 +857,7 @@ function Shell() {
 
 		try {
 			const workspace = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
-			const { skipped, url } = playgroundLink(location.origin + location.pathname, workspace);
+			const { skipped, url } = playgroundLink(site(), workspace);
 
 			setShare({ "url": url, "skipped": skipped, "copied": await copyShare(url) });
 		} catch (error) {
@@ -891,6 +921,7 @@ function Shell() {
 		setCurrentId(id);
 		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
 		hubRef.current?.publish("project.open", { "id": id });
+		showRepo(undefined);
 	};
 
 	// The Commit popover's body: what it needs first, until it has it — then the repo it pushes to, and the message.

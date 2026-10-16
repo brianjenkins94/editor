@@ -607,8 +607,33 @@ async function hostBuild(): Promise<void> {
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", ...SHARED_PACKAGES] },
 		"build": { "outDir": "../../docs", "emptyOutDir": false },
-		"plugins": [...hostPlugins(), shellPreloadPlugin()]
+		"plugins": [...hostPlugins(), shellPreloadPlugin(), staticHostPlugin()]
 	});
+}
+
+/**
+ * What a static host needs to serve the site well, beside it. The production site (packages/site/editor.jsonc, Workers
+ * static assets) reads `_headers` — real cross-origin isolation headers, so the first load needn't wait for the service
+ * worker to stamp them — `_redirects`, which serves the editor's page at every `env/<owner>/<repo>` (shell/address.ts), and
+ * `.assetsignore`: the package tarballs are the releases' and Pages', not the site's. GitHub Pages reads none of them;
+ * there `404.html` is the editor's page, so a deep link opens the editor (with a 404 status, which the page doesn't mind).
+ */
+function staticHostPlugin(): Plugin {
+	return {
+		"name": "static-host",
+		"enforce": "post",
+		"generateBundle": function(_options, bundle) {
+			const index = bundle["index.html"];
+
+			if (index?.type === "asset") {
+				this.emitFile({ "type": "asset", "fileName": "404.html", "source": index.source });
+			}
+
+			this.emitFile({ "type": "asset", "fileName": "_headers", "source": ["/*", "  Cross-Origin-Opener-Policy: same-origin", "  Cross-Origin-Embedder-Policy: credentialless", "  X-Content-Type-Options: nosniff", ""].join("\n") });
+			this.emitFile({ "type": "asset", "fileName": "_redirects", "source": "/env/* / 200\n" });
+			this.emitFile({ "type": "asset", "fileName": ".assetsignore", "source": "packages/\n" });
+		}
+	};
 }
 
 // `tsx build.ts` → the full build. Imported by dev.ts (for preBuild/hostPlugins), where this guard stays false.

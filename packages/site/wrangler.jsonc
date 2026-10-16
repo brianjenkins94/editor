@@ -1,0 +1,10 @@
+// unusuallygood.dev itself (packages/api/README.md, A7): static assets only, so no request runs a Worker or counts against its daily
+// requests. Until it has pages of its own, its `_redirects` send everything to the editor.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unusuallygood",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "public" },
+  "workers_dev": false,
+  "routes": [{ "pattern": "unusuallygood.dev", "custom_domain": true }]
+}

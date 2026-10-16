@@ -1,0 +1,12 @@
+// editor.unusuallygood.dev (packages/api/README.md, A7): the editor's built site — the same docs/ GitHub Pages serves — as static assets
+// only, so no request runs a Worker or counts against its daily requests. The build writes what the host reads beside it
+// (packages/editor/build.ts, staticHostPlugin): `_headers` (cross-origin isolation), `_redirects` (`env/<owner>/<repo>`
+// serves the editor's page) and `.assetsignore` (the package tarballs stay Pages').
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "editor",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "../../docs" },
+  "workers_dev": false,
+  "routes": [{ "pattern": "editor.unusuallygood.dev", "custom_domain": true }]
+}

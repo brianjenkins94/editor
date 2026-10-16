@@ -2,6 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <script>
+    // `env/<owner>/<repo>` (shell/address.ts) is this page too, served there by the host: resolve the site's files, the
+    // service worker among them, from the site's root, as at the root. First in <head>, so before any URL is resolved.
+    {
+      const at = location.pathname.indexOf("/env/");
+
+      if (at !== -1) {
+        const base = document.createElement("base");
+
+        base.href = location.pathname.slice(0, at + 1);
+        document.head.prepend(base);
+      }
+    }
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>editor</title>
   <style>html, body { height: 100%; margin: 0; background: #1e1e1e; color: #d4d4d4; }</style>

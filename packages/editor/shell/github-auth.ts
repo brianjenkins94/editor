@@ -10,12 +10,13 @@
  * Lives SHELL-side on purpose: the token stays in the top frame. The workbench iframe and any (sandboxed) game
  * iframe never receive a GitHub client — they traffic in files (zen-fs), not tokens.
  */
+import { isProduction, PRODUCTION } from "./address";
 
 /** A provider is a fetch that attaches a valid credential (or, signed out, none). */
 export type AuthProvider = typeof fetch;
 
-/** Where a signed-in user chooses the repositories the editor's GitHub App (the dev one, until A7) may reach. */
-export const GITHUB_APP_INSTALL = "https://github.com/apps/editor-dev-brianjenkins94/installations/new";
+/** Where a signed-in user chooses the repositories the editor's GitHub App (production's, or the dev one) may reach. */
+export const GITHUB_APP_INSTALL = `https://github.com/apps/${isProduction() ? PRODUCTION.app : "editor-dev-brianjenkins94"}/installations/new`;
 
 /** Where the retired pasted PAT was kept: deleted on load, so none outlives the PAT path (session.ts replaced it). */
 const PAT_KEY = "shell:githubPat";

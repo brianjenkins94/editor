@@ -13,12 +13,15 @@
  * Shell-side only: the key and the tokens live in the top frame's storage, and no other realm gets a client.
  */
 import * as oauth from "oauth4webapi";
+// The redirect URI is the site's root, a deep link's (`env/<owner>/<repo>`) too: the API knows one page per site, and the
+// sign-in's `returnTo` brings us back to the deep link.
+import { isProduction, PRODUCTION, site } from "./address";
 
-/** The API (packages/api), deployed for development. Production gets its own (A7). */
-export const API = "https://editor-api-dev.brianjenkins94.workers.dev";
+/** The API (packages/api): production's on the production site, the dev deployment's everywhere else (Pages, localhost). */
+export const API = isProduction() ? PRODUCTION.api : "https://editor-api-dev.brianjenkins94.workers.dev";
 
 /** The pages the API will send a sign-in back to (its REDIRECT_URIS, wrangler.jsonc): sign-in is offered only on these. */
-const PAGES = ["https://brianjenkins94.github.io/editor/", "http://localhost:5173/", "http://editor.localhost:5173/"];
+const PAGES = [`${PRODUCTION.site}/`, "https://brianjenkins94.github.io/editor/", "http://localhost:5173/", "http://editor.localhost:5173/"];
 
 const as: oauth.AuthorizationServer = {
 	"issuer": API,
@@ -36,11 +39,8 @@ const TOKENS = "shell:session";
 
 const PENDING = "shell:signIn";
 
-/** This page, as a redirect URI: no query, no fragment. */
-const page = (): string => location.origin + location.pathname;
-
 export function canSignIn(): boolean {
-	return PAGES.includes(page());
+	return PAGES.includes(site());
 }
 
 // ── The key ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ export async function signIn(): Promise<void> {
 	url.search = new URLSearchParams({
 		"client_id": client.client_id,
 		"response_type": "code",
-		"redirect_uri": page(),
+		"redirect_uri": site(),
 		"state": state,
 		"code_challenge": await oauth.calculatePKCECodeChallenge(verifier),
 		"code_challenge_method": "S256",
@@ -205,7 +205,7 @@ export async function completeSignIn(): Promise<boolean> {
 	// Checks the state is ours and `iss` is the API (RFC 9207), and turns `error=` into a thrown error.
 	const parameters = oauth.validateAuthResponse(as, client, here, pending.state);
 	const tokens = await withNonce(
-		async () => oauth.authorizationCodeGrantRequest(as, client, none, parameters, page(), pending.verifier, { "DPoP": await dpop() }),
+		async () => oauth.authorizationCodeGrantRequest(as, client, none, parameters, site(), pending.verifier, { "DPoP": await dpop() }),
 		async (response) => oauth.processAuthorizationCodeResponse(as, client, response)
 	);
 
