@@ -45,7 +45,7 @@
       # The API Worker's dev deployment (packages/api/README.md), after the same gate as the site. It stays off until
       # the repository variable CLOUDFLARE_ACCOUNT_ID exists, so the workflow is green before the Cloudflare account
       # is set up. The API token is a secret of the `dev` environment, scoped to Workers on this one
-      # account; production deploys are production.yml, approval-gated (A7).
+      # account; production deploys are production.yml, after this (A7).
       "if": "${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') && vars.CLOUDFLARE_ACCOUNT_ID != '' }}",
       "runs-on": "ubuntu-latest",
       "environment": "dev",

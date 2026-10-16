@@ -1,10 +1,10 @@
 {
   "name": "production",
   # unusuallygood.dev (packages/api/README.md, A7): the API at api.unusuallygood.dev, the editor at editor.unusuallygood.dev
-  # and the apex, all on Cloudflare. After every successful cd on main, or by hand; either way the `production`
-  # environment's required reviewer approves each run before anything is built or deployed, so a merge to main can't
-  # ship by itself. It stays off until the repository variable PRODUCTION_DEPLOYS is `on` (the runbook's last step): a job
-  # naming an environment that doesn't exist yet would create it, unprotected.
+  # and the apex, all on Cloudflare. After every successful cd on main, or by hand. Production promotes itself: the
+  # `production` environment (main only) has no required reviewer, by choice while this is early (2026-10-16); ticking
+  # Required reviewers again makes every run wait for approval. It stays off until the repository variable
+  # PRODUCTION_DEPLOYS is `on`: a job naming an environment that doesn't exist yet would create it, unprotected.
   "on": {
     "workflow_dispatch": null,
     "workflow_run": {
@@ -13,8 +13,8 @@
       "branches": ["main"]
     }
   },
-  # One deploy at a time, never cancelled midway (a migration may be running). While one waits for approval, only the
-  # newest run waits behind it; approving the older one ships the older commit, and the newer asks next.
+  # One deploy at a time, never cancelled midway (a migration may be running). A newer one waits behind it; with a
+  # reviewer required, only the newest waits, and one left unapproved blocks the rest.
   "concurrency": {
     "group": "production"
   },

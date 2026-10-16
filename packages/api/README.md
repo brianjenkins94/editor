@@ -338,8 +338,10 @@ public code means anyone can review it. The limits are operational:
   tokens), `SIGNING_JWK` (access tokens), `NONCE_KEY`, `AUDIT_KEY` (the audit log's IP hashes), `STATE_KEY`. The
   account id and binding names in `wrangler.jsonc` aren't secret.
 - **Deploys use a scoped Cloudflare API token** (Workers edit on this account only) stored as a GitHub *Environment*
-  secret. The `production` environment requires your approval for every deploy, so a merge to main can't ship an
-  auth change by itself. `dev` deploys automatically after CI.
+  secret. Both `dev` and `production` deploy automatically after CI and cd. *Decided 2026-10-16, while this is
+  early:* production promotes itself, so a merge to main ships. The `production` environment had a required reviewer
+  (you), and each unapproved run blocked the ones behind it. Ticking Required reviewers again restores the gate:
+  every run waits for approval, and a merge to main can't ship an auth change by itself.
 - **No `pull_request_target`**, and nothing that hands secrets to fork PRs. PRs get tests, never deploys.
 - **Telemetry is private.** It lives in the Cloudflare account, not in public view, even though the code that emits it
   is public.
@@ -546,7 +548,7 @@ Each step lands green and is useful on its own.
   a security review of the whole flow (`/security-review` plus a manual walk through RFC 9449 §11 and the OAuth 2.0
   Security BCP, RFC 9700).
 - **A7 · production.** The domain, the static-assets deploy with COOP/COEP headers, the prod GitHub App, and the
-  deploy approval gate. *Built 2026-10-15, not deployed:*
+  deploy approval gate. *Live since 2026-10-15; the approval gate was dropped 2026-10-16 (production promotes itself).*
   - `packages/site`: two static-assets-only Workers (no script, so no request runs one): the apex, whose
     `public/_redirects` sends `/` and `/env/*` to the editor, and the editor's (`editor.jsonc`), whose assets are the
     same `docs/` build Pages serves. The build writes the host's files beside it (`packages/editor/build.ts`,
@@ -559,8 +561,8 @@ Each step lands green and is useful on its own.
     sign-in's redirect URI is the site's root wherever the page is, and `returnTo` brings it back to the deep link.
   - `env.production` here: the custom domain `api.unusuallygood.dev`, the editor's origin as the only allowed origin
     and redirect URI.
-  - `.github/workflows/production.yml`: after each successful cd (or by hand, for a commit cd passed), and once its
-    reviewer approves: build, migrate, deploy the API, the editor, the apex. Off until `PRODUCTION_DEPLOYS` is `on`.
+  - `.github/workflows/production.yml`: after each successful cd (or by hand, for a commit cd passed): build, migrate,
+    deploy the API, the editor, the apex. Off until `PRODUCTION_DEPLOYS` is `on`.
 
   The runbook (yours; nothing here goes into the repo or chat but the two ids). Commands run in `packages/api`:
   1. **The production GitHub App**, as A0's step 3 with these differences:
@@ -578,7 +580,8 @@ Each step lands green and is useful on its own.
      DNS → Edit and Zone → Read (the custom domains are created on the first deploy).
   5. **GitHub:** Settings → Environments → New environment `production`. Required reviewers: you. Deployment
      branches: `main`. Secret: `CLOUDFLARE_API_TOKEN` (step 4).
-  6. Commit the two ids, then set the repository variable `PRODUCTION_DEPLOYS` to `on`. The next cd asks for approval.
+  6. Commit the two ids, then set the repository variable `PRODUCTION_DEPLOYS` to `on`. The next cd deploys production
+     (it asked for approval until 2026-10-16, when the reviewer was removed).
   7. After the first deploy: sign in at `https://editor.unusuallygood.dev/`, then add the WAF rate-limiting rule
      (Hardening, "Still to do").
 
