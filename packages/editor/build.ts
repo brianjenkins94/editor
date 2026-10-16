@@ -630,7 +630,9 @@ function staticHostPlugin(): Plugin {
 			}
 
 			this.emitFile({ "type": "asset", "fileName": "_headers", "source": ["/*", "  Cross-Origin-Opener-Policy: same-origin", "  Cross-Origin-Embedder-Policy: credentialless", "  X-Content-Type-Options: nosniff", ""].join("\n") });
-			this.emitFile({ "type": "asset", "fileName": "_redirects", "source": "/env/* / 200\n" });
+			// html_handling is "none" (editor.jsonc: no 307 from `x.html` to `x`), so the root names index.html itself. Named
+			// placeholders, not `/env/*`: a splat rewrite 404s under "none".
+			this.emitFile({ "type": "asset", "fileName": "_redirects", "source": ["/ /index.html 200", "/env/:owner/:repo /index.html 200", "/env/:owner/:repo/ /index.html 200", ""].join("\n") });
 			this.emitFile({ "type": "asset", "fileName": ".assetsignore", "source": "packages/\n" });
 		}
 	};

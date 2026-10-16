@@ -2,11 +2,13 @@
 // only, so no request runs a Worker or counts against its daily requests. The build writes what the host reads beside it
 // (packages/editor/build.ts, staticHostPlugin): `_headers` (cross-origin isolation), `_redirects` (`env/<owner>/<repo>`
 // serves the editor's page) and `.assetsignore` (the package tarballs stay Pages').
+// html_handling "none": the editor's .html files are fetched by their real names, and the default would answer each with a
+// 307 to the name without `.html` (a round trip on every load, for the extension host's iframe).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "editor",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": "../../docs" },
+  "assets": { "directory": "../../docs", "html_handling": "none" },
   "workers_dev": false,
   "routes": [{ "pattern": "editor.unusuallygood.dev", "custom_domain": true }]
 }
