@@ -16,6 +16,8 @@
     "logs": { "enabled": true, "invocation_logs": false },
     "traces": { "enabled": true }
   },
+  // Daily at 03:17 UTC: the audit log's retention (src/audit.ts, expire). Every environment inherits it.
+  "triggers": { "crons": ["17 3 * * *"] },
   // One Grant per sign-in (src/grant.ts), on SQLite storage.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Grant"] }],
   "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }] },

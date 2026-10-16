@@ -98,7 +98,7 @@ plus cold starts), Fly.io (a real server to run and patch). None beats Workers h
 | GitHub user access + refresh token | Grant DO, **AES-GCM encrypted** with a key from a Worker secret (with a key id, so it can rotate) | to call GitHub for the user | until sign-out, refresh expiry, or deletion |
 | our refresh-token family, hashed | Grant DO | rotation + reuse detection | lifetime of the grant |
 | grants index (grant id, user id, created, last used, coarse device label) | D1 `grants` | "your sessions", sign out everywhere | lifetime of the grant |
-| audit events | D1 `audit` | security record, user-visible | 90 days, then aggregated |
+| audit events | D1 `audit` | the security record: what was refused, and what went through | 90 days; refusals and alerts a year |
 
 We **don't** store login name, avatar, email, or raw IPs. Login and avatar are fetched live through the proxy.
 Audit rows carry country (from Cloudflare) and an IP hash salted per day, which is enough to spot abuse but can't
@@ -193,8 +193,16 @@ priority: whatever abuse gets past every limit should still be seen, and immedia
   refused code or refresh token (`token_rejected`, saying whether it was expired, unknown, the wrong PKCE verifier,
   or **another key**), a refused sign-in, a rate-limit trip and an oversized request. The one exception is the
   routine nonce challenge.
-- **Every write through the proxy is recorded** (`proxy_write`), with the call and GitHub's answer. Reads stay in the
-  request logs.
+- **Every call through the proxy is recorded** (`proxy_call`), reads as much as writes: the call (with its query),
+  GitHub's status, and the bytes it carried back. If something ever uses a session it shouldn't have, what it read is
+  what matters, and Workers Logs keep requests only 3 days on Free. The row is written before the answer streams, so a
+  dropped connection still leaves it; the bytes are added once they've streamed.
+- **What it's for:** not watching users, but knowing, if something gets through, what it tried and what it did.
+- **Retention**, applied daily by a cron trigger (`expire` in `audit.ts`): routine rows (sign-ins and what they did)
+  are kept 90 days, and refusals and alerts a year.
+- **Reading it:** `npm run audit` prints a timeline, oldest first, each row with its trace id. It can be filtered by
+  `--grant`, `--user`, `--ip <hash>` or `--event`, with `--suspicious` (refusals, limits and alerts only) and
+  `--since 24h`.
 - **Every row carries its request's trace id**, so it joins to the full logs and spans in Cloudflare's dashboard
   (`migrations/0002_audit_detail.sql` adds `reason`, `detail` and `trace_id`).
 - **Some events raise an alert at once** (`audit.ts`):

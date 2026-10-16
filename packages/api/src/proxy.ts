@@ -63,9 +63,17 @@ async function deny(context: Context<AppEnv>, detail: string): Promise<Response>
 	return context.json({ "error": "forbidden" }, 403);
 }
 
-/** A write that went through (a commit's parts, a repo made, Pages switched on): every one recorded, with GitHub's answer. */
-async function wrote(context: Context<AppEnv>, detail: string, status: number): Promise<void> {
-	await audit(context.env, "proxy_write", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `GitHub ${status}`, "detail": detail });
+/**
+ * Every call that went through, read or write, recorded before its answer streams (so a dropped connection still leaves
+ * the row): what it was and GitHub's status. The bytes it carried back are added once they have (relay). If a session
+ * is ever used by something that shouldn't have it, this is the record of what it read and wrote.
+ */
+async function called(context: Context<AppEnv>, detail: string, status: number): Promise<(bytes: number) => Promise<void>> {
+	const row = await audit(context.env, "proxy_call", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `GitHub ${status}`, "detail": detail });
+
+	return async (bytes) => {
+		await context.env.DB.prepare("UPDATE audit SET reason = ? WHERE id = ?").bind(`GitHub ${status}, ${bytes} bytes`, row).run();
+	};
 }
 
 /**
@@ -87,9 +95,9 @@ async function slot(context: Context<AppEnv>): Promise<{ "release": () => Promis
 	return { "release": async () => grant.release(lease) };
 }
 
-/** GitHub's answer, streamed, with only PASSED headers; `link` pointed back here so pagination stays on the proxy. Its
- *  slot is released once the body has streamed through (or, with no body, at once). */
-function relay(upstream: Response, rewrite: [string, string], release: () => Promise<void>): Response {
+/** GitHub's answer, streamed, with only PASSED headers; `link` pointed back here so pagination stays on the proxy. Once
+ *  the body has streamed through (or at once, with none), its bytes are recorded and its slot released. */
+function relay(upstream: Response, rewrite: [string, string], release: () => Promise<void>, counted: (bytes: number) => Promise<void>): Response {
 	const headers = new Headers();
 
 	for (const name of PASSED) {
@@ -102,11 +110,23 @@ function relay(upstream: Response, rewrite: [string, string], release: () => Pro
 
 	if (upstream.body === null) {
 		void release();
+		void counted(0);
 
 		return new Response(null, { "status": upstream.status, "headers": headers });
 	}
 
-	return new Response(upstream.body.pipeThrough(new TransformStream({ "flush": release })), { "status": upstream.status, "headers": headers });
+	let bytes = 0;
+
+	return new Response(upstream.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+		"transform": (chunk, controller) => {
+			bytes += chunk.byteLength;
+			controller.enqueue(chunk);
+		},
+		"flush": async () => {
+			await counted(bytes);
+			await release();
+		}
+	})), { "status": upstream.status, "headers": headers });
 }
 
 /** /github/api/* → api.github.com/*, for the calls in API. */
@@ -147,11 +167,7 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 		throw error;
 	});
 
-	if (method !== "GET") {
-		await wrote(context, `${method} ${path}`, upstream.status);
-	}
-
-	return relay(upstream, [api, `${url.origin}/github/api`], held.release);
+	return relay(upstream, [api, `${url.origin}/github/api`], held.release, await called(context, `${method} ${path}${url.search}`, upstream.status));
 }
 
 /** /github/git/<owner>/<repo>.git/… → github.com, for a clone's info/refs and git-upload-pack. */
@@ -192,5 +208,5 @@ export async function githubGit(context: Context<AppEnv>): Promise<Response> {
 		throw error;
 	});
 
-	return relay(upstream, [web, `${url.origin}/github/git`], held.release);
+	return relay(upstream, [web, `${url.origin}/github/git`], held.release, await called(context, `${method} ${path}${url.search}`, upstream.status));
 }

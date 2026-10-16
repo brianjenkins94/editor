@@ -170,16 +170,21 @@ test("a stolen refresh token, used with another key, alerts too", async () => {
 	assert.match(alerts.slice(before)[0]?.body ?? "", /^\[editor-api local\] token_rejected: another key/u);
 });
 
-test("every write through the proxy is recorded, with what it was and GitHub's answer", async () => {
+test("every call through the proxy is recorded — reads and writes, with GitHub's answer and the bytes it carried back", async () => {
 	const holder = await key();
 	const { accessToken, grantId } = await signedIn(holder);
 
-	await holder.send("POST", "/github/api/repos/octo/hello/git/blobs", { "token": accessToken, "body": "{}" });
-	await holder.send("GET", "/github/api/repos/octo/hello", { "token": accessToken });
+	await (await holder.send("POST", "/github/api/repos/octo/hello/git/blobs", { "token": accessToken, "body": "{}" })).text();
+	await (await holder.send("GET", "/github/api/repos/octo/hello/git/trees/main?recursive=1", { "token": accessToken })).text();
+	await (await holder.send("GET", "/github/git/octo/hello.git/info/refs?service=git-upload-pack", { "token": accessToken })).text();
 
-	const writes = (await env.DB.prepare("SELECT detail, reason FROM audit WHERE grant_id = ? AND event = 'proxy_write'").bind(grantId).all<{ "detail": string; "reason": string }>()).results;
+	const calls = (await env.DB.prepare("SELECT detail, reason FROM audit WHERE grant_id = ? AND event = 'proxy_call' ORDER BY id").bind(grantId).all<{ "detail": string; "reason": string }>()).results;
 
-	assert.deepEqual(writes, [{ "detail": "POST /repos/octo/hello/git/blobs", "reason": "GitHub 200" }], "the write, not the read");
+	assert.deepEqual(calls, [
+		{ "detail": "POST /repos/octo/hello/git/blobs", "reason": "GitHub 200, 11 bytes" },
+		{ "detail": "GET /repos/octo/hello/git/trees/main?recursive=1", "reason": "GitHub 200, 11 bytes" },
+		{ "detail": "GET /octo/hello.git/info/refs?service=git-upload-pack", "reason": "GitHub 200, 11 bytes" }
+	]);
 });
 
 test("the proxy is limited per user: 300 a minute", async () => {
@@ -194,6 +199,23 @@ test("the proxy is limited per user: 300 a minute", async () => {
 
 	assert.equal(statuses.filter((status) => status === 200).length, 300);
 	assert.equal(statuses.filter((status) => status === 429).length, 1);
+});
+
+test("retention: routine rows go after 90 days, refusals and alerts after a year", async () => {
+	const day = 86_400_000;
+	const now = Date.now();
+
+	await env.DB.batch([
+		env.DB.prepare("INSERT INTO audit (at, event, reason) VALUES (?, 'proxy_call', 'retention: old routine')").bind(now - 91 * day),
+		env.DB.prepare("INSERT INTO audit (at, event, reason) VALUES (?, 'proxy_call', 'retention: recent routine')").bind(now - 89 * day),
+		env.DB.prepare("INSERT INTO audit (at, event, reason) VALUES (?, 'proxy_denied', 'retention: old suspicious')").bind(now - 200 * day),
+		env.DB.prepare("INSERT INTO audit (at, event, reason) VALUES (?, 'proxy_denied', 'retention: ancient suspicious')").bind(now - 366 * day)
+	]);
+	await worker.scheduled({ "cron": "17 3 * * *" });
+
+	const kept = (await env.DB.prepare("SELECT reason FROM audit WHERE reason LIKE 'retention:%' ORDER BY id").all<{ "reason": string }>()).results.map((row) => row.reason);
+
+	assert.deepEqual(kept, ["retention: recent routine", "retention: old suspicious"]);
 });
 
 test("refusals at the token endpoint, and oversized requests, are recorded with why", async () => {

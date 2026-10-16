@@ -20,6 +20,7 @@
     "dev": "wrangler dev",
     "deploy:dev": "wrangler deploy --env dev",
     "test": "node --test --test-force-exit \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit": "node scripts/audit.ts"
   }
 }

@@ -8,7 +8,8 @@ import { base64url } from "jose";
  * - what happened to whose sign-in: login, tokens issued, refreshed, revoked;
  * - every request refused, and why. The one exception is the routine nonce challenge, which every client meets every
  *   few minutes;
- * - every write made through the proxy;
+ * - every call made through the proxy, reads as much as writes: what it was, GitHub's answer, and how many bytes it
+ *   carried back — if something gets through, what it read is what matters;
  * - where a request came from: Cloudflare's country, and an IP hash that only matches within a day.
  *
  * The events that look like someone doing something they shouldn't through us also raise an alert at once (`alert`).
@@ -18,7 +19,26 @@ export type AuditEvent =
 	| "login" | "token_issued" | "refreshed" | "grant_revoked" | "github_refresh_refused"
 	| "token_rejected" | "refresh_reuse_detected" | "auth_refused" | "sign_in_refused"
 	| "rate_limited" | "oversized"
-	| "proxy_write" | "proxy_denied" | "proxy_abuse";
+	| "proxy_call" | "proxy_denied" | "proxy_abuse";
+
+/** The everyday record — sign-ins and what they did — kept ROUTINE_DAYS; everything else (every refusal, every alert) is
+ *  what an investigation needs most, and is kept SUSPICIOUS_DAYS. */
+const ROUTINE: AuditEvent[] = ["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call"];
+
+const ROUTINE_DAYS = 90;
+
+const SUSPICIOUS_DAYS = 365;
+
+/** The retention above, applied (daily, by the Worker's cron trigger). Says how many rows went. */
+export async function expire(db: D1Database, now = Date.now()): Promise<number> {
+	const day = 86_400_000;
+	const [routine, rest] = await db.batch([
+		db.prepare(`DELETE FROM audit WHERE at < ? AND event IN (${ROUTINE.map(() => "?").join(", ")})`).bind(now - ROUTINE_DAYS * day, ...ROUTINE),
+		db.prepare("DELETE FROM audit WHERE at < ?").bind(now - SUSPICIOUS_DAYS * day)
+	]);
+
+	return (routine?.meta.changes ?? 0) + (rest?.meta.changes ?? 0);
+}
 
 /** Where a request came from, as much as the audit log keeps, and the trace it's part of. */
 export interface Origin {
@@ -59,14 +79,17 @@ const ALARMING = new Set<AuditEvent>(["refresh_reuse_detected", "proxy_denied", 
 /** Reasons that mean a token is in hands it shouldn't be: presented with another key's proof, or a proof replayed. */
 const THEFT = new Set(["key is not the one bound", "jti was seen before", "another key"]);
 
-export async function audit(env: Bindings, event: AuditEvent, subject: Subject, from: Origin, particulars: Particulars = {}): Promise<void> {
-	await env.DB.prepare("INSERT INTO audit (at, event, user_id, grant_id, country, ip_hash, reason, detail, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+/** Record an event (and alert, if it's one that does). The row's id, for what's only known later (a proxied call's bytes). */
+export async function audit(env: Bindings, event: AuditEvent, subject: Subject, from: Origin, particulars: Particulars = {}): Promise<number> {
+	const { meta } = await env.DB.prepare("INSERT INTO audit (at, event, user_id, grant_id, country, ip_hash, reason, detail, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
 		.bind(Date.now(), event, subject.userId ?? null, subject.grantId ?? null, from.country ?? null, from.ipHash ?? null, particulars.reason ?? null, particulars.detail ?? null, from.traceId ?? null)
 		.run();
 
 	if (ALARMING.has(event) || THEFT.has(particulars.reason ?? "")) {
 		await alert(env, event, subject, from, particulars);
 	}
+
+	return meta.last_row_id;
 }
 
 /**
