@@ -68,8 +68,28 @@ async function wrote(context: Context<AppEnv>, detail: string, status: number): 
 	await audit(context.env, "proxy_write", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `GitHub ${status}`, "detail": detail });
 }
 
-/** GitHub's answer, streamed, with only PASSED headers; `link` pointed back here so pagination stays on the proxy. */
-function relay(upstream: Response, rewrite: [string, string]): Response {
+/**
+ * One of the sign-in's in-flight slots (the Grant's lease()), or a 429 when it has them all in use: recorded, and so
+ * alerted, as a rate limit (`PROXY_CONCURRENCY`). The slot goes back when the answer has streamed (relay).
+ */
+async function slot(context: Context<AppEnv>): Promise<{ "release": () => Promise<void> } | Response> {
+	const grant = context.env.GRANTS.get(context.env.GRANTS.idFromString(context.get("grant")));
+	const lease = await grant.lease();
+
+	if (lease === undefined) {
+		context.get("span").info("proxy refused", { "reason": "too many requests in flight" });
+		await audit(context.env, "rate_limited", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": "PROXY_CONCURRENCY", "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+		context.header("retry-after", "1");
+
+		return context.json({ "error": "rate_limited" }, 429);
+	}
+
+	return { "release": async () => grant.release(lease) };
+}
+
+/** GitHub's answer, streamed, with only PASSED headers; `link` pointed back here so pagination stays on the proxy. Its
+ *  slot is released once the body has streamed through (or, with no body, at once). */
+function relay(upstream: Response, rewrite: [string, string], release: () => Promise<void>): Response {
 	const headers = new Headers();
 
 	for (const name of PASSED) {
@@ -80,7 +100,13 @@ function relay(upstream: Response, rewrite: [string, string]): Response {
 		}
 	}
 
-	return new Response(upstream.body, { "status": upstream.status, "headers": headers });
+	if (upstream.body === null) {
+		void release();
+
+		return new Response(null, { "status": upstream.status, "headers": headers });
+	}
+
+	return new Response(upstream.body.pipeThrough(new TransformStream({ "flush": release })), { "status": upstream.status, "headers": headers });
 }
 
 /** /github/api/* → api.github.com/*, for the calls in API. */
@@ -99,6 +125,12 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 		return bearer;
 	}
 
+	const held = await slot(context);
+
+	if (held instanceof Response) {
+		return held;
+	}
+
 	const { api } = github(context.env);
 	const upstream = await fetch(`${api}${path}${url.search}`, {
 		"method": method,
@@ -110,13 +142,16 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 			...context.req.header("content-type") === undefined ? {} : { "content-type": context.req.header("content-type") as string }
 		},
 		...method === "GET" ? {} : { "body": context.req.raw.body }
+	}).catch(async (error: unknown) => {
+		await held.release();
+		throw error;
 	});
 
 	if (method !== "GET") {
 		await wrote(context, `${method} ${path}`, upstream.status);
 	}
 
-	return relay(upstream, [api, `${url.origin}/github/api`]);
+	return relay(upstream, [api, `${url.origin}/github/api`], held.release);
 }
 
 /** /github/git/<owner>/<repo>.git/… → github.com, for a clone's info/refs and git-upload-pack. */
@@ -135,6 +170,12 @@ export async function githubGit(context: Context<AppEnv>): Promise<Response> {
 		return bearer;
 	}
 
+	const held = await slot(context);
+
+	if (held instanceof Response) {
+		return held;
+	}
+
 	const { web } = github(context.env);
 	const upstream = await fetch(`${web}${path}${url.search}`, {
 		"method": method,
@@ -146,7 +187,10 @@ export async function githubGit(context: Context<AppEnv>): Promise<Response> {
 			...context.req.header("content-type") === undefined ? {} : { "content-type": context.req.header("content-type") as string }
 		},
 		...method === "GET" ? {} : { "body": context.req.raw.body }
+	}).catch(async (error: unknown) => {
+		await held.release();
+		throw error;
 	});
 
-	return relay(upstream, [web, `${url.origin}/github/git`]);
+	return relay(upstream, [web, `${url.origin}/github/git`], held.release);
 }

@@ -26,6 +26,13 @@ import { open, seal } from "./seal.ts";
 
 const CODE_TTL = 60_000;
 
+/** At most this many proxied requests in flight for one sign-in (lease()): GitHub's secondary rate limits punish a token's
+ *  concurrent requests, and a burst of large clones is the shape a scripted session takes. */
+const CONCURRENT = 8;
+
+/** A lease returns itself when GitHub's answer has streamed; this frees one whose connection dropped first. */
+const LEASE_TTL = 120_000;
+
 /** This many proxy refusals within DENIAL_WINDOW end the sign-in (denied()). */
 const DENIALS = 5;
 
@@ -83,6 +90,7 @@ export class Grant extends DurableObject<Bindings> {
 			CREATE TABLE IF NOT EXISTS used_refresh (hash TEXT PRIMARY KEY);
 			CREATE TABLE IF NOT EXISTS seen_jti (jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 			CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL);
+			CREATE TABLE IF NOT EXISTS leases (id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 		`);
 	}
 
@@ -312,6 +320,29 @@ export class Grant extends DurableObject<Bindings> {
 		await this.revoke({ "from": from });
 
 		return true;
+	}
+
+	/** A slot for one proxied request, if fewer than CONCURRENT are in flight; release() it when the answer has streamed. */
+	public lease(): string | undefined {
+		const now = Date.now();
+
+		this.sql.exec("DELETE FROM leases WHERE expires < ?", now);
+
+		const [{ "count": count } = { "count": 0 }] = this.sql.exec<{ "count": number }>("SELECT COUNT(*) AS count FROM leases").toArray();
+
+		if (count >= CONCURRENT) {
+			return undefined;
+		}
+
+		const id = crypto.randomUUID();
+
+		this.sql.exec("INSERT INTO leases (id, expires) VALUES (?, ?)", id, now + LEASE_TTL);
+
+		return id;
+	}
+
+	public release(id: string): void {
+		this.sql.exec("DELETE FROM leases WHERE id = ?", id);
 	}
 
 	/** The platform's call, when the code would have expired (begin sets it). */

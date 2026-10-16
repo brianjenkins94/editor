@@ -23,7 +23,8 @@ const mock = createServer((request, response) => {
 		}
 
 		response.setHeader("content-type", "application/json");
-		response.end("{\"ok\":true}");
+		// A slow answer, so requests to it overlap.
+		setTimeout(() => response.end("{\"ok\":true}"), request.url?.includes("/slow") === true ? 300 : 0);
 	});
 });
 
@@ -184,7 +185,12 @@ test("every write through the proxy is recorded, with what it was and GitHub's a
 test("the proxy is limited per user: 300 a minute", async () => {
 	const holder = await key();
 	const { accessToken } = await signedIn(holder);
-	const statuses = await Promise.all(Array.from({ "length": 301 }, async () => (await holder.send("GET", "/github/api/user", { "token": accessToken })).status));
+	const statuses: number[] = [];
+
+	// In batches within the in-flight cap (the next test), so it's the per-minute limit that's met.
+	for (let sent = 0; sent < 301; sent += 8) {
+		statuses.push(...await Promise.all(Array.from({ "length": Math.min(8, 301 - sent) }, async () => (await holder.send("GET", "/github/api/user", { "token": accessToken })).status)));
+	}
 
 	assert.equal(statuses.filter((status) => status === 200).length, 300);
 	assert.equal(statuses.filter((status) => status === 429).length, 1);
@@ -205,4 +211,17 @@ test("refusals at the token endpoint, and oversized requests, are recorded with 
 	assert.deepEqual(refused.slice(-2), ["no such grant", "missing, or more than one"], "an unknown grant, then a refresh with no proof");
 	assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE grant_id = ? AND event = 'auth_refused'").bind(grantId).first<{ "n": number }>())?.n, 1, "the second names its grant");
 	assert.deepEqual((await rows("oversized")).map((row) => [row.reason, row.detail]), [["header too large", "GET /me"], ["body too large", "POST /token"]]);
+});
+
+test("at most 8 proxied requests in flight per sign-in; the slots come back when the answers have streamed", async () => {
+	const holder = await key();
+	const { accessToken, grantId } = await signedIn(holder);
+	const statuses = await Promise.all(Array.from({ "length": 10 }, async () => (await holder.send("GET", "/github/api/repos/octo/slow", { "token": accessToken })).status));
+
+	assert.deepEqual(statuses.toSorted((a, b) => a - b), [...Array.from({ "length": 8 }, () => 200), 429, 429]);
+	assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE grant_id = ? AND event = 'rate_limited' AND reason = 'PROXY_CONCURRENCY'").bind(grantId).first<{ "n": number }>())?.n, 2);
+
+	const again = await Promise.all(Array.from({ "length": 8 }, async () => (await holder.send("GET", "/github/api/repos/octo/slow", { "token": accessToken })).status));
+
+	assert.deepEqual(again, Array.from({ "length": 8 }, () => 200), "all eight slots free again");
 });
