@@ -1,6 +1,6 @@
 // admin.unusuallygood.dev (packages/admin/README.md, B5): the admin app's build (packages/admin/dist) as static assets
 // only, like the editor's, so no request runs a Worker. Its `_headers` (packages/admin/public) hold its CSP: nothing
-// runs on this origin but its own files, so Cloudflare's injected analytics beacon is blocked here too.
+// runs on this origin but its own files and Cloudflare's injected Web Analytics beacon.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "admin",

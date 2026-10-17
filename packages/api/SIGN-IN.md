@@ -144,8 +144,8 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     `Attempt` (src/attempt.ts, binding `ATTEMPTS`) and answers `201 { request_uri, expires_in: 120 }`.
   - `GET /auth/start?client_id&request_uri`: opens the attempt once, within 2 minutes, for its own client; sets
     `__Host-signin` (`HttpOnly; Secure; SameSite=Lax`, 15 minutes) and goes to `/sign-in`.
-  - `/sign-in` (public/: static assets beside the Worker): our own files only (CSP `script-src 'self'`,
-    `frame-ancestors 'none'`, which also blocks Cloudflare's injected beacon there); it asks `GET /auth/attempt` what
+  - `/sign-in` (public/: static assets beside the Worker): our own files and Cloudflare's Web Analytics beacon only
+    (CSP `script-src 'self' https://static.cloudflareinsights.com`, `frame-ancestors 'none'`); it asks `GET /auth/attempt` what
     the attempt's client offers (`SIGN_IN_METHODS` in wrangler.jsonc: `github` for both clients for now).
   - `GET /auth/github`: on to GitHub with the attempt's id sealed in the state; the callback finishes the attempt only
     in the browser holding its cookie, before GitHub's code is exchanged, and clears the cookie. An attempt is spent

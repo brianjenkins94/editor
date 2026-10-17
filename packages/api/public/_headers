@@ -1,7 +1,8 @@
-# The sign-in page (SIGN-IN.md): where credentials will be typed, so nothing runs here but our own files. No framing, no
-# referrer, nothing cached. (Cloudflare's injected analytics beacon is a third-party script: this CSP blocks it.)
+# The sign-in page (SIGN-IN.md): where credentials will be typed, so nothing runs here but our own files and Cloudflare's
+# Web Analytics beacon (injected by Cloudflare, which serves this page anyway; it reports to /cdn-cgi/rum or
+# cloudflareinsights.com). No framing, no referrer, nothing cached.
 /sign-in*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   Cache-Control: no-store

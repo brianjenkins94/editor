@@ -63,9 +63,8 @@ roles allow.
 
 - `admin.unusuallygood.dev`, static files on Workers static assets like the editor (no Worker runs for page loads).
   Locally, a dev server against the dev API.
-- **Strict headers:** a CSP allowing scripts from its own origin only, `frame-ancestors 'none'`, no third-party scripts.
-- **Before it's deployed,** Cloudflare's Web Analytics beacon must be excluded from this host; it's injected zone-wide
-  today.
+- **Strict headers:** a CSP allowing scripts from its own origin and Cloudflare's Web Analytics beacon only (injected
+  zone-wide; allowed by choice, 2026-10-17: Cloudflare serves the page anyway), `frame-ancestors 'none'`.
 
 ### The admin API
 
@@ -162,9 +161,9 @@ Each lands green and is useful on its own.
 - **B5 · production.** *Built 2026-10-17:* `admin.unusuallygood.dev`, the app's build as static assets only
   (packages/site/admin.jsonc, a custom domain; no Worker runs on it), deployed by production.yml after the editor.
   Production's API has its origin in `ALLOWED_ORIGINS` and its page (`https://admin.unusuallygood.dev/`) in
-  `REDIRECT_URIS.admin`. Its `_headers` (public/) hold a CSP that allows only its own files, the API and GitHub's API
-  (for logins), so Cloudflare's injected analytics beacon can't run; Web Awesome works under `style-src 'self'`
-  (checked with `wrangler dev`: no violations). The page itself is never cached.
+  `REDIRECT_URIS.admin`. Its `_headers` (public/) hold a CSP that allows only its own files, the API, GitHub's API
+  (for logins) and Cloudflare's Web Analytics (its beacon, allowed since 2026-10-17); Web Awesome works under
+  `style-src 'self'` (checked with `wrangler dev`: no violations). The page itself is never cached.
 - **Architecture page.** A live diagram of the system (Workers, Durable Objects, D1, R2, the static hosts, GitHub,
   Cloudflare's analytics), *derived from code*: the wrangler configs, the routes and the bindings, read at build time,
   never drawn by hand. *Zero-knowledge*: it shows the shape and its live counts, never a user's data. Its own renderer,

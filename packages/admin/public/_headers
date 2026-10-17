@@ -1,8 +1,8 @@
 # The admin app (README.md, "Its own origin"): our own scripts and styles only, the API and GitHub's public API (logins,
-# looked up live) the only places it talks to, never framed, nothing referred or cached. The CSP also blocks Cloudflare's
-# injected analytics beacon on this origin.
+# looked up live) the only places it talks to, never framed, nothing referred or cached. Cloudflare's Web Analytics, which
+# Cloudflare injects zone-wide, is allowed: its beacon script and where it reports.
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.unusuallygood.dev https://api.github.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.unusuallygood.dev https://api.github.com https://cloudflareinsights.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
