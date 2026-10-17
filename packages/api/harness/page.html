@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API harness</title>
+<style>
+	:root { color-scheme: light dark; --line: color-mix(in srgb, CanvasText 15%, transparent); --added: color-mix(in srgb, #2da44e 22%, Canvas); --changed: color-mix(in srgb, #d4a72c 25%, Canvas); --removed: color-mix(in srgb, #cf222e 20%, Canvas); }
+	* { box-sizing: border-box; }
+	html, body { height: 100%; margin: 0; font: 13px/1.4 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+	body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 42%); }
+	#app { display: flex; flex-direction: column; border-right: 1px solid var(--line); min-width: 0; }
+	#app form { display: flex; gap: 6px; padding: 6px; border-bottom: 1px solid var(--line); }
+	#app input { flex: 1; font: inherit; padding: 3px 6px; }
+	#app iframe { flex: 1; border: 0; width: 100%; }
+	#pane { overflow: auto; padding: 8px 12px 24px; min-width: 0; }
+	h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 0 6px; opacity: 0.7; }
+	details { border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; }
+	summary { cursor: pointer; padding: 4px 8px; font-weight: 600; }
+	summary .count { font-weight: 400; opacity: 0.7; }
+	.scroll { overflow-x: auto; }
+	table { border-collapse: collapse; font: 12px/1.35 ui-monospace, monospace; width: 100%; }
+	th, td { text-align: left; padding: 2px 6px; border-top: 1px solid var(--line); white-space: nowrap; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; }
+	th { opacity: 0.7; font-weight: 500; }
+	tr.added { background: var(--added); }
+	tr.changed { background: var(--changed); }
+	tr.removed { background: var(--removed); text-decoration: line-through; }
+	.when { font: 12px ui-monospace, monospace; opacity: 0.7; }
+	.empty { opacity: 0.6; padding: 4px 8px; }
+	#status { float: right; font-size: 12px; opacity: 0.7; }
+</style>
+</head>
+<body>
+<section id="app">
+	<form id="target"><input name="app" aria-label="App URL" placeholder="App URL"><button>Open</button></form>
+	<iframe id="frame" title="App"></iframe>
+</section>
+<section id="pane">
+	<span id="status"></span>
+	<h2>Changes</h2>
+	<div id="log"><p class="empty">Nothing written yet. Use the app and its writes appear here.</p></div>
+	<h2>Stored now</h2>
+	<div id="state"></div>
+</section>
+<script type="module">
+	// The app beside the state: ?app= (default the admin app's dev server), remembered in the address bar.
+	const params = new URLSearchParams(location.search);
+	const app = params.get("app") ?? "http://localhost:5174/";
+	const frame = document.querySelector("#frame");
+	const input = document.querySelector("#target input");
+
+	input.value = app;
+	frame.src = app;
+	document.querySelector("#target").addEventListener("submit", (event) => {
+		event.preventDefault();
+		params.set("app", input.value);
+		history.replaceState(null, "", `?${params}`);
+		frame.src = input.value;
+	});
+
+	const text = (value) => (value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : String(value));
+
+	/** A table of rows, each with an optional class (added, changed, removed). */
+	function table(rows) {
+		const columns = [...new Set(rows.flatMap(({ row }) => Object.keys(row)))];
+		const element = document.createElement("table");
+		const head = element.createTHead().insertRow();
+
+		for (const column of columns) {
+			head.append(Object.assign(document.createElement("th"), { "textContent": column }));
+		}
+
+		const body = element.createTBody();
+
+		for (const { row, kind } of rows) {
+			const tr = body.insertRow();
+
+			tr.className = kind ?? "";
+
+			for (const column of columns) {
+				const td = tr.insertCell();
+
+				td.textContent = text(row[column]);
+				td.title = td.textContent;
+			}
+		}
+
+		const wrapper = Object.assign(document.createElement("div"), { "className": "scroll" });
+
+		wrapper.append(element);
+
+		return wrapper;
+	}
+
+	function section(title, count, content, open) {
+		const details = document.createElement("details");
+		const summary = document.createElement("summary");
+
+		summary.append(title, " ", Object.assign(document.createElement("span"), { "className": "count", "textContent": count }));
+		details.append(summary, content);
+		details.open = open;
+
+		return details;
+	}
+
+	const opened = new Set();
+
+	function render({ state, log }) {
+		const logElement = document.querySelector("#log");
+
+		if (log.length > 0) {
+			logElement.replaceChildren(...log.slice(0, 30).map(({ at, changes }, index) => {
+				const rows = Object.entries(changes).flatMap(([collection, change]) => [
+					...change.added.map((row) => ({ "row": { "collection": collection, ...row }, "kind": "added" })),
+					...change.changed.map(({ after }) => ({ "row": { "collection": collection, ...after }, "kind": "changed" })),
+					...change.removed.map((row) => ({ "row": { "collection": collection, ...row }, "kind": "removed" }))
+				]);
+				const counts = Object.entries(changes).map(([collection, change]) => `${collection} +${change.added.length} ~${change.changed.length} -${change.removed.length}`).join(" · ");
+				const title = Object.assign(document.createElement("span"), { "className": "when", "textContent": new Date(at).toLocaleTimeString() });
+
+				return section(title, counts, table(rows), index === 0);
+			}));
+		}
+
+		document.querySelector("#state").replaceChildren(...Object.entries(state).map(([collection, rows]) => {
+			const details = section(collection, `${Object.keys(rows).length}`, table(Object.values(rows).map((row) => ({ row }))), opened.has(collection));
+
+			details.addEventListener("toggle", () => (details.open ? opened.add(collection) : opened.delete(collection)));
+
+			return details;
+		}));
+	}
+
+	async function poll() {
+		try {
+			render(await (await fetch("/__harness/state")).json());
+			document.querySelector("#status").textContent = `read ${new Date().toLocaleTimeString()}`;
+		} catch (error) {
+			document.querySelector("#status").textContent = `not reachable: ${error.message}`;
+		}
+
+		setTimeout(poll, 1000);
+	}
+
+	poll();
+</script>
+</body>
+</html>

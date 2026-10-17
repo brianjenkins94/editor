@@ -130,7 +130,10 @@ used, refused and removed, recovery codes used, links made. All of them alarm-wo
 
 Each lands green, tested in workerd, and is tried on the admin app before the next.
 
-- **C0 · a local debug harness** (modeled on sms-reference-app's): `npm run harness` in packages/api runs the API in
+- **C0 · a local debug harness.** *Built 2026-10-17* (`harness/`): `npm run harness`, then
+  `http://localhost:8787/__harness`; `recorded()` in `harness/state.ts`, first used by `test/harness.test.ts`. GitHub
+  sign-in through it needs the dev app's `GITHUB_CLIENT_SECRET` in `.dev.vars` (gitignored).
+  Modeled on sms-reference-app's: `npm run harness` in packages/api runs the API in
   Wrangler's test harness and serves a page with an app in an iframe beside a live, redacted view of everything stored:
   D1's tables, each Durable Object's storage (Grants, attempts), the R2 audit copies, the audit log's tail, with what
   changed since the last look highlighted. It adds no routes to the Worker, so nothing of it can be deployed. The same

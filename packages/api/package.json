@@ -21,6 +21,7 @@
     "deploy:dev": "wrangler deploy --env dev",
     "test": "node --test --test-force-exit \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "audit": "node scripts/audit.ts"
+    "audit": "node scripts/audit.ts",
+    "harness": "node harness/harness.ts"
   }
 }

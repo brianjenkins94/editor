@@ -22,6 +22,13 @@
 			"url": "http://localhost:5175"
 		},
 		{
+			"name": "api-harness",
+			"runtimeExecutable": "sh",
+			"runtimeArgs": ["-c", "cd packages/api && exec npm run harness"],
+			"port": 8787,
+			"url": "http://localhost:8787"
+		},
+		{
 			"name": "site-editor",
 			"runtimeExecutable": "sh",
 			"runtimeArgs": ["-c", "cd packages/site && exec npx wrangler dev --config editor.jsonc --port 8790"],
