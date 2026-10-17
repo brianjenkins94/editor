@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GitHub stand-in</title>
+<style>
+	body { font: 15px system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+	main { display: grid; gap: 10px; max-width: 26rem; }
+	a { padding: 10px 14px; border: 1px solid #888; border-radius: 8px; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+	<h1>GitHub stand-in</h1>
+	<p>The harness's GitHub (no client secret in .dev.vars). Sign in as:</p>
+	<a href="{{owner.href}}">{{owner.login}} ({{owner.id}}): the owner</a>
+	<a href="{{someone.href}}">{{someone.login}} ({{someone.id}}): someone else</a>
+	<a href="{{cancel.href}}">Cancel</a>
+</main>
+</body>
+</html>

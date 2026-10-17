@@ -4,6 +4,8 @@
  * exchange, a refresh, /user, an authorization revoked) as GitHub would. Used when `.dev.vars` has no
  * GITHUB_CLIENT_SECRET; with one, the harness talks to the real GitHub through the dev GitHub App.
  */
+import * as fs from "@brianjenkins94/util/fs";
+import { escapeHtml } from "@brianjenkins94/util/text";
 import { createServer } from "node:http";
 
 /** Who the stand-in signs in as: GitHub user ids and logins. */
@@ -39,13 +41,15 @@ export function githubStandIn(port: number, owner: Person): Promise<string> {
 				};
 				const someone = { "id": 1_000_000 + Math.floor(Math.random() * 1e9), "login": `someone-${Math.floor(Math.random() * 1e4)}` };
 
+				const cancel = new URL(url.searchParams.get("redirect_uri") ?? "");
+
+				cancel.search = new URLSearchParams({ "error": "access_denied", "state": url.searchParams.get("state") ?? "" }).toString();
+
+				// github.html, its {{placeholders}} filled (HTML-escaped; they're ours, but a login could be anything).
+				const fill: Record<string, string> = { "owner.href": back(owner), "owner.login": owner.login, "owner.id": String(owner.id), "someone.href": back(someone), "someone.login": someone.login, "someone.id": String(someone.id), "cancel.href": cancel.href };
+
 				response.setHeader("content-type", "text/html; charset=utf-8");
-				response.end(`<!doctype html><meta charset="utf-8"><title>GitHub stand-in</title>
-<style>body{font:15px system-ui;display:grid;place-items:center;min-height:100vh;margin:0}main{display:grid;gap:10px;max-width:26rem}a{padding:10px 14px;border:1px solid #888;border-radius:8px;text-decoration:none}</style>
-<main><h1>GitHub stand-in</h1><p>The harness's GitHub (no client secret in .dev.vars). Sign in as:</p>
-<a href="${back(owner)}">${owner.login} (${owner.id}): the owner</a>
-<a href="${back(someone)}">${someone.login} (${someone.id}): someone else</a>
-<a href="${url.searchParams.get("redirect_uri")}?error=access_denied&state=${encodeURIComponent(url.searchParams.get("state") ?? "")}">Cancel</a></main>`);
+				response.end(fs.readFileSync(new URL("github.html", import.meta.url).pathname, { "encoding": "utf-8" }).replace(/\{\{([\w.]+)\}\}/gu, (_, key: string) => escapeHtml(fill[key] ?? "")));
 
 				return;
 			}
