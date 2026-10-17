@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { ROUTINE } from "./audit-copies.ts";
 import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
+import { mailEndpoint } from "./mail-report.ts";
 import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
 import { adminSession } from "./tokens.ts";
@@ -123,6 +124,9 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
+
+/** What our email did (src/mail-report.ts): codes sent, delivered and not, sign-ins by email, refusals; counts only. */
+admin.get("/mail", requires("mail:read"), mailEndpoint);
 
 /** The API as it runs, described by itself (src/architecture.ts): routes, stores and their tables, counts. */
 admin.get("/architecture", requires("architecture:read"), architectureEndpoint);

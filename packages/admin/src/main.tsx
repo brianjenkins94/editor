@@ -21,6 +21,7 @@ import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { ArchitecturePage } from "./architecture";
 import { loginOf } from "./logins";
+import { MailPage } from "./mail";
 import { get, session, SIGNED_OUT } from "./session";
 import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
 
@@ -96,6 +97,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 					: path === "/traffic" ? <TrafficPage query={query} />
 						: path === "/unusual" ? <UnusualPage />
 							: path === "/architecture" ? <ArchitecturePage query={query} />
+								: path === "/mail" ? <MailPage query={query} />
 								: <Overview />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 
@@ -121,6 +123,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/sessions", "Sign-ins", path === "/sessions")}
 				{link("#/audit", "Audit log", path === "/audit")}
 				{link("#/unusual", "Unusual", path === "/unusual")}
+				{link("#/mail", "Mail", path === "/mail")}
 				{link("#/traffic", "Traffic", path === "/traffic")}
 				{link("#/architecture", "Architecture", path === "/architecture")}
 			</nav>

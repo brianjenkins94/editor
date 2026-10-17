@@ -34,7 +34,7 @@ roles allow.
 ### Roles and permissions
 
 - **Permissions** are fixed strings in code (`src/rbac.ts` in packages/api): `users:read`, `sessions:read`,
-  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, `behavior:read`, `architecture:read`, and later `org:members:read`, `org:members:write`,
+  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, `behavior:read`, `architecture:read`, `mail:read`, and later `org:members:read`, `org:members:write`,
   `org:roles:write`.
 - **Roles** map to permissions, also in code, so what a role can do is reviewed like any other change:
   - `owner`: every platform permission.
@@ -83,6 +83,7 @@ route table doubles as the access-control table.
 | `GET /admin/traffic` | `traffic:read` | Cloudflare's analytics, through the API's own read-only token |
 | `GET /admin/unusual` | `behavior:read` | sign-ins by their score, with their most surprising steps and flags (B9) |
 | `GET /admin/architecture` | `architecture:read` | the API as it runs: routes, stores and their tables with counts, its calls |
+| `GET /admin/mail` | `mail:read` | what our email did: codes sent, delivered and not, sign-ins by email, refusals; counts by day and reason |
 
 - **Every admin request is audited** (`admin_access`: route, and whose data), kept 365 days. Who looked at a user's data
   is itself part of the security record.
@@ -170,6 +171,18 @@ Each lands green and is useful on its own.
   proxy's allowlist (new features tolerated by construction), probes of routes that don't exist, a header fingerprint
   per sign-in compared on every request (changed, omitted, added; additions and browser updates tolerated), then a
   likely-next-action model and an Unusual page. Zero-knowledge: templates, header names, counts and keyed hashes only.
+- **Mail page.** *Built 2026-10-17* (`GET /admin/mail?days=`, `mail:read`; packages/api/src/mail-report.ts; src/mail.tsx
+  here). What our email did, from two records side by side: ours (the audit log: codes sent, sign-ins by email, and
+  every refusal on the way, by reason, Email Service's own error codes among them) and Cloudflare's (Email Service's
+  analytics, `emailSendingAdaptiveGroups` with each email's last event, through the read-only analytics token):
+  delivered or not, why, and SPF, DKIM and DMARC. By day for the last 7, 14 or 30 days. Counts only, never an address.
+  Cloudflare's records are the zone's, dev's and production's together; a local API has none (it sends to an outbox).
+  The suppression list isn't shown: reading it needs an Email Sending Edit token. Tested in workerd (test/admin.test.ts);
+  tried with the harness.
+- **Next: an inbox, and the email smoke test.** Email Routing for a few addresses of our own (`smoke-test@`, perhaps
+  DMARC reports) to the API Worker's `email` handler, kept a day, shown on an Inbox page; then a scheduled check that
+  signs in by email against production with the smoke-test address, reads the code from our own inbox and finishes
+  the sign-in: real delivery, DNS and the whole flow, with no person's inbox. Writing to users from admin: not planned.
 - **Architecture page.** *Built 2026-10-17.* A live diagram of the system, *derived from code* in two halves, each
   from what's authoritative for it:
   - **The deployment as configured** (deployment.ts, a Vite plugin: `virtual:deployment`): every wrangler config

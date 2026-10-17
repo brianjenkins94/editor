@@ -114,7 +114,7 @@ function When({ at }: { "at": number | null }) {
 
 const short = (id: string | null | undefined): string => (typeof id === "string" ? `${id.slice(0, 8)}…` : "");
 
-function Table({ head, children }: { "head": string[]; "children": ComponentChildren }) {
+export function Table({ head, children }: { "head": string[]; "children": ComponentChildren }) {
 	return (
 		<div class="table">
 			<table class="wa-zebra-rows wa-hover-rows">

@@ -18,7 +18,7 @@ const secrets = {
 	"AUDIT_KEY": "audit key for the tests",
 	"STATE_KEY": base64url.encode(crypto.getRandomValues(new Uint8Array(32)))
 };
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } }] });
+const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9", "CLOUDFLARE_API": "http://127.0.0.1:9" } }] });
 const worker = server.getWorker();
 let base: URL;
 let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };
@@ -198,11 +198,11 @@ test("every read endpoint is refused without its permission: 403, recorded with 
 	const holder = await browser();
 	const { access_token, grantId } = await signedIn(holder, someone(), "admin");
 
-	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit", "/admin/unusual", "/admin/architecture"]) {
+	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit", "/admin/unusual", "/admin/architecture", "/admin/mail"]) {
 		assert.equal((await holder.send("GET", path, { "accessToken": access_token })).status, 403, path);
 	}
 
-	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read", "lacks behavior:read", "lacks architecture:read"]);
+	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read", "lacks behavior:read", "lacks architecture:read", "lacks mail:read"]);
 });
 
 test("/admin/users and /admin/users/:id: who's signed up, their sign-ins with their client, and their audit rows", async () => {
@@ -376,4 +376,30 @@ test("/admin/architecture: the API describes itself from its code: its routes, i
 	assert.ok(described.proxied.some((call) => call.call === "GET /repos/:owner/:repo/git/trees/:ref"));
 	assert.ok(described.clients.includes("http://localhost:5174"));
 	assert.equal(JSON.stringify(described).includes(String(OWNER)), false, "no one's data");
+});
+
+// ── The Mail page ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("/admin/mail: by day, codes sent, sign-ins by email and refusals, and the refusals by reason; Cloudflare's side says why it's missing", async () => {
+	const holder = await browser();
+	const { access_token } = await signedIn(holder, OWNER, "admin");
+	const now = Date.now();
+
+	await env.DB.batch([
+		env.DB.prepare("INSERT INTO audit (at, event, detail) VALUES (?, 'email_code_sent', 'hash'), (?, 'email_code_sent', 'hash')").bind(now, now),
+		env.DB.prepare("INSERT INTO audit (at, event, reason) VALUES (?, 'login', 'email'), (?, 'login', 'github')").bind(now, now),
+		env.DB.prepare("INSERT INTO audit (at, event, reason) VALUES (?, 'sign_in_refused', 'email: code wrong'), (?, 'sign_in_refused', 'email: code wrong'), (?, 'sign_in_refused', 'email: not sent: E_RECIPIENT_SUPPRESSED'), (?, 'sign_in_refused', 'request_uri expired')").bind(now, now, now, now)
+	]);
+
+	const mail = await (await holder.send("GET", "/admin/mail?days=3", { "accessToken": access_token })).json() as { "window": { "days": number }; "days": { "day": string; "sent": number; "signedIn": number; "refused": number }[]; "refusals": { "reason": string; "count": number }[]; "cloudflare": { "error"?: string } };
+	const today = mail.days.at(-1);
+
+	assert.equal(mail.window.days, 3);
+	assert.equal(mail.days.length, 3);
+	assert.equal(today?.day, new Date(now).toISOString().slice(0, 10));
+	assert.ok((today?.sent ?? 0) >= 2 && (today?.signedIn ?? 0) >= 1 && (today?.refused ?? 0) >= 3);
+	assert.ok(mail.refusals.some((row) => row.reason === "code wrong" && row.count >= 2));
+	assert.ok(mail.refusals.some((row) => row.reason === "not sent: E_RECIPIENT_SUPPRESSED"));
+	assert.equal(mail.refusals.some((row) => row.reason.includes("request_uri")), false, "email's refusals only");
+	assert.match(mail.cloudflare.error ?? "", /local API/u, "a local API's mail isn't Cloudflare's: why its side is missing");
 });
