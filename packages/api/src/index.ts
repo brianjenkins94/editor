@@ -6,7 +6,7 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
-import { deleteAccountEndpoint, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
+import { deleteAccountEndpoint, purge, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
 import { admin } from "./admin.ts";
 import { audit, expire, origin } from "./audit.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
@@ -146,10 +146,14 @@ app.onError((error, context) => {
 
 export default {
 	"fetch": app.fetch,
-	// Daily (wrangler.jsonc's cron trigger): the audit log's retention (audit.ts).
+	// Daily (wrangler.jsonc's cron trigger): the audit log's retention (audit.ts), and deleted accounts past their grace
+	// period purged (account.ts).
 	"scheduled": async (_controller, env, context) => {
 		context.waitUntil(log.span("audit.expire", {}, async () => {
 			await expire(env.DB);
+		}));
+		context.waitUntil(log.span("account.purge", {}, async () => {
+			await purge(env);
 		}));
 	}
 } satisfies ExportedHandler<AppEnv["Bindings"]>;

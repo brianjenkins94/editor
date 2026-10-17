@@ -93,8 +93,8 @@ plus cold starts), Fly.io (a real server to run and patch). None beats Workers h
 
 | Data | Where | Why | Retention |
 |---|---|---|---|
-| GitHub numeric user id | D1 `users` | stable identity (logins can be renamed) | until account deletion |
-| our user id (random) | D1 `users` | what everything else (grants, later Stripe) keys on | until account deletion |
+| GitHub numeric user id | D1 `users` | stable identity (logins can be renamed) | until 30 days after account deletion |
+| our user id (random) | D1 `users` | what everything else (grants, later Stripe) keys on | until 30 days after account deletion |
 | GitHub user access + refresh token | Grant DO, **AES-GCM encrypted** with a key from a Worker secret (with a key id, so it can rotate) | to call GitHub for the user | until sign-out, refresh expiry, or deletion |
 | our refresh-token family, hashed | Grant DO | rotation + reuse detection | lifetime of the grant |
 | grants index (grant id, user id, created, last used, coarse device label) | D1 `grants` | "your sessions", sign out everywhere | lifetime of the grant |
@@ -104,10 +104,16 @@ We **don't** store login name, avatar, email, or raw IPs. Login and avatar are f
 Audit rows carry country (from Cloudflare) and an IP hash salted per day, which is enough to spot abuse but can't
 be reversed into an address.
 
-**Account deletion** (built 2026-10-15, `POST /account/delete`): revoke the GitHub App's authorization for the user
-(`DELETE /applications/{client_id}/grant`), end every grant and erase its storage, and delete the user's D1 rows. The
-audit log keeps its rows with the user's id removed: what happened stays on record (it's the security record), but
-no longer whom it happened to.
+**Account deletion** (built 2026-10-15; soft since 2026-10-17, `POST /account/delete`, src/account.ts): everything
+stops at once: the GitHub App's authorization is revoked for the user (`DELETE /applications/{client_id}/grant`) and
+every grant ends. The account is marked deleted (`users.deleted_at`, migrations/0005) and kept **30 days**, when
+signing in again restores it (`account_restored`). After that, the daily cron purges it (`purge`, `account_purged`):
+each grant's storage erased and the user's D1 rows deleted. The audit log keeps its rows with the user's id removed:
+what happened stays on record (it's the security record), but no longer whom it happened to.
+
+Only account deletion is soft. What expires is kept as it is: the audit log's retention (90 days and a year, with its
+locked R2 copies), sign-in attempts (15 minutes), and each grant's short-lived caches (spent proofs, the probe window,
+in-flight leases) are expiry, not anyone deleting something.
 
 ### Tokens and the flow
 

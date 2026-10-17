@@ -40,16 +40,16 @@ const limitOf = (value: string | undefined, fallback: number, max: number): numb
 /** Every user: our id, GitHub's id (the app looks the login up live; it isn't stored), when they joined, how many live
  *  sign-ins they have, and when they were last seen. Most recently seen first. */
 admin.get("/users", requires("users:read"), async (context) => {
-	const { results } = await context.env.DB.prepare(`SELECT u.id, u.github_id, u.created_at, SUM(CASE WHEN g.id IS NOT NULL AND g.revoked_at IS NULL THEN 1 ELSE 0 END) AS live, MAX(g.last_used_at) AS last_seen
-		FROM users u LEFT JOIN grants g ON g.user_id = u.id GROUP BY u.id ORDER BY last_seen IS NULL, last_seen DESC LIMIT ?`).bind(limitOf(context.req.query("limit"), 200, 1000)).all<{ "id": string; "github_id": number; "created_at": number; "live": number; "last_seen": number | null }>();
+	const { results } = await context.env.DB.prepare(`SELECT u.id, u.github_id, u.created_at, u.deleted_at, SUM(CASE WHEN g.id IS NOT NULL AND g.revoked_at IS NULL THEN 1 ELSE 0 END) AS live, MAX(g.last_used_at) AS last_seen
+		FROM users u LEFT JOIN grants g ON g.user_id = u.id GROUP BY u.id ORDER BY last_seen IS NULL, last_seen DESC LIMIT ?`).bind(limitOf(context.req.query("limit"), 200, 1000)).all<{ "id": string; "github_id": number; "created_at": number; "deleted_at": number | null; "live": number; "last_seen": number | null }>();
 
-	return context.json({ "users": results.map((row) => ({ "id": row.id, "githubId": row.github_id, "createdAt": row.created_at, "liveSessions": row.live, "lastSeenAt": row.last_seen })) });
+	return context.json({ "users": results.map((row) => ({ "id": row.id, "githubId": row.github_id, "createdAt": row.created_at, "deletedAt": row.deleted_at, "liveSessions": row.live, "lastSeenAt": row.last_seen })) });
 });
 
 /** One user: the same, every sign-in they've had (live and ended, with its client), and their latest audit rows. */
 admin.get("/users/:id", requires("users:read"), async (context) => {
 	const id = context.req.param("id");
-	const user = await context.env.DB.prepare("SELECT id, github_id, created_at FROM users WHERE id = ?").bind(id).first<{ "id": string; "github_id": number; "created_at": number }>();
+	const user = await context.env.DB.prepare("SELECT id, github_id, created_at, deleted_at FROM users WHERE id = ?").bind(id).first<{ "id": string; "github_id": number; "created_at": number; "deleted_at": number | null }>();
 
 	if (user === null) {
 		return context.json({ "error": "not_found" }, 404);
@@ -61,7 +61,7 @@ admin.get("/users/:id", requires("users:read"), async (context) => {
 	]);
 
 	return context.json({
-		"user": { "id": user.id, "githubId": user.github_id, "createdAt": user.created_at },
+		"user": { "id": user.id, "githubId": user.github_id, "createdAt": user.created_at, "deletedAt": user.deleted_at },
 		"sessions": (sessions?.results ?? []).map(session),
 		"audit": (rows?.results ?? []).map(auditRow)
 	});

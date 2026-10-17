@@ -165,35 +165,76 @@ test("signing out everywhere ends every one of your sessions, this one included 
 	assert.equal((await someoneElse.call("GET", "/me")).status, 200);
 });
 
-test("deleting the account: GitHub's authorization revoked, every session ended and erased, nothing left pointing at you", async () => {
+const userOf = async (grantId: string): Promise<string> => (await env.DB.prepare("SELECT user_id FROM grants WHERE id = ?").bind(grantId).first<{ "user_id": string }>())?.user_id as string;
+
+test("deleting the account is soft: GitHub's authorization revoked and every session ended at once, the account kept for 30 days", async () => {
 	const me = user();
 	const laptop = await signIn(me, "Chrome on macOS");
 	const phone = await signIn(me, "Safari on iOS");
 	const someoneElse = await signIn(user(), "Chrome on Windows");
-	const userId = (await env.DB.prepare("SELECT user_id FROM grants WHERE id = ?").bind(laptop.grantId).first<{ "user_id": string }>())?.user_id as string;
+	const userId = await userOf(laptop.grantId);
 
 	assert.equal((await laptop.call("POST", "/account/delete", {})).status, 400, "not without confirm=delete");
 
 	const before = revoked.length;
 	const deleted = await laptop.call("POST", "/account/delete", { "confirm": "delete" });
+	const answer = await deleted.json() as { "deleted": boolean; "githubAuthorizationRevoked": boolean; "purgeAfter": number };
 
-	assert.deepEqual(await deleted.json(), { "deleted": true, "githubAuthorizationRevoked": true });
+	assert.deepEqual([answer.deleted, answer.githubAuthorizationRevoked], [true, true]);
+	assert.ok(Math.abs(answer.purgeAfter - (Date.now() + 30 * 86_400_000)) < 60_000, "purged in 30 days");
 	assert.deepEqual(revoked.slice(before)[0], { "url": "/applications/Iv23ligdisoL7OPTVtXm/grant", "authorization": `Basic ${btoa(`Iv23ligdisoL7OPTVtXm:${secrets.GITHUB_CLIENT_SECRET}`)}`, "body": JSON.stringify({ "access_token": laptop.githubToken }) });
 
-	// Nothing points at the user: no user, no grants, the audit log's rows without their id.
-	assert.equal(await env.DB.prepare("SELECT 1 FROM users WHERE id = ?").bind(userId).first(), null);
-	assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM grants WHERE user_id = ?").bind(userId).first<{ "n": number }>())?.n, 0);
-	assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE user_id = ?").bind(userId).first<{ "n": number }>())?.n, 0);
-	assert.ok(((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE grant_id IN (?, ?)").bind(laptop.grantId, phone.grantId).first<{ "n": number }>())?.n ?? 0) > 0, "what happened is still recorded");
-	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'account_deleted' AND grant_id = ?").bind(laptop.grantId).first<{ "reason": string }>())?.reason, "GitHub authorization revoked");
+	// Marked, not gone: the user and their sign-ins (each ended), and the audit log still says whose rows are whose.
+	assert.equal(typeof (await env.DB.prepare("SELECT deleted_at FROM users WHERE id = ?").bind(userId).first<{ "deleted_at": number | null }>())?.deleted_at, "number");
+	assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM grants WHERE user_id = ? AND revoked_at IS NOT NULL").bind(userId).first<{ "n": number }>())?.n, 2);
+	assert.ok(((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE user_id = ?").bind(userId).first<{ "n": number }>())?.n ?? 0) > 0);
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'account_deleted' AND user_id = ?").bind(userId).first<{ "reason": string }>())?.reason, "GitHub authorization revoked");
 
-	// Each Grant's storage is erased, and a token still held meets a sign-in that's over.
+	// Every session is over at once, its Grant's state kept (revoked) until the purge.
 	for (const session of [laptop, phone]) {
 		const storage = await worker.getDurableObjectStorage("GRANTS", { "id": session.grantId });
 
-		assert.deepEqual(await storage.exec("SELECT * FROM state"), []);
+		assert.equal((await storage.exec("SELECT revoked_at FROM state") as { "revoked_at": number | null }[])[0]?.revoked_at !== null, true);
 		assert.equal((await session.call("GET", "/me")).status, 401);
 	}
 
 	assert.equal((await someoneElse.call("GET", "/me")).status, 200);
+});
+
+test("signing in again within the 30 days restores the account: the same user, recorded", async () => {
+	const me = user();
+	const first = await signIn(me, "Chrome on macOS");
+	const userId = await userOf(first.grantId);
+
+	await first.call("POST", "/account/delete", { "confirm": "delete" });
+
+	const again = await signIn(me, "Chrome on macOS");
+
+	assert.equal(await userOf(again.grantId), userId, "the same account, not a new one");
+	assert.equal((await env.DB.prepare("SELECT deleted_at FROM users WHERE id = ?").bind(userId).first<{ "deleted_at": number | null }>())?.deleted_at, null);
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'account_restored' AND user_id = ?").bind(userId).first<{ "reason": string }>())?.reason, "signed in within the grace period");
+	assert.equal((await again.call("GET", "/me")).status, 200);
+});
+
+test("after 30 days the daily cron purges it: storage erased, rows deleted, nothing left pointing at the user", async () => {
+	const me = user();
+	const laptop = await signIn(me, "Chrome on macOS");
+	const kept = await signIn(user(), "Chrome on Windows");
+	const userId = await userOf(laptop.grantId);
+
+	await laptop.call("POST", "/account/delete", { "confirm": "delete" });
+	await worker.scheduled({ "cron": "17 3 * * *" });
+	assert.ok(await env.DB.prepare("SELECT 1 FROM users WHERE id = ?").bind(userId).first() !== null, "not before its 30 days");
+
+	await env.DB.prepare("UPDATE users SET deleted_at = ? WHERE id = ?").bind(Date.now() - 31 * 86_400_000, userId).run();
+	await worker.scheduled({ "cron": "17 3 * * *" });
+
+	assert.equal(await env.DB.prepare("SELECT 1 FROM users WHERE id = ?").bind(userId).first(), null);
+	assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM grants WHERE user_id = ?").bind(userId).first<{ "n": number }>())?.n, 0);
+	assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE user_id = ?").bind(userId).first<{ "n": number }>())?.n, 0);
+	assert.ok(((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit WHERE grant_id = ?").bind(laptop.grantId).first<{ "n": number }>())?.n ?? 0) > 0, "what happened is still recorded");
+	assert.deepEqual(await (await worker.getDurableObjectStorage("GRANTS", { "id": laptop.grantId })).exec("SELECT * FROM state"), []);
+	assert.equal((await laptop.call("GET", "/me")).status, 401, "a token still held meets a sign-in that's over");
+	assert.ok((await env.DB.prepare("SELECT 1 FROM audit WHERE event = 'account_purged' AND detail = '1 sign-in(s) erased'").first()) !== null);
+	assert.equal((await kept.call("GET", "/me")).status, 200, "nobody else's");
 });

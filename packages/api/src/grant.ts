@@ -131,8 +131,14 @@ export class Grant extends DurableObject<Bindings> {
 
 		await this.env.DB.prepare("INSERT INTO users (id, github_id, created_at) VALUES (?, ?, ?) ON CONFLICT (github_id) DO NOTHING").bind(crypto.randomUUID(), githubId, now).run();
 
-		const user = await this.env.DB.prepare("SELECT id FROM users WHERE github_id = ?").bind(githubId).first<{ "id": string }>();
+		const user = await this.env.DB.prepare("SELECT id, deleted_at FROM users WHERE github_id = ?").bind(githubId).first<{ "id": string; "deleted_at": number | null }>();
 		const userId = user?.id as string;
+
+		// Signing in again within the grace period of a deletion restores the account (account.ts, GRACE_DAYS).
+		if (user?.deleted_at !== null && user?.deleted_at !== undefined) {
+			await this.env.DB.prepare("UPDATE users SET deleted_at = NULL WHERE id = ?").bind(userId).run();
+			await audit(this.env, "account_restored", { "userId": userId, "grantId": this.id }, from, { "reason": "signed in within the grace period" });
+		}
 
 		await this.env.DB.prepare("INSERT INTO grants (id, user_id, created_at, last_used_at, label, client) VALUES (?, ?, ?, ?, ?, ?)").bind(this.id, userId, now, now, label ?? null, client).run();
 
@@ -363,7 +369,7 @@ export class Grant extends DurableObject<Bindings> {
 		}
 	}
 
-	/** For account deletion: the sign-in ended, then everything this object kept erased. Its tables are made again, empty,
+	/** For an account's purge (account.ts): the sign-in ended, then everything this object kept erased. Its tables are made again, empty,
 	 *  so a token still in someone's hands meets a sign-in that's over rather than an error. */
 	public async forget({ from }: { "from": Origin }): Promise<void> {
 		await this.revoke({ "from": from, "reason": "account deleted" });

@@ -754,7 +754,7 @@ function Shell() {
 		setGithubUser(undefined);
 		setMySessions(undefined);
 
-		return githubAuthorizationRevoked ? "Your account is deleted, and the editor's GitHub App no longer has access." : "Your account is deleted. GitHub didn't confirm the app's access ended: remove it under GitHub's Settings → Applications.";
+		return githubAuthorizationRevoked ? "Your account is deleted, and the editor's GitHub App no longer has access. Sign in within 30 days to bring it back; after that it's gone for good." : "Your account is deleted. GitHub didn't confirm the app's access ended: remove it under GitHub's Settings → Applications.";
 	}, "Couldn't delete the account.");
 
 	// Sign out: the session ends at the API (and GitHub's token with it), and this browser forgets its key.
@@ -1131,7 +1131,7 @@ function Shell() {
 						{confirmingDelete
 							? (
 								<>
-									<span class={ghError()}>Deleting your account ends every session, takes away the editor's GitHub App's access, and leaves nothing we keep pointing at you. Your repositories on GitHub aren't touched.</span>
+									<span class={ghError()}>Deleting your account ends every session at once and takes away the editor's GitHub App's access. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you. Your repositories on GitHub aren't touched.</span>
 
 									<div class={ghActions()}>
 										<wa-button variant="danger" size="small" disabled={githubBusy} onClick={() => { void deleteAccount(); }}>Delete my account</wa-button>

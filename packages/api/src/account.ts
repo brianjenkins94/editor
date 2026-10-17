@@ -1,6 +1,6 @@
 import type { Context } from "hono";
-import type { AppEnv } from "./env.ts";
-import { audit, origin } from "./audit.ts";
+import type { AppEnv, Bindings } from "./env.ts";
+import { audit, NOWHERE, origin } from "./audit.ts";
 
 /**
  * Your sessions, and your account (README.md, "Identity and the data we keep"), all behind `session`: the signed-in user
@@ -57,10 +57,15 @@ export async function revokeAllEndpoint(context: Context<AppEnv>): Promise<Respo
 	return context.json({ "revoked": results.length });
 }
 
+/** How long a deleted account is kept, restorable by signing in again, before the daily cron purges it. */
+export const GRACE_DAYS = 30;
+
+const GRACE = GRACE_DAYS * 86_400_000;
+
 /**
- * POST /account/delete, with `confirm=delete`: the GitHub App's authorization revoked at GitHub, every sign-in ended and
- * its Grant's storage erased, the user's `users` and `grants` rows deleted, and their id taken off the audit log —
- * which keeps what happened (it's the security record), but no longer who it happened to.
+ * POST /account/delete, with `confirm=delete`: soft. Everything stops at once (the GitHub App's authorization revoked
+ * at GitHub, every sign-in ended), and the account is marked deleted. For GRACE_DAYS, signing in again restores it
+ * (Grant.begin); after that, `purge` erases it.
  */
 export async function deleteAccountEndpoint(context: Context<AppEnv>): Promise<Response> {
 	if ((await context.req.parseBody())["confirm"] !== "delete") {
@@ -69,19 +74,42 @@ export async function deleteAccountEndpoint(context: Context<AppEnv>): Promise<R
 
 	const user = context.get("user");
 	const from = await origin(context);
+	const now = Date.now();
 	const deauthorized = await grant(context, context.get("grant")).deauthorize();
-	const { results } = await context.env.DB.prepare("SELECT id FROM grants WHERE user_id = ?").bind(user).all<{ "id": string }>();
+	const { results } = await context.env.DB.prepare("SELECT id FROM grants WHERE user_id = ? AND revoked_at IS NULL").bind(user).all<{ "id": string }>();
 
 	for (const { id } of results) {
-		await grant(context, id).forget({ "from": from });
+		await grant(context, id).revoke({ "from": from, "reason": "account deleted" });
 	}
 
-	await context.env.DB.batch([
-		context.env.DB.prepare("DELETE FROM grants WHERE user_id = ?").bind(user),
-		context.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user),
-		context.env.DB.prepare("UPDATE audit SET user_id = NULL WHERE user_id = ?").bind(user)
-	]);
-	await audit(context.env, "account_deleted", { "grantId": context.get("grant") }, from, { "reason": deauthorized ? "GitHub authorization revoked" : "GitHub authorization not revoked: no working GitHub token" });
+	await context.env.DB.prepare("UPDATE users SET deleted_at = ? WHERE id = ?").bind(now, user).run();
+	await audit(context.env, "account_deleted", { "userId": user, "grantId": context.get("grant") }, from, { "reason": deauthorized ? "GitHub authorization revoked" : "GitHub authorization not revoked: no working GitHub token", "detail": `purged after ${GRACE_DAYS} days unless restored by signing in` });
 
-	return context.json({ "deleted": true, "githubAuthorizationRevoked": deauthorized });
+	return context.json({ "deleted": true, "githubAuthorizationRevoked": deauthorized, "purgeAfter": now + GRACE });
+}
+
+/**
+ * Daily (the cron trigger): every account deleted more than GRACE_DAYS ago, purged for good. Each sign-in's storage is
+ * erased, the `users` and `grants` rows deleted, and the user's id taken off the audit log, which keeps what happened
+ * (it's the security record) but no longer who it happened to. Says how many accounts went.
+ */
+export async function purge(env: Bindings, now = Date.now()): Promise<number> {
+	const { results: users } = await env.DB.prepare("SELECT id FROM users WHERE deleted_at IS NOT NULL AND deleted_at < ?").bind(now - GRACE).all<{ "id": string }>();
+
+	for (const { id: user } of users) {
+		const { results: grants } = await env.DB.prepare("SELECT id FROM grants WHERE user_id = ?").bind(user).all<{ "id": string }>();
+
+		for (const { id } of grants) {
+			await env.GRANTS.get(env.GRANTS.idFromString(id)).forget({ "from": NOWHERE });
+		}
+
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM grants WHERE user_id = ?").bind(user),
+			env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user),
+			env.DB.prepare("UPDATE audit SET user_id = NULL WHERE user_id = ?").bind(user)
+		]);
+		await audit(env, "account_purged", {}, NOWHERE, { "reason": `deleted more than ${GRACE_DAYS} days ago`, "detail": `${grants.length} sign-in(s) erased` });
+	}
+
+	return users.length;
 }

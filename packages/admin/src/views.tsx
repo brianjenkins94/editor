@@ -10,7 +10,14 @@ import { get } from "./session";
 
 // ── Shapes the admin API answers with (packages/api/src/admin.ts) ─────────────────────────────────────────────────
 
-export interface User { "id": string; "githubId": number; "createdAt": number; "liveSessions": number; "lastSeenAt": number | null }
+export interface User { "id": string; "githubId": number; "createdAt": number; "deletedAt": number | null; "liveSessions": number; "lastSeenAt": number | null }
+
+/** A deleted account is kept 30 days (packages/api/src/account.ts, GRACE_DAYS), restorable by signing in, then purged. */
+const PURGE_AFTER = 30 * 86_400_000;
+
+function Deleted({ at }: { "at": number | null }) {
+	return at === null ? null : <wa-badge variant="danger" title={`Purged after ${new Date(at + PURGE_AFTER).toLocaleDateString()} unless they sign in again`}>deleted</wa-badge>;
+}
 
 interface Session { "id": string; "client": string; "label": string | null; "createdAt": number; "lastUsedAt": number; "revokedAt": number | null; "userId"?: string; "githubId"?: number }
 
@@ -20,7 +27,7 @@ interface AuditRow { "id": number; "at": number; "event": string; "userId": stri
 interface Reads {
 	"/users": { "users": User[] };
 	"/sessions": { "sessions": Session[] };
-	[user: `/users/${string}`]: { "user": { "githubId": number; "createdAt": number }; "sessions": Session[]; "audit": AuditRow[] };
+	[user: `/users/${string}`]: { "user": { "githubId": number; "createdAt": number; "deletedAt": number | null }; "sessions": Session[]; "audit": AuditRow[] };
 	[audit: `/audit?${string}`]: { "rows": AuditRow[] };
 	[traffic: `/traffic?${string}`]: Traffic;
 }
@@ -145,7 +152,7 @@ export function Users() {
 				<Table head={["GitHub", "Joined", "Live sign-ins", "Last seen", "Our id"]}>
 					{read.data!.users.map((user) => (
 						<tr key={user.id}>
-							<td><a href={`#/users/${user.id}`}><Login id={user.githubId} /></a></td>
+							<td><a href={`#/users/${user.id}`}><Login id={user.githubId} /></a> <Deleted at={user.deletedAt} /></td>
 							<td><When at={user.createdAt} /></td>
 							<td>{user.liveSessions}</td>
 							<td><When at={user.lastSeenAt} /></td>
@@ -201,8 +208,9 @@ export function UserPage({ id }: { "id": string }) {
 	return (
 		<Loading read={read}>{() => (
 			<section class="wa-stack wa-gap-l">
-				<h1 class="wa-heading-xl"><Login id={read.data!.user.githubId} /></h1>
+				<h1 class="wa-heading-xl"><Login id={read.data!.user.githubId} /> <Deleted at={read.data!.user.deletedAt} /></h1>
 				<p class="muted">GitHub user {read.data!.user.githubId} · joined <When at={read.data!.user.createdAt} /> · our id <span class="mono">{id}</span></p>
+				{read.data!.user.deletedAt !== null && <wa-callout variant="warning">They deleted their account <When at={read.data!.user.deletedAt} />. It's purged after {new Date(read.data!.user.deletedAt + PURGE_AFTER).toLocaleDateString()}, unless they sign in again before then.</wa-callout>}
 				<h2 class="wa-heading-l">Sign-ins</h2>
 				<SessionRows sessions={read.data!.sessions} withUser={false} />
 				<h2 class="wa-heading-l">Latest audit rows</h2>
