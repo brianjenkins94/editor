@@ -1,6 +1,6 @@
 # Admin
 
-Status: **design, 2026-10-17; B1–B3 built.** Decisions are in "Decisions", what's built in "Steps", what's still open at the
+Status: **design, 2026-10-17; B1–B4 built.** Decisions are in "Decisions", what's built in "Steps", what's still open at the
 end.
 
 The admin app is where accounts and their roles are managed: today, the platform owner (one person) looking after users,
@@ -151,8 +151,14 @@ Each lands green and is useful on its own.
     "the owner" or "someone else"), `npm run dev` here, and a real browser: PAR, the sign-in page, the stand-in, the
     overview, users, a user, sign-ins, the audit log, sign out, then someone without a role (No access). The harness
     showed every row and copy each step wrote.
-- **B4 · traffic.** `ANALYTICS_TOKEN`, `GET /admin/traffic`, and a traffic view: requests by host and status, top
-  paths, agents, countries, Worker errors and CPU.
+- **B4 · traffic.** *Built 2026-10-17:* `GET /admin/traffic?window=1h|6h|24h` (packages/api/src/traffic.ts, behind
+  `traffic:read`): one GraphQL request to Cloudflare with `ANALYTICS_TOKEN`, a read-only Account API token
+  (`editor-analytics`: Account Analytics Read, and Analytics Read on unusuallygood.dev), set in dev, production and the
+  harness's `.dev.vars`; `ANALYTICS_ACCOUNT` and `ANALYTICS_ZONE` are ids in wrangler.jsonc. It answers requests by host
+  and status, top paths, agents and countries, requests by hour and host, and each Worker's requests, errors and CPU; a
+  missing token is a 503, Cloudflare's refusal a 502 with Cloudflare's message. The app's Traffic page shows it all
+  (tables; the Free plan has no ASN or security-event breakdowns). 4 tests in test/traffic.test.ts against a stand-in
+  Cloudflare; tried in the browser through the harness with the real token.
 - **B5 · production.** `admin.unusuallygood.dev` (static assets, custom domain), its redirect page and origin in
   production's config, the beacon excluded from the host, deployed by production.yml.
 - **B6 · first write.** End a sign-in from the admin app (`sessions:revoke`), with a confirm step, audited.

@@ -4,6 +4,7 @@ import { ROUTINE } from "./audit-copies.ts";
 import { audit, origin } from "./audit.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
 import { adminSession } from "./tokens.ts";
+import { trafficEndpoint } from "./traffic.ts";
 
 /**
  * The admin API (packages/admin/README.md, "The admin API"), mounted at /admin. Only tokens issued to the `admin` client
@@ -110,6 +111,9 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 
 	return context.json({ "rows": results.map(auditRow) });
 });
+
+/** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
+admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
 
 function session(row: Record<string, unknown>): Record<string, unknown> {
 	return { "id": row["id"], "client": row["client"] ?? "editor", "label": row["label"], "createdAt": row["created_at"], "lastUsedAt": row["last_used_at"], "revokedAt": row["revoked_at"] };

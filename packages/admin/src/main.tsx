@@ -20,7 +20,7 @@ import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { loginOf } from "./logins";
 import { get, session, SIGNED_OUT } from "./session";
-import { Audit, Overview, Sessions, UserPage, Users } from "./views";
+import { Audit, Overview, Sessions, TrafficPage, UserPage, Users } from "./views";
 
 interface Me { "user": string; "roles": string[]; "permissions": string[] }
 
@@ -91,7 +91,8 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 		: path.startsWith("/users/") ? <UserPage id={decodeURIComponent(path.slice("/users/".length))} />
 			: path === "/sessions" ? <Sessions />
 				: path === "/audit" ? <Audit query={query} />
-					: <Overview />;
+					: path === "/traffic" ? <TrafficPage query={query} />
+						: <Overview />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 
 	useEffect(() => {
@@ -115,6 +116,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/users", "Users", path.startsWith("/users"))}
 				{link("#/sessions", "Sign-ins", path === "/sessions")}
 				{link("#/audit", "Audit log", path === "/audit")}
+				{link("#/traffic", "Traffic", path === "/traffic")}
 			</nav>
 			<main>{page}</main>
 		</wa-page>

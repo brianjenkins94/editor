@@ -41,7 +41,9 @@ const secrets = {
 	"TOKEN_KEK": random(),
 	"AUDIT_KEY": random(),
 	"STATE_KEY": random(),
-	"GITHUB_CLIENT_SECRET": devVars()["GITHUB_CLIENT_SECRET"] ?? "the stand-in takes any"
+	"GITHUB_CLIENT_SECRET": devVars()["GITHUB_CLIENT_SECRET"] ?? "the stand-in takes any",
+	// Cloudflare's read-only analytics (src/traffic.ts), for the admin app's Traffic page: real data, from `.dev.vars`.
+	...devVars()["ANALYTICS_TOKEN"] === undefined ? {} : { "ANALYTICS_TOKEN": devVars()["ANALYTICS_TOKEN"] }
 };
 const standIn = devVars()["GITHUB_CLIENT_SECRET"] === undefined ? await githubStandIn(8786, { "id": 9398474, "login": "brianjenkins94" }) : undefined;
 const harness = createTestHarness({ "root": root, "workers": [{ "configPath": "wrangler.jsonc", "secrets": secrets, ...standIn === undefined ? {} : { "vars": { "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn } } }] });

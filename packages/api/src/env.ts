@@ -29,6 +29,12 @@ export interface Bindings {
 	"GITHUB_CLIENT_SECRET": string;
 	/** The key the sign-in's state is sealed under on its way through GitHub. */
 	"STATE_KEY": string;
+	/** Cloudflare's analytics (src/traffic.ts): a read-only token (a secret), and which account and zone to ask about. */
+	"ANALYTICS_TOKEN"?: string;
+	"ANALYTICS_ACCOUNT": string;
+	"ANALYTICS_ZONE": string;
+	/** Only in tests: where Cloudflare's API is, instead of api.cloudflare.com. */
+	"CLOUDFLARE_API"?: string;
 	/** Where alerts go (audit.ts): a webhook URL, a secret; without one, nothing is sent and the audit log is the record. */
 	"ALERT_WEBHOOK"?: string;
 	/** Rate limits (wrangler.jsonc `ratelimits`, src/limits.ts): sign-in by IP, the token endpoint by IP and by grant, the
