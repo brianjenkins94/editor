@@ -115,7 +115,7 @@ async function refusals(): Promise<string[]> {
 	return (await env.DB.prepare("SELECT reason FROM audit WHERE event = 'sign_in_refused' ORDER BY id").all<{ "reason": string }>()).results.map((row) => row.reason);
 }
 
-test("the admin app's sign-in page offers email where email can be sent; the editor's doesn't", async () => {
+test("the sign-in page offers email where email can be sent", async () => {
 	const { cookie } = await started();
 
 	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "methods": ["github", "email", "password"] });

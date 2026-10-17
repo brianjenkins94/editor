@@ -33,6 +33,7 @@
     "@typescript-eslint/parser": "^8.70.0",
     "@zenfs/core": "2.7.6",
     "@zenfs/dom": "1.2.14",
+    "account": "file:../account",
     "codehike": "^1.1.0",
     "cspell-lib": "^10.3.0",
     "diff": "^8.0.4",

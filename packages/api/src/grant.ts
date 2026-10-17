@@ -349,10 +349,11 @@ export class Grant extends DurableObject<Bindings> {
 	/**
 	 * GitHub's token for this sign-in, refreshed first when it's close to expiring; undefined once the sign-in is over. A
 	 * refresh GitHub refuses (its refresh token expired, or the user revoked the app) ends the sign-in; one GitHub didn't
-	 * answer just fails this request.
+	 * answer just fails this request. Null for a sign-in that never had one (by email or a password, C2–C3): it isn't
+	 * over, it just can't reach GitHub.
 	 */
-	public async githubToken(): Promise<string | undefined> {
-		let token: string | undefined;
+	public async githubToken(): Promise<string | null | undefined> {
+		let token: string | null | undefined;
 
 		// Nothing else reaches this object while a refresh is out: a second one would spend the same refresh token.
 		await this.ctx.blockConcurrencyWhile(async () => {
@@ -366,11 +367,15 @@ export class Grant extends DurableObject<Bindings> {
 		return token;
 	}
 
-	private async currentGithubToken(): Promise<string | undefined> {
+	private async currentGithubToken(): Promise<string | null | undefined> {
 		const [row] = this.sql.exec<{ "github": string | null; "revoked_at": number | null; "user_id": string }>("SELECT github, revoked_at, user_id FROM state WHERE id = 1").toArray();
 
-		if (row === undefined || row.revoked_at !== null || row.github === null) {
+		if (row === undefined || row.revoked_at !== null) {
 			return undefined;
+		}
+
+		if (row.github === null) {
+			return null;
 		}
 
 		const current = JSON.parse(await open(this.env.TOKEN_KEK, row.github, this.id)) as GitHubTokens;
@@ -463,7 +468,7 @@ export class Grant extends DurableObject<Bindings> {
 	public async deauthorize(): Promise<boolean> {
 		const token = await this.githubToken();
 
-		if (token === undefined) {
+		if (token === undefined || token === null) {
 			return false;
 		}
 

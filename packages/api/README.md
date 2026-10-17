@@ -127,6 +127,9 @@ client with a non-extractable key in IndexedDB, nonce retry, and single-flight r
 `Buffer` for `jose`'s base64url, replace the in-memory Maps with the Grant DO, and move the hard-coded HS256 secret
 to asymmetric signing.
 
+(Since C7 the editor pushes its request first and signs in through our own page, SIGN-IN.md, which offers GitHub, email
+and a password; GitHub's leg is as below.)
+
 1. **Start.** The shell makes (or loads) its DPoP key pair and a PKCE verifier, then does a top-level navigation
    to `GET /auth/github/start?code_challenge=…&dpop_jkt=…&state=…&redirect_uri=…`. The `redirect_uri` must
    exactly match an allowlisted app origin. The Worker makes its *own* PKCE pair for GitHub and packs everything

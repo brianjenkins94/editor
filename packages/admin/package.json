@@ -11,9 +11,9 @@
   "dependencies": {
     "@awesome.me/webawesome": "^3.14.0",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "account": "file:../account",
     "oauth4webapi": "^3.8.8",
-    "preact": "latest",
-    "uqr": "0.1.3"
+    "preact": "latest"
   },
   "devDependencies": {
     "jsonc-parser": "^3.3.1",

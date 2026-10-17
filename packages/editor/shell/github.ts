@@ -14,7 +14,7 @@
  */
 import type { AuthProvider } from "./github-auth";
 import { withDefaults } from "@brianjenkins94/util/fido";
-import { API as SESSION_API, dpopFetch, isSignedIn } from "./session";
+import { API as SESSION_API, dpopFetch, viaProxy } from "./session";
 
 const API = "https://api.github.com";
 
@@ -109,11 +109,9 @@ export interface RepoFile {
 	"bytes": Uint8Array;
 }
 
-/**
- * Build the GitHub client. Signed in, it goes through the API's proxy with `dpopFetch`; signed out, straight to GitHub
- * with no credential (public repos only). `provider` and `base` are the seam, for tests.
- */
-export function createGitHub(provider: AuthProvider = isSignedIn() ? dpopFetch : fetch, base: string = isSignedIn() ? PROXY : API) {
+/** Build a GitHub client: by default straight to GitHub with no credential. `provider` and `base` are the seam: the
+ *  proxy's (connectGitHub), and tests'. */
+export function createGitHub(provider: AuthProvider = fetch, base: string = API) {
 	// fido injects its own `Cache: no-store` directive into the request HEADERS. A non-safelisted header forces a CORS
 	// preflight that GitHub rejects ("Failed to fetch"). fido reads that directive from the options before calling
 	// fetch, so stripping it here (at the fetch boundary) leaves fido's caching intact while keeping the wire request
@@ -286,3 +284,11 @@ export function createGitHub(provider: AuthProvider = isSignedIn() ? dpopFetch :
 }
 
 export type GitHub = ReturnType<typeof createGitHub>;
+
+/**
+ * The GitHub client for this sign-in: through the API's proxy with `dpopFetch` when it's GitHub's; otherwise (signed out,
+ * or signed in by email or a password) straight to GitHub with no credential, public repos only.
+ */
+export async function connectGitHub(): Promise<GitHub> {
+	return await viaProxy() ? createGitHub(dpopFetch, PROXY) : createGitHub();
+}

@@ -1,0 +1,8 @@
+/* Your account (account.tsx): the authenticator app's QR code, recovery codes, code forms, and quiet text. */
+.account-mono { font-family: var(--wa-font-family-code); font-size: var(--wa-font-size-s); }
+.account-muted { color: var(--wa-color-text-quiet); }
+.account-qr { width: 12rem; height: 12rem; image-rendering: pixelated; background: white; }
+.account-recovery { display: grid; grid-template-columns: repeat(2, max-content); gap: var(--wa-space-2xs) var(--wa-space-l); }
+.account-code-form { align-items: end; }
+/* The editor shows it in a dialog (its shell/account-dialog.tsx): wide enough for the QR code beside its text. */
+.account-dialog { --width: 38rem; }

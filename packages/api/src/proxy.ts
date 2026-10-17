@@ -15,9 +15,16 @@ import { github } from "./github.ts";
 /** GitHub's response headers the browser may see: the body's type, caching, and what fido paginates and backs off by. */
 const PASSED = ["content-type", "cache-control", "etag", "last-modified", "link", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "x-ratelimit-used", "x-github-request-id"];
 
-/** The sign-in's GitHub token, or a 401 when the sign-in is over (or GitHub wouldn't refresh it). */
+/** The sign-in's GitHub token; a 401 when the sign-in is over (or GitHub wouldn't refresh it); a 403 for a sign-in
+ *  without GitHub (by email or a password), which is still signed in: the editor calls GitHub itself for those. */
 async function token(context: Context<AppEnv>): Promise<string | Response> {
 	const value = await context.env.GRANTS.get(context.env.GRANTS.idFromString(context.get("grant"))).githubToken();
+
+	if (value === null) {
+		context.get("span").info("proxy refused", { "reason": "this sign-in isn't GitHub's" });
+
+		return context.json({ "error": "no_github" }, 403);
+	}
 
 	if (value === undefined) {
 		context.get("span").info("proxy refused", { "reason": "no GitHub token for this sign-in" });

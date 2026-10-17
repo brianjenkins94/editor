@@ -146,11 +146,13 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     `__Host-signin` (`HttpOnly; Secure; SameSite=Lax`, 15 minutes) and goes to `/sign-in`.
   - `/sign-in` (public/: static assets beside the Worker): our own files and Cloudflare's Web Analytics beacon only
     (CSP `script-src 'self' https://static.cloudflareinsights.com`, `frame-ancestors 'none'`); it asks `GET /auth/attempt` what
-    the attempt's client offers (`SIGN_IN_METHODS` in wrangler.jsonc: `github` for both clients for now).
+    the attempt's client offers (`SIGN_IN_METHODS` in wrangler.jsonc: GitHub, email and a password for both clients
+    since C7).
   - `GET /auth/github`: on to GitHub with the attempt's id sealed in the state; the callback finishes the attempt only
     in the browser holding its cookie, before GitHub's code is exchanged, and clears the cookie. An attempt is spent
     either way; it's deleted when its 15 minutes are up.
-  - Every refusal is a `sign_in_refused` row with its reason. The legacy `/auth/github/start` stays for the editor.
+  - Every refusal is a `sign_in_refused` row with its reason. The legacy `/auth/github/start` stays for editor builds
+    from before C7 (a tab left open); nothing current uses it.
   - `test/signin.test.ts`, 7 tests in workerd; turning off the secret or single-use checks fails them. The admin app
     (B3) is the first real client.
 - **C2 · email.** *Built 2026-10-17* (src/email.ts, src/mail.ts; the Attempt's `email_step`; migrations/0007):
@@ -265,7 +267,26 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     has two-factor, and how, is src/mfa-state.ts (read by the sign-ins; changed only in src/mfa.ts).
   - 3 tests in test/password.test.ts (on, then a password sign-in asking for the emailed code; not asked after an
     emailed sign-in code, and off; the app asked for when both are on). The page looked at in the harness.
-- **C7 · the editor.** Its client gets the methods, after the admin trial.
+- **C7 · the editor.** *Built 2026-10-17.* **Signing in stays optional:** the editor is whole signed out (samples,
+  public repos, everything local), no account is made until someone signs in, and nothing asks them to.
+  - The editor's client pushes its request (`par: true`, packages/editor/shell/session.ts) and signs in through our
+    page, which offers it GitHub, an emailed code and a password (`SIGN_IN_METHODS.editor`), two-factor as set up. The
+    shell's button says "Sign in", with the optional said beside it.
+  - **GitHub only for GitHub's sign-ins:** signed in by email or a password, the shell calls GitHub as it does signed
+    out (public repos, anonymously); private repos and commits need a GitHub sign-in, and say so. The shell asks
+    `GET /account` whose account it is (`githubId`), once a page (`connectGitHub`, shell/github.ts). The proxy answers
+    such a sign-in `403 {"error":"no_github"}`, not the 401 that would read as signed out (`Grant.githubToken` is null
+    for a sign-in that never had GitHub, undefined for one that's over).
+  - **Your account, in the editor:** the account routes behind the editor's session too (`GET /account`, and
+    `POST /account/password/code`, `/account/password`, `/account/mfa/{start,confirm,off,recovery}`,
+    `/account/mfa/email/code`, `/account/mfa/email`): the admin app's handlers, client-agnostic. The page itself is
+    packages/account, shared: the admin app's Your account and the editor's dialog ("Your account…" in the GitHub
+    popover, loaded when opened), each passing how it reaches the routes.
+  - Deleting an account without GitHub says nothing of GitHub's app.
+  - 1 test in test/password.test.ts (an editor account by email alone; `GET /account`; the proxy's 403; a password set
+    from the editor's routes, then a password sign-in back to the editor's page). Tried signed out in the browser: the
+    popover, and a public repo loaded.
+  - Linking (one account for GitHub and an email) is still pinned: an email sign-in and a GitHub one are two accounts.
 - **Later:** passkeys (Pilcrow's recommendation for high-security accounts, and a way to drop passwords).
 
 ## Open questions

@@ -85,9 +85,9 @@ const browse = async (url: string, { cookie, ...init }: { "method"?: string; "he
 
 const form = async (path: string, cookie: string, fields: Record<string, string>): Promise<Answer> => browse(at(path), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams(fields).toString(), "cookie": cookie });
 
-/** The admin app: a DPoP key, a PKCE verifier; it pushes its request, a browser opens it (the cookie); `call` sends a
- *  request with the key's proof (and the access token, when it has one). */
-async function app(): Promise<{ "cookie": string; "redeem": (code: string) => Promise<string>; "call": (method: string, path: string, fields?: Record<string, string>) => Promise<Answer> }> {
+/** The admin app (or the editor, `client`): a DPoP key, a PKCE verifier; it pushes its request, a browser opens it (the
+ *  cookie); `call` sends a request with the key's proof (and the access token, when it has one). */
+async function app(client = "admin", redirect = APP): Promise<{ "cookie": string; "redeem": (code: string) => Promise<string>; "call": (method: string, path: string, fields?: Record<string, string>) => Promise<Answer> }> {
 	const { privateKey, publicKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
@@ -109,13 +109,13 @@ async function app(): Promise<{ "cookie": string; "redeem": (code: string) => Pr
 		}
 	};
 	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-	const { request_uri } = await (await call("POST", "/auth/par", { "client_id": "admin", "response_type": "code", "redirect_uri": APP, "state": "s", "code_challenge": challenge, "code_challenge_method": "S256" })).json() as { "request_uri": string };
-	const opened = await browse(`${at("/auth/start")}?${new URLSearchParams({ "client_id": "admin", "request_uri": request_uri })}`);
+	const { request_uri } = await (await call("POST", "/auth/par", { "client_id": client, "response_type": "code", "redirect_uri": redirect, "state": "s", "code_challenge": challenge, "code_challenge_method": "S256" })).json() as { "request_uri": string };
+	const opened = await browse(`${at("/auth/start")}?${new URLSearchParams({ "client_id": client, "request_uri": request_uri })}`);
 
 	return {
 		"cookie": (opened.headers.get("set-cookie") ?? "").split(";")[0] as string,
 		"redeem": async (code) => {
-			const tokens = await (await call("POST", "/token", { "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": "admin" })).json() as { "access_token": string };
+			const tokens = await (await call("POST", "/token", { "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": client })).json() as { "access_token": string };
 
 			token = tokens.access_token;
 
@@ -139,8 +139,8 @@ const aMinuteLater = async (): Promise<void> => {
 };
 
 /** Signed in to the admin app by an emailed code: a new account for `address`, and the app holding its tokens. */
-async function signedInByEmail(address: string): Promise<Awaited<ReturnType<typeof app>>> {
-	const signedIn = await app();
+async function signedInByEmail(address: string, signedIn?: Awaited<ReturnType<typeof app>>): Promise<Awaited<ReturnType<typeof app>>> {
+	signedIn ??= await app();
 
 	await form("/auth/email", signedIn.cookie, { "address": address });
 
@@ -165,6 +165,35 @@ async function setPassword(signedIn: Awaited<ReturnType<typeof app>>, address: s
 
 	return signedIn.call("POST", "/admin/account/password", { "code": codeFor(address), "password": password });
 }
+
+// ── The editor (C7) ─────────────────────────────────────────────────────────────────────────────────────────────
+
+test("the editor: an account by email alone, with a password set from it and signed in with; GitHub through the proxy refused as not this sign-in's, not as signed out", async () => {
+	const address = someone();
+	const editor = await signedInByEmail(address, await app("editor", "http://localhost:5173/"));
+	const account = await (await editor.call("GET", "/account")).json() as { "githubId": number | null; "email": { "address": string }; "password": { "setAt": number } | null };
+
+	assert.equal(account.githubId, null);
+	assert.equal(account.email.address, address);
+	assert.equal(account.password, null);
+
+	const proxied = await editor.call("GET", "/github/api/user");
+
+	assert.equal(proxied.status, 403);
+	assert.deepEqual(await proxied.json(), { "error": "no_github" });
+
+	assert.equal((await editor.call("POST", "/account/password/code", {})).status, 200);
+	await aMinuteLater();
+	assert.equal((await editor.call("POST", "/account/password", { "code": codeFor(address), "password": "a long and unusual editor password" })).status, 200);
+
+	const again = await app("editor", "http://localhost:5173/");
+	const signedIn = await form("/auth/password", again.cookie, { "address": address, "password": "a long and unusual editor password" });
+	const { location } = await signedIn.json() as { "location": string };
+
+	assert.ok(location.startsWith("http://localhost:5173/"), "back to the editor");
+	await again.redeem(new URL(location).searchParams.get("code") as string);
+	assert.ok(((await (await again.call("GET", "/account")).json()) as { "password": { "setAt": number } | null }).password !== null);
+});
 
 // ── The hash ───────────────────────────────────────────────────────────────────────────────────────────────────────
 

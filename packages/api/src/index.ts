@@ -13,8 +13,8 @@ import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
 import { emailEndpoint, verifyEndpoint } from "./email.ts";
 import { expireInbox, receive } from "./inbox.ts";
-import { secondStepEndpoint } from "./mfa.ts";
-import { passwordSignInEndpoint, resetCodeEndpoint, resetPasswordEndpoint } from "./password.ts";
+import { emailMfaCodeEndpoint, emailMfaEndpoint, mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint, secondStepEndpoint } from "./mfa.ts";
+import { accountEndpoint, passwordCodeEndpoint, passwordSignInEndpoint, resetCodeEndpoint, resetPasswordEndpoint, setPasswordEndpoint } from "./password.ts";
 import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
@@ -155,6 +155,26 @@ app.post("/sessions/revoke-all", session, revokeAllEndpoint);
 app.post("/sessions/:id/revoke", session, revokeSessionEndpoint);
 
 app.post("/account/delete", session, deleteAccountEndpoint);
+
+// Your account's sign-in methods, for the editor (C7): the same as the admin app's under /admin/account (src/password.ts,
+// src/mfa.ts), behind the editor's session.
+app.get("/account", session, accountEndpoint);
+
+app.post("/account/password/code", session, passwordCodeEndpoint);
+
+app.post("/account/password", session, setPasswordEndpoint);
+
+app.post("/account/mfa/start", session, mfaStartEndpoint);
+
+app.post("/account/mfa/confirm", session, mfaConfirmEndpoint);
+
+app.post("/account/mfa/off", session, mfaOffEndpoint);
+
+app.post("/account/mfa/recovery", session, mfaRecoveryEndpoint);
+
+app.post("/account/mfa/email/code", session, emailMfaCodeEndpoint);
+
+app.post("/account/mfa/email", session, emailMfaEndpoint);
 
 // The admin API (src/admin.ts): admin tokens only, each route behind its permission.
 app.route("/admin", admin);

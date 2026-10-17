@@ -16,15 +16,19 @@ import "@awesome.me/webawesome/dist/components/select/select.js";
 import "@awesome.me/webawesome/dist/components/option/option.js";
 import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
 import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
+import "account/account.css";
 import "./admin.css";
+import { AccountPage } from "account";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { AccountPage } from "./account";
 import { ArchitecturePage } from "./architecture";
 import { loginOf } from "./logins";
 import { MailPage } from "./mail";
-import { get, session, SIGNED_OUT } from "./session";
+import { get, session, SIGNED_OUT, submit } from "./session";
 import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
+
+/** Your account (packages/account), through the admin API. */
+const ACCOUNT = { "get": get, "submit": submit, "loginOf": loginOf };
 
 interface Me { "user": string; "roles": string[]; "permissions": string[] }
 
@@ -82,7 +86,7 @@ function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 		return (
 			<main class="wa-stack wa-gap-l">
 				<div><wa-button appearance="plain" onClick={() => setAccount(false)}>Back</wa-button></div>
-				<AccountPage />
+				<AccountPage api={ACCOUNT} />
 			</main>
 		);
 	}
@@ -114,7 +118,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 						: path === "/unusual" ? <UnusualPage />
 							: path === "/architecture" ? <ArchitecturePage query={query} />
 								: path === "/mail" ? <MailPage query={query} />
-									: path === "/account" ? <AccountPage />
+									: path === "/account" ? <AccountPage api={ACCOUNT} />
 								: <Overview />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 

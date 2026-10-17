@@ -347,10 +347,13 @@ function Shell() {
 	const [runOpen, setRunOpen] = useState(false);
 	const [targets, setTargets] = useState<LaunchTarget[]>([]);
 	const [runs, setRuns] = useState<RunInfo[]>([]);
-	// Signing in with GitHub (session.ts): `githubUser` is the signed-in login (undefined = signed out), fetched live through
-	// the API's proxy. The session (oauth4webapi) and the client (fido) are only imported when needed, so they code-split
-	// out of the cold-start bundle.
+	// Signing in (session.ts), optional: `signedInAs` says who (GitHub's login, or the account's email; undefined = signed
+	// out); `githubUser` is GitHub's login when the sign-in is GitHub's (fetched live through the API's proxy), what private
+	// repos and commits need. The session (oauth4webapi) and the client (fido) are only imported when needed, so they
+	// code-split out of the cold-start bundle; so does the account dialog.
+	const [signedInAs, setSignedInAs] = useState<string | undefined>(undefined);
 	const [githubUser, setGithubUser] = useState<string | undefined>(undefined);
+	const [AccountDialog, setAccountDialog] = useState<typeof import("./account-dialog").AccountDialog | undefined>(undefined);
 	const [githubOpen, setGithubOpen] = useState(false);
 	const [githubBusy, setGithubBusy] = useState(false);
 	const [githubError, setGithubError] = useState<string | undefined>(undefined);
@@ -614,10 +617,11 @@ function Shell() {
 	};
 
 	// On load: finish a sign-in this page is the end of, and if signed in, show who as (GitHub's login, fetched live through
-	// the API's proxy: the API keeps no login). The retired PAT is deleted wherever one was kept.
+	// the API's proxy: the API keeps no login; or the account's email). The retired PAT is deleted wherever one was kept.
 	useEffect(() => {
 		let cancelled = false;
 		const signedOut = (): void => {
+			setSignedInAs(undefined);
 			setGithubUser(undefined);
 		};
 
@@ -633,7 +637,7 @@ function Shell() {
 					span.info("signed in");
 				}
 			} catch (error) {
-				setGithubError(error instanceof Error && /access_denied/u.test(error.message) ? "Sign-in was cancelled at GitHub." : "Sign-in didn't complete. Try again.");
+				setGithubError(error instanceof Error && /access_denied/u.test(error.message) ? "Sign-in was cancelled." : "Sign-in didn't complete. Try again.");
 				setGithubOpen(true);
 				span.error("sign-in failed", { "error": errText(error) });
 			}
@@ -655,11 +659,20 @@ function Shell() {
 
 			try {
 				if (session.isSignedIn()) {
-					const { createGitHub } = await import("./github");
-					const me = await createGitHub().viewer();
+					const me = await session.account();
 
-					if (!cancelled) {
-						setGithubUser(me.login);
+					if (me.githubId === null) {
+						if (!cancelled) {
+							setSignedInAs(me.email?.address ?? "your account");
+						}
+					} else {
+						const { connectGitHub } = await import("./github");
+						const { login } = await (await connectGitHub()).viewer();
+
+						if (!cancelled) {
+							setSignedInAs(login);
+							setGithubUser(login);
+						}
 					}
 				}
 			} catch (error) {
@@ -675,7 +688,7 @@ function Shell() {
 		};
 	}, []);
 
-	// Sign in: a full-page round trip through the API and GitHub (session.ts); this page loads again at the end of it.
+	// Sign in: a full-page round trip through the API's sign-in page (session.ts); this page loads again at the end of it.
 	const signInGithub = async (): Promise<void> => {
 		setGithubBusy(true);
 		setGithubError(undefined);
@@ -691,7 +704,7 @@ function Shell() {
 
 	// Where you're signed in: listed each time the popover opens, signed in.
 	useEffect(() => {
-		if (!githubOpen || githubUser === undefined) {
+		if (!githubOpen || signedInAs === undefined) {
 			return;
 		}
 
@@ -712,7 +725,7 @@ function Shell() {
 		return () => {
 			cancelled = true;
 		};
-	}, [githubOpen, githubUser]);
+	}, [githubOpen, signedInAs]);
 
 	// A session's way out, an account's way out: each ends here signed out, with what happened said.
 	const accountAction = async (run: (session: typeof import("./session")) => Promise<string | undefined>, failure: string): Promise<void> => {
@@ -742,6 +755,7 @@ function Shell() {
 
 	const signOutEverywhere = async (): Promise<void> => accountAction(async (session) => {
 		await session.signOutEverywhere();
+		setSignedInAs(undefined);
 		setGithubUser(undefined);
 		setMySessions(undefined);
 
@@ -750,9 +764,15 @@ function Shell() {
 
 	const deleteAccount = async (): Promise<void> => accountAction(async (session) => {
 		const { githubAuthorizationRevoked } = await session.deleteAccount();
+		const github = githubUser !== undefined;
 
+		setSignedInAs(undefined);
 		setGithubUser(undefined);
 		setMySessions(undefined);
+
+		if (!github) {
+			return "Your account is deleted. Sign in within 30 days to bring it back; after that it's gone for good.";
+		}
 
 		return githubAuthorizationRevoked ? "Your account is deleted, and the editor's GitHub App no longer has access. Sign in within 30 days to bring it back; after that it's gone for good." : "Your account is deleted. GitHub didn't confirm the app's access ended: remove it under GitHub's Settings → Applications.";
 	}, "Couldn't delete the account.");
@@ -764,6 +784,7 @@ function Shell() {
 		try {
 			await (await import("./session")).signOut();
 		} finally {
+			setSignedInAs(undefined);
 			setGithubUser(undefined);
 			setGithubError(undefined);
 			setGithubOpen(false);
@@ -790,14 +811,15 @@ function Shell() {
 
 		try {
 			const [, owner, repo] = match;
-			// Signed in by the session itself, not `githubUser` (fetched after it): a load from the address runs before that.
-			const signedIn = (await import("./session")).isSignedIn();
-			const { createGitHub } = await import("./github");
-			const gh = createGitHub();
+			// Through the proxy by the session itself, not `githubUser` (fetched after it): a load from the address runs before
+			// that. Signed in by email or a password, it's as signed out: GitHub straight, public repos only.
+			const signedIn = await (await import("./session")).viaProxy();
+			const { connectGitHub } = await import("./github");
+			const gh = await connectGitHub();
 			const meta = await gh.getRepo(owner, repo);
 
 			if (meta === undefined) {
-				setLoadError(signedIn ? "Repo not found, or not one you've given the editor access to." : "Repo not found. A private one needs you signed in.");
+				setLoadError(signedIn ? "Repo not found, or not one you've given the editor access to." : "Repo not found. A private one needs you signed in with GitHub.");
 				span.error("repo not found or not visible");
 
 				return;
@@ -893,7 +915,7 @@ function Shell() {
 		try {
 			const { files } = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
 			const prefix = "/workspace/";
-			const { bytesToBase64, createGitHub } = await import("./github");
+			const { bytesToBase64, connectGitHub } = await import("./github");
 			const writes = files.map((file) => {
 				const path = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.path;
 
@@ -903,7 +925,7 @@ function Shell() {
 					: { "path": path, "content": new TextDecoder().decode(file.bytes) };
 			});
 
-			const sha = await createGitHub().commitFiles(binding.owner, binding.repo, { "branch": binding.branch, "message": message, "files": writes });
+			const sha = await (await connectGitHub()).commitFiles(binding.owner, binding.repo, { "branch": binding.branch, "message": message, "files": writes });
 
 			setCommitResult(sha.slice(0, 7));
 			setCommitMessage("");
@@ -1067,27 +1089,42 @@ function Shell() {
 		</>
 	);
 
-	// The GitHub popover's body: who's signed in (and signing out), or signing in; then a repo to load.
+	// Your account, in a dialog (account-dialog.tsx, loaded when first opened).
+	const openAccount = async (): Promise<void> => {
+		const { "AccountDialog": dialog } = await import("./account-dialog");
+
+		setAccountDialog(() => dialog);
+	};
+
+	// The GitHub popover's body: who's signed in (and signing out), or signing in, which is optional; then a repo to load.
 	const githubBody = (): ComponentChildren => (
 		<>
 			<span class={ghTitle()}>GitHub</span>
 
-			{githubUser !== undefined
+			{signedInAs !== undefined
 				? (
 					<>
 						<span class={ghConnected()}>
 							Signed in as
 							{" "}
 
-							<strong>{githubUser}</strong>
+							<strong>{signedInAs}</strong>
 						</span>
 
-						<span class={ghHint()}>
-							A private repo needs the editor's GitHub App on it.
-							{" "}
+						{githubUser !== undefined
+							? (
+								<span class={ghHint()}>
+									A private repo needs the editor's GitHub App on it.
+									{" "}
 
-							<a class={ghLink()} href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
-						</span>
+									<a class={ghLink()} href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
+								</span>
+							)
+							: <span class={ghHint()}>Public repos load as signed out. Private repos and commits need a sign-in with GitHub.</span>}
+
+						<div class={ghActions()}>
+							<wa-button appearance="outlined" size="small" onClick={() => { void openAccount(); }}>Your account…</wa-button>
+						</div>
 
 						<wa-divider />
 
@@ -1131,7 +1168,7 @@ function Shell() {
 						{confirmingDelete
 							? (
 								<>
-									<span class={ghError()}>Deleting your account ends every session at once and takes away the editor's GitHub App's access. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you. Your repositories on GitHub aren't touched.</span>
+									<span class={ghError()}>{githubUser !== undefined ? "Deleting your account ends every session at once and takes away the editor's GitHub App's access. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you. Your repositories on GitHub aren't touched." : "Deleting your account ends every session at once. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you."}</span>
 
 									<div class={ghActions()}>
 										<wa-button variant="danger" size="small" disabled={githubBusy} onClick={() => { void deleteAccount(); }}>Delete my account</wa-button>
@@ -1145,14 +1182,14 @@ function Shell() {
 				: signInHere
 					? (
 						<>
-							<span class={ghHint()}>GitHub's token stays on the editor's server: this browser never holds it, and only what you allow the editor's GitHub App can be reached.</span>
+							<span class={ghHint()}>Optional: everything here works without an account. Sign in with GitHub for private repos and commits (GitHub's token stays on the editor's server: this browser never holds it), or with your email.</span>
 
 							{githubNotice !== undefined && <span class={ghOk()}>{githubNotice}</span>}
 
 							{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
 
 							<div class={ghActions()}>
-								<wa-button variant="brand" size="small" disabled={githubBusy} onClick={() => { void signInGithub(); }}>{githubBusy ? "Signing in…" : "Sign in with GitHub"}</wa-button>
+								<wa-button variant="brand" size="small" disabled={githubBusy} onClick={() => { void signInGithub(); }}>{githubBusy ? "Signing in…" : "Sign in"}</wa-button>
 							</div>
 						</>
 					)
@@ -1407,6 +1444,8 @@ function Shell() {
 					/>
 				)}
 			</div>
+
+			{AccountDialog !== undefined && <AccountDialog onClose={() => { setAccountDialog(undefined); }} />}
 		</wa-page>
 	);
 }
