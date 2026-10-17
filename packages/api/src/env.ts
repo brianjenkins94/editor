@@ -43,6 +43,9 @@ export interface Bindings {
 	"EMAIL"?: { "send": (message: { "from": string | { "email": string; "name": string }; "to": string; "subject": string; "text": string; "html": string }) => Promise<{ "messageId": string }> };
 	"EMAIL_OUTBOX"?: string;
 	"CODE_KEY"?: string;
+	/** Our own addresses on the zone (src/inbox.ts), comma-separated: Email Routing sends their mail to the `email`
+	 *  handler, and the smoke test (src/smoke.ts) signs in with the first. */
+	"INBOX"?: string;
 	/** Rate limits (wrangler.jsonc `ratelimits`, src/limits.ts): sign-in by IP, the token endpoint by IP and by grant, the
 	 *  proxy by user — and one alert a minute per event and subject. */
 	"SIGN_IN_BY_IP": RateLimit;

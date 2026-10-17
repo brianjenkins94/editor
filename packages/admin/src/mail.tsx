@@ -1,11 +1,12 @@
 /**
  * The Mail page (README.md): what our email did, from GET /admin/mail. Ours (the audit log: codes sent, sign-ins by
  * email, refusals on the way) beside Cloudflare's (Email Service's analytics: delivered or not, and SPF, DKIM and DMARC).
- * Counts by day and reason; never an address.
+ * Counts by day and reason; never a user's address. And the smoke test (its last runs, and a run now), and our own
+ * inbox (GET /admin/inbox: mail to our own addresses, who from and its subject).
  */
-import { useEffect, useState } from "preact/hooks";
-import { get } from "./session";
-import { Table } from "./views";
+import { useContext, useEffect, useState } from "preact/hooks";
+import { get, post } from "./session";
+import { Permissions, Table } from "./views";
 
 interface Mail {
 	"window": { "days": number; "since": string; "until": string };
@@ -13,7 +14,81 @@ interface Mail {
 	"refusals": { "reason": string; "count": number }[];
 	"failures": { "reason": string; "count": number }[];
 	"authentication": { "check": string; "results": { "result": string; "count": number }[] }[];
+	"smoke": { "at": number; "passed": boolean; "reason": string }[];
 	"cloudflare": { "ok": true } | { "error": string };
+}
+
+interface Inbox { "addresses": string[]; "mail": { "id": number; "at": number; "address": string; "sender": string; "subject": string; "size": number }[] }
+
+/** The smoke test's last runs, and a run now (it sends a real email: `mail:test`). */
+function Smoke({ runs, onRan }: { "runs": Mail["smoke"]; "onRan": () => void }) {
+	const canRun = useContext(Permissions).includes("mail:test");
+	const [running, setRunning] = useState(false);
+	const [result, setResult] = useState<string | undefined>();
+
+	return (
+		<div class="wa-stack">
+			<div class="wa-split">
+				<h2 class="wa-heading-l">Smoke test</h2>
+				{canRun && (
+					<wa-button
+						size="small"
+						loading={running}
+						onClick={() => {
+							setRunning(true);
+							setResult(undefined);
+							post<{ "ok": boolean; "seconds"?: number; "step"?: string; "reason"?: string }>("/mail/smoke", {}).then((answer) => {
+								setResult(answer.ok ? `Passed: the email came back in ${answer.seconds} s.` : `Failed at ${answer.step}: ${answer.reason}`);
+							}, () => {
+								setResult("Couldn't run it.");
+							}).finally(() => {
+								setRunning(false);
+								onRan();
+							});
+						}}
+					>
+						Run now
+					</wa-button>
+				)}
+			</div>
+			<p class="muted">Daily, and on demand: a sign-in by email with our own address, the code sent through Email Service and read back from our inbox through Email Routing, then the sign-in ended.</p>
+			{result !== undefined && <wa-callout variant={result.startsWith("Passed") ? "success" : "danger"}>{result}</wa-callout>}
+			{runs.length === 0 ? <p class="muted">No runs yet.</p> : (
+				<Table head={["When", "Result", "Detail"]}>
+					{runs.map((run) => (
+						<tr key={run.at}>
+							<td>{new Date(run.at).toLocaleString()}</td>
+							<td><wa-badge variant={run.passed ? "success" : "danger"}>{run.passed ? "passed" : "failed"}</wa-badge></td>
+							<td>{run.reason}</td>
+						</tr>
+					))}
+				</Table>
+			)}
+		</div>
+	);
+}
+
+/** Our own inbox: mail to our own addresses, kept a day. */
+function InboxSection({ inbox }: { "inbox": Inbox | undefined }) {
+	return (
+		<div class="wa-stack">
+			<h2 class="wa-heading-l">Inbox</h2>
+			<p class="muted">Mail to our own addresses ({inbox?.addresses.join(", ") ?? "…"}), routed here by Email Routing: who from, its subject and size, kept a day. Never its body.</p>
+			{inbox === undefined || inbox.mail.length === 0 ? <p class="muted">Nothing in the last day.</p> : (
+				<Table head={["When", "To", "From", "Subject", "Size"]}>
+					{inbox.mail.map((mail) => (
+						<tr key={mail.id}>
+							<td>{new Date(mail.at).toLocaleString()}</td>
+							<td class="mono">{mail.address}</td>
+							<td class="mono">{mail.sender}</td>
+							<td>{mail.subject}</td>
+							<td>{`${Math.ceil(mail.size / 1024)} KB`}</td>
+						</tr>
+					))}
+				</Table>
+			)}
+		</div>
+	);
 }
 
 const WINDOWS = [7, 14, 30];
@@ -21,14 +96,16 @@ const WINDOWS = [7, 14, 30];
 export function MailPage({ query }: { "query": URLSearchParams }) {
 	const days = query.get("days") ?? "14";
 	const [mail, setMail] = useState<Mail | undefined>();
+	const [inbox, setInbox] = useState<Inbox | undefined>();
 	const [problem, setProblem] = useState<string | undefined>();
+	const [reads, setReads] = useState(0);
 
 	useEffect(() => {
-		setMail(undefined);
 		get<Mail>(`/mail?days=${encodeURIComponent(days)}`).then(setMail, (error: unknown) => {
 			setProblem(error instanceof Error && / 403$/u.test(error.message) ? "Your roles don't include this." : "Couldn't load this.");
 		});
-	}, [days]);
+		get<Inbox>("/inbox").then(setInbox, () => undefined);
+	}, [days, reads]);
 
 	if (problem !== undefined) {
 		return <wa-callout variant="danger">{problem}</wa-callout>;
@@ -102,6 +179,13 @@ export function MailPage({ query }: { "query": URLSearchParams }) {
 					)}
 				</div>
 			</div>
+			<Smoke
+				runs={mail.smoke}
+				onRan={() => {
+					setReads(reads + 1);
+				}}
+			/>
+			<InboxSection inbox={inbox} />
 			{cloudflare !== undefined && (
 				<div class="wa-stack">
 					<h2 class="wa-heading-l">Authentication</h2>

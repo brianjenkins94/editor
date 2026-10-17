@@ -4,8 +4,9 @@ import type { AppEnv } from "./env.ts";
 /**
  * What our email did (packages/admin/README.md, the Mail page), from two records, side by side:
  *
- * - ours, the audit log: codes sent (`email_code_sent`), sign-ins by email (`login`, "email"), and every refusal on
- *   the way (`sign_in_refused`, "email: …": the limits, wrong codes, and sends Email Service refused, by its error code);
+ * - ours, the audit log: codes sent (`email_code_sent`), sign-ins by email (`login`, "email"), every refusal on the
+ *   way (`sign_in_refused`, "email: …": the limits, wrong codes, and sends Email Service refused, by its error code),
+ *   and the smoke test's last runs (src/smoke.ts);
  * - Cloudflare's, Email Service's analytics (`emailSendingAdaptiveGroups`, through the read-only ANALYTICS_TOKEN, as
  *   Traffic is): each email's last event, delivered or not and why, and how SPF, DKIM and DMARC came out.
  *
@@ -53,10 +54,11 @@ export async function mailEndpoint(context: Context<AppEnv>): Promise<Response> 
 	const until = new Date(now).toISOString().slice(0, 10);
 	const day = "strftime('%Y-%m-%d', at / 1000, 'unixepoch')";
 	const db = context.env.DB;
-	const [sent, signedIn, refused] = await db.batch([
+	const [sent, signedIn, refused, smoke] = await db.batch([
 		db.prepare(`SELECT ${day} AS day, COUNT(*) AS count FROM audit WHERE event = 'email_code_sent' AND at >= ? GROUP BY day`).bind(Date.parse(since)),
 		db.prepare(`SELECT ${day} AS day, COUNT(*) AS count FROM audit WHERE event = 'login' AND reason = 'email' AND at >= ? GROUP BY day`).bind(Date.parse(since)),
-		db.prepare(`SELECT ${day} AS day, reason, COUNT(*) AS count FROM audit WHERE event = 'sign_in_refused' AND reason LIKE 'email: %' AND at >= ? GROUP BY day, reason`).bind(Date.parse(since))
+		db.prepare(`SELECT ${day} AS day, reason, COUNT(*) AS count FROM audit WHERE event = 'sign_in_refused' AND reason LIKE 'email: %' AND at >= ? GROUP BY day, reason`).bind(Date.parse(since)),
+		db.prepare("SELECT at, event, reason FROM audit WHERE event IN ('smoke_test_passed', 'smoke_test_failed') ORDER BY id DESC LIMIT 10")
 	]);
 	const cloudflare = await deliveries(context, since, until);
 	const delivered = "rows" in cloudflare ? cloudflare.rows : [];
@@ -78,6 +80,7 @@ export async function mailEndpoint(context: Context<AppEnv>): Promise<Response> 
 		"refusals": tally(refusals, (row) => row.reason.slice("email: ".length), (row) => row.count).map(({ key, count }) => ({ "reason": key, "count": count })),
 		"failures": tally(delivered.filter((row) => row.dimensions.status !== "delivered"), (row) => `${row.dimensions.status}${row.dimensions.errorCause === "" ? "" : `: ${row.dimensions.errorCause}`}`, (row) => row.count).map(({ key, count }) => ({ "reason": key, "count": count })),
 		"authentication": (["spf", "dkim", "dmarc"] as const).map((check) => ({ "check": check, "results": tally(delivered, (row) => row.dimensions[check] || "none", (row) => row.count).map(({ key, count }) => ({ "result": key, "count": count })) })),
+		"smoke": ((smoke?.results ?? []) as { "at": number; "event": string; "reason": string }[]).map((row) => ({ "at": row.at, "passed": row.event === "smoke_test_passed", "reason": row.reason })),
 		"cloudflare": "error" in cloudflare ? { "error": cloudflare.error } : { "ok": true }
 	});
 }

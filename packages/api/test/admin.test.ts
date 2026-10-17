@@ -198,11 +198,11 @@ test("every read endpoint is refused without its permission: 403, recorded with 
 	const holder = await browser();
 	const { access_token, grantId } = await signedIn(holder, someone(), "admin");
 
-	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit", "/admin/unusual", "/admin/architecture", "/admin/mail"]) {
+	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit", "/admin/unusual", "/admin/architecture", "/admin/mail", "/admin/inbox"]) {
 		assert.equal((await holder.send("GET", path, { "accessToken": access_token })).status, 403, path);
 	}
 
-	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read", "lacks behavior:read", "lacks architecture:read", "lacks mail:read"]);
+	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read", "lacks behavior:read", "lacks architecture:read", "lacks mail:read", "lacks mail:read"]);
 });
 
 test("/admin/users and /admin/users/:id: who's signed up, their sign-ins with their client, and their audit rows", async () => {

@@ -3,7 +3,9 @@ import { Hono } from "hono";
 import { ROUTINE } from "./audit-copies.ts";
 import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
+import { inboxEndpoint } from "./inbox.ts";
 import { mailEndpoint } from "./mail-report.ts";
+import { smokeTest } from "./smoke.ts";
 import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
 import { adminSession } from "./tokens.ts";
@@ -127,6 +129,13 @@ admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
 
 /** What our email did (src/mail-report.ts): codes sent, delivered and not, sign-ins by email, refusals; counts only. */
 admin.get("/mail", requires("mail:read"), mailEndpoint);
+
+/** Our own inbox (src/inbox.ts): the latest mail to our addresses, who from, subject and size. */
+admin.get("/inbox", requires("mail:read"), inboxEndpoint);
+
+/** The email smoke test (src/smoke.ts), now: a sign-in by email with our own address, the code read back from our inbox.
+ *  It sends a real email, so it's a permission of its own. */
+admin.post("/mail/smoke", requires("mail:test"), async (context) => context.json(await smokeTest(context.env, context.executionCtx)));
 
 /** The API as it runs, described by itself (src/architecture.ts): routes, stores and their tables, counts. */
 admin.get("/architecture", requires("architecture:read"), architectureEndpoint);

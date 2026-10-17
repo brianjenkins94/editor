@@ -12,6 +12,8 @@ import { ROUTES } from "./architecture.ts";
 import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
 import { emailEndpoint, verifyEndpoint } from "./email.ts";
+import { expireInbox, receive } from "./inbox.ts";
+import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
 import { githubApi, githubGit } from "./proxy.ts";
@@ -147,6 +149,9 @@ app.on(["GET", "POST"], "/github/git/*", session, rateLimit("PROXY_BY_USER", byU
 
 // The router's table, for the admin app's architecture page (src/architecture.ts): every route, by method and template;
 // middleware (registered for every method) isn't a route.
+// The router, for the smoke test, which signs in through it (src/smoke.ts).
+ROUTER.app = app;
+
 ROUTES.push(...[...new Map(app.routes.filter((route) => route.method !== "ALL").map((route) => [`${route.method} ${route.path}`, { "method": route.method, "path": route.path }])).values()]);
 
 /**
@@ -187,7 +192,8 @@ app.onError((error, context) => {
 export default {
 	"fetch": app.fetch,
 	// Daily (wrangler.jsonc's cron trigger): the audit log's retention (audit.ts), deleted accounts past their grace
-	// period purged (account.ts), and the likely-next-action model's counts faded (behavior.ts).
+	// period purged (account.ts), the likely-next-action model's counts faded (behavior.ts), our inbox's day kept
+	// (inbox.ts), and the email smoke test run (smoke.ts).
 	"scheduled": async (_controller, env, context) => {
 		context.waitUntil(log.span("audit.expire", {}, async () => {
 			await expire(env.DB);
@@ -198,5 +204,15 @@ export default {
 		context.waitUntil(log.span("behavior.decay", {}, async () => {
 			await decay(env.DB);
 		}));
+		context.waitUntil(log.span("inbox.expire", {}, async () => {
+			await expireInbox(env.DB);
+		}));
+		context.waitUntil(log.span("smoke.email", {}, async () => {
+			await smokeTest(env, context);
+		}));
+	},
+	// Email Routing's deliveries to our own addresses (src/inbox.ts).
+	"email": async (message, env) => {
+		await receive(message, env);
 	}
 } satisfies ExportedHandler<AppEnv["Bindings"]>;

@@ -222,3 +222,34 @@ test("what a code leaves stored: its HMAC in the attempt, the address's hash in 
 	assert.equal(JSON.stringify(changes["d1:audit"] ?? {}).includes(address), false, "the log has the address's hash only");
 	assert.ok(Object.keys(changes).some((collection) => collection.endsWith(":email_step")), "the attempt's email step");
 });
+
+// ── Our inbox and the smoke test ───────────────────────────────────────────────────────────────────────────────────
+
+test("the smoke test signs in by email with our own address, the code read back from our inbox, then ends the sign-in", async () => {
+	await worker.scheduled({ "cron": "17 3 * * *" });
+
+	const passed = await env.DB.prepare("SELECT reason FROM audit WHERE event = 'smoke_test_passed' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>();
+	const delivered = await env.DB.prepare("SELECT sender, subject FROM inbox WHERE address = 'smoke-test@unusuallygood.dev' ORDER BY id DESC LIMIT 1").first<{ "sender": string; "subject": string }>();
+	const user = await env.DB.prepare("SELECT user_id FROM emails WHERE address = 'smoke-test@unusuallygood.dev'").first<{ "user_id": string }>();
+	const live = await env.DB.prepare("SELECT COUNT(*) AS count FROM grants WHERE user_id = ? AND revoked_at IS NULL").bind(user?.user_id ?? "").first<{ "count": number }>();
+
+	assert.match(passed?.reason ?? "", /^email back in \d+ s$/u);
+	assert.equal(delivered?.sender, "no-reply@unusuallygood.dev");
+	assert.match(delivered?.subject ?? "", /^Your sign-in code: [A-Z2-9]{4}-[A-Z2-9]{4}$/u);
+	assert.equal(live?.count, 0, "its sign-in ended");
+	assert.equal(await env.DB.prepare("SELECT 1 FROM audit WHERE event = 'smoke_test_failed'").first(), null);
+});
+
+test("our inbox takes mail for our own addresses only, and keeps who, the subject and the size, never the body", async () => {
+	const raw = (to: string): string => `From: someone@example.com\r\nTo: ${to}\r\nSubject: hello\r\nMessage-ID: <${crypto.randomUUID()}@example.com>\r\n\r\nthe body\r\n`;
+	const deliver = async (to: string): Promise<Answer> => server.fetch(`${at("/cdn-cgi/handler/email")}?${new URLSearchParams({ "from": "someone@example.com", "to": to })}`, { "method": "POST", "body": raw(to) });
+	const ours = await deliver("smoke-test@unusuallygood.dev");
+	const kept = await env.DB.prepare("SELECT sender, subject, size FROM inbox WHERE sender = 'someone@example.com' ORDER BY id DESC LIMIT 1").first<{ "sender": string; "subject": string; "size": number }>();
+
+	assert.ok(ours.status < 400, `delivered: ${ours.status}`);
+	assert.deepEqual([kept?.subject, (kept?.size ?? 0) > 0], ["hello", true]);
+	assert.equal(JSON.stringify(kept).includes("the body"), false);
+
+	await deliver("anyone-else@unusuallygood.dev");
+	assert.equal(await env.DB.prepare("SELECT 1 FROM inbox WHERE address = 'anyone-else@unusuallygood.dev'").first(), null, "not ours: rejected");
+});

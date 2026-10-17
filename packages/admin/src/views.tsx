@@ -55,7 +55,7 @@ interface Traffic {
 }
 
 /** The everyday record; everything else is worth a second look (packages/api/src/audit-copies.ts, ROUTINE). */
-const ROUTINE = new Set(["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call", "email_code_sent", "admin_access"]);
+const ROUTINE = new Set(["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call", "email_code_sent", "smoke_test_passed", "admin_access"]);
 
 // ── Pieces ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

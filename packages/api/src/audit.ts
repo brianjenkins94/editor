@@ -30,7 +30,8 @@ export type AuditEvent =
 	| "account_deleted" | "account_restored" | "account_purged"
 	| "admin_access" | "admin_revoked"
 	| "probe" | "client_unusual" | "client_changed"
-	| "email_code_sent";
+	| "email_code_sent"
+	| "smoke_test_passed" | "smoke_test_failed";
 
 /** The retention (audit-copies.ts: ROUTINE_DAYS for the everyday record, SUSPICIOUS_DAYS for the rest), applied daily by
  *  the Worker's cron trigger. Says how many rows went. The copies expire on their own (the bucket's lifecycle rules). */
@@ -79,7 +80,7 @@ export interface Particulars { "reason"?: string; "detail"?: string }
 
 /** Events that are someone doing what the editor never does, whatever their reason: a call it doesn't make, a route that
  *  doesn't exist, a sign-in that isn't a browser's (BEHAVIOR.md). */
-const ALARMING = new Set<AuditEvent>(["refresh_reuse_detected", "proxy_denied", "proxy_abuse", "rate_limited", "probe", "client_unusual"]);
+const ALARMING = new Set<AuditEvent>(["refresh_reuse_detected", "proxy_denied", "proxy_abuse", "rate_limited", "probe", "client_unusual", "smoke_test_failed"]);
 
 /** Reasons that mean a token is in hands it shouldn't be: presented with another key's proof, or a proof replayed. */
 const THEFT = new Set(["key is not the one bound", "jti was seen before", "another key"]);

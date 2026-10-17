@@ -34,7 +34,7 @@ roles allow.
 ### Roles and permissions
 
 - **Permissions** are fixed strings in code (`src/rbac.ts` in packages/api): `users:read`, `sessions:read`,
-  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, `behavior:read`, `architecture:read`, `mail:read`, and later `org:members:read`, `org:members:write`,
+  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, `behavior:read`, `architecture:read`, `mail:read`, `mail:test`, and later `org:members:read`, `org:members:write`,
   `org:roles:write`.
 - **Roles** map to permissions, also in code, so what a role can do is reviewed like any other change:
   - `owner`: every platform permission.
@@ -83,7 +83,9 @@ route table doubles as the access-control table.
 | `GET /admin/traffic` | `traffic:read` | Cloudflare's analytics, through the API's own read-only token |
 | `GET /admin/unusual` | `behavior:read` | sign-ins by their score, with their most surprising steps and flags (B9) |
 | `GET /admin/architecture` | `architecture:read` | the API as it runs: routes, stores and their tables with counts, its calls |
-| `GET /admin/mail` | `mail:read` | what our email did: codes sent, delivered and not, sign-ins by email, refusals; counts by day and reason |
+| `GET /admin/mail` | `mail:read` | what our email did: codes sent, delivered and not, sign-ins by email, refusals; counts by day and reason; the smoke test's last runs |
+| `GET /admin/inbox` | `mail:read` | mail to our own addresses (INBOX): who from, subject, size; never the body |
+| `POST /admin/mail/smoke` | `mail:test` | run the email smoke test now (it sends a real email) |
 
 - **Every admin request is audited** (`admin_access`: route, and whose data), kept 365 days. Who looked at a user's data
   is itself part of the security record.
@@ -179,10 +181,22 @@ Each lands green and is useful on its own.
   Cloudflare's records are the zone's, dev's and production's together; a local API has none (it sends to an outbox).
   The suppression list isn't shown: reading it needs an Email Sending Edit token. Tested in workerd (test/admin.test.ts);
   tried with the harness.
-- **Next: an inbox, and the email smoke test.** Email Routing for a few addresses of our own (`smoke-test@`, perhaps
-  DMARC reports) to the API Worker's `email` handler, kept a day, shown on an Inbox page; then a scheduled check that
-  signs in by email against production with the smoke-test address, reads the code from our own inbox and finishes
-  the sign-in: real delivery, DNS and the whole flow, with no person's inbox. Writing to users from admin: not planned.
+- **Inbox and the email smoke test.** *Built 2026-10-17*, on the Mail page:
+  - **Our inbox** (packages/api/src/inbox.ts, migrations/0008): Email Routing sends mail for our own addresses
+    (`INBOX` in wrangler.jsonc: `smoke-test@unusuallygood.dev` for production, `smoke-test-dev@` for dev) to the API
+    Worker's `email` handler; anything to another address is rejected. Kept: who from, the subject and size, never the
+    body; for a day (the daily cron). In the harness and the tests, the outbox stand-in delivers our own addresses'
+    mail the same way.
+  - **The smoke test** (packages/api/src/smoke.ts): a whole sign-in by email, as the admin app and a browser would make
+    it (PAR with DPoP, the attempt's cookie, the code asked for), through the Worker's own router, with our own
+    address; the code goes out through Email Service and comes back through Email Routing to our inbox, where the test
+    reads it (within 90 seconds), then verifies, redeems and ends the sign-in. Real delivery, our DNS records and every
+    step, with no one's mailbox. Daily (the cron) and from the page's Run now (`mail:test`: it sends a real email). Each
+    run is `smoke_test_passed` (how long the email took) or `smoke_test_failed` (which step, why), which alerts.
+  - Tested in workerd (test/email.test.ts: the smoke test through the cron, end to end; the `email` handler through
+    Wrangler's local email trigger, ours kept, others rejected, never the body). Tried with the harness: passed, the
+    email back in 3 s.
+  - Writing to users from admin: not planned.
 - **Architecture page.** *Built 2026-10-17.* A live diagram of the system, *derived from code* in two halves, each
   from what's authoritative for it:
   - **The deployment as configured** (deployment.ts, a Vite plugin: `virtual:deployment`): every wrangler config

@@ -10,7 +10,7 @@
 
 /** The everyday record — sign-ins and what they did — kept ROUTINE_DAYS; everything else (every refusal, every alert) is
  *  what an investigation needs most, and is kept SUSPICIOUS_DAYS. */
-export const ROUTINE = ["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call", "email_code_sent"];
+export const ROUTINE = ["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call", "email_code_sent", "smoke_test_passed"];
 
 export const ROUTINE_DAYS = 90;
 
