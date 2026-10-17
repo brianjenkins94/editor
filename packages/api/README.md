@@ -93,14 +93,18 @@ plus cold starts), Fly.io (a real server to run and patch). None beats Workers h
 
 | Data | Where | Why | Retention |
 |---|---|---|---|
-| GitHub numeric user id | D1 `users` | stable identity (logins can be renamed) | until 30 days after account deletion |
+| GitHub numeric user id, for those who sign in with GitHub | D1 `users` | stable identity (logins can be renamed) | until 30 days after account deletion |
+| email address, as typed, for those who sign in with one (SIGN-IN.md, C2) | D1 `emails` | signing in by emailed code | until 30 days after account deletion |
 | our user id (random) | D1 `users` | what everything else (grants, later Stripe) keys on | until 30 days after account deletion |
 | GitHub user access + refresh token | Grant DO, **AES-GCM encrypted** with a key from a Worker secret (with a key id, so it can rotate) | to call GitHub for the user | until sign-out, refresh expiry, or deletion |
 | our refresh-token family, hashed | Grant DO | rotation + reuse detection | lifetime of the grant |
 | grants index (grant id, user id, created, last used, coarse device label) | D1 `grants` | "your sessions", sign out everywhere | lifetime of the grant |
 | audit events | D1 `audit` | the security record: what was refused, and what went through | 90 days; refusals and alerts a year |
 
-We **don't** store login name, avatar, email, or raw IPs. Login and avatar are fetched live through the proxy.
+We **don't** store login name, avatar, raw IPs, or (for GitHub users) an email. Login and avatar are fetched live through
+the proxy. An email is kept only for a user who signs in with one (SIGN-IN.md, C2): their address, and when a code last
+proved it theirs. The codes themselves are kept only as an HMAC, for 10 minutes; the audit log has a keyed hash of the
+address, never the address.
 Audit rows carry country (from Cloudflare) and an IP hash salted per day, which is enough to spot abuse but can't
 be reversed into an address.
 

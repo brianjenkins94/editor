@@ -14,7 +14,7 @@ export const Permissions = createContext<string[]>([]);
 
 // ── Shapes the admin API answers with (packages/api/src/admin.ts) ─────────────────────────────────────────────────
 
-export interface User { "id": string; "githubId": number; "createdAt": number; "deletedAt": number | null; "liveSessions": number; "lastSeenAt": number | null }
+export interface User { "id": string; "githubId": number | null; "createdAt": number; "deletedAt": number | null; "liveSessions": number; "lastSeenAt": number | null }
 
 /** A deleted account is kept 30 days (packages/api/src/account.ts, GRACE_DAYS), restorable by signing in, then purged. */
 const PURGE_AFTER = 30 * 86_400_000;
@@ -23,7 +23,7 @@ function Deleted({ at }: { "at": number | null }) {
 	return at === null ? null : <wa-badge variant="danger" title={`Purged after ${new Date(at + PURGE_AFTER).toLocaleDateString()} unless they sign in again`}>deleted</wa-badge>;
 }
 
-interface Session { "id": string; "client": string; "label": string | null; "createdAt": number; "lastUsedAt": number; "revokedAt": number | null; "current": boolean; "userId"?: string; "githubId"?: number }
+interface Session { "id": string; "client": string; "label": string | null; "createdAt": number; "lastUsedAt": number; "revokedAt": number | null; "current": boolean; "userId"?: string; "githubId"?: number | null }
 
 /** A sign-in as /admin/unusual answers it (packages/api/BEHAVIOR.md, B8): its score, and what it did that the editor doesn't. */
 interface Unusual extends Session {
@@ -38,7 +38,7 @@ interface Reads {
 	"/users": { "users": User[] };
 	"/sessions": { "sessions": Session[] };
 	"/unusual": { "sessions": Unusual[] };
-	[user: `/users/${string}`]: { "user": { "githubId": number; "createdAt": number; "deletedAt": number | null }; "sessions": Session[]; "audit": AuditRow[] };
+	[user: `/users/${string}`]: { "user": { "githubId": number | null; "createdAt": number; "deletedAt": number | null }; "sessions": Session[]; "audit": AuditRow[] };
 	[audit: `/audit?${string}`]: { "rows": AuditRow[] };
 	[traffic: `/traffic?${string}`]: Traffic;
 }
@@ -55,7 +55,7 @@ interface Traffic {
 }
 
 /** The everyday record; everything else is worth a second look (packages/api/src/audit-copies.ts, ROUTINE). */
-const ROUTINE = new Set(["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call", "admin_access"]);
+const ROUTINE = new Set(["login", "token_issued", "refreshed", "grant_revoked", "github_refresh_refused", "proxy_call", "email_code_sent", "admin_access"]);
 
 // ── Pieces ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -93,15 +93,18 @@ function Loading({ read, children }: { "read": { "data"?: unknown; "error"?: str
 	return read.data === undefined ? <wa-spinner /> : children();
 }
 
-/** A GitHub user, by login (looked up live) with their id. */
-function Login({ id }: { "id": number }) {
+/** A GitHub user, by login (looked up live) with their id; a user with no GitHub account signs in by email (C2), and
+ *  the admin app doesn't show their address. */
+function Login({ id }: { "id": number | null }) {
 	const [login, setLogin] = useState<string | undefined>();
 
 	useEffect(() => {
-		void loginOf(id).then(setLogin);
+		if (id !== null) {
+			void loginOf(id).then(setLogin);
+		}
 	}, [id]);
 
-	return <span title={`GitHub user ${id}`}>{login ?? `#${id}`}</span>;
+	return id === null ? <span class="muted" title="No GitHub account: signs in by email">by email</span> : <span title={`GitHub user ${id}`}>{login ?? `#${id}`}</span>;
 }
 
 /** A moment, relative ("3 minutes ago"), with the exact time on hover. */
@@ -205,7 +208,7 @@ function SessionRows<S extends Session>({ sessions, withUser, columns }: { "sess
 
 					return (
 						<tr key={session.id}>
-							{withUser && <td><a href={`#/users/${session.userId}`}><Login id={session.githubId as number} /></a></td>}
+							{withUser && <td><a href={`#/users/${session.userId}`}><Login id={session.githubId ?? null} /></a></td>}
 							<td><wa-badge variant={session.client === "admin" ? "brand" : "neutral"}>{session.client}</wa-badge></td>
 							<td>{session.label ?? <span class="muted">unknown</span>}</td>
 							<td><When at={session.createdAt} /></td>
@@ -248,7 +251,7 @@ function EndSignIn({ session, onClose }: { "session": Session; "onClose": (at?: 
 			setProblem(error instanceof Error && / 404$/u.test(error.message) ? "It had already ended." : error instanceof Error && / 403$/u.test(error.message) ? "Your roles don't include ending sign-ins." : "Couldn't end it. Try again.");
 		});
 	};
-	const whose = session.githubId === undefined ? "Their" : <><Login id={session.githubId} />'s</>;
+	const whose = session.githubId === undefined || session.githubId === null ? "Their" : <><Login id={session.githubId} />'s</>;
 
 	return (
 		<wa-dialog
@@ -299,7 +302,7 @@ export function UserPage({ id }: { "id": string }) {
 		<Loading read={read}>{() => (
 			<section class="wa-stack wa-gap-l">
 				<h1 class="wa-heading-xl"><Login id={read.data!.user.githubId} /> <Deleted at={read.data!.user.deletedAt} /></h1>
-				<p class="muted">GitHub user {read.data!.user.githubId} · joined <When at={read.data!.user.createdAt} /> · our id <span class="mono">{id}</span></p>
+				<p class="muted">{read.data!.user.githubId === null ? "No GitHub account" : `GitHub user ${read.data!.user.githubId}`} · joined <When at={read.data!.user.createdAt} /> · our id <span class="mono">{id}</span></p>
 				{read.data!.user.deletedAt !== null && <wa-callout variant="warning">They deleted their account <When at={read.data!.user.deletedAt} />. It's purged after {new Date(read.data!.user.deletedAt + PURGE_AFTER).toLocaleDateString()}, unless they sign in again before then.</wa-callout>}
 				<h2 class="wa-heading-l">Sign-ins</h2>
 				<SessionRows sessions={read.data!.sessions} withUser={false} />

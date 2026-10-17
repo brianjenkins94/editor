@@ -100,7 +100,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 
 	useEffect(() => {
-		void get<{ "users": { "id": string; "githubId": number }[] }>("/users").then(({ users }) => users.find((user) => user.id === me.user)).then((self) => (self === undefined ? undefined : loginOf(self.githubId))).then(setLogin, () => undefined);
+		void get<{ "users": { "id": string; "githubId": number | null }[] }>("/users").then(({ users }) => users.find((user) => user.id === me.user)).then((self) => (self === undefined || self.githubId === null ? undefined : loginOf(self.githubId))).then(setLogin, () => undefined);
 	}, [me.user]);
 
 	return (

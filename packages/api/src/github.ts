@@ -47,17 +47,23 @@ async function refuse(context: Context<AppEnv>, reason: string): Promise<Respons
 	return context.json({ "error": "invalid_request" }, 400);
 }
 
-/** Back to the app with an OAuth answer: `code` on success, `error` otherwise; always its own `state`, and our `iss`. */
-function answer(context: Context<AppEnv>, pending: Direct, parameters: Record<string, string>): Response {
+/** Where the app is answered (an OAuth answer: `code` on success, `error` otherwise; always its own `state`, and our
+ *  `iss`): GitHub's callback redirects there, the email step (email.ts) hands it to the sign-in page. */
+export function answerUrl(context: Context<AppEnv>, pending: Direct, parameters: Record<string, string>): string {
 	const target = new URL(pending.redirectUri);
 
 	for (const [key, value] of Object.entries({ ...parameters, "state": pending.state, "iss": new URL(context.req.url).origin })) {
 		target.searchParams.set(key, value);
 	}
 
+	return target.href;
+}
+
+/** Back to the app with an OAuth answer (answerUrl). */
+function answer(context: Context<AppEnv>, pending: Direct, parameters: Record<string, string>): Response {
 	context.header("cache-control", "no-store");
 
-	return context.redirect(target.href, 302);
+	return context.redirect(answerUrl(context, pending, parameters), 302);
 }
 
 /** GET /auth/github/start (an OAuth authorization endpoint, RFC 6749 §4.1.1 with PKCE and RFC 9449's dpop_jkt). */

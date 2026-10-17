@@ -4,7 +4,9 @@
  *
  *   http://localhost:8787/__harness              the page: an app in an iframe (?app=, default the admin app on
  *                                                5174), and the stored state with its changes
- *   http://localhost:8787/__harness/state        the same as JSON
+ *   http://localhost:8787/__harness/state        the same as JSON, with the outbox
+ *   http://localhost:8787/__harness/outbox       the email stand-in (src/mail.ts, EMAIL_OUTBOX): the Worker POSTs what it
+ *                                                sends here, and the page shows it, codes and links included
  *   http://localhost:8787/…                      everything else is the API itself
  *
  * It listens on 8787 because that's the dev GitHub App's local callback (packages/api/README.md, A0), and passes every
@@ -41,12 +43,14 @@ const secrets = {
 	"TOKEN_KEK": random(),
 	"AUDIT_KEY": random(),
 	"STATE_KEY": random(),
+	"CODE_KEY": random(),
 	"GITHUB_CLIENT_SECRET": devVars()["GITHUB_CLIENT_SECRET"] ?? "the stand-in takes any",
 	// Cloudflare's read-only analytics (src/traffic.ts), for the admin app's Traffic page: real data, from `.dev.vars`.
 	...devVars()["ANALYTICS_TOKEN"] === undefined ? {} : { "ANALYTICS_TOKEN": devVars()["ANALYTICS_TOKEN"] }
 };
 const standIn = devVars()["GITHUB_CLIENT_SECRET"] === undefined ? await githubStandIn(8786, { "id": 9398474, "login": "brianjenkins94" }) : undefined;
-const harness = createTestHarness({ "root": root, "workers": [{ "configPath": "wrangler.jsonc", "secrets": secrets, ...standIn === undefined ? {} : { "vars": { "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn } } }] });
+const vars = { "EMAIL_OUTBOX": `http://localhost:${PORT}/__harness/outbox`, ...standIn === undefined ? {} : { "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn } };
+const harness = createTestHarness({ "root": root, "workers": [{ "configPath": "wrangler.jsonc", "secrets": secrets, "vars": vars }] });
 
 await harness.listen();
 await harness.getWorker().applyD1Migrations("DB");
@@ -54,8 +58,11 @@ await harness.getWorker().applyD1Migrations("DB");
 let last: Snapshot = {};
 const log: { "at": string; "changes": Changes }[] = [];
 
+/** What the Worker emailed (newest first): nothing leaves the machine. */
+const outbox: { "at": string; "to": string; "subject": string; "text": string }[] = [];
+
 /** The state now, and every change since the harness started (newest first), each found by comparing with the last read. */
-async function state(): Promise<{ "state": Snapshot; "log": typeof log }> {
+async function state(): Promise<{ "state": Snapshot; "log": typeof log; "outbox": typeof outbox }> {
 	const now = await snapshot(harness);
 	const changes = diff(last, now);
 
@@ -66,7 +73,7 @@ async function state(): Promise<{ "state": Snapshot; "log": typeof log }> {
 
 	last = now;
 
-	return { "state": now, "log": log };
+	return { "state": now, "log": log, "outbox": outbox };
 }
 
 createServer(async (request, response) => {
@@ -76,6 +83,21 @@ createServer(async (request, response) => {
 		if (url.pathname === "/__harness" || url.pathname === "/__harness/") {
 			response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
 			response.end(fs.readFileSync(new URL("page.html", import.meta.url).pathname, { "encoding": "utf-8" }));
+
+			return;
+		}
+
+		if (url.pathname === "/__harness/outbox" && request.method === "POST") {
+			let body = "";
+
+			for await (const chunk of request) {
+				body += chunk;
+			}
+
+			const mail = JSON.parse(body) as { "to": string; "subject": string; "text": string };
+
+			outbox.unshift({ "at": new Date().toISOString(), "to": mail.to, "subject": mail.subject, "text": mail.text });
+			response.writeHead(202).end();
 
 			return;
 		}

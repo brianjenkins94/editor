@@ -29,7 +29,8 @@ export type AuditEvent =
 	| "proxy_call" | "proxy_denied" | "proxy_abuse"
 	| "account_deleted" | "account_restored" | "account_purged"
 	| "admin_access" | "admin_revoked"
-	| "probe" | "client_unusual" | "client_changed";
+	| "probe" | "client_unusual" | "client_changed"
+	| "email_code_sent";
 
 /** The retention (audit-copies.ts: ROUTINE_DAYS for the everyday record, SUSPICIOUS_DAYS for the rest), applied daily by
  *  the Worker's cron trigger. Says how many rows went. The copies expire on their own (the bucket's lifecycle rules). */

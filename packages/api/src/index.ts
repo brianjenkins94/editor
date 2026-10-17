@@ -11,6 +11,7 @@ import { admin } from "./admin.ts";
 import { ROUTES } from "./architecture.ts";
 import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
+import { emailEndpoint, verifyEndpoint } from "./email.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
 import { githubApi, githubGit } from "./proxy.ts";
@@ -67,6 +68,8 @@ const limit = (maxSize: number): ReturnType<typeof bodyLimit> => bodyLimit({
 // MB a request); a clone's upload-pack request is its wants and haves.
 app.use("/token", limit(4 * 1024));
 app.use("/auth/par", limit(4 * 1024));
+app.use("/auth/email/*", limit(4 * 1024));
+app.use("/auth/email", limit(4 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
@@ -112,6 +115,11 @@ app.get("/auth/start", rateLimit("SIGN_IN_BY_IP", byIp), signInStart);
 app.get("/auth/attempt", attemptEndpoint);
 
 app.get("/auth/github", rateLimit("SIGN_IN_BY_IP", byIp), githubEndpoint);
+
+// The page's email choice (src/email.ts, SIGN-IN.md C2): a code sent, then checked.
+app.post("/auth/email", rateLimit("SIGN_IN_BY_IP", byIp), emailEndpoint);
+
+app.post("/auth/email/verify", rateLimit("SIGN_IN_BY_IP", byIp), verifyEndpoint);
 
 app.post("/token", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), tokenEndpoint);
 

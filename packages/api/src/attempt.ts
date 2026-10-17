@@ -43,7 +43,18 @@ export const SCHEMA = `CREATE TABLE IF NOT EXISTS attempt (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	client TEXT NOT NULL, redirectUri TEXT NOT NULL, state TEXT NOT NULL, codeChallenge TEXT NOT NULL, jkt TEXT NOT NULL,
 	pushed_at INTEGER NOT NULL, opened_at INTEGER, secret_hash TEXT, finished_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS email_step (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	address TEXT NOT NULL, code_hash TEXT NOT NULL, expires INTEGER NOT NULL, tries REAL NOT NULL, tries_at INTEGER NOT NULL
 )`;
+
+/** An emailed code's life, and the tries at it: a bucket of TRIES, one back each TRY_REFILL (SIGN-IN.md, "Email"). */
+export const CODE_TTL = 10 * 60_000;
+
+const TRIES = 5;
+
+const TRY_REFILL = 60_000;
 
 export class Attempt extends DurableObject<Bindings> {
 	private readonly sql = this.ctx.storage.sql;
@@ -138,6 +149,67 @@ export class Attempt extends DurableObject<Bindings> {
 		}
 
 		return row;
+	}
+
+	/**
+	 * The email step (C2): a code was sent to `address`; its HMAC (`codeHash`, src/email.ts) is what's kept, valid for
+	 * CODE_TTL. A new code replaces the last one, but not the tries left: asking again doesn't buy guesses.
+	 */
+	public async emailed(secret: string, address: string, codeHash: string): Promise<{ "ok": true } | Refused> {
+		const row = await this.running(secret);
+
+		if ("reason" in row) {
+			return row;
+		}
+
+		const now = Date.now();
+
+		this.sql.exec("INSERT INTO email_step (id, address, code_hash, expires, tries, tries_at) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET address = excluded.address, code_hash = excluded.code_hash, expires = excluded.expires", address, codeHash, now + CODE_TTL, TRIES, now);
+
+		return { "ok": true };
+	}
+
+	/**
+	 * Try a code (its HMAC): one try from the bucket, then it must be this attempt's latest, unexpired. A match ends the
+	 * attempt, once, with its request and the address the code went to; a code is good once.
+	 */
+	public async confirm(secret: string, codeHash: string): Promise<{ "ok": true; "request": Pushed; "address": string } | Refused> {
+		const row = await this.running(secret);
+
+		if ("reason" in row) {
+			return row;
+		}
+
+		const [step] = this.sql.exec<{ "address": string; "code_hash": string; "expires": number; "tries": number; "tries_at": number }>("SELECT address, code_hash, expires, tries, tries_at FROM email_step WHERE id = 1").toArray();
+
+		if (step === undefined) {
+			return { "ok": false, "reason": "no code sent" };
+		}
+
+		const now = Date.now();
+		const tries = Math.min(TRIES, step.tries + (now - step.tries_at) / TRY_REFILL);
+
+		if (tries < 1) {
+			return { "ok": false, "reason": "too many tries" };
+		}
+
+		this.sql.exec("UPDATE email_step SET tries = ?, tries_at = ? WHERE id = 1", tries - 1, now);
+
+		const given = new TextEncoder().encode(codeHash);
+		const kept = new TextEncoder().encode(step.code_hash);
+
+		if (given.byteLength !== kept.byteLength || !crypto.subtle.timingSafeEqual(given, kept)) {
+			return { "ok": false, "reason": "code wrong" };
+		}
+
+		if (step.expires < now) {
+			return { "ok": false, "reason": "code expired" };
+		}
+
+		this.sql.exec("UPDATE attempt SET finished_at = ? WHERE id = 1", now);
+		this.sql.exec("DELETE FROM email_step");
+
+		return { "ok": true, "request": { "client": row.client, "redirectUri": row.redirectUri, "state": row.state, "codeChallenge": row.codeChallenge, "jkt": row.jkt }, "address": step.address };
 	}
 
 	/** Its time is up: nothing of it is kept. */

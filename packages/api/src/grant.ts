@@ -132,25 +132,36 @@ export class Grant extends DurableObject<Bindings> {
 	}
 
 	/**
-	 * Start the sign-in, once GitHub has said who this is: the user (made on their first sign-in), the grant's row, GitHub's
-	 * tokens sealed, and a code the browser redeems at /token with its PKCE verifier and a proof from key `jkt`. This is the
-	 * one call A0's GitHub callback makes. `client` is the OAuth client it's for: only that client can redeem the code and
+	 * Start the sign-in, once a method has said who this is: by GitHub (`githubId`, the user made on their first sign-in,
+	 * and GitHub's tokens, sealed), or by another method that found or made its user (`userId`: an emailed code, C2). Then
+	 * the grant's row, and a code the browser redeems at /token with its PKCE verifier and a proof from key `jkt`. The
+	 * `login` row says which method. `client` is the OAuth client it's for: only that client can redeem the code and
 	 * refresh what it gives.
 	 */
-	public async begin({ client = "editor", githubId, github, codeChallenge, jkt, from, label }: { "client"?: string; "githubId": number; "github": GitHubTokens; "codeChallenge": string; "jkt": string; "from": Origin; "label"?: string }): Promise<{ "code": string }> {
+	public async begin({ client = "editor", githubId, userId: known, github, method = "github", codeChallenge, jkt, from, label }: { "client"?: string; "githubId"?: number; "userId"?: string; "github"?: GitHubTokens; "method"?: string; "codeChallenge": string; "jkt": string; "from": Origin; "label"?: string }): Promise<{ "code": string }> {
 		if (this.state() !== undefined) {
 			throw new Error("a grant begins once");
 		}
 
 		const now = Date.now();
 
-		await this.env.DB.prepare("INSERT INTO users (id, github_id, created_at) VALUES (?, ?, ?) ON CONFLICT (github_id) DO NOTHING").bind(crypto.randomUUID(), githubId, now).run();
+		// GitHub's sign-in names its user by GitHub's id (made on their first sign-in); another method has found its user.
+		if (githubId !== undefined) {
+			await this.env.DB.prepare("INSERT INTO users (id, github_id, created_at) VALUES (?, ?, ?) ON CONFLICT (github_id) DO NOTHING").bind(crypto.randomUUID(), githubId, now).run();
+		}
 
-		const user = await this.env.DB.prepare("SELECT id, deleted_at FROM users WHERE github_id = ?").bind(githubId).first<{ "id": string; "deleted_at": number | null }>();
-		const userId = user?.id as string;
+		const user = githubId === undefined
+			? await this.env.DB.prepare("SELECT id, deleted_at FROM users WHERE id = ?").bind(known ?? "").first<{ "id": string; "deleted_at": number | null }>()
+			: await this.env.DB.prepare("SELECT id, deleted_at FROM users WHERE github_id = ?").bind(githubId).first<{ "id": string; "deleted_at": number | null }>();
+
+		if (user === null) {
+			throw new Error("a grant begins for a user");
+		}
+
+		const userId = user.id;
 
 		// Signing in again within the grace period of a deletion restores the account (account.ts, GRACE_DAYS).
-		if (user?.deleted_at !== null && user?.deleted_at !== undefined) {
+		if (user.deleted_at !== null) {
 			await this.env.DB.prepare("UPDATE users SET deleted_at = NULL WHERE id = ?").bind(userId).run();
 			await audit(this.env, "account_restored", { "userId": userId, "grantId": this.id }, from, { "reason": "signed in within the grace period" });
 		}
@@ -159,8 +170,8 @@ export class Grant extends DurableObject<Bindings> {
 
 		const code = token(this.id);
 
-		this.sql.exec("INSERT INTO state (id, user_id, jkt, github, code_hash, code_challenge, code_expires, client) VALUES (1, ?, ?, ?, ?, ?, ?, ?)", userId, jkt, await seal(this.env.TOKEN_KEK, JSON.stringify(github), this.id), await hash(code), codeChallenge, now + CODE_TTL, client);
-		await audit(this.env, "login", { "userId": userId, "grantId": this.id }, from);
+		this.sql.exec("INSERT INTO state (id, user_id, jkt, github, code_hash, code_challenge, code_expires, client) VALUES (1, ?, ?, ?, ?, ?, ?, ?)", userId, jkt, github === undefined ? null : await seal(this.env.TOKEN_KEK, JSON.stringify(github), this.id), await hash(code), codeChallenge, now + CODE_TTL, client);
+		await audit(this.env, "login", { "userId": userId, "grantId": this.id }, from, { "reason": method });
 		await this.ctx.storage.setAlarm(now + CODE_TTL);
 
 		return { "code": code };

@@ -10,3 +10,13 @@ h1 { margin: 0 0 4px; font-size: 1.5rem; }
 .method { display: block; padding: 10px 14px; border-radius: 8px; text-align: center; text-decoration: none; font-weight: 600; background: var(--brand); color: white; }
 .method:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 50%, transparent); outline-offset: 2px; }
 .problem { margin: 16px 0 0; }
+form.stack { gap: 12px; }
+label { display: grid; gap: 4px; font-weight: 600; }
+input { padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-weight: 400; background: Canvas; color: CanvasText; }
+input:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 50%, transparent); outline-offset: 1px; }
+button.method { width: 100%; border: 0; font: inherit; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: 0.6; cursor: default; }
+.secondary { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: transparent; color: inherit; cursor: pointer; }
+.or { margin: 4px 0; text-align: center; opacity: 0.6; }
+.note { margin: 0; }
+.code { margin: 8px 0 0; font: 600 1.6rem/1.2 ui-monospace, monospace; letter-spacing: 2px; text-align: center; }

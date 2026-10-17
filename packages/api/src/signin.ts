@@ -6,6 +6,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { ATTEMPT_TTL, PUSH_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
 import { toGitHub } from "./github.ts";
+import { canSend } from "./mail.ts";
 import { nonce } from "./tokens.ts";
 
 /**
@@ -15,7 +16,8 @@ import { nonce } from "./tokens.ts";
  *                       an attempt is made, and the client gets an opaque request_uri for it
  *   GET  /auth/start    the browser arrives with only client_id and request_uri: the attempt opens, once, in this
  *                       browser (its cookie), and the browser goes on to the sign-in page (public/sign-in.html)
- *   GET  /auth/attempt  what the page may offer this attempt: its client's methods (SIGN_IN_METHODS)
+ *   GET  /auth/attempt  what the page may offer this attempt: its client's methods (SIGN_IN_METHODS), email only where
+ *                       email can be sent (a binding or the outbox, and CODE_KEY)
  *   GET  /auth/github   the page's GitHub choice: on to GitHub, the attempt in GitHub's sealed state; GitHub's callback
  *                       (github.ts) finishes the attempt in the same browser and starts the sign-in (Grant.begin)
  *
@@ -133,7 +135,9 @@ export async function attemptEndpoint(context: Context<AppEnv>): Promise<Respons
 		return context.json({ "error": "no_attempt" }, 401);
 	}
 
-	return context.json({ "client": described.client, "methods": context.env.SIGN_IN_METHODS[described.client] ?? [] });
+	const ready = (method: string): boolean => method !== "email" || (canSend(context.env) && context.env.CODE_KEY !== undefined);
+
+	return context.json({ "client": described.client, "methods": (context.env.SIGN_IN_METHODS[described.client] ?? []).filter(ready) });
 }
 
 /** GET /auth/github: the page's GitHub choice, for this browser's attempt, when its client offers GitHub. */

@@ -1,6 +1,7 @@
 # Sign-in methods
 
-Status: **design, 2026-10-17.** Nothing here is built. Decided: build it ourselves, trial it on the admin app, move to
+Status: **design, 2026-10-17; C0, C1 and C2 built** (C2's sending in production waits on "Before email works in
+production", below). Decided: build it ourselves, trial it on the admin app, move to
 **Workers Paid** (for Argon2id's CPU and email sending), add a local debug harness first (C0), and push authorization
 requests (PAR) in C1. Still open: "Open questions".
 
@@ -153,7 +154,36 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   - Every refusal is a `sign_in_refused` row with its reason. The legacy `/auth/github/start` stays for the editor.
   - `test/signin.test.ts`, 7 tests in workerd; turning off the secret or single-use checks fails them. The admin app
     (B3) is the first real client.
-- **C2 · email.** The email provider and DNS records; `emails`; sign-in by emailed code or link; new accounts by email.
+- **C2 · email.** *Built 2026-10-17* (src/email.ts, src/mail.ts; the Attempt's `email_step`; migrations/0007):
+  - `POST /auth/email` (`address`): checked as typed (no trimming, at most 254 characters), sending limited per
+    address, one a minute and five an hour (by the address's own `email_code_sent` rows: a keyed hash, never the
+    address), then a code (8 symbols of 32, 40 bits) and a link holding it sent; the attempt keeps the code's HMAC
+    under `CODE_KEY` (a new secret), bound to the attempt, for 10 minutes. A new code replaces the last, not the tries.
+  - `POST /auth/email/verify` (`code`, case and dashes ignored): 5 tries a bucket, one back a minute; a match ends the
+    attempt and finds the address's user, case-insensitively (`emails`, unique on `lower(address)`, stored as typed),
+    or makes one, and starts the sign-in (`Grant.begin`, generalized: a user found by another method; the `login` row
+    says which). The page goes on to the app's redirect page, as GitHub's callback sends it.
+  - The link is `/sign-in#code=…`: the page sends it as if typed, in the browser that started; elsewhere it shows the
+    code to type there. A mail scanner opening it does nothing.
+  - `users.github_id` may be null (migrations/0007 rebuilds `users`, rows kept; checked against existing rows).
+  - Sending: src/mail.ts, Cloudflare Email Service's `send_email` binding (`EMAIL`), from `no-reply@unusuallygood.dev`;
+    in the harness and tests, an outbox stand-in (`EMAIL_OUTBOX`): the harness page's Outbox shows every code and link.
+    `/auth/attempt` offers email only where it can be sent and `CODE_KEY` is set; `SIGN_IN_METHODS` offers it to the
+    admin app everywhere, so it appears once an environment is set up.
+  - The email's bodies are src/email-code.txt and .html (`{{placeholders}}`, escaped in the HTML).
+  - The admin app shows a user without a GitHub account as "by email", not their address.
+  - 7 tests in test/email.test.ts, in workerd, against an outbox of the test's own: the whole flow and a new user by
+    email alone, the same user whatever the case, a code only in its own browser, the tries, the sending limit, what's
+    stored (never the code, the address only hashed in the log). Tried with the harness: a wrong code, the link in
+    the browser that started (signed in, a new account with no roles: "No access"), the link elsewhere (the code to
+    type).
+  - **Departure:** checking is limited per attempt only, not per user as well: a code is bound to its attempt (its
+    HMAC includes the attempt's id), so guessing in another attempt can't reach it.
+- **Before email works in production** (your part, on the Cloudflare dashboard): the account on **Workers Paid**
+  (sending to any address needs it; 3,000 emails a month included, then $0.35 per 1,000), and unusuallygood.dev
+  **onboarded** in Compute → Email Service → Email Sending (it adds the SPF, DKIM, DMARC and bounce records on
+  `cf-bounce`). Then, here: the `send_email` binding in dev's and production's configs, and `CODE_KEY` generated and
+  put in both. Until then, those environments don't offer email.
 - **C3 · passwords.** Set a password (signed in); sign in with one; the breach check; Argon2id; rate limits.
 - **C4 · password reset.** By email code, plus the second factor when MFA is on.
 - **C5 · authenticator-app MFA.** Enrollment, recovery codes, the step at sign-in, turning it off; the owner's policy.

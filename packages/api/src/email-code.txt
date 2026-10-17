@@ -1,0 +1,6 @@
+Your code for signing in to unusually good is {{code}}
+
+Type it on the sign-in page, or open this link in the browser where you started:
+{{link}}
+
+It works for {{minutes}} minutes, once. If you didn't ask for it, ignore this email: nothing happens without the code.

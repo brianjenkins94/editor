@@ -37,6 +37,8 @@
 </section>
 <section id="pane">
 	<span id="status"></span>
+	<h2>Outbox</h2>
+	<div id="outbox"><p class="empty">No email sent yet. Sign in by email and the code arrives here.</p></div>
 	<h2>Changes</h2>
 	<div id="log"><p class="empty">Nothing written yet. Use the app and its writes appear here.</p></div>
 	<h2>Stored now</h2>
@@ -105,7 +107,22 @@
 
 	const opened = new Set();
 
-	function render({ state, log }) {
+	function render({ state, log, outbox }) {
+		if (outbox.length > 0) {
+			document.querySelector("#outbox").replaceChildren(...outbox.slice(0, 10).map(({ at, to, subject, text: body }, index) => {
+				const link = /https?:\/\/\S+/u.exec(body)?.[0];
+				const content = document.createElement("div");
+
+				content.append(Object.assign(document.createElement("pre"), { "textContent": body }));
+
+				if (link !== undefined) {
+					content.append(Object.assign(document.createElement("a"), { "href": link, "target": "_blank", "textContent": "Open the link in a new tab" }));
+				}
+
+				return section(Object.assign(document.createElement("span"), { "className": "when", "textContent": `${new Date(at).toLocaleTimeString()} ${to}` }), subject, content, index === 0);
+			}));
+		}
+
 		const logElement = document.querySelector("#log");
 
 		if (log.length > 0) {
