@@ -62,7 +62,7 @@ admin.get("/users/:id", requires("users:read"), async (context) => {
 
 	return context.json({
 		"user": { "id": user.id, "githubId": user.github_id, "createdAt": user.created_at, "deletedAt": user.deleted_at },
-		"sessions": (sessions?.results ?? []).map(session),
+		"sessions": (sessions?.results ?? []).map((row) => session(row as Record<string, unknown>, context.get("grant"))),
 		"audit": (rows?.results ?? []).map(auditRow)
 	});
 });
@@ -72,7 +72,7 @@ admin.get("/sessions", requires("sessions:read"), async (context) => {
 	const { results } = await context.env.DB.prepare(`SELECT g.id, g.client, g.label, g.created_at, g.last_used_at, g.revoked_at, g.user_id, u.github_id
 		FROM grants g JOIN users u ON u.id = g.user_id WHERE g.revoked_at IS NULL ORDER BY g.last_used_at DESC LIMIT ?`).bind(limitOf(context.req.query("limit"), 200, 1000)).all();
 
-	return context.json({ "sessions": results.map((row) => ({ ...session(row), "userId": row["user_id"], "githubId": row["github_id"] })) });
+	return context.json({ "sessions": results.map((row) => ({ ...session(row, context.get("grant")), "userId": row["user_id"], "githubId": row["github_id"] })) });
 });
 
 /**
@@ -115,8 +115,37 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
 
-function session(row: Record<string, unknown>): Record<string, unknown> {
-	return { "id": row["id"], "client": row["client"] ?? "editor", "label": row["label"], "createdAt": row["created_at"], "lastUsedAt": row["last_used_at"], "revokedAt": row["revoked_at"] };
+// ── Writes (B6) ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * End someone's sign-in, with `confirm=revoke`: its tokens stop working at once, and its GitHub token is revoked at
+ * GitHub (Grant.revoke). Recorded on both sides: the sign-in's own row (`grant_revoked`, "ended by an admin", on that
+ * user's record), and the admin's (`admin_revoked`, naming the sign-in and whose it was; never routine, so it's kept as
+ * long as a refusal is and shows among the suspicious).
+ */
+admin.post("/sessions/:id/revoke", requires("sessions:revoke"), async (context) => {
+	if ((await context.req.parseBody())["confirm"] !== "revoke") {
+		return context.json({ "error": "confirm", "message": "send confirm=revoke" }, 400);
+	}
+
+	const id = context.req.param("id");
+	const row = /^[0-9a-f]{64}$/u.test(id) ? await context.env.DB.prepare("SELECT user_id FROM grants WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ "user_id": string }>() : null;
+
+	if (row === null) {
+		return context.json({ "error": "not_found" }, 404);
+	}
+
+	const from = await origin(context);
+
+	await context.env.GRANTS.get(context.env.GRANTS.idFromString(id)).revoke({ "from": from, "reason": "ended by an admin" });
+	await audit(context.env, "admin_revoked", { "userId": context.get("user"), "grantId": context.get("grant") }, from, { "detail": `sign-in ${id} of user ${row.user_id}` });
+
+	return context.json({ "revoked": 1 });
+});
+
+/** A sign-in as the admin app shows it; `current` is the admin's own (ended by signing out, not from a list). */
+function session(row: Record<string, unknown>, current: string): Record<string, unknown> {
+	return { "id": row["id"], "client": row["client"] ?? "editor", "label": row["label"], "createdAt": row["created_at"], "lastUsedAt": row["last_used_at"], "revokedAt": row["revoked_at"], "current": row["id"] === current };
 }
 
 function auditRow(row: Record<string, unknown>): Record<string, unknown> {

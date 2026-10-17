@@ -15,12 +15,13 @@ import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
 import "@awesome.me/webawesome/dist/components/select/select.js";
 import "@awesome.me/webawesome/dist/components/option/option.js";
 import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
+import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import "./admin.css";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { loginOf } from "./logins";
 import { get, session, SIGNED_OUT } from "./session";
-import { Audit, Overview, Sessions, TrafficPage, UserPage, Users } from "./views";
+import { Audit, Overview, Permissions, Sessions, TrafficPage, UserPage, Users } from "./views";
 
 interface Me { "user": string; "roles": string[]; "permissions": string[] }
 
@@ -118,7 +119,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/audit", "Audit log", path === "/audit")}
 				{link("#/traffic", "Traffic", path === "/traffic")}
 			</nav>
-			<main>{page}</main>
+			<main><Permissions.Provider value={me.permissions}>{page}</Permissions.Provider></main>
 		</wa-page>
 	);
 }
@@ -156,7 +157,8 @@ function App() {
 			try {
 				setState({ "kind": "in", "me": await get<Me>("/me") });
 			} catch {
-				setState({ "kind": "signedOut", "problem": "Couldn't reach the API." });
+				// Refused because the sign-in ended (an admin ended it, or it ran out): the client has signed out.
+				setState({ "kind": "signedOut", "problem": session.isSignedIn() ? "Couldn't reach the API." : "Your sign-in ended. Sign in again." });
 			}
 		})();
 

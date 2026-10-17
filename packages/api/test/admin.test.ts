@@ -262,3 +262,49 @@ test("/admin/audit: newest first, by event, suspicious only, and a page at a tim
 	assert.ok(suspicious.length > 0);
 	assert.ok(suspicious.every((row) => !["login", "token_issued", "refreshed", "proxy_call", "admin_access"].includes(row.event)));
 });
+
+// ── B6: the first write ────────────────────────────────────────────────────────────────────────────────────────────
+
+test("ending a sign-in needs sessions:revoke: 403, recorded, and the sign-in carries on", async () => {
+	const holder = await browser();
+	const { access_token, grantId } = await signedIn(holder, someone(), "admin");
+	const { grantId: target } = await signedIn(await browser(), someone(), "editor");
+
+	assert.equal((await holder.send("POST", `/admin/sessions/${target}/revoke`, { "accessToken": access_token, "form": { "confirm": "revoke" } })).status, 403);
+	assert.deepEqual(await refusals(grantId), ["lacks sessions:revoke"]);
+	assert.equal((await env.DB.prepare("SELECT revoked_at FROM grants WHERE id = ?").bind(target).first<{ "revoked_at": number | null }>())?.revoked_at, null);
+});
+
+test("an admin ends someone's sign-in: only with confirm=revoke; its tokens stop at once; both sides recorded", async () => {
+	const holder = await browser();
+	const { access_token, grantId } = await signedIn(holder, OWNER, "admin");
+	const victim = await browser();
+	const { "access_token": theirs, refresh_token, "grantId": target } = await signedIn(victim, someone(), "editor");
+	const end = async (form: Record<string, string>): Promise<Answer> => holder.send("POST", `/admin/sessions/${target}/revoke`, { "accessToken": access_token, "form": form });
+
+	assert.equal((await end({})).status, 400, "no confirm: nothing ended");
+	assert.equal((await victim.send("GET", "/sessions", { "accessToken": theirs })).status, 200);
+
+	assert.equal((await end({ "confirm": "revoke" })).status, 200);
+	assert.notEqual((await victim.send("GET", "/sessions", { "accessToken": theirs })).status, 200, "their access token is refused");
+	assert.equal((await victim.send("POST", "/token", { "form": { "grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": "editor" } })).status, 400, "and their refresh token");
+
+	const userId = (await env.DB.prepare("SELECT user_id FROM grants WHERE id = ?").bind(target).first<{ "user_id": string }>())?.user_id;
+	const ended = await env.DB.prepare("SELECT user_id, reason FROM audit WHERE grant_id = ? AND event = 'grant_revoked'").bind(target).first<{ "user_id": string; "reason": string }>();
+	const by = await env.DB.prepare("SELECT user_id, detail FROM audit WHERE grant_id = ? AND event = 'admin_revoked'").bind(grantId).first<{ "user_id": string; "detail": string }>();
+
+	assert.deepEqual(ended, { "user_id": userId, "reason": "ended by an admin" });
+	assert.equal(by?.detail, `sign-in ${target} of user ${userId}`);
+
+	// Ended already, or not a sign-in at all: nothing to end.
+	assert.equal((await end({ "confirm": "revoke" })).status, 404);
+	assert.equal((await holder.send("POST", "/admin/sessions/nope/revoke", { "accessToken": access_token, "form": { "confirm": "revoke" } })).status, 404);
+});
+
+test("the admin's own sign-in is marked current in the lists", async () => {
+	const holder = await browser();
+	const { access_token, grantId } = await signedIn(holder, OWNER, "admin");
+	const { sessions } = await (await holder.send("GET", "/admin/sessions", { "accessToken": access_token })).json() as { "sessions": { "id": string; "current": boolean }[] };
+
+	assert.deepEqual(sessions.filter((session) => session.current).map((session) => session.id), [grantId]);
+});

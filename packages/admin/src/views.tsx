@@ -1,12 +1,16 @@
 /**
  * The admin app's pages (README.md, "The UI"): an overview of cards, then native tables (Web Awesome's native styles) of
  * users, one user, sign-ins and the audit log. Each reads the admin API; what the signed-in user's roles don't allow, the
- * API refuses and the page says so.
+ * API refuses and the page says so. One write (B6): ending a sign-in, after a confirm.
  */
 import type { ComponentChildren } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { createContext } from "preact";
+import { useContext, useEffect, useState } from "preact/hooks";
 import { loginOf } from "./logins";
-import { get } from "./session";
+import { get, post } from "./session";
+
+/** The signed-in admin's permissions (GET /admin/me), for the pages to offer only what they may do. */
+export const Permissions = createContext<string[]>([]);
 
 // ── Shapes the admin API answers with (packages/api/src/admin.ts) ─────────────────────────────────────────────────
 
@@ -19,7 +23,7 @@ function Deleted({ at }: { "at": number | null }) {
 	return at === null ? null : <wa-badge variant="danger" title={`Purged after ${new Date(at + PURGE_AFTER).toLocaleDateString()} unless they sign in again`}>deleted</wa-badge>;
 }
 
-interface Session { "id": string; "client": string; "label": string | null; "createdAt": number; "lastUsedAt": number; "revokedAt": number | null; "userId"?: string; "githubId"?: number }
+interface Session { "id": string; "client": string; "label": string | null; "createdAt": number; "lastUsedAt": number; "revokedAt": number | null; "current": boolean; "userId"?: string; "githubId"?: number }
 
 interface AuditRow { "id": number; "at": number; "event": string; "userId": string | null; "grantId": string | null; "country": string | null; "ipHash": string | null; "reason": string | null; "detail": string | null; "traceId": string | null }
 
@@ -166,20 +170,95 @@ export function Users() {
 }
 
 function SessionRows({ sessions, withUser }: { "sessions": Session[]; "withUser": boolean }) {
+	const canEnd = useContext(Permissions).includes("sessions:revoke");
+	// Ended here since the list was read: when, by id.
+	const [ended, setEnded] = useState<Record<string, number>>({});
+	const [ending, setEnding] = useState<Session | undefined>();
+	const endButton = (session: Session) => (
+		<wa-button
+			size="small"
+			appearance="outlined"
+			variant="danger"
+			onClick={() => {
+				setEnding(session);
+			}}
+		>
+			End
+		</wa-button>
+	);
+
 	return (
-		<Table head={[...withUser ? ["GitHub"] : [], "Client", "Device", "Started", "Last used", "Ended", "Sign-in"]}>
-			{sessions.map((session) => (
-				<tr key={session.id}>
-					{withUser && <td><a href={`#/users/${session.userId}`}><Login id={session.githubId as number} /></a></td>}
-					<td><wa-badge variant={session.client === "admin" ? "brand" : "neutral"}>{session.client}</wa-badge></td>
-					<td>{session.label ?? <span class="muted">unknown</span>}</td>
-					<td><When at={session.createdAt} /></td>
-					<td><When at={session.lastUsedAt} /></td>
-					<td>{session.revokedAt === null ? <wa-badge variant="success">live</wa-badge> : <When at={session.revokedAt} />}</td>
-					<td class="mono">{short(session.id)}</td>
-				</tr>
-			))}
-		</Table>
+		<>
+			<Table head={[...withUser ? ["GitHub"] : [], "Client", "Device", "Started", "Last used", "Ended", "Sign-in", ...canEnd ? [""] : []]}>
+				{sessions.map((session) => {
+					const revokedAt = session.revokedAt ?? ended[session.id] ?? null;
+
+					return (
+						<tr key={session.id}>
+							{withUser && <td><a href={`#/users/${session.userId}`}><Login id={session.githubId as number} /></a></td>}
+							<td><wa-badge variant={session.client === "admin" ? "brand" : "neutral"}>{session.client}</wa-badge></td>
+							<td>{session.label ?? <span class="muted">unknown</span>}</td>
+							<td><When at={session.createdAt} /></td>
+							<td><When at={session.lastUsedAt} /></td>
+							<td>{revokedAt === null ? <wa-badge variant="success">live</wa-badge> : <When at={revokedAt} />}</td>
+							<td class="mono">{short(session.id)}</td>
+							{canEnd && <td>{session.current ? <span class="muted">this one</span> : revokedAt === null && endButton(session)}</td>}
+						</tr>
+					);
+				})}
+			</Table>
+			{ending !== undefined && (
+				<EndSignIn
+					session={ending}
+					onClose={(at) => {
+						if (at !== undefined) {
+							setEnded({ ...ended, [ending.id]: at });
+						}
+
+						setEnding(undefined);
+					}}
+				/>
+			)}
+		</>
+	);
+}
+
+/** The confirm step before ending a sign-in (POST /admin/sessions/:id/revoke, confirm=revoke): what will happen, then
+ *  the call. Closes with when it ended, or with nothing if it didn't. */
+function EndSignIn({ session, onClose }: { "session": Session; "onClose": (at?: number) => void }) {
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | undefined>();
+	const end = (): void => {
+		setBusy(true);
+		post(`/sessions/${session.id}/revoke`, { "confirm": "revoke" }).then(() => {
+			onClose(Date.now());
+		}, (error: unknown) => {
+			setBusy(false);
+			setProblem(error instanceof Error && / 404$/u.test(error.message) ? "It had already ended." : error instanceof Error && / 403$/u.test(error.message) ? "Your roles don't include ending sign-ins." : "Couldn't end it. Try again.");
+		});
+	};
+	const whose = session.githubId === undefined ? "Their" : <><Login id={session.githubId} />'s</>;
+
+	return (
+		<wa-dialog
+			open
+			label="End this sign-in?"
+			onwa-after-hide={(event: Event) => {
+				if (event.target === event.currentTarget) {
+					onClose();
+				}
+			}}
+		>
+			<div class="wa-stack">
+				<p>
+					{whose} {session.client} sign-in{session.label === null ? "" : ` on ${session.label}`}, started <When at={session.createdAt} />, stops working at once, and its GitHub token is revoked. They can sign in again.
+				</p>
+				<p class="muted">The audit log records that you ended it.</p>
+				{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
+			</div>
+			<wa-button slot="footer" appearance="plain" data-dialog="close">Cancel</wa-button>
+			<wa-button slot="footer" variant="danger" loading={busy} onClick={end}>End sign-in</wa-button>
+		</wa-dialog>
 	);
 }
 

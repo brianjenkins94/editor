@@ -168,7 +168,14 @@ Each lands green and is useful on its own.
   Cloudflare's analytics), *derived from code*: the wrangler configs, the routes and the bindings, read at build time,
   never drawn by hand. *Zero-knowledge*: it shows the shape and its live counts, never a user's data. Its own renderer,
   not the editor's.
-- **B6 · first write.** End a sign-in from the admin app (`sessions:revoke`), with a confirm step, audited.
+- **B6 · first write.** *Built 2026-10-17:* `POST /admin/sessions/:id/revoke` with `confirm=revoke`, behind
+  `sessions:revoke` (packages/api/src/admin.ts): Grant.revoke ends the sign-in at once (its GitHub token revoked too),
+  recorded on both sides: `grant_revoked` ("ended by an admin") on that user's record, and `admin_revoked` (which
+  sign-in, whose) on the admin's, never routine. The lists mark the admin's own sign-in `current`. The app's sign-in
+  tables have an End button (shown with that permission, not on your own sign-in) and a confirm dialog that says what
+  happens; the ended browser's next load says its sign-in ended. 3 tests in test/admin.test.ts; tried with the
+  harness, the owner in one browser ending someone else's sign-in in another. (WebKit can't sign in to the harness: it
+  drops the `Secure` `__Host-signin` cookie over http://localhost. Production is https.)
 - **Later:** organizations, memberships and their roles; organization admins in the same app; billing (Stripe).
 
 ## Open questions

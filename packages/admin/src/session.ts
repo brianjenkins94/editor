@@ -16,3 +16,6 @@ export const session = createClient({ "api": API, "clientId": "admin", "redirect
 
 /** A read from the admin API. */
 export const get = async <T>(path: string): Promise<T> => session.json<T>(`/admin${path}`);
+
+/** A write to the admin API: a form POSTed. */
+export const post = async <T>(path: string, form: Record<string, string>): Promise<T> => session.json<T>(`/admin${path}`, form);
