@@ -16,10 +16,10 @@ import { open, seal } from "./seal.ts";
 
 const STATE_TTL = 600_000;
 
-const CLIENT_ID = "editor";
-
 /** What rides through GitHub, sealed. */
 interface Pending {
+	/** Which of our clients (REDIRECT_URIS' keys) the sign-in is for: its Grant remembers it. */
+	"client": string;
 	"redirectUri": string;
 	"state": string;
 	"codeChallenge": string;
@@ -61,12 +61,14 @@ function answer(context: Context<AppEnv>, pending: Pending, parameters: Record<s
 export async function startEndpoint(context: Context<AppEnv>): Promise<Response> {
 	const query = context.req.query();
 
-	if (query["client_id"] !== CLIENT_ID || query["response_type"] !== "code") {
+	const client = query["client_id"] ?? "";
+
+	if (!Object.hasOwn(context.env.REDIRECT_URIS, client) || query["response_type"] !== "code") {
 		return refuse(context, "client_id or response_type");
 	}
 
-	// Exact match only: an app origin's own page, never anywhere a code could leak to.
-	if (!context.env.REDIRECT_URIS.split(",").includes(query["redirect_uri"] ?? "")) {
+	// Exact match only, among that client's own pages: never anywhere a code could leak to, nor another client's app.
+	if (!(context.env.REDIRECT_URIS[client] ?? []).includes(query["redirect_uri"] ?? "")) {
 		return refuse(context, "redirect_uri not registered");
 	}
 
@@ -75,7 +77,7 @@ export async function startEndpoint(context: Context<AppEnv>): Promise<Response>
 	}
 
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-	const pending: Pending = { "redirectUri": query["redirect_uri"] as string, "state": query["state"] as string, "codeChallenge": query["code_challenge"] as string, "jkt": query["dpop_jkt"] as string, "verifier": verifier, "expires": Date.now() + STATE_TTL };
+	const pending: Pending = { "client": client, "redirectUri": query["redirect_uri"] as string, "state": query["state"] as string, "codeChallenge": query["code_challenge"] as string, "jkt": query["dpop_jkt"] as string, "verifier": verifier, "expires": Date.now() + STATE_TTL };
 	const authorize = new URL("/login/oauth/authorize", github(context.env).web);
 
 	authorize.search = new URLSearchParams({
@@ -140,6 +142,7 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 	const now = Date.now();
 	const grant = context.env.GRANTS.get(context.env.GRANTS.newUniqueId());
 	const { "code": ours } = await grant.begin({
+		"client": pending.client,
 		"githubId": user.id,
 		"github": { "accessToken": exchanged.access_token, "refreshToken": exchanged.refresh_token, "expiresAt": now + (exchanged.expires_in ?? 28_800) * 1000, "refreshExpiresAt": now + (exchanged.refresh_token_expires_in ?? 15_897_600) * 1000 },
 		"codeChallenge": pending.codeChallenge,

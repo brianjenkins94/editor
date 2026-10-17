@@ -15,8 +15,6 @@ import type { AppEnv, Bindings } from "./env.ts";
 
 const ACCESS_TTL = 300;
 
-const CLIENT_ID = "editor";
-
 /** The issuer, and the audience: this Worker, by the origin it was reached at. */
 const issuer = (context: Context<AppEnv>): string => new URL(context.req.url).origin;
 
@@ -76,7 +74,9 @@ export async function tokenEndpoint(context: Context<AppEnv>): Promise<Response>
 		return oauthError(context, "unsupported_grant_type", "grant_type");
 	}
 
-	if (typeof presented !== "string" || (grantType === "authorization_code" && typeof form["code_verifier"] !== "string") || form["client_id"] !== CLIENT_ID) {
+	const client = form["client_id"];
+
+	if (typeof presented !== "string" || (grantType === "authorization_code" && typeof form["code_verifier"] !== "string") || typeof client !== "string" || !Object.hasOwn(context.env.REDIRECT_URIS, client)) {
 		return oauthError(context, "invalid_request", "missing parameters");
 	}
 
@@ -98,15 +98,15 @@ export async function tokenEndpoint(context: Context<AppEnv>): Promise<Response>
 
 	const from = await origin(context);
 	const issued = grantType === "authorization_code"
-		? await grant.stub.redeem({ "code": presented, "verifier": form["code_verifier"] as string, "jkt": proof.jkt, "from": from })
-		: await grant.stub.rotate({ "refreshToken": presented, "jkt": proof.jkt, "from": from });
+		? await grant.stub.redeem({ "code": presented, "verifier": form["code_verifier"] as string, "jkt": proof.jkt, "client": client, "from": from })
+		: await grant.stub.rotate({ "refreshToken": presented, "jkt": proof.jkt, "client": client, "from": from });
 
 	if (!issued.ok) {
 		return oauthError(context, "invalid_grant", "code or refresh token refused", { "recorded": true });
 	}
 
 	const iss = issuer(context);
-	const accessToken = await signAccessToken(signingKey(context.env), { "iss": iss, "aud": iss, "sub": issued.userId, "jkt": proof.jkt, "clientId": CLIENT_ID, "extra": { "grant": grant.id } }, { "ttl": ACCESS_TTL });
+	const accessToken = await signAccessToken(signingKey(context.env), { "iss": iss, "aud": iss, "sub": issued.userId, "jkt": proof.jkt, "clientId": issued.client, "extra": { "grant": grant.id } }, { "ttl": ACCESS_TTL });
 
 	context.header("cache-control", "no-store");
 	context.header("dpop-nonce", await nonce(context.env).issue());
@@ -154,11 +154,14 @@ async function unauthorized(context: Context<AppEnv>, error: "invalid_token" | "
 }
 
 /**
- * DPoP in front of a route: `Authorization: DPoP <access token>` (ours, unexpired, bound to a key), a proof from that key
- * for this request with the access token's hash and a current nonce, a jti the grant hasn't seen, and a live grant.
- * Leaves `user` and `grant` for the route.
+ * DPoP in front of a route, for one of our clients: `Authorization: DPoP <access token>` (ours, unexpired, bound to a
+ * key, issued to `client`), a proof from that key for this request with the access token's hash and a current nonce, a
+ * jti the grant hasn't seen, and a live grant. Leaves `user`, `grant` and `client` for the route.
+ *
+ * A token issued to another client is refused (403, audited): an editor session can't reach the admin API, even the
+ * owner's, so code running on the editor's origin can't either; and an admin session can't drive the editor's routes.
  */
-export const session = createMiddleware<AppEnv>(async (context, next) => {
+const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, next) => {
 	const [scheme, accessToken] = (context.req.header("authorization") ?? "").split(" ");
 
 	if (scheme?.toLowerCase() !== "dpop" || accessToken === undefined || accessToken === "") {
@@ -199,8 +202,22 @@ export const session = createMiddleware<AppEnv>(async (context, next) => {
 		return unauthorized(context, "invalid_token", "grant revoked", { "userId": token.claims.sub, "grantId": grantId });
 	}
 
+	if (token.claims["client_id"] !== client) {
+		context.get("span").info("request refused", { "reason": "a token for another client" });
+		await audit(context.env, "auth_refused", { "userId": token.claims.sub, "grantId": grantId }, await origin(context), { "reason": "a token for another client", "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+
+		return context.json({ "error": "forbidden" }, 403);
+	}
+
 	context.set("user", token.claims.sub as string);
 	context.set("grant", grantId);
+	context.set("client", client);
 
 	await next();
 });
+
+/** The editor's routes: its account endpoints and the GitHub proxy. */
+export const session = sessionFor("editor");
+
+/** The admin API (src/admin.ts). */
+export const adminSession = sessionFor("admin");

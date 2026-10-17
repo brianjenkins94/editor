@@ -4,10 +4,13 @@ import type { Grant } from "./grant.ts";
 /** The Worker's bindings: vars and bindings from wrangler.jsonc, secrets from `wrangler secret put`. */
 export interface Bindings {
 	"ENVIRONMENT": string;
-	/** The app origins allowed to call this API from a browser, comma-separated. */
+	/** The app origins allowed to call this API from a browser, comma-separated: every client's. */
 	"ALLOWED_ORIGINS": string;
-	/** The app pages a sign-in may return to, comma-separated: exact URLs, matched exactly. */
-	"REDIRECT_URIS": string;
+	/** Our OAuth clients (`editor`, `admin`), each with the pages a sign-in for it may return to: exact URLs, matched
+	 *  exactly. A client id that isn't a key here isn't one of ours. */
+	"REDIRECT_URIS": Record<string, string[]>;
+	/** The platform owners (src/rbac.ts): GitHub user ids, not secret. Only a commit makes one. */
+	"OWNERS": number[];
 	/** Only in tests: where GitHub's web and API are, instead of github.com and api.github.com. */
 	"GITHUB_ORIGIN"?: string;
 	"GITHUB_API"?: string;
@@ -42,5 +45,5 @@ export interface Bindings {
 /** Hono's environment: the bindings, and what middleware leaves for the routes after it. */
 export interface AppEnv {
 	"Bindings": Bindings;
-	"Variables": { "span": Span; "user": string; "grant": string };
+	"Variables": { "span": Span; "user": string; "grant": string; "client": string; "roles"?: import("./rbac.ts").Role[] };
 }

@@ -7,6 +7,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
 import { deleteAccountEndpoint, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
+import { admin } from "./admin.ts";
 import { audit, expire, origin } from "./audit.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
@@ -64,6 +65,7 @@ app.use("/token", limit(4 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
+app.use("/admin/*", limit(4 * 1024));
 app.use("/github/api/*", limit(32 * 1024 * 1024));
 app.use("/github/git/*", limit(1024 * 1024));
 
@@ -111,6 +113,9 @@ app.post("/sessions/revoke-all", session, revokeAllEndpoint);
 app.post("/sessions/:id/revoke", session, revokeSessionEndpoint);
 
 app.post("/account/delete", session, deleteAccountEndpoint);
+
+// The admin API (src/admin.ts): admin tokens only, each route behind its permission.
+app.route("/admin", admin);
 
 // GitHub, for a signed-in browser (src/proxy.ts): the API calls the editor makes, and a clone's fetch.
 app.on(["GET", "POST", "PATCH"], "/github/api/*", session, rateLimit("PROXY_BY_USER", byUser), githubApi);

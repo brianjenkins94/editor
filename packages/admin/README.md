@@ -1,7 +1,7 @@
 # Admin
 
-Status: **design, 2026-10-17.** Nothing here is built yet. The decision so far is in "Decisions"; what's still open is at
-the end.
+Status: **design, 2026-10-17; B1 built.** Decisions are in "Decisions", what's built in "Steps", what's still open at the
+end.
 
 The admin app is where accounts and their roles are managed: today, the platform owner (one person) looking after users,
 sign-ins, the audit log and traffic; later, customers' organization admins managing their own members. It's part of the
@@ -89,8 +89,9 @@ route table doubles as the access-control table.
   check stays `npm run audit -- --verify` on your machine.
 - **Cloudflare data** comes from a new secret, `ANALYTICS_TOKEN`: read-only (Account Analytics Read, Zone Analytics
   Read), used only by `/admin/traffic`. The browser never holds a Cloudflare credential.
-- **GitHub logins aren't stored** (README.md in packages/api, "Identity and the data we keep"). The admin app shows the
-  GitHub id and looks the login up when asked (see "Open questions").
+- **GitHub logins aren't stored** (README.md in packages/api, "Identity and the data we keep"). *Decided 2026-10-17:* the
+  admin app looks each login up live from GitHub by id, and stores nothing. GitHub allows 60 unauthenticated lookups an
+  hour, so the app looks up what's on screen and keeps the answers for the session.
 
 ### The UI: Web Awesome, from its own recipes
 
@@ -112,16 +113,28 @@ Web Awesome Pro (paid). The free package ships the same shapes as recipes, in it
 
 ### Shared sign-in code
 
-The shell's `session.ts` (oauth4webapi, the non-extractable DPoP key, refresh) is what the admin app needs too. It moves
-somewhere both can import, parameterized by client id and API, rather than being copied.
+The shell's `session.ts` (oauth4webapi, the non-extractable DPoP key, refresh) is what the admin app needs too. *Decided
+2026-10-17:* it moves to `@brianjenkins94/util/auth` (lib), parameterized by client id and API, next to the DPoP code
+the API already uses from there, and both apps import it.
 
 ## Steps
 
 Each lands green and is useful on its own.
 
-- **B1 · roles in the API.** `src/rbac.ts` (permissions, roles, `requires()`), `OWNERS`, per-client redirect pages,
-  the `admin` client, the Grant remembering its client, `/admin/*` refusing editor tokens, `GET /admin/me`. Tested in
-  workerd: an editor token is refused, a non-owner is refused, the owner gets their permissions.
+- **B1 · roles in the API.** *Built 2026-10-17:*
+  - `src/rbac.ts`: `PERMISSIONS`, `ROLES` (`owner`), `rolesOf` (owner from `OWNERS`, GitHub ids, in wrangler.jsonc),
+    `permissionsOf`, and `requires(permission)`, which refuses with a 403 and an `auth_refused` row ("lacks …"). No
+    route uses `requires` yet; B2's do, and its tests cover it.
+  - `REDIRECT_URIS` is per client: `{ "editor": [...], "admin": [...] }`. Locally and in dev, the admin app's page is
+    `http://localhost:5174/`; production has none until B5.
+  - The `admin` client: `/auth/github/start` takes any client in `REDIRECT_URIS`, only to that client's pages; the
+    Grant stores its client (a new column, added in place to existing Grants, whose missing value means `editor`);
+    `/token` refuses a code or refresh token presented by another client ("another client").
+  - `session` is per client (`session` for the editor's routes, `adminSession` for `/admin/*`): a token issued to the
+    other client gets a 403 and an `auth_refused` row ("a token for another client").
+  - `src/admin.ts`: the router at `/admin`, recording each answered request (`admin_access`, kept 365 days), and
+    `GET /admin/me` (user, roles, permissions).
+  - `test/admin.test.ts`, 10 tests in workerd; turning off either client check fails them.
 - **B2 · read endpoints.** users, a user, sessions, audit (with filters), `admin_access` audit rows. Tested for each
   permission.
 - **B3 · the admin app.** `packages/admin`: Preact + Web Awesome (the app shell, sign-in card and card grid recipes),
@@ -136,8 +149,5 @@ Each lands green and is useful on its own.
 
 ## Open questions
 
-- **Where the shared sign-in code lives:** a small package in this repo, or `@brianjenkins94/util/auth`.
-- **GitHub logins in the admin app:** look each up live from GitHub by id (nothing stored; GitHub's unauthenticated
-  limit is 60 lookups an hour), or store the login (one more field we'd hold about every user).
 - **Cloudflare Access in front of the owner's routes** as well, as a second, independent gate. Not needed for B1–B5;
   worth it once customers' admins share the app.

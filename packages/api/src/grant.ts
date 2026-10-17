@@ -65,9 +65,14 @@ interface State {
 	"code_expires": number | null;
 	"refresh_hash": string | null;
 	"revoked_at": number | null;
+	/** The OAuth client the sign-in is for (REDIRECT_URIS' keys). Null for grants from before clients: the editor's. */
+	"client": string | null;
 }
 
-export type Issued = { "ok": true; "userId": string; "refreshToken": string } | { "ok": false };
+/** A grant that predates clients was the editor's: the only client there was. */
+const clientOf = (state: State): string => state.client ?? "editor";
+
+export type Issued = { "ok": true; "userId": string; "refreshToken": string; "client": string } | { "ok": false };
 
 export class Grant extends DurableObject<Bindings> {
 	private readonly sql = this.ctx.storage.sql;
@@ -96,6 +101,11 @@ export class Grant extends DurableObject<Bindings> {
 			CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL);
 			CREATE TABLE IF NOT EXISTS leases (id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 		`);
+
+		// Added with the admin client (packages/admin): the grants that began before it have none, and are the editor's.
+		if (!this.sql.exec<{ "name": string }>("PRAGMA table_info(state)").toArray().some((column) => column.name === "client")) {
+			this.sql.exec("ALTER TABLE state ADD COLUMN client TEXT");
+		}
 	}
 
 	private get id(): string {
@@ -103,15 +113,16 @@ export class Grant extends DurableObject<Bindings> {
 	}
 
 	private state(): State | undefined {
-		return this.sql.exec<State & Record<string, SqlStorageValue>>("SELECT user_id, jkt, code_hash, code_challenge, code_expires, refresh_hash, revoked_at FROM state WHERE id = 1").toArray()[0];
+		return this.sql.exec<State & Record<string, SqlStorageValue>>("SELECT user_id, jkt, code_hash, code_challenge, code_expires, refresh_hash, revoked_at, client FROM state WHERE id = 1").toArray()[0];
 	}
 
 	/**
 	 * Start the sign-in, once GitHub has said who this is: the user (made on their first sign-in), the grant's row, GitHub's
 	 * tokens sealed, and a code the browser redeems at /token with its PKCE verifier and a proof from key `jkt`. This is the
-	 * one call A0's GitHub callback makes.
+	 * one call A0's GitHub callback makes. `client` is the OAuth client it's for: only that client can redeem the code and
+	 * refresh what it gives.
 	 */
-	public async begin({ githubId, github, codeChallenge, jkt, from, label }: { "githubId": number; "github": GitHubTokens; "codeChallenge": string; "jkt": string; "from": Origin; "label"?: string }): Promise<{ "code": string }> {
+	public async begin({ client = "editor", githubId, github, codeChallenge, jkt, from, label }: { "client"?: string; "githubId": number; "github": GitHubTokens; "codeChallenge": string; "jkt": string; "from": Origin; "label"?: string }): Promise<{ "code": string }> {
 		if (this.state() !== undefined) {
 			throw new Error("a grant begins once");
 		}
@@ -127,7 +138,7 @@ export class Grant extends DurableObject<Bindings> {
 
 		const code = token(this.id);
 
-		this.sql.exec("INSERT INTO state (id, user_id, jkt, github, code_hash, code_challenge, code_expires) VALUES (1, ?, ?, ?, ?, ?, ?)", userId, jkt, await seal(this.env.TOKEN_KEK, JSON.stringify(github), this.id), await hash(code), codeChallenge, now + CODE_TTL);
+		this.sql.exec("INSERT INTO state (id, user_id, jkt, github, code_hash, code_challenge, code_expires, client) VALUES (1, ?, ?, ?, ?, ?, ?, ?)", userId, jkt, await seal(this.env.TOKEN_KEK, JSON.stringify(github), this.id), await hash(code), codeChallenge, now + CODE_TTL, client);
 		await audit(this.env, "login", { "userId": userId, "grantId": this.id }, from);
 		await this.ctx.storage.setAlarm(now + CODE_TTL);
 
@@ -136,9 +147,9 @@ export class Grant extends DurableObject<Bindings> {
 
 	/**
 	 * Redeem the code (once: it's gone whatever the outcome, so a verifier can't be guessed at) with the PKCE verifier and
-	 * a proof from the key the sign-in started with. Gives the first refresh token.
+	 * a proof from the key the sign-in started with, by the client it started for. Gives the first refresh token.
 	 */
-	public async redeem({ code, verifier, jkt, from }: { "code": string; "verifier": string; "jkt": string; "from": Origin }): Promise<Issued> {
+	public async redeem({ code, verifier, jkt, client, from }: { "code": string; "verifier": string; "jkt": string; "client": string; "from": Origin }): Promise<Issued> {
 		const state = this.state();
 
 		if (state === undefined || state.revoked_at !== null || state.code_hash === null) {
@@ -150,7 +161,8 @@ export class Grant extends DurableObject<Bindings> {
 		const refused = (state.code_expires as number) < Date.now() ? "code expired"
 			: await hash(code) !== state.code_hash ? "code unknown"
 				: await s256(verifier) !== state.code_challenge ? "PKCE verifier"
-					: jkt !== state.jkt ? "another key" : undefined;
+					: jkt !== state.jkt ? "another key"
+						: client !== clientOf(state) ? "another client" : undefined;
 
 		if (refused !== undefined) {
 			return this.reject(state, from, refused);
@@ -160,14 +172,14 @@ export class Grant extends DurableObject<Bindings> {
 
 		await audit(this.env, "token_issued", { "userId": state.user_id, "grantId": this.id }, from);
 
-		return { "ok": true, "userId": state.user_id, "refreshToken": refreshToken };
+		return { "ok": true, "userId": state.user_id, "refreshToken": refreshToken, "client": clientOf(state) };
 	}
 
 	/**
-	 * Swap a refresh token for the next one, with a proof from the sign-in's key. An earlier one, used again, means two
-	 * parties hold this sign-in's tokens: the grant is revoked.
+	 * Swap a refresh token for the next one, with a proof from the sign-in's key, by the client it's for. An earlier one,
+	 * used again, means two parties hold this sign-in's tokens: the grant is revoked.
 	 */
-	public async rotate({ refreshToken, jkt, from }: { "refreshToken": string; "jkt": string; "from": Origin }): Promise<Issued> {
+	public async rotate({ refreshToken, jkt, client, from }: { "refreshToken": string; "jkt": string; "client": string; "from": Origin }): Promise<Issued> {
 		const state = this.state();
 
 		if (state === undefined || state.revoked_at !== null) {
@@ -183,8 +195,8 @@ export class Grant extends DurableObject<Bindings> {
 			return { "ok": false };
 		}
 
-		if (presented !== state.refresh_hash || jkt !== state.jkt) {
-			return this.reject(state, from, presented !== state.refresh_hash ? "refresh token unknown" : "another key");
+		if (presented !== state.refresh_hash || jkt !== state.jkt || client !== clientOf(state)) {
+			return this.reject(state, from, presented !== state.refresh_hash ? "refresh token unknown" : jkt !== state.jkt ? "another key" : "another client");
 		}
 
 		this.sql.exec("INSERT INTO used_refresh (hash) VALUES (?)", presented);
@@ -194,7 +206,7 @@ export class Grant extends DurableObject<Bindings> {
 		await this.env.DB.prepare("UPDATE grants SET last_used_at = ? WHERE id = ?").bind(Date.now(), this.id).run();
 		await audit(this.env, "refreshed", { "userId": state.user_id, "grantId": this.id }, from);
 
-		return { "ok": true, "userId": state.user_id, "refreshToken": next };
+		return { "ok": true, "userId": state.user_id, "refreshToken": next, "client": clientOf(state) };
 	}
 
 	/** Record a proof's jti (until `expires`), and say whether it was seen already, and whether the sign-in is live. */

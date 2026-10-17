@@ -490,8 +490,8 @@ Each step lands green and is useful on its own.
       - `TOKEN_KEK`: the same command; it must be exactly 32 bytes.
       - `SIGNING_JWK`: see A2.
     - **GitHub's round trip** (`src/github.ts`, built 2026-10-15):
-      - `/auth/github/start` takes the app's `redirect_uri` (an exact match against `REDIRECT_URIS`; otherwise a 400
-        and no redirect), its S256 challenge, its key's `dpop_jkt` and its `state`. It sends the browser to GitHub
+      - `/auth/github/start` takes the app's `redirect_uri` (an exact match against its client's pages in `REDIRECT_URIS`,
+        which since 2026-10-17 is per client, `editor` and `admin` (packages/admin, B1); otherwise a 400 and no redirect), its S256 challenge, its key's `dpop_jkt` and its `state`. It sends the browser to GitHub
         with a PKCE pair of our own, and seals the rest into GitHub's `state` under `STATE_KEY` for 10 minutes.
       - `/auth/github/callback` exchanges GitHub's code (client secret plus our verifier), reads `/user` for the
         numeric id only, starts the Grant, and returns to the app with our code, its `state`, and `iss` (RFC 9207).
