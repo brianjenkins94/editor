@@ -48,20 +48,65 @@ function explain(body) {
 		"that account has no password: sign in with a code": "That account has no password yet. Ask for a code instead.",
 		"wrong password": "That isn't the password.",
 		"ask for a code first": "Ask for a code first.",
-		"couldn't check it against known breaches: try again": "We couldn't check that password against known breaches just now. Try again."
+		"couldn't check it against known breaches: try again": "We couldn't check that password against known breaches just now. Try again.",
+		"that code isn't right, or it's been used": "That code isn't right, or it's been used. Wait for the app's next code.",
+		"that recovery code isn't one of yours, or it's been used": "That recovery code isn't one of yours, or it's been used.",
+		"two-factor code needed: from your authenticator app, or a recovery code": "This account has two-factor on: add a code from your authenticator app, or a recovery code."
 	};
 
 	return reasons[body.reason] ?? (body.error === "no_attempt" ? "This sign-in has expired or was opened somewhere else. Go back to the app and sign in again." : "Something went wrong. Try again.");
 }
 
-/** Sign in with a password: on a match, on to the app. */
+/** The second step, for an account with two-factor on: a code from the authenticator app, or a recovery code. */
+function secondForm() {
+	const code = element("input", { "name": "code", "type": "text", "required": true, "autocomplete": "one-time-code", "spellcheck": false, "placeholder": "123456" });
+	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Sign in" });
+	const form = element("form", { "className": "stack" },
+		element("p", { "className": "note", "textContent": "This account has two-factor on. Type the code from your authenticator app, or one of your recovery codes." }),
+		element("label", { "textContent": "Code" }, code),
+		submit);
+
+	form.addEventListener("submit", async (event) => {
+		event.preventDefault();
+		submit.disabled = true;
+
+		const { ok, body } = await post("/auth/second", { "code": code.value });
+
+		submit.disabled = false;
+
+		if (ok) {
+			location.assign(body.location);
+
+			return;
+		}
+
+		say(explain(body));
+	});
+
+	return form;
+}
+
+/** Where a first factor's answer leads: on to the app, or to the second step. */
+function onward(body) {
+	if (body.second_factor === true) {
+		say("");
+		methods.replaceChildren(secondForm());
+		methods.querySelector("input").focus();
+
+		return;
+	}
+
+	location.assign(body.location);
+}
+
+/** Sign in with a password: on a match, on to the app (or to the second step). */
 async function signIn(address, password, button) {
 	button.disabled = true;
 
 	const { ok, body } = await post("/auth/password", { "address": address, "password": password });
 
 	if (ok) {
-		location.assign(body.location);
+		onward(body);
 
 		return;
 	}
@@ -70,20 +115,22 @@ async function signIn(address, password, button) {
 	say(explain(body));
 }
 
-/** Check a code: on a match, on to the app. */
+/** Check a code: on a match, on to the app (or to the second step). Whether it matched. */
 async function verify(code, button) {
 	button.disabled = true;
 
 	const { ok, body } = await post("/auth/email/verify", { "code": code });
 
 	if (ok) {
-		location.assign(body.location);
+		onward(body);
 
-		return;
+		return true;
 	}
 
 	button.disabled = false;
 	say(explain(body));
+
+	return false;
 }
 
 /** The code's form, once one is sent to `address`. */
@@ -130,14 +177,16 @@ function resetForm(address) {
 	const code = element("input", { "name": "code", "type": "text", "autocomplete": "one-time-code", "autocapitalize": "characters", "spellcheck": false, "placeholder": "ABCD-2345" });
 	const password = element("input", { "name": "password", "type": "password", "autocomplete": "new-password" });
 	const end = element("input", { "type": "checkbox", "checked": true });
+	const second = element("input", { "name": "second", "type": "text", "autocomplete": "one-time-code", "spellcheck": false, "placeholder": "Only if you've turned two-factor on" });
 	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Reset my password" });
-	const second = element("div", { "className": "stack", "hidden": true },
+	const rest = element("div", { "className": "stack", "hidden": true },
 		element("label", { "textContent": "Code" }, code),
 		element("label", { "textContent": "New password" }, password),
 		element("p", { "className": "note", "textContent": "10 to 100 characters: letters, digits, spaces and the symbols on a US keyboard. Checked against known breaches." }),
+		element("label", { "textContent": "Two-factor code, or a recovery code" }, second),
 		element("label", { "className": "check" }, end, "Also end every sign-in of this account, everywhere"),
 		submit);
-	const form = element("form", { "className": "stack" }, element("p", { "className": "note", "textContent": `Reset the password for ${address}.` }), ask, second);
+	const form = element("form", { "className": "stack" }, element("p", { "className": "note", "textContent": `Reset the password for ${address}.` }), ask, rest);
 
 	ask.addEventListener("click", async () => {
 		ask.disabled = true;
@@ -155,14 +204,14 @@ function resetForm(address) {
 		say("");
 		ask.textContent = "Send another code";
 		ask.className = "secondary";
-		second.hidden = false;
+		rest.hidden = false;
 		code.focus();
 	});
 	form.addEventListener("submit", async (event) => {
 		event.preventDefault();
 		submit.disabled = true;
 
-		const { ok, body } = await post("/auth/reset/password", { "address": address, "code": code.value, "password": password.value, "end": end.checked ? "true" : "" });
+		const { ok, body } = await post("/auth/reset/password", { "address": address, "code": code.value, "password": password.value, "second": second.value, "end": end.checked ? "true" : "" });
 
 		submit.disabled = false;
 
@@ -256,8 +305,9 @@ if (response.ok) {
 
 		// On a match the page moves on to the app; otherwise, the reason, and the choices again.
 		methods.replaceChildren(button);
-		await verify(linked, button);
-		methods.replaceChildren(...choices);
+		if (!await verify(linked, button)) {
+			methods.replaceChildren(...choices);
+		}
 	}
 } else if (linked !== null) {
 	// The link, opened somewhere other than where the sign-in started: the code, to type there.

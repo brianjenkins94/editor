@@ -44,6 +44,10 @@ export const SCHEMA = `CREATE TABLE IF NOT EXISTS attempt (
 	client TEXT NOT NULL, redirectUri TEXT NOT NULL, state TEXT NOT NULL, codeChallenge TEXT NOT NULL, jkt TEXT NOT NULL,
 	pushed_at INTEGER NOT NULL, opened_at INTEGER, secret_hash TEXT, finished_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS first_factor (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	user_id TEXT NOT NULL, method TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS email_step (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	address TEXT NOT NULL, code_hash TEXT NOT NULL, expires INTEGER NOT NULL, tries REAL NOT NULL, tries_at INTEGER NOT NULL
@@ -170,8 +174,9 @@ export class Attempt extends DurableObject<Bindings> {
 	}
 
 	/**
-	 * Try a code (its HMAC): one try from the bucket, then it must be this attempt's latest, unexpired. A match ends the
-	 * attempt, once, with its request and the address the code went to; a code is good once.
+	 * Try a code (its HMAC): one try from the bucket, then it must be this attempt's latest, unexpired. A match hands back
+	 * the request and the address the code went to, and the code is gone (good once); the caller ends the attempt
+	 * (`finish`), or, when the account has MFA, records the first factor passed (`passed`) for the second to finish.
 	 */
 	public async confirm(secret: string, codeHash: string): Promise<{ "ok": true; "request": Pushed; "address": string } | Refused> {
 		const row = await this.running(secret);
@@ -206,10 +211,35 @@ export class Attempt extends DurableObject<Bindings> {
 			return { "ok": false, "reason": "code expired" };
 		}
 
-		this.sql.exec("UPDATE attempt SET finished_at = ? WHERE id = 1", now);
 		this.sql.exec("DELETE FROM email_step");
 
 		return { "ok": true, "request": { "client": row.client, "redirectUri": row.redirectUri, "state": row.state, "codeChallenge": row.codeChallenge, "jkt": row.jkt }, "address": step.address };
+	}
+
+	/** The first factor passed, for `user`, by `method` ("email", "password"): what the second (MFA, C5) finishes. */
+	public async passed(secret: string, user: string, method: string): Promise<{ "ok": true } | Refused> {
+		const row = await this.running(secret);
+
+		if ("reason" in row) {
+			return row;
+		}
+
+		this.sql.exec("INSERT INTO first_factor (id, user_id, method) VALUES (1, ?, ?) ON CONFLICT (id) DO UPDATE SET user_id = excluded.user_id, method = excluded.method", user, method);
+
+		return { "ok": true };
+	}
+
+	/** Whom the first factor found, and how, if one passed: what the second step checks. */
+	public async firstFactor(secret: string): Promise<{ "ok": true; "user": string; "method": string } | Refused> {
+		const row = await this.running(secret);
+
+		if ("reason" in row) {
+			return row;
+		}
+
+		const [first] = this.sql.exec<{ "user_id": string; "method": string }>("SELECT user_id, method FROM first_factor WHERE id = 1").toArray();
+
+		return first === undefined ? { "ok": false, "reason": "no first factor" } : { "ok": true, "user": first.user_id, "method": first.method };
 	}
 
 	/** Its time is up: nothing of it is kept. */

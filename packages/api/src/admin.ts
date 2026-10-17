@@ -5,6 +5,7 @@ import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
 import { inboxEndpoint } from "./inbox.ts";
 import { mailEndpoint } from "./mail-report.ts";
+import { mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint } from "./mfa.ts";
 import { accountEndpoint, passwordCodeEndpoint, setPasswordEndpoint } from "./password.ts";
 import { smokeTest } from "./smoke.ts";
 import { repositoryTag } from "./behavior.ts";
@@ -133,6 +134,15 @@ admin.get("/account", accountEndpoint);
 admin.post("/account/password/code", passwordCodeEndpoint);
 
 admin.post("/account/password", setPasswordEndpoint);
+
+// Two-factor (C5): set up (start, then confirm with the app's code), turned off, new recovery codes. A recent sign-in each.
+admin.post("/account/mfa/start", mfaStartEndpoint);
+
+admin.post("/account/mfa/confirm", mfaConfirmEndpoint);
+
+admin.post("/account/mfa/off", mfaOffEndpoint);
+
+admin.post("/account/mfa/recovery", mfaRecoveryEndpoint);
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);

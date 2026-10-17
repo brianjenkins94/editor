@@ -5,7 +5,8 @@ import { verifyProof } from "@brianjenkins94/util/auth/dpop";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { ATTEMPT_TTL, PUSH_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
-import { toGitHub } from "./github.ts";
+import { deviceLabel } from "./account.ts";
+import { answerUrl, toGitHub } from "./github.ts";
 import { canSend } from "./mail.ts";
 import { nonce } from "./tokens.ts";
 
@@ -51,6 +52,39 @@ export function heldAttempt(context: Context<AppEnv>): { "id": string; "secret":
 
 export function forgetAttempt(context: Context<AppEnv>): void {
 	deleteCookie(context, COOKIE, { "path": "/", "secure": true, "prefix": "host" });
+}
+
+/**
+ * The end of a sign-in by one of our own methods (an emailed code, a password, then a second factor if the account has
+ * MFA): this browser's attempt finished, once, its cookie gone, and the sign-in started for `user` (Grant.begin, its
+ * `login` row saying `method`). The answer is where the page goes next: the app's redirect page with our code, as
+ * GitHub's callback sends it.
+ */
+export async function signInAs(context: Context<AppEnv>, held: NonNullable<ReturnType<typeof heldAttempt>>, user: string, method: string): Promise<Response> {
+	const finished = await held.stub.finish(held.secret);
+
+	forgetAttempt(context);
+	context.header("cache-control", "no-store");
+
+	if ("reason" in finished) {
+		await audit(context.env, "sign_in_refused", {}, await origin(context), { "reason": finished.reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+
+		return context.json({ "error": "no_attempt", "reason": finished.reason }, 401);
+	}
+
+	const grant = context.env.GRANTS.get(context.env.GRANTS.newUniqueId());
+	const { "code": ours } = await grant.begin({ "client": finished.request.client, "userId": user, "method": method, "codeChallenge": finished.request.codeChallenge, "jkt": finished.request.jkt, "from": await origin(context), "label": deviceLabel(context.req.header("user-agent")) });
+
+	return context.json({ "location": answerUrl(context, finished.request, { "code": ours }) });
+}
+
+/** After a first factor, for an account with MFA: the attempt remembers whom it found and how, and the page asks for the
+ *  second (`second_factor`). */
+export async function askSecondFactor(context: Context<AppEnv>, held: NonNullable<ReturnType<typeof heldAttempt>>, user: string, method: string): Promise<Response> {
+	await held.stub.passed(held.secret, user, method);
+	context.header("cache-control", "no-store");
+
+	return context.json({ "second_factor": true });
 }
 
 async function refuse(context: Context<AppEnv>, reason: string, status: 400 | 401 = 400): Promise<Response> {

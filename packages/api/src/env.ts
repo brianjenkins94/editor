@@ -45,6 +45,8 @@ export interface Bindings {
 	"EMAIL"?: { "send": (message: { "from": string | { "email": string; "name": string }; "to": string; "subject": string; "text": string; "html": string }) => Promise<{ "messageId": string }> };
 	"EMAIL_OUTBOX"?: string;
 	"CODE_KEY"?: string;
+	/** 32 random bytes, base64url: the key authenticator-app secrets are sealed under (src/mfa.ts, C5), a key of their own. */
+	"TOTP_KEK"?: string;
 	/** Only in tests: where Have I Been Pwned's range API is (src/password.ts), instead of api.pwnedpasswords.com. */
 	"PWNED_API"?: string;
 	/** Our own addresses on the zone (src/inbox.ts), comma-separated: Email Routing sends their mail to the `email`

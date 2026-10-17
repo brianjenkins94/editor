@@ -6,6 +6,7 @@ import { after, before, test } from "node:test";
 import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
 import { hashPassword, passwordProblem, verifyPassword } from "../src/password-hash.ts";
+import { hotp, stepAt, unbase32 } from "../src/totp.ts";
 
 // C3 in workerd (SIGN-IN.md, "Passwords"): someone who signed in by email sets a password from their account (a code to
 // their email first, then the password, checked against known breaches by a stand-in of Have I Been Pwned), then signs
@@ -19,7 +20,8 @@ const secrets = {
 	"TOKEN_KEK": base64url.encode(crypto.getRandomValues(new Uint8Array(32))),
 	"AUDIT_KEY": "audit key for the tests",
 	"STATE_KEY": base64url.encode(crypto.getRandomValues(new Uint8Array(32))),
-	"CODE_KEY": "code key for the tests"
+	"CODE_KEY": "code key for the tests",
+	"TOTP_KEK": base64url.encode(crypto.getRandomValues(new Uint8Array(32)))
 };
 
 /** A password the breach stand-in knows: in 42 breaches. */
@@ -334,4 +336,124 @@ test("there's nothing to reset for an account without a password, or no account"
 
 	assert.equal(await ask(address), "that account has no password: sign in with a code");
 	assert.equal(await ask(someone()), "no account with that email");
+});
+
+// ── Authenticator-app MFA (C5) ─────────────────────────────────────────────────────────────────────────────────────
+
+test("TOTP is RFC 6238's: its SHA-1 test vectors", async () => {
+	const secret = new TextEncoder().encode("12345678901234567890");
+
+	for (const [time, code] of [[59, "94287082"], [1_111_111_109, "07081804"], [1_234_567_890, "89005924"], [20_000_000_000, "65353130"]] as const) {
+		assert.equal(await hotp(secret, Math.floor(time / 30), 8), code, String(time));
+	}
+});
+
+/** An authenticator app: the code for the step now, or `ahead` steps on (within the one-step window either side). */
+const authenticator = (secret: string) => async (ahead = 0): Promise<string> => hotp(unbase32(secret), stepAt(Date.now()) + ahead);
+
+/** An email account with MFA on: the app, and its recovery codes. */
+async function withMfa(address: string): Promise<{ "signedIn": Awaited<ReturnType<typeof app>>; "app": (ahead?: number) => Promise<string>; "recovery": string[] }> {
+	const signedIn = await signedInByEmail(address);
+	const started = await (await signedIn.call("POST", "/admin/account/mfa/start", {})).json() as { "secret": string; "uri": string };
+	const codeNow = authenticator(started.secret);
+
+	assert.match(started.uri, /^otpauth:\/\/totp\/unusually%20good%3A.*\?secret=[A-Z2-7]+&issuer=unusually\+good&algorithm=SHA1&digits=6&period=30$/u);
+	assert.equal((await signedIn.call("POST", "/admin/account/mfa/confirm", { "code": "000000" === await codeNow() ? "111111" : "000000" })).status, 400, "a wrong code doesn't turn it on");
+
+	const confirmed = await (await signedIn.call("POST", "/admin/account/mfa/confirm", { "code": await codeNow() })).json() as { "recoveryCodes": string[] };
+
+	assert.equal(confirmed.recoveryCodes.length, 10);
+
+	return { "signedIn": signedIn, "app": codeNow, "recovery": confirmed.recoveryCodes };
+}
+
+/** An email sign-in up to its second step: the browser, and what verifying the code answered. */
+async function firstFactorByEmail(address: string): Promise<{ "browser": Awaited<ReturnType<typeof app>>; "answer": Record<string, unknown> }> {
+	const browser = await app();
+
+	await aMinuteLater();
+	await form("/auth/email", browser.cookie, { "address": address });
+
+	return { "browser": browser, "answer": await (await form("/auth/email/verify", browser.cookie, { "code": codeFor(address) })).json() as Record<string, unknown> };
+}
+
+test("setting up two-factor: the app's QR code, a code to confirm, ten recovery codes shown once; the account says so", async () => {
+	const address = someone();
+	const { signedIn } = await withMfa(address);
+	const account = await (await signedIn.call("GET", "/admin/account")).json() as { "mfa": { "recoveryLeft": number } };
+
+	assert.equal(account.mfa.recoveryLeft, 10);
+	assert.ok(await env.DB.prepare("SELECT 1 FROM audit WHERE event = 'mfa_enrolled'").first());
+
+	const stored = JSON.stringify((await env.DB.prepare("SELECT * FROM totp").all()).results);
+
+	assert.equal(/"secret":"[A-Z2-7]{32}"/u.test(stored), false, "the secret is sealed");
+});
+
+test("signing in with two-factor on: the emailed code, then the app's code (each step once), and the sign-in says both", async () => {
+	const address = someone();
+	const { app: codeNow } = await withMfa(address);
+	const { browser, answer } = await firstFactorByEmail(address);
+
+	assert.deepEqual(answer, { "second_factor": true }, "no session yet");
+	assert.equal((await form("/auth/second", browser.cookie, { "code": await codeNow() })).status, 400, "the step the setup used, used once already");
+
+	const second = await form("/auth/second", browser.cookie, { "code": await codeNow(1) });
+	const { location } = await second.json() as { "location": string };
+
+	assert.equal(second.status, 200);
+	assert.match(await browser.redeem(new URL(location).searchParams.get("code") as string), /^ey/u);
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'login' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>())?.reason, "email+totp");
+});
+
+test("a recovery code signs in once; the second step needs a first; a password sign-in asks for it too", async () => {
+	const address = someone();
+	const { signedIn, recovery } = await withMfa(address);
+	const first = await firstFactorByEmail(address);
+
+	assert.equal((await form("/auth/second", (await app()).cookie, { "code": recovery[0] as string })).status, 401, "no first factor in this browser");
+	assert.equal((await form("/auth/second", first.browser.cookie, { "code": (recovery[0] as string).toLowerCase() })).status, 200);
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'login' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>())?.reason, "email+recovery");
+
+	const again = await firstFactorByEmail(address);
+
+	assert.equal((await form("/auth/second", again.browser.cookie, { "code": recovery[0] as string })).status, 400, "used");
+	assert.equal((await (await signedIn.call("GET", "/admin/account")).json() as { "mfa": { "recoveryLeft": number } }).mfa.recoveryLeft, 9);
+
+	await aMinuteLater();
+	await setPassword(signedIn, address, "two factors are better 1");
+
+	const byPassword = await app();
+
+	assert.deepEqual(await (await form("/auth/password", byPassword.cookie, { "address": address, "password": "two factors are better 1" })).json(), { "second_factor": true });
+});
+
+test("with two-factor on, a reset needs it too; turning it off needs it, and a recent sign-in", async () => {
+	const address = someone();
+	const { signedIn, app: codeNow, recovery } = await withMfa(address);
+
+	await setPassword(signedIn, address, "a password to forget 9");
+
+	const browser = await app();
+
+	await aMinuteLater();
+	await form("/auth/reset", browser.cookie, { "address": address });
+
+	const without = await form("/auth/reset/password", browser.cookie, { "address": address, "code": codeFor(address), "password": "a password remembered 9" });
+
+	assert.equal((await without.json() as { "reason": string }).reason, "two-factor code needed: from your authenticator app, or a recovery code");
+	assert.equal((await form("/auth/reset/password", browser.cookie, { "address": address, "code": codeFor(address), "password": "a password remembered 9", "second": recovery[1] as string })).status, 200);
+
+	await env.DB.prepare("UPDATE grants SET created_at = created_at - 3600000").run();
+	assert.equal((await signedIn.call("POST", "/admin/account/mfa/off", { "code": await codeNow(1) })).status, 403, "a sign-in more than 10 minutes old");
+});
+
+test("turning two-factor off, with a code from the app: sign-ins don't ask for it any more", async () => {
+	const address = someone();
+	const { signedIn, app: codeNow } = await withMfa(address);
+
+	assert.equal((await signedIn.call("POST", "/admin/account/mfa/off", { "code": "123" })).status, 400);
+	assert.equal((await signedIn.call("POST", "/admin/account/mfa/off", { "code": await codeNow(1) })).status, 200);
+	assert.ok(await env.DB.prepare("SELECT 1 FROM audit WHERE event = 'mfa_removed'").first());
+	assert.ok("location" in (await firstFactorByEmail(address)).answer, "straight in");
 });

@@ -104,6 +104,8 @@ export async function purge(env: Bindings, now = Date.now()): Promise<number> {
 			env.DB.prepare("DELETE FROM emails WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM passwords WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM action_codes WHERE user_id = ?").bind(user),
+			env.DB.prepare("DELETE FROM totp WHERE user_id = ?").bind(user),
+			env.DB.prepare("DELETE FROM recovery_codes WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user),
 			env.DB.prepare("UPDATE audit SET user_id = NULL WHERE user_id = ?").bind(user)
 		]);

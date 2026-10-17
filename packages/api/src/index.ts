@@ -13,6 +13,7 @@ import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
 import { emailEndpoint, verifyEndpoint } from "./email.ts";
 import { expireInbox, receive } from "./inbox.ts";
+import { secondStepEndpoint } from "./mfa.ts";
 import { passwordSignInEndpoint, resetCodeEndpoint, resetPasswordEndpoint } from "./password.ts";
 import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
@@ -76,6 +77,7 @@ app.use("/auth/email", limit(4 * 1024));
 app.use("/auth/password", limit(4 * 1024));
 app.use("/auth/reset", limit(4 * 1024));
 app.use("/auth/reset/*", limit(4 * 1024));
+app.use("/auth/second", limit(4 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
@@ -134,6 +136,9 @@ app.post("/auth/password", rateLimit("SIGN_IN_BY_IP", byIp), passwordSignInEndpo
 app.post("/auth/reset", rateLimit("SIGN_IN_BY_IP", byIp), resetCodeEndpoint);
 
 app.post("/auth/reset/password", rateLimit("SIGN_IN_BY_IP", byIp), resetPasswordEndpoint);
+
+// The second factor, for an account with MFA (src/mfa.ts, C5): after an emailed code or a password.
+app.post("/auth/second", rateLimit("SIGN_IN_BY_IP", byIp), secondStepEndpoint);
 
 app.post("/token", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), tokenEndpoint);
 

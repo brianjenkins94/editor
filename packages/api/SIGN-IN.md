@@ -1,6 +1,6 @@
 # Sign-in methods
 
-Status: **design, 2026-10-17; C0 to C4 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
+Status: **design, 2026-10-17; C0 to C5 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
 **Workers Paid** (for Argon2id's CPU and email sending), add a local debug harness first (C0), and push authorization
 requests (PAR) in C1. Still open: "Open questions".
 
@@ -224,10 +224,31 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   (`address`, `code`, `password`, `end`) checks the code and the password as setting one does (the rules, known
   breaches; a refused password doesn't spend the code), stores it, and, when asked (a checkbox, on by default: asked, not
   forced), ends every sign-in of the account. The attempt is spent and no session starts: the page says to go back to
-  the app and sign in with the new password. `password_reset` is audited with what was ended. **Not yet:** the second
-  factor (C5) once MFA is on. 3 tests in test/password.test.ts (the whole reset with sign-ins ended and signing in
+  the app and sign in with the new password. `password_reset` is audited with what was ended. With MFA on (C5), the
+  second factor too (`second`: the app's code or a recovery code). 3 tests in test/password.test.ts (the whole reset with sign-ins ended and signing in
   again, sign-ins kept and the code bound to its browser, nothing to reset); the screens looked at in the harness.
-- **C5 · authenticator-app MFA.** Enrollment, recovery codes, the step at sign-in, turning it off; the owner's policy.
+- **C5 · authenticator-app MFA.** *Built 2026-10-17* (src/totp.ts, src/mfa.ts; migrations/0010; the Attempt's
+  `first_factor`):
+  - **TOTP** (src/totp.ts): RFC 6238 (its SHA-1 test vectors pass), HMAC-SHA-1, 6 digits, 30-second steps, one step
+    either side, each step good once (the newest used is kept; taking it is conditional, so two requests can't both).
+  - **Setting it up,** from Your account: `POST /admin/account/mfa/start` makes a secret (20 bytes), sealed under
+    `TOTP_KEK` (a key of its own, set in dev and production) and bound to the user, pending; the page shows its QR code
+    (uqr, as an image) and the key to type; `POST /admin/account/mfa/confirm` with the app's code turns it on and returns
+    ten recovery codes (10 symbols of 32, 50 bits each), shown once, kept as HMACs under `CODE_KEY`, each good once.
+    `mfa_enrolled`.
+  - **At sign-in:** after an emailed code or a password, for an account with MFA, the attempt remembers whom it found and
+    how (`first_factor`) and the page asks for the second (`POST /auth/second`): the app's code or a recovery code, 5
+    tries a bucket. The `login` row says both ("email+totp", "password+recovery"). A GitHub sign-in isn't asked: it
+    carries GitHub's own 2FA.
+  - **Turning it off** (`mfa/off`) needs the app's code or a recovery code; **new recovery codes** (`mfa/recovery`) the
+    app's code. `mfa_removed`, `mfa_recovery_codes`.
+  - **The action's own check:** each of these needs a sign-in in the last 10 minutes. **Departure:** not an emailed
+    code, because a GitHub-only account has no email; a recent sign-in is the check every account can pass.
+  - 7 tests in test/password.test.ts (the RFC's vectors; setting up, its QR URI, the secret sealed; signing in with the
+    app's code, each step once; a recovery code once, the second step needing a first, a password sign-in asked too; a
+    reset needing it, turning it off needing a recent sign-in; off). Tried with the harness: set up from the QR page,
+    the recovery codes shown, then an email sign-in with the app's code ("email+totp").
+  - **Still open:** the owner's policy below (requiring MFA to open the admin app, GitHub sign-ins included).
 - **C6 · email as a second factor.**
 - **C7 · the editor.** Its client gets the methods, after the admin trial.
 - **Later:** passkeys (Pilcrow's recommendation for high-security accounts, and a way to drop passwords).

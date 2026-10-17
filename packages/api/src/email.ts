@@ -2,17 +2,16 @@ import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { escapeHtml } from "@brianjenkins94/util/text";
 import { base64url } from "jose";
-import { deviceLabel } from "./account.ts";
 import { CODE_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
 import { keyed } from "./behavior.ts";
-import { answerUrl } from "./github.ts";
 import ACTION_HTML from "./action-code.html";
 import ACTION_TEXT from "./action-code.txt";
 import CODE_HTML from "./email-code.html";
 import CODE_TEXT from "./email-code.txt";
 import { canSend, send } from "./mail.ts";
-import { forgetAttempt, heldAttempt } from "./signin.ts";
+import { hasMfa } from "./mfa.ts";
+import { askSecondFactor, heldAttempt, signInAs } from "./signin.ts";
 
 /**
  * Signing in by email (SIGN-IN.md, "Email"; C2), from the sign-in page, for this browser's attempt (its cookie):
@@ -211,21 +210,7 @@ export async function verifyEndpoint(context: Context<AppEnv>): Promise<Response
 		return refuse(context, confirmed.reason === "too many tries" ? 429 : 400, "code", confirmed.reason);
 	}
 
-	forgetAttempt(context);
+	const user = await userOf(context.env, confirmed.address, Date.now());
 
-	const now = Date.now();
-	const grant = context.env.GRANTS.get(context.env.GRANTS.newUniqueId());
-	const { "code": ours } = await grant.begin({
-		"client": confirmed.request.client,
-		"userId": await userOf(context.env, confirmed.address, now),
-		"method": "email",
-		"codeChallenge": confirmed.request.codeChallenge,
-		"jkt": confirmed.request.jkt,
-		"from": await origin(context),
-		"label": deviceLabel(context.req.header("user-agent"))
-	});
-
-	context.header("cache-control", "no-store");
-
-	return context.json({ "location": answerUrl(context, confirmed.request, { "code": ours }) });
+	return await hasMfa(context.env, user) ? askSecondFactor(context, held, user, "email") : signInAs(context, held, user, "email");
 }

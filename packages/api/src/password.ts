@@ -1,10 +1,8 @@
 import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
-import { deviceLabel } from "./account.ts";
 import { CODE_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
 import { ADDRESS, codeHash, isCode, newCode, sendCode, typed } from "./email.ts";
-import { answerUrl } from "./github.ts";
 import { hashPassword, passwordProblem, verifyPassword } from "./password-hash.ts";
 import { configureWasm } from "@hallaxius/argon2w";
 import argon2Wasm from "@hallaxius/argon2w/wasm";
@@ -12,7 +10,8 @@ import argon2Wasm from "@hallaxius/argon2w/wasm";
 // Argon2's WebAssembly, as a module Wrangler compiles at deploy: the runtime won't compile any at runtime.
 configureWasm(argon2Wasm);
 import { canSend } from "./mail.ts";
-import { forgetAttempt, heldAttempt } from "./signin.ts";
+import { hasMfa, mfaState, secondFactor } from "./mfa.ts";
+import { askSecondFactor, forgetAttempt, heldAttempt, signInAs } from "./signin.ts";
 
 /**
  * Passwords (SIGN-IN.md, "Passwords"; C3):
@@ -22,7 +21,8 @@ import { forgetAttempt, heldAttempt } from "./signin.ts";
  *   POST /admin/account/password/code     a code to your email, to set a password (the action's own check)
  *   POST /admin/account/password          `code`, `password`: the code, then the password set
  *   POST /auth/reset                      `address`: a code to it, to reset its password, for this browser's attempt (C4)
- *   POST /auth/reset/password             `address`, `code`, `password`, `end`: the code, then the new password
+ *   POST /auth/reset/password             `address`, `code`, `password`, `end` (and `second`, with MFA on): the code, then
+ *                                         the new password
  *
  * A password is set while signed in, never at sign-up: a password account starts as an email account, and its address
  * is what signs in with the password. The rules are Pilcrow's (printable ASCII, 10 to 100 characters, no space at either
@@ -142,20 +142,7 @@ export async function passwordSignInEndpoint(context: Context<AppEnv>): Promise<
 		return refuse(context, 400, "wrong_password", "wrong password");
 	}
 
-	const finished = await held.stub.finish(held.secret);
-
-	forgetAttempt(context);
-
-	if ("reason" in finished) {
-		return refuse(context, 401, "no_attempt", finished.reason);
-	}
-
-	const grant = context.env.GRANTS.get(context.env.GRANTS.newUniqueId());
-	const { "code": ours } = await grant.begin({ "client": finished.request.client, "userId": account.user_id, "method": "password", "codeChallenge": finished.request.codeChallenge, "jkt": finished.request.jkt, "from": await origin(context), "label": deviceLabel(context.req.header("user-agent")) });
-
-	context.header("cache-control", "no-store");
-
-	return context.json({ "location": answerUrl(context, finished.request, { "code": ours }) });
+	return await hasMfa(context.env, account.user_id) ? askSecondFactor(context, held, account.user_id, "password") : signInAs(context, held, account.user_id, "password");
 }
 
 // ── Your account ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -175,7 +162,8 @@ export async function accountEndpoint(context: Context<AppEnv>): Promise<Respons
 		"user": user,
 		"githubId": (row?.results[0] as { "github_id": number | null } | undefined)?.github_id ?? null,
 		"email": address === undefined ? null : { "address": address.address, "verifiedAt": address.verified_at },
-		"password": set === undefined ? null : { "setAt": set.set_at }
+		"password": set === undefined ? null : { "setAt": set.set_at },
+		"mfa": await mfaState(context.env, user)
 	});
 }
 
@@ -352,6 +340,19 @@ export async function resetPasswordEndpoint(context: Context<AppEnv>): Promise<R
 
 	if (refused !== undefined) {
 		return refused;
+	}
+
+	// With MFA on, email alone isn't enough to reset (SIGN-IN.md): the second factor too, the app's or a recovery code.
+	if (await hasMfa(context.env, account.user_id)) {
+		if (field("second") === "") {
+			return refuse(context, 400, "second_factor", "two-factor code needed: from your authenticator app, or a recovery code");
+		}
+
+		const second = await secondFactor(context.env, account.user_id, field("second"));
+
+		if ("reason" in second) {
+			return refuse(context, second.status, "second_factor", second.reason);
+		}
 	}
 
 	await storePassword(context.env, account.user_id, field("password"), RESET_PASSWORD);
