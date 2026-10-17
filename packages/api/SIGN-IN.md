@@ -1,6 +1,6 @@
 # Sign-in methods
 
-Status: **design, 2026-10-17; C0, C1 and C2 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
+Status: **design, 2026-10-17; C0 to C3 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
 **Workers Paid** (for Argon2id's CPU and email sending), add a local debug harness first (C0), and push authorization
 requests (PAR) in C1. Still open: "Open questions".
 
@@ -195,7 +195,29 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     an email to the owner's account doesn't make that inbox a key to it. The Grant records its method; `rolesOf` reads it.
   - **Where:** an Account page in the admin app first (reachable from the No access card), the editor's with C7.
   - The owner's duplicate (bc2bc582…, email only) is the first case: sign in with GitHub, add the address, merge.
-- **C3 · passwords.** Set a password (signed in); sign in with one; the breach check; Argon2id; rate limits.
+- **C3 · passwords.** *Built 2026-10-17* (src/password.ts, src/password-hash.ts; migrations/0009):
+  - **Setting one,** signed in, from the admin app's Your account page (reachable from the No access card too):
+    `POST /admin/account/password/code` emails a code to the account's address (the action's own check, its HMAC in
+    `action_codes`, bound to the user and the action; the address's sending limits shared with sign-in codes), then
+    `POST /admin/account/password` takes the code (5 tries a bucket) and the password: Pilcrow's rules (10 to 100
+    printable ASCII characters, no space at either end), then Have I Been Pwned's range API (k-anonymity; if it can't be
+    asked, refused: "try again"). A refused password doesn't spend the code. `password_set` is audited.
+  - **Signing in,** from the sign-in page ("Use a password instead"): `POST /auth/password` with the address and the
+    password; errors say what's wrong ("no account with that email", "that account has no password: sign in with a
+    code", "wrong password"); 5 tries a bucket per user, one back a minute, and the sign-in limit per IP; no lockouts.
+    The `login` row says "password".
+  - **Hashing:** Argon2id at OWASP's baseline (19 MiB, 2 passes, 1 lane, a 16-byte salt, a 32-byte hash) as a PHC
+    string, so stronger costs later still verify the old; compared in constant time by us. The Argon2 itself is
+    **@hallaxius/argon2w** (0.0.2, pinned exactly): Argon2's reference code as WebAssembly, its module imported (the
+    runtime refuses to compile any at runtime, which is why hash-wasm can't be used as published), about 13 ms a hash
+    in workerd. **Watch it** (chosen 2026-10-17 knowing it was two weeks old, one maintainer): read the diff before any
+    upgrade; test/password.test.ts checks its output against Node's own Argon2id. Tested alternatives, should it need
+    replacing: argon2-wasm-edge (hash-wasm's Argon2 for Workers, ~21 ms; its own verify compares with ===) and
+    @noble/hashes' pure-JavaScript Argon2id (~82 ms).
+  - 6 tests in test/password.test.ts (the hash against Node's, the rules, setting and signing in, breached and rule-
+    breaking passwords and the breach check failing, the tries). Tried with the harness against the real Have I Been
+    Pwned: an email account set a password ("password1234" refused: in 443,397 breaches), signed out, and signed in
+    with it.
 - **C4 · password reset.** By email code, plus the second factor when MFA is on.
 - **C5 · authenticator-app MFA.** Enrollment, recovery codes, the step at sign-in, turning it off; the owner's policy.
 - **C6 · email as a second factor.**
@@ -204,8 +226,6 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
 
 ## Open questions
 
-- **Argon2id's implementation.** The Workers runtime has no Argon2. The choices: a small, focused WebAssembly build
-  (`hash-wasm`, a hashing primitive, not an auth framework), or PBKDF2-SHA256 at 600,000 iterations through the
-  built-in Web Crypto (no dependency; OWASP-acceptable, weaker against GPUs than Argon2id).
+- ~~Argon2id's implementation.~~ Decided 2026-10-17: @hallaxius/argon2w (C3).
 - **Email MFA** as specified, with the caveat shown, or authenticator app only.
 - **The owner's MFA policy:** required for the admin app, as proposed?

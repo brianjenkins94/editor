@@ -7,6 +7,8 @@ import { CODE_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
 import { keyed } from "./behavior.ts";
 import { answerUrl } from "./github.ts";
+import ACTION_HTML from "./action-code.html";
+import ACTION_TEXT from "./action-code.txt";
 import CODE_HTML from "./email-code.html";
 import CODE_TEXT from "./email-code.txt";
 import { canSend, send } from "./mail.ts";
@@ -38,24 +40,67 @@ const PER_MINUTE = 60_000;
 const PER_HOUR = 5;
 
 /** A fresh code. */
-const newCode = (): string => [...crypto.getRandomValues(new Uint8Array(LENGTH))].map((byte) => ALPHABET[byte % ALPHABET.length]).join("");
+export const newCode = (): string => [...crypto.getRandomValues(new Uint8Array(LENGTH))].map((byte) => ALPHABET[byte % ALPHABET.length]).join("");
 
 /** As it's shown and sent: `ABCD-EFGH`. */
 const shown = (code: string): string => `${code.slice(0, 4)}-${code.slice(4)}`;
 
 /** As it's typed, compared: case and the dash and spaces don't matter. */
-const typed = (code: string): string => code.toUpperCase().replaceAll(/[\s-]/gu, "");
+export const typed = (code: string): string => code.toUpperCase().replaceAll(/[\s-]/gu, "");
 
-/** What the attempt keeps of a code: an HMAC under CODE_KEY, bound to the attempt (a leaked store can't be guessed at
- *  offline; SIGN-IN.md, "Departures"). */
-async function codeHash(env: Bindings, attempt: string, code: string): Promise<string> {
+/** Whether it's shaped like a code at all (typed first). */
+export const isCode = (code: string): boolean => code.length === LENGTH && [...code].every((symbol) => ALPHABET.includes(symbol));
+
+/** What's kept of a code: an HMAC under CODE_KEY, bound to what it's for (an attempt, or a user's action), so a leaked
+ *  store can't be guessed at offline and a code works only where it was asked for (SIGN-IN.md, "Departures"). */
+export async function codeHash(env: Bindings, bound: string, code: string): Promise<string> {
 	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.CODE_KEY), { "name": "HMAC", "hash": "SHA-256" }, false, ["sign"]);
 
-	return base64url.encode(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${attempt}:${code}`))));
+	return base64url.encode(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${bound}:${code}`))));
+}
+
+/**
+ * Send `code` to `address`: the address's limits first (one a minute, five an hour, whatever the code is for: its own
+ * `email_code_sent` rows, a keyed hash, never the address), then the email, then its row. A sign-in's email has the
+ * link (src/email-code.*); an action's (setting a password) has only the code (src/action-code.*). What stopped it, if
+ * something did: an HTTP status, an error and a reason for the caller to refuse with.
+ */
+export async function sendCode(context: Context<AppEnv>, address: string, code: string, purpose: { "kind": "sign-in" } | { "kind": "action"; "action": string }): Promise<{ "ok": true } | { "ok": false; "status": 429 | 502; "error": string; "reason": string }> {
+	const tag = await keyed(context.env, "email", address.toLowerCase());
+	const now = Date.now();
+	const sent = await context.env.DB.prepare("SELECT COUNT(*) AS count, MAX(at) AS last FROM audit WHERE event = 'email_code_sent' AND detail = ? AND at > ?").bind(tag, now - 3_600_000).first<{ "count": number; "last": number | null }>();
+
+	if (sent !== null && sent.last !== null && now - sent.last < PER_MINUTE) {
+		context.header("retry-after", String(Math.ceil((PER_MINUTE - (now - sent.last)) / 1000)));
+
+		return { "ok": false, "status": 429, "error": "too_soon", "reason": "a code was sent less than a minute ago" };
+	}
+
+	if (sent !== null && sent.count >= PER_HOUR) {
+		return { "ok": false, "status": 429, "error": "too_many", "reason": "five codes sent in the last hour" };
+	}
+
+	// The email: its .txt and .html, their {{placeholders}} filled (HTML-escaped in the HTML).
+	const fill: Record<string, string> = { "code": shown(code), "link": `${new URL(context.req.url).origin}/sign-in#code=${code}`, "minutes": String(CODE_TTL / 60_000), "action": purpose.kind === "action" ? purpose.action : "" };
+	const [text, html] = purpose.kind === "sign-in" ? [CODE_TEXT, CODE_HTML] : [ACTION_TEXT, ACTION_HTML];
+	const mailed = await send(context.env, {
+		"to": address,
+		"subject": purpose.kind === "sign-in" ? `Your sign-in code: ${shown(code)}` : `Your code to ${purpose.action}: ${shown(code)}`,
+		"text": text.replaceAll(/\{\{(\w+)\}\}/gu, (_, key: string) => fill[key] ?? ""),
+		"html": html.replaceAll(/\{\{(\w+)\}\}/gu, (_, key: string) => escapeHtml(fill[key] ?? ""))
+	});
+
+	if ("reason" in mailed) {
+		return { "ok": false, "status": 502, "error": "not_sent", "reason": `not sent: ${mailed.reason}` };
+	}
+
+	await audit(context.env, "email_code_sent", {}, await origin(context), { "detail": tag });
+
+	return { "ok": true };
 }
 
 /** An address as typed, checked, not changed: something@domain.tld, no spaces, at most 254 characters. */
-const ADDRESS = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/u;
+export const ADDRESS = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 
 /** A refusal: recorded, and answered with what's wrong (SIGN-IN.md: errors say what's wrong). */
 async function refuse(context: Context<AppEnv>, status: 400 | 401 | 429 | 502 | 503, error: string, reason: string): Promise<Response> {
@@ -101,21 +146,6 @@ export async function emailEndpoint(context: Context<AppEnv>): Promise<Response>
 		return refuse(context, 400, "address", "not an email address");
 	}
 
-	// The address's own record of codes sent: one a minute, five an hour.
-	const tag = await keyed(context.env, "email", address.toLowerCase());
-	const now = Date.now();
-	const sent = await context.env.DB.prepare("SELECT COUNT(*) AS count, MAX(at) AS last FROM audit WHERE event = 'email_code_sent' AND detail = ? AND at > ?").bind(tag, now - 3_600_000).first<{ "count": number; "last": number | null }>();
-
-	if (sent !== null && sent.last !== null && now - sent.last < PER_MINUTE) {
-		context.header("retry-after", String(Math.ceil((PER_MINUTE - (now - sent.last)) / 1000)));
-
-		return refuse(context, 429, "too_soon", "a code was sent less than a minute ago");
-	}
-
-	if (sent !== null && sent.count >= PER_HOUR) {
-		return refuse(context, 429, "too_many", "five codes sent in the last hour");
-	}
-
 	const code = newCode();
 	const kept = await held.stub.emailed(held.secret, address, await codeHash(context.env, held.id, code));
 
@@ -123,27 +153,19 @@ export async function emailEndpoint(context: Context<AppEnv>): Promise<Response>
 		return refuse(context, 401, "no_attempt", kept.reason);
 	}
 
-	// The email: src/email-code.txt and .html, their {{placeholders}} filled (HTML-escaped in the HTML).
-	const fill: Record<string, string> = { "code": shown(code), "link": `${new URL(context.req.url).origin}/sign-in#code=${code}`, "minutes": String(CODE_TTL / 60_000) };
-	const mailed = await send(context.env, {
-		"to": address,
-		"subject": `Your sign-in code: ${shown(code)}`,
-		"text": CODE_TEXT.replaceAll(/\{\{(\w+)\}\}/gu, (_, key: string) => fill[key] ?? ""),
-		"html": CODE_HTML.replaceAll(/\{\{(\w+)\}\}/gu, (_, key: string) => escapeHtml(fill[key] ?? ""))
-	});
+	const sent = await sendCode(context, address, code, { "kind": "sign-in" });
 
-	if ("reason" in mailed) {
-		return refuse(context, 502, "not_sent", `not sent: ${mailed.reason}`);
+	if ("reason" in sent) {
+		return refuse(context, sent.status, sent.error, sent.reason);
 	}
 
-	await audit(context.env, "email_code_sent", {}, await origin(context), { "detail": tag });
 	context.header("cache-control", "no-store");
 
 	return context.json({ "sent": true, "expires_in": CODE_TTL / 1000 });
 }
 
 /** The user an address belongs to, proven theirs just now: found (whatever its case), or made with it. */
-async function userOf(env: Bindings, address: string, now: number): Promise<string> {
+export async function userOf(env: Bindings, address: string, now: number): Promise<string> {
 	const found = await env.DB.prepare("SELECT user_id FROM emails WHERE lower(address) = lower(?)").bind(address).first<{ "user_id": string }>();
 
 	if (found !== null) {
@@ -179,7 +201,7 @@ export async function verifyEndpoint(context: Context<AppEnv>): Promise<Response
 	const form = await context.req.parseBody();
 	const code = typed(typeof form["code"] === "string" ? form["code"] : "");
 
-	if (code.length !== LENGTH || [...code].some((symbol) => !ALPHABET.includes(symbol))) {
+	if (!isCode(code)) {
 		return refuse(context, 400, "code", "not a code");
 	}
 

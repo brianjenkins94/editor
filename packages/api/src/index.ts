@@ -13,6 +13,7 @@ import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
 import { emailEndpoint, verifyEndpoint } from "./email.ts";
 import { expireInbox, receive } from "./inbox.ts";
+import { passwordSignInEndpoint } from "./password.ts";
 import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
@@ -72,6 +73,7 @@ app.use("/token", limit(4 * 1024));
 app.use("/auth/par", limit(4 * 1024));
 app.use("/auth/email/*", limit(4 * 1024));
 app.use("/auth/email", limit(4 * 1024));
+app.use("/auth/password", limit(4 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
@@ -122,6 +124,9 @@ app.get("/auth/github", rateLimit("SIGN_IN_BY_IP", byIp), githubEndpoint);
 app.post("/auth/email", rateLimit("SIGN_IN_BY_IP", byIp), emailEndpoint);
 
 app.post("/auth/email/verify", rateLimit("SIGN_IN_BY_IP", byIp), verifyEndpoint);
+
+// The page's password choice (src/password.ts, SIGN-IN.md C3): an email and its password.
+app.post("/auth/password", rateLimit("SIGN_IN_BY_IP", byIp), passwordSignInEndpoint);
 
 app.post("/token", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), tokenEndpoint);
 

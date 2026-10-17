@@ -5,6 +5,7 @@ import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
 import { inboxEndpoint } from "./inbox.ts";
 import { mailEndpoint } from "./mail-report.ts";
+import { accountEndpoint, passwordCodeEndpoint, setPasswordEndpoint } from "./password.ts";
 import { smokeTest } from "./smoke.ts";
 import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
@@ -123,6 +124,15 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 
 	return context.json({ "rows": results.map(auditRow) });
 });
+
+// ── Your own account (C3) ──────────────────────────────────────────────────────────────────────────────────────────
+// Any admin token, roles or none: it's your own account. Setting a password takes a code to your email first.
+
+admin.get("/account", accountEndpoint);
+
+admin.post("/account/password/code", passwordCodeEndpoint);
+
+admin.post("/account/password", setPasswordEndpoint);
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);

@@ -19,6 +19,7 @@ import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import "./admin.css";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { AccountPage } from "./account";
 import { ArchitecturePage } from "./architecture";
 import { loginOf } from "./logins";
 import { MailPage } from "./mail";
@@ -73,14 +74,29 @@ function SignIn({ problem }: { "problem"?: string }) {
 	);
 }
 
+/** Signed in with no role: nothing to look after, but your own account (a password, C3). */
 function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
+	const [account, setAccount] = useState(false);
+
+	if (account) {
+		return (
+			<main class="wa-stack wa-gap-l">
+				<div><wa-button appearance="plain" onClick={() => setAccount(false)}>Back</wa-button></div>
+				<AccountPage />
+			</main>
+		);
+	}
+
 	return (
 		<div class="auth-screen wa-stack">
 			<wa-card class="auth-card">
 				<div class="wa-stack wa-gap-l">
 					<h1 class="wa-heading-l">No access</h1>
 					<p>You're signed in, but your account has no admin roles. <span class="mono muted">{me.user}</span></p>
-					<wa-button appearance="outlined" onClick={onSignOut}>Sign out</wa-button>
+					<div class="wa-cluster">
+						<wa-button appearance="outlined" onClick={() => setAccount(true)}>Your account</wa-button>
+						<wa-button appearance="outlined" onClick={onSignOut}>Sign out</wa-button>
+					</div>
 				</div>
 			</wa-card>
 		</div>
@@ -98,6 +114,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 						: path === "/unusual" ? <UnusualPage />
 							: path === "/architecture" ? <ArchitecturePage query={query} />
 								: path === "/mail" ? <MailPage query={query} />
+									: path === "/account" ? <AccountPage />
 								: <Overview />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 
@@ -126,6 +143,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/mail", "Mail", path === "/mail")}
 				{link("#/traffic", "Traffic", path === "/traffic")}
 				{link("#/architecture", "Architecture", path === "/architecture")}
+				{link("#/account", "Your account", path === "/account")}
 			</nav>
 			<main><Permissions.Provider value={me.permissions}>{page}</Permissions.Provider></main>
 		</wa-page>

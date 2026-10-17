@@ -1,6 +1,7 @@
 // The sign-in page (SIGN-IN.md): what this browser's attempt may use (GET /auth/attempt). GitHub is a link on; email is
 // a form for the address (POST /auth/email), then one for the code (POST /auth/email/verify), which answers with where
-// to go: the app's page, with our code. The attempt itself is the cookie /auth/start set; nothing here holds anything.
+// to go: the app's page, with our code. A password (POST /auth/password) signs in with the same address, and answers
+// the same way. The attempt itself is the cookie /auth/start set; nothing here holds anything.
 //
 // The email's link is this page with the code in its fragment (#code=…): in the browser that started, it's sent as if
 // typed; anywhere else, there's no attempt here, and the page shows the code to type where the sign-in started.
@@ -42,10 +43,29 @@ function explain(body) {
 		"code expired": "That code has expired. Ask for another.",
 		"too many tries": "Too many tries. Wait a minute, then try again.",
 		"no code sent": "Ask for a code first.",
-		"email isn't set up here": "Email sign-in isn't available here yet."
+		"email isn't set up here": "Email sign-in isn't available here yet.",
+		"no account with that email": "There's no account with that email. Ask for a code instead: that makes one.",
+		"that account has no password: sign in with a code": "That account has no password yet. Ask for a code instead.",
+		"wrong password": "That isn't the password."
 	};
 
 	return reasons[body.reason] ?? (body.error === "no_attempt" ? "This sign-in has expired or was opened somewhere else. Go back to the app and sign in again." : "Something went wrong. Try again.");
+}
+
+/** Sign in with a password: on a match, on to the app. */
+async function signIn(address, password, button) {
+	button.disabled = true;
+
+	const { ok, body } = await post("/auth/password", { "address": address, "password": password });
+
+	if (ok) {
+		location.assign(body.location);
+
+		return;
+	}
+
+	button.disabled = false;
+	say(explain(body));
 }
 
 /** Check a code: on a match, on to the app. */
@@ -101,14 +121,33 @@ async function send(address, button) {
 	methods.querySelector("input").focus();
 }
 
-function emailForm() {
-	const address = element("input", { "name": "address", "type": "email", "required": true, "autocomplete": "email", "placeholder": "you@example.com" });
-	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Email me a code" });
-	const form = element("form", { "className": "stack" }, element("label", { "textContent": "Email" }, address), submit);
+/** The address, then a code by email, or a password: whichever the attempt offers. With both, the code first, and the
+ *  password a step away. */
+function emailForm(offered) {
+	const byEmail = offered.includes("email");
+	const address = element("input", { "name": "address", "type": "email", "required": true, "autocomplete": "username email", "placeholder": "you@example.com" });
+	const password = element("input", { "name": "password", "type": "password", "autocomplete": "current-password" });
+	const passwordLabel = element("label", { "textContent": "Password", "hidden": byEmail }, password);
+	const codeButton = element("button", { "type": "submit", "className": "method", "textContent": "Email me a code", "hidden": !byEmail });
+	const signInButton = element("button", { "type": "submit", "className": "method", "textContent": "Sign in", "hidden": byEmail });
+	const toggle = element("button", { "type": "button", "className": "secondary", "textContent": "Use a password instead", "hidden": !(byEmail && offered.includes("password")) });
+	const form = element("form", { "className": "stack" }, element("label", { "textContent": "Email" }, address), passwordLabel, codeButton, signInButton, toggle);
 
+	toggle.addEventListener("click", () => {
+		const usePassword = passwordLabel.hidden;
+
+		passwordLabel.hidden = !usePassword;
+		password.required = usePassword;
+		codeButton.hidden = usePassword;
+		signInButton.hidden = !usePassword;
+		toggle.textContent = usePassword ? "Email me a code instead" : "Use a password instead";
+
+		(usePassword ? password : address).focus();
+	});
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
-		void send(address.value, submit);
+		say("");
+		void (passwordLabel.hidden ? send(address.value, codeButton) : signIn(address.value, password.value, signInButton));
 	});
 
 	return form;
@@ -133,12 +172,12 @@ if (response.ok) {
 		choices.push(element("a", { "className": "method", "href": "/auth/github", "textContent": "Continue with GitHub" }));
 	}
 
-	if (offered.includes("email")) {
+	if (offered.includes("email") || offered.includes("password")) {
 		if (choices.length > 0) {
 			choices.push(element("p", { "className": "or", "textContent": "or" }));
 		}
 
-		choices.push(emailForm());
+		choices.push(emailForm(offered));
 	}
 
 	methods.replaceChildren(...choices);

@@ -19,3 +19,10 @@ export const get = async <T>(path: string): Promise<T> => session.json<T>(`/admi
 
 /** A write to the admin API: a form POSTed. */
 export const post = async <T>(path: string, form: Record<string, string>): Promise<T> => session.json<T>(`/admin${path}`, form);
+
+/** A write whose refusal the page shows: the answer's status and body either way (a refusal's `reason` says what's wrong). */
+export async function submit<T>(path: string, form: Record<string, string>): Promise<{ "ok": boolean; "status": number; "body": Partial<T> & { "reason"?: string } }> {
+	const response = await session.fetch(`${API}/admin${path}`, { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams(form) });
+
+	return { "ok": response.ok, "status": response.status, "body": await response.json().catch(() => ({})) as Partial<T> & { "reason"?: string } };
+}

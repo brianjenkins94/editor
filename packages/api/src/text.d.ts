@@ -1,4 +1,5 @@
-/** Wrangler's default module rules import these as text (the email's bodies, src/email-code.*). */
+/** Wrangler's default module rules import these as text (the emails' bodies, src/*-code.*), and .wasm as a compiled
+ *  WebAssembly module (Argon2's, src/password.ts). */
 declare module "*.html" {
 	const text: string;
 
@@ -9,4 +10,10 @@ declare module "*.txt" {
 	const text: string;
 
 	export default text;
+}
+
+declare module "*.wasm" {
+	const module: WebAssembly.Module;
+
+	export default module;
 }
