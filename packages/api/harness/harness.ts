@@ -85,7 +85,13 @@ createServer(async (request, response) => {
 		// The API, as the request came (util/proxy): same URL, so the Worker's issuer is this origin; headers and body
 		// streamed through; redirects (GitHub's, the sign-in's) handed back as they are; and the client's address as
 		// Cloudflare would give it.
-		await proxy(request, response, { "fetch": async (forwarded) => harness.fetch(forwarded as never) as unknown as Promise<Response>, "to": url.href, "headers": { "cf-connecting-ip": request.socket.remoteAddress ?? "127.0.0.1" }, "redirect": "manual" });
+		// The harness's fetch is Wrangler's own undici, which won't take Node's Request: it gets the request's parts.
+		await proxy(request, response, {
+			"fetch": async (forwarded) => harness.fetch(forwarded.url, { "method": forwarded.method, "headers": [...forwarded.headers], "body": forwarded.body ?? undefined, "redirect": forwarded.redirect, "duplex": "half" } as never) as unknown as Promise<Response>,
+			"to": url.href,
+			"headers": { "cf-connecting-ip": request.socket.remoteAddress ?? "127.0.0.1" },
+			"redirect": "manual"
+		});
 	} catch (error) {
 		response.writeHead(500, { "content-type": "text/plain" });
 		response.end(error instanceof Error ? error.message : String(error));
