@@ -1,11 +1,11 @@
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { open, seal } from "@brianjenkins94/util/auth/seal";
 import { base64url } from "jose";
 import { DurableObject } from "cloudflare:workers";
 import type { Origin } from "./audit.ts";
 import { audit, NOWHERE } from "./audit.ts";
 import type { Bindings } from "./env.ts";
 import { github as githubOrigins } from "./github.ts";
-import { open, seal } from "./seal.ts";
 
 /**
  * One sign-in (README.md, "Tokens and the flow"). A Durable Object, so everything about the sign-in happens one call at a

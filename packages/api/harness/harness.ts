@@ -14,6 +14,7 @@
  */
 import type { Changes, Snapshot } from "./state.ts";
 import * as fs from "@brianjenkins94/util/fs";
+import { proxy } from "@brianjenkins94/util/proxy";
 import { createServer } from "node:http";
 import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
@@ -81,22 +82,10 @@ createServer(async (request, response) => {
 			return;
 		}
 
-		// The API, as the request came: same URL (so the Worker's issuer is this origin), headers and body, and the
-		// client's address as Cloudflare would give it.
-		const chunks: Buffer[] = [];
-
-		for await (const chunk of request) {
-			chunks.push(chunk as Buffer);
-		}
-
-		const headers: Record<string, string> = Object.fromEntries(Object.entries(request.headers).flatMap(([name, value]) => (value === undefined ? [] : [[name, Array.isArray(value) ? value.join(", ") : value]])));
-
-		headers["cf-connecting-ip"] = request.socket.remoteAddress ?? "127.0.0.1";
-
-		const answer = await harness.fetch(url.href, { "method": request.method ?? "GET", "headers": headers, "redirect": "manual", ...chunks.length === 0 ? {} : { "body": Buffer.concat(chunks) } });
-
-		response.writeHead(answer.status, Object.fromEntries(answer.headers));
-		response.end(Buffer.from(await answer.arrayBuffer()));
+		// The API, as the request came (util/proxy): same URL, so the Worker's issuer is this origin; headers and body
+		// streamed through; redirects (GitHub's, the sign-in's) handed back as they are; and the client's address as
+		// Cloudflare would give it.
+		await proxy(request, response, { "fetch": async (forwarded) => harness.fetch(forwarded as never) as unknown as Promise<Response>, "to": url.href, "headers": { "cf-connecting-ip": request.socket.remoteAddress ?? "127.0.0.1" }, "redirect": "manual" });
 	} catch (error) {
 		response.writeHead(500, { "content-type": "text/plain" });
 		response.end(error instanceof Error ? error.message : String(error));

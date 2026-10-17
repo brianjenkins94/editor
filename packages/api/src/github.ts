@@ -1,10 +1,10 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { open, seal } from "@brianjenkins94/util/auth/seal";
 import { base64url } from "jose";
 import { deviceLabel } from "./account.ts";
 import { audit, origin } from "./audit.ts";
-import { open, seal } from "./seal.ts";
 
 /**
  * Signing in with GitHub (README.md, "Tokens and the flow", steps 1–2). The app sends the browser to /auth/github/start

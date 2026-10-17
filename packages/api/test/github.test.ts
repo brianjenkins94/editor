@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
-import { seal } from "../src/seal.ts";
+import { seal } from "@brianjenkins94/util/auth/seal";
 
 // Signing in through GitHub, in workerd, against a GitHub of the test's own: /auth/github/start, GitHub's authorize page
 // (skipped: the test is the user saying yes), /auth/github/callback, then the app redeeming our code at /token.
