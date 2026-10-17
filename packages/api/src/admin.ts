@@ -1,6 +1,7 @@
 import type { AppEnv } from "./env.ts";
 import { Hono } from "hono";
 import { ROUTINE } from "./audit-copies.ts";
+import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
 import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
@@ -122,6 +123,9 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
+
+/** The API as it runs, described by itself (src/architecture.ts): routes, stores and their tables, counts. */
+admin.get("/architecture", requires("architecture:read"), architectureEndpoint);
 
 /** What a sign-in did that the editor doesn't (B7), counted beside its score. */
 const FLAGS = ["probe", "proxy_denied", "client_unusual", "client_changed"];

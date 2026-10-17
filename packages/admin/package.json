@@ -2,7 +2,7 @@
   "name": "@brianjenkins94/admin",
   "version": "0.0.0",
   "private": true,
-  "description": "The admin app (README.md): accounts, sign-ins, the audit log and traffic, for those whose roles allow it.",
+  "description": "The admin app (README.md): accounts, sign-ins, the audit log, traffic, unusual sign-ins and the architecture, for those whose roles allow it.",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5174 --strictPort",
@@ -15,6 +15,7 @@
     "preact": "latest"
   },
   "devDependencies": {
-    "vite": "latest"
+    "vite": "latest",
+    "jsonc-parser": "^3.3.1"
   }
 }

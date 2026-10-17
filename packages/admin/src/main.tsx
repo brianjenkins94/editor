@@ -19,6 +19,7 @@ import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import "./admin.css";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { ArchitecturePage } from "./architecture";
 import { loginOf } from "./logins";
 import { get, session, SIGNED_OUT } from "./session";
 import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
@@ -94,7 +95,8 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				: path === "/audit" ? <Audit query={query} />
 					: path === "/traffic" ? <TrafficPage query={query} />
 						: path === "/unusual" ? <UnusualPage />
-							: <Overview />;
+							: path === "/architecture" ? <ArchitecturePage query={query} />
+								: <Overview />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 
 	useEffect(() => {
@@ -120,6 +122,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/audit", "Audit log", path === "/audit")}
 				{link("#/unusual", "Unusual", path === "/unusual")}
 				{link("#/traffic", "Traffic", path === "/traffic")}
+				{link("#/architecture", "Architecture", path === "/architecture")}
 			</nav>
 			<main><Permissions.Provider value={me.permissions}>{page}</Permissions.Provider></main>
 		</wa-page>

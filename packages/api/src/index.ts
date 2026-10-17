@@ -8,6 +8,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
 import { deleteAccountEndpoint, purge, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
 import { admin } from "./admin.ts";
+import { ROUTES } from "./architecture.ts";
 import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
@@ -135,6 +136,10 @@ app.route("/admin", admin);
 app.on(["GET", "POST", "PATCH"], "/github/api/*", session, rateLimit("PROXY_BY_USER", byUser), githubApi);
 
 app.on(["GET", "POST"], "/github/git/*", session, rateLimit("PROXY_BY_USER", byUser), githubGit);
+
+// The router's table, for the admin app's architecture page (src/architecture.ts): every route, by method and template;
+// middleware (registered for every method) isn't a route.
+ROUTES.push(...[...new Map(app.routes.filter((route) => route.method !== "ALL").map((route) => [`${route.method} ${route.path}`, { "method": route.method, "path": route.path }])).values()]);
 
 /**
  * A route that doesn't exist. Asked for by someone signed in, it's a probe (BEHAVIOR.md): something guessing at what the

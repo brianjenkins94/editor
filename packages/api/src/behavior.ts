@@ -23,7 +23,7 @@ export async function keyed(env: Bindings, scope: string, value: string): Promis
  * names, `:ref` a ref or sha (no `..`, so it can't climb out of the repository it names). A git entry also names the
  * query it must have.
  */
-const PROXIED: { "base": "api" | "git"; "method": string; "template": string; "search"?: string }[] = [
+export const PROXIED: { "base": "api" | "git"; "method": string; "template": string; "search"?: string }[] = [
 	{ "base": "api", "method": "GET", "template": "/user" },
 	{ "base": "api", "method": "POST", "template": "/user/repos" },
 	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo" },

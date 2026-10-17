@@ -80,6 +80,29 @@ interface State {
 /** A grant that predates clients was the editor's: the only client there was. */
 const clientOf = (state: State): string => state.client ?? "editor";
 
+/** What a Grant keeps, table by table (the admin app's architecture page lists them from here). */
+export const SCHEMA = `
+	CREATE TABLE IF NOT EXISTS state (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		user_id TEXT NOT NULL,
+		jkt TEXT NOT NULL,
+		github TEXT,
+		code_hash TEXT,
+		code_challenge TEXT,
+		code_expires INTEGER,
+		refresh_hash TEXT,
+		revoked_at INTEGER
+	);
+	CREATE TABLE IF NOT EXISTS used_refresh (hash TEXT PRIMARY KEY);
+	CREATE TABLE IF NOT EXISTS seen_jti (jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+	CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL);
+	CREATE TABLE IF NOT EXISTS leases (id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+	CREATE TABLE IF NOT EXISTS fingerprint (name TEXT PRIMARY KEY, value TEXT);
+	CREATE TABLE IF NOT EXISTS walk (id INTEGER PRIMARY KEY CHECK (id = 1), action TEXT NOT NULL, at INTEGER NOT NULL);
+	CREATE TABLE IF NOT EXISTS pending (from_action TEXT NOT NULL, to_action TEXT NOT NULL, gap INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (from_action, to_action, gap));
+	CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
+`;
+
 export type Issued = { "ok": true; "userId": string; "refreshToken": string; "client": string } | { "ok": false };
 
 export class Grant extends DurableObject<Bindings> {
@@ -92,27 +115,7 @@ export class Grant extends DurableObject<Bindings> {
 	}
 
 	private schema(): void {
-		this.sql.exec(`
-			CREATE TABLE IF NOT EXISTS state (
-				id INTEGER PRIMARY KEY CHECK (id = 1),
-				user_id TEXT NOT NULL,
-				jkt TEXT NOT NULL,
-				github TEXT,
-				code_hash TEXT,
-				code_challenge TEXT,
-				code_expires INTEGER,
-				refresh_hash TEXT,
-				revoked_at INTEGER
-			);
-			CREATE TABLE IF NOT EXISTS used_refresh (hash TEXT PRIMARY KEY);
-			CREATE TABLE IF NOT EXISTS seen_jti (jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
-			CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL);
-			CREATE TABLE IF NOT EXISTS leases (id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
-			CREATE TABLE IF NOT EXISTS fingerprint (name TEXT PRIMARY KEY, value TEXT);
-			CREATE TABLE IF NOT EXISTS walk (id INTEGER PRIMARY KEY CHECK (id = 1), action TEXT NOT NULL, at INTEGER NOT NULL);
-			CREATE TABLE IF NOT EXISTS pending (from_action TEXT NOT NULL, to_action TEXT NOT NULL, gap INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (from_action, to_action, gap));
-			CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
-		`);
+		this.sql.exec(SCHEMA);
 
 		// Added with the admin client (packages/admin): the grants that began before it have none, and are the editor's.
 		if (!this.sql.exec<{ "name": string }>("PRAGMA table_info(state)").toArray().some((column) => column.name === "client")) {

@@ -34,7 +34,7 @@ roles allow.
 ### Roles and permissions
 
 - **Permissions** are fixed strings in code (`src/rbac.ts` in packages/api): `users:read`, `sessions:read`,
-  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, `behavior:read`, and later `org:members:read`, `org:members:write`,
+  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, `behavior:read`, `architecture:read`, and later `org:members:read`, `org:members:write`,
   `org:roles:write`.
 - **Roles** map to permissions, also in code, so what a role can do is reviewed like any other change:
   - `owner`: every platform permission.
@@ -82,6 +82,7 @@ route table doubles as the access-control table.
 | `GET /admin/audit/verify` | `audit:verify` | D1 against the R2 copies, run by the Worker (see below) |
 | `GET /admin/traffic` | `traffic:read` | Cloudflare's analytics, through the API's own read-only token |
 | `GET /admin/unusual` | `behavior:read` | sign-ins by their score, with their most surprising steps and flags (B9) |
+| `GET /admin/architecture` | `architecture:read` | the API as it runs: routes, stores and their tables with counts, its calls |
 
 - **Every admin request is audited** (`admin_access`: route, and whose data), kept 365 days. Who looked at a user's data
   is itself part of the security record.
@@ -169,10 +170,25 @@ Each lands green and is useful on its own.
   proxy's allowlist (new features tolerated by construction), probes of routes that don't exist, a header fingerprint
   per sign-in compared on every request (changed, omitted, added; additions and browser updates tolerated), then a
   likely-next-action model and an Unusual page. Zero-knowledge: templates, header names, counts and keyed hashes only.
-- **Architecture page.** A live diagram of the system (Workers, Durable Objects, D1, R2, the static hosts, GitHub,
-  Cloudflare's analytics), *derived from code*: the wrangler configs, the routes and the bindings, read at build time,
-  never drawn by hand. *Zero-knowledge*: it shows the shape and its live counts, never a user's data. Its own renderer,
-  not the editor's.
+- **Architecture page.** *Built 2026-10-17.* A live diagram of the system, *derived from code* in two halves, each
+  from what's authoritative for it:
+  - **The deployment as configured** (deployment.ts, a Vite plugin: `virtual:deployment`): every wrangler config
+    (packages/api's, with its environments; packages/site's three, production's), read with util/json when this app is
+    built. The Workers, their custom domains, code or assets, Durable Object, D1, R2 and rate-limit bindings, crons, and
+    the hosts a static site's `_redirects` send to.
+  - **The API as it runs** (`GET /admin/architecture`, `architecture:read`; packages/api/src/architecture.ts): the
+    router's own table (every route by method and template), D1's tables from its schema with a row count each, each
+    Durable Object class's tables from the SQL that makes them (and the Grant's live count), the proxy's relayed calls,
+    the origins allowed to call it, and what it calls (GitHub's origins; whether analytics and alerts are set).
+  - Traffic's last hour on the hosts and Workers, when the viewer may read it and the environment is deployed (a local
+    Worker shares production's name, not its traffic). Read again every minute.
+  - *Zero-knowledge:* names from the code and counts, never a row.
+  - **Its own renderer** (src/architecture.tsx), not the editor's: five columns (calls in, hosts, Workers, what they
+    keep, calls out) of SVG boxes in Web Awesome's tokens, with curves between them; clicking a box follows its
+    connections. Below it, every route and every relayed GitHub call.
+  - Tested in workerd (test/admin.test.ts: the routes, tables, counts and Durable Object tables, no one's data; the
+    permission in the refusal test). Tried with the harness, locally and, in development, as production
+    (`#/architecture?as=production`: production's deployment around the local API's description).
 - **B6 · first write.** *Built 2026-10-17:* `POST /admin/sessions/:id/revoke` with `confirm=revoke`, behind
   `sessions:revoke` (packages/api/src/admin.ts): Grant.revoke ends the sign-in at once (its GitHub token revoked too),
   recorded on both sides: `grant_revoked` ("ended by an admin") on that user's record, and `admin_revoked` (which

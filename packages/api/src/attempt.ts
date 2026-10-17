@@ -38,17 +38,20 @@ interface Row extends Pushed {
 /** A refusal's reason: a fixed string, for the audit log. */
 export type Refused = { "ok": false; "reason": string };
 
+/** What an Attempt keeps (the admin app's architecture page lists it from here). */
+export const SCHEMA = `CREATE TABLE IF NOT EXISTS attempt (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	client TEXT NOT NULL, redirectUri TEXT NOT NULL, state TEXT NOT NULL, codeChallenge TEXT NOT NULL, jkt TEXT NOT NULL,
+	pushed_at INTEGER NOT NULL, opened_at INTEGER, secret_hash TEXT, finished_at INTEGER
+)`;
+
 export class Attempt extends DurableObject<Bindings> {
 	private readonly sql = this.ctx.storage.sql;
 
 	public constructor(ctx: DurableObjectState, env: Bindings) {
 		super(ctx, env);
 
-		this.sql.exec(`CREATE TABLE IF NOT EXISTS attempt (
-			id INTEGER PRIMARY KEY CHECK (id = 1),
-			client TEXT NOT NULL, redirectUri TEXT NOT NULL, state TEXT NOT NULL, codeChallenge TEXT NOT NULL, jkt TEXT NOT NULL,
-			pushed_at INTEGER NOT NULL, opened_at INTEGER, secret_hash TEXT, finished_at INTEGER
-		)`);
+		this.sql.exec(SCHEMA);
 	}
 
 	private row(): Row | undefined {

@@ -198,11 +198,11 @@ test("every read endpoint is refused without its permission: 403, recorded with 
 	const holder = await browser();
 	const { access_token, grantId } = await signedIn(holder, someone(), "admin");
 
-	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit", "/admin/unusual"]) {
+	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit", "/admin/unusual", "/admin/architecture"]) {
 		assert.equal((await holder.send("GET", path, { "accessToken": access_token })).status, 403, path);
 	}
 
-	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read", "lacks behavior:read"]);
+	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read", "lacks behavior:read", "lacks architecture:read"]);
 });
 
 test("/admin/users and /admin/users/:id: who's signed up, their sign-ins with their client, and their audit rows", async () => {
@@ -352,4 +352,28 @@ test("/admin/unusual: sign-ins by their mean surprise, most first, with their mo
 	assert.deepEqual(second?.flags, {});
 	assert.equal((await read("")).some((row) => row.id === brief.grantId), false, "two steps: too few to say");
 	assert.equal((await read("?min=1"))[0]?.id, brief.grantId);
+});
+
+// ── The architecture page ──────────────────────────────────────────────────────────────────────────────────────────
+
+test("/admin/architecture: the API describes itself from its code: its routes, its stores' tables with counts, what it relays and who calls it", async () => {
+	const holder = await browser();
+	const { access_token } = await signedIn(holder, OWNER, "admin");
+	const described = await (await holder.send("GET", "/admin/architecture", { "accessToken": access_token })).json() as { "environment": string; "routes": { "method": string; "path": string }[]; "database": { "table": string; "rows": number }[]; "objects": { "class": string; "tables": string[]; "live"?: number }[]; "proxied": { "base": string; "call": string }[]; "clients": string[] };
+	const routes = described.routes.map((route) => `${route.method} ${route.path}`);
+
+	assert.equal(described.environment, "local");
+
+	for (const route of ["POST /token", "GET /sessions", "GET /admin/architecture", "GET /admin/users/:id", "GET /github/api/*"]) {
+		assert.ok(routes.includes(route), route);
+	}
+
+	assert.equal(routes.some((route) => route.startsWith("ALL ")), false, "middleware isn't a route");
+	assert.ok((described.database.find((table) => table.table === "users")?.rows ?? 0) >= 1, "counts, from D1's own schema");
+	assert.equal(described.database.some((table) => table.table === "d1_migrations"), false);
+	assert.ok(described.objects.find((object) => object.class === "Grant")?.tables.includes("fingerprint"), "a Durable Object's tables, from the SQL that makes them");
+	assert.ok((described.objects.find((object) => object.class === "Grant")?.live ?? 0) >= 1);
+	assert.ok(described.proxied.some((call) => call.call === "GET /repos/:owner/:repo/git/trees/:ref"));
+	assert.ok(described.clients.includes("http://localhost:5174"));
+	assert.equal(JSON.stringify(described).includes(String(OWNER)), false, "no one's data");
 });

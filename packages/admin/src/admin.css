@@ -14,3 +14,18 @@ main { padding: var(--wa-space-l); }
 .filters { align-items: end; }
 .pair { --min-column-size: 24rem; align-items: start; }
 .agent { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The architecture page's diagram (src/architecture.tsx): Web Awesome's tokens, so it follows the theme. */
+.diagram { overflow-x: auto; }
+.diagram svg { font-family: var(--wa-font-family-body); }
+.diagram .column { fill: var(--wa-color-text-quiet); font-size: var(--wa-font-size-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+.diagram .box { cursor: pointer; }
+.diagram .box rect { fill: var(--wa-color-surface-raised); stroke: var(--wa-color-surface-border); }
+.diagram .box.selected rect { stroke: var(--wa-color-brand-border-loud); stroke-width: 2; }
+.diagram .title { fill: var(--wa-color-text-normal); font-size: var(--wa-font-size-s); font-weight: var(--wa-font-weight-semibold); }
+.diagram .kind { fill: var(--wa-color-text-quiet); font-size: var(--wa-font-size-xs); }
+.diagram .line { fill: var(--wa-color-text-normal); font-family: var(--wa-font-family-code); font-size: var(--wa-font-size-xs); }
+.diagram .metric { fill: var(--wa-color-brand-on-quiet); font-size: var(--wa-font-size-xs); font-weight: var(--wa-font-weight-semibold); }
+.diagram .edge path { fill: none; stroke: var(--wa-color-neutral-border-loud); stroke-width: 1.25; }
+.diagram .edge.back path { stroke-dasharray: 4 4; }
+.diagram .edge text { fill: var(--wa-color-text-quiet); font-size: var(--wa-font-size-xs); text-anchor: middle; }
+.diagram .edge.faded { opacity: 0.12; }
