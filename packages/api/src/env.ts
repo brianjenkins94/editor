@@ -11,6 +11,8 @@ export interface Bindings {
 	"REDIRECT_URIS": Record<string, string[]>;
 	/** The platform owners (src/rbac.ts): GitHub user ids, not secret. Only a commit makes one. */
 	"OWNERS": number[];
+	/** What each client's sign-in page offers (SIGN-IN.md): `github` now; `email` and `password` as they're built. */
+	"SIGN_IN_METHODS": Record<string, string[]>;
 	/** Only in tests: where GitHub's web and API are, instead of github.com and api.github.com. */
 	"GITHUB_ORIGIN"?: string;
 	"GITHUB_API"?: string;
@@ -40,6 +42,8 @@ export interface Bindings {
 	/** The audit log's write-once copies (audit-copies.ts), in a bucket whose lock rules keep each as long as D1 keeps its row. */
 	"AUDIT_COPIES": R2Bucket;
 	"GRANTS": DurableObjectNamespace<Grant>;
+	/** Sign-ins in progress (src/attempt.ts), one per pushed authorization request. */
+	"ATTEMPTS": DurableObjectNamespace<import("./attempt.ts").Attempt>;
 }
 
 /** Hono's environment: the bindings, and what middleware leaves for the routes after it. */

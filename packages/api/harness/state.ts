@@ -16,7 +16,7 @@ type Row = Record<string, unknown>;
 export type Snapshot = Record<string, Record<string, Row>>;
 
 /** The Durable Object namespaces to read, and the R2 buckets. */
-const OBJECTS = ["GRANTS"];
+const OBJECTS = ["GRANTS", "ATTEMPTS"];
 
 const BUCKETS = ["AUDIT_COPIES"];
 

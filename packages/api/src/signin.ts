@@ -1,0 +1,153 @@
+import type { Context } from "hono";
+import type { Attempt, Pushed } from "./attempt.ts";
+import type { AppEnv } from "./env.ts";
+import { verifyProof } from "@brianjenkins94/util/auth/dpop";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { ATTEMPT_TTL, PUSH_TTL } from "./attempt.ts";
+import { audit, origin } from "./audit.ts";
+import { toGitHub } from "./github.ts";
+import { nonce } from "./tokens.ts";
+
+/**
+ * Signing in through our own page (SIGN-IN.md, "The shape"):
+ *
+ *   POST /auth/par      the client pushes its authorization request (RFC 9126), proven with a DPoP proof and our nonce:
+ *                       an attempt is made, and the client gets an opaque request_uri for it
+ *   GET  /auth/start    the browser arrives with only client_id and request_uri: the attempt opens, once, in this
+ *                       browser (its cookie), and the browser goes on to the sign-in page (public/sign-in.html)
+ *   GET  /auth/attempt  what the page may offer this attempt: its client's methods (SIGN_IN_METHODS)
+ *   GET  /auth/github   the page's GitHub choice: on to GitHub, the attempt in GitHub's sealed state; GitHub's callback
+ *                       (github.ts) finishes the attempt in the same browser and starts the sign-in (Grant.begin)
+ *
+ * Every refusal is recorded (`sign_in_refused`, with its reason). The legacy /auth/github/start (front-channel request,
+ * straight to GitHub) stays for the editor until it moves over (SIGN-IN.md, C7).
+ */
+
+const REQUEST_URI = "urn:ietf:params:oauth:request_uri:";
+
+/** The attempt's cookie: `__Host-signin`, the attempt's id and this browser's secret. */
+const COOKIE = "signin";
+
+/** A base64url SHA-256 (43 characters): what a PKCE S256 challenge is. */
+const DIGEST = /^[\w-]{43}$/u;
+
+export const attemptOf = (context: Context<AppEnv>, id: string): DurableObjectStub<Attempt> | undefined => {
+	try {
+		return context.env.ATTEMPTS.get(context.env.ATTEMPTS.idFromString(id));
+	} catch {
+		return undefined; // not an id of ours
+	}
+};
+
+/** The attempt this browser holds, from its cookie. */
+export function heldAttempt(context: Context<AppEnv>): { "id": string; "secret": string; "stub": DurableObjectStub<Attempt> } | undefined {
+	const [id, secret] = (getCookie(context, COOKIE, "host") ?? "").split(".");
+	const stub = id === undefined || secret === undefined ? undefined : attemptOf(context, id);
+
+	return stub === undefined ? undefined : { "id": id as string, "secret": secret as string, "stub": stub };
+}
+
+export function forgetAttempt(context: Context<AppEnv>): void {
+	deleteCookie(context, COOKIE, { "path": "/", "secure": true, "prefix": "host" });
+}
+
+async function refuse(context: Context<AppEnv>, reason: string, status: 400 | 401 = 400): Promise<Response> {
+	context.get("span").info("sign-in refused", { "reason": reason });
+	await audit(context.env, "sign_in_refused", {}, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+	context.header("cache-control", "no-store");
+
+	return context.json({ "error": "invalid_request" }, status);
+}
+
+/** POST /auth/par: the client's authorization request, pushed. 201 with its request_uri. */
+export async function parEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const form = await context.req.parseBody();
+	const field = (name: string): string => (typeof form[name] === "string" ? form[name] : "");
+	const client = field("client_id");
+
+	if (!Object.hasOwn(context.env.REDIRECT_URIS, client) || field("response_type") !== "code") {
+		return refuse(context, "client_id or response_type");
+	}
+
+	if (!(context.env.REDIRECT_URIS[client] ?? []).includes(field("redirect_uri"))) {
+		return refuse(context, "redirect_uri not registered");
+	}
+
+	if (field("code_challenge_method") !== "S256" || !DIGEST.test(field("code_challenge")) || field("state") === "" || field("state").length > 512) {
+		return refuse(context, "PKCE or state");
+	}
+
+	// The key the sign-in will be bound to is proven here, with our nonce: nothing is pushed for a key nobody holds.
+	const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, { "nonce": nonce(context.env).check, "seen": () => false });
+
+	if ("error" in proof) {
+		if (proof.error === "use_dpop_nonce") {
+			context.header("dpop-nonce", await nonce(context.env).issue());
+			context.header("cache-control", "no-store");
+
+			return context.json({ "error": "use_dpop_nonce" }, 400);
+		}
+
+		return refuse(context, proof.reason);
+	}
+
+	const id = context.env.ATTEMPTS.newUniqueId();
+	const request: Pushed = { "client": client, "redirectUri": field("redirect_uri"), "state": field("state"), "codeChallenge": field("code_challenge"), "jkt": proof.jkt };
+
+	await context.env.ATTEMPTS.get(id).push(request);
+	context.header("cache-control", "no-store");
+
+	return context.json({ "request_uri": `${REQUEST_URI}${id.toString()}`, "expires_in": PUSH_TTL / 1000 }, 201);
+}
+
+/** GET /auth/start: open the pushed request's attempt in this browser, then the sign-in page. */
+export async function startEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const client = context.req.query("client_id") ?? "";
+	const requestUri = context.req.query("request_uri") ?? "";
+	const stub = requestUri.startsWith(REQUEST_URI) ? attemptOf(context, requestUri.slice(REQUEST_URI.length)) : undefined;
+
+	if (stub === undefined) {
+		return refuse(context, "request_uri");
+	}
+
+	const opened = await stub.open(client);
+
+	if ("reason" in opened) {
+		return refuse(context, opened.reason);
+	}
+
+	setCookie(context, COOKIE, `${requestUri.slice(REQUEST_URI.length)}.${opened.secret}`, { "path": "/", "secure": true, "httpOnly": true, "sameSite": "Lax", "maxAge": ATTEMPT_TTL / 1000, "prefix": "host" });
+	context.header("cache-control", "no-store");
+
+	return context.redirect("/sign-in", 302);
+}
+
+/** GET /auth/attempt: what the sign-in page may show for this browser's attempt. */
+export async function attemptEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const held = heldAttempt(context);
+	const described = held === undefined ? { "ok": false as const, "reason": "no attempt" } : await held.stub.describe(held.secret);
+
+	context.header("cache-control", "no-store");
+
+	if ("reason" in described) {
+		return context.json({ "error": "no_attempt" }, 401);
+	}
+
+	return context.json({ "client": described.client, "methods": context.env.SIGN_IN_METHODS[described.client] ?? [] });
+}
+
+/** GET /auth/github: the page's GitHub choice, for this browser's attempt, when its client offers GitHub. */
+export async function githubEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const held = heldAttempt(context);
+	const described = held === undefined ? { "ok": false as const, "reason": "no attempt" } : await held.stub.describe(held.secret);
+
+	if (held === undefined || "reason" in described) {
+		return refuse(context, "reason" in described ? described.reason : "no attempt", 401);
+	}
+
+	if (!(context.env.SIGN_IN_METHODS[described.client] ?? []).includes("github")) {
+		return refuse(context, "method not offered");
+	}
+
+	return toGitHub(context, { "attempt": held.id });
+}

@@ -20,7 +20,7 @@ const issuer = (context: Context<AppEnv>): string => new URL(context.req.url).or
 
 const signingKey = (env: Bindings): JWK => JSON.parse(env.SIGNING_JWK) as JWK;
 
-const nonce = (env: Bindings): ReturnType<typeof nonces> => nonces(env.NONCE_KEY);
+export const nonce = (env: Bindings): ReturnType<typeof nonces> => nonces(env.NONCE_KEY);
 
 /**
  * The Grant a `<grant id>.<secret>` code or refresh token belongs to — if that grant exists and is live. A token for a

@@ -5,6 +5,7 @@ import { open, seal } from "@brianjenkins94/util/auth/seal";
 import { base64url } from "jose";
 import { deviceLabel } from "./account.ts";
 import { audit, origin } from "./audit.ts";
+import { forgetAttempt, heldAttempt } from "./signin.ts";
 
 /**
  * Signing in with GitHub (README.md, "Tokens and the flow", steps 1–2). The app sends the browser to /auth/github/start
@@ -16,17 +17,19 @@ import { audit, origin } from "./audit.ts";
 
 const STATE_TTL = 600_000;
 
-/** What rides through GitHub, sealed. */
-interface Pending {
+/** The client's request, as the legacy start takes it in the front channel (an attempt holds the same, pushed). */
+interface Direct {
 	/** Which of our clients (REDIRECT_URIS' keys) the sign-in is for: its Grant remembers it. */
 	"client": string;
 	"redirectUri": string;
 	"state": string;
 	"codeChallenge": string;
 	"jkt": string;
-	"verifier": string;
-	"expires": number;
 }
+
+/** What rides through GitHub, sealed: the client's request itself (legacy), or which attempt holds it (signin.ts); and
+ *  our own PKCE verifier for GitHub. */
+type Pending = (Direct | { "attempt": string }) & { "verifier": string; "expires": number };
 
 /** GitHub's origins: the real ones, but for tests (GITHUB_ORIGIN / GITHUB_API, never set in wrangler.jsonc). */
 export const github = (env: AppEnv["Bindings"]): { "web": string; "api": string } => ({ "web": env.GITHUB_ORIGIN ?? "https://github.com", "api": env.GITHUB_API ?? "https://api.github.com" });
@@ -45,7 +48,7 @@ async function refuse(context: Context<AppEnv>, reason: string): Promise<Respons
 }
 
 /** Back to the app with an OAuth answer: `code` on success, `error` otherwise; always its own `state`, and our `iss`. */
-function answer(context: Context<AppEnv>, pending: Pending, parameters: Record<string, string>): Response {
+function answer(context: Context<AppEnv>, pending: Direct, parameters: Record<string, string>): Response {
 	const target = new URL(pending.redirectUri);
 
 	for (const [key, value] of Object.entries({ ...parameters, "state": pending.state, "iss": new URL(context.req.url).origin })) {
@@ -76,8 +79,13 @@ export async function startEndpoint(context: Context<AppEnv>): Promise<Response>
 		return refuse(context, "PKCE, dpop_jkt or state");
 	}
 
+	return toGitHub(context, { "client": client, "redirectUri": query["redirect_uri"] as string, "state": query["state"] as string, "codeChallenge": query["code_challenge"] as string, "jkt": query["dpop_jkt"] as string });
+}
+
+/** On to GitHub's authorize page: a PKCE pair of our own, and `request` (or the attempt holding it) sealed into the state. */
+export async function toGitHub(context: Context<AppEnv>, request: Direct | { "attempt": string }): Promise<Response> {
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-	const pending: Pending = { "client": client, "redirectUri": query["redirect_uri"] as string, "state": query["state"] as string, "codeChallenge": query["code_challenge"] as string, "jkt": query["dpop_jkt"] as string, "verifier": verifier, "expires": Date.now() + STATE_TTL };
+	const pending: Pending = { ...request, "verifier": verifier, "expires": Date.now() + STATE_TTL };
 	const authorize = new URL("/login/oauth/authorize", github(context.env).web);
 
 	authorize.search = new URLSearchParams({
@@ -107,12 +115,36 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 		return refuse(context, "state expired");
 	}
 
+	// Through an attempt (signin.ts): finished here, in the browser that opened it, before GitHub's code is used. Spent
+	// whatever GitHub answered.
+	let request: Direct;
+
+	if ("attempt" in pending) {
+		const held = heldAttempt(context);
+
+		if (held === undefined || held.id !== pending.attempt) {
+			return refuse(context, "another browser");
+		}
+
+		const finished = await held.stub.finish(held.secret);
+
+		forgetAttempt(context);
+
+		if ("reason" in finished) {
+			return refuse(context, finished.reason);
+		}
+
+		request = finished.request;
+	} else {
+		request = pending;
+	}
+
 	const code = context.req.query("code");
 
 	if (code === undefined) {
 		context.get("span").info("sign-in declined at GitHub", { "reason": "no code" });
 
-		return answer(context, pending, { "error": context.req.query("error") === "access_denied" ? "access_denied" : "server_error" });
+		return answer(context, request, { "error": context.req.query("error") === "access_denied" ? "access_denied" : "server_error" });
 	}
 
 	const { web, api } = github(context.env);
@@ -126,7 +158,7 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 	if (typeof exchanged.access_token !== "string" || typeof exchanged.refresh_token !== "string") {
 		context.get("span").info("sign-in failed at GitHub", { "reason": "code exchange" });
 
-		return answer(context, pending, { "error": "server_error" });
+		return answer(context, request, { "error": "server_error" });
 	}
 
 	const user = await fetch(`${api}/user`, { "headers": { "authorization": `Bearer ${exchanged.access_token}`, "accept": "application/vnd.github+json", "user-agent": "editor-api", "x-github-api-version": "2022-11-28" } })
@@ -136,22 +168,22 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 	if (typeof user.id !== "number") {
 		context.get("span").info("sign-in failed at GitHub", { "reason": "user" });
 
-		return answer(context, pending, { "error": "server_error" });
+		return answer(context, request, { "error": "server_error" });
 	}
 
 	const now = Date.now();
 	const grant = context.env.GRANTS.get(context.env.GRANTS.newUniqueId());
 	const { "code": ours } = await grant.begin({
-		"client": pending.client,
+		"client": request.client,
 		"githubId": user.id,
 		"github": { "accessToken": exchanged.access_token, "refreshToken": exchanged.refresh_token, "expiresAt": now + (exchanged.expires_in ?? 28_800) * 1000, "refreshExpiresAt": now + (exchanged.refresh_token_expires_in ?? 15_897_600) * 1000 },
-		"codeChallenge": pending.codeChallenge,
-		"jkt": pending.jkt,
+		"codeChallenge": request.codeChallenge,
+		"jkt": request.jkt,
 		"from": await origin(context),
 		"label": deviceLabel(context.req.header("user-agent"))
 	});
 
-	return answer(context, pending, { "code": ours });
+	return answer(context, request, { "code": ours });
 }
 
 /** GET /.well-known/oauth-authorization-server (RFC 8414): what a client (the shell's oauth4webapi) needs to find us. */

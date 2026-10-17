@@ -12,8 +12,10 @@ import { audit, expire, origin } from "./audit.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
 import { githubApi, githubGit } from "./proxy.ts";
+import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
 import { revokeEndpoint, session, tokenEndpoint } from "./tokens.ts";
 
+export { Attempt } from "./attempt.ts";
 export { Grant } from "./grant.ts";
 
 // The editor's API Worker (README.md): health, logging, errors (A1); the access-token key's JWKS (A2); our tokens, and
@@ -62,6 +64,7 @@ const limit = (maxSize: number): ReturnType<typeof bodyLimit> => bodyLimit({
 // OAuth forms are a few hundred bytes; a commit's blobs can be large (GitHub takes up to 100 MB a blob, the Worker 100
 // MB a request); a clone's upload-pack request is its wants and haves.
 app.use("/token", limit(4 * 1024));
+app.use("/auth/par", limit(4 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
@@ -97,6 +100,16 @@ app.get("/.well-known/oauth-authorization-server", metadataEndpoint);
 app.get("/auth/github/start", rateLimit("SIGN_IN_BY_IP", byIp), startEndpoint);
 
 app.get("/auth/github/callback", rateLimit("SIGN_IN_BY_IP", byIp), callbackEndpoint);
+
+// Signing in through our own page (src/signin.ts, SIGN-IN.md): the client pushes its request, the browser opens it, the
+// page offers the client's methods. The sign-in page itself is a static file (public/sign-in.html).
+app.post("/auth/par", rateLimit("SIGN_IN_BY_IP", byIp), parEndpoint);
+
+app.get("/auth/start", rateLimit("SIGN_IN_BY_IP", byIp), signInStart);
+
+app.get("/auth/attempt", attemptEndpoint);
+
+app.get("/auth/github", rateLimit("SIGN_IN_BY_IP", byIp), githubEndpoint);
 
 app.post("/token", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), tokenEndpoint);
 

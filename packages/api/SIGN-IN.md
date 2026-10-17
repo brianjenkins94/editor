@@ -138,8 +138,20 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   D1's tables, each Durable Object's storage (Grants, attempts), the R2 audit copies, the audit log's tail, with what
   changed since the last look highlighted. It adds no routes to the Worker, so nothing of it can be deployed. The same
   reading code gives tests `recorded(action)`: exactly what an action wrote, to assert on.
-- **C1 · PAR, the sign-in page and attempts.** `/auth/par` and `/auth/start` (generalized); the attempt Durable Object
-  and its cookie; the static sign-in page; GitHub behind a choice; methods per client.
+- **C1 · PAR, the sign-in page and attempts.** *Built 2026-10-17:*
+  - `POST /auth/par` (src/signin.ts): the same checks as the legacy start, plus a DPoP proof with our nonce; makes an
+    `Attempt` (src/attempt.ts, binding `ATTEMPTS`) and answers `201 { request_uri, expires_in: 120 }`.
+  - `GET /auth/start?client_id&request_uri`: opens the attempt once, within 2 minutes, for its own client; sets
+    `__Host-signin` (`HttpOnly; Secure; SameSite=Lax`, 15 minutes) and goes to `/sign-in`.
+  - `/sign-in` (public/: static assets beside the Worker): our own files only (CSP `script-src 'self'`,
+    `frame-ancestors 'none'`, which also blocks Cloudflare's injected beacon there); it asks `GET /auth/attempt` what
+    the attempt's client offers (`SIGN_IN_METHODS` in wrangler.jsonc: `github` for both clients for now).
+  - `GET /auth/github`: on to GitHub with the attempt's id sealed in the state; the callback finishes the attempt only
+    in the browser holding its cookie, before GitHub's code is exchanged, and clears the cookie. An attempt is spent
+    either way; it's deleted when its 15 minutes are up.
+  - Every refusal is a `sign_in_refused` row with its reason. The legacy `/auth/github/start` stays for the editor.
+  - `test/signin.test.ts`, 7 tests in workerd; turning off the secret or single-use checks fails them. The admin app
+    (B3) is the first real client.
 - **C2 · email.** The email provider and DNS records; `emails`; sign-in by emailed code or link; new accounts by email.
 - **C3 · passwords.** Set a password (signed in); sign in with one; the breach check; Argon2id; rate limits.
 - **C4 · password reset.** By email code, plus the second factor when MFA is on.

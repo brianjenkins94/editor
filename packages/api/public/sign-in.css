@@ -1,0 +1,12 @@
+/* The sign-in card (Web Awesome's login recipe, by hand: this page loads nothing but its own files). */
+:root { color-scheme: light dark; --line: color-mix(in srgb, CanvasText 18%, transparent); --brand: #0969da; }
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; }
+body { display: grid; place-items: center; min-height: 100vh; padding: 16px; font: 15px/1.5 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+.card { width: 100%; max-width: 24rem; padding: 28px; border: 1px solid var(--line); border-radius: 12px; }
+h1 { margin: 0 0 4px; font-size: 1.5rem; }
+.caption { margin: 0 0 20px; opacity: 0.75; }
+.stack { display: grid; gap: 10px; }
+.method { display: block; padding: 10px 14px; border-radius: 8px; text-align: center; text-decoration: none; font-weight: 600; background: var(--brand); color: white; }
+.method:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 50%, transparent); outline-offset: 2px; }
+.problem { margin: 16px 0 0; }
