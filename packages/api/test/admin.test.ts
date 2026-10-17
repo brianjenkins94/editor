@@ -10,6 +10,7 @@ import { keyed } from "../src/behavior.ts";
 // only, and roles from OWNERS. Sign-ins start as the GitHub callback starts them (Grant.begin), for either client.
 
 const OWNER = 9398474; // OWNERS in wrangler.jsonc's local vars
+const VIEWER = 64174526; // VIEWERS
 const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };
 const secrets = {
 	"SIGNING_JWK": JSON.stringify(signing),
@@ -402,4 +403,25 @@ test("/admin/mail: by day, codes sent, sign-ins by email and refusals, and the r
 	assert.ok(mail.refusals.some((row) => row.reason === "not sent: E_RECIPIENT_SUPPRESSED"));
 	assert.equal(mail.refusals.some((row) => row.reason.includes("request_uri")), false, "email's refusals only");
 	assert.match(mail.cloudflare.error ?? "", /local API/u, "a local API's mail isn't Cloudflare's: why its side is missing");
+});
+
+// ── The viewer role ────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("a viewer reads everything an owner can, and changes or sends nothing", async () => {
+	const holder = await browser();
+	const { access_token, grantId } = await signedIn(holder, VIEWER, "admin");
+	const { grantId: someoneElse } = await signedIn(await browser(), someone(), "editor");
+	const me = await (await holder.send("GET", "/admin/me", { "accessToken": access_token })).json() as { "roles": string[]; "permissions": string[] };
+
+	assert.deepEqual(me.roles, ["viewer"]);
+	assert.ok(me.permissions.every((permission) => permission.endsWith(":read") || permission === "audit:verify"), "reads only");
+
+	for (const path of ["/admin/users", "/admin/sessions", "/admin/audit", "/admin/unusual", "/admin/architecture", "/admin/mail", "/admin/inbox"]) {
+		assert.equal((await holder.send("GET", path, { "accessToken": access_token })).status, 200, path);
+	}
+
+	assert.equal((await holder.send("POST", `/admin/sessions/${someoneElse}/revoke`, { "accessToken": access_token, "form": { "confirm": "revoke" } })).status, 403);
+	assert.equal((await holder.send("POST", "/admin/mail/smoke", { "accessToken": access_token, "form": {} })).status, 403);
+	assert.deepEqual((await refusals(grantId)).slice(-2), ["lacks sessions:revoke", "lacks mail:test"]);
+	assert.equal((await env.DB.prepare("SELECT revoked_at FROM grants WHERE id = ?").bind(someoneElse).first<{ "revoked_at": number | null }>())?.revoked_at, null, "nothing ended");
 });

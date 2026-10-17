@@ -11,6 +11,8 @@ export interface Bindings {
 	"REDIRECT_URIS": Record<string, string[]>;
 	/** The platform owners (src/rbac.ts): GitHub user ids, not secret. Only a commit makes one. */
 	"OWNERS": number[];
+	/** Those who may look but not change anything (src/rbac.ts, `viewer`): GitHub user ids, as OWNERS. */
+	"VIEWERS"?: number[];
 	/** What each client's sign-in page offers (SIGN-IN.md): `github` now; `email` and `password` as they're built. */
 	"SIGN_IN_METHODS": Record<string, string[]>;
 	/** Only in tests: where GitHub's web and API are, instead of github.com and api.github.com. */

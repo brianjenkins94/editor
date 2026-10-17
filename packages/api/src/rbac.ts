@@ -14,19 +14,31 @@ export const PERMISSIONS = ["users:read", "sessions:read", "sessions:revoke", "a
 
 export type Permission = typeof PERMISSIONS[number];
 
-/** The platform owner: every platform permission. (Organization roles come later, as rows.) */
-export const ROLES = { "owner": PERMISSIONS } satisfies Record<string, readonly Permission[]>;
+/** What only reads: every `…:read`, and checking the audit log against its copies. A permission added later that only
+ *  reads (named `…:read`) is a viewer's too. */
+const READS = PERMISSIONS.filter((permission) => permission.endsWith(":read") || permission === "audit:verify");
+
+/**
+ * The platform owner: every platform permission. A viewer: everything that only reads, nothing that changes anything
+ * or sends anything (`sessions:revoke`, `mail:test`). (Organization roles come later, as rows.)
+ */
+export const ROLES = { "owner": PERMISSIONS, "viewer": READS } satisfies Record<string, readonly Permission[]>;
 
 export type Role = keyof typeof ROLES;
 
 /**
- * A user's roles. `owner` is config, not data: the user's GitHub id is in OWNERS (wrangler.jsonc). It can't be granted or
- * revoked through the API, so neither a compromised admin session nor a bad database write can make another owner.
+ * A user's roles. `owner` and `viewer` are config, not data: the user's GitHub id is in OWNERS or VIEWERS (wrangler.jsonc).
+ * Neither can be granted or revoked through the API, so neither a compromised admin session nor a bad database write can
+ * make another. A user without a GitHub account (email only) holds neither: a role needs GitHub's sign-in, and its 2FA.
  */
 export async function rolesOf(env: Bindings, userId: string): Promise<Role[]> {
-	const user = await env.DB.prepare("SELECT github_id FROM users WHERE id = ?").bind(userId).first<{ "github_id": number }>();
+	const user = await env.DB.prepare("SELECT github_id FROM users WHERE id = ?").bind(userId).first<{ "github_id": number | null }>();
 
-	return user !== null && env.OWNERS.includes(user.github_id) ? ["owner"] : [];
+	if (user === null || user.github_id === null) {
+		return [];
+	}
+
+	return [...env.OWNERS.includes(user.github_id) ? ["owner" as const] : [], ...(env.VIEWERS ?? []).includes(user.github_id) ? ["viewer" as const] : []];
 }
 
 /** What a set of roles allows, in PERMISSIONS' order. */
