@@ -2,7 +2,11 @@ import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { open, seal } from "@brianjenkins94/util/auth/seal";
 import { base64url } from "jose";
+import { checkActionCode, issueActionCode } from "./action-codes.ts";
 import { audit, origin } from "./audit.ts";
+import { codeHash, newCode, sendCode, typed } from "./email.ts";
+import { hasEmailMfa } from "./mfa-state.ts";
+import { hasMfa } from "./mfa-state.ts";
 import { heldAttempt, signInAs } from "./signin.ts";
 import { base32, isRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, typedRecovery, unbase32, verifyTotp } from "./totp.ts";
 
@@ -13,6 +17,8 @@ import { base32, isRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, typedR
  *   POST /admin/account/mfa/confirm    `code`, from the app: it's on, and ten recovery codes, shown this once
  *   POST /admin/account/mfa/off        `code`, the app's or a recovery code: it's off
  *   POST /admin/account/mfa/recovery   `code`, the app's: ten new recovery codes, the old ones gone
+ *   POST /admin/account/mfa/email/code `turn` ("on" or "off"): a code to your email, to turn two-factor by email on or off
+ *   POST /admin/account/mfa/email      `turn`, `code`: two-factor by email on, or off (C6)
  *
  * Each needs a recent sign-in (within RECENT): the action's own check, and the one every account can pass, GitHub's
  * included (SIGN-IN.md, "Departures"). Turning it off and new recovery codes need the second factor itself too.
@@ -37,11 +43,6 @@ async function recoveryHash(env: Bindings, user: string, code: string): Promise<
 	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.CODE_KEY), { "name": "HMAC", "hash": "SHA-256" }, false, ["sign"]);
 
 	return base64url.encode(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${user}:recovery:${typedRecovery(code)}`))));
-}
-
-/** Whether `user` has MFA on. */
-export async function hasMfa(env: Bindings, user: string): Promise<boolean> {
-	return (await env.DB.prepare("SELECT 1 FROM totp WHERE user_id = ? AND enrolled_at IS NOT NULL").bind(user).first()) !== null;
 }
 
 /**
@@ -111,13 +112,6 @@ async function replaceRecoveryCodes(env: Bindings, user: string): Promise<string
 	]);
 
 	return codes;
-}
-
-/** How the account page shows it: on since when, and recovery codes left; or off. */
-export async function mfaState(env: Bindings, user: string): Promise<{ "enrolledAt": number; "recoveryLeft": number } | null> {
-	const row = await env.DB.prepare("SELECT enrolled_at, (SELECT COUNT(*) FROM recovery_codes WHERE user_id = ? AND used_at IS NULL) AS left FROM totp WHERE user_id = ? AND enrolled_at IS NOT NULL").bind(user, user).first<{ "enrolled_at": number; "left": number }>();
-
-	return row === null ? null : { "enrolledAt": row.enrolled_at, "recoveryLeft": row.left };
 }
 
 /** POST /admin/account/mfa/start: a new secret, pending until the app's code confirms it. */
@@ -247,11 +241,111 @@ export async function secondStepEndpoint(context: Context<AppEnv>): Promise<Resp
 		return signInRefusal(401, "no_attempt", "reason" in first ? first.reason : "no attempt");
 	}
 
-	const checked = await secondFactor(context.env, first.user, String((await context.req.parseBody())["code"] ?? ""));
+	const code = String((await context.req.parseBody())["code"] ?? "");
+
+	// Two-factor by email, without an app: the code just emailed to the attempt (its email step: tries, once).
+	if (!await hasMfa(context.env, first.user) && await hasEmailMfa(context.env, first.user)) {
+		const confirmed = await held.stub.confirm(held.secret, await codeHash(context.env, held.id, typed(code)));
+
+		return "reason" in confirmed ? signInRefusal(confirmed.reason === "too many tries" ? 429 : 400, "code", confirmed.reason) : signInAs(context, held, first.user, `${first.method}+email`);
+	}
+
+	const checked = await secondFactor(context.env, first.user, code);
 
 	if ("reason" in checked) {
 		return signInRefusal(checked.status, "code", checked.reason);
 	}
 
 	return signInAs(context, held, first.user, `${first.method}+${checked.kind}`);
+}
+
+// ── Two-factor by email (C6) ───────────────────────────────────────────────────────────────────────────────────────
+// It stops a stolen password, not a stolen inbox: the inbox can reset the password too. The app says so, and offers an
+// authenticator app first. Asked for after a password only; with an app on too, the app is asked for instead.
+
+/** After a password, for an account with two-factor by email: a code to its address, kept in the attempt's email step.
+ *  The refusal, if it couldn't be sent. */
+export async function emailSecondFactor(context: Context<AppEnv>, held: NonNullable<ReturnType<typeof heldAttempt>>, user: string): Promise<Response | undefined> {
+	const email = await context.env.DB.prepare("SELECT address FROM emails WHERE user_id = ?").bind(user).first<{ "address": string }>();
+
+	if (email === null) {
+		return undefined;
+	}
+
+	const code = newCode();
+
+	await held.stub.emailed(held.secret, email.address, await codeHash(context.env, held.id, code));
+
+	const sent = await sendCode(context, email.address, code, { "kind": "action", "action": "finish signing in" });
+
+	if ("reason" in sent) {
+		await audit(context.env, "sign_in_refused", { "userId": user }, await origin(context), { "reason": `mfa: ${sent.reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+		context.header("cache-control", "no-store");
+
+		return context.json({ "error": sent.error, "reason": sent.reason }, sent.status);
+	}
+
+	return undefined;
+}
+
+/** Which way, and what its code is bound to. */
+const turning = (form: Record<string, unknown>, user: string): { "on": boolean; "action": string; "bound": string } => {
+	const on = form["turn"] !== "off";
+
+	return { "on": on, "action": `email-mfa-${on ? "on" : "off"}`, "bound": `${user}:email-mfa-${on ? "on" : "off"}` };
+};
+
+/** POST /admin/account/mfa/email/code: `turn` ("on" or "off"): a code to your email, for turning two-factor by email
+ *  on or off. A recent sign-in, and an email on the account. */
+export async function emailMfaCodeEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const refused = await recent(context);
+
+	if (refused !== undefined) {
+		return refused;
+	}
+
+	const user = context.get("user");
+	const turn = turning(await context.req.parseBody(), user);
+	const email = await context.env.DB.prepare("SELECT address FROM emails WHERE user_id = ?").bind(user).first<{ "address": string }>();
+
+	if (email === null) {
+		return refuse(context, 400, "no_email", "no email on this account: two-factor by email needs one");
+	}
+
+	const notSent = await issueActionCode(context, user, turn.action, turn.bound, email.address, turn.on ? "turn on two-factor by email" : "turn off two-factor by email", "auth_refused");
+
+	if (notSent !== undefined) {
+		return notSent;
+	}
+
+	context.header("cache-control", "no-store");
+
+	return context.json({ "sent": true, "address": email.address });
+}
+
+/** POST /admin/account/mfa/email: `turn` and `code`: the code checked, then two-factor by email on or off. */
+export async function emailMfaEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const refused = await recent(context);
+
+	if (refused !== undefined) {
+		return refused;
+	}
+
+	const user = context.get("user");
+	const form = await context.req.parseBody();
+	const turn = turning(form, user);
+	const wrong = await checkActionCode(context, user, turn.action, turn.bound, String(form["code"] ?? ""), "auth_refused");
+
+	if (wrong !== undefined) {
+		return wrong;
+	}
+
+	await context.env.DB.batch([
+		turn.on ? context.env.DB.prepare("INSERT INTO email_mfa (user_id, enrolled_at) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING").bind(user, Date.now()) : context.env.DB.prepare("DELETE FROM email_mfa WHERE user_id = ?").bind(user),
+		context.env.DB.prepare("DELETE FROM action_codes WHERE user_id = ? AND action = ?").bind(user, turn.action)
+	]);
+	await audit(context.env, turn.on ? "mfa_enrolled" : "mfa_removed", { "userId": user, "grantId": context.get("grant") }, await origin(context), { "reason": "email" });
+	context.header("cache-control", "no-store");
+
+	return context.json({ "on": turn.on });
 }

@@ -1,6 +1,6 @@
 # Sign-in methods
 
-Status: **design, 2026-10-17; C0 to C5 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
+Status: **design, 2026-10-17; C0 to C6 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
 **Workers Paid** (for Argon2id's CPU and email sending), add a local debug harness first (C0), and push authorization
 requests (PAR) in C1. Still open: "Open questions".
 
@@ -250,7 +250,21 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     the recovery codes shown, then an email sign-in with the app's code ("email+totp").
   - **The owner's policy** (*decided 2026-10-17*): not now. MFA stays optional for owners; GitHub's own 2FA covers
     their GitHub sign-ins.
-- **C6 · email as a second factor.**
+- **C6 · email as a second factor.** *Built 2026-10-17* (src/mfa.ts, src/mfa-state.ts, src/action-codes.ts;
+  migrations/0011):
+  - **Asked for after a password only:** an emailed sign-in code already proves the inbox, so asking it again adds
+    nothing. After a password, the account's email gets a code ("to finish signing in"), kept in the attempt's email
+    step (its tries, once, this browser), and `POST /auth/second` takes it; the `login` row says "password+email".
+  - **The app wins:** with an authenticator app on too, the app is what's asked for. A password reset with only email
+    two-factor on asks nothing more (its code already went to the inbox).
+  - **On and off** from Your account, each with an emailed code (`POST /admin/account/mfa/email/code`, then
+    `POST /admin/account/mfa/email`, `turn` "on" or "off") and a recent sign-in. `mfa_enrolled`/`mfa_removed` "email".
+  - **The caveat, shown where it's turned on:** it stops someone with only your password, not someone with your inbox
+    (which can reset the password); an authenticator app, offered first, protects against both.
+  - The action codes (setting a password, resetting it, email two-factor) now share src/action-codes.ts; whether a user
+    has two-factor, and how, is src/mfa-state.ts (read by the sign-ins; changed only in src/mfa.ts).
+  - 3 tests in test/password.test.ts (on, then a password sign-in asking for the emailed code; not asked after an
+    emailed sign-in code, and off; the app asked for when both are on). The page looked at in the harness.
 - **C7 · the editor.** Its client gets the methods, after the admin trial.
 - **Later:** passkeys (Pilcrow's recommendation for high-security accounts, and a way to drop passwords).
 

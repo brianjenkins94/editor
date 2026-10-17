@@ -79,12 +79,12 @@ export async function signInAs(context: Context<AppEnv>, held: NonNullable<Retur
 }
 
 /** After a first factor, for an account with MFA: the attempt remembers whom it found and how, and the page asks for the
- *  second (`second_factor`). */
-export async function askSecondFactor(context: Context<AppEnv>, held: NonNullable<ReturnType<typeof heldAttempt>>, user: string, method: string): Promise<Response> {
+ *  second (`second_factor`: "totp", an authenticator app's code or a recovery code; "email", a code just emailed). */
+export async function askSecondFactor(context: Context<AppEnv>, held: NonNullable<ReturnType<typeof heldAttempt>>, user: string, method: string, kind: "totp" | "email"): Promise<Response> {
 	await held.stub.passed(held.secret, user, method);
 	context.header("cache-control", "no-store");
 
-	return context.json({ "second_factor": true });
+	return context.json({ "second_factor": kind });
 }
 
 async function refuse(context: Context<AppEnv>, reason: string, status: 400 | 401 = 400): Promise<Response> {

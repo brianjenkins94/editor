@@ -395,7 +395,7 @@ test("signing in with two-factor on: the emailed code, then the app's code (each
 	const { app: codeNow } = await withMfa(address);
 	const { browser, answer } = await firstFactorByEmail(address);
 
-	assert.deepEqual(answer, { "second_factor": true }, "no session yet");
+	assert.deepEqual(answer, { "second_factor": "totp" }, "no session yet");
 	assert.equal((await form("/auth/second", browser.cookie, { "code": await codeNow() })).status, 400, "the step the setup used, used once already");
 
 	const second = await form("/auth/second", browser.cookie, { "code": await codeNow(1) });
@@ -425,7 +425,7 @@ test("a recovery code signs in once; the second step needs a first; a password s
 
 	const byPassword = await app();
 
-	assert.deepEqual(await (await form("/auth/password", byPassword.cookie, { "address": address, "password": "two factors are better 1" })).json(), { "second_factor": true });
+	assert.deepEqual(await (await form("/auth/password", byPassword.cookie, { "address": address, "password": "two factors are better 1" })).json(), { "second_factor": "totp" });
 });
 
 test("with two-factor on, a reset needs it too; turning it off needs it, and a recent sign-in", async () => {
@@ -456,4 +456,63 @@ test("turning two-factor off, with a code from the app: sign-ins don't ask for i
 	assert.equal((await signedIn.call("POST", "/admin/account/mfa/off", { "code": await codeNow(1) })).status, 200);
 	assert.ok(await env.DB.prepare("SELECT 1 FROM audit WHERE event = 'mfa_removed'").first());
 	assert.ok("location" in (await firstFactorByEmail(address)).answer, "straight in");
+});
+
+// ── Two-factor by email (C6) ───────────────────────────────────────────────────────────────────────────────────────
+
+/** Turn two-factor by email `turn` ("on", "off") on the signed-in account: a code to its email, then the code. */
+async function emailMfa(signedIn: Awaited<ReturnType<typeof app>>, address: string, turn: "on" | "off"): Promise<Answer> {
+	await aMinuteLater();
+	assert.equal((await signedIn.call("POST", "/admin/account/mfa/email/code", { "turn": turn })).status, 200);
+
+	return signedIn.call("POST", "/admin/account/mfa/email", { "turn": turn, "code": codeFor(address) });
+}
+
+test("two-factor by email: on with an emailed code; then a password sign-in asks for a code by email, and the sign-in says both", async () => {
+	const address = someone();
+	const signedIn = await signedInByEmail(address);
+
+	assert.equal((await emailMfa(signedIn, address, "on")).status, 200);
+	assert.match(outbox.at(-1)?.subject ?? "", /^Your code to turn on two-factor by email: /u);
+	assert.equal(typeof (await (await signedIn.call("GET", "/admin/account")).json() as { "emailMfa": { "enrolledAt": number } }).emailMfa.enrolledAt, "number");
+
+	await aMinuteLater();
+	await setPassword(signedIn, address, "inbox and a password 5");
+
+	const browser = await app();
+
+	await aMinuteLater();
+	assert.deepEqual(await (await form("/auth/password", browser.cookie, { "address": address, "password": "inbox and a password 5" })).json(), { "second_factor": "email" });
+	assert.match(outbox.at(-1)?.subject ?? "", /^Your code to finish signing in: /u);
+	assert.equal((await form("/auth/second", browser.cookie, { "code": "AAAA-AAAA" })).status, 400);
+
+	const second = await form("/auth/second", browser.cookie, { "code": codeFor(address) });
+
+	assert.equal(second.status, 200);
+	assert.ok("location" in (await second.json() as Record<string, unknown>));
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'login' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>())?.reason, "password+email");
+});
+
+test("two-factor by email isn't asked after an emailed sign-in code (the inbox is proven already); off with an emailed code", async () => {
+	const address = someone();
+	const signedIn = await signedInByEmail(address);
+
+	await emailMfa(signedIn, address, "on");
+	assert.ok("location" in (await firstFactorByEmail(address)).answer, "straight in");
+	assert.equal((await emailMfa(signedIn, address, "off")).status, 200);
+	assert.equal((await (await signedIn.call("GET", "/admin/account")).json() as { "emailMfa": unknown }).emailMfa, null);
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'mfa_removed' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>())?.reason, "email");
+});
+
+test("with both an authenticator app and email on, the app is what's asked for", async () => {
+	const address = someone();
+	const { signedIn } = await withMfa(address);
+
+	await emailMfa(signedIn, address, "on");
+	await aMinuteLater();
+	await setPassword(signedIn, address, "both kinds of second 6");
+
+	const browser = await app();
+
+	assert.deepEqual(await (await form("/auth/password", browser.cookie, { "address": address, "password": "both kinds of second 6" })).json(), { "second_factor": "totp" });
 });

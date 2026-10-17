@@ -10,7 +10,7 @@ import ACTION_TEXT from "./action-code.txt";
 import CODE_HTML from "./email-code.html";
 import CODE_TEXT from "./email-code.txt";
 import { canSend, send } from "./mail.ts";
-import { hasMfa } from "./mfa.ts";
+import { hasMfa } from "./mfa-state.ts";
 import { askSecondFactor, heldAttempt, signInAs } from "./signin.ts";
 
 /**
@@ -212,5 +212,5 @@ export async function verifyEndpoint(context: Context<AppEnv>): Promise<Response
 
 	const user = await userOf(context.env, confirmed.address, Date.now());
 
-	return await hasMfa(context.env, user) ? askSecondFactor(context, held, user, "email") : signInAs(context, held, user, "email");
+	return await hasMfa(context.env, user) ? askSecondFactor(context, held, user, "email", "totp") : signInAs(context, held, user, "email");
 }

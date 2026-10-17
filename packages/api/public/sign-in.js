@@ -57,12 +57,13 @@ function explain(body) {
 	return reasons[body.reason] ?? (body.error === "no_attempt" ? "This sign-in has expired or was opened somewhere else. Go back to the app and sign in again." : "Something went wrong. Try again.");
 }
 
-/** The second step, for an account with two-factor on: a code from the authenticator app, or a recovery code. */
-function secondForm() {
-	const code = element("input", { "name": "code", "type": "text", "required": true, "autocomplete": "one-time-code", "spellcheck": false, "placeholder": "123456" });
+/** The second step, for an account with two-factor on: a code from the authenticator app or a recovery code ("totp"),
+ *  or the code just emailed ("email", after a password). */
+function secondForm(kind) {
+	const code = element("input", { "name": "code", "type": "text", "required": true, "autocomplete": "one-time-code", "spellcheck": false, "placeholder": kind === "email" ? "ABCD-2345" : "123456" });
 	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Sign in" });
 	const form = element("form", { "className": "stack" },
-		element("p", { "className": "note", "textContent": "This account has two-factor on. Type the code from your authenticator app, or one of your recovery codes." }),
+		element("p", { "className": "note", "textContent": kind === "email" ? "This account has two-factor by email on. We sent a code to your email: type it to finish signing in." : "This account has two-factor on. Type the code from your authenticator app, or one of your recovery codes." }),
 		element("label", { "textContent": "Code" }, code),
 		submit);
 
@@ -88,9 +89,9 @@ function secondForm() {
 
 /** Where a first factor's answer leads: on to the app, or to the second step. */
 function onward(body) {
-	if (body.second_factor === true) {
+	if (body.second_factor !== undefined) {
 		say("");
-		methods.replaceChildren(secondForm());
+		methods.replaceChildren(secondForm(body.second_factor));
 		methods.querySelector("input").focus();
 
 		return;

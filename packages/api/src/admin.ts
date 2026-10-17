@@ -5,7 +5,7 @@ import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
 import { inboxEndpoint } from "./inbox.ts";
 import { mailEndpoint } from "./mail-report.ts";
-import { mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint } from "./mfa.ts";
+import { emailMfaCodeEndpoint, emailMfaEndpoint, mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint } from "./mfa.ts";
 import { accountEndpoint, passwordCodeEndpoint, setPasswordEndpoint } from "./password.ts";
 import { smokeTest } from "./smoke.ts";
 import { repositoryTag } from "./behavior.ts";
@@ -143,6 +143,11 @@ admin.post("/account/mfa/confirm", mfaConfirmEndpoint);
 admin.post("/account/mfa/off", mfaOffEndpoint);
 
 admin.post("/account/mfa/recovery", mfaRecoveryEndpoint);
+
+// Two-factor by email (C6): a code to your email, then on or off.
+admin.post("/account/mfa/email/code", emailMfaCodeEndpoint);
+
+admin.post("/account/mfa/email", emailMfaEndpoint);
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);

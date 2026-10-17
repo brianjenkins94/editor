@@ -2,15 +2,16 @@ import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { CODE_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
-import { ADDRESS, codeHash, isCode, newCode, sendCode, typed } from "./email.ts";
+import { ADDRESS } from "./email.ts";
 import { hashPassword, passwordProblem, verifyPassword } from "./password-hash.ts";
 import { configureWasm } from "@hallaxius/argon2w";
 import argon2Wasm from "@hallaxius/argon2w/wasm";
 
 // Argon2's WebAssembly, as a module Wrangler compiles at deploy: the runtime won't compile any at runtime.
 configureWasm(argon2Wasm);
-import { canSend } from "./mail.ts";
-import { hasMfa, mfaState, secondFactor } from "./mfa.ts";
+import { emailMfaState, hasEmailMfa, hasMfa, mfaState } from "./mfa-state.ts";
+import { emailSecondFactor, secondFactor } from "./mfa.ts";
+import { checkActionCode, issueActionCode } from "./action-codes.ts";
 import { askSecondFactor, forgetAttempt, heldAttempt, signInAs } from "./signin.ts";
 
 /**
@@ -142,7 +143,18 @@ export async function passwordSignInEndpoint(context: Context<AppEnv>): Promise<
 		return refuse(context, 400, "wrong_password", "wrong password");
 	}
 
-	return await hasMfa(context.env, account.user_id) ? askSecondFactor(context, held, account.user_id, "password") : signInAs(context, held, account.user_id, "password");
+	if (await hasMfa(context.env, account.user_id)) {
+		return askSecondFactor(context, held, account.user_id, "password", "totp");
+	}
+
+	// Two-factor by email (C6): after a password, a code to the account's email, then the second step.
+	if (await hasEmailMfa(context.env, account.user_id)) {
+		const refused = await emailSecondFactor(context, held, account.user_id);
+
+		return refused ?? askSecondFactor(context, held, account.user_id, "password", "email");
+	}
+
+	return signInAs(context, held, account.user_id, "password");
 }
 
 // ── Your account ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -163,28 +175,9 @@ export async function accountEndpoint(context: Context<AppEnv>): Promise<Respons
 		"githubId": (row?.results[0] as { "github_id": number | null } | undefined)?.github_id ?? null,
 		"email": address === undefined ? null : { "address": address.address, "verifiedAt": address.verified_at },
 		"password": set === undefined ? null : { "setAt": set.set_at },
-		"mfa": await mfaState(context.env, user)
+		"mfa": await mfaState(context.env, user),
+		"emailMfa": await emailMfaState(context.env, user)
 	});
-}
-
-/**
- * A code for one of `user`'s actions, emailed to `address`: its HMAC kept in `action_codes`, bound to `bound` (the user
- * and the action; for a reset, the browser's attempt too), for 10 minutes. A new code replaces the last, not the tries
- * left. The refusal, if it wasn't sent.
- */
-async function issueActionCode(context: Context<AppEnv>, user: string, action: string, bound: string, address: string, words: string, event: "sign_in_refused" | "auth_refused"): Promise<Response | undefined> {
-	if (!canSend(context.env) || context.env.CODE_KEY === undefined) {
-		return refuse(context, 503, "unavailable", "email isn't set up here", event);
-	}
-
-	const code = newCode();
-	const now = Date.now();
-
-	await context.env.DB.prepare("INSERT INTO action_codes (user_id, action, code_hash, expires, tries, tries_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, action) DO UPDATE SET code_hash = excluded.code_hash, expires = excluded.expires").bind(user, action, await codeHash(context.env, bound, code), now + CODE_TTL, TRIES, now).run();
-
-	const sent = await sendCode(context, address, code, { "kind": "action", "action": words });
-
-	return "reason" in sent ? refuse(context, sent.status, sent.error, sent.reason, event) : undefined;
 }
 
 /**
@@ -193,30 +186,10 @@ async function issueActionCode(context: Context<AppEnv>, user: string, action: s
  * password can be replaced without another email.
  */
 async function checkCodeAndPassword(context: Context<AppEnv>, user: string, action: string, bound: string, code: string, password: string, event: "sign_in_refused" | "auth_refused"): Promise<Response | undefined> {
-	const now = Date.now();
-	const kept = await context.env.DB.prepare("SELECT code_hash, expires, tries, tries_at FROM action_codes WHERE user_id = ? AND action = ?").bind(user, action).first<{ "code_hash": string; "expires": number; "tries": number; "tries_at": number }>();
+	const wrong = await checkActionCode(context, user, action, bound, code, event);
 
-	if (kept === null) {
-		return refuse(context, 400, "no_code", "ask for a code first", event);
-	}
-
-	const tries = refilled(kept.tries, kept.tries_at, now);
-
-	if (tries < 1) {
-		return refuse(context, 429, "too_many_tries", "too many tries", event);
-	}
-
-	await context.env.DB.prepare("UPDATE action_codes SET tries = ?, tries_at = ? WHERE user_id = ? AND action = ?").bind(tries - 1, now, user, action).run();
-
-	const given = new TextEncoder().encode(isCode(typed(code)) ? await codeHash(context.env, bound, typed(code)) : "");
-	const expected = new TextEncoder().encode(kept.code_hash);
-
-	if (given.byteLength !== expected.byteLength || !crypto.subtle.timingSafeEqual(given, expected)) {
-		return refuse(context, 400, "code", "code wrong", event);
-	}
-
-	if (kept.expires < now) {
-		return refuse(context, 400, "code", "code expired", event);
+	if (wrong !== undefined) {
+		return wrong;
 	}
 
 	const problem = passwordProblem(password);

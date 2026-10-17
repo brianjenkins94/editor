@@ -8,7 +8,7 @@ import { renderSVG } from "uqr";
 import { loginOf } from "./logins";
 import { get, submit } from "./session";
 
-interface Account { "user": string; "githubId": number | null; "email": { "address": string; "verifiedAt": number | null } | null; "password": { "setAt": number } | null; "mfa": { "enrolledAt": number; "recoveryLeft": number } | null }
+interface Account { "user": string; "githubId": number | null; "email": { "address": string; "verifiedAt": number | null } | null; "password": { "setAt": number } | null; "mfa": { "enrolledAt": number; "recoveryLeft": number } | null; "emailMfa": { "enrolledAt": number } | null }
 
 /** What a refusal's reason means, in words (packages/api/src/password.ts and email.ts say it plainly already; these few
  *  read better for a person). */
@@ -210,6 +210,74 @@ function TwoFactor({ account, onChanged }: { "account": Account; "onChanged": ()
 	);
 }
 
+/** Two-factor by email (C6): a code by email after a password. Offered after the app, with what it doesn't protect
+ *  against said plainly. Turning it on or off takes an emailed code. */
+function EmailTwoFactor({ account, onChanged }: { "account": Account; "onChanged": () => void }) {
+	const [sent, setSent] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | undefined>();
+	const turn = account.emailMfa === null ? "on" : "off";
+
+	if (account.email === null) {
+		return null;
+	}
+
+	return (
+		<div class="wa-stack">
+			<h3 class="wa-heading-m">Or: a code by email</h3>
+			<wa-callout variant="neutral">
+				A code by email after your password stops someone who has only your password. It doesn't stop someone who has your inbox: your inbox can reset your password too. An authenticator app, above, protects against both.
+			</wa-callout>
+			<p>{account.emailMfa === null ? "Off." : `On since ${new Date(account.emailMfa.enrolledAt).toLocaleDateString()}: after a password, we email you a code.`}{account.mfa !== null && account.emailMfa !== null ? " (With the authenticator app on, it's the app we ask for.)" : ""}</p>
+			{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
+			{sent ? (
+				<form
+					class="wa-cluster wa-gap-s code-form"
+					onSubmit={(event) => {
+						event.preventDefault();
+						setBusy(true);
+						setProblem(undefined);
+						void postWithReason<{ "on": boolean }>("/account/mfa/email", { "turn": turn, "code": (event.currentTarget.elements.namedItem("code") as HTMLInputElement).value }).then((answer) => {
+							setBusy(false);
+
+							if ("reason" in answer) {
+								setProblem(answer.reason);
+							} else {
+								setSent(false);
+								onChanged();
+							}
+						});
+					}}
+				>
+					<wa-input name="code" label={`The code we sent to ${account.email.address}`} autocomplete="one-time-code" required />
+					<wa-button type="submit" loading={busy}>{turn === "on" ? "Turn on" : "Turn off"}</wa-button>
+				</form>
+			) : (
+				<div>
+					<wa-button
+						loading={busy}
+						onClick={() => {
+							setBusy(true);
+							setProblem(undefined);
+							void postWithReason<{ "sent": boolean }>("/account/mfa/email/code", { "turn": turn }).then((answer) => {
+								setBusy(false);
+
+								if ("reason" in answer) {
+									setProblem(answer.reason);
+								} else {
+									setSent(true);
+								}
+							});
+						}}
+					>
+						{turn === "on" ? "Turn on: email me a code" : "Turn off: email me a code"}
+					</wa-button>
+				</div>
+			)}
+		</div>
+	);
+}
+
 export function AccountPage() {
 	const [account, setAccount] = useState<Account | undefined>();
 	const [login, setLogin] = useState<string | undefined>();
@@ -240,12 +308,18 @@ export function AccountPage() {
 						{row("GitHub", account.githubId === null ? "Not connected" : login ?? `GitHub user ${account.githubId}`)}
 						{row("Email", account.email?.address ?? "None")}
 						{row("Password", account.password === null ? "Not set" : `Set ${new Date(account.password.setAt).toLocaleDateString()}`)}
-						{row("Two-factor", account.mfa === null ? "Off" : `On: an authenticator app, ${account.mfa.recoveryLeft} recovery codes left`)}
+						{row("Two-factor", [account.mfa === null ? undefined : `an authenticator app, ${account.mfa.recoveryLeft} recovery codes left`, account.emailMfa === null ? undefined : "a code by email after a password"].filter((part) => part !== undefined).join("; ") || "Off")}
 					</tbody>
 				</table>
 			</div>
 			<h2 class="wa-heading-l">Two-factor</h2>
 			<TwoFactor
+				account={account}
+				onChanged={() => {
+					setReads(reads + 1);
+				}}
+			/>
+			<EmailTwoFactor
 				account={account}
 				onChanged={() => {
 					setReads(reads + 1);
