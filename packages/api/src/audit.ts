@@ -32,7 +32,7 @@ export type AuditEvent =
 	| "probe" | "client_unusual" | "client_changed"
 	| "email_code_sent"
 	| "smoke_test_passed" | "smoke_test_failed"
-	| "password_set";
+	| "password_set" | "password_reset";
 
 /** The retention (audit-copies.ts: ROUTINE_DAYS for the everyday record, SUSPICIOUS_DAYS for the rest), applied daily by
  *  the Worker's cron trigger. Says how many rows went. The copies expire on their own (the bucket's lifecycle rules). */

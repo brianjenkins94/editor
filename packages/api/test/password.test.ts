@@ -269,3 +269,69 @@ test("an email account without a password is told to use a code; setting one nee
 
 	assert.deepEqual([response.status, (await response.json() as { "reason": string }).reason], [400, "that account has no password: sign in with a code"]);
 });
+
+// ── Resetting it (C4) ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A reset in a fresh browser: the code asked for, then `fields` with it. */
+async function reset(address: string, password: string, end: boolean): Promise<{ "browser": Awaited<ReturnType<typeof app>>; "response": Answer }> {
+	const browser = await app();
+
+	assert.equal((await form("/auth/reset", browser.cookie, { "address": address })).status, 200);
+	await aMinuteLater();
+
+	return { "browser": browser, "response": await form("/auth/reset/password", browser.cookie, { "address": address, "code": codeFor(address), "password": password, "end": end ? "true" : "" }) };
+}
+
+test("a forgotten password is reset from the sign-in page: a code to the email, a new password, every sign-in ended if asked; then signing in again", async () => {
+	const address = someone();
+	const signedIn = await signedInByEmail(address);
+
+	await setPassword(signedIn, address, "first passphrase of many");
+
+	const { browser, response } = await reset(address, "second passphrase of many", true);
+
+	assert.match(outbox.at(-1)?.subject ?? "", /^Your code to reset your password: /u);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { "reset": true, "ended": 1 });
+	assert.equal((await signedIn.call("GET", "/admin/account")).status, 401, "the sign-in that was open is over");
+	assert.equal((await form("/auth/password", browser.cookie, { "address": address, "password": "second passphrase of many" })).status, 401, "the reset's attempt is spent: no session from it");
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'password_reset' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>())?.reason, "every sign-in ended (1)");
+
+	const again = await app();
+
+	assert.equal((await form("/auth/password", again.cookie, { "address": address, "password": "first passphrase of many" })).status, 400, "the old password is gone");
+	assert.equal((await form("/auth/password", again.cookie, { "address": address, "password": "second passphrase of many" })).status, 200);
+});
+
+test("a reset keeps other sign-ins when not asked to end them; a reset code works only in the browser that asked for it", async () => {
+	const address = someone();
+	const signedIn = await signedInByEmail(address);
+
+	await setPassword(signedIn, address, "orchard gate at noon 3");
+
+	const asker = await app();
+	const other = await app();
+
+	await form("/auth/reset", asker.cookie, { "address": address });
+	await aMinuteLater();
+
+	assert.equal((await form("/auth/reset/password", other.cookie, { "address": address, "code": codeFor(address), "password": "orchard gate at dusk 4" })).status, 400, "another browser: the code is bound to the one that asked");
+
+	const kept = await form("/auth/reset/password", asker.cookie, { "address": address, "code": codeFor(address), "password": "orchard gate at dusk 4" });
+
+	assert.deepEqual(await kept.json(), { "reset": true, "ended": 0 });
+	assert.equal((await signedIn.call("GET", "/admin/account")).status, 200, "kept");
+	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'password_reset' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>())?.reason, "other sign-ins kept");
+});
+
+test("there's nothing to reset for an account without a password, or no account", async () => {
+	const address = someone();
+
+	await signedInByEmail(address);
+
+	const browser = await app();
+	const ask = async (to: string): Promise<string> => (await (await form("/auth/reset", browser.cookie, { "address": to })).json() as { "reason": string }).reason;
+
+	assert.equal(await ask(address), "that account has no password: sign in with a code");
+	assert.equal(await ask(someone()), "no account with that email");
+});

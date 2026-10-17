@@ -20,4 +20,6 @@ button:disabled { opacity: 0.6; cursor: default; }
 .or { margin: 4px 0; text-align: center; opacity: 0.6; }
 .note { margin: 0; }
 .code { margin: 8px 0 0; font: 600 1.6rem/1.2 ui-monospace, monospace; letter-spacing: 2px; text-align: center; }
+.link { padding: 0; border: 0; background: none; color: var(--brand); font: inherit; text-decoration: underline; cursor: pointer; justify-self: center; }
+label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
 [hidden] { display: none !important; }

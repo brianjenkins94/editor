@@ -46,7 +46,9 @@ function explain(body) {
 		"email isn't set up here": "Email sign-in isn't available here yet.",
 		"no account with that email": "There's no account with that email. Ask for a code instead: that makes one.",
 		"that account has no password: sign in with a code": "That account has no password yet. Ask for a code instead.",
-		"wrong password": "That isn't the password."
+		"wrong password": "That isn't the password.",
+		"ask for a code first": "Ask for a code first.",
+		"couldn't check it against known breaches: try again": "We couldn't check that password against known breaches just now. Try again."
 	};
 
 	return reasons[body.reason] ?? (body.error === "no_attempt" ? "This sign-in has expired or was opened somewhere else. Go back to the app and sign in again." : "Something went wrong. Try again.");
@@ -121,6 +123,62 @@ async function send(address, button) {
 	methods.querySelector("input").focus();
 }
 
+/** Resetting a forgotten password (C4): a code to the address, then the code and a new password, and whether to end
+ *  every sign-in of the account. The attempt is spent: the app signs in again, with the new password. */
+function resetForm(address) {
+	const ask = element("button", { "type": "button", "className": "method", "textContent": "Email me a reset code" });
+	const code = element("input", { "name": "code", "type": "text", "autocomplete": "one-time-code", "autocapitalize": "characters", "spellcheck": false, "placeholder": "ABCD-2345" });
+	const password = element("input", { "name": "password", "type": "password", "autocomplete": "new-password" });
+	const end = element("input", { "type": "checkbox", "checked": true });
+	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Reset my password" });
+	const second = element("div", { "className": "stack", "hidden": true },
+		element("label", { "textContent": "Code" }, code),
+		element("label", { "textContent": "New password" }, password),
+		element("p", { "className": "note", "textContent": "10 to 100 characters: letters, digits, spaces and the symbols on a US keyboard. Checked against known breaches." }),
+		element("label", { "className": "check" }, end, "Also end every sign-in of this account, everywhere"),
+		submit);
+	const form = element("form", { "className": "stack" }, element("p", { "className": "note", "textContent": `Reset the password for ${address}.` }), ask, second);
+
+	ask.addEventListener("click", async () => {
+		ask.disabled = true;
+
+		const { ok, body } = await post("/auth/reset", { "address": address });
+
+		ask.disabled = false;
+
+		if (!ok) {
+			say(explain(body));
+
+			return;
+		}
+
+		say("");
+		ask.textContent = "Send another code";
+		ask.className = "secondary";
+		second.hidden = false;
+		code.focus();
+	});
+	form.addEventListener("submit", async (event) => {
+		event.preventDefault();
+		submit.disabled = true;
+
+		const { ok, body } = await post("/auth/reset/password", { "address": address, "code": code.value, "password": password.value, "end": end.checked ? "true" : "" });
+
+		submit.disabled = false;
+
+		if (!ok) {
+			say(explain(body));
+
+			return;
+		}
+
+		say("");
+		methods.replaceChildren(element("p", { "className": "note", "textContent": `Your password is reset${body.ended > 0 ? `, and ${body.ended} sign-in${body.ended === 1 ? "" : "s"} ended` : ""}. Go back to the app and sign in with it.` }));
+	});
+
+	return form;
+}
+
 /** The address, then a code by email, or a password: whichever the attempt offers. With both, the code first, and the
  *  password a step away. */
 function emailForm(offered) {
@@ -131,7 +189,17 @@ function emailForm(offered) {
 	const codeButton = element("button", { "type": "submit", "className": "method", "textContent": "Email me a code", "hidden": !byEmail });
 	const signInButton = element("button", { "type": "submit", "className": "method", "textContent": "Sign in", "hidden": byEmail });
 	const toggle = element("button", { "type": "button", "className": "secondary", "textContent": "Use a password instead", "hidden": !(byEmail && offered.includes("password")) });
-	const form = element("form", { "className": "stack" }, element("label", { "textContent": "Email" }, address), passwordLabel, codeButton, signInButton, toggle);
+	const forgot = element("button", { "type": "button", "className": "link", "textContent": "Forgot your password?", "hidden": byEmail });
+	const form = element("form", { "className": "stack" }, element("label", { "textContent": "Email" }, address), passwordLabel, codeButton, signInButton, toggle, forgot);
+
+	forgot.addEventListener("click", () => {
+		if (!address.reportValidity()) {
+			return;
+		}
+
+		say("");
+		methods.replaceChildren(resetForm(address.value));
+	});
 
 	toggle.addEventListener("click", () => {
 		const usePassword = passwordLabel.hidden;
@@ -140,6 +208,7 @@ function emailForm(offered) {
 		password.required = usePassword;
 		codeButton.hidden = usePassword;
 		signInButton.hidden = !usePassword;
+		forgot.hidden = !usePassword;
 		toggle.textContent = usePassword ? "Email me a code instead" : "Use a password instead";
 
 		(usePassword ? password : address).focus();

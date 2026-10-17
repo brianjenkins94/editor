@@ -1,6 +1,6 @@
 # Sign-in methods
 
-Status: **design, 2026-10-17; C0 to C3 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
+Status: **design, 2026-10-17; C0 to C4 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
 **Workers Paid** (for Argon2id's CPU and email sending), add a local debug harness first (C0), and push authorization
 requests (PAR) in C1. Still open: "Open questions".
 
@@ -218,7 +218,15 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     breaking passwords and the breach check failing, the tries). Tried with the harness against the real Have I Been
     Pwned: an email account set a password ("password1234" refused: in 443,397 breaches), signed out, and signed in
     with it.
-- **C4 · password reset.** By email code, plus the second factor when MFA is on.
+- **C4 · password reset.** *Built 2026-10-17* (src/password.ts): from the sign-in page, "Forgot your password?" in
+  password mode. `POST /auth/reset` (`address`) emails a code ("to reset your password"), its HMAC bound to this
+  browser's attempt, the account and the action, so it works only where it was asked for; `POST /auth/reset/password`
+  (`address`, `code`, `password`, `end`) checks the code and the password as setting one does (the rules, known
+  breaches; a refused password doesn't spend the code), stores it, and, when asked (a checkbox, on by default: asked, not
+  forced), ends every sign-in of the account. The attempt is spent and no session starts: the page says to go back to
+  the app and sign in with the new password. `password_reset` is audited with what was ended. **Not yet:** the second
+  factor (C5) once MFA is on. 3 tests in test/password.test.ts (the whole reset with sign-ins ended and signing in
+  again, sign-ins kept and the code bound to its browser, nothing to reset); the screens looked at in the harness.
 - **C5 · authenticator-app MFA.** Enrollment, recovery codes, the step at sign-in, turning it off; the owner's policy.
 - **C6 · email as a second factor.**
 - **C7 · the editor.** Its client gets the methods, after the admin trial.

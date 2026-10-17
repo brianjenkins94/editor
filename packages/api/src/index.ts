@@ -13,7 +13,7 @@ import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
 import { emailEndpoint, verifyEndpoint } from "./email.ts";
 import { expireInbox, receive } from "./inbox.ts";
-import { passwordSignInEndpoint } from "./password.ts";
+import { passwordSignInEndpoint, resetCodeEndpoint, resetPasswordEndpoint } from "./password.ts";
 import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
@@ -74,6 +74,8 @@ app.use("/auth/par", limit(4 * 1024));
 app.use("/auth/email/*", limit(4 * 1024));
 app.use("/auth/email", limit(4 * 1024));
 app.use("/auth/password", limit(4 * 1024));
+app.use("/auth/reset", limit(4 * 1024));
+app.use("/auth/reset/*", limit(4 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
@@ -127,6 +129,11 @@ app.post("/auth/email/verify", rateLimit("SIGN_IN_BY_IP", byIp), verifyEndpoint)
 
 // The page's password choice (src/password.ts, SIGN-IN.md C3): an email and its password.
 app.post("/auth/password", rateLimit("SIGN_IN_BY_IP", byIp), passwordSignInEndpoint);
+
+// Resetting it from the sign-in page (src/password.ts, C4): a code to the account's email, then a new password.
+app.post("/auth/reset", rateLimit("SIGN_IN_BY_IP", byIp), resetCodeEndpoint);
+
+app.post("/auth/reset/password", rateLimit("SIGN_IN_BY_IP", byIp), resetPasswordEndpoint);
 
 app.post("/token", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), tokenEndpoint);
 
