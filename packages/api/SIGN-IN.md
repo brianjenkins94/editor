@@ -183,6 +183,18 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   **onboarded** in Compute → Email Service → Email Sending (it adds the SPF, DKIM, DMARC and bounce records on
   `cf-bounce`); then the `send_email` binding in dev's and production's configs (from `no-reply@unusuallygood.dev`
   only), and `CODE_KEY` generated and put in both.
+- **Linking accounts** (*pinned 2026-10-17, to come back to once C3–C7's work in progress is done*). Today an email
+  sign-in for someone who also has GitHub makes a second, separate account (the owner's own email sign-in did). The
+  plan, as "Accounts and linking" above says:
+  - **Add an email** (signed in with GitHub): an address, then its code, as sign-in's; **Connect GitHub** (signed in by
+    email): GitHub's authorize page, its id attached. Each a fresh, action-specific check, never the sign-in's.
+  - **A method already on another account:** if that account holds nothing but that one method (no other method, no
+    role, nothing worth keeping), offer to merge it in: soft-deleted as an account deletion is (its sign-ins ended,
+    purged after 30 days), both sides audited. Otherwise refused, saying whose it is.
+  - **Roles follow how you signed in:** until MFA (C5), admin roles apply only to sign-ins made with GitHub, so linking
+    an email to the owner's account doesn't make that inbox a key to it. The Grant records its method; `rolesOf` reads it.
+  - **Where:** an Account page in the admin app first (reachable from the No access card), the editor's with C7.
+  - The owner's duplicate (bc2bc582…, email only) is the first case: sign in with GitHub, add the address, merge.
 - **C3 · passwords.** Set a password (signed in); sign in with one; the breach check; Argon2id; rate limits.
 - **C4 · password reset.** By email code, plus the second factor when MFA is on.
 - **C5 · authenticator-app MFA.** Enrollment, recovery codes, the step at sign-in, turning it off; the owner's policy.
