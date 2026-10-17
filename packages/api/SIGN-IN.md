@@ -100,7 +100,7 @@ after it is unchanged: DPoP-bound tokens, refresh, the audit log, roles, the adm
   factor). An authenticator app is the stronger choice and the one offered first.
 - **When it's asked:** after the first factor, before `Grant.begin`. It applies to password and email sign-ins;
   a GitHub sign-in already carries GitHub's own 2FA.
-- **Per-role policy:** a role can require MFA. Proposed: `owner` must pass an authenticator code (or recovery code) to
+- **Per-role policy:** a role can require MFA. Proposed (not adopted for now, 2026-10-17: C5): `owner` must pass an authenticator code (or recovery code) to
   open the admin app, however they signed in, GitHub included.
 - Turning MFA off needs a fresh second factor and is audited.
 
@@ -248,7 +248,8 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     app's code, each step once; a recovery code once, the second step needing a first, a password sign-in asked too; a
     reset needing it, turning it off needing a recent sign-in; off). Tried with the harness: set up from the QR page,
     the recovery codes shown, then an email sign-in with the app's code ("email+totp").
-  - **Still open:** the owner's policy below (requiring MFA to open the admin app, GitHub sign-ins included).
+  - **The owner's policy** (*decided 2026-10-17*): not now. MFA stays optional for owners; GitHub's own 2FA covers
+    their GitHub sign-ins.
 - **C6 · email as a second factor.**
 - **C7 · the editor.** Its client gets the methods, after the admin trial.
 - **Later:** passkeys (Pilcrow's recommendation for high-security accounts, and a way to drop passwords).
@@ -257,4 +258,5 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
 
 - ~~Argon2id's implementation.~~ Decided 2026-10-17: @hallaxius/argon2w (C3).
 - **Email MFA** as specified, with the caveat shown, or authenticator app only.
-- **The owner's MFA policy:** required for the admin app, as proposed?
+- ~~The owner's MFA policy.~~ Decided 2026-10-17: not for now; optional for owners, GitHub's 2FA covering GitHub
+  sign-ins (C5).
