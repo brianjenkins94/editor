@@ -1,7 +1,8 @@
 // The editor's API Worker (README.md). Secrets are never in this file: `wrangler secret put` (SIGNING_JWK, NONCE_KEY,
 // TOKEN_KEK, AUDIT_KEY, STATE_KEY, GITHUB_CLIENT_SECRET; README.md's A0 says how to make each; and ANALYTICS_TOKEN,
-// Cloudflare's read-only analytics, packages/admin/README.md B4). ANALYTICS_ACCOUNT and ANALYTICS_ZONE (unusuallygood.dev)
-// are ids, not secrets.
+// Cloudflare's read-only analytics, packages/admin/README.md B4; CODE_KEY, 32 random bytes, emailed codes' HMAC key,
+// SIGN-IN.md C2). ANALYTICS_ACCOUNT and ANALYTICS_ZONE (unusuallygood.dev) are ids, not secrets. `send_email` is Cloudflare
+// Email Service, from no-reply@unusuallygood.dev only (the zone is onboarded for Email Sending).
 // The top level is local `wrangler dev` and the tests; `--env dev` and `--env production` are the deployments.
 // vars, bindings and observability are repeated per environment on purpose: wrangler doesn't inherit them, and each
 // deployment's settings should be readable where it's declared. Production's D1 id is a placeholder until A7 creates
@@ -52,6 +53,7 @@
       "assets": { "directory": "public" },
       "d1_databases": [{ "binding": "DB", "database_name": "editor-api-dev", "database_id": "296ad75a-302e-4aa6-97cd-360f3481617e", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "AUDIT_COPIES", "bucket_name": "editor-api-audit-dev" }],
+      "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["no-reply@unusuallygood.dev"] }],
       "ratelimits": [{ "name": "SIGN_IN_BY_IP", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }, { "name": "TOKEN_BY_IP", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }, { "name": "TOKEN_BY_GRANT", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }, { "name": "PROXY_BY_USER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } }, { "name": "ALERTS", "namespace_id": "1005", "simple": { "limit": 1, "period": 60 } }],
       "vars": { "ENVIRONMENT": "dev", "ALLOWED_ORIGINS": "https://brianjenkins94.github.io,http://localhost:5173,http://editor.localhost:5173,http://localhost:5174", "REDIRECT_URIS": { "editor": ["https://brianjenkins94.github.io/editor/", "http://localhost:5173/", "http://editor.localhost:5173/"], "admin": ["http://localhost:5174/"] }, "OWNERS": [9398474], "SIGN_IN_METHODS": { "editor": ["github"], "admin": ["github", "email"] }, "ANALYTICS_ACCOUNT": "3ade13ae64e29b20e6b7c61f9ae7b714", "ANALYTICS_ZONE": "54d20cd60d5353f2080a1c8aec6def0d", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" }
     },
@@ -70,6 +72,7 @@
       "assets": { "directory": "public" },
       "d1_databases": [{ "binding": "DB", "database_name": "editor-api", "database_id": "a81ff6d8-f4af-4b21-bbee-265203df0a72", "migrations_dir": "migrations" }],
       "r2_buckets": [{ "binding": "AUDIT_COPIES", "bucket_name": "editor-api-audit" }],
+      "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["no-reply@unusuallygood.dev"] }],
       "ratelimits": [{ "name": "SIGN_IN_BY_IP", "namespace_id": "2001", "simple": { "limit": 20, "period": 60 } }, { "name": "TOKEN_BY_IP", "namespace_id": "2002", "simple": { "limit": 30, "period": 60 } }, { "name": "TOKEN_BY_GRANT", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } }, { "name": "PROXY_BY_USER", "namespace_id": "2004", "simple": { "limit": 300, "period": 60 } }, { "name": "ALERTS", "namespace_id": "2005", "simple": { "limit": 1, "period": 60 } }],
       "vars": { "ENVIRONMENT": "production", "ALLOWED_ORIGINS": "https://editor.unusuallygood.dev,https://admin.unusuallygood.dev", "REDIRECT_URIS": { "editor": ["https://editor.unusuallygood.dev/"], "admin": ["https://admin.unusuallygood.dev/"] }, "OWNERS": [9398474], "SIGN_IN_METHODS": { "editor": ["github"], "admin": ["github", "email"] }, "ANALYTICS_ACCOUNT": "3ade13ae64e29b20e6b7c61f9ae7b714", "ANALYTICS_ZONE": "54d20cd60d5353f2080a1c8aec6def0d", "GITHUB_CLIENT_ID": "Iv23liFJepSEiExenSOI" }
     }

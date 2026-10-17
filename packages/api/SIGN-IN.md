@@ -1,7 +1,6 @@
 # Sign-in methods
 
-Status: **design, 2026-10-17; C0, C1 and C2 built** (C2's sending in production waits on "Before email works in
-production", below). Decided: build it ourselves, trial it on the admin app, move to
+Status: **design, 2026-10-17; C0, C1 and C2 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
 **Workers Paid** (for Argon2id's CPU and email sending), add a local debug harness first (C0), and push authorization
 requests (PAR) in C1. Still open: "Open questions".
 
@@ -179,11 +178,11 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     type).
   - **Departure:** checking is limited per attempt only, not per user as well: a code is bound to its attempt (its
     HMAC includes the attempt's id), so guessing in another attempt can't reach it.
-- **Before email works in production** (your part, on the Cloudflare dashboard): the account on **Workers Paid**
+- **Email in production** (*done 2026-10-17*): the account on **Workers Paid**
   (sending to any address needs it; 3,000 emails a month included, then $0.35 per 1,000), and unusuallygood.dev
   **onboarded** in Compute → Email Service → Email Sending (it adds the SPF, DKIM, DMARC and bounce records on
-  `cf-bounce`). Then, here: the `send_email` binding in dev's and production's configs, and `CODE_KEY` generated and
-  put in both. Until then, those environments don't offer email.
+  `cf-bounce`); then the `send_email` binding in dev's and production's configs (from `no-reply@unusuallygood.dev`
+  only), and `CODE_KEY` generated and put in both.
 - **C3 · passwords.** Set a password (signed in); sign in with one; the breach check; Argon2id; rate limits.
 - **C4 · password reset.** By email code, plus the second factor when MFA is on.
 - **C5 · authenticator-app MFA.** Enrollment, recovery codes, the step at sign-in, turning it off; the owner's policy.
