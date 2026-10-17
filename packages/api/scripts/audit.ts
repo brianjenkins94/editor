@@ -89,7 +89,8 @@ if (event !== undefined) {
 }
 
 if (values.suspicious) {
-	where.push(`event NOT IN (${ROUTINE.map((name) => `'${name}'`).join(", ")})`);
+	// Admins reading is kept a year, but it's expected: not worth a second look.
+	where.push(`event NOT IN (${[...ROUTINE, "admin_access"].map((name) => `'${name}'`).join(", ")})`);
 }
 
 const sql = `SELECT at, event, reason, detail, user_id, grant_id, country, ip_hash, trace_id FROM (SELECT * FROM audit WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ${Number(values.limit)}) ORDER BY id`;

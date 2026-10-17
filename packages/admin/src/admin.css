@@ -1,0 +1,13 @@
+/* The admin app's own few rules; everything else is Web Awesome's (themes, utilities, native table styles). */
+html, body { min-height: 100%; margin: 0; }
+.auth-screen { min-height: 100vh; justify-content: center; align-items: center; }
+.auth-card { width: 100%; max-width: 24rem; }
+.stats { --min-column-size: 14rem; }
+.stat { text-decoration: none; color: inherit; }
+nav[slot="navigation"] a { padding: var(--wa-space-xs) var(--wa-space-s); border-radius: var(--wa-border-radius-m); text-decoration: none; color: inherit; }
+nav[slot="navigation"] a.active { background: var(--wa-color-brand-fill-quiet); color: var(--wa-color-brand-on-quiet); font-weight: var(--wa-font-weight-semibold); }
+main { padding: var(--wa-space-l); }
+.table { overflow-x: auto; }
+.mono { font-family: var(--wa-font-family-code); font-size: var(--wa-font-size-s); }
+.muted { color: var(--wa-color-text-quiet); }
+.filters { align-items: end; }

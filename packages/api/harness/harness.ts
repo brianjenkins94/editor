@@ -9,8 +9,9 @@
  *
  * It listens on 8787 because that's the dev GitHub App's local callback (packages/api/README.md, A0), and passes every
  * other request to the Worker as it came, so the issuer and redirect URIs are the local ones in wrangler.jsonc.
- * Secrets are made fresh each run, except GITHUB_CLIENT_SECRET, read from `.dev.vars` (gitignored) if it's there:
- * without it, signing in with GitHub stops at GitHub's answer. State lives in memory: a restart starts empty.
+ * Secrets are made fresh each run, except GITHUB_CLIENT_SECRET, read from `.dev.vars` (gitignored) if it's there. With
+ * it, signing in goes to the real GitHub (the dev GitHub App); without it, to a stand-in on 8786 (github.ts) whose
+ * authorize page asks who to be: you, the owner, or someone new. State lives in memory: a restart starts empty.
  */
 import type { Changes, Snapshot } from "./state.ts";
 import * as fs from "@brianjenkins94/util/fs";
@@ -18,6 +19,7 @@ import { proxy } from "@brianjenkins94/util/proxy";
 import { createServer } from "node:http";
 import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
+import { githubStandIn } from "./github.ts";
 import { diff, snapshot } from "./state.ts";
 
 const PORT = Number(process.env["PORT"] ?? 8787);
@@ -39,9 +41,10 @@ const secrets = {
 	"TOKEN_KEK": random(),
 	"AUDIT_KEY": random(),
 	"STATE_KEY": random(),
-	"GITHUB_CLIENT_SECRET": devVars()["GITHUB_CLIENT_SECRET"] ?? "no client secret: add GITHUB_CLIENT_SECRET to .dev.vars"
+	"GITHUB_CLIENT_SECRET": devVars()["GITHUB_CLIENT_SECRET"] ?? "the stand-in takes any"
 };
-const harness = createTestHarness({ "root": root, "workers": [{ "configPath": "wrangler.jsonc", "secrets": secrets }] });
+const standIn = devVars()["GITHUB_CLIENT_SECRET"] === undefined ? await githubStandIn(8786, { "id": 9398474, "login": "brianjenkins94" }) : undefined;
+const harness = createTestHarness({ "root": root, "workers": [{ "configPath": "wrangler.jsonc", "secrets": secrets, ...standIn === undefined ? {} : { "vars": { "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn } } }] });
 
 await harness.listen();
 await harness.getWorker().applyD1Migrations("DB");
@@ -97,5 +100,5 @@ createServer(async (request, response) => {
 		response.end(error instanceof Error ? error.message : String(error));
 	}
 }).listen(PORT, () => {
-	process.stdout.write(`API on http://localhost:${PORT}/ · harness at http://localhost:${PORT}/__harness\n`);
+	process.stdout.write(`API on http://localhost:${PORT}/ · harness at http://localhost:${PORT}/__harness · GitHub: ${standIn ?? "the real one (dev GitHub App)"}\n`);
 });

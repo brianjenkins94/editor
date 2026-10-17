@@ -1,0 +1,20 @@
+{
+  "name": "@brianjenkins94/admin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The admin app (README.md): accounts, sign-ins, the audit log and traffic, for those whose roles allow it.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174 --strictPort",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@awesome.me/webawesome": "^3.14.0",
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "oauth4webapi": "^3.8.8",
+    "preact": "latest"
+  },
+  "devDependencies": {
+    "vite": "latest"
+  }
+}

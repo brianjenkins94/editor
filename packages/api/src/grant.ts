@@ -134,7 +134,7 @@ export class Grant extends DurableObject<Bindings> {
 		const user = await this.env.DB.prepare("SELECT id FROM users WHERE github_id = ?").bind(githubId).first<{ "id": string }>();
 		const userId = user?.id as string;
 
-		await this.env.DB.prepare("INSERT INTO grants (id, user_id, created_at, last_used_at, label) VALUES (?, ?, ?, ?, ?)").bind(this.id, userId, now, now, label ?? null).run();
+		await this.env.DB.prepare("INSERT INTO grants (id, user_id, created_at, last_used_at, label, client) VALUES (?, ?, ?, ?, ?, ?)").bind(this.id, userId, now, now, label ?? null, client).run();
 
 		const code = token(this.id);
 

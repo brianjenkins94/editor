@@ -132,7 +132,8 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
 
 - **C0 · a local debug harness.** *Built 2026-10-17* (`harness/`): `npm run harness`, then
   `http://localhost:8787/__harness`; `recorded()` in `harness/state.ts`, first used by `test/harness.test.ts`. GitHub
-  sign-in through it needs the dev app's `GITHUB_CLIENT_SECRET` in `.dev.vars` (gitignored).
+  sign-in through it goes to a GitHub stand-in (harness/github.ts: sign in as the owner or someone new) unless
+  `.dev.vars` (gitignored) has the dev app's `GITHUB_CLIENT_SECRET`.
   Modeled on sms-reference-app's: `npm run harness` in packages/api runs the API in
   Wrangler's test harness and serves a page with an app in an iframe beside a live, redacted view of everything stored:
   D1's tables, each Durable Object's storage (Grants, attempts), the R2 audit copies, the audit log's tail, with what

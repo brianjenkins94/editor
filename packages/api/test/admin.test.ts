@@ -189,3 +189,76 @@ test("every admin request that's answered is recorded: admin_access, with what i
 
 	assert.deepEqual(rows, [{ "detail": "GET /admin/me" }]);
 });
+
+// ── B2: the read endpoints ─────────────────────────────────────────────────────────────────────────────────────────
+
+test("every read endpoint is refused without its permission: 403, recorded with what was lacking", async () => {
+	const holder = await browser();
+	const { access_token, grantId } = await signedIn(holder, someone(), "admin");
+
+	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit"]) {
+		assert.equal((await holder.send("GET", path, { "accessToken": access_token })).status, 403, path);
+	}
+
+	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read"]);
+});
+
+test("/admin/users and /admin/users/:id: who's signed up, their sign-ins with their client, and their audit rows", async () => {
+	const holder = await browser();
+	const { access_token, grantId } = await signedIn(holder, OWNER, "admin");
+	const other = someone();
+	const { grantId: otherGrant } = await signedIn(await browser(), other, "editor");
+	const { users } = await (await holder.send("GET", "/admin/users", { "accessToken": access_token })).json() as { "users": { "id": string; "githubId": number; "liveSessions": number; "lastSeenAt": number | null }[] };
+	const listed = users.find((user) => user.githubId === other);
+
+	assert.ok(listed !== undefined);
+	assert.equal(listed.liveSessions, 1);
+	assert.equal(typeof listed.lastSeenAt, "number");
+
+	const one = await (await holder.send("GET", `/admin/users/${listed.id}`, { "accessToken": access_token })).json() as { "user": { "githubId": number }; "sessions": { "id": string; "client": string }[]; "audit": { "event": string }[] };
+
+	assert.equal(one.user.githubId, other);
+	assert.deepEqual(one.sessions.map((session) => [session.id, session.client]), [[otherGrant, "editor"]]);
+	assert.deepEqual(one.audit.map((row) => row.event).sort((a, b) => a.localeCompare(b)), ["login", "token_issued"]);
+	assert.ok(one.audit.every((row) => (row as { "userId"?: string }).userId === listed.id), "rows carry whose they are, as /admin/audit's do");
+	assert.equal((await holder.send("GET", "/admin/users/nobody", { "accessToken": access_token })).status, 404);
+
+	// Looking was itself recorded, with whose data.
+	const looked = (await env.DB.prepare("SELECT detail FROM audit WHERE grant_id = ? AND event = 'admin_access'").bind(grantId).all<{ "detail": string }>()).results.map((row) => row.detail);
+
+	assert.ok(looked.includes(`GET /admin/users/${listed.id}`));
+});
+
+test("/admin/sessions: live sign-ins, with whose they are; an ended one isn't listed", async () => {
+	const holder = await browser();
+	const { access_token, grantId } = await signedIn(holder, OWNER, "admin");
+	const { grantId: ended } = await signedIn(await browser(), someone(), "editor");
+
+	await env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(Date.now(), ended).run();
+
+	const { sessions } = await (await holder.send("GET", "/admin/sessions", { "accessToken": access_token })).json() as { "sessions": { "id": string; "client": string; "githubId": number }[] };
+	const mine = sessions.find((session) => session.id === grantId);
+
+	assert.deepEqual([mine?.client, mine?.githubId], ["admin", OWNER]);
+	assert.equal(sessions.some((session) => session.id === ended), false);
+});
+
+test("/admin/audit: newest first, by event, suspicious only, and a page at a time", async () => {
+	const holder = await browser();
+	const { access_token } = await signedIn(holder, OWNER, "admin");
+	const read = async (query: string): Promise<{ "id": number; "event": string }[]> => (await (await holder.send("GET", `/admin/audit?${query}`, { "accessToken": access_token })).json() as { "rows": { "id": number; "event": string }[] }).rows;
+	const logins = await read("event=login&limit=3");
+
+	assert.equal(logins.length, 3);
+	assert.ok(logins.every((row) => row.event === "login"));
+	assert.ok(logins[0]!.id > logins[1]!.id, "newest first");
+
+	const next = await read(`event=login&limit=3&before=${logins.at(-1)!.id}`);
+
+	assert.ok(next.every((row) => row.id < logins.at(-1)!.id), "the next page");
+
+	const suspicious = await read("suspicious=true&limit=500");
+
+	assert.ok(suspicious.length > 0);
+	assert.ok(suspicious.every((row) => !["login", "token_issued", "refreshed", "proxy_call", "admin_access"].includes(row.event)));
+});

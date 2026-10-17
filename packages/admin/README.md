@@ -1,6 +1,6 @@
 # Admin
 
-Status: **design, 2026-10-17; B1 built.** Decisions are in "Decisions", what's built in "Steps", what's still open at the
+Status: **design, 2026-10-17; B1–B3 built.** Decisions are in "Decisions", what's built in "Steps", what's still open at the
 end.
 
 The admin app is where accounts and their roles are managed: today, the platform owner (one person) looking after users,
@@ -135,11 +135,22 @@ Each lands green and is useful on its own.
   - `src/admin.ts`: the router at `/admin`, recording each answered request (`admin_access`, kept 365 days), and
     `GET /admin/me` (user, roles, permissions).
   - `test/admin.test.ts`, 10 tests in workerd; turning off either client check fails them.
-- **B2 · read endpoints.** users, a user, sessions, audit (with filters), `admin_access` audit rows. Tested for each
-  permission.
-- **B3 · the admin app.** `packages/admin`: Preact + Web Awesome (the app shell, sign-in card and card grid recipes),
-  the shared sign-in, and views for the overview, users, a user, sessions and the audit timeline. Verified in the
-  browser against the dev API, with screenshots.
+- **B2 · read endpoints.** *Built 2026-10-17* (src/admin.ts): `GET /admin/users`, `/admin/users/:id` (their
+  sign-ins with each one's client, and their latest 100 audit rows), `/admin/sessions` (live ones), `/admin/audit`
+  (`event`, `user`, `grant`, `ip`, `suspicious`, `since`, `before` for paging, newest first). `grants.client` is new
+  (migrations/0004). "Suspicious" leaves out admins reading (`admin_access`, kept a year but expected), here and in
+  `npm run audit -- --suspicious`. Tested for each permission (14 tests in test/admin.test.ts).
+- **B3 · the admin app.** *Built 2026-10-17* (this package): Vite + Preact + Web Awesome, `npm run dev` on 5174.
+  - Sign-in: util/auth/client as the `admin` client with `par` (lib 022052c, 9fddbfd: PAR, and plain HTTP allowed for
+    a localhost API only), through the API's sign-in page. Signed in with no role: a "No access" card.
+  - Pages (src/views.tsx): Overview (card grid), Users, a user (sign-ins and audit rows), Sign-ins, Audit log
+    (filters in the address, older rows a page at a time). GitHub logins looked up live by id (src/logins.ts).
+  - Its API: production's on `admin.unusuallygood.dev`, otherwise the harness's (`http://localhost:8787`), or
+    `VITE_API`.
+  - Tried locally, 2026-10-17: `npm run harness` in packages/api (its GitHub stand-in, harness/github.ts, offers
+    "the owner" or "someone else"), `npm run dev` here, and a real browser: PAR, the sign-in page, the stand-in, the
+    overview, users, a user, sign-ins, the audit log, sign out, then someone without a role (No access). The harness
+    showed every row and copy each step wrote.
 - **B4 · traffic.** `ANALYTICS_TOKEN`, `GET /admin/traffic`, and a traffic view: requests by host and status, top
   paths, agents, countries, Worker errors and CPU.
 - **B5 · production.** `admin.unusuallygood.dev` (static assets, custom domain), its redirect page and origin in

@@ -1,0 +1,172 @@
+/**
+ * The admin app (README.md). Signed out, Web Awesome's login card: one button, to the API's sign-in page (PAR, via
+ * util/auth/client). Signed in, `GET /admin/me` says what the user's roles allow: nothing (a page that says so), or the
+ * app shell (`<wa-page>`, its navigation in one slot) with the pages in views.tsx, by the address's hash.
+ */
+import "@awesome.me/webawesome/dist/styles/webawesome.css";
+import "@awesome.me/webawesome/dist/components/page/page.js";
+import "@awesome.me/webawesome/dist/components/card/card.js";
+import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/badge/badge.js";
+import "@awesome.me/webawesome/dist/components/callout/callout.js";
+import "@awesome.me/webawesome/dist/components/spinner/spinner.js";
+import "@awesome.me/webawesome/dist/components/input/input.js";
+import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
+import "@awesome.me/webawesome/dist/components/select/select.js";
+import "@awesome.me/webawesome/dist/components/option/option.js";
+import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
+import "./admin.css";
+import { render } from "preact";
+import { useEffect, useState } from "preact/hooks";
+import { loginOf } from "./logins";
+import { get, session, SIGNED_OUT } from "./session";
+import { Audit, Overview, Sessions, UserPage, Users } from "./views";
+
+interface Me { "user": string; "roles": string[]; "permissions": string[] }
+
+/** Where the hash says we are: a page and its query. */
+function useRoute(): { "path": string; "query": URLSearchParams } {
+	const read = (): { "path": string; "query": URLSearchParams } => {
+		const [path = "/", query = ""] = location.hash.replace(/^#/u, "").split("?");
+
+		return { "path": path === "" ? "/" : path, "query": new URLSearchParams(query) };
+	};
+	const [route, setRoute] = useState(read);
+
+	useEffect(() => {
+		const changed = (): void => {
+			setRoute(read());
+		};
+
+		window.addEventListener("hashchange", changed);
+
+		return () => {
+			window.removeEventListener("hashchange", changed);
+		};
+	}, []);
+
+	return route;
+}
+
+function SignIn({ problem }: { "problem"?: string }) {
+	const [busy, setBusy] = useState(false);
+
+	return (
+		<div class="auth-screen wa-stack">
+			<wa-card class="auth-card">
+				<div class="wa-stack wa-gap-l">
+					<h1 class="wa-heading-l">Admin</h1>
+					<p class="wa-caption-m">Sign in to look after accounts, sign-ins and the audit log.</p>
+					{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
+					<wa-button variant="brand" loading={busy} onClick={() => {
+						setBusy(true);
+						session.signIn().catch(() => {
+							setBusy(false);
+						});
+					}}>Sign in</wa-button>
+				</div>
+			</wa-card>
+		</div>
+	);
+}
+
+function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
+	return (
+		<div class="auth-screen wa-stack">
+			<wa-card class="auth-card">
+				<div class="wa-stack wa-gap-l">
+					<h1 class="wa-heading-l">No access</h1>
+					<p>You're signed in, but your account has no admin roles. <span class="mono muted">{me.user}</span></p>
+					<wa-button appearance="outlined" onClick={onSignOut}>Sign out</wa-button>
+				</div>
+			</wa-card>
+		</div>
+	);
+}
+
+function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
+	const { path, query } = useRoute();
+	const [login, setLogin] = useState<string | undefined>();
+	const page = path === "/users" ? <Users />
+		: path.startsWith("/users/") ? <UserPage id={decodeURIComponent(path.slice("/users/".length))} />
+			: path === "/sessions" ? <Sessions />
+				: path === "/audit" ? <Audit query={query} />
+					: <Overview />;
+	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
+
+	useEffect(() => {
+		void get<{ "users": { "id": string; "githubId": number }[] }>("/users").then(({ users }) => users.find((user) => user.id === me.user)).then((self) => (self === undefined ? undefined : loginOf(self.githubId))).then(setLogin, () => undefined);
+	}, [me.user]);
+
+	return (
+		<wa-page>
+			<header slot="header" class="wa-split">
+				<div class="wa-cluster">
+					<wa-button data-toggle-nav appearance="plain" class="wa-mobile-only">Menu</wa-button>
+					<strong>Admin</strong>
+				</div>
+				<div class="wa-cluster wa-gap-s">
+					<span class="wa-caption-m">{login ?? ""} {me.roles.map((role) => <wa-badge key={role} variant="brand">{role}</wa-badge>)}</span>
+					<wa-button size="small" appearance="outlined" onClick={onSignOut}>Sign out</wa-button>
+				</div>
+			</header>
+			<nav slot="navigation" class="wa-stack wa-gap-2xs">
+				{link("#/", "Overview", path === "/")}
+				{link("#/users", "Users", path.startsWith("/users"))}
+				{link("#/sessions", "Sign-ins", path === "/sessions")}
+				{link("#/audit", "Audit log", path === "/audit")}
+			</nav>
+			<main>{page}</main>
+		</wa-page>
+	);
+}
+
+function App() {
+	const [state, setState] = useState<{ "kind": "loading" } | { "kind": "signedOut"; "problem"?: string } | { "kind": "in"; "me": Me }>({ "kind": "loading" });
+	const signOut = (): void => {
+		void session.signOut().finally(() => {
+			setState({ "kind": "signedOut" });
+		});
+	};
+
+	useEffect(() => {
+		const ended = (): void => {
+			setState({ "kind": "signedOut", "problem": "Your sign-in ended. Sign in again." });
+		};
+
+		window.addEventListener(SIGNED_OUT, ended);
+
+		void (async () => {
+			try {
+				await session.completeSignIn();
+			} catch {
+				setState({ "kind": "signedOut", "problem": "Signing in didn't complete. Try again." });
+
+				return;
+			}
+
+			if (!session.isSignedIn()) {
+				setState({ "kind": "signedOut" });
+
+				return;
+			}
+
+			try {
+				setState({ "kind": "in", "me": await get<Me>("/me") });
+			} catch {
+				setState({ "kind": "signedOut", "problem": "Couldn't reach the API." });
+			}
+		})();
+
+		return () => {
+			window.removeEventListener(SIGNED_OUT, ended);
+		};
+	}, []);
+
+	return state.kind === "loading" ? <div class="auth-screen wa-stack"><wa-spinner /></div>
+		: state.kind === "signedOut" ? <SignIn problem={state.problem} />
+			: state.me.roles.length === 0 ? <NoAccess me={state.me} onSignOut={signOut} />
+				: <Shell me={state.me} onSignOut={signOut} />;
+}
+
+render(<App />, document.querySelector("#app") as HTMLElement);
