@@ -4,7 +4,8 @@
  * (Cross-Origin-Opener-Policy: same-origin + a Cross-Origin-Embedder-Policy). A dev server sets those
  * headers directly (vite.config.ts coi-headers), but a static host can't — so this worker stamps them
  * onto every response instead. COEP is `credentialless` (not require-corp) so the cross-origin CDN fetch
- * below, whose response carries no CORP header, keeps working.
+ * below, whose response carries no CORP header, keeps working — except in WebKit, which has no credentialless:
+ * there coi.ts registers this worker with `?coep=require-corp`, and that is what it stamps.
  *
  * ONE service worker owns three roles, over one path space and with no magic module namespaces:
  *   • node_modules resolver — for a request under /workspace/node_modules/, it fetches the package from the CDN
@@ -216,7 +217,15 @@ function splitPackage(rel) {
 	return { "pkg": at === -1 ? rel : rel.slice(0, at), "sub": at === -1 ? "" : rel.slice(at + 1) };
 }
 
-// Add cross-origin isolation headers to a response (opaque responses can't be modified — pass them through).
+// The COEP this worker stamps: `credentialless`, or `require-corp` where the browser doesn't take credentialless
+// (WebKit), as coi.ts registers it then (`?coep=require-corp`): the one Safari isolates with.
+const COEP = new URL(globalThis.location.href).searchParams.get("coep") === "require-corp" ? "require-corp" : "credentialless";
+
+// Statuses whose Response must not carry a body.
+const NULL_BODY = new Set([101, 103, 204, 205, 304]);
+
+// Add cross-origin isolation headers to a response (opaque responses can't be modified — pass them through). A
+// null-body status (204, 304…) gets no body: WebKit hands one over (empty) and then refuses it in a new Response.
 function stamp(response) {
 	if (response.status === 0) {
 		return response;
@@ -224,10 +233,10 @@ function stamp(response) {
 
 	const headers = new Headers(response.headers);
 
-	headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+	headers.set("Cross-Origin-Embedder-Policy", COEP);
 	headers.set("Cross-Origin-Opener-Policy", "same-origin");
 
-	return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
+	return new Response(NULL_BODY.has(response.status) ? null : response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
 }
 
 // CDN fallback for a node_modules store miss (the fold-in that retired `__proxy__`). Reconstruct the CDN URL
@@ -270,7 +279,7 @@ async function fetchCdn(pathname, requestUrl) {
 		const response = await fetch(CDN + "/" + spec + (meta ? "?meta" : ""));
 		const headers = new Headers(response.headers);
 
-		headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+		headers.set("Cross-Origin-Embedder-Policy", COEP);
 		headers.set("Cross-Origin-Opener-Policy", "same-origin");
 		headers.set("Cross-Origin-Resource-Policy", "cross-origin");
 
@@ -353,16 +362,13 @@ function virtualHeaders(source) {
 	const headers = new Headers(source || {});
 
 	headers.set("Document-Policy", "js-profiling");
-	headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+	headers.set("Cross-Origin-Embedder-Policy", COEP);
 	headers.set("Cross-Origin-Opener-Policy", "same-origin");
 	headers.set("Cross-Origin-Resource-Policy", "cross-origin");
 	headers.delete("X-Frame-Options");
 
 	return headers;
 }
-
-// Statuses whose Response must not carry a body.
-const NULL_BODY = new Set([101, 103, 204, 205, 304]);
 
 // One exchange with the server on `port` (a dev server in the node worker, or a run's own; over the hub — editor-api's
 // `exchanges` is the other end): both bodies stream. A body that fits in its first REQUEST_PIECE goes whole with the
