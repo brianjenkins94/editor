@@ -42,6 +42,12 @@
 			"port": 8790
 		},
 		{
+			"name": "site-admin",
+			"runtimeExecutable": "sh",
+			"runtimeArgs": ["-c", "cd packages/site && exec npx wrangler dev --config admin.jsonc --port 8793"],
+			"port": 8793
+		},
+		{
 			"name": "site-apex",
 			"runtimeExecutable": "sh",
 			"runtimeArgs": ["-c", "cd packages/site && exec npx wrangler dev --port 8791"],

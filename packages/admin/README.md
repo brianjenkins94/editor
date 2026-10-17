@@ -126,7 +126,7 @@ Each lands green and is useful on its own.
     `permissionsOf`, and `requires(permission)`, which refuses with a 403 and an `auth_refused` row ("lacks …"). No
     route uses `requires` yet; B2's do, and its tests cover it.
   - `REDIRECT_URIS` is per client: `{ "editor": [...], "admin": [...] }`. Locally and in dev, the admin app's page is
-    `http://localhost:5174/`; production has none until B5.
+    `http://localhost:5174/`; production's is `https://admin.unusuallygood.dev/` (B5).
   - The `admin` client: `/auth/github/start` takes any client in `REDIRECT_URIS`, only to that client's pages; the
     Grant stores its client (a new column, added in place to existing Grants, whose missing value means `editor`);
     `/token` refuses a code or refresh token presented by another client ("another client").
@@ -159,8 +159,16 @@ Each lands green and is useful on its own.
   missing token is a 503, Cloudflare's refusal a 502 with Cloudflare's message. The app's Traffic page shows it all
   (tables; the Free plan has no ASN or security-event breakdowns). 4 tests in test/traffic.test.ts against a stand-in
   Cloudflare; tried in the browser through the harness with the real token.
-- **B5 · production.** `admin.unusuallygood.dev` (static assets, custom domain), its redirect page and origin in
-  production's config, the beacon excluded from the host, deployed by production.yml.
+- **B5 · production.** *Built 2026-10-17:* `admin.unusuallygood.dev`, the app's build as static assets only
+  (packages/site/admin.jsonc, a custom domain; no Worker runs on it), deployed by production.yml after the editor.
+  Production's API has its origin in `ALLOWED_ORIGINS` and its page (`https://admin.unusuallygood.dev/`) in
+  `REDIRECT_URIS.admin`. Its `_headers` (public/) hold a CSP that allows only its own files, the API and GitHub's API
+  (for logins), so Cloudflare's injected analytics beacon can't run; Web Awesome works under `style-src 'self'`
+  (checked with `wrangler dev`: no violations). The page itself is never cached.
+- **Architecture page.** A live diagram of the system (Workers, Durable Objects, D1, R2, the static hosts, GitHub,
+  Cloudflare's analytics), *derived from code*: the wrangler configs, the routes and the bindings, read at build time,
+  never drawn by hand. *Zero-knowledge*: it shows the shape and its live counts, never a user's data. Its own renderer,
+  not the editor's.
 - **B6 · first write.** End a sign-in from the admin app (`sessions:revoke`), with a confirm step, audited.
 - **Later:** organizations, memberships and their roles; organization admins in the same app; billing (Stripe).
 

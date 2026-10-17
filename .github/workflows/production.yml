@@ -1,7 +1,8 @@
 {
   "name": "production",
-  # unusuallygood.dev (packages/api/README.md, A7): the API at api.unusuallygood.dev, the editor at editor.unusuallygood.dev
-  # and the apex, all on Cloudflare. After every successful cd on main, or by hand. Production promotes itself: the
+  # unusuallygood.dev (packages/api/README.md, A7): the API at api.unusuallygood.dev, the editor at editor.unusuallygood.dev,
+  # the admin app at admin.unusuallygood.dev (packages/admin, B5) and the apex, all on Cloudflare. After every successful
+  # cd on main, or by hand. Production promotes itself: the
   # `production` environment (main only) has no required reviewer, by choice while this is early (2026-10-16); ticking
   # Required reviewers again makes every run wait for approval. It stays off until the repository variable
   # PRODUCTION_DEPLOYS is `on`: a job naming an environment that doesn't exist yet would create it, unprotected.
@@ -46,6 +47,9 @@
         { "run": "pnpm exec wrangler d1 migrations apply editor-api --env production --remote", "working-directory": "packages/api" },
         { "run": "pnpm exec wrangler deploy --env production", "working-directory": "packages/api" },
         { "run": "pnpm exec wrangler deploy --config editor.jsonc", "working-directory": "packages/site" },
+        # The admin app's own build (packages/admin/dist; the root build doesn't make it), then its static host.
+        { "run": "pnpm run build", "working-directory": "packages/admin" },
+        { "run": "pnpm exec wrangler deploy --config admin.jsonc", "working-directory": "packages/site" },
         { "run": "pnpm exec wrangler deploy", "working-directory": "packages/site" }
       ],
       "timeout-minutes": 30
