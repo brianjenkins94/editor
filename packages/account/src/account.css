@@ -6,3 +6,5 @@
 .account-code-form { align-items: end; }
 /* The editor shows it in a dialog (its shell/account-dialog.tsx): wide enough for the QR code beside its text. */
 .account-dialog { --width: 38rem; }
+/* There, without Web Awesome's native styles (the editor loads its theme and utilities only): the table's spacing. */
+.account-dialog td { padding: var(--wa-space-3xs) var(--wa-space-l) var(--wa-space-3xs) 0; }
