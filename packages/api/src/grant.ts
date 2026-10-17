@@ -5,7 +5,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Origin } from "./audit.ts";
 import { audit, NOWHERE } from "./audit.ts";
 import type { Difference, Fingerprint } from "./behavior.ts";
-import { clientKind, differences } from "./behavior.ts";
+import { clientKind, differences, gapOf, learn, START } from "./behavior.ts";
 import type { Bindings } from "./env.ts";
 import { github as githubOrigins } from "./github.ts";
 
@@ -19,7 +19,8 @@ import { github as githubOrigins } from "./github.ts";
  *   - the current refresh token's hash, and every earlier one's, for reuse detection;
  *   - the jtis of proofs it has seen, until they'd be too old anyway;
  *   - its client's fingerprint (BEHAVIOR.md: which headers it sent, keyed hashes of them), from the code's redemption,
- *     and how often each header has differed since, and how.
+ *     and how often each header has differed since, and how;
+ *   - its last action and the transitions since its last flush (BEHAVIOR.md, B8), added to the shared model hourly.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
  * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
  * GitHub's token is spent here, for the proxy (src/proxy.ts), and refreshed here, one refresh at a time: GitHub's refresh
@@ -29,6 +30,9 @@ import { github as githubOrigins } from "./github.ts";
  */
 
 const CODE_TTL = 60_000;
+
+/** How often a sign-in's transitions are added to the shared model (learn()), batched. */
+const FLUSH_EVERY = 60 * 60_000;
 
 /** At most this many proxied requests in flight for one sign-in (lease()): GitHub's secondary rate limits punish a token's
  *  concurrent requests, and a burst of large clones is the shape a scripted session takes. */
@@ -105,6 +109,8 @@ export class Grant extends DurableObject<Bindings> {
 			CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL);
 			CREATE TABLE IF NOT EXISTS leases (id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 			CREATE TABLE IF NOT EXISTS fingerprint (name TEXT PRIMARY KEY, value TEXT);
+			CREATE TABLE IF NOT EXISTS walk (id INTEGER PRIMARY KEY CHECK (id = 1), action TEXT NOT NULL, at INTEGER NOT NULL);
+			CREATE TABLE IF NOT EXISTS pending (from_action TEXT NOT NULL, to_action TEXT NOT NULL, gap INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (from_action, to_action, gap));
 			CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
 		`);
 
@@ -251,7 +257,7 @@ export class Grant extends DurableObject<Bindings> {
 	 * from how the sign-in's client is known is counted (by how much it matters, so a tolerated change doesn't hide a later
 	 * one that matters), and the ones that matter are handed back the first time, for the Worker to record.
 	 */
-	public use(jti: string, expires: number, print?: Fingerprint): { "seen": boolean; "active": boolean; "changed": Difference[] } {
+	public async use(jti: string, expires: number, { print, action }: { "print"?: Fingerprint; "action"?: string } = {}): Promise<{ "seen": boolean; "active": boolean; "changed": Difference[] }> {
 		const now = Date.now();
 
 		this.sql.exec("DELETE FROM seen_jti WHERE expires < ?", now);
@@ -272,7 +278,34 @@ export class Grant extends DurableObject<Bindings> {
 			}
 		}
 
+		if (active && !seen && action !== undefined) {
+			await this.step(action, now);
+		}
+
 		return { "seen": seen, "active": active, "changed": changed };
+	}
+
+	/** The sign-in took `action`: the transition from its last one counted, to be added to the model at the next flush. */
+	private async step(action: string, now: number): Promise<void> {
+		const [last] = this.sql.exec<{ "action": string; "at": number }>("SELECT action, at FROM walk WHERE id = 1").toArray();
+
+		this.sql.exec("INSERT INTO pending (from_action, to_action, gap, count) VALUES (?, ?, ?, 1) ON CONFLICT (from_action, to_action, gap) DO UPDATE SET count = count + 1", last?.action ?? START, action, last === undefined ? 0 : gapOf(now - last.at));
+		this.sql.exec("INSERT INTO walk (id, action, at) VALUES (1, ?, ?) ON CONFLICT (id) DO UPDATE SET action = excluded.action, at = excluded.at", action, now);
+
+		if (await this.ctx.storage.getAlarm() === null) {
+			await this.ctx.storage.setAlarm(now + FLUSH_EVERY);
+		}
+	}
+
+	/** Add the transitions since the last flush to the shared model, scoring them first (learn()). The alarm's, hourly;
+	 *  public for the tests (alarm() is reserved over RPC). Says how many were scored. */
+	public async flush(): Promise<number> {
+		const pending = this.sql.exec<{ "from_action": string; "to_action": string; "gap": number; "count": number }>("SELECT from_action, to_action, gap, count FROM pending").toArray();
+		const scored = await learn(this.env.DB, this.id, pending.map((row) => ({ "from": row.from_action, "to": row.to_action, "gap": row.gap, "count": row.count })));
+
+		this.sql.exec("DELETE FROM pending");
+
+		return scored;
 	}
 
 	/** How this sign-in's client is known: its fingerprint, once the code has been redeemed. */
@@ -465,9 +498,11 @@ export class Grant extends DurableObject<Bindings> {
 		this.sql.exec("DELETE FROM leases WHERE id = ?", id);
 	}
 
-	/** The platform's call, when the code would have expired (begin sets it). */
+	/** The platform's call: when the code would have expired (begin sets it), and hourly while there's something to
+	 *  flush (step sets it). */
 	public async alarm(): Promise<void> {
 		await this.abandon();
+		await this.flush();
 	}
 
 	/** A sign-in that never got its first refresh token is abandoned, so it ends. */

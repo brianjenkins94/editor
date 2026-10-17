@@ -9,7 +9,7 @@ import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
 import { deleteAccountEndpoint, purge, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
 import { admin } from "./admin.ts";
 import { audit, expire, origin } from "./audit.ts";
-import { keyed } from "./behavior.ts";
+import { decay, keyed } from "./behavior.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
 import { githubApi, githubGit } from "./proxy.ts";
@@ -173,14 +173,17 @@ app.onError((error, context) => {
 
 export default {
 	"fetch": app.fetch,
-	// Daily (wrangler.jsonc's cron trigger): the audit log's retention (audit.ts), and deleted accounts past their grace
-	// period purged (account.ts).
+	// Daily (wrangler.jsonc's cron trigger): the audit log's retention (audit.ts), deleted accounts past their grace
+	// period purged (account.ts), and the likely-next-action model's counts faded (behavior.ts).
 	"scheduled": async (_controller, env, context) => {
 		context.waitUntil(log.span("audit.expire", {}, async () => {
 			await expire(env.DB);
 		}));
 		context.waitUntil(log.span("account.purge", {}, async () => {
 			await purge(env);
+		}));
+		context.waitUntil(log.span("behavior.decay", {}, async () => {
+			await decay(env.DB);
 		}));
 	}
 } satisfies ExportedHandler<AppEnv["Bindings"]>;

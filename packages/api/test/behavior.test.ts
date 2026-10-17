@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
-import { differences, proxied } from "../src/behavior.ts";
+import type { Model } from "../src/behavior.ts";
+import { actionOf, differences, FLOWS, proxied, START, surprisal } from "../src/behavior.ts";
 import { BROWSER } from "./browser.ts";
 
 // B7 (BEHAVIOR.md): actions as templates, probes, and a sign-in's client fingerprint, in workerd. Sign-ins start as the
@@ -19,7 +20,7 @@ const secrets = {
 const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } }] });
 const worker = server.getWorker();
 let base: URL;
-let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };
+let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "idFromString": (id: string) => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }>; "flush": () => Promise<number> } }; "DB": D1Database };
 
 before(async () => {
 	({ "url": base } = await server.listen());
@@ -72,11 +73,11 @@ async function client(headers: Record<string, string> = BROWSER): Promise<{ "jkt
 type Client = Awaited<ReturnType<typeof client>>;
 
 /** Signed in as someone new, for `as`: its tokens and grant. */
-async function signedIn(holder: Client, as = "editor"): Promise<{ "access_token": string; "refresh_token": string; "grantId": string }> {
+async function signedIn(holder: Client, as = "editor", githubId = 1_000_000 + Math.floor(Math.random() * 1e9)): Promise<{ "access_token": string; "refresh_token": string; "grantId": string }> {
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 	const id = env.GRANTS.newUniqueId();
-	const { code } = await env.GRANTS.get(id).begin({ "client": as, "githubId": 1_000_000 + Math.floor(Math.random() * 1e9), "github": { "accessToken": "ghu_test", "refreshToken": "ghr_test", "expiresAt": Date.now() + 3_600_000, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": challenge, "jkt": holder.jkt, "from": { "country": null, "ipHash": null, "traceId": null } });
+	const { code } = await env.GRANTS.get(id).begin({ "client": as, "githubId": githubId, "github": { "accessToken": "ghu_test", "refreshToken": "ghr_test", "expiresAt": Date.now() + 3_600_000, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": challenge, "jkt": holder.jkt, "from": { "country": null, "ipHash": null, "traceId": null } });
 	const response = await holder.send("POST", "/token", { "form": { "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": as } });
 
 	assert.equal(response.status, 200, await response.clone().text());
@@ -196,4 +197,127 @@ test("a refresh takes what's tolerated into how the client is known: the browser
 	assert.equal(refreshed.status, 200);
 	assert.equal((await holder.send("GET", "/sessions", { "accessToken": (await refreshed.json() as { "access_token": string }).access_token })).status, 200, "Chrome 141 again");
 	assert.deepEqual((await rows(grantId, "client_changed")).map((row) => row.reason), ["medium: user-agent changed", "strong: major changed"]);
+});
+
+// ── The likely next action (B8) ────────────────────────────────────────────────────────────────────────────────────
+
+const flush = async (grantId: string): Promise<number> => env.GRANTS.get(env.GRANTS.idFromString(grantId)).flush();
+
+/** A sign-in's score as the model has it: transitions scored, and their mean surprise in bits. */
+async function score(grantId: string): Promise<{ "steps": number; "mean": number; "top": { "from": string; "to": string; "bits": number }[] }> {
+	const row = await env.DB.prepare("SELECT steps, bits, top FROM scores WHERE grant_id = ?").bind(grantId).first<{ "steps": number; "bits": number; "top": string }>();
+
+	return { "steps": row?.steps ?? 0, "mean": row === null || row.steps === 0 ? 0 : row.bits / row.steps, "top": JSON.parse(row?.top ?? "[]") as { "from": string; "to": string; "bits": number }[] };
+}
+
+/** Every action as though first seen long ago: the tests' model is days old, not minutes, so nothing is "new". */
+const settle = async (): Promise<void> => {
+	await env.DB.prepare("UPDATE actions SET first_seen = 0").run();
+};
+
+test("an action is its route's template, the proxy's template, or no route at all", () => {
+	assert.equal(actionOf("GET", new URL("https://api.test/github/api/repos/octo/hello/git/trees/main?recursive=1"), "/github/api/*"), "GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive");
+	assert.equal(actionOf("DELETE", new URL("https://api.test/github/api/repos/octo/hello"), "/github/api/*"), "DELETE /github/api/… (refused)");
+	assert.equal(actionOf("POST", new URL("https://api.test/sessions/abc/revoke"), "/sessions/:id/revoke"), "POST /sessions/:id/revoke");
+	assert.equal(actionOf("GET", new URL("https://api.test/wp-admin"), "/*"), "GET (no such route)");
+});
+
+test("the editor's flows name only calls the proxy allows", () => {
+	for (const action of new Set(FLOWS.flat())) {
+		const [method = "", template = ""] = action.split(" ");
+
+		if (template.startsWith("/github/")) {
+			const [path = "", names] = template.split("?");
+			const url = new URL(`https://api.test${path.replaceAll(":owner", "octo").replaceAll(":repo", "hello").replaceAll(":ref", "main")}${names === undefined ? "" : `?${names === "service" ? "service=git-upload-pack" : `${names}=1`}`}`);
+
+			assert.equal(actionOf(method, url, "/github/*"), action, action);
+		}
+	}
+});
+
+test("the score: a step the editor takes is unsurprising, a jump it never makes is, a new action is capped, and too little behind an action isn't scored", () => {
+	const model: Model = { "counts": new Map(), "out": new Map(), "into": new Map(), "total": 0, "firstSeen": new Map([["GET /github/api/repos/:owner/:repo/git/blobs/:ref", 0], ["POST /account/delete", 0]]) };
+	const from = "GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive";
+	const usual = surprisal(model, { "from": from, "to": "GET /github/api/repos/:owner/:repo/git/blobs/:ref", "gap": 0 }) as number;
+	const jump = surprisal(model, { "from": from, "to": "POST /account/delete", "gap": 0 }) as number;
+
+	assert.ok(usual < 3, `a flow's step: ${usual} bits`);
+	assert.ok(jump > usual + 3, `a jump: ${jump} bits`);
+	assert.equal(surprisal(model, { "from": from, "to": "GET /brand-new-feature", "gap": 0 }), 4, "new: capped");
+	assert.equal(surprisal(model, { "from": "GET /never-seen", "to": "POST /account/delete", "gap": 0 }), undefined, "nothing behind it");
+});
+
+test("a sign-in's steps are kept in its Grant and flushed into the model: our routes, the admin's, and the proxy's, by template", async () => {
+	const editor = await client();
+	const { access_token, grantId } = await signedIn(editor);
+
+	await editor.send("GET", "/sessions", { "accessToken": access_token });
+	await editor.send("GET", "/github/api/repos/octo/hello/git/trees/main?recursive=1", { "accessToken": access_token });
+
+	const admin = await client();
+	const owner = await signedIn(admin, "admin", 9398474);
+
+	await admin.send("GET", "/admin/users/someone", { "accessToken": owner.access_token });
+	await flush(grantId);
+	await flush(owner.grantId);
+
+	const transitions = (await env.DB.prepare("SELECT from_action, to_action FROM transitions").all<{ "from_action": string; "to_action": string }>()).results.map((row) => `${row.from_action} → ${row.to_action}`);
+
+	for (const expected of [`${START} → POST /token`, "POST /token → GET /sessions", "GET /sessions → GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive", "POST /token → GET /admin/users/:id"]) {
+		assert.ok(transitions.includes(expected), expected);
+	}
+
+	assert.equal(JSON.stringify(transitions).includes("octo"), false, "templates only");
+	assert.equal(await flush(grantId), 0, "flushed once: nothing left");
+});
+
+test("a sign-in doing what the editor does scores lower than one jumping about, and the model learns: the second jump surprises less", async (context) => {
+	const usual = await client();
+	const editor = await signedIn(usual);
+
+	for (const path of ["/github/api/repos/octo/hello/git/trees/main?recursive=1", "/github/api/repos/octo/hello/git/blobs/a", "/github/api/repos/octo/hello/git/blobs/b", "/github/api/repos/octo/hello/git/blobs/c"]) {
+		await usual.send("GET", path, { "accessToken": editor.access_token });
+	}
+
+	const jumping = async (): Promise<string> => {
+		const odd = await client();
+		const signed = await signedIn(odd);
+
+		for (const [method, path] of [["GET", "/github/api/repos/octo/hello/git/blobs/a"], ["POST", "/github/api/user/repos"], ["GET", "/github/api/repos/octo/hello/git/trees/main?recursive=1"], ["GET", "/sessions"], ["GET", "/github/api/repos/octo/hello/git/commits/a"]] as const) {
+			await odd.send(method, path, { "accessToken": signed.access_token });
+		}
+
+		return signed.grantId;
+	};
+	const first = await jumping();
+
+	await flush(editor.grantId);
+	await settle();
+	await flush(first);
+
+	const second = await jumping();
+
+	await settle();
+	await flush(second);
+
+	const [ours, theirs, again] = [await score(editor.grantId), await score(first), await score(second)];
+
+	context.diagnostic(`mean bits: the editor's ${ours.mean.toFixed(2)} (${ours.steps} steps), a jumper's ${theirs.mean.toFixed(2)} (${theirs.steps}), the next jumper's ${again.mean.toFixed(2)}; most surprising: ${theirs.top.map((step) => `${step.from} → ${step.to} ${step.bits}`).join("; ")}`);
+	assert.ok(ours.steps > 0 && theirs.steps > 0);
+	assert.ok(ours.mean < theirs.mean, `the editor's ${ours.mean} bits < a jumper's ${theirs.mean}`);
+	assert.ok(again.mean < theirs.mean, `learned: ${again.mean} < ${theirs.mean}`);
+	assert.ok(theirs.top.length > 0 && theirs.top.every((step) => !JSON.stringify(step).includes("octo")), "its most surprising steps, as templates");
+});
+
+test("the daily cron fades the model's counts, and drops what's faded to nothing", async () => {
+	await env.DB.batch([
+		env.DB.prepare("INSERT INTO transitions (from_action, to_action, gap, count) VALUES ('decay: a', 'decay: b', 0, 1)"),
+		env.DB.prepare("INSERT INTO transitions (from_action, to_action, gap, count) VALUES ('decay: a', 'decay: c', 0, 0.04)")
+	]);
+	await worker.scheduled({ "cron": "17 3 * * *" });
+
+	const left = (await env.DB.prepare("SELECT to_action, count FROM transitions WHERE from_action = 'decay: a'").all<{ "to_action": string; "count": number }>()).results;
+
+	assert.deepEqual(left.map((row) => row.to_action), ["decay: b"]);
+	assert.ok(Math.abs((left[0]?.count ?? 0) - 0.97) < 1e-9);
 });

@@ -188,3 +188,200 @@ export function differences(base: Fingerprint, now: Fingerprint): Difference[] {
 
 	return found;
 }
+
+// ── The likely next action (B8) ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a signed-in request is, as the model counts it: `METHOD /route` with the router's template (`route`, Hono's
+ * `routePath(c, -1)`), the proxy's template for a proxied call, and for a request that matched no route of its own
+ * (only a wildcard middleware did), `METHOD (no such route)`.
+ */
+export function actionOf(method: string, url: URL, route: string): string {
+	const base = url.pathname.startsWith("/github/api/") ? "api" : url.pathname.startsWith("/github/git/") ? "git" : undefined;
+
+	if (base !== undefined) {
+		const call = proxied(base, method, url.pathname.slice(`/github/${base}`.length), url.search);
+
+		return call === undefined ? `${method} /github/${base}/… (refused)` : `${method} /github/${base}${call.template.slice(method.length + 1)}`;
+	}
+
+	return route.endsWith("*") ? `${method} (no such route)` : `${method} ${route}`;
+}
+
+/** Where a sign-in's chain starts: before its first request. */
+export const START = "(start)";
+
+/** The gap since the sign-in's last request, coarsely: under 100 ms, under 1 s, under 10 s, longer. */
+export function gapOf(milliseconds: number): number {
+	return milliseconds < 100 ? 0 : milliseconds < 1000 ? 1 : milliseconds < 10_000 ? 2 : 3;
+}
+
+const GAPS = 4;
+
+/**
+ * What the editor and the admin app do, in order (packages/editor/shell/github.ts, git-clone.ts, session.ts;
+ * packages/admin/src): the model's prior, so it starts from the code rather than from nothing, and so a flow that's in
+ * the code is never unusual however few people have used it yet. Each step is counted PRIOR_WEIGHT times: enough that
+ * every action in a flow can be scored from the first day (OBSERVED).
+ */
+export const FLOWS: string[][] = [
+	// Signing in to the editor: the code redeemed, then who it is.
+	[START, "POST /token", "GET /github/api/user"],
+	// Opening a repository: what it is, then a clone.
+	["GET /github/api/user", "GET /github/api/repos/:owner/:repo", "GET /github/git/:owner/:repo.git/info/refs?service", "POST /github/git/:owner/:repo.git/git-upload-pack"],
+	// Or through the API: its tree, then each blob.
+	["GET /github/api/repos/:owner/:repo", "GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive", "GET /github/api/repos/:owner/:repo/git/blobs/:ref", "GET /github/api/repos/:owner/:repo/git/blobs/:ref"],
+	// Committing: the branch, its commit, each blob, a tree, the commit, the branch moved.
+	["GET /github/api/repos/:owner/:repo/git/ref/:ref", "GET /github/api/repos/:owner/:repo/git/commits/:ref", "POST /github/api/repos/:owner/:repo/git/blobs", "POST /github/api/repos/:owner/:repo/git/blobs", "POST /github/api/repos/:owner/:repo/git/trees", "POST /github/api/repos/:owner/:repo/git/commits", "PATCH /github/api/repos/:owner/:repo/git/refs/:ref"],
+	// A new repository, its first commit, then published.
+	["GET /github/api/user", "POST /github/api/user/repos", "GET /github/api/repos/:owner/:repo/git/ref/:ref"],
+	["PATCH /github/api/repos/:owner/:repo/git/refs/:ref", "POST /github/api/repos/:owner/:repo/pages"],
+	// Your sign-ins, and your account.
+	["GET /sessions", "POST /sessions/:id/revoke"],
+	["GET /sessions", "POST /sessions/revoke-all"],
+	["GET /sessions", "POST /account/delete"],
+	// The admin app: who you are, the overview's reads, then a page.
+	[START, "POST /token", "GET /admin/me", "GET /admin/users", "GET /admin/users", "GET /admin/sessions", "GET /admin/audit"],
+	["GET /admin/users", "GET /admin/users/:id"],
+	["GET /admin/sessions", "POST /admin/sessions/:id/revoke"],
+	["GET /admin/me", "GET /admin/traffic"]
+];
+
+const PRIOR_WEIGHT = 20;
+
+/** FLOWS as counts: from → to → weight. */
+const PRIOR = new Map<string, Map<string, number>>();
+
+for (const flow of FLOWS) {
+	for (let index = 1; index < flow.length; index += 1) {
+		const next = PRIOR.get(flow[index - 1] as string) ?? new Map<string, number>();
+
+		next.set(flow[index] as string, (next.get(flow[index] as string) ?? 0) + PRIOR_WEIGHT);
+		PRIOR.set(flow[index - 1] as string, next);
+	}
+}
+
+/** A transition: from one action to the next, with the gap between them. */
+export interface Step { "from": string; "to": string; "gap": number }
+
+/** What's known of the transitions a score needs: the counts out of their actions, how common each action is, and when
+ *  each was first seen. */
+export interface Model {
+	/** `from\nto\ngap` → count. */
+	"counts": Map<string, number>;
+	/** from → its transitions' total. */
+	"out": Map<string, number>;
+	/** to → how often it was the next action, from anything. */
+	"into": Map<string, number>;
+	"total": number;
+	"firstSeen": Map<string, number>;
+}
+
+/** A transition is scored once its starting action has this much behind it (counts and prior together). */
+const OBSERVED = 20;
+
+/** An action first seen this recently is new: a transition into it scores at most NEW_CAP. */
+const NEW_DAYS = 7;
+
+const NEW_CAP = 4;
+
+/**
+ * How surprising a transition is, in bits: −log₂ of its probability. The next action's probability is its count out of
+ * `from` plus the prior, smoothed toward how common the action is anywhere (so an action that's common but never
+ * followed this one isn't impossible); the gap's is add-one over its four buckets. Undefined when `from` hasn't enough
+ * behind it to say. A new action's surprise is capped: a feature that just shipped isn't unusual.
+ */
+export function surprisal(model: Model, step: Step, now = Date.now()): number | undefined {
+	const prior = PRIOR.get(step.from);
+	const priorOut = [...prior?.values() ?? []].reduce((sum, weight) => sum + weight, 0);
+	const out = (model.out.get(step.from) ?? 0) + priorOut;
+
+	if (out < OBSERVED) {
+		return undefined;
+	}
+
+	const pair = [0, 1, 2, 3].reduce((sum, gap) => sum + (model.counts.get(`${step.from}\n${step.to}\n${gap}`) ?? 0), 0);
+	const anywhere = ((model.into.get(step.to) ?? 0) + 1) / (model.total + model.into.size + 1);
+	const next = (pair + (prior?.get(step.to) ?? 0) + anywhere) / (out + 1);
+	const gap = ((model.counts.get(`${step.from}\n${step.to}\n${step.gap}`) ?? 0) + 1) / (pair + GAPS);
+	const bits = -Math.log2(next * gap);
+	const seen = model.firstSeen.get(step.to);
+
+	return seen === undefined || now - seen < NEW_DAYS * 86_400_000 ? Math.min(bits, NEW_CAP) : bits;
+}
+
+/** The most surprising transitions a score keeps. */
+const TOP = 5;
+
+/**
+ * A sign-in's transitions since its last flush (the Grant's, hourly): scored against the model as it is (so a sign-in
+ * never explains itself), its score updated, then added to the model. Says how many were scored.
+ */
+export async function learn(db: D1Database, grantId: string, pending: (Step & { "count": number })[], now = Date.now()): Promise<number> {
+	if (pending.length === 0) {
+		return 0;
+	}
+
+	const froms = [...new Set(pending.map((step) => step.from))];
+	const tos = [...new Set(pending.map((step) => step.to))];
+	const [counts, into, seen, score] = await db.batch([
+		db.prepare(`SELECT from_action, to_action, gap, count FROM transitions WHERE from_action IN (${froms.map(() => "?").join(", ")})`).bind(...froms),
+		// How common each action is: the whole table, summed. Small while the vocabulary is.
+		db.prepare("SELECT to_action, SUM(count) AS count FROM transitions GROUP BY to_action"),
+		db.prepare(`SELECT action, first_seen FROM actions WHERE action IN (${tos.map(() => "?").join(", ")})`).bind(...tos),
+		db.prepare("SELECT steps, bits, top FROM scores WHERE grant_id = ?").bind(grantId)
+	]);
+	const model: Model = { "counts": new Map(), "out": new Map(), "into": new Map(), "total": 0, "firstSeen": new Map() };
+
+	for (const row of (counts?.results ?? []) as { "from_action": string; "to_action": string; "gap": number; "count": number }[]) {
+		model.counts.set(`${row.from_action}\n${row.to_action}\n${row.gap}`, row.count);
+		model.out.set(row.from_action, (model.out.get(row.from_action) ?? 0) + row.count);
+	}
+
+	for (const row of (into?.results ?? []) as { "to_action": string; "count": number }[]) {
+		model.into.set(row.to_action, row.count);
+		model.total += row.count;
+	}
+
+	for (const row of (seen?.results ?? []) as { "action": string; "first_seen": number }[]) {
+		model.firstSeen.set(row.action, row.first_seen);
+	}
+
+	const before = (score?.results[0] ?? { "steps": 0, "bits": 0, "top": "[]" }) as { "steps": number; "bits": number; "top": string };
+	let steps = before.steps;
+	let bits = before.bits;
+	let top = JSON.parse(before.top) as (Step & { "bits": number })[];
+	let scored = 0;
+
+	for (const step of pending) {
+		const surprise = surprisal(model, step, now);
+
+		if (surprise !== undefined) {
+			steps += step.count;
+			bits += surprise * step.count;
+			scored += step.count;
+			top.push({ "from": step.from, "to": step.to, "gap": step.gap, "bits": Math.round(surprise * 100) / 100 });
+		}
+	}
+
+	top = top.sort((a, b) => b.bits - a.bits).slice(0, TOP);
+
+	await db.batch([
+		...pending.map((step) => db.prepare("INSERT INTO transitions (from_action, to_action, gap, count) VALUES (?, ?, ?, ?) ON CONFLICT (from_action, to_action, gap) DO UPDATE SET count = count + excluded.count").bind(step.from, step.to, step.gap, step.count)),
+		...tos.map((action) => db.prepare("INSERT INTO actions (action, first_seen) VALUES (?, ?) ON CONFLICT (action) DO NOTHING").bind(action, now)),
+		db.prepare("INSERT INTO scores (grant_id, steps, bits, top, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (grant_id) DO UPDATE SET steps = excluded.steps, bits = excluded.bits, top = excluded.top, updated_at = excluded.updated_at").bind(grantId, steps, bits, JSON.stringify(top), now)
+	]);
+
+	return scored;
+}
+
+/** Each day the counts fade (a half-life of about three weeks), so the model follows the product; what fades to
+ *  almost nothing goes. Says how many transitions went. */
+export async function decay(db: D1Database): Promise<number> {
+	const [, removed] = await db.batch([
+		db.prepare("UPDATE transitions SET count = count * 0.97"),
+		db.prepare("DELETE FROM transitions WHERE count < 0.05")
+	]);
+
+	return removed?.meta.changes ?? 0;
+}

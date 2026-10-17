@@ -3,10 +3,11 @@ import type { JWK } from "jose";
 import type { Grant } from "./grant.ts";
 import { nonces, publicKey, signAccessToken, verifyAccessToken, verifyProof } from "@brianjenkins94/util/auth/dpop";
 import { createMiddleware } from "hono/factory";
+import { routePath } from "hono/route";
 import type { Subject } from "./audit.ts";
 import { audit, origin } from "./audit.ts";
 import type { Difference } from "./behavior.ts";
-import { described, fingerprint } from "./behavior.ts";
+import { actionOf, described, fingerprint } from "./behavior.ts";
 import type { AppEnv, Bindings } from "./env.ts";
 
 /**
@@ -106,7 +107,7 @@ export async function tokenEndpoint(context: Context<AppEnv>): Promise<Response>
 	const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, {
 		"nonce": nonce(context.env).check,
 		"seen": async (jti, expires) => {
-			const use = await grant.stub.use(jti, expires, print);
+			const use = await grant.stub.use(jti, expires, { "print": print, "action": "POST /token" });
 
 			changed = use.changed;
 
@@ -145,7 +146,7 @@ export async function revokeEndpoint(context: Context<AppEnv>): Promise<Response
 	const grant = await grantOf(context, presented);
 
 	if (grant !== undefined && grant !== "revoked") {
-		const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, { "nonce": nonce(context.env).check, "seen": async (jti, expires) => (await grant.stub.use(jti, expires)).seen });
+		const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, { "nonce": nonce(context.env).check, "seen": async (jti, expires) => (await grant.stub.use(jti, expires, { "action": "POST /revoke" })).seen });
 
 		if (!("error" in proof)) {
 			await grant.stub.revokeWith({ "refreshToken": presented as string, "jkt": proof.jkt, "from": await origin(context) });
@@ -181,7 +182,8 @@ async function unauthorized(context: Context<AppEnv>, error: "invalid_token" | "
  * Who's signed in, by DPoP: `Authorization: DPoP <access token>` (ours, unexpired, bound to a key), a proof from that key
  * for this request with the access token's hash and a current nonce, a jti the grant hasn't seen, and a live grant. The
  * sign-in, or the 401 (recorded) that says why not. Its client is compared with how the sign-in's client is known
- * (BEHAVIOR.md), and a difference that matters is recorded the first time it's seen.
+ * (BEHAVIOR.md), and a difference that matters is recorded the first time it's seen; and what it's doing (its action,
+ * the matched route's template) is the next step of the sign-in's chain (B8).
  */
 export async function signedIn(context: Context<AppEnv>): Promise<{ "user": string; "grant": string; "client": unknown } | Response> {
 	const [scheme, accessToken] = (context.req.header("authorization") ?? "").split(" ");
@@ -210,7 +212,7 @@ export async function signedIn(context: Context<AppEnv>): Promise<{ "user": stri
 	const proof = await verifyProof({ "method": context.req.method, "url": context.req.url, "proof": context.req.header("dpop"), "accessToken": accessToken, "jkt": token.claims.cnf.jkt }, {
 		"nonce": nonce(context.env).check,
 		"seen": async (jti, expires) => {
-			const use = await stub.use(jti, expires, print);
+			const use = await stub.use(jti, expires, { "print": print, "action": actionOf(context.req.method, new URL(context.req.url), routePath(context, -1)) });
 
 			active = use.active;
 			changed = use.changed;

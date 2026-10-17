@@ -27,8 +27,8 @@ Shown in the admin app (packages/admin/README.md, B7–B9).
   guessed, so it's kept as a keyed hash, enough to tell one guess from a repeat). A few probes in a short while end the
   sign-in, as proxy denials do.
 - **New features are tolerated by construction:** a route that ships is in the vocabulary from that deploy on, so it's
-  never a probe. Each action also notes the deploy it was first seen in (the Worker's version metadata), so the
-  statistics below treat it as new rather than unlikely.
+  never a probe. The model also notes when each action was first seen, so the statistics below treat a new one as new
+  rather than unlikely.
 - `proxy_call` keeps the template, the repository's tag (`repo#` and a keyed hash of `owner/name`, lowercased) and a
   keyed hash of its other values (HMAC under AUDIT_KEY, as IPs are). "Was it repository X?" is the admin audit log's
   `repo` filter, which hashes X the same way; the log itself doesn't say which it was. A refused call (`proxy_denied`)
@@ -63,21 +63,35 @@ Shown in the admin app (packages/admin/README.md, B7–B9).
 
 ## The likely next action
 
+- **Actions:** every signed-in request names its action as it reaches the Grant (`Grant.use`, from `signedIn`): the
+  matched route's template (Hono's `routePath(c, -1)`, so a route added to the router is named the day it ships), the
+  proxy's template for a proxied call, `(refused)` for a call the proxy refuses, `(no such route)` for a probe. The
+  token endpoint's are `POST /token` (a sign-in's first action, then each refresh) and `POST /revoke`.
 - A sign-in's actions in order, each with a coarse gap since the last (under 100 ms, under 1 s, under 10 s, longer),
-  are a chain. The model is how often each action follows each other one, across every sign-in: counts only, with no
-  user or sign-in in them.
-- **Where the counts live:** the Grant keeps its own sign-in's transitions (it sees every request already) and adds them
-  to the shared counts in D1 on an hourly alarm, batched. The daily cron decays the shared counts (×0.97 a day, a
-  half-life of about three weeks), so the model follows the product as it changes.
-- **The score:** how surprising a sign-in's transitions were, on average (−log of each one's probability, smoothed,
-  falling back to how common the next action is on its own). A transition is scored only once its starting action has
-  enough observations, and a transition into an action first seen in the last few deploys is counted as new, capped:
-  so a feature that just shipped doesn't make everyone who uses it look unusual.
-- **A prior from code:** few people use the editor yet, so the counts start from what the editor does: its flows
-  (opening a repository is a ref, a commit, a tree and its blobs; a commit is blobs, a tree, a commit and a ref) and the
-  runs of our own end-to-end tests.
+  are a chain, starting from `(start)`. The model is how often each action follows each other one, by gap, across
+  every sign-in: counts only, with no user or sign-in in them (D1 `transitions`, migrations/0006).
+- **Where the counts live:** the Grant keeps its last action and its transitions since its last flush (its `walk` and
+  `pending` tables), and adds them to the shared counts on an alarm an hour after its first unflushed step (`flush`,
+  batched; also when the code-expiry alarm fires). The daily cron decays the shared counts (×0.97 a day, a half-life
+  of about three weeks) and drops what has faded below 0.05, so the model follows the product as it changes.
+- **The score** (`surprisal` in src/behavior.ts): each transition's surprise in bits, −log₂ of its probability: the
+  next action's count out of the last one plus the prior, smoothed toward how common the next action is anywhere (so a
+  common action that never followed this one isn't impossible), times the gap's (add-one over its four buckets). A
+  transition is scored only once its starting action has 20 counts behind it (real and prior). A transition into an
+  action first seen in the last 7 days is new, and scores at most 4 bits: a feature that just shipped doesn't make
+  everyone who uses it look unusual. Each flush scores its transitions against the model as it was, before adding
+  them, so a sign-in never explains itself. A sign-in's score (D1 `scores`) is its scored steps, their bits in total
+  (the mean is the score) and its five most surprising transitions, as templates.
+- **A prior from code:** few people use the editor yet, so the counts start from what the editor and the admin app do
+  (`FLOWS`: signing in, opening a repository by clone or by the API, committing, a new repository published, your
+  sign-ins and account, the admin app's pages), each step counted 20 times, which is enough for every action in a flow
+  to be scored from the first day. The runs of our own end-to-end tests as a second source: not yet.
+- In the tests (workerd), the editor's flow scores about 2.2 bits a step and a sign-in jumping between calls the editor
+  makes but never in that order about 6.1; the next one to jump the same way, after the model has learned from the
+  first, about 5.2.
 - **Shown:** the sign-ins with the highest scores, each with the transitions that made it so, as templates, on the
-  admin app's Unusual page. Ending one is B6's End.
+  admin app's Unusual page (B9). Ending one is B6's End.
+- **Kept and erased with the account:** a purged account's scores go with its grants.
 
 ## Never kept
 
@@ -94,8 +108,11 @@ person. A flag points at a sign-in (a grant id); the audit log already says whos
   test/admin.test.ts, in workerd: a route the router has is never a probe (even its own 404), a header added and a
   browser update are tolerated, a downgrade after a refresh isn't. The tests' clients send a browser's headers
   (test/browser.ts). Tried with a real Chromium sign-in through the harness: no `client_unusual`, no `client_changed`.
-- **B8 · the model.** Transitions in the Grant, flushed hourly into D1 (a migration), decayed daily, seeded from the
-  editor's flows; the score.
+- **B8 · the model.** *Built 2026-10-17* (src/behavior.ts: `actionOf`, `FLOWS`, `surprisal`, `learn`, `decay`; the
+  Grant's `walk`, `pending` and `flush`; migrations/0006): transitions in the Grant, flushed hourly into D1, decayed
+  daily, seeded from the editor's and the admin app's flows; each sign-in's score. 6 tests in test/behavior.test.ts:
+  actions named by template (ours, the admin's, the proxy's), every flow a call the proxy allows, the score's
+  arithmetic, flushing, scoring and learning, and the decay.
 - **B9 · the Unusual page.** `GET /admin/unusual` (a new permission, `behavior:read`) and the admin app's page.
 
 ## Open questions

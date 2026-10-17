@@ -22,7 +22,7 @@ after(async () => {
 	await server.close();
 });
 
-test("a sign-in writes a user, a grant, two audit rows and their copies, and the Grant's state and its client's fingerprint; GitHub's tokens read as sealed, header values not at all", async () => {
+test("a sign-in writes a user, a grant, two audit rows and their copies, and the Grant's state, its client's fingerprint and its first step; GitHub's tokens read as sealed, header values not at all", async () => {
 	const env = await server.getWorker().getEnv() as { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } } };
 	const { privateKey, publicKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
@@ -52,7 +52,9 @@ test("a sign-in writes a user, a grant, two audit rows and their copies, and the
 		"r2:AUDIT_COPIES": "+2 ~0 -0",
 		"GRANTS:<grant>:state": "+1 ~0 -0",
 		"GRANTS:<grant>:seen_jti": "+1 ~0 -0",
-		"GRANTS:<grant>:fingerprint": "+13 ~0 -0"
+		"GRANTS:<grant>:fingerprint": "+13 ~0 -0",
+		"GRANTS:<grant>:walk": "+1 ~0 -0",
+		"GRANTS:<grant>:pending": "+1 ~0 -0"
 	});
 	assert.deepEqual(changes["d1:audit"]?.added.map((row) => row["event"]), ["login", "token_issued"]);
 
