@@ -2,6 +2,7 @@ import type { AppEnv } from "./env.ts";
 import { Hono } from "hono";
 import { ROUTINE } from "./audit-copies.ts";
 import { audit, origin } from "./audit.ts";
+import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
 import { adminSession } from "./tokens.ts";
 import { trafficEndpoint } from "./traffic.ts";
@@ -78,6 +79,8 @@ admin.get("/sessions", requires("sessions:read"), async (context) => {
 /**
  * The audit log, newest first, filtered as `npm run audit` filters it: `event`, `user`, `grant`, `ip` (a hash),
  * `suspicious` (everything but the everyday record), `since` (`24h`, `7d`), and `before` (an id, for the next page).
+ * And `repo` (`owner/name`): the proxy's calls about that repository, found by hashing its name as the log does
+ * (BEHAVIOR.md); the log itself never names one.
  */
 admin.get("/audit", requires("audit:read"), async (context) => {
 	const query = context.req.query();
@@ -90,6 +93,11 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 			where.push(`${column} = ?`);
 			values.push(query[parameter]);
 		}
+	}
+
+	if (query["repo"] !== undefined && query["repo"] !== "") {
+		where.push("detail LIKE ?");
+		values.push(`% ${await repositoryTag(context.env, query["repo"])}%`);
 	}
 
 	if (query["suspicious"] === "true") {

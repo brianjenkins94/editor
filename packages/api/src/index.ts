@@ -9,11 +9,12 @@ import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
 import { deleteAccountEndpoint, purge, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
 import { admin } from "./admin.ts";
 import { audit, expire, origin } from "./audit.ts";
+import { keyed } from "./behavior.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { log } from "./log.ts";
 import { githubApi, githubGit } from "./proxy.ts";
 import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
-import { revokeEndpoint, session, tokenEndpoint } from "./tokens.ts";
+import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
 
 export { Attempt } from "./attempt.ts";
 export { Grant } from "./grant.ts";
@@ -135,7 +136,33 @@ app.on(["GET", "POST", "PATCH"], "/github/api/*", session, rateLimit("PROXY_BY_U
 
 app.on(["GET", "POST"], "/github/git/*", session, rateLimit("PROXY_BY_USER", byUser), githubGit);
 
-app.notFound((context) => context.json({ "error": "not_found" }, 404));
+/**
+ * A route that doesn't exist. Asked for by someone signed in, it's a probe (BEHAVIOR.md): something guessing at what the
+ * API has, which the editor never does (every route it calls is one the router has, whichever release it is). Recorded
+ * with its method and a keyed hash of the path (what was guessed), alerted, and counted with the proxy's refusals: a few
+ * end the sign-in. A request with credentials is checked as any signed-in request is (a nonce challenge included), so a
+ * probe is only ever pinned on a sign-in that made it. Without credentials it's the web's background noise: a 404, and
+ * the Traffic page's to show.
+ */
+app.notFound(async (context) => {
+	const signed = context.get("grant") !== undefined ? { "user": context.get("user"), "grant": context.get("grant") }
+		: context.req.header("authorization") === undefined ? undefined : await signedIn(context);
+
+	if (signed instanceof Response) {
+		return signed;
+	}
+
+	if (signed !== undefined) {
+		const from = await origin(context);
+		const url = new URL(context.req.url);
+
+		context.get("span").info("probe", { "method": context.req.method });
+		await audit(context.env, "probe", { "userId": signed.user, "grantId": signed.grant }, from, { "detail": `${context.req.method} #${await keyed(context.env, "values", url.pathname + url.search)}` });
+		await context.env.GRANTS.get(context.env.GRANTS.idFromString(signed.grant)).denied({ "from": from });
+	}
+
+	return context.json({ "error": "not_found" }, 404);
+});
 
 // The error's name only: a message can quote whatever input caused it.
 app.onError((error, context) => {

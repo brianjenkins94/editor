@@ -9,8 +9,11 @@ import { copyKey, ROUTINE, ROUTINE_DAYS, SUSPICIOUS_DAYS } from "./audit-copies.
  * - what happened to whose sign-in: login, tokens issued, refreshed, revoked;
  * - every request refused, and why. The one exception is the routine nonce challenge, which every client meets every
  *   few minutes;
- * - every call made through the proxy, reads as much as writes: what it was, GitHub's answer, and how many bytes it
- *   carried back — if something gets through, what it read is what matters;
+ * - every call made through the proxy, reads as much as writes: what it was (its template, and a keyed hash of its
+ *   values, so a repository's name isn't in the log: BEHAVIOR.md), GitHub's answer, and how many bytes it carried back
+ *   — if something gets through, what it read is what matters;
+ * - what a sign-in did that the editor doesn't (BEHAVIOR.md): a route that doesn't exist (`probe`), a client that isn't
+ *   a browser (`client_unusual`), a client whose headers changed (`client_changed`, which headers and how);
  * - where a request came from: Cloudflare's country, and an IP hash that only matches within a day.
  *
  * Each row is copied, once, to a locked R2 bucket (audit-copies.ts), so the record can be checked: what the Worker wrote
@@ -25,7 +28,8 @@ export type AuditEvent =
 	| "rate_limited" | "oversized"
 	| "proxy_call" | "proxy_denied" | "proxy_abuse"
 	| "account_deleted" | "account_restored" | "account_purged"
-	| "admin_access" | "admin_revoked";
+	| "admin_access" | "admin_revoked"
+	| "probe" | "client_unusual" | "client_changed";
 
 /** The retention (audit-copies.ts: ROUTINE_DAYS for the everyday record, SUSPICIOUS_DAYS for the rest), applied daily by
  *  the Worker's cron trigger. Says how many rows went. The copies expire on their own (the bucket's lifecycle rules). */
@@ -72,8 +76,9 @@ export interface Subject { "userId"?: string | null; "grantId"?: string | null }
 /** Why (a fixed reason string) and what (a proxied call, method and path). */
 export interface Particulars { "reason"?: string; "detail"?: string }
 
-/** Events that are someone doing what the editor never does, whatever their reason. */
-const ALARMING = new Set<AuditEvent>(["refresh_reuse_detected", "proxy_denied", "proxy_abuse", "rate_limited"]);
+/** Events that are someone doing what the editor never does, whatever their reason: a call it doesn't make, a route that
+ *  doesn't exist, a sign-in that isn't a browser's (BEHAVIOR.md). */
+const ALARMING = new Set<AuditEvent>(["refresh_reuse_detected", "proxy_denied", "proxy_abuse", "rate_limited", "probe", "client_unusual"]);
 
 /** Reasons that mean a token is in hands it shouldn't be: presented with another key's proof, or a proof replayed. */
 const THEFT = new Set(["key is not the one bound", "jti was seen before", "another key"]);
@@ -87,7 +92,8 @@ export async function audit(env: Bindings, event: AuditEvent, subject: Subject, 
 
 	await copy(env, copyKey(event, meta.last_row_id), { "id": meta.last_row_id, ...row });
 
-	if (ALARMING.has(event) || THEFT.has(particulars.reason ?? "")) {
+	// A sign-in's client changing strongly (BEHAVIOR.md: a browser becoming something else) alerts too; a medium change only shows.
+	if (ALARMING.has(event) || THEFT.has(particulars.reason ?? "") || (event === "client_changed" && particulars.reason?.startsWith("strong") === true)) {
 		await alert(env, event, subject, from, particulars);
 	}
 

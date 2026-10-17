@@ -4,6 +4,8 @@ import { base64url } from "jose";
 import { DurableObject } from "cloudflare:workers";
 import type { Origin } from "./audit.ts";
 import { audit, NOWHERE } from "./audit.ts";
+import type { Difference, Fingerprint } from "./behavior.ts";
+import { clientKind, differences } from "./behavior.ts";
 import type { Bindings } from "./env.ts";
 import { github as githubOrigins } from "./github.ts";
 
@@ -15,7 +17,9 @@ import { github as githubOrigins } from "./github.ts";
  *   - GitHub's tokens, sealed under TOKEN_KEK;
  *   - the authorization code (its hash, its PKCE challenge, 60 seconds to live) until it's redeemed;
  *   - the current refresh token's hash, and every earlier one's, for reuse detection;
- *   - the jtis of proofs it has seen, until they'd be too old anyway.
+ *   - the jtis of proofs it has seen, until they'd be too old anyway;
+ *   - its client's fingerprint (BEHAVIOR.md: which headers it sent, keyed hashes of them), from the code's redemption,
+ *     and how often each header has differed since, and how.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
  * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
  * GitHub's token is spent here, for the proxy (src/proxy.ts), and refreshed here, one refresh at a time: GitHub's refresh
@@ -100,6 +104,8 @@ export class Grant extends DurableObject<Bindings> {
 			CREATE TABLE IF NOT EXISTS seen_jti (jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 			CREATE TABLE IF NOT EXISTS denials (at INTEGER NOT NULL);
 			CREATE TABLE IF NOT EXISTS leases (id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+			CREATE TABLE IF NOT EXISTS fingerprint (name TEXT PRIMARY KEY, value TEXT);
+			CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
 		`);
 
 		// Added with the admin client (packages/admin): the grants that began before it have none, and are the editor's.
@@ -155,7 +161,7 @@ export class Grant extends DurableObject<Bindings> {
 	 * Redeem the code (once: it's gone whatever the outcome, so a verifier can't be guessed at) with the PKCE verifier and
 	 * a proof from the key the sign-in started with, by the client it started for. Gives the first refresh token.
 	 */
-	public async redeem({ code, verifier, jkt, client, from }: { "code": string; "verifier": string; "jkt": string; "client": string; "from": Origin }): Promise<Issued> {
+	public async redeem({ code, verifier, jkt, client, from, print }: { "code": string; "verifier": string; "jkt": string; "client": string; "from": Origin; "print"?: Fingerprint }): Promise<Issued> {
 		const state = this.state();
 
 		if (state === undefined || state.revoked_at !== null || state.code_hash === null) {
@@ -178,6 +184,18 @@ export class Grant extends DurableObject<Bindings> {
 
 		await audit(this.env, "token_issued", { "userId": state.user_id, "grantId": this.id }, from);
 
+		// The client as it is now is the one this sign-in is known by. One that isn't a browser is a script signing in
+		// for itself: recorded, by what it didn't send.
+		if (print !== undefined) {
+			this.remember(print);
+
+			const kind = clientKind(print);
+
+			if (kind.kind === "other") {
+				await audit(this.env, "client_unusual", { "userId": state.user_id, "grantId": this.id }, from, { "reason": `not a browser: no ${kind.missing.join(", no ")}` });
+			}
+		}
+
 		return { "ok": true, "userId": state.user_id, "refreshToken": refreshToken, "client": clientOf(state) };
 	}
 
@@ -185,7 +203,7 @@ export class Grant extends DurableObject<Bindings> {
 	 * Swap a refresh token for the next one, with a proof from the sign-in's key, by the client it's for. An earlier one,
 	 * used again, means two parties hold this sign-in's tokens: the grant is revoked.
 	 */
-	public async rotate({ refreshToken, jkt, client, from }: { "refreshToken": string; "jkt": string; "client": string; "from": Origin }): Promise<Issued> {
+	public async rotate({ refreshToken, jkt, client, from, print }: { "refreshToken": string; "jkt": string; "client": string; "from": Origin; "print"?: Fingerprint }): Promise<Issued> {
 		const state = this.state();
 
 		if (state === undefined || state.revoked_at !== null) {
@@ -212,19 +230,64 @@ export class Grant extends DurableObject<Bindings> {
 		await this.env.DB.prepare("UPDATE grants SET last_used_at = ? WHERE id = ?").bind(Date.now(), this.id).run();
 		await audit(this.env, "refreshed", { "userId": state.user_id, "grantId": this.id }, from);
 
+		// Refreshing takes the sign-in's key, so this is still its client: what's tolerated about how it differs now (a
+		// header added, the browser updated) becomes how it's known.
+		const known = this.known();
+
+		if (print !== undefined && known !== undefined) {
+			const tolerated = differences(known, print).filter((difference) => difference.strength === "tolerated");
+
+			for (const { name } of tolerated) {
+				this.sql.exec("INSERT INTO fingerprint (name, value) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET value = excluded.value", name, print[name] ?? null);
+			}
+		}
+
 		return { "ok": true, "userId": state.user_id, "refreshToken": next, "client": clientOf(state) };
 	}
 
-	/** Record a proof's jti (until `expires`), and say whether it was seen already, and whether the sign-in is live. */
-	public use(jti: string, expires: number): { "seen": boolean; "active": boolean } {
+	/**
+	 * Record a proof's jti (until `expires`), and say whether it was seen already, and whether the sign-in is live. Every
+	 * request's proof comes here, so its client's `print` is compared here too (BEHAVIOR.md): each way a header differs
+	 * from how the sign-in's client is known is counted (by how much it matters, so a tolerated change doesn't hide a later
+	 * one that matters), and the ones that matter are handed back the first time, for the Worker to record.
+	 */
+	public use(jti: string, expires: number, print?: Fingerprint): { "seen": boolean; "active": boolean; "changed": Difference[] } {
 		const now = Date.now();
 
 		this.sql.exec("DELETE FROM seen_jti WHERE expires < ?", now);
 
 		const seen = this.sql.exec("INSERT INTO seen_jti (jti, expires) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING", jti, expires).rowsWritten === 0;
 		const state = this.state();
+		const active = state !== undefined && state.revoked_at === null;
+		const known = this.known();
+		const changed: Difference[] = [];
 
-		return { "seen": seen, "active": state !== undefined && state.revoked_at === null };
+		if (active && !seen && print !== undefined && known !== undefined) {
+			for (const difference of differences(known, print)) {
+				const [{ "count": count } = { "count": 0 }] = this.sql.exec<{ "count": number }>("INSERT INTO differences (name, kind, strength, count) VALUES (?, ?, ?, 1) ON CONFLICT (name, kind, strength) DO UPDATE SET count = count + 1 RETURNING count", difference.name, difference.kind, difference.strength).toArray();
+
+				if (count === 1 && difference.strength !== "tolerated") {
+					changed.push(difference);
+				}
+			}
+		}
+
+		return { "seen": seen, "active": active, "changed": changed };
+	}
+
+	/** How this sign-in's client is known: its fingerprint, once the code has been redeemed. */
+	private known(): Fingerprint | undefined {
+		const rows = this.sql.exec<{ "name": string; "value": string | null }>("SELECT name, value FROM fingerprint").toArray();
+
+		return rows.length === 0 ? undefined : Object.fromEntries(rows.map((row) => [row.name, row.value]));
+	}
+
+	private remember(print: Fingerprint): void {
+		this.sql.exec("DELETE FROM fingerprint");
+
+		for (const [name, value] of Object.entries(print)) {
+			this.sql.exec("INSERT INTO fingerprint (name, value) VALUES (?, ?)", name, value);
+		}
 	}
 
 	/** Revoke with the current refresh token and a proof from the sign-in's key (RFC 7009, for the browser's sign-out). */
@@ -322,8 +385,9 @@ export class Grant extends DurableObject<Bindings> {
 	}
 
 	/**
-	 * The proxy refused this sign-in a call the editor never makes. A few in a short while is a session probing the
-	 * allowlist — a compromised one, or someone scripting it — so it ends. Says whether it did.
+	 * The proxy refused this sign-in a call the editor never makes, or it asked for a route that doesn't exist (a probe).
+	 * A few in a short while is a session probing — a compromised one, or someone scripting it — so it ends. Says whether
+	 * it did.
 	 */
 	public async denied({ from }: { "from": Origin }): Promise<boolean> {
 		const now = Date.now();

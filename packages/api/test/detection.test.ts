@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
+import { BROWSER } from "./browser.ts";
+import { keyed } from "../src/behavior.ts";
 
 // Detecting abuse (README.md, "Hardening"): the rate limits, the alert someone gets at once when a sign-in is used the
 // way only a thief or a script would use it (deduplicated, and never quoting a secret), and every proxied write recorded.
@@ -76,7 +78,7 @@ async function key(): Promise<{ "jkt": string; "send": (method: string, path: st
 			for (let attempt = 0; ; attempt += 1) {
 				const claims = { "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) } };
 				const proof = await new SignJWT(claims).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);
-				const headers: Record<string, string> = { "dpop": proof, "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
+				const headers: Record<string, string> = { ...BROWSER, "dpop": proof, "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
 				const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? body === undefined ? {} : { "body": body } : { "body": new URLSearchParams(form).toString() } });
 
 				nonce = response.headers.get("dpop-nonce") ?? nonce;
@@ -177,7 +179,7 @@ test("a stolen refresh token, used with another key, alerts too", async () => {
 	assert.match(alerts.slice(before)[0]?.body ?? "", /^\[editor-api local\] token_rejected: another key/u);
 });
 
-test("every call through the proxy is recorded — reads and writes, with GitHub's answer and the bytes it carried back", async () => {
+test("every call through the proxy is recorded — reads and writes, as templates with their values hashed, with GitHub's answer and the bytes it carried back", async () => {
 	const holder = await key();
 	const { accessToken, grantId } = await signedIn(holder);
 
@@ -187,11 +189,16 @@ test("every call through the proxy is recorded — reads and writes, with GitHub
 
 	const calls = (await env.DB.prepare("SELECT detail, reason FROM audit WHERE grant_id = ? AND event = 'proxy_call' ORDER BY id").bind(grantId).all<{ "detail": string; "reason": string }>()).results;
 
+	// "Was it octo/hello?" is answered by hashing it the same way; the log itself doesn't say (BEHAVIOR.md).
+	const hashed = async (values: string): Promise<string> => keyed({ "AUDIT_KEY": secrets.AUDIT_KEY } as Parameters<typeof keyed>[0], "values", values);
+	const repo = `repo#${await hashed("octo/hello")}`;
+
 	assert.deepEqual(calls, [
-		{ "detail": "POST /repos/octo/hello/git/blobs", "reason": "GitHub 200, 11 bytes" },
-		{ "detail": "GET /repos/octo/hello/git/trees/main?recursive=1", "reason": "GitHub 200, 11 bytes" },
-		{ "detail": "GET /octo/hello.git/info/refs?service=git-upload-pack", "reason": "GitHub 200, 11 bytes" }
+		{ "detail": `POST /repos/:owner/:repo/git/blobs ${repo}`, "reason": "GitHub 200, 11 bytes" },
+		{ "detail": `GET /repos/:owner/:repo/git/trees/:ref?recursive ${repo} #${await hashed("main\n?recursive=1")}`, "reason": "GitHub 200, 11 bytes" },
+		{ "detail": `GET /:owner/:repo.git/info/refs?service ${repo} #${await hashed("?service=git-upload-pack")}`, "reason": "GitHub 200, 11 bytes" }
 	]);
+	assert.equal(JSON.stringify(calls).includes("octo"), false, "no repository's name in the log");
 });
 
 test("the proxy is limited per user: 300 a minute", async () => {

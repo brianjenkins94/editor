@@ -3,6 +3,8 @@ import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
 import { PERMISSIONS, permissionsOf } from "../src/rbac.ts";
+import { BROWSER } from "./browser.ts";
+import { keyed } from "../src/behavior.ts";
 
 // B1 in workerd (packages/admin/README.md): the admin client, the Grant remembering its client, /admin/* for admin tokens
 // only, and roles from OWNERS. Sign-ins start as the GitHub callback starts them (Grant.begin), for either client.
@@ -49,7 +51,7 @@ async function browser(): Promise<{ "jkt": string; "send": (method: string, path
 		"send": async (method, path, { form, accessToken } = {}) => {
 			for (let attempt = 0; ; attempt += 1) {
 				const ath = accessToken === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accessToken)))) };
-				const headers: Record<string, string> = { "dpop": await proof(method, at(path), ath), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...accessToken === undefined ? {} : { "authorization": `DPoP ${accessToken}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
+				const headers: Record<string, string> = { ...BROWSER, "dpop": await proof(method, at(path), ath), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...accessToken === undefined ? {} : { "authorization": `DPoP ${accessToken}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
 				const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? {} : { "body": new URLSearchParams(form).toString() } });
 
 				nonce = response.headers.get("dpop-nonce") ?? nonce;
@@ -307,4 +309,20 @@ test("the admin's own sign-in is marked current in the lists", async () => {
 	const { sessions } = await (await holder.send("GET", "/admin/sessions", { "accessToken": access_token })).json() as { "sessions": { "id": string; "current": boolean }[] };
 
 	assert.deepEqual(sessions.filter((session) => session.current).map((session) => session.id), [grantId]);
+});
+
+test("/admin/audit?repo=: the proxy's calls about one repository, found by hashing its name as the log does", async () => {
+	const holder = await browser();
+	const { access_token } = await signedIn(holder, OWNER, "admin");
+	const tag = async (repository: string): Promise<string> => `repo#${await keyed({ "AUDIT_KEY": secrets.AUDIT_KEY } as Parameters<typeof keyed>[0], "values", repository)}`;
+	const marker = crypto.randomUUID();
+
+	await env.DB.batch([
+		env.DB.prepare("INSERT INTO audit (at, event, reason, detail) VALUES (?, 'proxy_call', ?, ?)").bind(Date.now(), marker, `GET /repos/:owner/:repo ${await tag("octo/hello")}`),
+		env.DB.prepare("INSERT INTO audit (at, event, reason, detail) VALUES (?, 'proxy_call', ?, ?)").bind(Date.now(), marker, `GET /repos/:owner/:repo ${await tag("octo/other")}`)
+	]);
+
+	const { rows } = await (await holder.send("GET", "/admin/audit?repo=Octo/Hello&event=proxy_call", { "accessToken": access_token })).json() as { "rows": { "reason": string; "detail": string }[] };
+
+	assert.deepEqual(rows.filter((row) => row.reason === marker).map((row) => row.detail), [`GET /repos/:owner/:repo ${await tag("octo/hello")}`], "case doesn't matter: GitHub's names don't");
 });

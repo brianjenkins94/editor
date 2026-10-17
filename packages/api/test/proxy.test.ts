@@ -7,6 +7,8 @@ import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT 
 import { createTestHarness } from "wrangler";
 import type { Copy, Row } from "../src/audit-copies.ts";
 import { compare, copyKey, parseKey } from "../src/audit-copies.ts";
+import { BROWSER } from "./browser.ts";
+import { keyed } from "../src/behavior.ts";
 
 // The GitHub proxy in workerd (README.md, "The proxy"): a signed-in browser's calls go through with the sign-in's GitHub
 // token, refreshed when it's close to expiring; anything the editor doesn't call is refused; sizes are capped.
@@ -83,7 +85,7 @@ const at = (path: string): string => new URL(path, base).href;
 /** A request from an IP of its own (TEST-NET-2), so the functional tests never meet the per-IP rate limits. */
 const anyIp = (): string => `198.51.100.${Math.floor(Math.random() * 254) + 1}`;
 
-const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...init.headers } });
+const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...BROWSER, ...init.headers } });
 
 type Answer = Awaited<ReturnType<typeof server.fetch>>;
 
@@ -162,7 +164,7 @@ test("a commit's writes go through: blobs, trees, commits, then moving the ref",
 	}
 });
 
-test("anything the editor doesn't call is refused, and audited with what it was", async () => {
+test("anything the editor doesn't call is refused, and audited with its method and its path hashed (what was guessed)", async () => {
 	const before = seen.length;
 	const calls = [["GET", "/github/api/user/emails"], ["GET", "/github/api/repos/octo/hello/collaborators"], ["POST", "/github/api/repos/octo/hello/git/refs/heads/main"], ["GET", "/github/api/repos/octo/hello/git/ref/heads%2F..%2F..%2Fsecret"], ["POST", "/github/git/octo/hello.git/git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs?service=git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs"]] as const;
 
@@ -176,7 +178,13 @@ test("anything the editor doesn't call is refused, and audited with what it was"
 
 		const details = (await env.DB.prepare("SELECT detail FROM audit WHERE grant_id = ? AND event = 'proxy_denied' ORDER BY id").bind(session.grantId).all<{ "detail": string }>()).results.map((row) => row.detail);
 
-		assert.deepEqual(details, batch.map(([method, path]) => `${method} ${path.replace(/^\/github\/(?:api|git)/u, "")}`));
+		const expected = await Promise.all(batch.map(async ([method, path]) => {
+			const [, base = "", rest = ""] = /^\/github\/(api|git)(.*)$/u.exec(path) ?? [];
+
+			return `${method} /github/${base}/… #${await keyed({ "AUDIT_KEY": secrets.AUDIT_KEY } as Parameters<typeof keyed>[0], "values", rest)}`;
+		}));
+
+		assert.deepEqual(details, expected);
 	}
 
 	assert.equal(seen.length, before, "none of it reached GitHub");

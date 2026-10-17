@@ -1,23 +1,18 @@
 import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { audit, NOWHERE, origin } from "./audit.ts";
+import { agentOf } from "./behavior.ts";
 
 /**
  * Your sessions, and your account (README.md, "Identity and the data we keep"), all behind `session`: the signed-in user
  * sees and ends only their own sign-ins, and can delete the account — which leaves nothing that points at them.
  */
 
-/** "Chrome on macOS": the browser and the OS from a User-Agent, and nothing more of it (it isn't kept). */
+/** "Chrome on macOS": the browser and the OS from a User-Agent (src/behavior.ts), and nothing more of it (it isn't kept). */
 export function deviceLabel(userAgent: string | undefined): string | undefined {
-	if (userAgent === undefined || userAgent === "") {
-		return undefined;
-	}
+	const agent = agentOf(userAgent);
 
-	// In this order: Edge's User-Agent names Chrome and Safari too, Chrome's names Safari, an iPad's names Mac OS X.
-	const browser = /Edg\//u.test(userAgent) ? "Edge" : /Firefox\//u.test(userAgent) ? "Firefox" : /Chrome\//u.test(userAgent) ? "Chrome" : /Safari\//u.test(userAgent) ? "Safari" : "A browser";
-	const system = /iPhone|iPad/u.test(userAgent) ? "iOS" : /Android/u.test(userAgent) ? "Android" : /Mac OS X/u.test(userAgent) ? "macOS" : /Windows/u.test(userAgent) ? "Windows" : /Linux/u.test(userAgent) ? "Linux" : undefined;
-
-	return system === undefined ? browser : `${browser} on ${system}`;
+	return agent === undefined ? undefined : agent.os === null ? agent.browser : `${agent.browser} on ${agent.os}`;
 }
 
 const grant = (context: Context<AppEnv>, id: string): DurableObjectStub<import("./grant.ts").Grant> => context.env.GRANTS.get(context.env.GRANTS.idFromString(id));

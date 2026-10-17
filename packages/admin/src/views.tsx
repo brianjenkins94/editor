@@ -356,9 +356,12 @@ export function Audit({ query }: { "query": URLSearchParams }) {
 			<h1 class="wa-heading-xl">Audit log</h1>
 			<form class="wa-cluster wa-gap-m filters" onSubmit={(event) => {
 				event.preventDefault();
-				location.hash = filters({ "event": (event.currentTarget.elements.namedItem("event") as HTMLInputElement).value.trim() });
+				const field = (name: string): string => (event.currentTarget.elements.namedItem(name) as HTMLInputElement).value.trim();
+
+				location.hash = filters({ "event": field("event"), "repo": field("repo") });
 			}}>
 				<wa-input name="event" label="Event" placeholder="auth_refused" value={query.get("event") ?? ""} with-clear />
+				<wa-input name="repo" label="Repository" placeholder="owner/name" value={query.get("repo") ?? ""} with-clear />
 				<wa-select label="Since" value={query.get("since") ?? ""} onChange={(event: Event) => {
 					location.hash = filters({ "since": (event.target as HTMLSelectElement).value });
 				}}>

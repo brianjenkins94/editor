@@ -5,6 +5,8 @@ import { nonces, publicKey, signAccessToken, verifyAccessToken, verifyProof } fr
 import { createMiddleware } from "hono/factory";
 import type { Subject } from "./audit.ts";
 import { audit, origin } from "./audit.ts";
+import type { Difference } from "./behavior.ts";
+import { described, fingerprint } from "./behavior.ts";
 import type { AppEnv, Bindings } from "./env.ts";
 
 /**
@@ -21,6 +23,14 @@ const issuer = (context: Context<AppEnv>): string => new URL(context.req.url).or
 const signingKey = (env: Bindings): JWK => JSON.parse(env.SIGNING_JWK) as JWK;
 
 export const nonce = (env: Bindings): ReturnType<typeof nonces> => nonces(env.NONCE_KEY);
+
+/** How a sign-in's client differs from how it's known, the first time each way that matters is seen (Grant.use):
+ *  recorded by name and how, never the values (BEHAVIOR.md). */
+async function recordChanged(context: Context<AppEnv>, subject: Subject, changed: Difference[]): Promise<void> {
+	for (const difference of changed) {
+		await audit(context.env, "client_changed", subject, await origin(context), { "reason": `${difference.strength}: ${difference.name} ${difference.kind}`, "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
+	}
+}
 
 /**
  * The Grant a `<grant id>.<secret>` code or refresh token belongs to — if that grant exists and is live. A token for a
@@ -52,7 +62,7 @@ async function oauthError(context: Context<AppEnv>, error: string, reason: strin
 	context.get("span").info("token request refused", { "reason": reason });
 
 	if (error !== "use_dpop_nonce" && !recorded) {
-		await audit(context.env, "auth_refused", subject, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+		await audit(context.env, "auth_refused", subject, await origin(context), { "reason": reason, "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
 	}
 
 	if (error === "use_dpop_nonce") {
@@ -90,16 +100,30 @@ export async function tokenEndpoint(context: Context<AppEnv>): Promise<Response>
 		return oauthError(context, "invalid_grant", "no such grant");
 	}
 
-	const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, { "nonce": nonce(context.env).check, "seen": async (jti, expires) => (await grant.stub.use(jti, expires)).seen });
+	// The client as it is now (BEHAVIOR.md): the sign-in's first redemption remembers it; a refresh is compared with it.
+	const print = await fingerprint(context.env, grant.id, context.req.raw.headers);
+	let changed: Difference[] = [];
+	const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, {
+		"nonce": nonce(context.env).check,
+		"seen": async (jti, expires) => {
+			const use = await grant.stub.use(jti, expires, print);
+
+			changed = use.changed;
+
+			return use.seen;
+		}
+	});
 
 	if ("error" in proof) {
 		return oauthError(context, proof.error, proof.reason, { "subject": { "grantId": grant.id } });
 	}
 
+	await recordChanged(context, { "grantId": grant.id }, changed);
+
 	const from = await origin(context);
 	const issued = grantType === "authorization_code"
-		? await grant.stub.redeem({ "code": presented, "verifier": form["code_verifier"] as string, "jkt": proof.jkt, "client": client, "from": from })
-		: await grant.stub.rotate({ "refreshToken": presented, "jkt": proof.jkt, "client": client, "from": from });
+		? await grant.stub.redeem({ "code": presented, "verifier": form["code_verifier"] as string, "jkt": proof.jkt, "client": client, "from": from, "print": print })
+		: await grant.stub.rotate({ "refreshToken": presented, "jkt": proof.jkt, "client": client, "from": from, "print": print });
 
 	if (!issued.ok) {
 		return oauthError(context, "invalid_grant", "code or refresh token refused", { "recorded": true });
@@ -141,7 +165,7 @@ async function unauthorized(context: Context<AppEnv>, error: "invalid_token" | "
 
 	// Recorded, but for the nonce challenge, which every client meets routinely.
 	if (error !== "use_dpop_nonce") {
-		await audit(context.env, "auth_refused", subject, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+		await audit(context.env, "auth_refused", subject, await origin(context), { "reason": reason, "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
 	}
 
 	context.header("www-authenticate", `DPoP error="${error}", algs="ES256 ES384 ES512 PS256 PS384 PS512 EdDSA"`);
@@ -154,14 +178,12 @@ async function unauthorized(context: Context<AppEnv>, error: "invalid_token" | "
 }
 
 /**
- * DPoP in front of a route, for one of our clients: `Authorization: DPoP <access token>` (ours, unexpired, bound to a
- * key, issued to `client`), a proof from that key for this request with the access token's hash and a current nonce, a
- * jti the grant hasn't seen, and a live grant. Leaves `user`, `grant` and `client` for the route.
- *
- * A token issued to another client is refused (403, audited): an editor session can't reach the admin API, even the
- * owner's, so code running on the editor's origin can't either; and an admin session can't drive the editor's routes.
+ * Who's signed in, by DPoP: `Authorization: DPoP <access token>` (ours, unexpired, bound to a key), a proof from that key
+ * for this request with the access token's hash and a current nonce, a jti the grant hasn't seen, and a live grant. The
+ * sign-in, or the 401 (recorded) that says why not. Its client is compared with how the sign-in's client is known
+ * (BEHAVIOR.md), and a difference that matters is recorded the first time it's seen.
  */
-const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, next) => {
+export async function signedIn(context: Context<AppEnv>): Promise<{ "user": string; "grant": string; "client": unknown } | Response> {
 	const [scheme, accessToken] = (context.req.header("authorization") ?? "").split(" ");
 
 	if (scheme?.toLowerCase() !== "dpop" || accessToken === undefined || accessToken === "") {
@@ -182,13 +204,16 @@ const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, 
 	// The grant id is ours (the token is signed), so it's safe to address its Durable Object.
 	const grantId = token.claims["grant"];
 	const stub = context.env.GRANTS.get(context.env.GRANTS.idFromString(grantId));
+	const print = await fingerprint(context.env, grantId, context.req.raw.headers);
 	let active = false;
+	let changed: Difference[] = [];
 	const proof = await verifyProof({ "method": context.req.method, "url": context.req.url, "proof": context.req.header("dpop"), "accessToken": accessToken, "jkt": token.claims.cnf.jkt }, {
 		"nonce": nonce(context.env).check,
 		"seen": async (jti, expires) => {
-			const use = await stub.use(jti, expires);
+			const use = await stub.use(jti, expires, print);
 
 			active = use.active;
+			changed = use.changed;
 
 			return use.seen;
 		}
@@ -202,15 +227,34 @@ const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, 
 		return unauthorized(context, "invalid_token", "grant revoked", { "userId": token.claims.sub, "grantId": grantId });
 	}
 
-	if (token.claims["client_id"] !== client) {
+	await recordChanged(context, { "userId": token.claims.sub, "grantId": grantId }, changed);
+
+	return { "user": token.claims.sub as string, "grant": grantId, "client": token.claims["client_id"] };
+}
+
+/**
+ * DPoP in front of a route, for one of our clients: signed in (`signedIn`), with a token issued to `client`. Leaves
+ * `user`, `grant` and `client` for the route.
+ *
+ * A token issued to another client is refused (403, audited): an editor session can't reach the admin API, even the
+ * owner's, so code running on the editor's origin can't either; and an admin session can't drive the editor's routes.
+ */
+const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, next) => {
+	const signed = await signedIn(context);
+
+	if (signed instanceof Response) {
+		return signed;
+	}
+
+	if (signed.client !== client) {
 		context.get("span").info("request refused", { "reason": "a token for another client" });
-		await audit(context.env, "auth_refused", { "userId": token.claims.sub, "grantId": grantId }, await origin(context), { "reason": "a token for another client", "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+		await audit(context.env, "auth_refused", { "userId": signed.user, "grantId": signed.grant }, await origin(context), { "reason": "a token for another client", "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
 
 		return context.json({ "error": "forbidden" }, 403);
 	}
 
-	context.set("user", token.claims.sub as string);
-	context.set("grant", grantId);
+	context.set("user", signed.user);
+	context.set("grant", signed.grant);
 	context.set("client", client);
 
 	await next();

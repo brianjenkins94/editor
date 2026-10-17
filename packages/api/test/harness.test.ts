@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
 import { recorded } from "../harness/state.ts";
+import { BROWSER } from "./browser.ts";
 
 // C0 (SIGN-IN.md): `recorded` reads everything the API stores, from outside it, and says exactly what an action wrote.
 // Here: what a sign-in writes, all of it, and nothing secret in the reading.
@@ -21,7 +22,7 @@ after(async () => {
 	await server.close();
 });
 
-test("a sign-in writes a user, a grant, two audit rows and their copies, and the Grant's state; GitHub's tokens read as sealed", async () => {
+test("a sign-in writes a user, a grant, two audit rows and their copies, and the Grant's state and its client's fingerprint; GitHub's tokens read as sealed, header values not at all", async () => {
 	const env = await server.getWorker().getEnv() as { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } } };
 	const { privateKey, publicKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
@@ -31,7 +32,7 @@ test("a sign-in writes a user, a grant, two audit rows and their copies, and the
 		const url = new URL("/token", base).href;
 		const proof = await new SignJWT({ "htm": "POST", "htu": url, "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce } }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);
 
-		return server.fetch(url, { "method": "POST", "headers": { "dpop": proof, "content-type": "application/x-www-form-urlencoded", "cf-connecting-ip": "198.51.100.7" }, "body": new URLSearchParams({ "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": "admin" }).toString() }) as unknown as Response;
+		return server.fetch(url, { "method": "POST", "headers": { "dpop": proof, "content-type": "application/x-www-form-urlencoded", "cf-connecting-ip": "198.51.100.7", ...BROWSER }, "body": new URLSearchParams({ "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": "admin" }).toString() }) as unknown as Response;
 	};
 
 	const changes = await recorded(server, async () => {
@@ -50,7 +51,8 @@ test("a sign-in writes a user, a grant, two audit rows and their copies, and the
 		"d1:audit": "+2 ~0 -0",
 		"r2:AUDIT_COPIES": "+2 ~0 -0",
 		"GRANTS:<grant>:state": "+1 ~0 -0",
-		"GRANTS:<grant>:seen_jti": "+1 ~0 -0"
+		"GRANTS:<grant>:seen_jti": "+1 ~0 -0",
+		"GRANTS:<grant>:fingerprint": "+13 ~0 -0"
 	});
 	assert.deepEqual(changes["d1:audit"]?.added.map((row) => row["event"]), ["login", "token_issued"]);
 
@@ -58,4 +60,5 @@ test("a sign-in writes a user, a grant, two audit rows and their copies, and the
 
 	assert.equal(written.includes("ghu_secret") || written.includes("ghr_secret"), false, "GitHub's tokens never show");
 	assert.match(written, /"github":"sealed"/u);
+	assert.equal(written.includes("localhost:5174") || written.includes("AppleWebKit"), false, "header values never show: only keyed hashes");
 });

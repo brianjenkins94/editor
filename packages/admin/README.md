@@ -164,7 +164,7 @@ Each lands green and is useful on its own.
   `REDIRECT_URIS.admin`. Its `_headers` (public/) hold a CSP that allows only its own files, the API, GitHub's API
   (for logins) and Cloudflare's Web Analytics (its beacon, allowed since 2026-10-17); Web Awesome works under
   `style-src 'self'` (checked with `wrangler dev`: no violations). The page itself is never cached.
-- **B7–B9 · unusual behavior.** packages/api/BEHAVIOR.md: actions as route templates derived from the router and the
+- **B7–B9 · unusual behavior.** *B7 built 2026-10-17 (the rules); B8, B9 next.* packages/api/BEHAVIOR.md: actions as route templates derived from the router and the
   proxy's allowlist (new features tolerated by construction), probes of routes that don't exist, a header fingerprint
   per sign-in compared on every request (changed, omitted, added; additions and browser updates tolerated), then a
   likely-next-action model and an Unusual page. Zero-knowledge: templates, header names, counts and keyed hashes only.

@@ -5,6 +5,7 @@ import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
 import { deviceLabel } from "../src/account.ts";
+import { BROWSER } from "./browser.ts";
 
 // Your sessions and your account (src/account.ts), in workerd: listing and ending your own sign-ins (never anyone
 // else's), signing out everywhere, and deleting the account — at GitHub too, and leaving nothing that points at you.
@@ -72,7 +73,7 @@ async function signIn(githubId: number, label: string): Promise<{ "call": (metho
 	const send = async (method: string, path: string, { form, token }: { "form"?: Record<string, string>; "token"?: string }): Promise<Answer> => {
 		for (let attempt = 0; ; attempt += 1) {
 			const claims = { "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) } };
-			const headers: Record<string, string> = { "dpop": await new SignJWT(claims).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
+			const headers: Record<string, string> = { ...BROWSER, "dpop": await new SignJWT(claims).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
 			const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? {} : { "body": new URLSearchParams(form).toString() } });
 
 			nonce = response.headers.get("dpop-nonce") ?? nonce;

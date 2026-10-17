@@ -5,6 +5,7 @@ import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
 import { seal } from "@brianjenkins94/util/auth/seal";
+import { BROWSER } from "./browser.ts";
 
 // Signing in through GitHub, in workerd, against a GitHub of the test's own: /auth/github/start, GitHub's authorize page
 // (skipped: the test is the user saying yes), /auth/github/callback, then the app redeeming our code at /token.
@@ -76,7 +77,7 @@ const at = (path: string): string => new URL(path, base).href;
 /** A request from an IP of its own (TEST-NET-2), so the functional tests never meet the per-IP rate limits. */
 const anyIp = (): string => `198.51.100.${Math.floor(Math.random() * 254) + 1}`;
 
-const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...init.headers } });
+const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...BROWSER, ...init.headers } });
 
 /** The app: a DPoP key, a PKCE verifier, and a state of its own, as oauth4webapi makes them. */
 async function app(): Promise<{ "jkt": string; "verifier": string; "challenge": string; "state": string; "proof": (method: string, url: string, claims?: Record<string, unknown>) => Promise<string> }> {

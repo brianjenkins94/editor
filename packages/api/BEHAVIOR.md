@@ -15,8 +15,8 @@ Shown in the admin app (packages/admin/README.md, B7–B9).
   profile that began it. A script can't borrow the editor's sign-in: it has to run the sign-in flow itself, as its own
   client, from the start. So "logged in, then made direct API calls" shows as a sign-in that never looked like the
   editor, more than as one that changed.
-- Not yet: a signed-in request to a route that doesn't exist is a plain 404 (`app.notFound`), unrecorded; `proxy_call`
-  keeps the real path (repository names); nothing looks at order, timing or headers.
+- Since B7, the rules below: probes, templated proxy rows, and each sign-in's client fingerprint. Not yet: anything
+  that looks at order or timing (B8).
 
 ## Actions: a vocabulary derived from code
 
@@ -29,8 +29,11 @@ Shown in the admin app (packages/admin/README.md, B7–B9).
 - **New features are tolerated by construction:** a route that ships is in the vocabulary from that deploy on, so it's
   never a probe. Each action also notes the deploy it was first seen in (the Worker's version metadata), so the
   statistics below treat it as new rather than unlikely.
-- `proxy_call` keeps the template and a keyed hash of its values (HMAC under AUDIT_KEY, as IPs are): "was it repository
-  X?" can be checked by hashing X, but the log doesn't say which it was.
+- `proxy_call` keeps the template, the repository's tag (`repo#` and a keyed hash of `owner/name`, lowercased) and a
+  keyed hash of its other values (HMAC under AUDIT_KEY, as IPs are). "Was it repository X?" is the admin audit log's
+  `repo` filter, which hashes X the same way; the log itself doesn't say which it was. A refused call (`proxy_denied`)
+  and every other row about a proxied path (refusals, rate limits) keep only the method and a hash of the path.
+- In src/behavior.ts: `PROXIED` (the templates, which the proxy allows and nothing else), `proxied`, `described`.
 
 ## Headers: a sign-in's fingerprint
 
@@ -40,13 +43,16 @@ Shown in the admin app (packages/admin/README.md, B7–B9).
   are keyed per sign-in (AUDIT_KEY and the grant), so they compare within a sign-in and can't be matched across them.
   The browser family, its major version and the OS are kept in clear (the device label already says "Chrome on macOS").
 - **Client kind** from the same headers: the editor's requests carry `Origin: https://editor.unusuallygood.dev` and
-  Fetch Metadata (`sec-fetch-mode: cors`, `sec-fetch-site: same-site`); a script usually sends neither. A sign-in that
-  starts as `other` is the direct-API case above: recorded at once (`client_unusual`), shown in the admin app.
+  Fetch Metadata (`sec-fetch-mode: cors`, `sec-fetch-site: same-site`). A script usually sends no Origin; Node's own
+  `fetch` does send `sec-fetch-mode: cors`, so the Origin is what gives it away. A sign-in that starts as `other` is the
+  direct-API case above: recorded at once (`client_unusual`, by which headers were missing) and alerted; it isn't
+  refused.
 - **Compared on every request** in `Grant.use` (every request already checks its DPoP proof there, so this costs no
   extra call). Each header of the set is `same`, `changed`, `omitted` (sent at first, missing now) or `added` (missing
   at first, sent now). The Grant keeps counts per header and outcome, not the requests. The first time a header changes
   in a way that matters, an audit row says so (`client_changed`, the header's name and how), once per header and way
-  per sign-in.
+  per sign-in (counted by how much it matters, so a tolerated change doesn't hide a later one that does). A strong one
+  alerts.
 - **What matters, and what's tolerated:**
   - Strong: `origin` or `sec-fetch-*` omitted (a browser became something else); the browser family or OS changed; the
     major version went down.
@@ -80,10 +86,14 @@ person. A flag points at a sign-in (a grant id); the audit log already says whos
 
 ## Steps
 
-- **B7 · the rules.** The action vocabulary from the router and the allowlist; `probe` recorded and ending a sign-in
-  after a few; `proxy_call` templated with keyed hashes; the header fingerprint at `/token`, client kind, comparison in
-  `Grant.use`, `client_unusual` and `client_changed`. Tested in workerd, including a new route added to the router
-  being no probe, and a header added being tolerated.
+- **B7 · the rules.** *Built 2026-10-17* (src/behavior.ts; `signedIn` in src/tokens.ts; `app.notFound` in
+  src/index.ts; the Grant's `fingerprint` and `differences` tables): probes recorded and counted with the proxy's
+  refusals (five in ten minutes end the sign-in); `proxy_call` templated with `repo#` tags and keyed hashes, and
+  `?repo=` on /admin/audit (the admin app's Repository filter); the header fingerprint at `/token`, client kind,
+  comparison in `Grant.use`, `client_unusual` and `client_changed`. 9 tests in test/behavior.test.ts and one in
+  test/admin.test.ts, in workerd: a route the router has is never a probe (even its own 404), a header added and a
+  browser update are tolerated, a downgrade after a refresh isn't. The tests' clients send a browser's headers
+  (test/browser.ts). Tried with a real Chromium sign-in through the harness: no `client_unusual`, no `client_changed`.
 - **B8 · the model.** Transitions in the Grant, flushed hourly into D1 (a migration), decayed daily, seeded from the
   editor's flows; the score.
 - **B9 · the Unusual page.** `GET /admin/unusual` (a new permission, `behavior:read`) and the admin app's page.

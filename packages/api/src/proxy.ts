@@ -1,39 +1,16 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 import { audit, finish, origin } from "./audit.ts";
+import { described, proxied } from "./behavior.ts";
 import { github } from "./github.ts";
 
 /**
  * GitHub, for a signed-in browser (README.md, "The proxy"). The browser never holds GitHub's token: it calls these routes
  * with its DPoP-bound access token (the `session` middleware in front), and the Worker calls GitHub with the token the
  * sign-in's Grant keeps. Only what the editor calls is allowed — packages/editor/shell/github.ts for the API, a clone's
- * fetch for git — so a hijacked session can do what the editor does and no more. Anything else is a 403, and audited.
+ * fetch for git, listed as templates in src/behavior.ts — so a hijacked session can do what the editor does and no more.
+ * Anything else is a 403, and audited.
  */
-
-const NAME = "[\\w.-]+";
-
-const REPO = `/repos/${NAME}/${NAME}`;
-
-/** A ref or sha in a path: no `..`, so it can't climb out of the repo it names. */
-const REF = "(?!.*\\.\\.)[\\w./-]+";
-
-/** The API calls shell/github.ts makes, by method and path (below /github/api). */
-const API: [string, RegExp][] = [
-	["GET", /^\/user$/u],
-	["POST", /^\/user\/repos$/u],
-	["GET", new RegExp(`^${REPO}$`, "u")],
-	["GET", new RegExp(`^${REPO}/git/(?:trees|blobs|commits)/${REF}$`, "u")],
-	["GET", new RegExp(`^${REPO}/git/ref/${REF}$`, "u")],
-	["POST", new RegExp(`^${REPO}/git/(?:blobs|trees|commits)$`, "u")],
-	["PATCH", new RegExp(`^${REPO}/git/refs/${REF}$`, "u")],
-	["POST", new RegExp(`^${REPO}/pages$`, "u")]
-];
-
-/** A clone's two requests (git smart-HTTP, below /github/git): reading only, never a push. */
-const GIT: [string, RegExp, string][] = [
-	["GET", new RegExp(`^/${NAME}/${NAME}\\.git/info/refs$`, "u"), "?service=git-upload-pack"],
-	["POST", new RegExp(`^/${NAME}/${NAME}\\.git/git-upload-pack$`, "u"), ""]
-];
 
 /** GitHub's response headers the browser may see: the body's type, caching, and what fido paginates and backs off by. */
 const PASSED = ["content-type", "cache-control", "etag", "last-modified", "link", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "x-ratelimit-used", "x-github-request-id"];
@@ -52,12 +29,13 @@ async function token(context: Context<AppEnv>): Promise<string | Response> {
 	return value;
 }
 
-/** A call the editor never makes: refused, recorded (it alerts), and counted against the sign-in, which a few end. */
-async function deny(context: Context<AppEnv>, detail: string): Promise<Response> {
+/** A call the editor never makes: refused, recorded (it alerts; its path only as a keyed hash, being what was guessed),
+ *  and counted against the sign-in, which a few end. */
+async function deny(context: Context<AppEnv>): Promise<Response> {
 	const from = await origin(context);
 
 	context.get("span").info("proxy refused", { "reason": "not a call the editor makes" });
-	await audit(context.env, "proxy_denied", { "userId": context.get("user"), "grantId": context.get("grant") }, from, { "detail": detail });
+	await audit(context.env, "proxy_denied", { "userId": context.get("user"), "grantId": context.get("grant") }, from, { "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
 	await context.env.GRANTS.get(context.env.GRANTS.idFromString(context.get("grant"))).denied({ "from": from });
 
 	return context.json({ "error": "forbidden" }, 403);
@@ -65,11 +43,11 @@ async function deny(context: Context<AppEnv>, detail: string): Promise<Response>
 
 /**
  * Every call that went through, read or write, recorded before its answer streams (so a dropped connection still leaves
- * the row): what it was and GitHub's status. The bytes it carried back are added once they have (relay). If a session
+ * the row): what it was (its template, and a keyed hash of its values: BEHAVIOR.md) and GitHub's status. The bytes it carried back are added once they have (relay). If a session
  * is ever used by something that shouldn't have it, this is the record of what it read and wrote.
  */
-async function called(context: Context<AppEnv>, detail: string, status: number): Promise<(bytes: number) => Promise<void>> {
-	const row = await audit(context.env, "proxy_call", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `GitHub ${status}`, "detail": detail });
+async function called(context: Context<AppEnv>, status: number): Promise<(bytes: number) => Promise<void>> {
+	const row = await audit(context.env, "proxy_call", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `GitHub ${status}`, "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
 
 	return async (bytes) => {
 		await finish(context.env, row, `GitHub ${status}, ${bytes} bytes`);
@@ -86,7 +64,7 @@ async function slot(context: Context<AppEnv>): Promise<{ "release": () => Promis
 
 	if (lease === undefined) {
 		context.get("span").info("proxy refused", { "reason": "too many requests in flight" });
-		await audit(context.env, "rate_limited", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": "PROXY_CONCURRENCY", "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
+		await audit(context.env, "rate_limited", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": "PROXY_CONCURRENCY", "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
 		context.header("retry-after", "1");
 
 		return context.json({ "error": "rate_limited" }, 429);
@@ -129,14 +107,14 @@ function relay(upstream: Response, rewrite: [string, string], release: () => Pro
 	})), { "status": upstream.status, "headers": headers });
 }
 
-/** /github/api/* → api.github.com/*, for the calls in API. */
+/** /github/api/* → api.github.com/*, for the calls the editor makes (src/behavior.ts, PROXIED). */
 export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 	const url = new URL(context.req.url);
 	const path = url.pathname.slice("/github/api".length);
 	const method = context.req.method;
 
-	if (!API.some(([allowed, pattern]) => allowed === method && pattern.test(path))) {
-		return deny(context, `${method} ${path}`);
+	if (proxied("api", method, path, url.search) === undefined) {
+		return deny(context);
 	}
 
 	const bearer = await token(context);
@@ -167,7 +145,7 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 		throw error;
 	});
 
-	return relay(upstream, [api, `${url.origin}/github/api`], held.release, await called(context, `${method} ${path}${url.search}`, upstream.status));
+	return relay(upstream, [api, `${url.origin}/github/api`], held.release, await called(context, upstream.status));
 }
 
 /** /github/git/<owner>/<repo>.git/… → github.com, for a clone's info/refs and git-upload-pack. */
@@ -176,8 +154,8 @@ export async function githubGit(context: Context<AppEnv>): Promise<Response> {
 	const path = url.pathname.slice("/github/git".length);
 	const method = context.req.method;
 
-	if (!GIT.some(([allowed, pattern, search]) => allowed === method && pattern.test(path) && url.search === search)) {
-		return deny(context, `${method} ${path}${url.search}`);
+	if (proxied("git", method, path, url.search) === undefined) {
+		return deny(context);
 	}
 
 	const bearer = await token(context);
@@ -208,5 +186,5 @@ export async function githubGit(context: Context<AppEnv>): Promise<Response> {
 		throw error;
 	});
 
-	return relay(upstream, [web, `${url.origin}/github/git`], held.release, await called(context, `${method} ${path}${url.search}`, upstream.status));
+	return relay(upstream, [web, `${url.origin}/github/git`], held.release, await called(context, upstream.status));
 }

@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
+import { BROWSER } from "./browser.ts";
 
 // B4 in workerd: /admin/traffic asks Cloudflare's GraphQL API (here, a stand-in) with the API's own read-only token, and
 // answers the admin app in its own shape. Only `traffic:read` may ask; without a token it says so.
@@ -82,7 +83,7 @@ async function browser(): Promise<{ "jkt": string; "send": (method: string, path
 		"send": async (method, path, { form, accessToken } = {}) => {
 			for (let attempt = 0; ; attempt += 1) {
 				const ath = accessToken === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accessToken)))) };
-				const headers: Record<string, string> = { "dpop": await proof(method, at(path), ath), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...accessToken === undefined ? {} : { "authorization": `DPoP ${accessToken}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
+				const headers: Record<string, string> = { ...BROWSER, "dpop": await proof(method, at(path), ath), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...accessToken === undefined ? {} : { "authorization": `DPoP ${accessToken}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
 				const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? {} : { "body": new URLSearchParams(form).toString() } });
 
 				nonce = response.headers.get("dpop-nonce") ?? nonce;

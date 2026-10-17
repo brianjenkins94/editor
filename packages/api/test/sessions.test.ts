@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
+import { BROWSER } from "./browser.ts";
 
 // A3 in workerd: a sign-in as A0's GitHub callback will start it (Grant.begin), then everything the browser does with
 // it — /token, /me, refresh, /revoke — with DPoP proofs from a key of the test's own, as the shell's will be.
@@ -38,7 +39,7 @@ const at = (path: string): string => new URL(path, base).href;
 /** A request from an IP of its own (TEST-NET-2), so the functional tests never meet the per-IP rate limits. */
 const anyIp = (): string => `198.51.100.${Math.floor(Math.random() * 254) + 1}`;
 
-const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...init.headers } });
+const fetchFrom = async (url: string, init: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "redirect"?: "manual" } = {}): Promise<Awaited<ReturnType<typeof server.fetch>>> => server.fetch(url, { ...init, "headers": { "cf-connecting-ip": anyIp(), ...BROWSER, ...init.headers } });
 
 /** A response, as the harness gives it (miniflare's Response, not the Workers one). */
 type Answer = Awaited<ReturnType<typeof server.fetch>>;

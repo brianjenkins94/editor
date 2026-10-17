@@ -213,8 +213,9 @@ priority: whatever abuse gets past every limit should still be seen, and immedia
   refused code or refresh token (`token_rejected`, saying whether it was expired, unknown, the wrong PKCE verifier,
   or **another key**), a refused sign-in, a rate-limit trip and an oversized request. The one exception is the
   routine nonce challenge.
-- **Every call through the proxy is recorded** (`proxy_call`), reads as much as writes: the call (with its query),
-  GitHub's status, and the bytes it carried back. If something ever uses a session it shouldn't have, what it read is
+- **Every call through the proxy is recorded** (`proxy_call`), reads as much as writes: the call as its template
+  (BEHAVIOR.md: the query's names, a `repo#` tag and a keyed hash for its values, never a repository's name), GitHub's
+  status, and the bytes it carried back. If something ever uses a session it shouldn't have, what it read is
   what matters, and Workers Logs keep requests only 3 days on Free. The row is written before the answer streams, so a
   dropped connection still leaves it; the bytes are added once they've streamed.
 - **What it's for:** not watching users, but knowing, if something gets through, what it tried and what it did.
