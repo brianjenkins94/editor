@@ -34,7 +34,7 @@ roles allow.
 ### Roles and permissions
 
 - **Permissions** are fixed strings in code (`src/rbac.ts` in packages/api): `users:read`, `sessions:read`,
-  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, and later `org:members:read`, `org:members:write`,
+  `sessions:revoke`, `audit:read`, `audit:verify`, `traffic:read`, `behavior:read`, and later `org:members:read`, `org:members:write`,
   `org:roles:write`.
 - **Roles** map to permissions, also in code, so what a role can do is reviewed like any other change:
   - `owner`: every platform permission.
@@ -77,10 +77,11 @@ route table doubles as the access-control table.
 | `GET /admin/users` | `users:read` | users: id, GitHub id, created, live sign-ins, last seen |
 | `GET /admin/users/:id` | `users:read` | one user: their sign-ins and recent audit rows |
 | `GET /admin/sessions` | `sessions:read` | live sign-ins across users |
-| `POST /admin/sessions/:id/revoke` | `sessions:revoke` | end one (later; the first write action) |
+| `POST /admin/sessions/:id/revoke` | `sessions:revoke` | end one, with `confirm=revoke` (B6, the first write) |
 | `GET /admin/audit` | `audit:read` | the timeline, with the filters `npm run audit` has |
 | `GET /admin/audit/verify` | `audit:verify` | D1 against the R2 copies, run by the Worker (see below) |
 | `GET /admin/traffic` | `traffic:read` | Cloudflare's analytics, through the API's own read-only token |
+| `GET /admin/unusual` | `behavior:read` | sign-ins by their score, with their most surprising steps and flags (B9) |
 
 - **Every admin request is audited** (`admin_access`: route, and whose data), kept 365 days. Who looked at a user's data
   is itself part of the security record.
@@ -164,7 +165,7 @@ Each lands green and is useful on its own.
   `REDIRECT_URIS.admin`. Its `_headers` (public/) hold a CSP that allows only its own files, the API, GitHub's API
   (for logins) and Cloudflare's Web Analytics (its beacon, allowed since 2026-10-17); Web Awesome works under
   `style-src 'self'` (checked with `wrangler dev`: no violations). The page itself is never cached.
-- **B7–B9 · unusual behavior.** *B7 (the rules) and B8 (the model and each sign-in's score) built 2026-10-17; B9 (the Unusual page) next.* packages/api/BEHAVIOR.md: actions as route templates derived from the router and the
+- **B7–B9 · unusual behavior.** *All three built 2026-10-17: B7 the rules, B8 the model and each sign-in's score, B9 the Unusual page.* packages/api/BEHAVIOR.md: actions as route templates derived from the router and the
   proxy's allowlist (new features tolerated by construction), probes of routes that don't exist, a header fingerprint
   per sign-in compared on every request (changed, omitted, added; additions and browser updates tolerated), then a
   likely-next-action model and an Unusual page. Zero-knowledge: templates, header names, counts and keyed hashes only.

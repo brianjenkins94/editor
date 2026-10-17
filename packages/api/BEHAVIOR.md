@@ -113,7 +113,13 @@ person. A flag points at a sign-in (a grant id); the audit log already says whos
   daily, seeded from the editor's and the admin app's flows; each sign-in's score. 6 tests in test/behavior.test.ts:
   actions named by template (ours, the admin's, the proxy's), every flow a call the proxy allows, the score's
   arithmetic, flushing, scoring and learning, and the decay.
-- **B9 · the Unusual page.** `GET /admin/unusual` (a new permission, `behavior:read`) and the admin app's page.
+- **B9 · the Unusual page.** *Built 2026-10-17:* `GET /admin/unusual` (`behavior:read`, the owner's like every
+  permission; `min` scored steps, default 3, and `limit`): sign-ins by mean surprise, highest first, each with its most
+  surprising steps and its B7 flags counted (`probe`, `proxy_denied`, `client_unusual`, `client_changed`). The admin
+  app's Unusual page draws it in the sign-in table (End included), the proxy's prefix trimmed off each call. A test in
+  test/admin.test.ts (order, flags, the `min` filter) and the permission in the refusal test. Tried with the harness: a
+  real admin sign-in clicking through the app scored 3.1 bits over 8 steps, the overview's parallel reads its most
+  surprising.
 
 ## Open questions
 

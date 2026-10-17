@@ -25,12 +25,19 @@ function Deleted({ at }: { "at": number | null }) {
 
 interface Session { "id": string; "client": string; "label": string | null; "createdAt": number; "lastUsedAt": number; "revokedAt": number | null; "current": boolean; "userId"?: string; "githubId"?: number }
 
+/** A sign-in as /admin/unusual answers it (packages/api/BEHAVIOR.md, B8): its score, and what it did that the editor doesn't. */
+interface Unusual extends Session {
+	"score": { "mean": number; "steps": number; "top": { "from": string; "to": string; "gap": number; "bits": number }[]; "updatedAt": number };
+	"flags": Record<string, number>;
+}
+
 interface AuditRow { "id": number; "at": number; "event": string; "userId": string | null; "grantId": string | null; "country": string | null; "ipHash": string | null; "reason": string | null; "detail": string | null; "traceId": string | null }
 
 /** What each admin API read answers, by path: the type of a page's data follows from the path it reads. */
 interface Reads {
 	"/users": { "users": User[] };
 	"/sessions": { "sessions": Session[] };
+	"/unusual": { "sessions": Unusual[] };
 	[user: `/users/${string}`]: { "user": { "githubId": number; "createdAt": number; "deletedAt": number | null }; "sessions": Session[]; "audit": AuditRow[] };
 	[audit: `/audit?${string}`]: { "rows": AuditRow[] };
 	[traffic: `/traffic?${string}`]: Traffic;
@@ -169,7 +176,10 @@ export function Users() {
 	);
 }
 
-function SessionRows({ sessions, withUser }: { "sessions": Session[]; "withUser": boolean }) {
+/** Columns a page adds to the sign-in table, before End: their headings, and each sign-in's cells. */
+interface Columns<S extends Session> { "head": string[]; "cells": (session: S) => ComponentChildren }
+
+function SessionRows<S extends Session>({ sessions, withUser, columns }: { "sessions": S[]; "withUser": boolean; "columns"?: Columns<S> }) {
 	const canEnd = useContext(Permissions).includes("sessions:revoke");
 	// Ended here since the list was read: when, by id.
 	const [ended, setEnded] = useState<Record<string, number>>({});
@@ -189,7 +199,7 @@ function SessionRows({ sessions, withUser }: { "sessions": Session[]; "withUser"
 
 	return (
 		<>
-			<Table head={[...withUser ? ["GitHub"] : [], "Client", "Device", "Started", "Last used", "Ended", "Sign-in", ...canEnd ? [""] : []]}>
+			<Table head={[...withUser ? ["GitHub"] : [], "Client", "Device", "Started", "Last used", "Ended", "Sign-in", ...columns?.head ?? [], ...canEnd ? [""] : []]}>
 				{sessions.map((session) => {
 					const revokedAt = session.revokedAt ?? ended[session.id] ?? null;
 
@@ -202,6 +212,7 @@ function SessionRows({ sessions, withUser }: { "sessions": Session[]; "withUser"
 							<td><When at={session.lastUsedAt} /></td>
 							<td>{revokedAt === null ? <wa-badge variant="success">live</wa-badge> : <When at={revokedAt} />}</td>
 							<td class="mono">{short(session.id)}</td>
+							{columns?.cells(session)}
 							{canEnd && <td>{session.current ? <span class="muted">this one</span> : revokedAt === null && endButton(session)}</td>}
 						</tr>
 					);
@@ -306,6 +317,38 @@ export function Sessions() {
 		<section class="wa-stack wa-gap-l">
 			<h1 class="wa-heading-xl">Live sign-ins</h1>
 			<Loading read={read}>{() => <SessionRows sessions={read.data!.sessions} withUser={true} />}</Loading>
+		</section>
+	);
+}
+
+/** The gap buckets the model counts by (packages/api/src/behavior.ts, gapOf). */
+const GAPS = ["at once", "within 1 s", "within 10 s", "later"];
+
+/** Strip the proxy's prefix: the transitions read as the calls they are. */
+const call = (action: string): string => action.replace(" /github/api/", " ").replace(" /github/git/", " git ");
+
+/**
+ * The sign-ins that surprised the model most (GET /admin/unusual): mean surprise a step, what they did that the editor
+ * doesn't, and their most surprising steps, as templates. A high score is a reason to look, not a verdict.
+ */
+export function UnusualPage() {
+	const read = useRead("/unusual");
+	const columns: Columns<Unusual> = {
+		"head": ["Surprise", "Flags", "Most surprising steps"],
+		"cells": (session) => [
+			<td key="score" title={`${session.score.steps} steps scored`}><wa-badge variant={session.score.mean >= 6 ? "danger" : session.score.mean >= 4 ? "warning" : "neutral"}>{session.score.mean.toFixed(1)} bits</wa-badge> <span class="muted">{session.score.steps}</span></td>,
+			<td key="flags"><div class="wa-cluster wa-gap-2xs">{Object.entries(session.flags).map(([event, count]) => <wa-badge key={event} variant="warning" appearance="outlined">{event} {count}</wa-badge>)}</div></td>,
+			<td key="top">
+				{session.score.top.map((step) => <div key={`${step.from}${step.to}${step.gap}`} class="mono">{call(step.from)} → {call(step.to)} <span class="muted">{GAPS[step.gap]}, {step.bits} bits</span></div>)}
+			</td>
+		]
+	};
+
+	return (
+		<section class="wa-stack wa-gap-l">
+			<h1 class="wa-heading-xl">Unusual sign-ins</h1>
+			<p class="muted">Each sign-in's steps, scored against what sign-ins usually do next (packages/api/BEHAVIOR.md): the mean surprise a step, in bits, highest first. Steps and calls are templates; no values, repositories or contents.</p>
+			<Loading read={read}>{() => (read.data!.sessions.length === 0 ? <p class="muted">Nothing scored yet: sign-ins are scored an hour after they're used.</p> : <SessionRows sessions={read.data!.sessions} withUser={true} columns={columns} />)}</Loading>
 		</section>
 	);
 }

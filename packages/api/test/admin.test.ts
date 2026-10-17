@@ -198,11 +198,11 @@ test("every read endpoint is refused without its permission: 403, recorded with 
 	const holder = await browser();
 	const { access_token, grantId } = await signedIn(holder, someone(), "admin");
 
-	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit"]) {
+	for (const path of ["/admin/users", "/admin/users/x", "/admin/sessions", "/admin/audit", "/admin/unusual"]) {
 		assert.equal((await holder.send("GET", path, { "accessToken": access_token })).status, 403, path);
 	}
 
-	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read"]);
+	assert.deepEqual(await refusals(grantId), ["lacks users:read", "lacks users:read", "lacks sessions:read", "lacks audit:read", "lacks behavior:read"]);
 });
 
 test("/admin/users and /admin/users/:id: who's signed up, their sign-ins with their client, and their audit rows", async () => {
@@ -325,4 +325,31 @@ test("/admin/audit?repo=: the proxy's calls about one repository, found by hashi
 	const { rows } = await (await holder.send("GET", "/admin/audit?repo=Octo/Hello&event=proxy_call", { "accessToken": access_token })).json() as { "rows": { "reason": string; "detail": string }[] };
 
 	assert.deepEqual(rows.filter((row) => row.reason === marker).map((row) => row.detail), [`GET /repos/:owner/:repo ${await tag("octo/hello")}`], "case doesn't matter: GitHub's names don't");
+});
+
+// ── B9: unusual sign-ins ───────────────────────────────────────────────────────────────────────────────────────────
+
+test("/admin/unusual: sign-ins by their mean surprise, most first, with their most surprising steps and what they did that the editor doesn't", async () => {
+	const holder = await browser();
+	const { access_token } = await signedIn(holder, OWNER, "admin");
+	const [calm, odd, brief] = [await signedIn(await browser(), someone(), "editor"), await signedIn(await browser(), someone(), "editor"), await signedIn(await browser(), someone(), "editor")];
+	const step = { "from": "GET /sessions", "to": "POST /account/delete", "gap": 0, "bits": 9.5 };
+
+	// Means of 100 and 101 bits a step: above anything real, so these two lead whatever else the tests have scored.
+	await env.DB.batch([
+		env.DB.prepare("INSERT INTO scores (grant_id, steps, bits, top, updated_at) VALUES (?, 10, 1000, '[]', ?)").bind(calm.grantId, Date.now()),
+		env.DB.prepare("INSERT INTO scores (grant_id, steps, bits, top, updated_at) VALUES (?, 10, 1010, ?, ?)").bind(odd.grantId, JSON.stringify([step]), Date.now()),
+		env.DB.prepare("INSERT INTO scores (grant_id, steps, bits, top, updated_at) VALUES (?, 2, 9000, '[]', ?)").bind(brief.grantId, Date.now()),
+		env.DB.prepare("INSERT INTO audit (at, event, grant_id, detail) VALUES (?, 'probe', ?, 'GET #x')").bind(Date.now(), odd.grantId),
+		env.DB.prepare("INSERT INTO audit (at, event, grant_id, detail) VALUES (?, 'probe', ?, 'GET #y')").bind(Date.now(), odd.grantId)
+	]);
+
+	const read = async (query: string): Promise<{ "id": string; "score": { "mean": number; "steps": number; "top": unknown[] }; "flags": Record<string, number>; "githubId": number; "client": string }[]> => (await (await holder.send("GET", `/admin/unusual${query}`, { "accessToken": access_token })).json() as { "sessions": { "id": string; "score": { "mean": number; "steps": number; "top": unknown[] }; "flags": Record<string, number>; "githubId": number; "client": string }[] }).sessions;
+	const [first, second] = await read("");
+
+	assert.deepEqual([first?.id, second?.id], [odd.grantId, calm.grantId]);
+	assert.deepEqual([first?.score.mean, first?.score.steps, first?.score.top, first?.flags, first?.client], [101, 10, [step], { "probe": 2 }, "editor"]);
+	assert.deepEqual(second?.flags, {});
+	assert.equal((await read("")).some((row) => row.id === brief.grantId), false, "two steps: too few to say");
+	assert.equal((await read("?min=1"))[0]?.id, brief.grantId);
 });

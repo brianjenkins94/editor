@@ -123,6 +123,29 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
 
+/** What a sign-in did that the editor doesn't (B7), counted beside its score. */
+const FLAGS = ["probe", "proxy_denied", "client_unusual", "client_changed"];
+
+/**
+ * The sign-ins whose transitions surprised the model most (BEHAVIOR.md, B8 and B9): mean bits a scored step, highest
+ * first, each with its most surprising transitions (templates only) and how many times it did what the editor doesn't
+ * (B7's rows). Only sign-ins with `min` scored steps (default 3): one odd step says little.
+ */
+admin.get("/unusual", requires("behavior:read"), async (context) => {
+	const { results } = await context.env.DB.prepare(`SELECT s.grant_id, s.steps, s.bits, s.top, s.updated_at, g.client, g.label, g.created_at, g.last_used_at, g.revoked_at, g.user_id, u.github_id,
+			(SELECT json_group_object(event, n) FROM (SELECT event, COUNT(*) AS n FROM audit a WHERE a.grant_id = s.grant_id AND a.event IN (${FLAGS.map(() => "?").join(", ")}) GROUP BY event)) AS flags
+		FROM scores s JOIN grants g ON g.id = s.grant_id JOIN users u ON u.id = g.user_id
+		WHERE s.steps >= ? ORDER BY s.bits / s.steps DESC LIMIT ?`).bind(...FLAGS, limitOf(context.req.query("min"), 3, 1000), limitOf(context.req.query("limit"), 100, 500)).all<Record<string, unknown>>();
+
+	return context.json({ "sessions": results.map((row) => ({
+		...session({ "id": row["grant_id"], "client": row["client"], "label": row["label"], "created_at": row["created_at"], "last_used_at": row["last_used_at"], "revoked_at": row["revoked_at"] }, context.get("grant")),
+		"userId": row["user_id"],
+		"githubId": row["github_id"],
+		"score": { "mean": (row["bits"] as number) / (row["steps"] as number), "steps": row["steps"], "top": JSON.parse(row["top"] as string) as unknown, "updatedAt": row["updated_at"] },
+		"flags": JSON.parse((row["flags"] as string | null) ?? "{}") as Record<string, number>
+	})) });
+});
+
 // ── Writes (B6) ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**

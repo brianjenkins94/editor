@@ -21,7 +21,7 @@ import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { loginOf } from "./logins";
 import { get, session, SIGNED_OUT } from "./session";
-import { Audit, Overview, Permissions, Sessions, TrafficPage, UserPage, Users } from "./views";
+import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
 
 interface Me { "user": string; "roles": string[]; "permissions": string[] }
 
@@ -93,7 +93,8 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 			: path === "/sessions" ? <Sessions />
 				: path === "/audit" ? <Audit query={query} />
 					: path === "/traffic" ? <TrafficPage query={query} />
-						: <Overview />;
+						: path === "/unusual" ? <UnusualPage />
+							: <Overview />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 
 	useEffect(() => {
@@ -117,6 +118,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/users", "Users", path.startsWith("/users"))}
 				{link("#/sessions", "Sign-ins", path === "/sessions")}
 				{link("#/audit", "Audit log", path === "/audit")}
+				{link("#/unusual", "Unusual", path === "/unusual")}
 				{link("#/traffic", "Traffic", path === "/traffic")}
 			</nav>
 			<main><Permissions.Provider value={me.permissions}>{page}</Permissions.Provider></main>
