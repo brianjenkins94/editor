@@ -14,7 +14,9 @@ import { passkeysOf } from "./passkeys.ts";
 import { emailMfaState, hasEmailMfa, hasMfa, mfaState } from "./mfa-state.ts";
 import { emailSecondFactor, secondFactor } from "./mfa.ts";
 import { checkActionCode, issueActionCode } from "./action-codes.ts";
-import { askSecondFactor, forgetAttempt, heldAttempt, signInAs } from "./signin.ts";
+import { forgetAttempt, heldAttempt } from "./attempt.ts";
+import { askSecondFactor, signInAs } from "./signin.ts";
+import { refusal } from "./refusals.ts";
 
 /**
  * Passwords (SIGN-IN.md, "Passwords"; C3):
@@ -63,14 +65,7 @@ export async function breaches(env: Bindings, password: string): Promise<number 
 /** A bucket of tries, `tries` at `at`: what's in it now, one back each TRY_REFILL, at most TRIES. */
 const refilled = (tries: number, at: number, now: number): number => Math.min(TRIES, tries + (now - at) / TRY_REFILL);
 
-/** A refusal: recorded, and answered with what's wrong. */
-async function refuse(context: Context<AppEnv>, status: 400 | 401 | 429 | 502 | 503, error: string, reason: string, event: "sign_in_refused" | "auth_refused" = "sign_in_refused"): Promise<Response> {
-	context.get("span").info("password refused", { "reason": reason });
-	await audit(context.env, event, event === "auth_refused" ? { "userId": context.get("user"), "grantId": context.get("grant") } : {}, await origin(context), { "reason": `password: ${reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-	context.header("cache-control", "no-store");
-
-	return context.json({ "error": error, "reason": reason }, status);
-}
+const refuse = refusal("password");
 
 // ── Signing in with a password ─────────────────────────────────────────────────────────────────────────────────────
 

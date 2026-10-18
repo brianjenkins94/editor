@@ -6,6 +6,7 @@ import { audit, origin } from "./audit.ts";
 import { ADDRESS } from "./email.ts";
 import { authorizeUrl } from "./github.ts";
 import { githubIdOf, identityOf, link, ownerOf } from "./identities.ts";
+import { refusal, signedInRecently } from "./refusals.ts";
 
 /**
  * Linking (SIGN-IN.md, "Linking accounts"): another way to sign in, added to the signed-in account. GitHub connected to
@@ -21,25 +22,15 @@ import { githubIdOf, identityOf, link, ownerOf } from "./identities.ts";
  * The editor reaches them at the API's root, the admin app under /admin (src/index.ts, src/admin.ts).
  */
 
-const RECENT = 10 * 60_000;
-
 const ADD_EMAIL = "add_email";
 
 const PROVIDERS: Record<Provider, string> = { "github": "GitHub account", "email": "email" };
 
-export async function refuse(context: Context<AppEnv>, status: 400 | 403 | 409, error: string, reason: string, extra: Record<string, unknown> = {}): Promise<Response> {
-	context.get("span").info("link refused", { "reason": reason });
-	await audit(context.env, "auth_refused", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `link: ${reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-	context.header("cache-control", "no-store");
+const refuse = refusal("link", "auth_refused");
 
-	return context.json({ "error": error, "reason": reason, ...extra }, status);
-}
-
-/** The action's own check: this sign-in was made in the last 10 minutes. The refusal, or nothing. */
+/** The action's own check: this sign-in was made in the last 10 minutes (src/refusals.ts). The refusal, or nothing. */
 export async function recent(context: Context<AppEnv>, what: string): Promise<Response | undefined> {
-	const grant = await context.env.DB.prepare("SELECT created_at FROM grants WHERE id = ?").bind(context.get("grant")).first<{ "created_at": number }>();
-
-	return grant === null || Date.now() - grant.created_at > RECENT ? refuse(context, 403, "sign_in_again", `sign in again to ${what} (it needs a sign-in in the last 10 minutes)`) : undefined;
+	return await signedInRecently(context) ? undefined : refuse(context, 403, "sign_in_again", `sign in again to ${what} (it needs a sign-in in the last 10 minutes)`);
 }
 
 /** Whether `other` holds nothing but its `provider` way in: no other, no password, passkey or two-factor, no role (a GitHub id in
@@ -85,7 +76,7 @@ async function attach(context: Context<AppEnv>, provider: Provider, subject: str
 	const canMerge = await mergeable(context.env, other, provider);
 
 	if (!merge || !canMerge) {
-		return refuse(context, 409, "taken", `that ${PROVIDERS[provider]} is another account's`, { "account": other, "mergeable": canMerge });
+		return refuse(context, 409, "taken", `that ${PROVIDERS[provider]} is another account's`, "auth_refused", { "account": other, "mergeable": canMerge });
 	}
 
 	const { results } = await context.env.DB.prepare("SELECT id FROM grants WHERE user_id = ? AND revoked_at IS NULL").bind(other).all<{ "id": string }>();

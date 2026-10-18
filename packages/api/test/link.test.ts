@@ -2,16 +2,17 @@ import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
-import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
+import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
-import { BROWSER } from "./browser.ts";
+import type { App } from "./helpers.ts";
+import { testBrowser, PAGES, someone } from "./helpers.ts";
 
 // Linking (SIGN-IN.md, "Linking accounts") in workerd, against stand-ins for GitHub and the outbox: an email account
 // connects GitHub, a GitHub account adds an email, an empty duplicate is merged in, anything more is refused; and roles
 // go by how a sign-in was made.
 
-const EDITOR = "http://localhost:5173/";
-const ADMIN = "http://localhost:5174/";
+const EDITOR = PAGES.editor;
+const ADMIN = PAGES.admin;
 const OWNER = 9398474; // OWNERS in wrangler.jsonc's local vars
 const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };
 const secrets = {
@@ -72,97 +73,7 @@ after(async () => {
 	stand.close();
 });
 
-const at = (path: string): string => new URL(path, base).href;
-
-type Answer = Awaited<ReturnType<typeof server.fetch>>;
-
-const browse = async (url: string, { cookie, ...init }: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "cookie"?: string } = {}): Promise<Answer> => server.fetch(url, { ...init, "redirect": "manual", "headers": { "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...BROWSER, ...cookie === undefined ? {} : { "cookie": cookie }, ...init.headers } });
-
-const form = async (path: string, cookie: string, fields: Record<string, string>): Promise<Answer> => browse(at(path), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams(fields).toString(), "cookie": cookie });
-
-/** An app (the editor, or the admin app), its sign-in pushed and opened in a browser (the cookie); `call` sends a request
- *  with its key's proof (and the access token once it has one); `prefix` is where its account routes are. */
-async function app(client: "editor" | "admin"): Promise<{ "cookie": string; "prefix": string; "page": string; "redeem": (code: string) => Promise<void>; "call": (method: string, path: string, fields?: Record<string, string>) => Promise<Answer> }> {
-	const page = client === "editor" ? EDITOR : ADMIN;
-	const { privateKey, publicKey } = await generateKeyPair("ES256");
-	const jwk = await exportJWK(publicKey);
-	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-	let nonce: string | undefined;
-	let token: string | undefined;
-	const call = async (method: string, path: string, fields?: Record<string, string>): Promise<Answer> => {
-		for (let attempt = 0; ; attempt += 1) {
-			const ath = token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) };
-			const proof = await new SignJWT({ "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...ath }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);
-			const response = await browse(at(path), { "method": method, "headers": { "dpop": proof, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...fields === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } }, ...fields === undefined ? {} : { "body": new URLSearchParams(fields).toString() } });
-
-			nonce = response.headers.get("dpop-nonce") ?? nonce;
-
-			if (attempt === 0 && (response.status === 400 || response.status === 401) && (await response.clone().json().catch(() => ({})) as { "error"?: string }).error === "use_dpop_nonce") {
-				continue;
-			}
-
-			return response;
-		}
-	};
-	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-	const { request_uri } = await (await call("POST", "/auth/par", { "client_id": client, "response_type": "code", "redirect_uri": page, "state": "s", "code_challenge": challenge, "code_challenge_method": "S256" })).json() as { "request_uri": string };
-	const opened = await browse(`${at("/auth/start")}?${new URLSearchParams({ "client_id": client, "request_uri": request_uri })}`);
-
-	return {
-		"cookie": (opened.headers.get("set-cookie") ?? "").split(";")[0] as string,
-		"prefix": client === "editor" ? "" : "/admin",
-		"page": page,
-		"redeem": async (code) => {
-			token = (await (await call("POST", "/token", { "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": client })).json() as { "access_token": string }).access_token;
-		},
-		"call": call
-	};
-}
-
-type App = Awaited<ReturnType<typeof app>>;
-
-const someone = (): string => `someone-${crypto.randomUUID().slice(0, 8)}@example.com`;
-
-function codeFor(address: string): string {
-	const code = /([A-Z2-9]{4}-[A-Z2-9]{4})/u.exec(outbox.findLast((message) => message.to === address)?.subject ?? "")?.[1];
-
-	assert.ok(code !== undefined, `a code was sent to ${address}`);
-
-	return code;
-}
-
-/** As the throttle on emailed codes can tell, a minute later. */
-const aMinuteLater = async (): Promise<void> => {
-	await env.DB.prepare("UPDATE audit SET at = at - 61000 WHERE event = 'email_code_sent'").run();
-};
-
-/** Signed in by an emailed code. */
-async function byEmail(address: string, client: "editor" | "admin" = "editor"): Promise<App> {
-	const signedIn = await app(client);
-
-	await form("/auth/email", signedIn.cookie, { "address": address });
-
-	const { location } = await (await form("/auth/email/verify", signedIn.cookie, { "code": codeFor(address) })).json() as { "location": string };
-
-	await signedIn.redeem(new URL(location).searchParams.get("code") as string);
-	await aMinuteLater();
-
-	return signedIn;
-}
-
-/** Signed in with GitHub, as `id`, through the sign-in page. */
-async function byGitHub(id: number, client: "editor" | "admin" = "editor"): Promise<App> {
-	const signedIn = await app(client);
-	const toGitHub = new URL((await browse(at("/auth/github"), { "cookie": signedIn.cookie })).headers.get("location") as string);
-
-	github.id = id;
-
-	const landing = new URL((await browse(`${at("/auth/github/callback")}?${new URLSearchParams({ "code": "github-code", "state": toGitHub.searchParams.get("state") as string })}`, { "cookie": signedIn.cookie })).headers.get("location") as string);
-
-	await signedIn.redeem(landing.searchParams.get("code") as string);
-
-	return signedIn;
-}
+const { at, browse, app, byEmail, byGitHub, codeFor, aMinuteLater } = testBrowser(server, () => base, { outbox, github, "db": () => env.DB });
 
 /** Connecting GitHub (as `id`) from `signedIn`: its authorize page, GitHub's way back to `returnTo`, and the link code. */
 async function connect(signedIn: App, id: number, returnTo = `${signedIn.page}env/octo/hello`): Promise<URL> {

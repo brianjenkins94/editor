@@ -7,19 +7,19 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
 import { deleteAccountEndpoint, purge, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
+import { accountRoutes } from "./account-routes.ts";
 import { admin } from "./admin.ts";
 import { ROUTES } from "./architecture.ts";
 import { audit, expire, origin } from "./audit.ts";
 import { decay, keyed } from "./behavior.ts";
 import { emailEndpoint, verifyEndpoint } from "./email.ts";
 import { expireInbox, receive } from "./inbox.ts";
-import { emailMfaCodeEndpoint, emailMfaEndpoint, mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint, secondStepEndpoint } from "./mfa.ts";
-import { accountEndpoint, passwordCodeEndpoint, passwordSignInEndpoint, resetCodeEndpoint, resetPasswordEndpoint, setPasswordEndpoint } from "./password.ts";
+import { secondStepEndpoint } from "./mfa.ts";
+import { passwordSignInEndpoint, resetCodeEndpoint, resetPasswordEndpoint } from "./password.ts";
 import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
-import { emailLinkCodeEndpoint, emailLinkEndpoint, githubFinishEndpoint, githubLinkEndpoint } from "./link.ts";
 import { log } from "./log.ts";
-import { passkeyFinishEndpoint, passkeyOptionsEndpoint, passkeyRegisterEndpoint, passkeyRemoveEndpoint, passkeySignInEndpoint, passkeyStartEndpoint } from "./passkeys.ts";
+import { passkeyOptionsEndpoint, passkeyRegisterEndpoint, passkeySignInEndpoint } from "./passkeys.ts";
 import { githubApi, githubGit } from "./proxy.ts";
 import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
 import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
@@ -168,40 +168,8 @@ app.post("/sessions/:id/revoke", session, revokeSessionEndpoint);
 
 app.post("/account/delete", session, deleteAccountEndpoint);
 
-// Your account's sign-in methods, for the editor (C7): the same as the admin app's under /admin/account (src/password.ts,
-// src/mfa.ts), behind the editor's session.
-app.get("/account", session, accountEndpoint);
-
-app.post("/account/password/code", session, passwordCodeEndpoint);
-
-app.post("/account/password", session, setPasswordEndpoint);
-
-app.post("/account/mfa/start", session, mfaStartEndpoint);
-
-app.post("/account/mfa/confirm", session, mfaConfirmEndpoint);
-
-app.post("/account/mfa/off", session, mfaOffEndpoint);
-
-app.post("/account/mfa/recovery", session, mfaRecoveryEndpoint);
-
-app.post("/account/mfa/email/code", session, emailMfaCodeEndpoint);
-
-app.post("/account/mfa/email", session, emailMfaEndpoint);
-
-// Linking another way to sign in to your account (src/link.ts).
-app.post("/account/github", session, githubLinkEndpoint);
-
-app.post("/account/github/finish", session, githubFinishEndpoint);
-
-app.post("/account/email/code", session, emailLinkCodeEndpoint);
-
-app.post("/account/email", session, emailLinkEndpoint);
-
-app.post("/account/passkey", session, passkeyStartEndpoint);
-
-app.post("/account/passkey/finish", session, passkeyFinishEndpoint);
-
-app.post("/account/passkey/remove", session, passkeyRemoveEndpoint);
+// Your account (src/account-routes.ts): the same routes as the admin app's /admin/account, behind the editor's session.
+app.route("/account", accountRoutes(session));
 
 // The admin API (src/admin.ts): admin tokens only, each route behind its permission.
 app.route("/admin", admin);

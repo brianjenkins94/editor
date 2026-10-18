@@ -1,9 +1,9 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 import { CODE_TTL } from "./attempt.ts";
-import { audit, origin } from "./audit.ts";
 import { codeHash, isCode, newCode, sendCode, typed } from "./email.ts";
 import { canSend } from "./mail.ts";
+import { refusal } from "./refusals.ts";
 
 /**
  * Codes for one action of a user's (SIGN-IN.md: sensitive actions take a fresh, action-specific check): setting or
@@ -16,14 +16,7 @@ const TRIES = 5;
 
 const TRY_REFILL = 60_000;
 
-/** A refusal: recorded, answered with what's wrong. */
-async function refuse(context: Context<AppEnv>, status: 400 | 429 | 502 | 503, error: string, reason: string, event: "sign_in_refused" | "auth_refused"): Promise<Response> {
-	context.get("span").info("action code refused", { "reason": reason });
-	await audit(context.env, event, event === "auth_refused" ? { "userId": context.get("user"), "grantId": context.get("grant") } : {}, await origin(context), { "reason": `code: ${reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-	context.header("cache-control", "no-store");
-
-	return context.json({ "error": error, "reason": reason }, status);
-}
+const refuse = refusal("code");
 
 /**
  * A code for one of `user`'s actions, emailed to `address`: its HMAC kept in `action_codes`, bound to `bound` (the user

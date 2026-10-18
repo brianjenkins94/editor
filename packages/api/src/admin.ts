@@ -1,15 +1,12 @@
 import type { AppEnv } from "./env.ts";
 import { Hono } from "hono";
+import { accountRoutes } from "./account-routes.ts";
 import { ROUTINE } from "./audit-copies.ts";
 import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
 import { githubIdColumn } from "./identities.ts";
 import { inboxEndpoint } from "./inbox.ts";
-import { emailLinkCodeEndpoint, emailLinkEndpoint, githubFinishEndpoint, githubLinkEndpoint } from "./link.ts";
-import { passkeyFinishEndpoint, passkeyRemoveEndpoint, passkeyStartEndpoint } from "./passkeys.ts";
 import { mailEndpoint } from "./mail-report.ts";
-import { emailMfaCodeEndpoint, emailMfaEndpoint, mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint } from "./mfa.ts";
-import { accountEndpoint, passwordCodeEndpoint, setPasswordEndpoint } from "./password.ts";
 import { smokeTest } from "./smoke.ts";
 import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
@@ -129,42 +126,10 @@ admin.get("/audit", requires("audit:read"), async (context) => {
 	return context.json({ "rows": results.map(auditRow) });
 });
 
-// ── Your own account (C3) ──────────────────────────────────────────────────────────────────────────────────────────
-// Any admin token, roles or none: it's your own account. Setting a password takes a code to your email first.
+// ── Your own account (src/account-routes.ts) ───────────────────────────────────────────────────────────────────────
+// Any admin token, roles or none: it's your own account. The editor has the same routes at /account.
 
-admin.get("/account", accountEndpoint);
-
-admin.post("/account/password/code", passwordCodeEndpoint);
-
-admin.post("/account/password", setPasswordEndpoint);
-
-// Two-factor (C5): set up (start, then confirm with the app's code), turned off, new recovery codes. A recent sign-in each.
-admin.post("/account/mfa/start", mfaStartEndpoint);
-
-admin.post("/account/mfa/confirm", mfaConfirmEndpoint);
-
-admin.post("/account/mfa/off", mfaOffEndpoint);
-
-admin.post("/account/mfa/recovery", mfaRecoveryEndpoint);
-
-// Two-factor by email (C6): a code to your email, then on or off.
-admin.post("/account/mfa/email/code", emailMfaCodeEndpoint);
-
-admin.post("/account/mfa/email", emailMfaEndpoint);
-
-admin.post("/account/github", githubLinkEndpoint);
-
-admin.post("/account/github/finish", githubFinishEndpoint);
-
-admin.post("/account/email/code", emailLinkCodeEndpoint);
-
-admin.post("/account/email", emailLinkEndpoint);
-
-admin.post("/account/passkey", passkeyStartEndpoint);
-
-admin.post("/account/passkey/finish", passkeyFinishEndpoint);
-
-admin.post("/account/passkey/remove", passkeyRemoveEndpoint);
+admin.route("/account", accountRoutes());
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);

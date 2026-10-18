@@ -1,14 +1,14 @@
 import type { Context } from "hono";
-import type { Attempt, Pushed } from "./attempt.ts";
+import type { Pushed } from "./attempt.ts";
 import type { AppEnv } from "./env.ts";
 import { verifyProof } from "@brianjenkins94/util/auth/dpop";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { ATTEMPT_TTL, PUSH_TTL } from "./attempt.ts";
+import { attemptOf, forgetAttempt, heldAttempt, holdAttempt, PUSH_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
 import { deviceLabel } from "./account.ts";
 import { answerUrl, toGitHub } from "./github.ts";
 import { canSend } from "./mail.ts";
 import { nonce } from "./tokens.ts";
+import { oauthRefusal } from "./refusals.ts";
 
 /**
  * Signing in through our own page (SIGN-IN.md, "The shape"):
@@ -28,31 +28,8 @@ import { nonce } from "./tokens.ts";
 
 const REQUEST_URI = "urn:ietf:params:oauth:request_uri:";
 
-/** The attempt's cookie: `__Host-signin`, the attempt's id and this browser's secret. */
-const COOKIE = "signin";
-
 /** A base64url SHA-256 (43 characters): what a PKCE S256 challenge is. */
 const DIGEST = /^[\w-]{43}$/u;
-
-export const attemptOf = (context: Context<AppEnv>, id: string): DurableObjectStub<Attempt> | undefined => {
-	try {
-		return context.env.ATTEMPTS.get(context.env.ATTEMPTS.idFromString(id));
-	} catch {
-		return undefined; // not an id of ours
-	}
-};
-
-/** The attempt this browser holds, from its cookie. */
-export function heldAttempt(context: Context<AppEnv>): { "id": string; "secret": string; "stub": DurableObjectStub<Attempt> } | undefined {
-	const [id, secret] = (getCookie(context, COOKIE, "host") ?? "").split(".");
-	const stub = id === undefined || secret === undefined ? undefined : attemptOf(context, id);
-
-	return stub === undefined ? undefined : { "id": id as string, "secret": secret as string, "stub": stub };
-}
-
-export function forgetAttempt(context: Context<AppEnv>): void {
-	deleteCookie(context, COOKIE, { "path": "/", "secure": true, "prefix": "host" });
-}
 
 /**
  * The end of a sign-in by one of our own methods (an emailed code, a password, then a second factor if the account has
@@ -87,13 +64,7 @@ export async function askSecondFactor(context: Context<AppEnv>, held: NonNullabl
 	return context.json({ "second_factor": kind });
 }
 
-async function refuse(context: Context<AppEnv>, reason: string, status: 400 | 401 = 400): Promise<Response> {
-	context.get("span").info("sign-in refused", { "reason": reason });
-	await audit(context.env, "sign_in_refused", {}, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-	context.header("cache-control", "no-store");
-
-	return context.json({ "error": "invalid_request" }, status);
-}
+const refuse = oauthRefusal;
 
 /** POST /auth/par: the client's authorization request, pushed. 201 with its request_uri. */
 export async function parEndpoint(context: Context<AppEnv>): Promise<Response> {
@@ -152,7 +123,7 @@ export async function startEndpoint(context: Context<AppEnv>): Promise<Response>
 		return refuse(context, opened.reason);
 	}
 
-	setCookie(context, COOKIE, `${requestUri.slice(REQUEST_URI.length)}.${opened.secret}`, { "path": "/", "secure": true, "httpOnly": true, "sameSite": "Lax", "maxAge": ATTEMPT_TTL / 1000, "prefix": "host" });
+	holdAttempt(context, requestUri.slice(REQUEST_URI.length), opened.secret);
 	context.header("cache-control", "no-store");
 
 	return context.redirect("/sign-in", 302);

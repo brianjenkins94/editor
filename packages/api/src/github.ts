@@ -5,8 +5,9 @@ import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 import { open, seal } from "@brianjenkins94/util/auth/seal";
 import { base64url } from "jose";
 import { deviceLabel } from "./account.ts";
-import { audit, origin } from "./audit.ts";
-import { forgetAttempt, heldAttempt } from "./signin.ts";
+import { origin } from "./audit.ts";
+import { forgetAttempt, heldAttempt } from "./attempt.ts";
+import { oauthRefusal } from "./refusals.ts";
 
 /**
  * Signing in with GitHub (README.md, "Tokens and the flow", steps 1–2). The app sends the browser to /auth/github/start
@@ -44,12 +45,7 @@ const callback = (context: Context<AppEnv>): string => `${new URL(context.req.ur
 /** A base64url SHA-256 (43 characters): what a PKCE S256 challenge and a JWK thumbprint both are. */
 const DIGEST = /^[\w-]{43}$/u;
 
-async function refuse(context: Context<AppEnv>, reason: string): Promise<Response> {
-	context.get("span").info("sign-in refused", { "reason": reason });
-	await audit(context.env, "sign_in_refused", {}, await origin(context), { "reason": reason, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-
-	return context.json({ "error": "invalid_request" }, 400);
-}
+const refuse = oauthRefusal;
 
 /** Where the app is answered (an OAuth answer: `code` on success, `error` otherwise; always its own `state`, and our
  *  `iss`): GitHub's callback redirects there, the email step (email.ts) hands it to the sign-in page. */

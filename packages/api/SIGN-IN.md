@@ -337,6 +337,11 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     challenge once, a tampered signature and an unknown or removed passkey refused; a passkey sign-in holding the owner's
     role. Looked at in the harness: the sign-in page's button, the account page's section, the passkey page (the device's
     own prompt not driven: it's the person's).
+- **Tidied** (2026-10-18), no change in behaviour: your account's routes are one table (src/account-routes.ts), mounted
+  at /account for the editor and /admin/account for the admin app; refusals are one helper each module binds with its
+  area (src/refusals.ts), with the recent-sign-in check sensitive actions share; how a browser holds its attempt (the
+  `__Host-signin` cookie) sits with the Attempt (src/attempt.ts), which ends the github.ts ↔ signin.ts import cycle; the
+  tests that sign in through our pages share test/helpers.ts.
 - **Later:** a passkey as a second step after a password; naming passkeys; conditional UI (passkeys offered in the
   email field's autofill).
 

@@ -1,7 +1,9 @@
+import type { Context } from "hono";
+import type { AppEnv, Bindings } from "./env.ts";
 import { accessTokenHash as hash } from "@brianjenkins94/util/auth/dpop";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { base64url } from "jose";
 import { DurableObject } from "cloudflare:workers";
-import type { Bindings } from "./env.ts";
 
 /**
  * A sign-in in progress (SIGN-IN.md, "An attempt holds a sign-in in progress"): one Durable Object per attempt, made by
@@ -284,4 +286,34 @@ export class Attempt extends DurableObject<Bindings> {
 	public override async alarm(): Promise<void> {
 		await this.ctx.storage.deleteAll();
 	}
+}
+
+// ── How a browser holds its attempt ────────────────────────────────────────────────────────────────────────────────
+
+/** The attempt's cookie: `__Host-signin`, the attempt's id and this browser's secret. */
+const COOKIE = "signin";
+
+export const attemptOf = (context: Context<AppEnv>, id: string): DurableObjectStub<Attempt> | undefined => {
+	try {
+		return context.env.ATTEMPTS.get(context.env.ATTEMPTS.idFromString(id));
+	} catch {
+		return undefined; // not an id of ours
+	}
+};
+
+/** The attempt this browser holds, from its cookie. */
+export function heldAttempt(context: Context<AppEnv>): { "id": string; "secret": string; "stub": DurableObjectStub<Attempt> } | undefined {
+	const [id, secret] = (getCookie(context, COOKIE, "host") ?? "").split(".");
+	const stub = id === undefined || secret === undefined ? undefined : attemptOf(context, id);
+
+	return stub === undefined ? undefined : { "id": id as string, "secret": secret as string, "stub": stub };
+}
+
+export function forgetAttempt(context: Context<AppEnv>): void {
+	deleteCookie(context, COOKIE, { "path": "/", "secure": true, "prefix": "host" });
+}
+
+/** Hold attempt `id` in this browser: the cookie, `HttpOnly`, `SameSite=Lax`, for the attempt's life. */
+export function holdAttempt(context: Context<AppEnv>, id: string, secret: string): void {
+	setCookie(context, COOKIE, `${id}.${secret}`, { "path": "/", "secure": true, "httpOnly": true, "sameSite": "Lax", "maxAge": ATTEMPT_TTL / 1000, "prefix": "host" });
 }

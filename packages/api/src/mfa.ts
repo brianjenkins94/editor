@@ -8,8 +8,10 @@ import { codeHash, newCode, sendCode, typed } from "./email.ts";
 import { emailOf } from "./identities.ts";
 import { hasEmailMfa } from "./mfa-state.ts";
 import { hasMfa } from "./mfa-state.ts";
-import { heldAttempt, signInAs } from "./signin.ts";
+import { heldAttempt } from "./attempt.ts";
+import { signInAs } from "./signin.ts";
 import { base32, isRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, typedRecovery, unbase32, verifyTotp } from "./totp.ts";
+import { refusal, signedInRecently } from "./refusals.ts";
 
 /**
  * Authenticator-app MFA (SIGN-IN.md, "MFA, optional"; C5), for your own account, from the admin app's Your account page:
@@ -21,7 +23,7 @@ import { base32, isRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, typedR
  *   POST /admin/account/mfa/email/code `turn` ("on" or "off"): a code to your email, to turn two-factor by email on or off
  *   POST /admin/account/mfa/email      `turn`, `code`: two-factor by email on, or off (C6)
  *
- * Each needs a recent sign-in (within RECENT): the action's own check, and the one every account can pass, GitHub's
+ * Each needs a recent sign-in (within 10 minutes, src/refusals.ts): the action's own check, and the one every account can pass, GitHub's
  * included (SIGN-IN.md, "Departures"). Turning it off and new recovery codes need the second factor itself too.
  *
  * `secondFactor` is the check at sign-in (after an emailed code or a password, before the session starts: POST
@@ -30,7 +32,6 @@ import { base32, isRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, typedR
  */
 
 /** How recent a sign-in must be to change MFA. */
-const RECENT = 10 * 60_000;
 
 const TRIES = 5;
 
@@ -83,24 +84,15 @@ export async function secondFactor(env: Bindings, user: string, code: string, no
 	return took.meta.changes === 1 ? { "ok": true, "kind": "totp" } : { "ok": false, "reason": "that code isn't right, or it's been used", "status": 400 };
 }
 
-/** A refusal: recorded, answered with what's wrong. */
-async function refuse(context: Context<AppEnv>, status: 400 | 403 | 429 | 503, error: string, reason: string): Promise<Response> {
-	context.get("span").info("mfa refused", { "reason": reason });
-	await audit(context.env, "auth_refused", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `mfa: ${reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-	context.header("cache-control", "no-store");
+const refuse = refusal("mfa", "auth_refused");
 
-	return context.json({ "error": error, "reason": reason }, status);
-}
-
-/** The action's own check: a sign-in within RECENT, and MFA set up in this environment. The refusal, or nothing. */
+/** The action's own check: a sign-in in the last 10 minutes, and MFA set up in this environment. The refusal, or nothing. */
 async function recent(context: Context<AppEnv>): Promise<Response | undefined> {
 	if (context.env.TOTP_KEK === undefined || context.env.CODE_KEY === undefined) {
 		return refuse(context, 503, "unavailable", "two-factor isn't set up here");
 	}
 
-	const grant = await context.env.DB.prepare("SELECT created_at FROM grants WHERE id = ?").bind(context.get("grant")).first<{ "created_at": number }>();
-
-	return grant === null || Date.now() - grant.created_at > RECENT ? refuse(context, 403, "sign_in_again", "sign in again to change two-factor (it needs a sign-in in the last 10 minutes)") : undefined;
+	return await signedInRecently(context) ? undefined : refuse(context, 403, "sign_in_again", "sign in again to change two-factor (it needs a sign-in in the last 10 minutes)");
 }
 
 /** Ten new recovery codes for `user`, replacing any: kept as HMACs, handed back in clear this once. */

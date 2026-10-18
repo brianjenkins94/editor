@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import * as nodeCrypto from "node:crypto";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
-import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
+import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
+import type { Answer, App } from "./helpers.ts";
+import { testBrowser, someone } from "./helpers.ts";
 import { hashPassword, passwordProblem, verifyPassword } from "../src/password-hash.ts";
 import { hotp, stepAt, unbase32 } from "../src/totp.ts";
 
@@ -12,7 +14,6 @@ import { hotp, stepAt, unbase32 } from "../src/totp.ts";
 // their email first, then the password, checked against known breaches by a stand-in of Have I Been Pwned), then signs
 // in with it, as the admin app and a browser would.
 
-const APP = "http://localhost:5174/";
 const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };
 const secrets = {
 	"SIGNING_JWK": JSON.stringify(signing),
@@ -77,89 +78,17 @@ after(async () => {
 	stand.close();
 });
 
-const at = (path: string): string => new URL(path, base).href;
+const { at, browse, form, app, byEmail, codeFor, aMinuteLater } = testBrowser(server, () => base, { outbox, "db": () => env.DB });
 
-type Answer = Awaited<ReturnType<typeof server.fetch>>;
-
-const browse = async (url: string, { cookie, ...init }: { "method"?: string; "headers"?: Record<string, string>; "body"?: string; "cookie"?: string } = {}): Promise<Answer> => server.fetch(url, { ...init, "redirect": "manual", "headers": { "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...cookie === undefined ? {} : { "cookie": cookie }, ...init.headers } });
-
-const form = async (path: string, cookie: string, fields: Record<string, string>): Promise<Answer> => browse(at(path), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": new URLSearchParams(fields).toString(), "cookie": cookie });
-
-/** The admin app (or the editor, `client`): a DPoP key, a PKCE verifier; it pushes its request, a browser opens it (the
- *  cookie); `call` sends a request with the key's proof (and the access token, when it has one). */
-async function app(client = "admin", redirect = APP): Promise<{ "cookie": string; "redeem": (code: string) => Promise<string>; "call": (method: string, path: string, fields?: Record<string, string>) => Promise<Answer> }> {
-	const { privateKey, publicKey } = await generateKeyPair("ES256");
-	const jwk = await exportJWK(publicKey);
-	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-	let nonce: string | undefined;
-	let token: string | undefined;
-	const call = async (method: string, path: string, fields?: Record<string, string>): Promise<Answer> => {
-		for (let attempt = 0; ; attempt += 1) {
-			const ath = token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) };
-			const proof = await new SignJWT({ "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...ath }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);
-			const response = await browse(at(path), { "method": method, "headers": { "dpop": proof, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...fields === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } }, ...fields === undefined ? {} : { "body": new URLSearchParams(fields).toString() } });
-
-			nonce = response.headers.get("dpop-nonce") ?? nonce;
-
-			if (attempt === 0 && (response.status === 400 || response.status === 401) && (await response.clone().json().catch(() => ({})) as { "error"?: string }).error === "use_dpop_nonce") {
-				continue;
-			}
-
-			return response;
-		}
-	};
-	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-	const { request_uri } = await (await call("POST", "/auth/par", { "client_id": client, "response_type": "code", "redirect_uri": redirect, "state": "s", "code_challenge": challenge, "code_challenge_method": "S256" })).json() as { "request_uri": string };
-	const opened = await browse(`${at("/auth/start")}?${new URLSearchParams({ "client_id": client, "request_uri": request_uri })}`);
-
-	return {
-		"cookie": (opened.headers.get("set-cookie") ?? "").split(";")[0] as string,
-		"redeem": async (code) => {
-			const tokens = await (await call("POST", "/token", { "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": client })).json() as { "access_token": string };
-
-			token = tokens.access_token;
-
-			return token;
-		},
-		"call": call
-	};
-}
-
-function codeFor(address: string): string {
-	const code = /([A-Z2-9]{4}-[A-Z2-9]{4})/u.exec(outbox.findLast((message) => message.to === address)?.subject ?? "")?.[1];
-
-	assert.ok(code !== undefined, `a code was sent to ${address}`);
-
-	return code;
-}
-
-/** As the throttle on emailed codes can tell, a minute later. */
-const aMinuteLater = async (): Promise<void> => {
-	await env.DB.prepare("UPDATE audit SET at = at - 61000 WHERE event = 'email_code_sent'").run();
-};
-
-/** Signed in to the admin app by an emailed code: a new account for `address`, and the app holding its tokens. */
-async function signedInByEmail(address: string, signedIn?: Awaited<ReturnType<typeof app>>): Promise<Awaited<ReturnType<typeof app>>> {
-	signedIn ??= await app();
-
-	await form("/auth/email", signedIn.cookie, { "address": address });
-
-	const { location } = await (await form("/auth/email/verify", signedIn.cookie, { "code": codeFor(address) })).json() as { "location": string };
-
-	await signedIn.redeem(new URL(location).searchParams.get("code") as string);
-	await aMinuteLater();
-
-	return signedIn;
-}
-
-const someone = (): string => `someone-${crypto.randomUUID().slice(0, 8)}@example.com`;
+/** Signed in to the admin app by an emailed code (or in `signedIn`, the editor say): a new account for `address`. */
+const signedInByEmail = async (address: string, signedIn?: App): Promise<App> => byEmail(address, signedIn ?? "admin");
 
 async function refusals(): Promise<string[]> {
 	return (await env.DB.prepare("SELECT reason FROM audit WHERE event IN ('sign_in_refused', 'auth_refused') ORDER BY id").all<{ "reason": string }>()).results.map((row) => row.reason);
 }
 
 /** Set `password` on the signed-in account: a code to its email, then the code and the password. */
-async function setPassword(signedIn: Awaited<ReturnType<typeof app>>, address: string, password: string): Promise<Answer> {
+async function setPassword(signedIn: App, address: string, password: string): Promise<Answer> {
 	assert.equal((await signedIn.call("POST", "/admin/account/password/code", {})).status, 200);
 	await aMinuteLater();
 
@@ -170,7 +99,7 @@ async function setPassword(signedIn: Awaited<ReturnType<typeof app>>, address: s
 
 test("the editor: an account by email alone, with a password set from it and signed in with; GitHub through the proxy refused as not this sign-in's, not as signed out", async () => {
 	const address = someone();
-	const editor = await signedInByEmail(address, await app("editor", "http://localhost:5173/"));
+	const editor = await signedInByEmail(address, await app("editor"));
 	const account = await (await editor.call("GET", "/account")).json() as { "githubId": number | null; "email": { "address": string }; "password": { "setAt": number } | null };
 
 	assert.equal(account.githubId, null);
@@ -186,7 +115,7 @@ test("the editor: an account by email alone, with a password set from it and sig
 	await aMinuteLater();
 	assert.equal((await editor.call("POST", "/account/password", { "code": codeFor(address), "password": "a long and unusual editor password" })).status, 200);
 
-	const again = await app("editor", "http://localhost:5173/");
+	const again = await app("editor");
 	const signedIn = await form("/auth/password", again.cookie, { "address": address, "password": "a long and unusual editor password" });
 	const { location } = await signedIn.json() as { "location": string };
 
@@ -304,7 +233,7 @@ test("an email account without a password is told to use a code; setting one nee
 // ── Resetting it (C4) ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A reset in a fresh browser: the code asked for, then `fields` with it. */
-async function reset(address: string, password: string, end: boolean): Promise<{ "browser": Awaited<ReturnType<typeof app>>; "response": Answer }> {
+async function reset(address: string, password: string, end: boolean): Promise<{ "browser": App; "response": Answer }> {
 	const browser = await app();
 
 	assert.equal((await form("/auth/reset", browser.cookie, { "address": address })).status, 200);
@@ -381,7 +310,7 @@ test("TOTP is RFC 6238's: its SHA-1 test vectors", async () => {
 const authenticator = (secret: string) => async (ahead = 0): Promise<string> => hotp(unbase32(secret), stepAt(Date.now()) + ahead);
 
 /** An email account with MFA on: the app, and its recovery codes. */
-async function withMfa(address: string): Promise<{ "signedIn": Awaited<ReturnType<typeof app>>; "app": (ahead?: number) => Promise<string>; "recovery": string[] }> {
+async function withMfa(address: string): Promise<{ "signedIn": App; "app": (ahead?: number) => Promise<string>; "recovery": string[] }> {
 	const signedIn = await signedInByEmail(address);
 	const started = await (await signedIn.call("POST", "/admin/account/mfa/start", {})).json() as { "secret": string; "uri": string };
 	const codeNow = authenticator(started.secret);
@@ -397,7 +326,7 @@ async function withMfa(address: string): Promise<{ "signedIn": Awaited<ReturnTyp
 }
 
 /** An email sign-in up to its second step: the browser, and what verifying the code answered. */
-async function firstFactorByEmail(address: string): Promise<{ "browser": Awaited<ReturnType<typeof app>>; "answer": Record<string, unknown> }> {
+async function firstFactorByEmail(address: string): Promise<{ "browser": App; "answer": Record<string, unknown> }> {
 	const browser = await app();
 
 	await aMinuteLater();
@@ -490,7 +419,7 @@ test("turning two-factor off, with a code from the app: sign-ins don't ask for i
 // ── Two-factor by email (C6) ───────────────────────────────────────────────────────────────────────────────────────
 
 /** Turn two-factor by email `turn` ("on", "off") on the signed-in account: a code to its email, then the code. */
-async function emailMfa(signedIn: Awaited<ReturnType<typeof app>>, address: string, turn: "on" | "off"): Promise<Answer> {
+async function emailMfa(signedIn: App, address: string, turn: "on" | "off"): Promise<Answer> {
 	await aMinuteLater();
 	assert.equal((await signedIn.call("POST", "/admin/account/mfa/email/code", { "turn": turn })).status, 200);
 

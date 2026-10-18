@@ -12,7 +12,9 @@ import CODE_TEXT from "./email-code.txt";
 import { canSend, send } from "./mail.ts";
 import { userWith } from "./identities.ts";
 import { hasMfa } from "./mfa-state.ts";
-import { askSecondFactor, heldAttempt, signInAs } from "./signin.ts";
+import { heldAttempt } from "./attempt.ts";
+import { askSecondFactor, signInAs } from "./signin.ts";
+import { refusal } from "./refusals.ts";
 
 /**
  * Signing in by email (SIGN-IN.md, "Email"; C2), from the sign-in page, for this browser's attempt (its cookie):
@@ -102,14 +104,7 @@ export async function sendCode(context: Context<AppEnv>, address: string, code: 
 /** An address as typed, checked, not changed: something@domain.tld, no spaces, at most 254 characters. */
 export const ADDRESS = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 
-/** A refusal: recorded, and answered with what's wrong (SIGN-IN.md: errors say what's wrong). */
-async function refuse(context: Context<AppEnv>, status: 400 | 401 | 429 | 502 | 503, error: string, reason: string): Promise<Response> {
-	context.get("span").info("email sign-in refused", { "reason": reason });
-	await audit(context.env, "sign_in_refused", {}, await origin(context), { "reason": `email: ${reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-	context.header("cache-control", "no-store");
-
-	return context.json({ "error": error, "reason": reason }, status);
-}
+const refuse = refusal("email");
 
 /** This browser's attempt, if it's running and its client offers email. */
 async function emailAttempt(context: Context<AppEnv>): Promise<{ "id": string; "secret": string; "stub": NonNullable<ReturnType<typeof heldAttempt>>["stub"] } | Response> {

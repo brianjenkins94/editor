@@ -5,8 +5,10 @@ import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthe
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import { audit, origin } from "./audit.ts";
 import { emailOf, githubIdOf } from "./identities.ts";
-import { field, isAppPage, recent, refuse } from "./link.ts";
-import { heldAttempt, signInAs } from "./signin.ts";
+import { field, isAppPage, recent } from "./link.ts";
+import { heldAttempt } from "./attempt.ts";
+import { signInAs } from "./signin.ts";
+import { refusal } from "./refusals.ts";
 
 /**
  * Passkeys (SIGN-IN.md, "Passkeys"): WebAuthn, through @simplewebauthn/server. The relying party is the API's own host
@@ -24,6 +26,11 @@ import { heldAttempt, signInAs } from "./signin.ts";
  */
 
 const RP_NAME = "unusually good";
+
+const refuse = refusal("passkey", "auth_refused");
+
+/** A sign-in page refusal (signing in with a passkey): nobody signed in yet. */
+const refused = async (context: Context<AppEnv>, status: 400 | 401, error: string, reason: string): Promise<Response> => refuse(context, status, error, reason, "sign_in_refused");
 
 /** Our relying party: the host and origin this request reached, which is the sign-in page's. */
 const party = (context: Context<AppEnv>): { "rpID": string; "origin": string } => {
@@ -165,15 +172,6 @@ export async function passkeyRemoveEndpoint(context: Context<AppEnv>): Promise<R
 	await audit(context.env, "passkey_removed", { "userId": user, "grantId": context.get("grant") }, await origin(context));
 
 	return context.json({ "removed": true });
-}
-
-/** A sign-in page refusal, recorded. */
-async function refused(context: Context<AppEnv>, status: 400 | 401, error: string, reason: string): Promise<Response> {
-	context.get("span").info("sign-in refused", { "reason": reason });
-	await audit(context.env, "sign_in_refused", {}, await origin(context), { "reason": `passkey: ${reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
-	context.header("cache-control", "no-store");
-
-	return context.json({ "error": error, "reason": reason }, status);
 }
 
 /** POST /auth/passkey/options: a challenge for this browser's attempt, and what the browser asks the passkey with. Any of
