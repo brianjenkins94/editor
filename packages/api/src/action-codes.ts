@@ -1,7 +1,8 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 import { CODE_TTL } from "./attempt.ts";
-import { codeHash, isCode, newCode, sendCode, typed } from "./email.ts";
+import { isCode, newCode, typed } from "@brianjenkins94/util/auth/codes";
+import { codeHash, sendCode } from "./email.ts";
 import { canSend } from "./mail.ts";
 import { refusal } from "./refusals.ts";
 

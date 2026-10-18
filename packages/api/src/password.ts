@@ -4,6 +4,7 @@ import { CODE_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
 import { ADDRESS } from "./email.ts";
 import { hashPassword, passwordProblem, verifyPassword } from "./password-hash.ts";
+import { breaches } from "@brianjenkins94/util/auth/pwned";
 import { configureWasm } from "@hallaxius/argon2w";
 import argon2Wasm from "@hallaxius/argon2w/wasm";
 
@@ -47,20 +48,6 @@ const TRY_REFILL = 60_000;
 const SET_PASSWORD = "set-password";
 
 const RESET_PASSWORD = "reset-password";
-
-/** How many known breaches have this password (Have I Been Pwned, k-anonymity), or undefined if it couldn't be asked. */
-export async function breaches(env: Bindings, password: string): Promise<number | undefined> {
-	const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-1", new TextEncoder().encode(password)))].map((byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
-	const response = await fetch(`${env.PWNED_API ?? "https://api.pwnedpasswords.com"}/range/${digest.slice(0, 5)}`, { "headers": { "add-padding": "true", "user-agent": "editor-api" } }).catch(() => undefined);
-
-	if (response?.ok !== true) {
-		return undefined;
-	}
-
-	const line = (await response.text()).split("\n").find((entry) => entry.startsWith(`${digest.slice(5)}:`));
-
-	return line === undefined ? 0 : Number.parseInt(line.split(":")[1] ?? "0", 10);
-}
 
 /** A bucket of tries, `tries` at `at`: what's in it now, one back each TRY_REFILL, at most TRIES. */
 const refilled = (tries: number, at: number, now: number): number => Math.min(TRIES, tries + (now - at) / TRY_REFILL);
@@ -191,7 +178,7 @@ async function checkCodeAndPassword(context: Context<AppEnv>, user: string, acti
 		return refuse(context, 400, "password", problem, event);
 	}
 
-	const found = await breaches(context.env, password);
+	const found = await breaches(password, { "api": context.env.PWNED_API, "userAgent": "editor-api" });
 
 	if (found === undefined) {
 		return refuse(context, 503, "breach_check", "couldn't check it against known breaches: try again", event);

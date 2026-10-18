@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { escapeHtml } from "@brianjenkins94/util/text";
-import { base64url } from "jose";
+import { codeHash as hash, isCode, newCode, shown, typed } from "@brianjenkins94/util/auth/codes";
 import { CODE_TTL } from "./attempt.ts";
 import { audit, origin } from "./audit.ts";
 import { keyed } from "./behavior.ts";
@@ -31,35 +31,18 @@ import { refusal } from "./refusals.ts";
  * `sign_in_refused` rows with their reason, as every sign-in refusal is. No lockouts: a bucket refills.
  */
 
-/** 32 symbols, no I, O, 0 or 1 (they read alike): 8 of them are 40 bits. 256 is a multiple of 32, so every byte maps
- *  evenly. */
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-const LENGTH = 8;
-
 const PER_MINUTE = 60_000;
 
 const PER_HOUR = 5;
 
-/** A fresh code. */
-export const newCode = (): string => [...crypto.getRandomValues(new Uint8Array(LENGTH))].map((byte) => ALPHABET[byte % ALPHABET.length]).join("");
 
-/** As it's shown and sent: `ABCD-EFGH`. */
-const shown = (code: string): string => `${code.slice(0, 4)}-${code.slice(4)}`;
 
-/** As it's typed, compared: case and the dash and spaces don't matter. */
-export const typed = (code: string): string => code.toUpperCase().replaceAll(/[\s-]/gu, "");
 
-/** Whether it's shaped like a code at all (typed first). */
-export const isCode = (code: string): boolean => code.length === LENGTH && [...code].every((symbol) => ALPHABET.includes(symbol));
 
 /** What's kept of a code: an HMAC under CODE_KEY, bound to what it's for (an attempt, or a user's action), so a leaked
- *  store can't be guessed at offline and a code works only where it was asked for (SIGN-IN.md, "Departures"). */
-export async function codeHash(env: Bindings, bound: string, code: string): Promise<string> {
-	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.CODE_KEY), { "name": "HMAC", "hash": "SHA-256" }, false, ["sign"]);
-
-	return base64url.encode(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${bound}:${code}`))));
-}
+ *  store can't be guessed at offline and a code works only where it was asked for (SIGN-IN.md, "Departures";
+ *  util/auth/codes). */
+export const codeHash = async (env: Bindings, bound: string, code: string): Promise<string> => hash(env.CODE_KEY as string, bound, code);
 
 /**
  * Send `code` to `address`: the address's limits first (one a minute, five an hour, whatever the code is for: its own

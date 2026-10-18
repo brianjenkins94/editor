@@ -1,16 +1,16 @@
 import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { open, seal } from "@brianjenkins94/util/auth/seal";
-import { base64url } from "jose";
 import { checkActionCode, issueActionCode } from "./action-codes.ts";
 import { audit, origin } from "./audit.ts";
-import { codeHash, newCode, sendCode, typed } from "./email.ts";
+import { newCode, typed } from "@brianjenkins94/util/auth/codes";
+import { base32, isRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, typedRecovery, unbase32, verifyTotp } from "@brianjenkins94/util/auth/totp";
+import { codeHash, sendCode } from "./email.ts";
 import { emailOf } from "./identities.ts";
 import { hasEmailMfa } from "./mfa-state.ts";
 import { hasMfa } from "./mfa-state.ts";
 import { heldAttempt } from "./attempt.ts";
 import { signInAs } from "./signin.ts";
-import { base32, isRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, typedRecovery, unbase32, verifyTotp } from "./totp.ts";
 import { refusal, signedInRecently } from "./refusals.ts";
 
 /**
@@ -41,11 +41,7 @@ const TRY_REFILL = 60_000;
 const sealedFor = (user: string): string => `totp:${user}`;
 
 /** A recovery code as kept: an HMAC under CODE_KEY, bound to its user (as emailed codes are, src/email.ts). */
-async function recoveryHash(env: Bindings, user: string, code: string): Promise<string> {
-	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.CODE_KEY), { "name": "HMAC", "hash": "SHA-256" }, false, ["sign"]);
-
-	return base64url.encode(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${user}:recovery:${typedRecovery(code)}`))));
-}
+const recoveryHash = async (env: Bindings, user: string, code: string): Promise<string> => codeHash(env, `${user}:recovery`, typedRecovery(code));
 
 /**
  * The second factor: an app's code or a recovery code, for `user`. Spends a try, then what it matched (a step, or a
@@ -128,7 +124,7 @@ export async function mfaStartEndpoint(context: Context<AppEnv>): Promise<Respon
 	await context.env.DB.prepare("INSERT INTO totp (user_id, secret, created_at, enrolled_at, last_step, tries, tries_at) VALUES (?, ?, ?, NULL, -1, ?, ?) ON CONFLICT (user_id) DO UPDATE SET secret = excluded.secret, created_at = excluded.created_at, enrolled_at = NULL, last_step = -1, tries = excluded.tries, tries_at = excluded.tries_at").bind(user, await seal(context.env.TOTP_KEK as string, base32(secret), sealedFor(user)), now, TRIES, now).run();
 	context.header("cache-control", "no-store");
 
-	return context.json({ "secret": base32(secret), "uri": otpauthUri(secret, named ?? user.slice(0, 8)) });
+	return context.json({ "secret": base32(secret), "uri": otpauthUri(secret, named ?? user.slice(0, 8), "unusually good") });
 }
 
 /** POST /admin/account/mfa/confirm: `code` from the app; it's on, and the recovery codes, this once. */

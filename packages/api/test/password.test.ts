@@ -8,7 +8,7 @@ import { createTestHarness } from "wrangler";
 import type { Answer, App } from "./helpers.ts";
 import { testBrowser, someone } from "./helpers.ts";
 import { hashPassword, passwordProblem, verifyPassword } from "../src/password-hash.ts";
-import { hotp, stepAt, unbase32 } from "../src/totp.ts";
+import { hotp, stepAt, unbase32 } from "@brianjenkins94/util/auth/totp";
 
 // C3 in workerd (SIGN-IN.md, "Passwords"): someone who signed in by email sets a password from their account (a code to
 // their email first, then the password, checked against known breaches by a stand-in of Have I Been Pwned), then signs
@@ -298,13 +298,7 @@ test("there's nothing to reset for an account without a password, or no account"
 
 // ── Authenticator-app MFA (C5) ─────────────────────────────────────────────────────────────────────────────────────
 
-test("TOTP is RFC 6238's: its SHA-1 test vectors", async () => {
-	const secret = new TextEncoder().encode("12345678901234567890");
-
-	for (const [time, code] of [[59, "94287082"], [1_111_111_109, "07081804"], [1_234_567_890, "89005924"], [20_000_000_000, "65353130"]] as const) {
-		assert.equal(await hotp(secret, Math.floor(time / 30), 8), code, String(time));
-	}
-});
+// TOTP itself (RFC 6238's vectors) is util/auth/totp's, tested there.
 
 /** An authenticator app: the code for the step now, or `ahead` steps on (within the one-step window either side). */
 const authenticator = (secret: string) => async (ahead = 0): Promise<string> => hotp(unbase32(secret), stepAt(Date.now()) + ahead);

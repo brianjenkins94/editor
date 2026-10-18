@@ -254,9 +254,9 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   the app and sign in with the new password. `password_reset` is audited with what was ended. With MFA on (C5), the
   second factor too (`second`: the app's code or a recovery code). 3 tests in test/password.test.ts (the whole reset with sign-ins ended and signing in
   again, sign-ins kept and the code bound to its browser, nothing to reset); the screens looked at in the harness.
-- **C5 · authenticator-app MFA.** *Built 2026-10-17* (src/totp.ts, src/mfa.ts; migrations/0010; the Attempt's
+- **C5 · authenticator-app MFA.** *Built 2026-10-17* (util/auth/totp, src/mfa.ts; migrations/0010; the Attempt's
   `first_factor`):
-  - **TOTP** (src/totp.ts): RFC 6238 (its SHA-1 test vectors pass), HMAC-SHA-1, 6 digits, 30-second steps, one step
+  - **TOTP** (util/auth/totp, from lib): RFC 6238 (its SHA-1 test vectors pass), HMAC-SHA-1, 6 digits, 30-second steps, one step
     either side, each step good once (the newest used is kept; taking it is conditional, so two requests can't both).
   - **Setting it up,** from Your account: `POST /admin/account/mfa/start` makes a secret (20 bytes), sealed under
     `TOTP_KEK` (a key of its own, set in dev and production) and bound to the user, pending; the page shows its QR code
@@ -341,7 +341,10 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   at /account for the editor and /admin/account for the admin app; refusals are one helper each module binds with its
   area (src/refusals.ts), with the recent-sign-in check sensitive actions share; how a browser holds its attempt (the
   `__Host-signin` cookie) sits with the Attempt (src/attempt.ts), which ends the github.ts ↔ signin.ts import cycle; the
-  tests that sign in through our pages share test/helpers.ts.
+  tests that sign in through our pages share test/helpers.ts. What isn't ours went to lib (util/auth): TOTP and recovery
+  codes (`totp`), typed codes and their keyed hashes (`codes`), and Have I Been Pwned's range check (`pwned`), each
+  with its own tests there; the Argon2id wrapper stays here (src/password-hash.ts), being tied to argon2w's
+  Workers-imported WebAssembly.
 - **Later:** a passkey as a second step after a password; naming passkeys; conditional UI (passkeys offered in the
   email field's autofill).
 
