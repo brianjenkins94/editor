@@ -77,11 +77,26 @@ test("boot: the page's start to the editor being ready", async () => {
 
 test("the demo's first typed hover", async () => {
 	const workbench = await editor();
-	const ms = await workbench.evaluate(async () => {
+	// Type acquisition's runs while the hover waits, on the test's clock (the page's console has every hub record).
+	const started = performance.now();
+	const acquisitions = [];
+	const onConsole = (message) => {
+		const text = message.text();
+
+		if (/^\[workbench\] [→←] ata /u.test(text)) {
+			acquisitions.push(`${Math.round(performance.now() - started)}ms ${text.split(" {").slice(0, 2).join(" {")}`);
+		}
+	};
+
+	session.page.on("console", onConsole);
+
+	const { ms, states } = await workbench.evaluate(async () => {
 		const api = globalThis.__editor.api;
 		const uri = api.Uri.file("/workspace/src/App.tsx");
 		const start = performance.now();
 		const document = await api.workspace.openTextDocument(uri);
+		// Each change of the hover's answer, with when it came: where a slow run's time went.
+		const seen = [];
 
 		await api.window.showTextDocument(document);
 
@@ -90,10 +105,15 @@ test("the demo's first typed hover", async () => {
 		while (performance.now() - start < 120_000) {
 			const hovers = await api.commands.executeCommand("vscode.executeHoverProvider", uri, position);
 			const text = (hovers ?? []).flatMap((hover) => hover.contents.map((content) => (typeof content === "string" ? content : content.value))).join(" ");
+			const state = [["none", text === ""], ["loading", /loading/u.test(text)], ["typed", /useState[<(]/u.test(text)]].find(([, is]) => is)?.[0] ?? "other";
+
+			if (seen.at(-1)?.[1] !== state) {
+				seen.push([Math.round(performance.now() - start), state]);
+			}
 
 			// The syntax server answers first with a placeholder; the type is what's being timed.
-			if (/useState[<(]/u.test(text) && !/loading/u.test(text)) {
-				return performance.now() - start;
+			if (state === "typed") {
+				return { "ms": performance.now() - start, "states": seen };
 			}
 
 			await new Promise((resolve) => {
@@ -101,9 +121,11 @@ test("the demo's first typed hover", async () => {
 			});
 		}
 
-		return Infinity;
+		return { "ms": Infinity, "states": seen };
 	});
 
+	session.page.off("console", onConsole);
+	console.log(`typed hover: ${states.map(([at, state]) => `${state}@${at}ms`).join(" → ")}\n${acquisitions.map((line) => "  " + line).join("\n")}`);
 	measured("typedHoverMs", ms);
 });
 

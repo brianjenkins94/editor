@@ -40,11 +40,16 @@ const DECL = /\.d\.[mc]?ts$/u;
  *  it flat, by full path, `type` its MIME type (the current one). */
 interface MetaNode { "type"?: string; "path": string; "files"?: MetaNode[] }
 
+/** A module specifier after `from`/`import`/`require`. The keyword stands alone (not the tail of `"-ms-flow-from"` or the
+ *  string `"from"`, which csstype's declarations are full of), and a specifier holds no whitespace — else the text between
+ *  two string literals reads as one (`?: Property.MsFlowFrom | undefined;`). */
+const SPECIFIER = String.raw`(?<![\w$."'-])(?:from|import|require)\s*(?:\(\s*)?["']([^"'\s]+)["']`;
+
 /** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors snapshot.ts. */
-function importedPackages(source: string): string[] {
+export function importedPackages(source: string): string[] {
 	const roots = new Set<string>();
 
-	for (const match of source.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']/gu)) {
+	for (const match of source.matchAll(new RegExp(SPECIFIER, "gu"))) {
 		const pkg = match[1].startsWith("node:") ? "@types/node" : packageRootOf(match[1]);
 
 		if (pkg !== undefined) {
@@ -189,7 +194,7 @@ function collectFiles(node: MetaNode, out: Set<string>): void {
 
 /** Module specifiers + triple-slash references in a `.d.ts` — the graph to crawl: relative paths, other packages, and
  *  `#` aliases from the package's own `imports` map. */
-function references(dts: string): { "relative": string[]; "packages": string[]; "imports": string[] } {
+export function references(dts: string): { "relative": string[]; "packages": string[]; "imports": string[] } {
 	const relative = new Set<string>();
 	const packages = new Set<string>();
 	const imports = new Set<string>();
@@ -197,7 +202,7 @@ function references(dts: string): { "relative": string[]; "packages": string[]; 
 	// Comments out first (triple-slash references aside): @types/node's doc examples alone `require("Hello!")` dozens of times.
 	const code = dts.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|(?<!\/)\/\/(?!\/\s*<reference)[^\n]*/gu, (_, string: string | undefined) => string ?? "");
 
-	for (const match of code.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']|\/\/\/\s*<reference\s+(path|types)\s*=\s*["']([^"']+)["']/gu)) {
+	for (const match of code.matchAll(new RegExp(SPECIFIER + String.raw`|\/\/\/\s*<reference\s+(path|types)\s*=\s*["']([^"']+)["']`, "gu"))) {
 		const spec = match[1] ?? match[3];
 		const [, , kind] = match; // "path" | "types" | undefined (a module specifier)
 
