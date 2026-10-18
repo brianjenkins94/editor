@@ -21,7 +21,7 @@ import { isProduction, PRODUCTION, site } from "./address";
 /** The API (packages/api): production's on the production site, the dev deployment's everywhere else (Pages, localhost). */
 export const API = isProduction() ? PRODUCTION.api : "https://editor-api-dev.brianjenkins94.workers.dev";
 
-/** The pages the API will send a sign-in back to (its REDIRECT_URIS' `editor`, wrangler.jsonc): sign-in is offered only on these. */
+/** The pages the API will send a sign-in back to (the `editor` client's, packages/api/src/clients.ts): sign-in is offered only on these. */
 const PAGES = [`${PRODUCTION.site}/`, "https://brianjenkins94.github.io/editor/", "http://localhost:5173/", "http://editor.localhost:5173/"];
 
 /** Signed-out, or the session ended (revoked, or GitHub refused to refresh it): the shell shows signed-out. */

@@ -3,18 +3,12 @@ import type { Grant } from "./grant.ts";
 
 /** The Worker's bindings: vars and bindings from wrangler.jsonc, secrets from `wrangler secret put`. */
 export interface Bindings {
+	/** Which deployment this is (`local`, `dev`, `production`): which of each client's pages apply (src/clients.ts). */
 	"ENVIRONMENT": string;
-	/** The app origins allowed to call this API from a browser, comma-separated: every client's. */
-	"ALLOWED_ORIGINS": string;
-	/** Our OAuth clients (`editor`, `admin`), each with the pages a sign-in for it may return to: exact URLs, matched
-	 *  exactly. A client id that isn't a key here isn't one of ours. */
-	"REDIRECT_URIS": Record<string, string[]>;
 	/** The platform owners (src/rbac.ts): GitHub user ids, not secret. Only a commit makes one. */
 	"OWNERS": number[];
 	/** Those who may look but not change anything (src/rbac.ts, `viewer`): GitHub user ids, as OWNERS. */
 	"VIEWERS"?: number[];
-	/** What each client's sign-in page offers (SIGN-IN.md): `github` now; `email` and `password` as they're built. */
-	"SIGN_IN_METHODS": Record<string, string[]>;
 	/** Only in tests: where GitHub's web and API are, instead of github.com and api.github.com. */
 	"GITHUB_ORIGIN"?: string;
 	"GITHUB_API"?: string;

@@ -6,6 +6,7 @@ import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT 
 import { createTestHarness } from "wrangler";
 import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // Detecting abuse (README.md, "Hardening"): the rate limits, the alert someone gets at once when a sign-in is used the
 // way only a thief or a script would use it (deduplicated, and never quoting a secret), and every proxied write recorded.
@@ -76,7 +77,7 @@ async function key(): Promise<{ "jkt": string; "send": (method: string, path: st
 		"jkt": await calculateJwkThumbprint(jwk),
 		"send": async (method, path, { token, form, body } = {}) => {
 			for (let attempt = 0; ; attempt += 1) {
-				const claims = { "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) } };
+				const claims = { "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...token === undefined ? {} : { "ath": await s256(token) } };
 				const proof = await new SignJWT(claims).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);
 				const headers: Record<string, string> = { ...BROWSER, "dpop": proof, "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
 				const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? body === undefined ? {} : { "body": body } : { "body": new URLSearchParams(form).toString() } });
@@ -97,7 +98,7 @@ async function key(): Promise<{ "jkt": string; "send": (method: string, path: st
 async function signedIn(holder: Awaited<ReturnType<typeof key>>): Promise<{ "accessToken": string; "refreshToken": string; "grantId": string }> {
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 	const id = env.GRANTS.newUniqueId();
-	const { code } = await env.GRANTS.get(id).begin({ "githubId": Math.floor(Math.random() * 1e9), "github": { "accessToken": "ghu_test", "refreshToken": "ghr_test", "expiresAt": Date.now() + 3_600_000, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))), "jkt": holder.jkt, "from": { "country": null, "ipHash": null, "traceId": null } });
+	const { code } = await env.GRANTS.get(id).begin({ "githubId": Math.floor(Math.random() * 1e9), "github": { "accessToken": "ghu_test", "refreshToken": "ghr_test", "expiresAt": Date.now() + 3_600_000, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": await s256(verifier), "jkt": holder.jkt, "from": { "country": null, "ipHash": null, "traceId": null } });
 	const tokens = await (await holder.send("POST", "/token", { "form": { "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": "editor" } })).json() as { "access_token": string; "refresh_token": string };
 
 	return { "accessToken": tokens.access_token, "refreshToken": tokens.refresh_token, "grantId": id.toString() };

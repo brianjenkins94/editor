@@ -4,6 +4,7 @@ import { SCHEMA as ATTEMPT } from "./attempt.ts";
 import { PROXIED } from "./behavior.ts";
 import { SCHEMA as GRANT } from "./grant.ts";
 import { github } from "./github.ts";
+import { allowedOrigins } from "./clients.ts";
 
 /**
  * The API as it runs, described by itself (packages/admin/README.md, the architecture page): its routes (the router's own
@@ -39,7 +40,7 @@ export async function architectureEndpoint(context: Context<AppEnv>): Promise<Re
 			{ "binding": "ATTEMPTS", "class": "Attempt", "tables": tablesOf(ATTEMPT) }
 		],
 		"proxied": PROXIED.map((entry) => ({ "base": entry.base, "call": `${entry.method} ${entry.template}` })),
-		"clients": context.env.ALLOWED_ORIGINS.split(","),
+		"clients": allowedOrigins(context.env),
 		"calls": {
 			"github": { "web": origins.web, "api": origins.api },
 			"analytics": context.env.ANALYTICS_TOKEN !== undefined && context.env.ANALYTICS_TOKEN !== "",

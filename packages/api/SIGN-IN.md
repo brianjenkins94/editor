@@ -146,8 +146,8 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     `__Host-signin` (`HttpOnly; Secure; SameSite=Lax`, 15 minutes) and goes to `/sign-in`.
   - `/sign-in` (public/: static assets beside the Worker): our own files and Cloudflare's Web Analytics beacon only
     (CSP `script-src 'self' https://static.cloudflareinsights.com`, `frame-ancestors 'none'`); it asks `GET /auth/attempt` what
-    the attempt's client offers (`SIGN_IN_METHODS` in wrangler.jsonc: GitHub, email and a password for both clients
-    since C7).
+    the attempt's client offers, and its name (src/clients.ts, since 2026-10-18; it was `SIGN_IN_METHODS` in
+    wrangler.jsonc): GitHub, email, a password and passkeys for both clients.
   - `GET /auth/github`: on to GitHub with the attempt's id sealed in the state; the callback finishes the attempt only
     in the browser holding its cookie, before GitHub's code is exchanged, and clears the cookie. An attempt is spent
     either way; it's deleted when its 15 minutes are up.
@@ -169,8 +169,8 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   - `users.github_id` may be null (migrations/0007 rebuilds `users`, rows kept; checked against existing rows).
   - Sending: src/mail.ts, Cloudflare Email Service's `send_email` binding (`EMAIL`), from `no-reply@unusuallygood.dev`;
     in the harness and tests, an outbox stand-in (`EMAIL_OUTBOX`): the harness page's Outbox shows every code and link.
-    `/auth/attempt` offers email only where it can be sent and `CODE_KEY` is set; `SIGN_IN_METHODS` offers it to the
-    admin app everywhere, so it appears once an environment is set up.
+    `/auth/attempt` offers email only where it can be sent and `CODE_KEY` is set; the client table (src/clients.ts) offers
+    it to the admin app everywhere, so it appears once an environment is set up.
   - The email's bodies are src/email-code.txt and .html (`{{placeholders}}`, escaped in the HTML).
   - The admin app shows a user without a GitHub account as "by email", not their address.
   - 7 tests in test/email.test.ts, in workerd, against an outbox of the test's own: the whole flow and a new user by
@@ -295,7 +295,7 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
 - **C7 · the editor.** *Built 2026-10-17.* **Signing in stays optional:** the editor is whole signed out (samples,
   public repos, everything local), no account is made until someone signs in, and nothing asks them to.
   - The editor's client pushes its request (`par: true`, packages/editor/shell/session.ts) and signs in through our
-    page, which offers it GitHub, an emailed code and a password (`SIGN_IN_METHODS.editor`), two-factor as set up. The
+    page, which offers it GitHub, an emailed code and a password (the editor's methods, src/clients.ts), two-factor as set up. The
     shell's button says "Sign in", with the optional said beside it.
   - **GitHub only for GitHub's sign-ins:** signed in by email or a password, the shell calls GitHub as it does signed
     out (public repos, anonymously); private repos and commits need a GitHub sign-in, and say so. The shell asks
@@ -341,7 +341,11 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   at /account for the editor and /admin/account for the admin app; refusals are one helper each module binds with its
   area (src/refusals.ts), with the recent-sign-in check sensitive actions share; how a browser holds its attempt (the
   `__Host-signin` cookie) sits with the Attempt (src/attempt.ts), which ends the github.ts ↔ signin.ts import cycle; the
-  tests that sign in through our pages share test/helpers.ts. What isn't ours went to lib (util/auth): TOTP and recovery
+  tests that sign in through our pages share test/helpers.ts.
+- **One client table** (2026-10-18, src/clients.ts): each app that signs in through the API is one entry, its name (the
+  sign-in page's "to …", from `/auth/attempt`), its methods, and its pages in each environment; the origins the API
+  answers browsers from are those pages'. It replaced `ALLOWED_ORIGINS`, `REDIRECT_URIS` and `SIGN_IN_METHODS` in each
+  of wrangler.jsonc's three environments and the page's own list of names: a new project is one edit. What isn't ours went to lib (util/auth): TOTP and recovery
   codes (`totp`), typed codes and their keyed hashes (`codes`), and Have I Been Pwned's range check (`pwned`), each
   with its own tests there; the Argon2id wrapper stays here (src/password-hash.ts), being tied to argon2w's
   Workers-imported WebAssembly.

@@ -172,8 +172,8 @@ Each lands green and is useful on its own.
   Cloudflare; tried in the browser through the harness with the real token.
 - **B5 · production.** *Built 2026-10-17:* `admin.unusuallygood.dev`, the app's build as static assets only
   (packages/site/admin.jsonc, a custom domain; no Worker runs on it), deployed by production.yml after the editor.
-  Production's API has its origin in `ALLOWED_ORIGINS` and its page (`https://admin.unusuallygood.dev/`) in
-  `REDIRECT_URIS.admin`. Its `_headers` (public/) hold a CSP that allows only its own files, the API, GitHub's API
+  Production's API has its page (`https://admin.unusuallygood.dev/`), and so its origin, in the `admin` client's
+  production pages (packages/api/src/clients.ts). Its `_headers` (public/) hold a CSP that allows only its own files, the API, GitHub's API
   (for logins) and Cloudflare's Web Analytics (its beacon, allowed since 2026-10-17); Web Awesome works under
   `style-src 'self'` (checked with `wrangler dev`: no violations). The page itself is never cached.
 - **B7–B9 · unusual behavior.** *All three built 2026-10-17: B7 the rules, B8 the model and each sign-in's score, B9 the Unusual page.* packages/api/BEHAVIOR.md: actions as route templates derived from the router and the

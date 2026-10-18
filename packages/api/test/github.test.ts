@@ -6,6 +6,7 @@ import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT 
 import { createTestHarness } from "wrangler";
 import { seal } from "@brianjenkins94/util/auth/seal";
 import { BROWSER } from "./browser.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // Signing in through GitHub, in workerd, against a GitHub of the test's own: /auth/github/start, GitHub's authorize page
 // (skipped: the test is the user saying yes), /auth/github/callback, then the app redeeming our code at /token.
@@ -88,7 +89,7 @@ async function app(): Promise<{ "jkt": string; "verifier": string; "challenge": 
 	return {
 		"jkt": await calculateJwkThumbprint(jwk),
 		"verifier": verifier,
-		"challenge": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))),
+		"challenge": await s256(verifier),
 		"state": crypto.randomUUID(),
 		"proof": async (method, url, claims = {}) => new SignJWT({ "htm": method, "htu": url, "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...claims }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey)
 	};

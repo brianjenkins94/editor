@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // C1 in workerd (SIGN-IN.md): the admin app pushes its request (PAR, with DPoP and our nonce), the browser opens the
 // attempt (its cookie) and reaches our sign-in page, chooses GitHub, and GitHub's callback finishes the attempt in that
@@ -63,7 +64,7 @@ async function app(): Promise<{ "jkt": string; "verifier": string; "challenge": 
 	const client = {
 		"jkt": await calculateJwkThumbprint(jwk),
 		"verifier": verifier,
-		"challenge": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))),
+		"challenge": await s256(verifier),
 		"state": crypto.randomUUID(),
 		"nonce": undefined as string | undefined,
 		"proof": async (method: string, url: string) => new SignJWT({ "htm": method, "htu": url, "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...client.nonce === undefined ? {} : { "nonce": client.nonce } }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey)
@@ -167,7 +168,7 @@ test("the sign-in page: our own files only, and what this attempt may use", asyn
 
 	assert.equal(page.status, 200);
 	assert.match(page.headers.get("content-security-policy") ?? "", /script-src 'self'.*frame-ancestors 'none'/u);
-	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "methods": ["github", "password", "passkey"] });
+	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "name": "the admin app", "methods": ["github", "password", "passkey"] });
 	assert.match((await browse(at("/passkey"))).headers.get("content-security-policy") ?? "", /script-src 'self'.*frame-ancestors 'none'/u, "the passkey page too");
 	assert.equal((await browse(at("/auth/attempt"))).status, 401, "another browser has none");
 	assert.equal((await browse(at("/auth/attempt"), { "cookie": `${cookie.split(".")[0]}.${"A".repeat(43)}` })).status, 401, "the attempt's id without its secret");

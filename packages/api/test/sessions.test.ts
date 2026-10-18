@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
 import { BROWSER } from "./browser.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // A3 in workerd: a sign-in as A0's GitHub callback will start it (Grant.begin), then everything the browser does with
 // it — /token, /me, refresh, /revoke — with DPoP proofs from a key of the test's own, as the shell's will be.
@@ -70,7 +71,7 @@ type Browser = Awaited<ReturnType<typeof browser>>;
 /** A request with a fresh proof; a `use_dpop_nonce` answer is retried once with the nonce it brought, as oauth4webapi does. */
 async function send(client: Browser, method: string, path: string, { form, accessToken }: { "form"?: Record<string, string>; "accessToken"?: string } = {}): Promise<Answer> {
 	for (let attempt = 0; ; attempt += 1) {
-		const headers: Record<string, string> = { "dpop": await client.proof(method, at(path), accessToken === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accessToken)))) }) };
+		const headers: Record<string, string> = { "dpop": await client.proof(method, at(path), accessToken === undefined ? {} : { "ath": await s256(accessToken) }) };
 
 		if (accessToken !== undefined) {
 			headers["authorization"] = `DPoP ${accessToken}`;
@@ -95,7 +96,7 @@ async function send(client: Browser, method: string, path: string, { form, acces
 /** What GitHub's callback will do (A0): start a sign-in for GitHub user `githubId`, bound to `client`'s key. */
 async function signIn(client: Browser, githubId: number): Promise<{ "code": string; "verifier": string; "grantId": string }> {
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+	const challenge = await s256(verifier);
 	const id = env.GRANTS.newUniqueId();
 	const github = { "accessToken": `ghu_${crypto.randomUUID()}`, "refreshToken": `ghr_${crypto.randomUUID()}`, "expiresAt": Date.now() + 28_800_000, "refreshExpiresAt": Date.now() + 15_897_600_000 };
 	const { code } = await env.GRANTS.get(id).begin({ "githubId": githubId, "github": github, "codeChallenge": challenge, "jkt": client.jkt, "from": { "country": null, "ipHash": null } });
@@ -224,7 +225,7 @@ test("/me refuses without the token, with Bearer, with another key's proof, with
 	// The right key, but a proof that doesn't carry this token's hash (ath): it could be paired with another token.
 	await unauthorized(await fetchFrom(at("/me"), { "headers": { "authorization": `DPoP ${issued.access_token}`, "dpop": await client.proof("GET", at("/me")) } }), "invalid_dpop_proof");
 
-	const proof = await client.proof("GET", at("/me"), { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(issued.access_token)))) });
+	const proof = await client.proof("GET", at("/me"), { "ath": await s256(issued.access_token) });
 	const headers = { "authorization": `DPoP ${issued.access_token}`, "dpop": proof };
 
 	assert.equal((await fetchFrom(at("/me"), { "headers": headers })).status, 200);

@@ -23,6 +23,7 @@ import { passkeyOptionsEndpoint, passkeyRegisterEndpoint, passkeySignInEndpoint 
 import { githubApi, githubGit } from "./proxy.ts";
 import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
 import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
+import { allowedOrigins } from "./clients.ts";
 
 export { Attempt } from "./attempt.ts";
 export { Grant } from "./grant.ts";
@@ -90,10 +91,10 @@ app.use("/admin/*", limit(4 * 1024));
 app.use("/github/api/*", limit(32 * 1024 * 1024));
 app.use("/github/git/*", limit(1024 * 1024));
 
-// The app calls from its own origin (GitHub Pages, in dev): the ones in ALLOWED_ORIGINS, no others, and never
+// The app calls from its own origin (GitHub Pages, in dev): its pages' (src/clients.ts), no others, and never
 // with cookies — the credential is the DPoP-bound Authorization header.
 app.use(cors({
-	"origin": (requested, context) => (context.env.ALLOWED_ORIGINS.split(",").includes(requested) ? requested : null),
+	"origin": (requested, context) => (allowedOrigins(context.env).includes(requested) ? requested : null),
 	"allowMethods": ["GET", "POST", "PATCH"],
 	"allowHeaders": ["authorization", "content-type", "dpop", "accept", "x-github-api-version"],
 	// And GitHub's, through the proxy: what fido paginates (link) and backs off by (retry-after, x-ratelimit-*).

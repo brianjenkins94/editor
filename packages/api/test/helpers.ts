@@ -2,6 +2,7 @@ import type { createTestHarness } from "wrangler";
 import assert from "node:assert/strict";
 import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { BROWSER } from "./browser.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // What the tests that sign in through the API's own pages share: a browser (from an IP of its own each request, so the
 // per-IP limits never meet), an app (its DPoP key, PKCE, the pushed request, the access token once it has one), and
@@ -12,7 +13,7 @@ type Harness = ReturnType<typeof createTestHarness>;
 
 export type Answer = Awaited<ReturnType<Harness["fetch"]>>;
 
-/** Each client's page (REDIRECT_URIS in wrangler.jsonc's local vars). */
+/** Each client's local page (src/clients.ts). */
 export const PAGES = { "editor": "http://localhost:5173/", "admin": "http://localhost:5174/" } as const;
 
 export type Client = keyof typeof PAGES;
@@ -50,7 +51,7 @@ export function testBrowser(server: Harness, base: () => URL, { outbox = [], git
 		let token: string | undefined;
 		const call = async (method: string, path: string, fields?: Record<string, string>): Promise<Answer> => {
 			for (let attempt = 0; ; attempt += 1) {
-				const ath = token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) };
+				const ath = token === undefined ? {} : { "ath": await s256(token) };
 				const proof = await new SignJWT({ "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...ath }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);
 				const response = await browse(at(path), { "method": method, "headers": { "dpop": proof, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...fields === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } }, ...fields === undefined ? {} : { "body": new URLSearchParams(fields).toString() } });
 
@@ -63,7 +64,7 @@ export function testBrowser(server: Harness, base: () => URL, { outbox = [], git
 				return response;
 			}
 		};
-		const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+		const challenge = await s256(verifier);
 		const { request_uri } = await (await call("POST", "/auth/par", { "client_id": client, "response_type": "code", "redirect_uri": page, "state": "s", "code_challenge": challenge, "code_challenge_method": "S256" })).json() as { "request_uri": string };
 		const opened = await browse(`${at("/auth/start")}?${new URLSearchParams({ "client_id": client, "request_uri": request_uri })}`);
 

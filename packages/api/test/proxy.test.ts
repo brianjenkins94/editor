@@ -9,6 +9,7 @@ import type { Copy, Row } from "../src/audit-copies.ts";
 import { compare, copyKey, parseKey } from "../src/audit-copies.ts";
 import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // The GitHub proxy in workerd (README.md, "The proxy"): a signed-in browser's calls go through with the sign-in's GitHub
 // token, refreshed when it's close to expiring; anything the editor doesn't call is refused; sizes are capped.
@@ -101,10 +102,10 @@ async function signedIn(github: { "accessToken": string; "expiresAt": number }):
 
 	issued.add(github.accessToken).add(refreshToken);
 
-	const { code } = await env.GRANTS.get(id).begin({ "githubId": 7, "github": { ...github, "refreshToken": refreshToken, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))), "jkt": await calculateJwkThumbprint(jwk), "from": { "country": null, "ipHash": null } });
+	const { code } = await env.GRANTS.get(id).begin({ "githubId": 7, "github": { ...github, "refreshToken": refreshToken, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": await s256(verifier), "jkt": await calculateJwkThumbprint(jwk), "from": { "country": null, "ipHash": null } });
 	const send = async (method: string, path: string, { body, headers = {}, token }: { "body"?: string; "headers"?: Record<string, string>; "token"?: string } = {}): Promise<Answer> => {
 		for (let attempt = 0; ; attempt += 1) {
-			const ath = token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) };
+			const ath = token === undefined ? {} : { "ath": await s256(token) };
 			const response = await fetchFrom(at(path), { "method": method, "headers": { "dpop": await proof(method, at(path), ath), ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...headers }, ...body === undefined ? {} : { "body": body } });
 
 			nonce = response.headers.get("dpop-nonce") ?? nonce;

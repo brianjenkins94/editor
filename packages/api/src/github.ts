@@ -8,6 +8,7 @@ import { deviceLabel } from "./account.ts";
 import { origin } from "./audit.ts";
 import { forgetAttempt, heldAttempt } from "./attempt.ts";
 import { oauthRefusal } from "./refusals.ts";
+import { isClient, pagesOf } from "./clients.ts";
 
 /**
  * Signing in with GitHub (README.md, "Tokens and the flow", steps 1–2). The app sends the browser to /auth/github/start
@@ -72,12 +73,12 @@ export async function startEndpoint(context: Context<AppEnv>): Promise<Response>
 
 	const client = query["client_id"] ?? "";
 
-	if (!Object.hasOwn(context.env.REDIRECT_URIS, client) || query["response_type"] !== "code") {
+	if (!isClient(client) || query["response_type"] !== "code") {
 		return refuse(context, "client_id or response_type");
 	}
 
 	// Exact match only, among that client's own pages: never anywhere a code could leak to, nor another client's app.
-	if (!(context.env.REDIRECT_URIS[client] ?? []).includes(query["redirect_uri"] ?? "")) {
+	if (!pagesOf(context.env, client).includes(query["redirect_uri"] ?? "")) {
 		return refuse(context, "redirect_uri not registered");
 	}
 

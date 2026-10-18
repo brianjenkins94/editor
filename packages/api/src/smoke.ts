@@ -3,6 +3,8 @@ import type { AppEnv, Bindings } from "./env.ts";
 import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { audit, NOWHERE } from "./audit.ts";
 import { inboxAddresses } from "./inbox.ts";
+import { pagesOf } from "./clients.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 /**
  * The email smoke test (packages/admin/README.md, the Mail page): a whole sign-in by email, as the admin app and a browser
@@ -38,7 +40,7 @@ class Failed extends Error {
 export async function smokeTest(env: Bindings, executionContext: Pick<ExecutionContext, "waitUntil" | "passThroughOnException">): Promise<{ "ok": true; "seconds": number } | { "ok": false; "step": string; "reason": string }> {
 	const app = ROUTER.app;
 	const address = inboxAddresses(env)[0];
-	const redirectUri = env.REDIRECT_URIS["admin"]?.[0];
+	const redirectUri = pagesOf(env, "admin")[0];
 
 	if (app === undefined || address === undefined || redirectUri === undefined) {
 		return record(env, { "ok": false, "step": "setup", "reason": address === undefined ? "no INBOX address" : "no admin redirect page" });
@@ -81,7 +83,7 @@ export async function smokeTest(env: Bindings, executionContext: Pick<ExecutionC
 
 	try {
 		const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-		const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+		const challenge = await s256(verifier);
 		const pushed = await (await expect("push", await send("POST", "/auth/par", { "proof": true, "form": { "client_id": "admin", "response_type": "code", "redirect_uri": redirectUri, "state": "smoke", "code_challenge": challenge, "code_challenge_method": "S256" } }), 201)).json() as { "request_uri": string };
 		const opened = await expect("open", await send("GET", "/auth/start", { "query": `?${new URLSearchParams({ "client_id": "admin", "request_uri": pushed.request_uri })}` }), 302);
 

@@ -4,6 +4,7 @@ import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT 
 import { createTestHarness } from "wrangler";
 import { recorded } from "../harness/state.ts";
 import { BROWSER } from "./browser.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // C0 (SIGN-IN.md): `recorded` reads everything the API stores, from outside it, and says exactly what an action wrote.
 // Here: what a sign-in writes, all of it, and nothing secret in the reading.
@@ -27,7 +28,7 @@ test("a sign-in writes a user, a grant, two audit rows and their copies, and the
 	const { privateKey, publicKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+	const challenge = await s256(verifier);
 	const token = async (code: string, nonce?: string): Promise<Response> => {
 		const url = new URL("/token", base).href;
 		const proof = await new SignJWT({ "htm": "POST", "htu": url, "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce } }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);

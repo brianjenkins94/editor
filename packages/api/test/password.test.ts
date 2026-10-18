@@ -159,7 +159,7 @@ test("an email account sets a password (a code to its email first), then signs i
 
 	const browser = await app();
 
-	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": browser.cookie })).json(), { "client": "admin", "methods": ["github", "email", "password", "passkey"] });
+	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": browser.cookie })).json(), { "client": "admin", "name": "the admin app", "methods": ["github", "email", "password", "passkey"] });
 
 	const signIn = await form("/auth/password", browser.cookie, { "address": address.toUpperCase(), "password": "plum orchard at dusk 42" });
 	const { location } = await signIn.json() as { "location": string };

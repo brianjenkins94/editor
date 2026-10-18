@@ -9,6 +9,7 @@ import { audit, origin } from "./audit.ts";
 import type { Difference } from "./behavior.ts";
 import { actionOf, described, fingerprint } from "./behavior.ts";
 import type { AppEnv, Bindings } from "./env.ts";
+import { isClient } from "./clients.ts";
 
 /**
  * Our tokens (README.md, "Tokens and the flow"): /token redeems a code or rotates a refresh token for a DPoP-bound access
@@ -87,7 +88,7 @@ export async function tokenEndpoint(context: Context<AppEnv>): Promise<Response>
 
 	const client = form["client_id"];
 
-	if (typeof presented !== "string" || (grantType === "authorization_code" && typeof form["code_verifier"] !== "string") || typeof client !== "string" || !Object.hasOwn(context.env.REDIRECT_URIS, client)) {
+	if (typeof presented !== "string" || (grantType === "authorization_code" && typeof form["code_verifier"] !== "string") || typeof client !== "string" || !isClient(client)) {
 		return oauthError(context, "invalid_request", "missing parameters");
 	}
 

@@ -15,6 +15,7 @@ import { hasMfa } from "./mfa-state.ts";
 import { heldAttempt } from "./attempt.ts";
 import { askSecondFactor, signInAs } from "./signin.ts";
 import { refusal } from "./refusals.ts";
+import { methodsOf } from "./clients.ts";
 
 /**
  * Signing in by email (SIGN-IN.md, "Email"; C2), from the sign-in page, for this browser's attempt (its cookie):
@@ -98,7 +99,7 @@ async function emailAttempt(context: Context<AppEnv>): Promise<{ "id": string; "
 		return refuse(context, 401, "no_attempt", "reason" in described ? described.reason : "no attempt");
 	}
 
-	if (!(context.env.SIGN_IN_METHODS[described.client] ?? []).includes("email")) {
+	if (!methodsOf(described.client).includes("email")) {
 		return refuse(context, 400, "not_offered", "method not offered");
 	}
 

@@ -7,6 +7,7 @@ import { ADDRESS } from "./email.ts";
 import { authorizeUrl } from "./github.ts";
 import { githubIdOf, identityOf, link, ownerOf } from "./identities.ts";
 import { refusal, signedInRecently } from "./refusals.ts";
+import { pagesOf } from "./clients.ts";
 
 /**
  * Linking (SIGN-IN.md, "Linking accounts"): another way to sign in, added to the signed-in account. GitHub connected to
@@ -99,7 +100,7 @@ export const field = (form: Record<string, unknown>, name: string): string => (t
 
 /** Whether `returnTo` is one of the signed-in app's own pages (its REDIRECT_URIS, as a prefix: a deep link, or the page's
  *  hash route): the only places a link or a new passkey goes back to. */
-export const isAppPage = (context: Context<AppEnv>, returnTo: string): boolean => URL.canParse(returnTo) && (context.env.REDIRECT_URIS[context.get("client")] ?? []).some((page) => returnTo.startsWith(page));
+export const isAppPage = (context: Context<AppEnv>, returnTo: string): boolean => URL.canParse(returnTo) && pagesOf(context.env, context.get("client")).some((page) => returnTo.startsWith(page));
 
 /** POST /account/github: where to go to connect GitHub — GitHub's authorize page, coming back to `return` (one of the
  *  app's own pages) with a code this sign-in finishes. */

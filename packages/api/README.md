@@ -485,7 +485,7 @@ Each step lands green and is useful on its own.
         `GET /me` returns the user id behind it.
     - **`src/audit.ts`**: `login`, `token_issued`, `refreshed`, `token_rejected`, `refresh_reuse_detected` and
       `grant_revoked`, each with Cloudflare's country and an IP hash (an HMAC keyed by `AUDIT_KEY` and the date).
-    - **CORS:** only the origins in `ALLOWED_ORIGINS`. `DPoP-Nonce` and `WWW-Authenticate` are exposed to the browser.
+    - **CORS:** only our clients' origins (their pages', src/clients.ts; `ALLOWED_ORIGINS` before 2026-10-18). `DPoP-Nonce` and `WWW-Authenticate` are exposed to the browser.
     - **Tests** (`test/sessions.test.ts`, workerd, 12 of them) cover:
       - the whole flow, and the same GitHub user signing in twice;
       - a code used with the wrong verifier, used twice, or with another key;

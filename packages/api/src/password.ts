@@ -18,6 +18,7 @@ import { checkActionCode, issueActionCode } from "./action-codes.ts";
 import { forgetAttempt, heldAttempt } from "./attempt.ts";
 import { askSecondFactor, signInAs } from "./signin.ts";
 import { refusal } from "./refusals.ts";
+import { methodsOf } from "./clients.ts";
 
 /**
  * Passwords (SIGN-IN.md, "Passwords"; C3):
@@ -65,7 +66,7 @@ async function passwordAttempt(context: Context<AppEnv>): Promise<NonNullable<Re
 		return refuse(context, 401, "no_attempt", "reason" in described ? described.reason : "no attempt");
 	}
 
-	if (!(context.env.SIGN_IN_METHODS[described.client] ?? []).includes("password")) {
+	if (!methodsOf(described.client).includes("password")) {
 		return refuse(context, 400, "not_offered", "method not offered");
 	}
 

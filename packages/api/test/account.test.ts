@@ -6,6 +6,7 @@ import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT 
 import { createTestHarness } from "wrangler";
 import { deviceLabel } from "../src/account.ts";
 import { BROWSER } from "./browser.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // Your sessions and your account (src/account.ts), in workerd: listing and ending your own sign-ins (never anyone
 // else's), signing out everywhere, and deleting the account — at GitHub too, and leaving nothing that points at you.
@@ -72,7 +73,7 @@ async function signIn(githubId: number, label: string): Promise<{ "call": (metho
 	let nonce: string | undefined;
 	const send = async (method: string, path: string, { form, token }: { "form"?: Record<string, string>; "token"?: string }): Promise<Answer> => {
 		for (let attempt = 0; ; attempt += 1) {
-			const claims = { "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...token === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))) } };
+			const claims = { "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...token === undefined ? {} : { "ath": await s256(token) } };
 			const headers: Record<string, string> = { ...BROWSER, "dpop": await new SignJWT(claims).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
 			const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? {} : { "body": new URLSearchParams(form).toString() } });
 
@@ -88,7 +89,7 @@ async function signIn(githubId: number, label: string): Promise<{ "call": (metho
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 	const id = env.GRANTS.newUniqueId();
 	const githubToken = `ghu_${crypto.randomUUID()}`;
-	const { code } = await env.GRANTS.get(id).begin({ "githubId": githubId, "github": { "accessToken": githubToken, "refreshToken": `ghr_${crypto.randomUUID()}`, "expiresAt": Date.now() + 3_600_000, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))), "jkt": await calculateJwkThumbprint(jwk), "from": { "country": null, "ipHash": null, "traceId": null }, "label": label });
+	const { code } = await env.GRANTS.get(id).begin({ "githubId": githubId, "github": { "accessToken": githubToken, "refreshToken": `ghr_${crypto.randomUUID()}`, "expiresAt": Date.now() + 3_600_000, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": await s256(verifier), "jkt": await calculateJwkThumbprint(jwk), "from": { "country": null, "ipHash": null, "traceId": null }, "label": label });
 	const tokens = await (await send("POST", "/token", { "form": { "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "client_id": "editor" } })).json() as { "access_token": string; "refresh_token": string };
 
 	return { "call": async (method, path, form) => send(method, path, { "form": form, "token": tokens.access_token }), "grantId": id.toString(), "githubToken": githubToken, "refreshToken": tokens.refresh_token };

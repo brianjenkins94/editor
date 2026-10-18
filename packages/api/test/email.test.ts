@@ -5,6 +5,7 @@ import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
 import { recorded } from "../harness/state.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // C2 in workerd (SIGN-IN.md, "Email"): the admin app pushes its request, the browser opens the attempt, asks for a code
 // by email (sent to an outbox of the test's own), and types it or follows the link, in that same browser; a match finds
@@ -85,7 +86,7 @@ async function started(): Promise<{ "cookie": string; "verifier": string; "state
 			return response;
 		}
 	};
-	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+	const challenge = await s256(verifier);
 	const { request_uri } = await (await post("/auth/par", { "client_id": "admin", "response_type": "code", "redirect_uri": APP, "state": state, "code_challenge": challenge, "code_challenge_method": "S256" })).json() as { "request_uri": string };
 	const opened = await browse(`${at("/auth/start")}?${new URLSearchParams({ "client_id": "admin", "request_uri": request_uri })}`);
 
@@ -118,7 +119,7 @@ async function refusals(): Promise<string[]> {
 test("the sign-in page offers email where email can be sent", async () => {
 	const { cookie } = await started();
 
-	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "methods": ["github", "email", "password", "passkey"] });
+	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "name": "the admin app", "methods": ["github", "email", "password", "passkey"] });
 });
 
 test("signing in by email: a code sent, typed in the same browser, and the app's code redeemed; a new user, by email alone", async () => {

@@ -9,6 +9,7 @@ import { answerUrl, toGitHub } from "./github.ts";
 import { canSend } from "./mail.ts";
 import { nonce } from "./tokens.ts";
 import { oauthRefusal } from "./refusals.ts";
+import { CLIENTS, isClient, methodsOf, pagesOf } from "./clients.ts";
 
 /**
  * Signing in through our own page (SIGN-IN.md, "The shape"):
@@ -72,11 +73,11 @@ export async function parEndpoint(context: Context<AppEnv>): Promise<Response> {
 	const field = (name: string): string => (typeof form[name] === "string" ? form[name] : "");
 	const client = field("client_id");
 
-	if (!Object.hasOwn(context.env.REDIRECT_URIS, client) || field("response_type") !== "code") {
+	if (!isClient(client) || field("response_type") !== "code") {
 		return refuse(context, "client_id or response_type");
 	}
 
-	if (!(context.env.REDIRECT_URIS[client] ?? []).includes(field("redirect_uri"))) {
+	if (!pagesOf(context.env, client).includes(field("redirect_uri"))) {
 		return refuse(context, "redirect_uri not registered");
 	}
 
@@ -142,7 +143,7 @@ export async function attemptEndpoint(context: Context<AppEnv>): Promise<Respons
 
 	const ready = (method: string): boolean => method !== "email" || (canSend(context.env) && context.env.CODE_KEY !== undefined);
 
-	return context.json({ "client": described.client, "methods": (context.env.SIGN_IN_METHODS[described.client] ?? []).filter(ready) });
+	return context.json({ "client": described.client, "name": isClient(described.client) ? CLIENTS[described.client].name : described.client, "methods": methodsOf(described.client).filter(ready) });
 }
 
 /** GET /auth/github: the page's GitHub choice, for this browser's attempt, when its client offers GitHub. */
@@ -154,7 +155,7 @@ export async function githubEndpoint(context: Context<AppEnv>): Promise<Response
 		return refuse(context, "reason" in described ? described.reason : "no attempt", 401);
 	}
 
-	if (!(context.env.SIGN_IN_METHODS[described.client] ?? []).includes("github")) {
+	if (!methodsOf(described.client).includes("github")) {
 		return refuse(context, "method not offered");
 	}
 

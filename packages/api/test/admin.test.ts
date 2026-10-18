@@ -5,6 +5,7 @@ import { createTestHarness } from "wrangler";
 import { PERMISSIONS, permissionsOf } from "../src/rbac.ts";
 import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
+import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 // B1 in workerd (packages/admin/README.md): the admin client, the Grant remembering its client, /admin/* for admin tokens
 // only, and roles from OWNERS. Sign-ins start as the GitHub callback starts them (Grant.begin), for either client.
@@ -51,7 +52,7 @@ async function browser(): Promise<{ "jkt": string; "send": (method: string, path
 		"jkt": await calculateJwkThumbprint(jwk),
 		"send": async (method, path, { form, accessToken } = {}) => {
 			for (let attempt = 0; ; attempt += 1) {
-				const ath = accessToken === undefined ? {} : { "ath": base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accessToken)))) };
+				const ath = accessToken === undefined ? {} : { "ath": await s256(accessToken) };
 				const headers: Record<string, string> = { ...BROWSER, "dpop": await proof(method, at(path), ath), "cf-connecting-ip": `198.51.100.${Math.floor(Math.random() * 254) + 1}`, ...accessToken === undefined ? {} : { "authorization": `DPoP ${accessToken}` }, ...form === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } };
 				const response = await server.fetch(at(path), { "method": method, "headers": headers, ...form === undefined ? {} : { "body": new URLSearchParams(form).toString() } });
 
@@ -72,7 +73,7 @@ type Browser = Awaited<ReturnType<typeof browser>>;
 /** A sign-in for GitHub user `githubId`, begun for `client` (undefined: as grants that predate clients were). */
 async function begin(holder: Browser, githubId: number, client: string | undefined): Promise<{ "code": string; "verifier": string; "grantId": string }> {
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
-	const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+	const challenge = await s256(verifier);
 	const id = env.GRANTS.newUniqueId();
 	const { code } = await env.GRANTS.get(id).begin({ ...client === undefined ? {} : { "client": client }, "githubId": githubId, "github": { "accessToken": "ghu_test", "refreshToken": "ghr_test", "expiresAt": Date.now() + 3_600_000, "refreshExpiresAt": Date.now() + 1e10 }, "codeChallenge": challenge, "jkt": holder.jkt, "from": { "country": null, "ipHash": null, "traceId": null } });
 

@@ -10,8 +10,6 @@
 // typed; anywhere else, there's no attempt here, and the page shows the code to type where the sign-in started.
 import { get as askPasskey, supported as passkeys } from "/webauthn.js";
 
-const NAMES = { "admin": "the admin app", "editor": "the editor" };
-
 const intro = document.querySelector("#for");
 const methods = document.querySelector("#methods");
 const problem = document.querySelector("#problem");
@@ -320,10 +318,10 @@ if (linked !== null) {
 const response = await fetch("/auth/attempt", { "credentials": "same-origin" });
 
 if (response.ok) {
-	const { client, "methods": offered } = await response.json();
+	const { name, "methods": offered } = await response.json();
 	const choices = [];
 
-	intro.textContent = `to ${NAMES[client] ?? client}`;
+	intro.textContent = `to ${name}`;
 
 	if (offered.includes("github")) {
 		choices.push(element("a", { "className": "method", "href": "/auth/github", "textContent": "Continue with GitHub" }));
