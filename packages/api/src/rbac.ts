@@ -29,11 +29,12 @@ export type Role = keyof typeof ROLES;
 
 /**
  * Whether a sign-in made by `method` (the `login` row's, kept on its `grants` row) can carry a role (SIGN-IN.md, "Roles
- * follow how you signed in"): GitHub's (its own 2FA), or any with an authenticator app as its second step. Not an emailed
+ * follow how you signed in"): GitHub's (its own 2FA), a passkey's (a device and its PIN or face), or any with an
+ * authenticator app as its second step. Not an emailed
  * code, a password, or a password and an emailed code: with an email linked to an owner's account, each would make the
  * inbox (which can reset the password) a key to it.
  */
-export const canHoldRoles = (method: string | null): boolean => method === "github" || /\+(?:totp|recovery)$/u.test(method ?? "");
+export const canHoldRoles = (method: string | null): boolean => method === "github" || method === "passkey" || /\+(?:totp|recovery)$/u.test(method ?? "");
 
 /**
  * A sign-in's roles. `owner` and `viewer` are config, not data: the user's GitHub id is in OWNERS or VIEWERS (wrangler.jsonc).

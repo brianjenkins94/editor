@@ -6,6 +6,7 @@ import { audit, origin } from "./audit.ts";
 import { githubIdColumn } from "./identities.ts";
 import { inboxEndpoint } from "./inbox.ts";
 import { emailLinkCodeEndpoint, emailLinkEndpoint, githubFinishEndpoint, githubLinkEndpoint } from "./link.ts";
+import { passkeyFinishEndpoint, passkeyRemoveEndpoint, passkeyStartEndpoint } from "./passkeys.ts";
 import { mailEndpoint } from "./mail-report.ts";
 import { emailMfaCodeEndpoint, emailMfaEndpoint, mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint } from "./mfa.ts";
 import { accountEndpoint, passwordCodeEndpoint, setPasswordEndpoint } from "./password.ts";
@@ -158,6 +159,12 @@ admin.post("/account/github/finish", githubFinishEndpoint);
 admin.post("/account/email/code", emailLinkCodeEndpoint);
 
 admin.post("/account/email", emailLinkEndpoint);
+
+admin.post("/account/passkey", passkeyStartEndpoint);
+
+admin.post("/account/passkey/finish", passkeyFinishEndpoint);
+
+admin.post("/account/passkey/remove", passkeyRemoveEndpoint);
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);

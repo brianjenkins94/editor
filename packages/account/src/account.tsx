@@ -19,7 +19,7 @@ export interface AccountApi {
 
 const Api = createContext<AccountApi | undefined>(undefined);
 
-export interface Account { "user": string; "githubId": number | null; "email": { "address": string; "verifiedAt": number | null } | null; "password": { "setAt": number } | null; "mfa": { "enrolledAt": number; "recoveryLeft": number } | null; "emailMfa": { "enrolledAt": number } | null }
+export interface Account { "user": string; "githubId": number | null; "email": { "address": string; "verifiedAt": number | null } | null; "password": { "setAt": number } | null; "mfa": { "enrolledAt": number; "recoveryLeft": number } | null; "emailMfa": { "enrolledAt": number } | null; "passkeys": { "id": string; "createdAt": number; "lastUsedAt": number | null; "synced": boolean }[] }
 
 /** What a refusal's reason means, in words (packages/api/src/password.ts and email.ts say it plainly already; these few
  *  read better for a person). */
@@ -150,6 +150,95 @@ function ConnectGitHub({ onChanged }: { "onChanged": () => void }) {
 					}}
 				>
 					Connect GitHub
+				</wa-button>
+			</div>
+		</div>
+	);
+}
+
+/** Passkeys (SIGN-IN.md, "Passkeys"): the account's, each removable; adding one goes to our passkey page (passkeys
+ *  belong to the API's host, so they're made there) and back here with `passkey`, which this sign-in finishes. Adding and
+ *  removing need a sign-in in the last 10 minutes: the API says so if not. */
+function Passkeys({ account, onChanged }: { "account": Account; "onChanged": () => void }) {
+	const api = useContext(Api) as AccountApi;
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | undefined>();
+	const [added, setAdded] = useState(false);
+	const call = async (path: string, form: Record<string, string>, then: () => void): Promise<void> => {
+		setBusy(true);
+		setProblem(undefined);
+
+		const answer = await postWithReason(api.submit, path, form);
+
+		setBusy(false);
+
+		if ("reason" in answer) {
+			setProblem(answer.reason);
+		} else {
+			then();
+		}
+	};
+
+	// Back from our passkey page: the code in the address, taken out of it at once, and the passkey added.
+	useEffect(() => {
+		const here = new URL(location.href);
+		const code = here.searchParams.get("passkey");
+
+		if (code === null) {
+			return;
+		}
+
+		here.searchParams.delete("passkey");
+		history.replaceState(history.state, "", here.href);
+		void call("/account/passkey/finish", { "passkey": code }, () => {
+			setAdded(true);
+			onChanged();
+		});
+	}, []);
+
+	const when = (at: number): string => new Date(at).toLocaleDateString();
+
+	return (
+		<div class="wa-stack">
+			<p>Sign in with your device instead: its fingerprint, face or PIN, or your password manager. Nothing to type, and it works only on our own sign-in page, so it can't be phished.</p>
+			{added && <wa-callout variant="success">Your passkey is added. Choose “Sign in with a passkey” next time.</wa-callout>}
+			{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
+			{account.passkeys.map((passkey) => (
+				<div class="wa-cluster wa-gap-s" key={passkey.id}>
+					<span>
+						Added {when(passkey.createdAt)}, {passkey.lastUsedAt === null ? "not used yet" : `last used ${when(passkey.lastUsedAt)}`}
+						<span class="account-muted"> · {passkey.synced ? "synced" : "this device only"}</span>
+					</span>
+					<wa-button
+						size="small"
+						appearance="plain"
+						variant="danger"
+						loading={busy}
+						onClick={() => {
+							void call("/account/passkey/remove", { "id": passkey.id }, onChanged);
+						}}
+					>
+						Remove
+					</wa-button>
+				</div>
+			))}
+			<div>
+				<wa-button
+					loading={busy}
+					onClick={() => {
+						setBusy(true);
+						setProblem(undefined);
+						void postWithReason<{ "location": string }>(api.submit, "/account/passkey", { "return": location.href }).then((answer) => {
+							if (answer.ok && answer.body.location !== undefined) {
+								location.assign(answer.body.location);
+							} else {
+								setBusy(false);
+								setProblem("reason" in answer ? answer.reason : undefined);
+							}
+						});
+					}}
+				>
+					Add a passkey
 				</wa-button>
 			</div>
 		</div>
@@ -520,30 +609,38 @@ export function AccountPage({ api, heading = true }: { "api": AccountApi; "headi
 							{row("GitHub", account.githubId === null ? "Not connected" : login ?? `GitHub user ${account.githubId}`)}
 							{row("Email", account.email?.address ?? "None")}
 							{row("Password", account.password === null ? "Not set" : `Set ${new Date(account.password.setAt).toLocaleDateString()}`)}
+						{row("Passkeys", account.passkeys.length === 0 ? "None" : String(account.passkeys.length))}
 							{row("Two-factor", [account.mfa === null ? undefined : `an authenticator app, ${account.mfa.recoveryLeft} recovery codes left`, account.emailMfa === null ? undefined : "a code by email after a password"].filter((part) => part !== undefined).join("; ") || "Off")}
 						</tbody>
 					</table>
 				</div>
 				{(account.githubId === null || account.email === null) && (
-				<>
-					<h2 class="wa-heading-l">Ways to sign in</h2>
-					{account.githubId === null && (
-						<ConnectGitHub
-							onChanged={() => {
-								setReads(reads + 1);
-							}}
-						/>
-					)}
-					{account.email === null && (
-						<AddEmail
-							onChanged={() => {
-								setReads(reads + 1);
-							}}
-						/>
-					)}
-				</>
-			)}
-			<h2 class="wa-heading-l">Two-factor</h2>
+					<>
+						<h2 class="wa-heading-l">Ways to sign in</h2>
+						{account.githubId === null && (
+							<ConnectGitHub
+								onChanged={() => {
+									setReads(reads + 1);
+								}}
+							/>
+						)}
+						{account.email === null && (
+							<AddEmail
+								onChanged={() => {
+									setReads(reads + 1);
+								}}
+							/>
+						)}
+					</>
+				)}
+				<h2 class="wa-heading-l">Passkeys</h2>
+				<Passkeys
+					account={account}
+					onChanged={() => {
+						setReads(reads + 1);
+					}}
+				/>
+				<h2 class="wa-heading-l">Two-factor</h2>
 				<TwoFactor
 					account={account}
 					onChanged={() => {

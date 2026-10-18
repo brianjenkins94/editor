@@ -1,6 +1,6 @@
 # Sign-in methods
 
-Status: **design, 2026-10-17; C0 to C6 built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
+Status: **design, 2026-10-17; C0 to C7, linking and passkeys built,** C2 sending for real in dev and production since 2026-10-17. Decided: build it ourselves, trial it on the admin app, move to
 **Workers Paid** (for Argon2id's CPU and email sending), add a local debug harness first (C0), and push authorization
 requests (PAR) in C1. Still open: "Open questions".
 
@@ -312,7 +312,33 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     from the editor's routes, then a password sign-in back to the editor's page). Tried signed out in the browser: the
     popover, and a public repo loaded.
   - Linking (one account for GitHub and an email) is still pinned: an email sign-in and a GitHub one are two accounts.
-- **Later:** passkeys (Pilcrow's recommendation for high-security accounts, and a way to drop passwords).
+- **Passkeys.** *Built 2026-10-18* (src/passkeys.ts, public/passkey.*, public/webauthn.js; migrations/0013).
+  WebAuthn through **@simplewebauthn/server** (14.0.3, pinned: the standard server library, runtime-agnostic, run in
+  workerd by the tests), Pilcrow's recommendation for high-security accounts and a way to drop passwords.
+  - **The relying party is the API's own host** (`api.unusuallygood.dev`, the dev worker's, `localhost`), not the whole
+    site: only our sign-in pages can ask for a passkey, never an app's page, nor a preview running someone's code on a
+    subdomain. So both ceremonies run on the API's origin (CSP-locked as the sign-in page is), as passwords do.
+  - **Signing in:** "Sign in with a passkey" on the sign-in page: `POST /auth/passkey/options` gives a challenge kept in
+    the attempt (5 minutes, good once), the device answers (discoverable: no account named first; user verification
+    required), `POST /auth/passkey` checks it against the stored public key, keeps its sign count, and starts the
+    sign-in (`login` says "passkey"). No second step: a passkey is a device and its PIN or face already.
+  - **Roles:** a passkey sign-in can hold one (`canHoldRoles`), as GitHub's or one with an authenticator app can.
+  - **Adding one,** from Your account, in three steps as connecting GitHub is: `POST /account/passkey` (a recent sign-in;
+    `return`, one of the app's pages) answers our `/passkey` page with a ticket and the registration options in its
+    fragment; the page makes the passkey and `POST /passkey/register` checks it (challenge, origin, host, user
+    verification; attestation "none": we don't ask which device), held in the sign-in for the app; back on the app's page
+    with `passkey`, `POST /account/passkey/finish` adds it, through the sign-in that asked. `passkey_added`.
+  - **Removing one** (a recent sign-in): `POST /account/passkey/remove`. `passkey_removed`. The account page lists
+    them: when added, last used, synced or this device only.
+  - **Stored** (`passkeys`): the credential's id, its public key, sign count, transports, AAGUID, whether it syncs. Never
+    a private key. Purged with the account; an account with one isn't "empty" for a merge.
+  - 4 tests in test/passkeys.test.ts, with a software authenticator (a P-256 key and the bytes a device sends): adding
+    one and signing in with it; only the sign-in that asked finishes it, the ticket once, another origin refused; each
+    challenge once, a tampered signature and an unknown or removed passkey refused; a passkey sign-in holding the owner's
+    role. Looked at in the harness: the sign-in page's button, the account page's section, the passkey page (the device's
+    own prompt not driven: it's the person's).
+- **Later:** a passkey as a second step after a password; naming passkeys; conditional UI (passkeys offered in the
+  email field's autofill).
 
 ## Open questions
 

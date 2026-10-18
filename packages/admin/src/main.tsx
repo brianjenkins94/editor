@@ -78,8 +78,8 @@ function SignIn({ problem }: { "problem"?: string }) {
 	);
 }
 
-/** Signed in with no role: nothing to look after, but your own account (a password, C3; linking). Open at `#/account`,
- *  so coming back from GitHub (connecting it, with `link` in the address) lands there to finish. */
+/** Signed in with no role: nothing to look after, but your own account (a password, C3; linking; passkeys). Open at
+ *  `#/account`, so coming back from GitHub or our passkey page (`link`, `passkey` in the address) lands there to finish. */
 function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 	const [account, setAccount] = useState(() => location.hash === "#/account");
 
@@ -108,7 +108,7 @@ function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				<div class="wa-stack wa-gap-l">
 					<h1 class="wa-heading-l">No access</h1>
 					<p>You're signed in, but this sign-in holds no admin roles. <span class="mono muted">{me.user}</span></p>
-					<p class="muted">Roles go with a sign-in made with GitHub, or with an authenticator app as its second step.</p>
+					<p class="muted">Roles go with a sign-in made with GitHub or a passkey, or with an authenticator app as its second step.</p>
 					<div class="wa-cluster">
 						<wa-button
 							appearance="outlined"

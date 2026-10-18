@@ -644,8 +644,9 @@ function Shell() {
 
 			setSignInHere(session.canSignIn());
 
-			// Back from GitHub, connecting it to the account (packages/account finishes the link): its dialog, open again.
-			if (session.isSignedIn() && /[?&]link(?:_error)?=/u.test(location.search)) {
+			// Back from GitHub, connecting it to the account, or from our passkey page, adding one (packages/account finishes
+			// either): its dialog, open again.
+			if (session.isSignedIn() && /[?&](?:link|link_error|passkey)=/u.test(location.search)) {
 				const { "AccountDialog": dialog } = await import("./account-dialog");
 
 				setAccountDialog(() => dialog);

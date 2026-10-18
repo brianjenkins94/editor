@@ -22,7 +22,8 @@ import { userWith } from "./identities.ts";
  *   - its client's fingerprint (BEHAVIOR.md: which headers it sent, keyed hashes of them), from the code's redemption,
  *     and how often each header has differed since, and how;
  *   - its last action and the transitions since its last flush (BEHAVIOR.md, B8), added to the shared model hourly;
- *   - GitHub's answer to connecting GitHub to the account (src/link.ts), sealed, for 2 minutes, until the app finishes it.
+ *   - GitHub's answer to connecting GitHub to the account (src/link.ts), sealed, for 2 minutes, until the app finishes it;
+ *   - a passkey being added (src/passkeys.ts): its challenge, then the checked credential, until the app finishes it.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
  * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
  * GitHub's token is spent here, for the proxy (src/proxy.ts), and refreshed here, one refresh at a time: GitHub's refresh
@@ -107,6 +108,7 @@ export const SCHEMA = `
 	CREATE TABLE IF NOT EXISTS pending (from_action TEXT NOT NULL, to_action TEXT NOT NULL, gap INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (from_action, to_action, gap));
 	CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
 	CREATE TABLE IF NOT EXISTS github_link (id INTEGER PRIMARY KEY CHECK (id = 1), github_id INTEGER NOT NULL, github TEXT NOT NULL, code_hash TEXT NOT NULL, expires INTEGER NOT NULL);
+	CREATE TABLE IF NOT EXISTS passkey_setup (id INTEGER PRIMARY KEY CHECK (id = 1), ticket_hash TEXT NOT NULL, challenge TEXT NOT NULL, return_to TEXT NOT NULL, credential TEXT, code_hash TEXT, expires INTEGER NOT NULL);
 `;
 
 export type Issued = { "ok": true; "userId": string; "refreshToken": string; "client": string } | { "ok": false };
@@ -397,6 +399,60 @@ export class Grant extends DurableObject<Bindings> {
 	}
 
 	/**
+	 * Adding a passkey to this sign-in's account (src/passkeys.ts), in three steps: the app asks (this, with the
+	 * registration's `challenge` and the app's page to go back to), and gets a ticket for our passkey page; the page
+	 * creates the passkey and hands it back with the ticket (`setUpPasskey`, once checked), getting a code for the app's
+	 * page; the app finishes with that code through this sign-in (`takePasskey`), so a passkey made in another browser
+	 * can't be added to this account. LINK_TTL for the whole. Undefined for a sign-in that's over.
+	 */
+	public async startPasskey(challenge: string, returnTo: string): Promise<{ "ticket": string } | undefined> {
+		const state = this.state();
+
+		if (state === undefined || state.revoked_at !== null) {
+			return undefined;
+		}
+
+		const ticket = token(this.id);
+
+		this.sql.exec("INSERT OR REPLACE INTO passkey_setup (id, ticket_hash, challenge, return_to, credential, code_hash, expires) VALUES (1, ?, ?, ?, NULL, NULL, ?)", await hash(ticket), challenge, returnTo, Date.now() + LINK_TTL);
+
+		return { "ticket": ticket };
+	}
+
+	/** The registration a ticket is for (its challenge, where to go back), if it's the ticket out, unused, unexpired. */
+	public async passkeySetup(ticket: string): Promise<{ "challenge": string; "returnTo": string } | undefined> {
+		const [setup] = this.sql.exec<{ "ticket_hash": string; "challenge": string; "return_to": string; "credential": string | null; "expires": number }>("SELECT ticket_hash, challenge, return_to, credential, expires FROM passkey_setup WHERE id = 1").toArray();
+
+		return setup === undefined || setup.credential !== null || setup.expires < Date.now() || setup.ticket_hash !== await hash(ticket) ? undefined : { "challenge": setup.challenge, "returnTo": setup.return_to };
+	}
+
+	/** The page's passkey, checked (src/passkeys.ts), held for the app to finish: the code its page gets. */
+	public async setUpPasskey(ticket: string, credential: string): Promise<{ "code": string } | undefined> {
+		if (await this.passkeySetup(ticket) === undefined) {
+			return undefined;
+		}
+
+		const code = token(this.id);
+
+		this.sql.exec("UPDATE passkey_setup SET credential = ?, code_hash = ? WHERE id = 1", credential, await hash(code));
+
+		return { "code": code };
+	}
+
+	/** Finish adding a passkey: the held credential (JSON), once, if `code` is its; the setup gone. */
+	public async takePasskey(code: string): Promise<string | undefined> {
+		const [held] = this.sql.exec<{ "credential": string | null; "code_hash": string | null; "expires": number }>("SELECT credential, code_hash, expires FROM passkey_setup WHERE id = 1").toArray();
+
+		if (held === undefined || held.credential === null || held.expires < Date.now() || held.code_hash !== await hash(code)) {
+			return undefined;
+		}
+
+		this.sql.exec("DELETE FROM passkey_setup");
+
+		return held.credential;
+	}
+
+	/**
 	 * GitHub's token for this sign-in, refreshed first when it's close to expiring; undefined once the sign-in is over. A
 	 * refresh GitHub refuses (its refresh token expired, or the user revoked the app) ends the sign-in; one GitHub didn't
 	 * answer just fails this request. Null for a sign-in that never had one (by email or a password, C2–C3): it isn't
@@ -483,6 +539,7 @@ export class Grant extends DurableObject<Bindings> {
 
 		this.sql.exec("UPDATE state SET revoked_at = ?, github = NULL, refresh_hash = NULL, code_hash = NULL WHERE id = 1", now);
 		this.sql.exec("DELETE FROM github_link");
+		this.sql.exec("DELETE FROM passkey_setup");
 		await this.env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(now, this.id).run();
 		await audit(this.env, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from, reason === undefined ? {} : { "reason": reason });
 	}

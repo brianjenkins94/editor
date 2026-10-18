@@ -19,6 +19,7 @@ import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
 import { emailLinkCodeEndpoint, emailLinkEndpoint, githubFinishEndpoint, githubLinkEndpoint } from "./link.ts";
 import { log } from "./log.ts";
+import { passkeyFinishEndpoint, passkeyOptionsEndpoint, passkeyRegisterEndpoint, passkeyRemoveEndpoint, passkeySignInEndpoint, passkeyStartEndpoint } from "./passkeys.ts";
 import { githubApi, githubGit } from "./proxy.ts";
 import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
 import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
@@ -79,6 +80,9 @@ app.use("/auth/password", limit(4 * 1024));
 app.use("/auth/reset", limit(4 * 1024));
 app.use("/auth/reset/*", limit(4 * 1024));
 app.use("/auth/second", limit(4 * 1024));
+app.use("/auth/passkey", limit(8 * 1024));
+app.use("/auth/passkey/*", limit(4 * 1024));
+app.use("/passkey/register", limit(16 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
@@ -141,6 +145,13 @@ app.post("/auth/reset/password", rateLimit("SIGN_IN_BY_IP", byIp), resetPassword
 // The second factor, for an account with MFA (src/mfa.ts, C5): after an emailed code or a password.
 app.post("/auth/second", rateLimit("SIGN_IN_BY_IP", byIp), secondStepEndpoint);
 
+// Passkeys (src/passkeys.ts): signing in with one from the sign-in page, and our page that makes one for an account.
+app.post("/auth/passkey/options", rateLimit("SIGN_IN_BY_IP", byIp), passkeyOptionsEndpoint);
+
+app.post("/auth/passkey", rateLimit("SIGN_IN_BY_IP", byIp), passkeySignInEndpoint);
+
+app.post("/passkey/register", rateLimit("SIGN_IN_BY_IP", byIp), passkeyRegisterEndpoint);
+
 app.post("/token", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), tokenEndpoint);
 
 app.post("/revoke", rateLimit("TOKEN_BY_IP", byIp), rateLimit("TOKEN_BY_GRANT", byGrant), revokeEndpoint);
@@ -185,6 +196,12 @@ app.post("/account/github/finish", session, githubFinishEndpoint);
 app.post("/account/email/code", session, emailLinkCodeEndpoint);
 
 app.post("/account/email", session, emailLinkEndpoint);
+
+app.post("/account/passkey", session, passkeyStartEndpoint);
+
+app.post("/account/passkey/finish", session, passkeyFinishEndpoint);
+
+app.post("/account/passkey/remove", session, passkeyRemoveEndpoint);
 
 // The admin API (src/admin.ts): admin tokens only, each route behind its permission.
 app.route("/admin", admin);

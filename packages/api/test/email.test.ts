@@ -118,7 +118,7 @@ async function refusals(): Promise<string[]> {
 test("the sign-in page offers email where email can be sent", async () => {
 	const { cookie } = await started();
 
-	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "methods": ["github", "email", "password"] });
+	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "methods": ["github", "email", "password", "passkey"] });
 });
 
 test("signing in by email: a code sent, typed in the same browser, and the app's code redeemed; a new user, by email alone", async () => {

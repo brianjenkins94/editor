@@ -9,6 +9,7 @@
   "dependencies": {
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@hallaxius/argon2w": "0.0.2",
+    "@simplewebauthn/server": "14.0.3",
     "hono": "4.13.13",
     "jose": "6.2.12"
   },

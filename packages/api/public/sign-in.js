@@ -3,8 +3,13 @@
 // to go: the app's page, with our code. A password (POST /auth/password) signs in with the same address, and answers
 // the same way. The attempt itself is the cookie /auth/start set; nothing here holds anything.
 //
+// A passkey (POST /auth/passkey/options, then the passkey's answer to POST /auth/passkey) signs in on its own, and
+// answers the same way.
+//
 // The email's link is this page with the code in its fragment (#code=…): in the browser that started, it's sent as if
 // typed; anywhere else, there's no attempt here, and the page shows the code to type where the sign-in started.
+import { get as askPasskey, supported as passkeys } from "/webauthn.js";
+
 const NAMES = { "admin": "the admin app", "editor": "the editor" };
 
 const intro = document.querySelector("#for");
@@ -51,7 +56,10 @@ function explain(body) {
 		"couldn't check it against known breaches: try again": "We couldn't check that password against known breaches just now. Try again.",
 		"that code isn't right, or it's been used": "That code isn't right, or it's been used. Wait for the app's next code.",
 		"that recovery code isn't one of yours, or it's been used": "That recovery code isn't one of yours, or it's been used.",
-		"two-factor code needed: from your authenticator app, or a recovery code": "This account has two-factor on: add a code from your authenticator app, or a recovery code."
+		"two-factor code needed: from your authenticator app, or a recovery code": "This account has two-factor on: add a code from your authenticator app, or a recovery code.",
+		"that passkey isn't one of ours: sign in another way": "That passkey isn't one of ours (it may have been removed). Sign in another way.",
+		"that passkey couldn't be checked: try again": "That passkey couldn't be checked. Try again.",
+		"ask the passkey again": "That took too long. Try the passkey again."
 	};
 
 	return reasons[body.reason] ?? (body.error === "no_attempt" ? "This sign-in has expired or was opened somewhere else. Go back to the app and sign in again." : "Something went wrong. Try again.");
@@ -229,6 +237,36 @@ function resetForm(address) {
 	return form;
 }
 
+/** Signing in with a passkey: a challenge for this attempt, the device's answer, and on to the app. */
+async function passkeySignIn(button) {
+	say("");
+	button.disabled = true;
+
+	try {
+		const options = await post("/auth/passkey/options", {});
+
+		if (!options.ok) {
+			say(explain(options.body));
+
+			return;
+		}
+
+		const { ok, body } = await post("/auth/passkey", { "credential": await askPasskey(options.body) });
+
+		if (ok) {
+			location.assign(body.location);
+
+			return;
+		}
+
+		say(explain(body));
+	} catch (error) {
+		say(error?.name === "NotAllowedError" ? "No passkey was used. Try again, or sign in another way." : "This device couldn't use a passkey.");
+	} finally {
+		button.disabled = false;
+	}
+}
+
 /** The address, then a code by email, or a password: whichever the attempt offers. With both, the code first, and the
  *  password a step away. */
 function emailForm(offered) {
@@ -289,6 +327,15 @@ if (response.ok) {
 
 	if (offered.includes("github")) {
 		choices.push(element("a", { "className": "method", "href": "/auth/github", "textContent": "Continue with GitHub" }));
+	}
+
+	if (offered.includes("passkey") && passkeys()) {
+		const button = element("button", { "type": "button", "className": "method", "textContent": "Sign in with a passkey" });
+
+		button.addEventListener("click", () => {
+			void passkeySignIn(button);
+		});
+		choices.push(button);
 	}
 
 	if (offered.includes("email") || offered.includes("password")) {

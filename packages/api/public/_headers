@@ -6,3 +6,10 @@
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   Cache-Control: no-store
+
+# Adding a passkey (src/passkeys.ts): the same page rules, being where a passkey is made.
+/passkey*
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Cache-Control: no-store

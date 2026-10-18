@@ -10,6 +10,7 @@ import argon2Wasm from "@hallaxius/argon2w/wasm";
 // Argon2's WebAssembly, as a module Wrangler compiles at deploy: the runtime won't compile any at runtime.
 configureWasm(argon2Wasm);
 import { emailOf, githubIdOf, identityOf } from "./identities.ts";
+import { passkeysOf } from "./passkeys.ts";
 import { emailMfaState, hasEmailMfa, hasMfa, mfaState } from "./mfa-state.ts";
 import { emailSecondFactor, secondFactor } from "./mfa.ts";
 import { checkActionCode, issueActionCode } from "./action-codes.ts";
@@ -171,6 +172,7 @@ export async function accountEndpoint(context: Context<AppEnv>): Promise<Respons
 		"githubId": await githubIdOf(context.env, user),
 		"email": email === null ? null : { "address": email.subject, "verifiedAt": email.verifiedAt },
 		"password": set === null ? null : { "setAt": set.set_at },
+		"passkeys": await passkeysOf(context.env, user),
 		"mfa": await mfaState(context.env, user),
 		"emailMfa": await emailMfaState(context.env, user)
 	});

@@ -167,7 +167,8 @@ test("the sign-in page: our own files only, and what this attempt may use", asyn
 
 	assert.equal(page.status, 200);
 	assert.match(page.headers.get("content-security-policy") ?? "", /script-src 'self'.*frame-ancestors 'none'/u);
-	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "methods": ["github", "password"] });
+	assert.deepEqual(await (await browse(at("/auth/attempt"), { "cookie": cookie })).json(), { "client": "admin", "methods": ["github", "password", "passkey"] });
+	assert.match((await browse(at("/passkey"))).headers.get("content-security-policy") ?? "", /script-src 'self'.*frame-ancestors 'none'/u, "the passkey page too");
 	assert.equal((await browse(at("/auth/attempt"))).status, 401, "another browser has none");
 	assert.equal((await browse(at("/auth/attempt"), { "cookie": `${cookie.split(".")[0]}.${"A".repeat(43)}` })).status, 401, "the attempt's id without its secret");
 });

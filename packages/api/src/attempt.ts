@@ -51,7 +51,14 @@ CREATE TABLE IF NOT EXISTS first_factor (
 CREATE TABLE IF NOT EXISTS email_step (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	address TEXT NOT NULL, code_hash TEXT NOT NULL, expires INTEGER NOT NULL, tries REAL NOT NULL, tries_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS passkey_challenge (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	challenge TEXT NOT NULL, expires INTEGER NOT NULL
 )`;
+
+/** How long a passkey sign-in's challenge is good for: the browser's prompt, and someone choosing a passkey. */
+const CHALLENGE_TTL = 5 * 60_000;
 
 /** An emailed code's life, and the tries at it: a bucket of TRIES, one back each TRY_REFILL (SIGN-IN.md, "Email"). */
 export const CODE_TTL = 10 * 60_000;
@@ -214,6 +221,37 @@ export class Attempt extends DurableObject<Bindings> {
 		this.sql.exec("DELETE FROM email_step");
 
 		return { "ok": true, "request": { "client": row.client, "redirectUri": row.redirectUri, "state": row.state, "codeChallenge": row.codeChallenge, "jkt": row.jkt }, "address": step.address };
+	}
+
+	/**
+	 * A passkey sign-in (src/passkeys.ts): the challenge the browser's passkey signs, kept until it's checked (once,
+	 * whatever the outcome), for CHALLENGE_TTL. A new one replaces the last.
+	 */
+	public async challenged(secret: string, challenge: string): Promise<{ "ok": true } | Refused> {
+		const row = await this.running(secret);
+
+		if ("reason" in row) {
+			return row;
+		}
+
+		this.sql.exec("INSERT OR REPLACE INTO passkey_challenge (id, challenge, expires) VALUES (1, ?, ?)", challenge, Date.now() + CHALLENGE_TTL);
+
+		return { "ok": true };
+	}
+
+	/** The passkey challenge, taken (good once), if one is out and unexpired. */
+	public async takeChallenge(secret: string): Promise<{ "ok": true; "challenge": string } | Refused> {
+		const row = await this.running(secret);
+
+		if ("reason" in row) {
+			return row;
+		}
+
+		const [kept] = this.sql.exec<{ "challenge": string; "expires": number }>("SELECT challenge, expires FROM passkey_challenge WHERE id = 1").toArray();
+
+		this.sql.exec("DELETE FROM passkey_challenge");
+
+		return kept === undefined || kept.expires < Date.now() ? { "ok": false, "reason": "no passkey challenge" } : { "ok": true, "challenge": kept.challenge };
 	}
 
 	/** The first factor passed, for `user`, by `method` ("email", "password"): what the second (MFA, C5) finishes. */

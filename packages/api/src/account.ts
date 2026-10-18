@@ -102,6 +102,7 @@ export async function purge(env: Bindings, now = Date.now()): Promise<number> {
 			env.DB.prepare("DELETE FROM scores WHERE grant_id IN (SELECT id FROM grants WHERE user_id = ?)").bind(user),
 			env.DB.prepare("DELETE FROM grants WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM identities WHERE user_id = ?").bind(user),
+			env.DB.prepare("DELETE FROM passkeys WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM passwords WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM action_codes WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM totp WHERE user_id = ?").bind(user),

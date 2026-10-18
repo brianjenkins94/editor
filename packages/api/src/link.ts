@@ -27,7 +27,7 @@ const ADD_EMAIL = "add_email";
 
 const PROVIDERS: Record<Provider, string> = { "github": "GitHub account", "email": "email" };
 
-async function refuse(context: Context<AppEnv>, status: 400 | 403 | 409, error: string, reason: string, extra: Record<string, unknown> = {}): Promise<Response> {
+export async function refuse(context: Context<AppEnv>, status: 400 | 403 | 409, error: string, reason: string, extra: Record<string, unknown> = {}): Promise<Response> {
 	context.get("span").info("link refused", { "reason": reason });
 	await audit(context.env, "auth_refused", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": `link: ${reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
 	context.header("cache-control", "no-store");
@@ -36,17 +36,17 @@ async function refuse(context: Context<AppEnv>, status: 400 | 403 | 409, error: 
 }
 
 /** The action's own check: this sign-in was made in the last 10 minutes. The refusal, or nothing. */
-async function recent(context: Context<AppEnv>, what: string): Promise<Response | undefined> {
+export async function recent(context: Context<AppEnv>, what: string): Promise<Response | undefined> {
 	const grant = await context.env.DB.prepare("SELECT created_at FROM grants WHERE id = ?").bind(context.get("grant")).first<{ "created_at": number }>();
 
 	return grant === null || Date.now() - grant.created_at > RECENT ? refuse(context, 403, "sign_in_again", `sign in again to ${what} (it needs a sign-in in the last 10 minutes)`) : undefined;
 }
 
-/** Whether `other` holds nothing but its `provider` way in: no other, no password or two-factor, no role (a GitHub id in
+/** Whether `other` holds nothing but its `provider` way in: no other, no password, passkey or two-factor, no role (a GitHub id in
  *  OWNERS or VIEWERS). Such an account can be merged into another; anything more is someone's to keep. */
 async function mergeable(env: Bindings, other: string, provider: Provider): Promise<boolean> {
 	const row = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM identities WHERE user_id = ?) AS ways,
-		(SELECT COUNT(*) FROM passwords WHERE user_id = ?) + (SELECT COUNT(*) FROM totp WHERE user_id = ?) + (SELECT COUNT(*) FROM email_mfa WHERE user_id = ?) AS kept`).bind(other, other, other, other).first<{ "ways": number; "kept": number }>();
+		(SELECT COUNT(*) FROM passwords WHERE user_id = ?) + (SELECT COUNT(*) FROM totp WHERE user_id = ?) + (SELECT COUNT(*) FROM email_mfa WHERE user_id = ?) + (SELECT COUNT(*) FROM passkeys WHERE user_id = ?) AS kept`).bind(other, other, other, other, other).first<{ "ways": number; "kept": number }>();
 
 	if (row === null || row.ways !== 1 || row.kept !== 0) {
 		return false;
@@ -104,7 +104,11 @@ async function attach(context: Context<AppEnv>, provider: Provider, subject: str
 	return undefined;
 }
 
-const field = (form: Record<string, unknown>, name: string): string => (typeof form[name] === "string" ? form[name] : "");
+export const field = (form: Record<string, unknown>, name: string): string => (typeof form[name] === "string" ? form[name] : "");
+
+/** Whether `returnTo` is one of the signed-in app's own pages (its REDIRECT_URIS, as a prefix: a deep link, or the page's
+ *  hash route): the only places a link or a new passkey goes back to. */
+export const isAppPage = (context: Context<AppEnv>, returnTo: string): boolean => URL.canParse(returnTo) && (context.env.REDIRECT_URIS[context.get("client")] ?? []).some((page) => returnTo.startsWith(page));
 
 /** POST /account/github: where to go to connect GitHub — GitHub's authorize page, coming back to `return` (one of the
  *  app's own pages) with a code this sign-in finishes. */
@@ -116,8 +120,7 @@ export async function githubLinkEndpoint(context: Context<AppEnv>): Promise<Resp
 		return refuse(context, 409, "linked", "a GitHub account is connected already");
 	}
 
-	// Back only to the app's own pages (its REDIRECT_URIS, as a prefix: a deep link or the page's hash route).
-	if (!(context.env.REDIRECT_URIS[context.get("client")] ?? []).some((page) => returnTo.startsWith(page)) || !URL.canParse(returnTo)) {
+	if (!isAppPage(context, returnTo)) {
 		return refuse(context, 400, "return", "not one of the app's pages");
 	}
 
