@@ -629,7 +629,9 @@ function staticHostPlugin(): Plugin {
 				this.emitFile({ "type": "asset", "fileName": "404.html", "source": index.source });
 			}
 
-			this.emitFile({ "type": "asset", "fileName": "_headers", "source": ["/*", "  Cross-Origin-Opener-Policy: same-origin", "  Cross-Origin-Embedder-Policy: credentialless", "  X-Content-Type-Options: nosniff", ""].join("\n") });
+			// frame-ancestors 'self': the shell is the editor's only embedder. Another site framing it could navigate the frames
+			// inside it, such as the DevTools frame the shell posts to with "*" (shell/preview-devtools.ts).
+			this.emitFile({ "type": "asset", "fileName": "_headers", "source": ["/*", "  Cross-Origin-Opener-Policy: same-origin", "  Cross-Origin-Embedder-Policy: credentialless", "  Content-Security-Policy: frame-ancestors 'self'", "  X-Content-Type-Options: nosniff", ""].join("\n") });
 			// html_handling is "none" (editor.jsonc: no 307 from `x.html` to `x`), so the root names index.html itself. Named
 			// placeholders, not `/env/*`: a splat rewrite 404s under "none".
 			this.emitFile({ "type": "asset", "fileName": "_redirects", "source": ["/ /index.html 200", "/env/:owner/:repo /index.html 200", "/env/:owner/:repo/ /index.html 200", ""].join("\n") });
