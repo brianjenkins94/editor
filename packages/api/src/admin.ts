@@ -3,7 +3,9 @@ import { Hono } from "hono";
 import { ROUTINE } from "./audit-copies.ts";
 import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
+import { githubIdColumn } from "./identities.ts";
 import { inboxEndpoint } from "./inbox.ts";
+import { emailLinkCodeEndpoint, emailLinkEndpoint, githubFinishEndpoint, githubLinkEndpoint } from "./link.ts";
 import { mailEndpoint } from "./mail-report.ts";
 import { emailMfaCodeEndpoint, emailMfaEndpoint, mfaConfirmEndpoint, mfaOffEndpoint, mfaRecoveryEndpoint, mfaStartEndpoint } from "./mfa.ts";
 import { accountEndpoint, passwordCodeEndpoint, setPasswordEndpoint } from "./password.ts";
@@ -47,7 +49,7 @@ const limitOf = (value: string | undefined, fallback: number, max: number): numb
 /** Every user: our id, GitHub's id (the app looks the login up live; it isn't stored), when they joined, how many live
  *  sign-ins they have, and when they were last seen. Most recently seen first. */
 admin.get("/users", requires("users:read"), async (context) => {
-	const { results } = await context.env.DB.prepare(`SELECT u.id, u.github_id, u.created_at, u.deleted_at, SUM(CASE WHEN g.id IS NOT NULL AND g.revoked_at IS NULL THEN 1 ELSE 0 END) AS live, MAX(g.last_used_at) AS last_seen
+	const { results } = await context.env.DB.prepare(`SELECT u.id, ${githubIdColumn("u")} AS github_id, u.created_at, u.deleted_at, SUM(CASE WHEN g.id IS NOT NULL AND g.revoked_at IS NULL THEN 1 ELSE 0 END) AS live, MAX(g.last_used_at) AS last_seen
 		FROM users u LEFT JOIN grants g ON g.user_id = u.id GROUP BY u.id ORDER BY last_seen IS NULL, last_seen DESC LIMIT ?`).bind(limitOf(context.req.query("limit"), 200, 1000)).all<{ "id": string; "github_id": number; "created_at": number; "deleted_at": number | null; "live": number; "last_seen": number | null }>();
 
 	return context.json({ "users": results.map((row) => ({ "id": row.id, "githubId": row.github_id, "createdAt": row.created_at, "deletedAt": row.deleted_at, "liveSessions": row.live, "lastSeenAt": row.last_seen })) });
@@ -56,7 +58,7 @@ admin.get("/users", requires("users:read"), async (context) => {
 /** One user: the same, every sign-in they've had (live and ended, with its client), and their latest audit rows. */
 admin.get("/users/:id", requires("users:read"), async (context) => {
 	const id = context.req.param("id");
-	const user = await context.env.DB.prepare("SELECT id, github_id, created_at, deleted_at FROM users WHERE id = ?").bind(id).first<{ "id": string; "github_id": number; "created_at": number; "deleted_at": number | null }>();
+	const user = await context.env.DB.prepare(`SELECT id, ${githubIdColumn("users")} AS github_id, created_at, deleted_at FROM users WHERE id = ?`).bind(id).first<{ "id": string; "github_id": number; "created_at": number; "deleted_at": number | null }>();
 
 	if (user === null) {
 		return context.json({ "error": "not_found" }, 404);
@@ -76,7 +78,7 @@ admin.get("/users/:id", requires("users:read"), async (context) => {
 
 /** Live sign-ins across users, the most recently used first. */
 admin.get("/sessions", requires("sessions:read"), async (context) => {
-	const { results } = await context.env.DB.prepare(`SELECT g.id, g.client, g.label, g.created_at, g.last_used_at, g.revoked_at, g.user_id, u.github_id
+	const { results } = await context.env.DB.prepare(`SELECT g.id, g.client, g.label, g.created_at, g.last_used_at, g.revoked_at, g.user_id, ${githubIdColumn("u")} AS github_id
 		FROM grants g JOIN users u ON u.id = g.user_id WHERE g.revoked_at IS NULL ORDER BY g.last_used_at DESC LIMIT ?`).bind(limitOf(context.req.query("limit"), 200, 1000)).all();
 
 	return context.json({ "sessions": results.map((row) => ({ ...session(row, context.get("grant")), "userId": row["user_id"], "githubId": row["github_id"] })) });
@@ -149,6 +151,14 @@ admin.post("/account/mfa/email/code", emailMfaCodeEndpoint);
 
 admin.post("/account/mfa/email", emailMfaEndpoint);
 
+admin.post("/account/github", githubLinkEndpoint);
+
+admin.post("/account/github/finish", githubFinishEndpoint);
+
+admin.post("/account/email/code", emailLinkCodeEndpoint);
+
+admin.post("/account/email", emailLinkEndpoint);
+
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
 
@@ -174,7 +184,7 @@ const FLAGS = ["probe", "proxy_denied", "client_unusual", "client_changed"];
  * (B7's rows). Only sign-ins with `min` scored steps (default 3): one odd step says little.
  */
 admin.get("/unusual", requires("behavior:read"), async (context) => {
-	const { results } = await context.env.DB.prepare(`SELECT s.grant_id, s.steps, s.bits, s.top, s.updated_at, g.client, g.label, g.created_at, g.last_used_at, g.revoked_at, g.user_id, u.github_id,
+	const { results } = await context.env.DB.prepare(`SELECT s.grant_id, s.steps, s.bits, s.top, s.updated_at, g.client, g.label, g.created_at, g.last_used_at, g.revoked_at, g.user_id, ${githubIdColumn("u")} AS github_id,
 			(SELECT json_group_object(event, n) FROM (SELECT event, COUNT(*) AS n FROM audit a WHERE a.grant_id = s.grant_id AND a.event IN (${FLAGS.map(() => "?").join(", ")}) GROUP BY event)) AS flags
 		FROM scores s JOIN grants g ON g.id = s.grant_id JOIN users u ON u.id = g.user_id
 		WHERE s.steps >= ? ORDER BY s.bits / s.steps DESC LIMIT ?`).bind(...FLAGS, limitOf(context.req.query("min"), 3, 1000), limitOf(context.req.query("limit"), 100, 500)).all<Record<string, unknown>>();

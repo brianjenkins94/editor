@@ -31,21 +31,217 @@ const WORDS: Record<string, string> = {
 	"a code was sent less than a minute ago": "A code was sent less than a minute ago. Wait a moment, then ask again."
 };
 
+/** A refusal's reason, in words. */
+const said = (reason = ""): string => WORDS[reason] ?? (reason === "" ? "That didn't work. Try again." : `${reason[0]?.toUpperCase() ?? ""}${reason.slice(1)}.`);
+
 /** A form POST: its body, or what's wrong with it, in words. */
 async function postWithReason<T>(submit: AccountApi["submit"], path: string, form: Record<string, string>): Promise<{ "ok": true; "body": Partial<T> } | { "ok": false; "reason": string }> {
 	try {
 		const answer = await submit<T>(path, form);
 
-		if (answer.ok) {
-			return { "ok": true, "body": answer.body };
-		}
-
-		const reason = answer.body.reason ?? "";
-
-		return { "ok": false, "reason": WORDS[reason] ?? (reason === "" ? "That didn't work. Try again." : `${reason[0]?.toUpperCase() ?? ""}${reason.slice(1)}.`) };
+		return answer.ok ? { "ok": true, "body": answer.body } : { "ok": false, "reason": said(answer.body.reason) };
 	} catch {
 		return { "ok": false, "reason": "Couldn't reach the API." };
 	}
+}
+
+/** A way in that's another account's (the API's 409): whose, and whether it holds nothing else, so it can be merged in. */
+interface Taken { "account": string; "mergeable": boolean }
+
+/** A link's answer: done, another account's (Taken), or what's wrong in words. */
+async function linkWith(submit: AccountApi["submit"], path: string, form: Record<string, string>): Promise<{ "ok": true } | { "taken": Taken } | { "reason": string }> {
+	try {
+		const answer = await submit<Taken>(path, form);
+
+		if (answer.ok) {
+			return { "ok": true };
+		}
+
+		return answer.status === 409 && typeof answer.body.account === "string" ? { "taken": { "account": answer.body.account, "mergeable": answer.body.mergeable === true } } : { "reason": said(answer.body.reason) };
+	} catch {
+		return { "reason": "Couldn't reach the API." };
+	}
+}
+
+/** What to say of a way in that's another account's: merge it in (it holds nothing else), or keep them apart. */
+function TakenBy({ what, taken, busy, onMerge }: { "what": string; "taken": Taken; "busy": boolean; "onMerge": () => void }) {
+	if (!taken.mergeable) {
+		return (
+			<wa-callout variant="warning">
+				That {what} is another account's (<span class="account-mono">{taken.account.slice(0, 8)}</span>), which holds more than it: a password, two-factor, a role or another way in. Sign in with it and delete that account first, or keep them apart.
+			</wa-callout>
+		);
+	}
+
+	return (
+		<wa-callout variant="warning">
+			<div class="wa-stack wa-gap-s">
+				<span>That {what} has an account of its own (<span class="account-mono">{taken.account.slice(0, 8)}</span>), with nothing else in it. Merge it into this one? That account is deleted, as deleting an account is, and its sign-ins end.</span>
+				<div><wa-button variant="brand" loading={busy} onClick={onMerge}>Merge it into this account</wa-button></div>
+			</div>
+		</wa-callout>
+	);
+}
+
+/** Connecting GitHub (SIGN-IN.md, "Linking accounts"): GitHub's authorize page, then back to this page with `link`,
+ *  which this sign-in finishes. Needs a sign-in in the last 10 minutes: the API says so if not. */
+function ConnectGitHub({ onChanged }: { "onChanged": () => void }) {
+	const api = useContext(Api) as AccountApi;
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | undefined>();
+	const [taken, setTaken] = useState<{ "link": string } & Taken | undefined>();
+	const finish = async (link: string, merge: boolean): Promise<void> => {
+		setBusy(true);
+		setProblem(undefined);
+
+		const answer = await linkWith(api.submit, "/account/github/finish", { "link": link, ...merge ? { "merge": "1" } : {} });
+
+		setBusy(false);
+
+		if ("taken" in answer) {
+			setTaken({ "link": link, ...answer.taken });
+		} else if ("reason" in answer) {
+			setProblem(answer.reason);
+		} else {
+			onChanged();
+		}
+	};
+
+	// Back from GitHub: the link (or why not) in the address, taken out of it at once.
+	useEffect(() => {
+		const here = new URL(location.href);
+		const link = here.searchParams.get("link");
+		const error = here.searchParams.get("link_error");
+
+		if (link === null && error === null) {
+			return;
+		}
+
+		here.searchParams.delete("link");
+		here.searchParams.delete("link_error");
+		history.replaceState(history.state, "", here.href);
+
+		if (link === null) {
+			setProblem(error === "access_denied" ? "Connecting GitHub was cancelled." : "GitHub didn't connect. Try again.");
+		} else {
+			void finish(link, false);
+		}
+	}, []);
+
+	return (
+		<div class="wa-stack">
+			<p>Connect GitHub to sign in with it too, and, in the editor, to open private repositories and commit.</p>
+			{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
+			{taken !== undefined && <TakenBy what="GitHub account" taken={taken} busy={busy} onMerge={() => { void finish(taken.link, true); }} />}
+			<div>
+				<wa-button
+					loading={busy}
+					onClick={() => {
+						setBusy(true);
+						setProblem(undefined);
+						void postWithReason<{ "location": string }>(api.submit, "/account/github", { "return": location.href }).then((answer) => {
+							if (answer.ok && answer.body.location !== undefined) {
+								location.assign(answer.body.location);
+							} else {
+								setBusy(false);
+								setProblem("reason" in answer ? answer.reason : undefined);
+							}
+						});
+					}}
+				>
+					Connect GitHub
+				</wa-button>
+			</div>
+		</div>
+	);
+}
+
+/** Adding an email to a GitHub account: the address, then the code we send it. Needs a sign-in in the last 10 minutes. */
+function AddEmail({ onChanged }: { "onChanged": () => void }) {
+	const api = useContext(Api) as AccountApi;
+	const [sent, setSent] = useState<string | undefined>();
+	const [code, setCode] = useState<string | undefined>();
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | undefined>();
+	const [taken, setTaken] = useState<Taken | undefined>();
+	const add = async (address: string, typed: string, merge: boolean): Promise<void> => {
+		setBusy(true);
+		setProblem(undefined);
+
+		const answer = await linkWith(api.submit, "/account/email", { "address": address, "code": typed, ...merge ? { "merge": "1" } : {} });
+
+		setBusy(false);
+
+		if ("taken" in answer) {
+			setCode(typed);
+			setTaken(answer.taken);
+		} else if ("reason" in answer) {
+			setProblem(answer.reason);
+		} else {
+			onChanged();
+		}
+	};
+
+	if (sent === undefined) {
+		return (
+			<form
+				class="wa-cluster wa-gap-s account-code-form"
+				onSubmit={(event) => {
+					event.preventDefault();
+
+					const address = (event.currentTarget.elements.namedItem("address") as HTMLInputElement).value;
+
+					setBusy(true);
+					setProblem(undefined);
+					void postWithReason<{ "sent": boolean }>(api.submit, "/account/email/code", { "address": address }).then((answer) => {
+						setBusy(false);
+
+						if (answer.ok) {
+							setSent(address);
+						} else {
+							setProblem("reason" in answer ? answer.reason : undefined);
+						}
+					});
+				}}
+			>
+				<wa-input name="address" type="email" label="Add an email, to sign in with it too" autocomplete="email" required />
+				<wa-button type="submit" loading={busy}>Email me a code</wa-button>
+				{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
+			</form>
+		);
+	}
+
+	return (
+		<div class="wa-stack">
+			{taken === undefined
+				? (
+					<form
+						class="wa-cluster wa-gap-s account-code-form"
+						onSubmit={(event) => {
+							event.preventDefault();
+							void add(sent, (event.currentTarget.elements.namedItem("code") as HTMLInputElement).value, false);
+						}}
+					>
+						<wa-input name="code" label={`The code we sent to ${sent}`} placeholder="ABCD-2345" autocomplete="one-time-code" required />
+						<wa-button type="submit" loading={busy}>Add it</wa-button>
+					</form>
+				)
+				: <TakenBy what="email" taken={taken} busy={busy} onMerge={() => { void add(sent, code ?? "", true); }} />}
+			{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
+			<div>
+				<wa-button
+					appearance="plain"
+					onClick={() => {
+						setSent(undefined);
+						setTaken(undefined);
+						setProblem(undefined);
+					}}
+				>
+					Use another address
+				</wa-button>
+			</div>
+		</div>
+	);
 }
 
 function SetPassword({ account, onSet }: { "account": Account; "onSet": () => void }) {
@@ -56,7 +252,7 @@ function SetPassword({ account, onSet }: { "account": Account; "onSet": () => vo
 	const [done, setDone] = useState(false);
 
 	if (account.email === null) {
-		return <p class="account-muted">A password signs in with your email, and this account has none yet (it signs in with GitHub).</p>;
+		return <p class="account-muted">A password signs in with your email, and this account has none yet: add one above.</p>;
 	}
 
 	if (done) {
@@ -328,7 +524,26 @@ export function AccountPage({ api, heading = true }: { "api": AccountApi; "headi
 						</tbody>
 					</table>
 				</div>
-				<h2 class="wa-heading-l">Two-factor</h2>
+				{(account.githubId === null || account.email === null) && (
+				<>
+					<h2 class="wa-heading-l">Ways to sign in</h2>
+					{account.githubId === null && (
+						<ConnectGitHub
+							onChanged={() => {
+								setReads(reads + 1);
+							}}
+						/>
+					)}
+					{account.email === null && (
+						<AddEmail
+							onChanged={() => {
+								setReads(reads + 1);
+							}}
+						/>
+					)}
+				</>
+			)}
+			<h2 class="wa-heading-l">Two-factor</h2>
 				<TwoFactor
 					account={account}
 					onChanged={() => {

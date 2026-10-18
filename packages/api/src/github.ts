@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
+import type { GitHubTokens } from "./grant.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 import { open, seal } from "@brianjenkins94/util/auth/seal";
 import { base64url } from "jose";
@@ -27,9 +28,12 @@ interface Direct {
 	"jkt": string;
 }
 
-/** What rides through GitHub, sealed: the client's request itself (legacy), or which attempt holds it (signin.ts); and
- *  our own PKCE verifier for GitHub. */
-type Pending = (Direct | { "attempt": string }) & { "verifier": string; "expires": number };
+/** Connecting GitHub to a signed-in account (src/link.ts): which sign-in asked, and the app's page to go back to. */
+export interface Linking { "link": string; "returnTo": string }
+
+/** What rides through GitHub, sealed: the client's request itself (legacy), which attempt holds it (signin.ts), or a
+ *  link (src/link.ts); and our own PKCE verifier for GitHub. */
+type Pending = (Direct | { "attempt": string } | Linking) & { "verifier": string; "expires": number };
 
 /** GitHub's origins: the real ones, but for tests (GITHUB_ORIGIN / GITHUB_API, never set in wrangler.jsonc). */
 export const github = (env: AppEnv["Bindings"]): { "web": string; "api": string } => ({ "web": env.GITHUB_ORIGIN ?? "https://github.com", "api": env.GITHUB_API ?? "https://api.github.com" });
@@ -90,6 +94,13 @@ export async function startEndpoint(context: Context<AppEnv>): Promise<Response>
 
 /** On to GitHub's authorize page: a PKCE pair of our own, and `request` (or the attempt holding it) sealed into the state. */
 export async function toGitHub(context: Context<AppEnv>, request: Direct | { "attempt": string }): Promise<Response> {
+	context.header("cache-control", "no-store");
+
+	return context.redirect(await authorizeUrl(context, request), 302);
+}
+
+/** GitHub's authorize page for `request`, with a PKCE pair of our own and the request sealed into the state. */
+export async function authorizeUrl(context: Context<AppEnv>, request: Direct | { "attempt": string } | Linking): Promise<string> {
 	const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 	const pending: Pending = { ...request, "verifier": verifier, "expires": Date.now() + STATE_TTL };
 	const authorize = new URL("/login/oauth/authorize", github(context.env).web);
@@ -102,9 +113,70 @@ export async function toGitHub(context: Context<AppEnv>, request: Direct | { "at
 		"code_challenge_method": "S256"
 	}).toString();
 
-	context.header("cache-control", "no-store");
+	return authorize.href;
+}
 
-	return context.redirect(authorize.href, 302);
+/** GitHub's code exchanged (with our PKCE verifier) for the user's tokens, then who they are; or why not. */
+async function fromGitHub(context: Context<AppEnv>, code: string, verifier: string): Promise<{ "id": number; "tokens": GitHubTokens } | { "failed": string }> {
+	const { web, api } = github(context.env);
+	const exchanged = await fetch(`${web}/login/oauth/access_token`, {
+		"method": "POST",
+		"headers": { "accept": "application/json", "content-type": "application/x-www-form-urlencoded" },
+		"body": new URLSearchParams({ "client_id": context.env.GITHUB_CLIENT_ID, "client_secret": context.env.GITHUB_CLIENT_SECRET, "code": code, "redirect_uri": callback(context), "code_verifier": verifier })
+	}).then((response) => response.json()).catch(() => ({})) as { "access_token"?: string; "refresh_token"?: string; "expires_in"?: number; "refresh_token_expires_in"?: number };
+
+	// A GitHub App with expiring user tokens always gives both (README.md: "Expire user authorization tokens" on).
+	if (typeof exchanged.access_token !== "string" || typeof exchanged.refresh_token !== "string") {
+		return { "failed": "code exchange" };
+	}
+
+	const user = await fetch(`${api}/user`, { "headers": { "authorization": `Bearer ${exchanged.access_token}`, "accept": "application/vnd.github+json", "user-agent": "editor-api", "x-github-api-version": "2022-11-28" } })
+		.then((response) => (response.ok ? response.json() : {}))
+		.catch(() => ({})) as { "id"?: unknown };
+
+	if (typeof user.id !== "number") {
+		return { "failed": "user" };
+	}
+
+	const now = Date.now();
+
+	return { "id": user.id, "tokens": { "accessToken": exchanged.access_token, "refreshToken": exchanged.refresh_token, "expiresAt": now + (exchanged.expires_in ?? 28_800) * 1000, "refreshExpiresAt": now + (exchanged.refresh_token_expires_in ?? 15_897_600) * 1000 } };
+}
+
+/**
+ * The end of connecting GitHub (src/link.ts): GitHub's answer held by the sign-in that asked, and the browser sent back
+ * to the app's page with `link` (a code only that sign-in can finish with), or `link_error`. Nothing is attached here:
+ * the app finishes it, with its key, so a link started by one browser and answered at GitHub by another goes nowhere.
+ */
+async function linked(context: Context<AppEnv>, pending: Linking & { "verifier": string }): Promise<Response> {
+	const back = (parameters: Record<string, string>): Response => {
+		const target = new URL(pending.returnTo);
+
+		for (const [key, value] of Object.entries(parameters)) {
+			target.searchParams.set(key, value);
+		}
+
+		context.header("cache-control", "no-store");
+
+		return context.redirect(target.href, 302);
+	};
+	const code = context.req.query("code");
+
+	if (code === undefined) {
+		return back({ "link_error": context.req.query("error") === "access_denied" ? "access_denied" : "server_error" });
+	}
+
+	const answer = await fromGitHub(context, code, pending.verifier);
+
+	if ("failed" in answer) {
+		context.get("span").info("link failed at GitHub", { "reason": answer.failed });
+
+		return back({ "link_error": "server_error" });
+	}
+
+	const held = await context.env.GRANTS.get(context.env.GRANTS.idFromString(pending.link)).holdGithubLink(answer.id, answer.tokens);
+
+	return held === undefined ? back({ "link_error": "signed_out" }) : back({ "link": held.code });
 }
 
 /** GET /auth/github/callback: GitHub's answer — exchanged for the user's tokens and id, then a Grant and our code. */
@@ -119,6 +191,10 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 
 	if (pending.expires < Date.now()) {
 		return refuse(context, "state expired");
+	}
+
+	if ("link" in pending) {
+		return linked(context, pending);
 	}
 
 	// Through an attempt (signin.ts): finished here, in the browser that opened it, before GitHub's code is used. Spent
@@ -153,36 +229,19 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 		return answer(context, request, { "error": context.req.query("error") === "access_denied" ? "access_denied" : "server_error" });
 	}
 
-	const { web, api } = github(context.env);
-	const exchanged = await fetch(`${web}/login/oauth/access_token`, {
-		"method": "POST",
-		"headers": { "accept": "application/json", "content-type": "application/x-www-form-urlencoded" },
-		"body": new URLSearchParams({ "client_id": context.env.GITHUB_CLIENT_ID, "client_secret": context.env.GITHUB_CLIENT_SECRET, "code": code, "redirect_uri": callback(context), "code_verifier": pending.verifier })
-	}).then((response) => response.json()).catch(() => ({})) as { "access_token"?: string; "refresh_token"?: string; "expires_in"?: number; "refresh_token_expires_in"?: number };
+	const user = await fromGitHub(context, code, pending.verifier);
 
-	// A GitHub App with expiring user tokens always gives both (README.md: "Expire user authorization tokens" on).
-	if (typeof exchanged.access_token !== "string" || typeof exchanged.refresh_token !== "string") {
-		context.get("span").info("sign-in failed at GitHub", { "reason": "code exchange" });
+	if ("failed" in user) {
+		context.get("span").info("sign-in failed at GitHub", { "reason": user.failed });
 
 		return answer(context, request, { "error": "server_error" });
 	}
 
-	const user = await fetch(`${api}/user`, { "headers": { "authorization": `Bearer ${exchanged.access_token}`, "accept": "application/vnd.github+json", "user-agent": "editor-api", "x-github-api-version": "2022-11-28" } })
-		.then((response) => (response.ok ? response.json() : {}))
-		.catch(() => ({})) as { "id"?: unknown };
-
-	if (typeof user.id !== "number") {
-		context.get("span").info("sign-in failed at GitHub", { "reason": "user" });
-
-		return answer(context, request, { "error": "server_error" });
-	}
-
-	const now = Date.now();
 	const grant = context.env.GRANTS.get(context.env.GRANTS.newUniqueId());
 	const { "code": ours } = await grant.begin({
 		"client": request.client,
 		"githubId": user.id,
-		"github": { "accessToken": exchanged.access_token, "refreshToken": exchanged.refresh_token, "expiresAt": now + (exchanged.expires_in ?? 28_800) * 1000, "refreshExpiresAt": now + (exchanged.refresh_token_expires_in ?? 15_897_600) * 1000 },
+		"github": user.tokens,
 		"codeChallenge": request.codeChallenge,
 		"jkt": request.jkt,
 		"from": await origin(context),

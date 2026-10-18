@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 import { createMiddleware } from "hono/factory";
 import { audit, origin } from "./audit.ts";
+import { githubIdColumn } from "./identities.ts";
 
 /**
  * Roles and permissions (packages/admin/README.md, "Roles and permissions"). Permissions are fixed strings; roles map to
@@ -27,18 +28,27 @@ export const ROLES = { "owner": PERMISSIONS, "viewer": READS } satisfies Record<
 export type Role = keyof typeof ROLES;
 
 /**
- * A user's roles. `owner` and `viewer` are config, not data: the user's GitHub id is in OWNERS or VIEWERS (wrangler.jsonc).
- * Neither can be granted or revoked through the API, so neither a compromised admin session nor a bad database write can
- * make another. A user without a GitHub account (email only) holds neither: a role needs GitHub's sign-in, and its 2FA.
+ * Whether a sign-in made by `method` (the `login` row's, kept on its `grants` row) can carry a role (SIGN-IN.md, "Roles
+ * follow how you signed in"): GitHub's (its own 2FA), or any with an authenticator app as its second step. Not an emailed
+ * code, a password, or a password and an emailed code: with an email linked to an owner's account, each would make the
+ * inbox (which can reset the password) a key to it.
  */
-export async function rolesOf(env: Bindings, userId: string): Promise<Role[]> {
-	const user = await env.DB.prepare("SELECT github_id FROM users WHERE id = ?").bind(userId).first<{ "github_id": number | null }>();
+export const canHoldRoles = (method: string | null): boolean => method === "github" || /\+(?:totp|recovery)$/u.test(method ?? "");
 
-	if (user === null || user.github_id === null) {
+/**
+ * A sign-in's roles. `owner` and `viewer` are config, not data: the user's GitHub id is in OWNERS or VIEWERS (wrangler.jsonc).
+ * Neither can be granted or revoked through the API, so neither a compromised admin session nor a bad database write can
+ * make another. A user without a GitHub account (email only) holds neither, and a sign-in that can't hold roles
+ * (canHoldRoles) has none, whoever's it is.
+ */
+export async function rolesOf(env: Bindings, userId: string, grantId: string): Promise<Role[]> {
+	const row = await env.DB.prepare(`SELECT g.method, ${githubIdColumn("u")} AS github_id FROM grants g JOIN users u ON u.id = g.user_id WHERE g.id = ? AND g.user_id = ?`).bind(grantId, userId).first<{ "method": string | null; "github_id": number | null }>();
+
+	if (row === null || row.github_id === null || !canHoldRoles(row.method)) {
 		return [];
 	}
 
-	return [...env.OWNERS.includes(user.github_id) ? ["owner" as const] : [], ...(env.VIEWERS ?? []).includes(user.github_id) ? ["viewer" as const] : []];
+	return [...env.OWNERS.includes(row.github_id) ? ["owner" as const] : [], ...(env.VIEWERS ?? []).includes(row.github_id) ? ["viewer" as const] : []];
 }
 
 /** What a set of roles allows, in PERMISSIONS' order. */
@@ -52,7 +62,7 @@ export async function roles(context: Context<AppEnv>): Promise<Role[]> {
 		return known;
 	}
 
-	const found = await rolesOf(context.env, context.get("user"));
+	const found = await rolesOf(context.env, context.get("user"), context.get("grant"));
 
 	context.set("roles", found);
 

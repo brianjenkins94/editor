@@ -17,6 +17,7 @@ import { emailMfaCodeEndpoint, emailMfaEndpoint, mfaConfirmEndpoint, mfaOffEndpo
 import { accountEndpoint, passwordCodeEndpoint, passwordSignInEndpoint, resetCodeEndpoint, resetPasswordEndpoint, setPasswordEndpoint } from "./password.ts";
 import { ROUTER, smokeTest } from "./smoke.ts";
 import { byGrant, byIp, byUser, limit as rateLimit } from "./limits.ts";
+import { emailLinkCodeEndpoint, emailLinkEndpoint, githubFinishEndpoint, githubLinkEndpoint } from "./link.ts";
 import { log } from "./log.ts";
 import { githubApi, githubGit } from "./proxy.ts";
 import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
@@ -175,6 +176,15 @@ app.post("/account/mfa/recovery", session, mfaRecoveryEndpoint);
 app.post("/account/mfa/email/code", session, emailMfaCodeEndpoint);
 
 app.post("/account/mfa/email", session, emailMfaEndpoint);
+
+// Linking another way to sign in to your account (src/link.ts).
+app.post("/account/github", session, githubLinkEndpoint);
+
+app.post("/account/github/finish", session, githubFinishEndpoint);
+
+app.post("/account/email/code", session, emailLinkCodeEndpoint);
+
+app.post("/account/email", session, emailLinkEndpoint);
 
 // The admin API (src/admin.ts): admin tokens only, each route behind its permission.
 app.route("/admin", admin);

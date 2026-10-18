@@ -8,6 +8,7 @@ import type { Difference, Fingerprint } from "./behavior.ts";
 import { clientKind, differences, gapOf, learn, START } from "./behavior.ts";
 import type { Bindings } from "./env.ts";
 import { github as githubOrigins } from "./github.ts";
+import { userWith } from "./identities.ts";
 
 /**
  * One sign-in (README.md, "Tokens and the flow"). A Durable Object, so everything about the sign-in happens one call at a
@@ -20,7 +21,8 @@ import { github as githubOrigins } from "./github.ts";
  *   - the jtis of proofs it has seen, until they'd be too old anyway;
  *   - its client's fingerprint (BEHAVIOR.md: which headers it sent, keyed hashes of them), from the code's redemption,
  *     and how often each header has differed since, and how;
- *   - its last action and the transitions since its last flush (BEHAVIOR.md, B8), added to the shared model hourly.
+ *   - its last action and the transitions since its last flush (BEHAVIOR.md, B8), added to the shared model hourly;
+ *   - GitHub's answer to connecting GitHub to the account (src/link.ts), sealed, for 2 minutes, until the app finishes it.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
  * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
  * GitHub's token is spent here, for the proxy (src/proxy.ts), and refreshed here, one refresh at a time: GitHub's refresh
@@ -30,6 +32,9 @@ import { github as githubOrigins } from "./github.ts";
  */
 
 const CODE_TTL = 60_000;
+
+/** How long GitHub's answer to connecting GitHub waits for the app to finish it (src/link.ts). */
+const LINK_TTL = 120_000;
 
 /** How often a sign-in's transitions are added to the shared model (learn()), batched. */
 const FLUSH_EVERY = 60 * 60_000;
@@ -101,6 +106,7 @@ export const SCHEMA = `
 	CREATE TABLE IF NOT EXISTS walk (id INTEGER PRIMARY KEY CHECK (id = 1), action TEXT NOT NULL, at INTEGER NOT NULL);
 	CREATE TABLE IF NOT EXISTS pending (from_action TEXT NOT NULL, to_action TEXT NOT NULL, gap INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (from_action, to_action, gap));
 	CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
+	CREATE TABLE IF NOT EXISTS github_link (id INTEGER PRIMARY KEY CHECK (id = 1), github_id INTEGER NOT NULL, github TEXT NOT NULL, code_hash TEXT NOT NULL, expires INTEGER NOT NULL);
 `;
 
 export type Issued = { "ok": true; "userId": string; "refreshToken": string; "client": string } | { "ok": false };
@@ -145,14 +151,10 @@ export class Grant extends DurableObject<Bindings> {
 
 		const now = Date.now();
 
-		// GitHub's sign-in names its user by GitHub's id (made on their first sign-in); another method has found its user.
-		if (githubId !== undefined) {
-			await this.env.DB.prepare("INSERT INTO users (id, github_id, created_at) VALUES (?, ?, ?) ON CONFLICT (github_id) DO NOTHING").bind(crypto.randomUUID(), githubId, now).run();
-		}
-
-		const user = githubId === undefined
-			? await this.env.DB.prepare("SELECT id, deleted_at FROM users WHERE id = ?").bind(known ?? "").first<{ "id": string; "deleted_at": number | null }>()
-			: await this.env.DB.prepare("SELECT id, deleted_at FROM users WHERE github_id = ?").bind(githubId).first<{ "id": string; "deleted_at": number | null }>();
+		// GitHub's sign-in names its user by GitHub's id (its identity, made on their first sign-in; src/identities.ts);
+		// another method has found its user.
+		const found = githubId === undefined ? known ?? "" : await userWith(this.env, "github", String(githubId), now);
+		const user = await this.env.DB.prepare("SELECT id, deleted_at FROM users WHERE id = ?").bind(found).first<{ "id": string; "deleted_at": number | null }>();
 
 		if (user === null) {
 			throw new Error("a grant begins for a user");
@@ -166,7 +168,7 @@ export class Grant extends DurableObject<Bindings> {
 			await audit(this.env, "account_restored", { "userId": userId, "grantId": this.id }, from, { "reason": "signed in within the grace period" });
 		}
 
-		await this.env.DB.prepare("INSERT INTO grants (id, user_id, created_at, last_used_at, label, client) VALUES (?, ?, ?, ?, ?, ?)").bind(this.id, userId, now, now, label ?? null, client).run();
+		await this.env.DB.prepare("INSERT INTO grants (id, user_id, created_at, last_used_at, label, client, method) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(this.id, userId, now, now, label ?? null, client, method).run();
 
 		const code = token(this.id);
 
@@ -347,6 +349,54 @@ export class Grant extends DurableObject<Bindings> {
 	}
 
 	/**
+	 * Connecting GitHub to this sign-in's account (src/link.ts): GitHub's answer (whose account, its tokens) held for
+	 * LINK_TTL, until the app finishes it with `code` through this sign-in, so only the browser holding this sign-in's
+	 * key can (a link started here and finished by someone else's browser can't attach their GitHub to this account).
+	 * Undefined for a sign-in that's over.
+	 */
+	public async holdGithubLink(githubId: number, github: GitHubTokens): Promise<{ "code": string } | undefined> {
+		const state = this.state();
+
+		if (state === undefined || state.revoked_at !== null) {
+			return undefined;
+		}
+
+		const code = token(this.id);
+
+		this.sql.exec("INSERT OR REPLACE INTO github_link (id, github_id, github, code_hash, expires) VALUES (1, ?, ?, ?, ?)", githubId, await seal(this.env.TOKEN_KEK, JSON.stringify(github), this.id), await hash(code), Date.now() + LINK_TTL);
+
+		return { "code": code };
+	}
+
+	/** The GitHub id a held link is for, if `code` is its and it hasn't expired (an expired one is dropped). */
+	public async heldGithubLink(code: string): Promise<number | undefined> {
+		const [held] = this.sql.exec<{ "github_id": number; "code_hash": string; "expires": number }>("SELECT github_id, code_hash, expires FROM github_link WHERE id = 1").toArray();
+
+		if (held === undefined || held.expires < Date.now()) {
+			this.sql.exec("DELETE FROM github_link");
+
+			return undefined;
+		}
+
+		return await hash(code) === held.code_hash ? held.github_id : undefined;
+	}
+
+	/** Finish a held link: GitHub's tokens become this sign-in's (the proxy reaches GitHub with them from now on), and the
+	 *  link is gone. False if `code` isn't the held link's. */
+	public async takeGithubLink(code: string): Promise<boolean> {
+		if (await this.heldGithubLink(code) === undefined) {
+			return false;
+		}
+
+		const [held] = this.sql.exec<{ "github": string }>("SELECT github FROM github_link WHERE id = 1").toArray();
+
+		this.sql.exec("UPDATE state SET github = ? WHERE id = 1 AND revoked_at IS NULL", held?.github ?? null);
+		this.sql.exec("DELETE FROM github_link");
+
+		return true;
+	}
+
+	/**
 	 * GitHub's token for this sign-in, refreshed first when it's close to expiring; undefined once the sign-in is over. A
 	 * refresh GitHub refuses (its refresh token expired, or the user revoked the app) ends the sign-in; one GitHub didn't
 	 * answer just fails this request. Null for a sign-in that never had one (by email or a password, C2–C3): it isn't
@@ -432,6 +482,7 @@ export class Grant extends DurableObject<Bindings> {
 		}
 
 		this.sql.exec("UPDATE state SET revoked_at = ?, github = NULL, refresh_hash = NULL, code_hash = NULL WHERE id = 1", now);
+		this.sql.exec("DELETE FROM github_link");
 		await this.env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(now, this.id).run();
 		await audit(this.env, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from, reason === undefined ? {} : { "reason": reason });
 	}

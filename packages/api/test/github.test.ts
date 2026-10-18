@@ -189,7 +189,7 @@ test("a sign-in end to end: GitHub's code exchanged with our secret and verifier
 	assert.equal(redeemed.body["token_type"], "DPoP");
 
 	const env = await worker.getEnv() as { "DB": D1Database };
-	const user = await env.DB.prepare("SELECT users.id, users.github_id FROM users JOIN grants ON grants.user_id = users.id WHERE grants.id = ?").bind((landing.searchParams.get("code") as string).split(".")[0]).first<{ "id": string; "github_id": number }>();
+	const user = await env.DB.prepare("SELECT grants.user_id AS id, CAST(identities.subject AS INTEGER) AS github_id FROM grants JOIN identities ON identities.user_id = grants.user_id AND identities.provider = 'github' WHERE grants.id = ?").bind((landing.searchParams.get("code") as string).split(".")[0]).first<{ "id": string; "github_id": number }>();
 
 	assert.equal(user?.github_id, 4242);
 	assert.equal(JSON.stringify(await env.DB.prepare("SELECT * FROM users").all()).includes("octocat"), false, "no login or email kept");

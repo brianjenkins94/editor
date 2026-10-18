@@ -644,6 +644,13 @@ function Shell() {
 
 			setSignInHere(session.canSignIn());
 
+			// Back from GitHub, connecting it to the account (packages/account finishes the link): its dialog, open again.
+			if (session.isSignedIn() && /[?&]link(?:_error)?=/u.test(location.search)) {
+				const { "AccountDialog": dialog } = await import("./account-dialog");
+
+				setAccountDialog(() => dialog);
+			}
+
 			// An `env/<owner>/<repo>` address opens that repo, once the app listens — after the sign-in above, so a private
 			// one is read signed in. The workspace already being that repo's (a reload) keeps it, and the edits made in it. The
 			// GitHub popover opens over the load, to show it going and say what went wrong (it closes on success).

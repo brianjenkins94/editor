@@ -46,8 +46,10 @@ roles allow.
     can't be granted or revoked through the API, so a compromised admin session or a bad database write can't create
     another owner. Adding one is a reviewed commit.
   - `viewer` the same way: `VIEWERS` in wrangler.jsonc (GitHub ids; T-Mev's since 2026-10-17).
-  - Both need a GitHub account: a user who signs in by email only holds no role (GitHub's sign-in carries its 2FA; an
-    email inbox alone shouldn't open the admin app). Ids, not addresses, so the public repo names no one's email.
+  - Both need a GitHub account, and a sign-in that can hold a role: made with GitHub, or with an authenticator app as its
+    second step (packages/api/SIGN-IN.md, "Linking accounts"). An emailed code or a password doesn't, even into the
+    owner's account once an email is linked to it: an inbox alone shouldn't open the admin app. Ids, not addresses, so
+    the public repo names no one's email.
   - Organization roles (later) are rows: `organizations`, and `memberships (org_id, user_id, role, granted_by,
     granted_at)`, every change audited.
 - **Checked on every request,** from D1 and config, never from claims in the token, so a role taken away is gone at once.

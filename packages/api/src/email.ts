@@ -10,6 +10,7 @@ import ACTION_TEXT from "./action-code.txt";
 import CODE_HTML from "./email-code.html";
 import CODE_TEXT from "./email-code.txt";
 import { canSend, send } from "./mail.ts";
+import { userWith } from "./identities.ts";
 import { hasMfa } from "./mfa-state.ts";
 import { askSecondFactor, heldAttempt, signInAs } from "./signin.ts";
 
@@ -165,27 +166,7 @@ export async function emailEndpoint(context: Context<AppEnv>): Promise<Response>
 
 /** The user an address belongs to, proven theirs just now: found (whatever its case), or made with it. */
 export async function userOf(env: Bindings, address: string, now: number): Promise<string> {
-	const found = await env.DB.prepare("SELECT user_id FROM emails WHERE lower(address) = lower(?)").bind(address).first<{ "user_id": string }>();
-
-	if (found !== null) {
-		await env.DB.prepare("UPDATE emails SET verified_at = ? WHERE lower(address) = lower(?)").bind(now, address).run();
-
-		return found.user_id;
-	}
-
-	const user = crypto.randomUUID();
-
-	try {
-		await env.DB.batch([
-			env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(user, now),
-			env.DB.prepare("INSERT INTO emails (address, user_id, created_at, verified_at) VALUES (?, ?, ?, ?)").bind(address, user, now, now)
-		]);
-	} catch {
-		// Made by another sign-in a moment ago: theirs, then.
-		return userOf(env, address, now);
-	}
-
-	return user;
+	return userWith(env, "email", address, now);
 }
 
 /** POST /auth/email/verify: the code, for this browser's attempt. A match starts the sign-in; the page goes on to

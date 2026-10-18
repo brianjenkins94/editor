@@ -9,6 +9,7 @@ import argon2Wasm from "@hallaxius/argon2w/wasm";
 
 // Argon2's WebAssembly, as a module Wrangler compiles at deploy: the runtime won't compile any at runtime.
 configureWasm(argon2Wasm);
+import { emailOf, githubIdOf, identityOf } from "./identities.ts";
 import { emailMfaState, hasEmailMfa, hasMfa, mfaState } from "./mfa-state.ts";
 import { emailSecondFactor, secondFactor } from "./mfa.ts";
 import { checkActionCode, issueActionCode } from "./action-codes.ts";
@@ -94,7 +95,7 @@ async function passwordAccount(context: Context<AppEnv>, address: string): Promi
 		return refuse(context, 400, "address", "not an email address");
 	}
 
-	const account = await context.env.DB.prepare("SELECT e.user_id, p.hash FROM emails e LEFT JOIN passwords p ON p.user_id = e.user_id WHERE lower(e.address) = lower(?)").bind(address).first<{ "user_id": string; "hash": string | null }>();
+	const account = await context.env.DB.prepare("SELECT e.user_id, p.hash FROM identities e LEFT JOIN passwords p ON p.user_id = e.user_id WHERE e.provider = 'email' AND lower(e.subject) = lower(?)").bind(address).first<{ "user_id": string; "hash": string | null }>();
 
 	if (account === null) {
 		return refuse(context, 400, "no_account", "no account with that email");
@@ -120,7 +121,7 @@ export async function passwordSignInEndpoint(context: Context<AppEnv>): Promise<
 		return refuse(context, 400, "address", "not an email address");
 	}
 
-	const account = await context.env.DB.prepare("SELECT e.user_id, p.hash, p.tries, p.tries_at FROM emails e LEFT JOIN passwords p ON p.user_id = e.user_id WHERE lower(e.address) = lower(?)").bind(address).first<{ "user_id": string; "hash": string | null; "tries": number | null; "tries_at": number | null }>();
+	const account = await context.env.DB.prepare("SELECT e.user_id, p.hash, p.tries, p.tries_at FROM identities e LEFT JOIN passwords p ON p.user_id = e.user_id WHERE e.provider = 'email' AND lower(e.subject) = lower(?)").bind(address).first<{ "user_id": string; "hash": string | null; "tries": number | null; "tries_at": number | null }>();
 
 	if (account === null) {
 		return refuse(context, 400, "no_account", "no account with that email");
@@ -162,19 +163,14 @@ export async function passwordSignInEndpoint(context: Context<AppEnv>): Promise<
 /** GET /admin/account: how you can sign in: GitHub (its id), your email, and whether you have a password. */
 export async function accountEndpoint(context: Context<AppEnv>): Promise<Response> {
 	const user = context.get("user");
-	const [row, email, password] = await context.env.DB.batch([
-		context.env.DB.prepare("SELECT github_id FROM users WHERE id = ?").bind(user),
-		context.env.DB.prepare("SELECT address, verified_at FROM emails WHERE user_id = ?").bind(user),
-		context.env.DB.prepare("SELECT set_at FROM passwords WHERE user_id = ?").bind(user)
-	]);
-	const address = email?.results[0] as { "address": string; "verified_at": number | null } | undefined;
-	const set = password?.results[0] as { "set_at": number } | undefined;
+	const email = await identityOf(context.env, user, "email");
+	const set = await context.env.DB.prepare("SELECT set_at FROM passwords WHERE user_id = ?").bind(user).first<{ "set_at": number }>();
 
 	return context.json({
 		"user": user,
-		"githubId": (row?.results[0] as { "github_id": number | null } | undefined)?.github_id ?? null,
-		"email": address === undefined ? null : { "address": address.address, "verifiedAt": address.verified_at },
-		"password": set === undefined ? null : { "setAt": set.set_at },
+		"githubId": await githubIdOf(context.env, user),
+		"email": email === null ? null : { "address": email.subject, "verifiedAt": email.verifiedAt },
+		"password": set === null ? null : { "setAt": set.set_at },
 		"mfa": await mfaState(context.env, user),
 		"emailMfa": await emailMfaState(context.env, user)
 	});
@@ -220,13 +216,13 @@ async function storePassword(env: Bindings, user: string, password: string, acti
 /** POST /admin/account/password/code: a code to your email, for setting a password. */
 export async function passwordCodeEndpoint(context: Context<AppEnv>): Promise<Response> {
 	const user = context.get("user");
-	const email = await context.env.DB.prepare("SELECT address FROM emails WHERE user_id = ?").bind(user).first<{ "address": string }>();
+	const address = await emailOf(context.env, user);
 
-	if (email === null) {
+	if (address === null) {
 		return refuse(context, 400, "no_email", "no email on this account: a password signs in with your email", "auth_refused");
 	}
 
-	const refused = await issueActionCode(context, user, SET_PASSWORD, `${user}:${SET_PASSWORD}`, email.address, "set a password", "auth_refused");
+	const refused = await issueActionCode(context, user, SET_PASSWORD, `${user}:${SET_PASSWORD}`, address, "set a password", "auth_refused");
 
 	if (refused !== undefined) {
 		return refused;
@@ -234,7 +230,7 @@ export async function passwordCodeEndpoint(context: Context<AppEnv>): Promise<Re
 
 	context.header("cache-control", "no-store");
 
-	return context.json({ "sent": true, "address": email.address, "expires_in": CODE_TTL / 1000 });
+	return context.json({ "sent": true, "address": address, "expires_in": CODE_TTL / 1000 });
 }
 
 /** POST /admin/account/password: `code` (the one just emailed) and `password`: checked (checkCodeAndPassword), then set. */

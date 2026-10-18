@@ -93,8 +93,9 @@ plus cold starts), Fly.io (a real server to run and patch). None beats Workers h
 
 | Data | Where | Why | Retention |
 |---|---|---|---|
-| GitHub numeric user id, for those who sign in with GitHub | D1 `users` | stable identity (logins can be renamed) | until 30 days after account deletion |
-| email address, as typed, for those who sign in with one (SIGN-IN.md, C2) | D1 `emails` | signing in by emailed code | until 30 days after account deletion |
+| GitHub numeric user id, for those who sign in with GitHub | D1 `identities` (provider `github`) | stable identity (logins can be renamed) | until 30 days after account deletion |
+| email address, as typed, for those who sign in with one (SIGN-IN.md, C2) | D1 `identities` (provider `email`) | signing in by emailed code | until 30 days after account deletion |
+| how each sign-in was made (`github`, `email`, `password+totp`…) | D1 `grants.method` | admin roles go by it (src/rbac.ts) | the grant's |
 | our user id (random) | D1 `users` | what everything else (grants, later Stripe) keys on | until 30 days after account deletion |
 | GitHub user access + refresh token | Grant DO, **AES-GCM encrypted** with a key from a Worker secret (with a key id, so it can rotate) | to call GitHub for the user | until sign-out, refresh expiry, or deletion |
 | our refresh-token family, hashed | Grant DO | rotation + reuse detection | lifetime of the grant |

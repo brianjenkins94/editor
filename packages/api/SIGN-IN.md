@@ -185,18 +185,43 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   **onboarded** in Compute → Email Service → Email Sending (it adds the SPF, DKIM, DMARC and bounce records on
   `cf-bounce`); then the `send_email` binding in dev's and production's configs (from `no-reply@unusuallygood.dev`
   only), and `CODE_KEY` generated and put in both.
-- **Linking accounts** (*pinned 2026-10-17, to come back to once C3–C7's work in progress is done*). Today an email
-  sign-in for someone who also has GitHub makes a second, separate account (the owner's own email sign-in did). The
-  plan, as "Accounts and linking" above says:
-  - **Add an email** (signed in with GitHub): an address, then its code, as sign-in's; **Connect GitHub** (signed in by
-    email): GitHub's authorize page, its id attached. Each a fresh, action-specific check, never the sign-in's.
-  - **A method already on another account:** if that account holds nothing but that one method (no other method, no
-    role, nothing worth keeping), offer to merge it in: soft-deleted as an account deletion is (its sign-ins ended,
-    purged after 30 days), both sides audited. Otherwise refused, saying whose it is.
-  - **Roles follow how you signed in:** until MFA (C5), admin roles apply only to sign-ins made with GitHub, so linking
-    an email to the owner's account doesn't make that inbox a key to it. The Grant records its method; `rolesOf` reads it.
-  - **Where:** an Account page in the admin app first (reachable from the No access card), the editor's with C7.
-  - The owner's duplicate (bc2bc582…, email only) is the first case: sign in with GitHub, add the address, merge.
+- **Linking accounts.** *Built 2026-10-18* (src/identities.ts, src/link.ts; migrations/0012). Before it, an email
+  sign-in for someone who also had GitHub made a second, separate account (the owner's own email sign-in did).
+  - **Linked identities** (*decided 2026-10-18: the generally accepted shape*): each way of proving who you are is a row
+    in `identities` (`provider`, `subject`, `user_id`, `verified_at`), as Auth.js's `accounts` and Supabase's
+    `auth.identities` keep them: `github` (GitHub's numeric id, as text) and `email` (the address as typed, unique
+    whatever its case). `users.github_id` and `emails` moved there; `users` keeps our id. One of each per account, for
+    now (a unique index, easy to drop). Only src/identities.ts reads or writes the table; a first sign-in makes its user
+    and identity in one batch, so two at once make one user.
+  - **Connect GitHub** (an account without it): `POST /account/github` (`return`: one of the app's own pages, by
+    prefix) answers GitHub's authorize page; GitHub's callback hands its answer (whose account, its tokens) to the sign-in
+    that asked, for 2 minutes, and goes back to the page with `link`; the app finishes with `POST /account/github/finish`
+    through that sign-in, so a link started in one browser and answered at GitHub in another attaches nothing. GitHub's
+    tokens become that sign-in's: the editor reaches private repos at once.
+  - **Add an email** (an account without one): `POST /account/email/code` (`address`) sends a code bound to the user and
+    the address; `POST /account/email` (`address`, `code`) attaches it. The code is spent once it's attached.
+  - **Each needs a sign-in in the last 10 minutes** (the action's own check, as two-factor's changes): a stolen session
+    can't quietly add its own way in.
+  - **A way in that's another account's:** if that account holds nothing but it (no other way in, no password or
+    two-factor, no role), the answer is `409 {error: "taken", account, mergeable: true}`, and the same request with
+    `merge=1` moves it over: that account's sign-ins end and it's deleted as account deletion does (purged after 30
+    days); `account_merged` on it, `identity_linked` on this one. Otherwise `mergeable: false`, saying whose. The page
+    asks before merging.
+  - **Roles follow how you signed in** (`grants.method`, the `login` row's, backfilled for earlier sign-ins): only a
+    GitHub sign-in or one with an authenticator app as its second step (`…+totp`, `…+recovery`) holds a role
+    (`canHoldRoles`, src/rbac.ts). An emailed code, a password, or a password and an emailed code don't: with an email
+    linked to the owner's account, each would make the inbox a key to it. The admin app's No access card says so.
+  - **On the page** (packages/account, both apps): "Ways to sign in", with Connect GitHub and Add an email while the
+    account lacks one; coming back from GitHub, the page finishes the link (the admin app opens Your account at
+    `#/account`, the editor its dialog). Unlinking isn't built (it would need to say what happens to sign-ins made with
+    the way removed).
+  - 6 tests in test/link.test.ts (connecting GitHub, then its sign-in the same account and the proxy working; only the
+    app's pages, only the sign-in that started it, once, a recent sign-in; adding an email; merging an empty duplicate
+    and refusing one with a password, from either side; an emailed sign-in to the owner's account holding no role). The
+    migration tried on production-shaped rows (identities filled, methods backfilled, foreign keys clean). Tried in the
+    harness: connecting GitHub from an email account, adding an email to the owner's, and a refusal.
+  - The owner's duplicate (bc2bc582…, email only) is the first real case: sign in to the admin app with GitHub, add that
+    address from Your account, and merge it.
 - **C3 · passwords.** *Built 2026-10-17* (src/password.ts, src/password-hash.ts; migrations/0009):
   - **Setting one,** signed in, from the admin app's Your account page (reachable from the No access card too):
     `POST /admin/account/password/code` emails a code to the account's address (the action's own check, its HMAC in
@@ -292,6 +317,6 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
 ## Open questions
 
 - ~~Argon2id's implementation.~~ Decided 2026-10-17: @hallaxius/argon2w (C3).
-- **Email MFA** as specified, with the caveat shown, or authenticator app only.
+- ~~Email MFA as specified, or authenticator app only.~~ Decided 2026-10-17: as specified, with the caveat shown (C6).
 - ~~The owner's MFA policy.~~ Decided 2026-10-17: not for now; optional for owners, GitHub's 2FA covering GitHub
   sign-ins (C5).

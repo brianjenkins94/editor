@@ -46,7 +46,7 @@ test("a sign-in writes a user, a grant, two audit rows and their copies, and the
 	const summary = Object.fromEntries(Object.entries(changes).map(([collection, change]) => [collection.replace(/:[0-9a-f]{12}:/u, ":<grant>:"), `+${change.added.length} ~${change.changed.length} -${change.removed.length}`]));
 
 	assert.deepEqual(summary, {
-		"d1:users": "+1 ~0 -0",
+		"d1:users": "+1 ~0 -0", "d1:identities": "+1 ~0 -0",
 		"d1:grants": "+1 ~0 -0",
 		"d1:audit": "+2 ~0 -0",
 		"r2:AUDIT_COPIES": "+2 ~0 -0",

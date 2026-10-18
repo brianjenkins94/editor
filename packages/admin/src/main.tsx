@@ -78,14 +78,25 @@ function SignIn({ problem }: { "problem"?: string }) {
 	);
 }
 
-/** Signed in with no role: nothing to look after, but your own account (a password, C3). */
+/** Signed in with no role: nothing to look after, but your own account (a password, C3; linking). Open at `#/account`,
+ *  so coming back from GitHub (connecting it, with `link` in the address) lands there to finish. */
 function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
-	const [account, setAccount] = useState(false);
+	const [account, setAccount] = useState(() => location.hash === "#/account");
 
 	if (account) {
 		return (
 			<main class="wa-stack wa-gap-l">
-				<div><wa-button appearance="plain" onClick={() => setAccount(false)}>Back</wa-button></div>
+				<div>
+					<wa-button
+						appearance="plain"
+						onClick={() => {
+							history.replaceState(history.state, "", location.pathname + location.search);
+							setAccount(false);
+						}}
+					>
+						Back
+					</wa-button>
+				</div>
 				<AccountPage api={ACCOUNT} />
 			</main>
 		);
@@ -96,9 +107,18 @@ function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 			<wa-card class="auth-card">
 				<div class="wa-stack wa-gap-l">
 					<h1 class="wa-heading-l">No access</h1>
-					<p>You're signed in, but your account has no admin roles. <span class="mono muted">{me.user}</span></p>
+					<p>You're signed in, but this sign-in holds no admin roles. <span class="mono muted">{me.user}</span></p>
+					<p class="muted">Roles go with a sign-in made with GitHub, or with an authenticator app as its second step.</p>
 					<div class="wa-cluster">
-						<wa-button appearance="outlined" onClick={() => setAccount(true)}>Your account</wa-button>
+						<wa-button
+							appearance="outlined"
+							onClick={() => {
+								location.hash = "#/account";
+								setAccount(true);
+							}}
+						>
+							Your account
+						</wa-button>
 						<wa-button appearance="outlined" onClick={onSignOut}>Sign out</wa-button>
 					</div>
 				</div>

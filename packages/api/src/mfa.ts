@@ -5,6 +5,7 @@ import { base64url } from "jose";
 import { checkActionCode, issueActionCode } from "./action-codes.ts";
 import { audit, origin } from "./audit.ts";
 import { codeHash, newCode, sendCode, typed } from "./email.ts";
+import { emailOf } from "./identities.ts";
 import { hasEmailMfa } from "./mfa-state.ts";
 import { hasMfa } from "./mfa-state.ts";
 import { heldAttempt, signInAs } from "./signin.ts";
@@ -130,12 +131,12 @@ export async function mfaStartEndpoint(context: Context<AppEnv>): Promise<Respon
 
 	const secret = newSecret();
 	const now = Date.now();
-	const named = await context.env.DB.prepare("SELECT address FROM emails WHERE user_id = ?").bind(user).first<{ "address": string }>();
+	const named = await emailOf(context.env, user);
 
 	await context.env.DB.prepare("INSERT INTO totp (user_id, secret, created_at, enrolled_at, last_step, tries, tries_at) VALUES (?, ?, ?, NULL, -1, ?, ?) ON CONFLICT (user_id) DO UPDATE SET secret = excluded.secret, created_at = excluded.created_at, enrolled_at = NULL, last_step = -1, tries = excluded.tries, tries_at = excluded.tries_at").bind(user, await seal(context.env.TOTP_KEK as string, base32(secret), sealedFor(user)), now, TRIES, now).run();
 	context.header("cache-control", "no-store");
 
-	return context.json({ "secret": base32(secret), "uri": otpauthUri(secret, named?.address ?? user.slice(0, 8)) });
+	return context.json({ "secret": base32(secret), "uri": otpauthUri(secret, named ?? user.slice(0, 8)) });
 }
 
 /** POST /admin/account/mfa/confirm: `code` from the app; it's on, and the recovery codes, this once. */
@@ -266,7 +267,7 @@ export async function secondStepEndpoint(context: Context<AppEnv>): Promise<Resp
 /** After a password, for an account with two-factor by email: a code to its address, kept in the attempt's email step.
  *  The refusal, if it couldn't be sent. */
 export async function emailSecondFactor(context: Context<AppEnv>, held: NonNullable<ReturnType<typeof heldAttempt>>, user: string): Promise<Response | undefined> {
-	const email = await context.env.DB.prepare("SELECT address FROM emails WHERE user_id = ?").bind(user).first<{ "address": string }>();
+	const email = await emailOf(context.env, user);
 
 	if (email === null) {
 		return undefined;
@@ -274,9 +275,9 @@ export async function emailSecondFactor(context: Context<AppEnv>, held: NonNulla
 
 	const code = newCode();
 
-	await held.stub.emailed(held.secret, email.address, await codeHash(context.env, held.id, code));
+	await held.stub.emailed(held.secret, email, await codeHash(context.env, held.id, code));
 
-	const sent = await sendCode(context, email.address, code, { "kind": "action", "action": "finish signing in" });
+	const sent = await sendCode(context, email, code, { "kind": "action", "action": "finish signing in" });
 
 	if ("reason" in sent) {
 		await audit(context.env, "sign_in_refused", { "userId": user }, await origin(context), { "reason": `mfa: ${sent.reason}`, "detail": `${context.req.method} ${new URL(context.req.url).pathname}` });
@@ -306,13 +307,13 @@ export async function emailMfaCodeEndpoint(context: Context<AppEnv>): Promise<Re
 
 	const user = context.get("user");
 	const turn = turning(await context.req.parseBody(), user);
-	const email = await context.env.DB.prepare("SELECT address FROM emails WHERE user_id = ?").bind(user).first<{ "address": string }>();
+	const email = await emailOf(context.env, user);
 
 	if (email === null) {
 		return refuse(context, 400, "no_email", "no email on this account: two-factor by email needs one");
 	}
 
-	const notSent = await issueActionCode(context, user, turn.action, turn.bound, email.address, turn.on ? "turn on two-factor by email" : "turn off two-factor by email", "auth_refused");
+	const notSent = await issueActionCode(context, user, turn.action, turn.bound, email, turn.on ? "turn on two-factor by email" : "turn off two-factor by email", "auth_refused");
 
 	if (notSent !== undefined) {
 		return notSent;
@@ -320,7 +321,7 @@ export async function emailMfaCodeEndpoint(context: Context<AppEnv>): Promise<Re
 
 	context.header("cache-control", "no-store");
 
-	return context.json({ "sent": true, "address": email.address });
+	return context.json({ "sent": true, "address": email });
 }
 
 /** POST /admin/account/mfa/email: `turn` and `code`: the code checked, then two-factor by email on or off. */

@@ -144,9 +144,9 @@ test("signing in by email: a code sent, typed in the same browser, and the app's
 	assert.equal(landing.searchParams.get("state"), browser.state);
 	assert.equal((await browser.redeem(landing.searchParams.get("code") as string)).status, 200);
 
-	const user = await env.DB.prepare("SELECT u.github_id, e.address, e.verified_at FROM emails e JOIN users u ON u.id = e.user_id WHERE e.address = ?").bind(address).first<{ "github_id": number | null; "address": string; "verified_at": number | null }>();
+	const user = await env.DB.prepare("SELECT e.user_id, e.subject, e.verified_at, (SELECT COUNT(*) FROM identities i WHERE i.user_id = e.user_id) AS identities FROM identities e WHERE e.provider = 'email' AND e.subject = ?").bind(address).first<{ "user_id": string; "subject": string; "verified_at": number | null; "identities": number }>();
 
-	assert.deepEqual([user?.github_id, user?.address, typeof user?.verified_at], [null, address, "number"]);
+	assert.deepEqual([user?.identities, user?.subject, typeof user?.verified_at], [1, address, "number"], "by email alone: one identity, the address");
 	assert.equal((await env.DB.prepare("SELECT reason FROM audit WHERE event = 'login' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>())?.reason, "email");
 	assert.equal((await form("/auth/email/verify", browser.cookie, { "code": code })).status, 401, "spent: the attempt is over");
 });
@@ -159,7 +159,7 @@ test("the same address, whatever its case, is the same user; kept as first typed
 		await form("/auth/email", browser.cookie, { "address": typed });
 		await form("/auth/email/verify", browser.cookie, { "code": codeFor(typed) });
 
-		return (await env.DB.prepare("SELECT user_id FROM emails WHERE lower(address) = lower(?)").bind(typed).first<{ "user_id": string }>())?.user_id as string;
+		return (await env.DB.prepare("SELECT user_id FROM identities WHERE provider = 'email' AND lower(subject) = lower(?)").bind(typed).first<{ "user_id": string }>())?.user_id as string;
 	};
 
 	const first = await signIn(address);
@@ -168,7 +168,7 @@ test("the same address, whatever its case, is the same user; kept as first typed
 	await env.DB.prepare("UPDATE audit SET at = at - 61000 WHERE event = 'email_code_sent'").run();
 
 	assert.equal(await signIn(address.toUpperCase()), first);
-	assert.deepEqual((await env.DB.prepare("SELECT address FROM emails WHERE user_id = ?").bind(first).all<{ "address": string }>()).results, [{ "address": address }]);
+	assert.deepEqual((await env.DB.prepare("SELECT subject FROM identities WHERE user_id = ? AND provider = 'email'").bind(first).all<{ "subject": string }>()).results, [{ "subject": address }]);
 });
 
 test("a code only finishes the sign-in in the browser that asked for it", async () => {
@@ -230,7 +230,7 @@ test("the smoke test signs in by email with our own address, the code read back 
 
 	const passed = await env.DB.prepare("SELECT reason FROM audit WHERE event = 'smoke_test_passed' ORDER BY id DESC LIMIT 1").first<{ "reason": string }>();
 	const delivered = await env.DB.prepare("SELECT sender, subject FROM inbox WHERE address = 'smoke-test@unusuallygood.dev' ORDER BY id DESC LIMIT 1").first<{ "sender": string; "subject": string }>();
-	const user = await env.DB.prepare("SELECT user_id FROM emails WHERE address = 'smoke-test@unusuallygood.dev'").first<{ "user_id": string }>();
+	const user = await env.DB.prepare("SELECT user_id FROM identities WHERE provider = 'email' AND subject = 'smoke-test@unusuallygood.dev'").first<{ "user_id": string }>();
 	const live = await env.DB.prepare("SELECT COUNT(*) AS count FROM grants WHERE user_id = ? AND revoked_at IS NULL").bind(user?.user_id ?? "").first<{ "count": number }>();
 
 	assert.match(passed?.reason ?? "", /^email back in \d+ s$/u);
