@@ -336,7 +336,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
-	let written = 0; // files ATA has added to the store this session (see the reload in `run`)
+	let written = 0; // files ATA has added to the store this session (see the reload in `acquire`)
 
 	const write = async (rel: string, code: string): Promise<void> => {
 		try {
@@ -491,35 +491,49 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
-	/** Acquire `packages` (and `configs`, tsconfigs to extend), then reload the TS projects if anything landed. */
+	// Runs in flight, and what the store held when the first of them started: the projects reload once, when the last
+	// settles. Boot starts three at once (tsconfig's configs, the manifests' types, the open file's imports); a reload
+	// each restarted the TS project load twice more, and the first typed hover waited behind all three.
+	let inFlight = 0;
+	let writtenAtStart = 0;
+
+	/** Acquire `packages` (and `configs`, tsconfigs to extend); the last run in flight reloads the TS projects if anything
+	 *  landed. */
 	const acquire = (what: Record<string, unknown>, packages: string[], configs: [string, string][] = []): void => {
 		const span = log.span("ata", { ...what, "imports": packages.length });
 		const budget = { "n": MAX_NETWORK };
 		const writtenBefore = written;
 
+		if (inFlight === 0) {
+			writtenAtStart = written;
+		}
+
+		inFlight += 1;
+
 		void Promise.all([...packages.map((pkg) => acquirePackage(pkg, budget)), ...configs.map(([pkg, sub]) => acquireConfig(pkg, sub, budget))])
 			.then(async () => {
-				// tsserver may have resolved these imports (and failed) before the writes landed. Its failed-lookup
-				// watchers are registered asynchronously through the extension host, so on a cold boot the writes'
-				// change events can arrive before anyone is listening and the failure sticks. Reload the projects
-				// (NOT restartTsServer — killing the server mid-open orphans the "Analyzing…" progress) so resolution
-				// reruns against files that are now present. Nothing new written → nothing to pick up → no reload.
-				const added = written - writtenBefore;
-
 				if (healing && !has(abs(HEALED))) {
 					await write(HEALED, "");
 				}
 
-				if (added > 0) {
-					await api.commands.executeCommand("typescript.reloadProjects");
-				}
-
-				span.end({ "files": fetchedPath.size, "network": MAX_NETWORK - budget.n, "added": added });
+				span.end({ "files": fetchedPath.size, "network": MAX_NETWORK - budget.n, "added": written - writtenBefore });
 			})
 			.catch((error: unknown) => {
 				// eslint-disable-next-line ts/no-base-to-string -- a rejection's value is unknown: a non-Error one is logged as String() makes it
 				span.error("ata failed", { "error": error instanceof Error ? error.message : String(error) });
 				span.end();
+			})
+			.finally(() => {
+				inFlight -= 1;
+
+				// tsserver may have resolved these imports (and failed) before the writes landed. Its failed-lookup
+				// watchers are registered asynchronously through the extension host, so on a cold boot the writes'
+				// change events can arrive before anyone is listening and the failure sticks. Reload the projects
+				// (NOT restartTsServer — killing the server mid-open orphans the "Analyzing…" progress) so resolution
+				// reruns against files that are now present. Nothing new written → nothing to pick up → no reload.
+				if (inFlight === 0 && written > writtenAtStart) {
+					void api.commands.executeCommand("typescript.reloadProjects");
+				}
 			});
 	};
 
