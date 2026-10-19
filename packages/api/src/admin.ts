@@ -13,6 +13,7 @@ import { permissionsOf, requires, roles } from "./rbac.ts";
 import { adminSession } from "./tokens.ts";
 import { trafficEndpoint } from "./traffic.ts";
 import { down, maintenance, setMaintenance } from "./maintenance.ts";
+import { spendEndpoint } from "./spend.ts";
 
 /**
  * The admin API (packages/admin/README.md, "The admin API"), mounted at /admin. Only tokens issued to the `admin` client
@@ -157,6 +158,9 @@ admin.route("/account", accountRoutes());
 
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
+
+/** The cost guard's estimate (src/spend.ts, OPERATIONS.md O2): the last 24 hours by meter, the budget, 14 days by day. */
+admin.get("/spend", requires("traffic:read"), spendEndpoint);
 
 /** What our email did (src/mail-report.ts): codes sent, delivered and not, sign-ins by email, refusals; counts only. */
 admin.get("/mail", requires("mail:read"), mailEndpoint);

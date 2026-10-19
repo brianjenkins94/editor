@@ -16,6 +16,7 @@ import "@awesome.me/webawesome/dist/components/select/select.js";
 import "@awesome.me/webawesome/dist/components/option/option.js";
 import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
 import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
+import "@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js";
 import "account/account.css";
 import "./admin.css";
 import { AccountPage } from "account";

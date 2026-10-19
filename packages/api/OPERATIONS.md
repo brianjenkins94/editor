@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19; O1 built.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1 and O2 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -123,8 +123,22 @@ Each lands green and is tried before the next.
   - 2 tests in test/maintenance.test.ts (on by the owner, everyone else down, the owner's way back in, off, audited and
     emailed; a break-glass flip noticed by the next request, once). Tried in the harness: on from the Overview, the
     banner, `/status`, a refused route, off from the banner.
-- **O2 · the cost guard.** The hourly cron, usage per meter from GraphQL, the price table, warn and trip, the Traffic
-  page's spend; you set Cloudflare's billing notification.
+- **O2 · the cost guard.** *Built 2026-10-19* (src/spend.ts; the admin app's Traffic page):
+  - One GraphQL query, by day: Worker requests and CPU (`workersInvocationsAdaptive`), D1 rows
+    (`d1AnalyticsAdaptiveGroups`), Durable Object requests (`durableObjectsInvocationsAdaptiveGroups`) and duration in
+    GB-s and rows (`durableObjectsPeriodicGroups`), R2 operations by action, classed A or B, deletes free
+    (`r2OperationsAdaptiveGroups`), emails sent (`emailSendingAdaptiveGroups`). The account's, both deployments: it's
+    the account that's billed, so each deployment guards itself against the whole.
+  - `PRICES`: the overage rates from Cloudflare's pricing pages on 2026-10-19. `BUDGET` $20, `WARN_AT` $10.
+  - Hourly at :07 (a second cron). Past half, `spend_warning` and an email, once a day. At the budget, `spend_tripped`,
+    the switch on "by cost guard", and an email with the breakdown. **After a person turns the switch off,** the
+    trailing 24 hours stay high a while, so for a day it trips only at double the budget.
+  - Unreadable: `spend_unreadable` each hour; three in a row, `spend_blind` and an email (once a day). Blind isn't a
+    trip.
+  - `GET /admin/spend` (`traffic:read`): the last 24 hours by meter, the budget, 14 days by day; the Traffic page's
+    Spend section. First reading in production's account: $0.0015 a day.
+  - 3 tests in test/spend.test.ts, against a GraphQL stand-in, the cron triggered through the harness. Your click:
+    Cloudflare's own billing notification (dashboard → Notifications → Usage Based Billing), the backstop.
 - **O3 · the tripwire.** The canary account; the wrapped D1 binding and `crossUser`; tests running every route under it;
   report-only, then enforcing after a week in production.
 - **O4 · server errors.** Error ids, `onError`, the `errors` table, the Errors page.

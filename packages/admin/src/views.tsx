@@ -41,6 +41,51 @@ interface Reads {
 	[user: `/users/${string}`]: { "user": { "githubId": number | null; "createdAt": number; "deletedAt": number | null }; "sessions": Session[]; "audit": AuditRow[] };
 	[audit: `/audit?${string}`]: { "rows": AuditRow[] };
 	[traffic: `/traffic?${string}`]: Traffic;
+	"/spend": Spend;
+}
+
+/** The cost guard's estimate (packages/api/src/spend.ts): overage rates, so an overestimate. */
+interface Spend {
+	"budget": number;
+	"warnAt": number;
+	"last24Hours": { "total": number; "meters": { "meter": string; "amount": number; "dollars": number }[] };
+	"days": { "date": string; "dollars": number }[];
+}
+
+const money = (dollars: number): string => `$${dollars < 0.01 && dollars > 0 ? dollars.toFixed(4) : dollars.toFixed(2)}`;
+
+/** The Traffic page's first section: what the last 24 hours would cost, against the budget, and the last 14 days. */
+function SpendSection() {
+	const read = useRead("/spend");
+
+	return (
+		<Loading read={read}>{() => {
+			const spend = read.data!;
+			const share = Math.min(1, spend.last24Hours.total / spend.budget);
+
+			return (
+				<div class="wa-stack">
+					<h2 class="wa-heading-l">Spend</h2>
+					<p class="muted">The last 24 hours at Cloudflare's overage rates (what the plan includes isn't taken off, so this is high). At {money(spend.warnAt)} you're emailed; at {money(spend.budget)} the cost guard turns the kill switch on. Checked hourly.</p>
+					<div class="wa-cluster wa-gap-s">
+						<strong class="wa-heading-2xl">{money(spend.last24Hours.total)}</strong>
+						<span class="muted">of {money(spend.budget)} a day</span>
+					</div>
+					<wa-progress-bar value={share * 100} label="Share of the daily budget" />
+					<Table head={["Meter", "Last 24 hours", "Cost"]}>
+						{spend.last24Hours.meters.map((meter) => (
+							<tr key={meter.meter}><td>{meter.meter}</td><td>{Math.round(meter.amount).toLocaleString()}</td><td>{money(meter.dollars)}</td></tr>
+						))}
+					</Table>
+					<Table head={["Day (UTC)", "Estimate"]}>
+						{spend.days.toReversed().map((day) => (
+							<tr key={day.date}><td>{day.date}</td><td>{money(day.dollars)}</td></tr>
+						))}
+					</Table>
+				</div>
+			);
+		}}</Loading>
+	);
 }
 
 /** Cloudflare's analytics, as /admin/traffic shapes them (packages/api/src/traffic.ts). */
@@ -458,6 +503,7 @@ export function TrafficPage({ query }: { "query": URLSearchParams }) {
 
 				return (
 					<div class="wa-stack wa-gap-l">
+						<SpendSection />
 						<p class="muted">Cloudflare's analytics, {new Date(traffic.window.since).toLocaleString()} to {new Date(traffic.window.until).toLocaleString()}. The Free plan has no network (ASN) or security-event breakdowns.</p>
 						<h2 class="wa-heading-l">Workers</h2>
 						<Table head={["Worker", "Requests", "Errors", "Subrequests", "CPU p50", "CPU p99"]}>

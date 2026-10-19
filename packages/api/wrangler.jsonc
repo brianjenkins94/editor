@@ -20,8 +20,9 @@
     "logs": { "enabled": true, "invocation_logs": false },
     "traces": { "enabled": true }
   },
-  // Daily at 03:17 UTC: the audit log's retention (src/audit.ts, expire). Every environment inherits it.
-  "triggers": { "crons": ["17 3 * * *"] },
+  // Daily at 03:17 UTC: retention, purges, the smoke test (src/index.ts, scheduled). Hourly at :07: the cost guard
+  // (src/spend.ts, OPERATIONS.md O2). Every environment inherits them.
+  "triggers": { "crons": ["17 3 * * *", "7 * * * *"] },
   // One Grant per sign-in (src/grant.ts), on SQLite storage.
   // One Attempt per sign-in in progress (src/attempt.ts), on SQLite storage too.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Grant"] }, { "tag": "v2", "new_sqlite_classes": ["Attempt"] }],
