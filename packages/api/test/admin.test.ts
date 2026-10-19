@@ -415,7 +415,7 @@ test("a viewer reads everything an owner can, and changes or sends nothing", asy
 	const me = await (await holder.send("GET", "/admin/me", { "accessToken": access_token })).json() as { "roles": string[]; "permissions": string[] };
 
 	assert.deepEqual(me.roles, ["viewer"]);
-	assert.ok(me.permissions.every((permission) => permission.endsWith(":read") || permission === "audit:verify"), "reads only");
+	assert.ok(me.permissions.every((permission) => permission.endsWith(":read") || permission === "audit:verify" || permission === "sessions:replay"), "reads only");
 
 	for (const path of ["/admin/users", "/admin/sessions", "/admin/audit", "/admin/unusual", "/admin/architecture", "/admin/mail", "/admin/inbox"]) {
 		assert.equal((await holder.send("GET", path, { "accessToken": access_token })).status, 200, path);

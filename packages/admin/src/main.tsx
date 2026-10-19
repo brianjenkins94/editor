@@ -25,6 +25,7 @@ import { useEffect, useState } from "preact/hooks";
 import { ArchitecturePage } from "./architecture";
 import { loginOf } from "./logins";
 import { errorsPageFor } from "./errors";
+import { TimelinePage } from "./timeline";
 import { MailPage } from "./mail";
 import type { Maintenance } from "./maintenance";
 import { KillSwitch, MaintenanceBanner } from "./maintenance";
@@ -137,6 +138,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 	const page = path === "/users" ? <Users />
 		: path.startsWith("/users/") ? <UserPage id={decodeURIComponent(path.slice("/users/".length))} />
 			: path === "/sessions" ? <Sessions />
+				: path.startsWith("/sessions/") ? <TimelinePage id={decodeURIComponent(path.slice("/sessions/".length))} />
 				: path === "/audit" ? <Audit query={query} />
 					: path === "/traffic" ? <TrafficPage query={query} />
 						: path === "/unusual" ? <UnusualPage />

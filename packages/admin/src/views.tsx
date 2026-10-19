@@ -230,6 +230,7 @@ interface Columns<S extends Session> { "head": string[]; "cells": (session: S) =
 
 function SessionRows<S extends Session>({ sessions, withUser, columns }: { "sessions": S[]; "withUser": boolean; "columns"?: Columns<S> }) {
 	const canEnd = useContext(Permissions).includes("sessions:revoke");
+	const canReplay = useContext(Permissions).includes("sessions:replay");
 	// Ended here since the list was read: when, by id.
 	const [ended, setEnded] = useState<Record<string, number>>({});
 	const [ending, setEnding] = useState<Session | undefined>();
@@ -260,7 +261,7 @@ function SessionRows<S extends Session>({ sessions, withUser, columns }: { "sess
 							<td><When at={session.createdAt} /></td>
 							<td><When at={session.lastUsedAt} /></td>
 							<td>{revokedAt === null ? <wa-badge variant="success">live</wa-badge> : <When at={revokedAt} />}</td>
-							<td class="mono">{short(session.id)}</td>
+							<td class="mono">{canReplay ? <a href={`#/sessions/${session.id}`} title="Its timeline">{short(session.id)}</a> : short(session.id)}</td>
 							{columns?.cells(session)}
 							{canEnd && <td>{session.current ? <span class="wa-color-text-quiet">this one</span> : revokedAt === null && endButton(session)}</td>}
 						</tr>

@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19; O1 to O4 built.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1 to O5 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -181,7 +181,18 @@ Each lands green and is tried before the next.
     and whose sign-in, and a search by id.
   - 2 tests in test/errors.test.ts (scrubbing and fingerprints; a failing request end to end: the id, one group for two
     occurrences, the owner told once, found by group and by id however typed, a surge emailed once).
-- **O5 · server timelines.** Request events in the Grant, the Timeline on a sign-in's page, `sessions:replay`.
+- **O5 · server timelines.** *Built 2026-10-19* (src/timeline.ts, the Grant's `events`; the admin app's
+  src/timeline.tsx):
+  - The session middleware (src/tokens.ts) records each request once it's answered, off the response's path: its action
+    as the behavior model names it (`GET /account`, a proxied call's template), status, duration and trace id, in the
+    Grant (`record`). At most 5,000 a sign-in, none older than 30 days; the sign-in's end sets one alarm 30 days on that
+    clears the rest (`expireTimeline`), and an account's purge erases the Grant.
+  - `GET /admin/sessions/:id/timeline` (`sessions:replay`, owner and viewer): the sign-in, and its requests, audit rows
+    and errors, oldest first. The Sign-ins tables link each sign-in's id to its page; the page filters to audit rows or
+    errors, and an error links to its occurrence.
+  - Trace ids are shown, not linked: Cloudflare's dashboard finds them (Workers → editor-api → Observability).
+  - 2 tests in test/timeline.test.ts (requests, a refusal and an error in order, a viewer reads, an editor token can't;
+    the 30 days after the end).
 - **O6 · editor events and errors.** The vocabulary, `POST /session/events`, `POST /errors` (signed in and anonymous),
   the editor's error notice with its id.
 - **O7 · readable stacks.** Source maps kept per release, stacks mapped in the admin app.

@@ -15,6 +15,7 @@ import { trafficEndpoint } from "./traffic.ts";
 import { down, maintenance, setMaintenance } from "./maintenance.ts";
 import { spendEndpoint } from "./spend.ts";
 import { errorGroupEndpoint, errorOccurrenceEndpoint, errorsEndpoint } from "./errors.ts";
+import { timelineEndpoint } from "./timeline.ts";
 
 /**
  * The admin API (packages/admin/README.md, "The admin API"), mounted at /admin. Only tokens issued to the `admin` client
@@ -219,6 +220,9 @@ admin.get("/unusual", requires("behavior:read"), async (context) => {
  * user's record), and the admin's (`admin_revoked`, naming the sign-in and whose it was; never routine, so it's kept as
  * long as a refusal is and shows among the suspicious).
  */
+/** A sign-in's timeline (src/timeline.ts, OPERATIONS.md O5): its requests, audit rows and errors, in order. */
+admin.get("/sessions/:id/timeline", requires("sessions:replay"), timelineEndpoint);
+
 admin.post("/sessions/:id/revoke", requires("sessions:revoke"), async (context) => {
 	if ((await context.req.parseBody())["confirm"] !== "revoke") {
 		return context.json({ "error": "confirm", "message": "send confirm=revoke" }, 400);

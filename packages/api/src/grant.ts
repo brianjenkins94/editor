@@ -23,7 +23,9 @@ import { userWith } from "./identities.ts";
  *     and how often each header has differed since, and how;
  *   - its last action and the transitions since its last flush (BEHAVIOR.md, B8), added to the shared model hourly;
  *   - GitHub's answer to connecting GitHub to the account (src/link.ts), sealed, for 2 minutes, until the app finishes it;
- *   - a passkey being added (src/passkeys.ts): its challenge, then the checked credential, until the app finishes it.
+ *   - a passkey being added (src/passkeys.ts): its challenge, then the checked credential, until the app finishes it;
+ *   - its timeline (OPERATIONS.md, "Session timelines"; O5): each request made through it (route, status, duration,
+ *     trace id), at most EVENTS of them, none older than RETAIN, and none RETAIN after it ended.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
  * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
  * GitHub's token is spent here, for the proxy (src/proxy.ts), and refreshed here, one refresh at a time: GitHub's refresh
@@ -33,6 +35,11 @@ import { userWith } from "./identities.ts";
  */
 
 const CODE_TTL = 60_000;
+
+/** A sign-in's timeline: at most this many requests, kept at most this long, and this long after the sign-in ends. */
+const EVENTS = 5000;
+
+const RETAIN = 30 * 86_400_000;
 
 /** How long GitHub's answer to connecting GitHub waits for the app to finish it (src/link.ts). */
 const LINK_TTL = 120_000;
@@ -108,6 +115,8 @@ export const SCHEMA = `
 	CREATE TABLE IF NOT EXISTS pending (from_action TEXT NOT NULL, to_action TEXT NOT NULL, gap INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (from_action, to_action, gap));
 	CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
 	CREATE TABLE IF NOT EXISTS github_link (id INTEGER PRIMARY KEY CHECK (id = 1), github_id INTEGER NOT NULL, github TEXT NOT NULL, code_hash TEXT NOT NULL, expires INTEGER NOT NULL);
+	CREATE TABLE IF NOT EXISTS events (at INTEGER NOT NULL, route TEXT NOT NULL, status INTEGER NOT NULL, ms INTEGER NOT NULL, trace TEXT);
+	CREATE INDEX IF NOT EXISTS events_by_at ON events (at);
 	CREATE TABLE IF NOT EXISTS passkey_setup (id INTEGER PRIMARY KEY CHECK (id = 1), ticket_hash TEXT NOT NULL, challenge TEXT NOT NULL, return_to TEXT NOT NULL, credential TEXT, code_hash TEXT, expires INTEGER NOT NULL);
 `;
 
@@ -312,6 +321,29 @@ export class Grant extends DurableObject<Bindings> {
 
 		if (await this.ctx.storage.getAlarm() === null) {
 			await this.ctx.storage.setAlarm(now + FLUSH_EVERY);
+		}
+	}
+
+	/** A request made through this sign-in, for its timeline (the session middleware records it once it's answered,
+	 *  src/tokens.ts): kept within EVENTS and RETAIN. */
+	public async record({ route, status, ms, trace }: { "route": string; "status": number; "ms": number; "trace": string | null }): Promise<void> {
+		const now = Date.now();
+
+		this.sql.exec("INSERT INTO events (at, route, status, ms, trace) VALUES (?, ?, ?, ?, ?)", now, route.slice(0, 200), status, ms, trace);
+		this.sql.exec("DELETE FROM events WHERE at < ? OR rowid <= (SELECT rowid FROM events ORDER BY rowid DESC LIMIT 1 OFFSET ?)", now - RETAIN, EVENTS);
+	}
+
+	/** The timeline's requests, oldest first (the admin app's sign-in page, src/admin.ts). */
+	public async timeline(): Promise<{ "at": number; "route": string; "status": number; "ms": number; "trace": string | null }[]> {
+		return this.sql.exec<{ "at": number; "route": string; "status": number; "ms": number; "trace": string | null }>("SELECT at, route, status, ms, trace FROM events ORDER BY at, rowid").toArray();
+	}
+
+	/** RETAIN after the sign-in ended, its timeline goes (the alarm's; public for the tests, as flush is). */
+	public async expireTimeline(now = Date.now()): Promise<void> {
+		const state = this.state();
+
+		if (state?.revoked_at !== null && state?.revoked_at !== undefined && now >= state.revoked_at + RETAIN) {
+			this.sql.exec("DELETE FROM events");
 		}
 	}
 
@@ -541,6 +573,9 @@ export class Grant extends DurableObject<Bindings> {
 		this.sql.exec("DELETE FROM github_link");
 		this.sql.exec("DELETE FROM passkey_setup");
 		await this.env.DB.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").bind(now, this.id).run();
+		// What's still to learn from it now, and one alarm RETAIN on to clear its timeline (expireTimeline).
+		await this.flush();
+		await this.ctx.storage.setAlarm(now + RETAIN);
 		await audit(this.env, "grant_revoked", { "userId": state.user_id, "grantId": this.id }, from, reason === undefined ? {} : { "reason": reason });
 	}
 
@@ -630,6 +665,7 @@ export class Grant extends DurableObject<Bindings> {
 	public async alarm(): Promise<void> {
 		await this.abandon();
 		await this.flush();
+		await this.expireTimeline();
 	}
 
 	/** A sign-in that never got its first refresh token is abandoned, so it ends. */

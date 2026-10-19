@@ -262,7 +262,24 @@ const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, 
 	context.set("client", client);
 
 	// The rest of the request reads D1 through the tripwire's eyes (src/tripwire.ts): nothing of another user's.
+	const started = Date.now();
+
 	await watch(context, next);
+
+	// Its sign-in's timeline (OPERATIONS.md O5): what it was (the action, as the behavior model names it), how it went,
+	// how long, its trace. After the answer, not before it.
+	const recorded = context.env.GRANTS.get(context.env.GRANTS.idFromString(signed.grant)).record({
+		"route": actionOf(context.req.method, new URL(context.req.url), routePath(context, -1)),
+		"status": context.res.status,
+		"ms": Date.now() - started,
+		"trace": (context.get("span") as { "traceId"?: string } | undefined)?.traceId ?? null
+	}).catch(() => undefined);
+
+	try {
+		context.executionCtx.waitUntil(recorded);
+	} catch {
+		await recorded;
+	}
 });
 
 /** The editor's routes: its account endpoints and the GitHub proxy. */

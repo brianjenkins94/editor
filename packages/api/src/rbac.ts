@@ -12,13 +12,13 @@ import { unwatched } from "./tripwire.ts";
  */
 
 /** Everything the admin API can be asked to do, one string per action. */
-export const PERMISSIONS = ["users:read", "sessions:read", "sessions:revoke", "audit:read", "audit:verify", "traffic:read", "behavior:read", "architecture:read", "mail:read", "mail:test", "maintenance:switch", "errors:read"] as const;
+export const PERMISSIONS = ["users:read", "sessions:read", "sessions:revoke", "audit:read", "audit:verify", "traffic:read", "behavior:read", "architecture:read", "mail:read", "mail:test", "maintenance:switch", "errors:read", "sessions:replay"] as const;
 
 export type Permission = typeof PERMISSIONS[number];
 
 /** What only reads: every `…:read`, and checking the audit log against its copies. A permission added later that only
  *  reads (named `…:read`) is a viewer's too. */
-const READS = PERMISSIONS.filter((permission) => permission.endsWith(":read") || permission === "audit:verify");
+const READS = PERMISSIONS.filter((permission) => permission.endsWith(":read") || permission === "audit:verify" || permission === "sessions:replay");
 
 /**
  * The platform owner: every platform permission. A viewer: everything that only reads, nothing that changes anything
