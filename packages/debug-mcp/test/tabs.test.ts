@@ -8,7 +8,7 @@ import * as assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { until } from "@brianjenkins94/util/until";
-import { createHub, portTransport, websocketTransport } from "@brianjenkins94/hub";
+import { createHub, portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
 
 import { createArchReporter } from "../../observability/src/arch.ts";
 import { TAB_DISCOVER, TAB_HERE } from "../../observability/src/tabs.ts";
@@ -59,7 +59,7 @@ async function connect(hub: Hub, tab: string): Promise<void> {
 }
 
 type Row = { "message": string; "source": string; "tab"?: string };
-type Architecture = { "nodes": { "id": string }[] };
+type Architecture = { "nodes": { "id": string }[]; "violations"?: unknown[] };
 
 async function queryLogs(args: Record<string, unknown>): Promise<Row[]> {
 	return (await call("logs_query", args)).value as Row[];
@@ -125,6 +125,25 @@ test("architecture_state shows one tab's contexts, never the two merged — and 
 		assert.ok(ids.includes("root"), `${tab}: ${ids.join(", ")}`);
 		assert.ok(!ids.includes(theirs), `${tab} shows the other tab's ${theirs}: ${ids.join(", ")}`);
 	}
+});
+
+test("architecture_state adds a tab's violations when it answers for them, and no field when it doesn't", async () => {
+	const violation = { "kind": "undeclared-channel", "a": "root", "b": "worker-a", "message": "seen, not declared" };
+
+	disposers.push(serve(roots.get("t1")!, "tool.architecture_violations.t1", () => [violation]));
+
+	const declared = await until("t1's violations", async () => {
+		const { isError, value } = await architecture({ "tab": "t1" });
+
+		return isError !== true && value.violations !== undefined ? value : undefined;
+	});
+
+	assert.deepEqual(declared.violations, [violation]);
+
+	const plain = await architecture({ "tab": "t2" });
+
+	assert.equal(plain.isError, undefined);
+	assert.equal("violations" in plain.value, false, "a tab with no model of its own has no violations field");
 });
 
 test("spans_query keeps two tabs' same-id spans apart, and takes one tab's", async () => {

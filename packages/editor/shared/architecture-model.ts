@@ -180,6 +180,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "workbench.online", "from": ["workbench"], "to": ["root"] },
 	{ "pattern": "workbench.save", "from": ["workbench"], "to": ["root"] },
 	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "architecture.violations", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.status", "from": ["shell", "bridge", "root"], "to": ["workbench"] },
 	{ "pattern": "git.file", "from": ["shell", "bridge"], "to": ["workbench"] },

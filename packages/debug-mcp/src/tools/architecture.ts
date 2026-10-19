@@ -2,13 +2,14 @@
 import type { ToolsContext } from "./context.ts";
 import { defineTool, fail, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
+import { PAGE_TOOL } from "../../../observability/src/page-tools.ts";
 import { resolveTab } from "../forward.ts";
 
 export default ({ debugMcp }: ToolsContext) => [defineTool({
 	"name": "architecture_state",
 	"config": {
 		"title": "Architecture",
-		"description": "The live architecture of one tab: every context (hubs, workers, extension hosts, webviews, network endpoints) with its state, every channel between two of them (hub links and probed channels) with message counts, rates and top messages, and each hub's topology (links and the peer at the other end). Pass `channel` (a node id or 'a|b') for one channel's full message breakdown and recent traffic.",
+		"description": "The live architecture of one tab: every context (hubs, workers, extension hosts, webviews, network endpoints) with its state, every channel between two of them (hub links and probed channels) with message counts, rates and top messages, and each hub's topology (links and the peer at the other end). A tab that declares its architecture (an editor tab) adds `violations`: what it saw that its model doesn't allow — an empty list when nothing needs review. Pass `channel` (a node id or 'a|b') for one channel's full message breakdown and recent traffic.",
 		"inputSchema": {
 			"channel": z.string().optional().describe("Node id (e.g. 'workbench') or 'a|b' pair to detail; omit for the overview."),
 			"limit": z.number().int().positive().optional().describe("Max channels in the overview (default 40)."),
@@ -56,7 +57,12 @@ export default ({ debugMcp }: ToolsContext) => [defineTool({
 			})));
 		}
 
+		// A tab with a declared model answers what doesn't conform to it, served under its id like a page tool but not
+		// announced as one (an editor tab: its shared/architecture-model.ts); a tab without one has no answer, and no field.
+		const violations = await debugMcp.rpc.request(`${PAGE_TOOL}.architecture_violations.${resolved}`, {}, { "timeoutMs": 10_000, "waitForResponderMs": 300 }).catch(() => undefined);
+
 		return ok({
+			...violations === undefined ? {} : { "violations": violations },
 			"reporters": Object.fromEntries([...arch.reporters].map(([id, seen]) => [id, { "lastReportMsAgo": now - seen }])),
 			// A medium only two contexts use is the edge between them (its `medium`), not a node.
 			"nodes": [...arch.nodes.values()].filter((node) => !arch.media().has(node.id)).map((node) => ({ "id": node.id, "state": node.state, "instances": node.instances, "spawnCount": node.spawnCount, "label": node.spec.label, "container": node.spec.container, "reporters": [...node.reporters] })),

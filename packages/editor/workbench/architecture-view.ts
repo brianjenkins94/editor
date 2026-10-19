@@ -12,7 +12,7 @@ import type WaButton from "@awesome.me/webawesome/dist/components/button/button.
 import type { Hub } from "@brianjenkins94/hub";
 import type { ChannelStats, FlowMessage, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture-model";
-import { createRpcClient } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { ArchitectureStore, collectArchReports, flowsOf, requestArchSync } from "@brianjenkins94/observability";
 import css from "theme/exceptions/architecture-view.css?raw";
 import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjects as subjectFamilies, subjectMatches, subjectOfLabel } from "../shared/architecture-model";
@@ -85,6 +85,9 @@ export function architectureStore(hub: Hub): ArchitectureStore {
 		setTimeout(() => {
 			requestArchSync(hub);
 		}, 200);
+		// What needs review, for debug-mcp's architecture_state (the editor tab answers it: main.tsx).
+		serve(hub, "architecture.violations", () => conformanceOf(store));
+
 		// A handle for scripts (the architecture smoke test, a console): what the diagram knows, as data.
 		const rpc = createRpcClient(hub);
 

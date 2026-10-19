@@ -125,4 +125,6 @@ test("coverage: every must-see hub link, channel and message was observed", asyn
 
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
+	// And as debug-mcp's architecture_state gets it: the workbench's answer, through the tree.
+	assert.deepEqual(await session.request("architecture.violations", undefined, 10_000), []);
 });
