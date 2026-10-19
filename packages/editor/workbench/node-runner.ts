@@ -55,9 +55,9 @@ export interface NodeRunner {
 	"closePreview": (port?: number) => void;
 	/** When the preview on `port` is stopped from anywhere — Ctrl-C, or its last window closed. */
 	"onPreviewClose": (port: number, handler: () => void) => () => void;
-	/** Ask every preview page to report its runtime evidence now, and give the reports a moment to arrive — before a
+	/** Ask every preview page to report its runtime evidence now, and wait for `port`'s report to arrive — before a
 	 *  preview's windows close, since they close before its run ends (evidence.ts folds at the end). */
-	"flushPreviewEvidence": () => Promise<void>;
+	"flushPreviewEvidence": (port: number) => Promise<void>;
 	/** Present a long-running production run (the vite preview) as a VS Code debug session: publishes
 	 *  `production.launch` (the ext host starts a `production` attach session) and returns its id. `port`, when the
 	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. `target`
@@ -151,6 +151,15 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 
 	const runs = createRunRegistry(hub);
 
+	// The preview ports whose pages report runtime evidence (evidence.ts's `evidence.preview`): a flush before their windows
+	// close waits for the report, not a fixed moment — a hot update's new version is only told on the next report.
+	const previewPortOf = (data: unknown): number => Number(/^preview:(\d+)/u.exec(String((data as { "window"?: unknown } | null)?.window ?? ""))?.[1]);
+	const reporting = new Set<number>();
+
+	hub.subscribe("evidence.preview", (data) => {
+		reporting.add(previewPortOf(data));
+	});
+
 	// A run's own server, listening: its preview opens (RUNNING.md, step 4) — the window on its port, no dev server started
 	// (`server`) — and closes when the run ends.
 	const serving = new Map<string, number>();
@@ -223,10 +232,27 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
 		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "port": port }); },
 		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },
-		"flushPreviewEvidence": async () => {
+		"flushPreviewEvidence": async (port) => {
+			const reported = new Promise<void>((resolve) => {
+				const off = hub.subscribe("evidence.preview", (data) => {
+					if (previewPortOf(data) === port) {
+						off();
+						resolve();
+					}
+				});
+
+				// (a page that has never reported may have nothing to tell: a moment, as before)
+				setTimeout(() => {
+					off();
+					resolve();
+				}, reporting.has(port) ? 5000 : 500);
+			});
+
 			hub.publish("evidence.flush", {});
+			await reported;
+			// (and its other windows' pages, a moment behind it)
 			await new Promise((resolve) => {
-				setTimeout(resolve, 500);
+				setTimeout(resolve, 100);
 			});
 		},
 		"onPreviewClose": (port, handler) => hub.subscribe("preview.close", (data) => {
