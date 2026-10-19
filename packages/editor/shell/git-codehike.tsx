@@ -305,20 +305,21 @@ const VERDICT_LABELS: Record<ChangeKind, string> = {
 	"unparsable": "Couldn’t parse — showing the raw text diff"
 };
 
+/** The Web Awesome variant a verdict's banner is drawn in: quiet when nothing moved, a warning when the meaning did. */
+const VERDICT_VARIANTS: Record<ChangeKind, string> = { "cosmetic": "neutral", "semantic": "warning", "unparsable": "danger" };
+
 /** The BABLR verdict banner above the diff (nothing for a non-classified change). */
 function banner(verdict: ChangeKind | "none"): ReactNode {
-	const label = verdict === "none" ? undefined : VERDICT_LABELS[verdict];
-
-	if (label === undefined) {
+	if (verdict === "none") {
 		return null;
 	}
 
-	return createElement("div", { "className": "sxs-verdict " + verdict }, createElement("span", { "className": "sxs-dot" }), label);
+	return createElement("div", { "className": "sxs-verdict wa-cluster wa-flex-nowrap wa-gap-xs wa-font-size-2xs wa-font-weight-semibold wa-" + VERDICT_VARIANTS[verdict] }, createElement("span", { "className": "sxs-dot wa-border-radius-circle" }), VERDICT_LABELS[verdict]);
 }
 
 /** A line's fold slot: its chevron when it heads a block, else empty. */
 function foldSlotOf(header: FoldHeader | undefined, onToggleFold: (id: string) => void): ReactNode {
-	return createElement("span", { "className": "sxs-fold-slot", "key": "b" }, header !== undefined
+	return createElement("span", { "className": "sxs-fold-slot wa-cluster wa-flex-nowrap wa-align-items-start wa-justify-content-center", "key": "b" }, header !== undefined
 		? createElement("button", {
 				"className": "sxs-fold",
 				"title": header.folded ? "Unfold " + header.count + " lines" : "Fold block",
@@ -334,7 +335,7 @@ function foldSlotOf(header: FoldHeader | undefined, onToggleFold: (id: string) =
 function pickSlotOf(at: Rendered, hasFolds: boolean, deselectedRows: ReadonlySet<number>, onToggleRow: (index: number) => void): ReactNode {
 	if (at.type !== "ctx") {
 		return createElement("button", {
-			"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
+			"className": "sxs-pick wa-cluster wa-flex-nowrap wa-justify-content-center" + (deselectedRows.has(at.index) ? "" : " on"),
 			"key": "p",
 			"title": deselectedRows.has(at.index) ? "Include this line in the commit" : "Exclude this line from the commit",
 			"onClick": (event: { "stopPropagation": () => void }) => {
@@ -397,7 +398,7 @@ function sideHandlers(
 			const rowSelected = at.type !== "ctx" && !deselectedRows.has(at.index);
 			// Pick checkmark shows LEFT of the fold chevron (via CSS `order`). The fold slot is present on every row when the
 			// file has folds so chevrons share one column; a context row (no pick) renders an empty pick slot to match.
-			const numCell = createElement("span", { "className": "sxs-num" + (rowSelected ? " sel" : ""), "key": "n" }, hasFolds ? foldSlotOf(header, onToggleFold) : null, pickSlotOf(at, hasFolds, deselectedRows, onToggleRow), createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
+			const numCell = createElement("span", { "className": "sxs-num wa-cluster wa-flex-nowrap wa-align-items-start wa-gap-3xs" + (rowSelected ? " sel" : ""), "key": "n" }, hasFolds ? foldSlotOf(header, onToggleFold) : null, pickSlotOf(at, hasFolds, deselectedRows, onToggleRow), createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
 
 			// A folded block collapses to `{ ⋯ }` on the opening line: the code already ends with `{`, so we append the
 			// ellipsis and a synthetic closing brace (the real `}` row is hidden), and clicking it unfolds the block.
@@ -437,7 +438,7 @@ function sideHandlers(
 					"gridTemplateColumns": "subgrid",
 					"gridColumn": cols,
 					"gridRow": at.row,
-					"background": highlighted ? "var(--sxs-hl, #c8a53340)" : tint(at.type, side)
+					"background": highlighted ? "var(--wa-color-warning-fill-quiet)" : tint(at.type, side)
 				}
 			}, ...cells);
 		}
@@ -648,7 +649,7 @@ function Diff(props: {
 
 		return createElement("button", {
 			"key": "h" + hunk.gridStart,
-			"className": "sxs-hunk " + state,
+			"className": "sxs-hunk wa-cluster wa-flex-nowrap wa-align-items-start wa-justify-content-center " + state,
 			"title": (state === "all" ? "Exclude this whole change" : "Include this whole change") + " · right-click to discard",
 			"style": { "gridRow": hunk.gridStart + " / " + (hunk.gridEnd + 1) },
 			"onClick": () => { toggleHunk(hunk.rows); },
@@ -676,19 +677,18 @@ function Diff(props: {
 			event.preventDefault();
 			setMenu(null);
 		}
-	}, createElement("div", {
-		"className": "sxs-menu",
+	}, createElement("wa-button", {
+		"class": "sxs-menu", // React 18 sets `className` on a custom element as a literal `classname` attribute
+		"variant": "danger",
+		"size": "small",
 		"style": { "left": menu.x, "top": menu.y },
-		"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); }
-	}, createElement("button", {
-		"className": "sxs-menu-item",
 		"onClick": () => {
 			props.onDiscardRows?.(menu.rows);
 			setMenu(null);
 		}
-	}, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")")));
+	}, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")"));
 
-	return createElement("div", { "className": "sxs-wrap" }, banner(verdict), grid, menuEl);
+	return createElement("div", { "className": "sxs-wrap wa-stack wa-gap-0" }, banner(verdict), grid, menuEl);
 }
 
 /** Render (or re-render) the side-by-side diff for one file into `host`. */

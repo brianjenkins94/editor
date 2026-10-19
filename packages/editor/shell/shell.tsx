@@ -10,8 +10,8 @@
  *
  * The picker talks to the app over the hub: the app `serve`s `project.list` and subscribes `project.open` (main.tsx);
  * here we link a shell hub to the app iframe, pull the catalog, and publish the selected id. File contents never cross
- * this channel — the catalog lives app-side (samples.ts); we send only ids. The RHS review panel (git-panel.ts) is
- * mounted into the `aside` region as-is; its WA rebuild is a follow-on.
+ * this channel — the catalog lives app-side (samples.ts); we send only ids. The RHS review panel (git-panel.tsx, Web Awesome
+ * components of its own) is mounted into the `aside` region.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
@@ -64,16 +64,6 @@ interface SampleInfo { "id": string; "name": string; "description": string }
 // Structural CSS — the little that wa-page doesn't give us: full-viewport height, the editor iframe filling `main`,
 // the diff overlay, and the collapse widths. All via theme tokens (stitches objects, not CSS strings).
 const injectGlobals = globalCss({
-	// Legacy CSS vars the (kept) git-panel.ts still references — mapped onto WA tokens so it follows light/dark too,
-	// until its own WA rebuild.
-	":root": {
-		"--bg": "var(--wa-color-surface-default)",
-		"--chrome": "var(--wa-color-surface-raised)",
-		"--line": "var(--wa-color-surface-border)",
-		"--fg": "var(--wa-color-text-normal)",
-		"--muted": "var(--wa-color-text-quiet)",
-		"--accent": "var(--wa-color-brand-fill-loud)"
-	},
 	// `clip`, not `hidden`: the shell page must never scroll, and a hidden overflow still scrolls programmatically — as
 	// when VS Code focuses an editor in a dock panel mid-layout and the browser scrolls the page to show it.
 	"html, body": { "height": "100%", "margin": 0, "overflow": "clip" },
@@ -163,7 +153,7 @@ const ghSession = css({ "display": "flex", "alignItems": "center", "justifyConte
 const ghSessionText = css({ "display": "flex", "flexDirection": "column", "minWidth": 0 });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
-// list and the (kept) git-panel each fill their side and scroll internally. `--header-height` is published by wa-page.
+// list and the git panel each fill their side and scroll internally. `--header-height` is published by wa-page.
 const sideCol = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "minHeight": 0 });
 // The panes flanking the editor get a border on the edge that meets it: the LHS project pane on its right, the RHS
 // changes pane on its left. `position: relative` anchors the absolute resize grip on that inner edge.
@@ -1429,10 +1419,7 @@ function Shell() {
 						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>
 					</div>
 
-					{/* `wa-diff-body` scopes the codehike diff grid CSS (git-panel.css). It MUST be declared here in JSX, not
-					    added imperatively by git-panel: preact owns this element's `class`, so any Shell re-render would
-					    otherwise reconcile it back and wipe an imperatively-added class — collapsing the diff grid. */}
-					<div ref={overlayBodyRef} class={overlayBody() + " wa-diff-body"} />
+					<div ref={overlayBodyRef} class={overlayBody()} />
 				</div>
 			</div>
 

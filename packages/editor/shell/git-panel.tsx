@@ -1,8 +1,9 @@
 /** @jsxImportSource preact */
 /**
  * Git review panel — a GitHub-Desktop-style changed-files + diff + commit surface, rendered in the SHELL's RHS chrome
- * (not the vscode SCM viewlet). Built on Web Awesome components (wa-checkbox / wa-textarea / wa-button / wa-badge) in a
- * preact tree; the side-by-side diff renderer's grid CSS lives in git-panel.css. It's a pure hub consumer: it calls
+ * (not the vscode SCM viewlet). Built on Web Awesome components (wa-checkbox / wa-textarea / wa-button / wa-badge) and
+ * utility classes in a preact tree; what's left in theme/exceptions/git-panel.css is the rows' hover/current states and
+ * the side-by-side diff renderer's grid. It's a pure hub consumer: it calls
  * `git.status` / `git.file` / `git.commit` (served by git-service.ts in the workbench realm) over the shell hub, and
  * refreshes on `git.changed`. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
  * decoupling was for. The diff opens in a shell-owned overlay the codehike island mounts into (overlay.body).
@@ -18,6 +19,9 @@ import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
 import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/badge/badge.js";
+// Web Awesome's layer order first, so git-panel.css's `@layer app` is declared after it (the shell imports this module
+// before its own Web Awesome setup).
+import "./webawesome";
 import "theme/exceptions/git-panel.css";
 
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
@@ -222,6 +226,15 @@ const isCodeFile = (file: GitFileChange): boolean => /\.(?:ts|tsx|js|jsx|mjs|cjs
 /** Current OS colour scheme — the diff highlights with the matching shiki theme (the shell drives the same query). */
 const prefersDark = (): boolean => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
+/** A chunk timeline's note line (a status, or the summary above the chunks). */
+const CHUNK_INFO = "gp-chunk-info wa-font-size-2xs wa-color-text-quiet";
+
+/** What the chunk timeline says until it has chunks to show. */
+const CHUNK_NOTES = { "loading": "Loading your edits…", "error": "Couldn't load edit history.", "empty": "No edits recorded since the last commit." };
+
+/** A file's status letter, by the Web Awesome variant it's drawn in: added, modified, deleted. */
+const STATUS_VARIANTS: Record<GitFileChange["status"], string> = { "A": "success", "M": "warning", "D": "danger" };
+
 /** The "your edits" chunk timeline for one expanded file — hovering a chunk spotlights its range in the open diff. */
 function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeof createRpcClient>; "onOpen": (path: string) => void }) {
 	const [state, setState] = useState<{ "status": "loading" | "error" | "empty" | "ready"; "groups"?: EditGroup[]; "bursts"?: number }>({ "status": "loading" });
@@ -255,23 +268,15 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 		};
 	}, [path, rpc]);
 
-	if (state.status === "loading") {
-		return <div class="chunks"><div class="chunk info">Loading your edits…</div></div>;
-	}
-
-	if (state.status === "error") {
-		return <div class="chunks"><div class="chunk info">Couldn't load edit history.</div></div>;
-	}
-
-	if (state.status === "empty") {
-		return <div class="chunks"><div class="chunk info">No edits recorded since the last commit.</div></div>;
+	if (state.status !== "ready") {
+		return <div class="gp-chunks wa-stack wa-gap-0"><div class={CHUNK_INFO}>{CHUNK_NOTES[state.status]}</div></div>;
 	}
 
 	const groups = state.groups ?? [];
 
 	return (
-		<div class="chunks">
-			<div class="chunk info">{groups.length + " change" + (groups.length === 1 ? "" : "s") + " · " + (state.bursts ?? 0) + " edit" + (state.bursts === 1 ? "" : "s")}</div>
+		<div class="gp-chunks wa-stack wa-gap-0">
+			<div class={CHUNK_INFO}>{groups.length + " change" + (groups.length === 1 ? "" : "s") + " · " + (state.bursts ?? 0) + " edit" + (state.bursts === 1 ? "" : "s")}</div>
 
 			{groups.map((group, index) => {
 				const range = group.endLine > group.startLine ? "L" + group.startLine + "–" + group.endLine : "L" + group.startLine;
@@ -279,25 +284,25 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 				return (
 					<div
 						key={index}
-						class="chunk"
+						class="gp-chunk wa-cluster wa-flex-nowrap wa-gap-xs wa-align-items-baseline wa-border-radius-s wa-font-size-xs"
 						onMouseEnter={() => { highlightRef.current({ "start": group.startLine, "end": group.endLine }); }}
 						onMouseLeave={() => { highlightRef.current(null); }}
 						onClick={() => { onOpen(path); }}
 					>
-						<span class="ck">{group.kind}</span>
+						<span class="wa-font-size-3xs wa-text-lowercase wa-color-text-quiet">{group.kind}</span>
 
-						<span class="cl">{group.label}</span>
+						<span class="gp-chunk-label wa-text-truncate">{group.label}</span>
 
-						{group.edits > 1 ? (
-							<span class="ce" title={group.edits + " edit-bursts touched this"}>
+						{group.edits > 1 && (
+							<wa-badge variant="neutral" appearance="outlined" title={group.edits + " edit-bursts touched this"}>
 								{group.edits}
 
 								{" "}
 								edits
-							</span>
-						) : <span class="ce" />}
+							</wa-badge>
+						)}
 
-						<span class="cr">{range}</span>
+						<span class="wa-font-size-2xs wa-color-text-quiet">{range}</span>
 					</div>
 				);
 			})}
@@ -341,7 +346,7 @@ function FileRow({ file, cosmetic, state, current, expanded, onPick, onOpen, onT
 	};
 
 	const clickRow = (event: MouseEvent): void => {
-		if ((event.target as HTMLElement).closest("wa-checkbox, .discard, .exp") === null) {
+		if ((event.target as HTMLElement).closest("wa-checkbox, .gp-discard, .gp-expand") === null) {
 			onOpen();
 		}
 	};
@@ -352,19 +357,19 @@ function FileRow({ file, cosmetic, state, current, expanded, onPick, onOpen, onT
 	};
 
 	return (
-		<div class={"file" + (cosmetic ? " cosmetic" : "")} aria-current={current} onClick={clickRow}>
-			<wa-checkbox class="pick" checked={state !== "off"} indeterminate={state === "partial"} onChange={(event: Event) => { onPick((event.target as HTMLInputElement).checked); }} />
+		<div class="gp-file wa-cluster wa-flex-nowrap wa-gap-xs" aria-current={current} onClick={clickRow}>
+			<wa-checkbox checked={state !== "off"} indeterminate={state === "partial"} onChange={(event: Event) => { onPick((event.target as HTMLInputElement).checked); }} />
 
-			<span class={"st " + file.status}>{file.status}</span>
+			<wa-badge class="gp-status" variant={STATUS_VARIANTS[file.status]} appearance="filled">{file.status}</wa-badge>
 
-			<span class="nm"><bdi dir="ltr">{file.path}</bdi></span>
+			<span class={"gp-name wa-text-truncate" + (cosmetic ? " wa-color-text-quiet" : "")}><bdi dir="ltr">{file.path}</bdi></span>
 
-			<span class="tail">
-				{isCodeFile(file) && <wa-button class="exp" appearance="plain" size="small" title="Your edits" aria-label="Your edits" onClick={clickExpand}>{expanded ? "▾" : "▸"}</wa-button>}
+			<span class="wa-cluster wa-flex-nowrap wa-gap-2xs">
+				{isCodeFile(file) && <wa-button class="gp-expand" appearance="plain" size="small" title="Your edits" aria-label="Your edits" onClick={clickExpand}>{expanded ? "▾" : "▸"}</wa-button>}
 
-				{cosmetic && <wa-badge class="cos" variant="neutral">cosmetic</wa-badge>}
+				{cosmetic && <wa-badge variant="neutral">cosmetic</wa-badge>}
 
-				<wa-button class={"discard" + (armed ? " armed" : "")} appearance="plain" size="small" variant="danger" title="Discard changes" aria-label="Discard changes" onClick={clickDiscard}>{armed ? "Discard?" : "⨯"}</wa-button>
+				<wa-button class={"gp-discard" + (armed ? " armed" : "")} appearance="plain" size="small" variant="danger" title="Discard changes" aria-label="Discard changes" onClick={clickDiscard}>{armed ? "Discard?" : "⨯"}</wa-button>
 			</span>
 		</div>
 	);
@@ -422,12 +427,12 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const renderPlain = (head: string, working: string): void => {
 		const diff = document.createElement("div");
 
-		diff.className = "diff";
+		diff.className = "sxs-plain";
 
 		for (const row of collapse(lineDiff(head, working))) {
 			const line = document.createElement("div");
 
-			line.className = "row " + row.t;
+			line.className = "sxs-plain-row " + row.t;
 			line.textContent = ROW_MARKS[row.t] + row.text;
 			diff.appendChild(line);
 		}
@@ -555,9 +560,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		});
 	};
 
-	// Mount-once wiring: the overlay close button, git.changed refresh, and the initial load. NOTE: the diff grid's
-	// scoping class (`wa-diff-body`) is declared on overlay.body in the SHELL's JSX (shell.tsx), not added here — the
-	// shell owns that element, so an imperative classList.add would be clobbered on its next preact re-render.
+	// Mount-once wiring: the overlay close button, git.changed refresh, and the initial load.
 	useEffect(() => {
 		overlay.close.addEventListener("click", hideOverlay);
 
@@ -712,22 +715,22 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const commitLabel = commitLabelOf(commitError, allChecked, chosen, total);
 
 	return (
-		<div class="gp">
-			<div class="head">
-				<wa-checkbox checked={allChecked} indeterminate={someChecked} title="Select all changes" aria-label="Select all changes" onChange={(event: Event) => { toggleAll((event.target as HTMLInputElement).checked); }} />
+		<div class="gp wa-stack wa-gap-0 wa-font-size-s">
+			<div class="gp-head wa-split wa-flex-nowrap wa-gap-xs wa-font-size-2xs wa-text-uppercase wa-color-text-quiet">
+				<span class="wa-cluster wa-flex-nowrap wa-gap-xs">
+					<wa-checkbox checked={allChecked} indeterminate={someChecked} title="Select all changes" aria-label="Select all changes" onChange={(event: Event) => { toggleAll((event.target as HTMLInputElement).checked); }} />
 
-				<span>Changes</span>
+					<span>Changes</span>
 
-				<span class="count">{total}</span>
-
-				<span class="spacer" />
+					<span class="wa-color-text-normal wa-font-weight-semibold">{total}</span>
+				</span>
 
 				{headerEnd}
 			</div>
 
-			<div class="files">
+			<div class="gp-files">
 				{total === 0
-					? <div class="empty">No changes</div>
+					? <div class="gp-empty wa-text-center wa-color-text-quiet">No changes</div>
 					: files.map((file) => (
 							<Fragment key={file.path}>
 								<FileRow
@@ -747,7 +750,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 						))}
 			</div>
 
-			<div class="commit">
+			<div class="gp-commit wa-stack wa-gap-xs">
 				<wa-textarea ref={msgRef} rows={2} resize="vertical" placeholder="Summary — describe your changes" />
 
 				<wa-button variant="brand" disabled={chosen === 0 || committing} onClick={() => { void commit(); }}>{commitLabel}</wa-button>
