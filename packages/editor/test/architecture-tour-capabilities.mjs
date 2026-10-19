@@ -131,7 +131,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Rule…").click();
 	});
 	assert.equal(await eventually("the rule editor, prefilled", status), "Covers this call: allows it");
-	await resourceRow([".rule-editor-operator select", "matches", "change"]);
+	await resourceRow([".rule-editor-operator", "matches", "change"]);
 	await resourceRow([".rule-editor-argument", "/tmp/*", "input"]);
 	assert.equal(await status(), "Doesn't cover this call");
 	assert.equal(await saveable(), false, "a rule that doesn't cover the call can't decide it");
@@ -851,7 +851,7 @@ test("mock a call's result: given at its capability stop, from what it returned 
 	});
 
 	assert.match(await eventually("the rule, given what it returned", async () => ((await ruleStatus() ?? "").startsWith("Covers this call: gives it what it returned on ") ? ruleStatus() : undefined)), /^Covers this call: gives it what it returned on /u);
-	assert.equal(await inRuleView(() => document.querySelector(".rule-panel .rule-editor-then .rule-editor-action-target select").value), "result");
+	assert.equal(await inRuleView(() => document.querySelector(".rule-panel .rule-editor-then .rule-editor-action-target").value), "result");
 	await pressInRuleView("Save as rule");
 
 	// Saved, the run goes on with it (and ends); the next run is given it with no stop, past both awaits.

@@ -40,7 +40,7 @@ function panelOf(policy: PolicyModule, request: EditRequest, pressed: (button: s
 	let editor: ReturnType<typeof ruleEditor> | undefined;
 	const buttons = request.buttons.map((button) => {
 		// (Save is the one that's the brand's: the rest are neutral)
-		const each = element("wa-button", "", { "size": "s", "variant": button.className === "save" ? "brand" : "neutral", "textContent": button.label, "title": button.title });
+		const each = element("wa-button", "rule-panel-choice", { "size": "s", "variant": button.className === "save" ? "brand" : "neutral", "textContent": button.label, "title": button.title });
 
 		each.addEventListener("click", () => {
 			pressed(button.id, editor?.rule() ?? rule);

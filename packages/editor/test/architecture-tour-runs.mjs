@@ -666,9 +666,9 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 		await workbench.evaluate(() => {
 			[...document.querySelectorAll(".live-values-row[data-line=\"2\"] button")].find((each) => each.textContent === "Mock…").click();
 		});
-		await eventually("high's rule editor", () => inRuleView(() => document.querySelector(".rule-panel .rule-editor-then input") !== null || undefined));
+		await eventually("high's rule editor", () => inRuleView(() => document.querySelector(".rule-panel .rule-editor-then wa-input") !== null || undefined));
 		await inRuleView((label) => {
-			const input = document.querySelector(".rule-panel .rule-editor-then input");
+			const input = document.querySelector(".rule-panel .rule-editor-then wa-input");
 
 			input.value = "3";
 			input.dispatchEvent(new Event("input"));
@@ -763,7 +763,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 
 				// Each run's arguments, as a command line.
 				for (const [index, line] of value.entries()) {
-					const input = runs()[index].querySelector("input");
+					const input = runs()[index].querySelector("wa-input");
 
 					input.value = line;
 					input.dispatchEvent(new Event("input"));
