@@ -236,10 +236,23 @@ test("provoke: a cold transform round in a child worker", async () => {
 // and the call waits on it — saved, it decides the call.
 test("preview prompt: Rule… makes the rule in the Rules view, and the call waits on it", async () => {
 	const workbench = session.workbench();
-	// A preview's own fetch: the service worker gates it, and asks in that preview's window.
-	const preview = await eventually("a preview", () => session.page.frames().find((frame) => /\/__virtual__\/[^/]+\/\d+\//u.test(frame.url())));
-	// (A host the previews reach anyway: esm.sh.)
-	const decided = preview.evaluate(() => fetch("https://esm.sh/").then((response) => response.statusText, (error) => String(error)));
+	// A preview's own fetch: the service worker gates it, and asks in that preview's window. (A host the previews reach
+	// anyway: esm.sh.) The preview found can be mid-navigation, a reload an earlier test's run left: then it's asked
+	// again, in the frame found then.
+	const ask = async (tries = 5) => {
+		const preview = await eventually("a preview", () => session.page.frames().find((frame) => /\/__virtual__\/[^/]+\/\d+\//u.test(frame.url())));
+
+		try {
+			return await preview.evaluate(() => fetch("https://esm.sh/").then((response) => response.statusText, (error) => String(error)));
+		} catch (error) {
+			if (tries > 1 && /Execution context was destroyed|Frame was detached/u.test(String(error))) {
+				return ask(tries - 1);
+			}
+
+			throw error;
+		}
+	};
+	const decided = ask();
 	const rule = session.page.locator("wa-button", { "hasText": "Rule…" });
 
 	await rule.first().waitFor({ "timeout": 30_000 });
