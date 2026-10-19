@@ -1,0 +1,169 @@
+/**
+ * The Errors pages (packages/api/OPERATIONS.md, "Errors"; O4): every uncaught error, grouped, most recently seen first;
+ * a group's occurrences; one occurrence (by the id a person quoted, `E-ABCD-EFGH`): its stack, release, trace id and,
+ * if they were signed in, whose sign-in. Messages and stacks were redacted before they were stored. `errors:read`.
+ */
+import { useEffect, useState } from "preact/hooks";
+import { get } from "./session";
+import { Table, When } from "./views";
+
+interface Group { "fingerprint": string; "source": string; "name": string; "message": string | null; "route": string | null; "first_seen": number; "last_seen": number; "count": number; "releases": string; "recent"?: number }
+
+interface Occurrence { "id": string; "at": number; "route": string | null; "release": string | null; "trace_id": string | null; "grant_id": string | null; "user_id": string | null; "message": string | null; "stack"?: string | null; "name"?: string; "source"?: string; "count"?: number; "fingerprint"?: string }
+
+/** A read: its data (the caller says its shape), or what went wrong. */
+function useGet(path: string): { "data"?: unknown; "problem"?: string } {
+	const [state, setState] = useState<{ "data"?: unknown; "problem"?: string }>({});
+
+	useEffect(() => {
+		setState({});
+		get(path).then((data) => {
+			setState({ "data": data });
+		}, (error: unknown) => {
+			setState({ "problem": error instanceof Error && / 404$/u.test(error.message) ? "Not found: the id may be mistyped, or older than 30 days." : error instanceof Error && / 403$/u.test(error.message) ? "Your roles don't include this." : "Couldn't load this." });
+		});
+	}, [path]);
+
+	return state;
+}
+
+const isErrorId = (text: string): boolean => /^E?[\s-]*[A-HJ-NP-Z2-9]{4}[\s-]*[A-HJ-NP-Z2-9]{4}$/iu.test(text.trim());
+
+/** A search for the id a person quoted. */
+function FindById() {
+	const [problem, setProblem] = useState<string | undefined>();
+
+	return (
+		<form
+			class="wa-cluster wa-gap-s wa-align-items-end"
+			onSubmit={(event) => {
+				event.preventDefault();
+
+				const typed = (event.currentTarget.elements.namedItem("id") as HTMLInputElement).value;
+
+				if (isErrorId(typed)) {
+					setProblem(undefined);
+					location.hash = `#/errors/${encodeURIComponent(typed.trim())}`;
+				} else {
+					setProblem("An error id looks like E-ABCD-EFGH.");
+				}
+			}}
+		>
+			<wa-input name="id" label="Find an error by its id" placeholder="E-ABCD-EFGH" />
+			<wa-button type="submit">Find</wa-button>
+			{problem !== undefined && <span class="wa-color-danger-on-quiet">{problem}</span>}
+		</form>
+	);
+}
+
+/** A stack, a line each. */
+function Stack({ text }: { "text": string }) {
+	return <div class="wa-stack wa-gap-3xs wa-font-family-code wa-caption-m">{text.split("\n").map((line, index) => <span key={index}>{line}</span>)}</div>;
+}
+
+export function ErrorsPage() {
+	const read = useGet("/errors?days=7") as { "data"?: { "days": number; "errors": Group[] }; "problem"?: string };
+
+	return (
+		<section class="wa-stack wa-gap-l">
+			<h1 class="wa-heading-xl">Errors</h1>
+			<p class="wa-color-text-quiet">Every uncaught error in the last 7 days, grouped by its name and where in the code it happened. A person who saw one was shown its id: find it here.</p>
+			<FindById />
+			{read.problem !== undefined && <wa-callout variant="danger">{read.problem}</wa-callout>}
+			{read.data === undefined ? read.problem === undefined && <wa-spinner /> : read.data.errors.length === 0 ? <p class="wa-color-text-quiet">None. 🎉</p> : (
+				<Table head={["Error", "Where", "Last 7 days", "In all", "First seen", "Last seen", "Releases"]}>
+					{read.data.errors.map((group) => (
+						<tr key={group.fingerprint}>
+							<td><a href={`#/errors/${group.fingerprint}`}><strong>{group.name}</strong></a> <span class="wa-color-text-quiet">{group.message}</span></td>
+							<td>{group.source} · {group.route}</td>
+							<td>{group.recent}</td>
+							<td>{group.count}</td>
+							<td><When at={group.first_seen} /></td>
+							<td><When at={group.last_seen} /></td>
+							<td class="wa-font-family-code">{group.releases}</td>
+						</tr>
+					))}
+				</Table>
+			)}
+		</section>
+	);
+}
+
+export function ErrorGroupPage({ fingerprint }: { "fingerprint": string }) {
+	const read = useGet(`/errors/${encodeURIComponent(fingerprint)}`) as { "data"?: { "error": Group; "occurrences": Occurrence[] }; "problem"?: string };
+
+	if (read.problem !== undefined) {
+		return <wa-callout variant="danger">{read.problem}</wa-callout>;
+	}
+
+	if (read.data === undefined) {
+		return <wa-spinner />;
+	}
+
+	const { error, occurrences } = read.data;
+
+	return (
+		<section class="wa-stack wa-gap-l">
+			<div><a href="#/errors">Errors</a></div>
+			<h1 class="wa-heading-xl">{error.name}</h1>
+			<p>{error.message}</p>
+			<p class="wa-color-text-quiet">{error.source} · {error.route} · {error.count} in all, first <When at={error.first_seen} />, last <When at={error.last_seen} /> · releases {error.releases}</p>
+			<Table head={["Id", "When", "Release", "Signed in as"]}>
+				{occurrences.map((occurrence) => (
+					<tr key={occurrence.id}>
+						<td class="wa-font-family-code"><a href={`#/errors/${occurrence.id}`}>{occurrence.id}</a></td>
+						<td><When at={occurrence.at} /></td>
+						<td class="wa-font-family-code">{occurrence.release}</td>
+						<td>{occurrence.user_id === null ? <span class="wa-color-text-quiet">signed out</span> : <a href={`#/users/${occurrence.user_id}`}>{occurrence.user_id.slice(0, 8)}…</a>}</td>
+					</tr>
+				))}
+			</Table>
+		</section>
+	);
+}
+
+export function ErrorOccurrencePage({ id }: { "id": string }) {
+	const read = useGet(`/errors/occurrence/${encodeURIComponent(id)}`) as { "data"?: { "occurrence": Occurrence }; "problem"?: string };
+
+	if (read.problem !== undefined) {
+		return (
+			<section class="wa-stack wa-gap-l">
+				<div><a href="#/errors">Errors</a></div>
+				<wa-callout variant="danger">{read.problem}</wa-callout>
+				<FindById />
+			</section>
+		);
+	}
+
+	if (read.data === undefined) {
+		return <wa-spinner />;
+	}
+
+	const { occurrence } = read.data;
+
+	return (
+		<section class="wa-stack wa-gap-l">
+			<div><a href="#/errors">Errors</a> · <a href={`#/errors/${occurrence.fingerprint}`}>its group ({occurrence.count})</a></div>
+			<h1 class="wa-heading-xl">{occurrence.id}</h1>
+			<p><strong>{occurrence.name}</strong> {occurrence.message}</p>
+			<Table head={["When", "Where", "Release", "Signed in as", "Trace"]}>
+				<tr>
+					<td>{new Date(occurrence.at).toLocaleString()}</td>
+					<td>{occurrence.source} · {occurrence.route}</td>
+					<td class="wa-font-family-code">{occurrence.release}</td>
+					<td>{occurrence.user_id === null ? <span class="wa-color-text-quiet">signed out</span> : <a href={`#/users/${occurrence.user_id}`}>{occurrence.user_id.slice(0, 8)}…</a>}</td>
+					<td class="wa-font-family-code">{occurrence.trace_id ?? "—"}</td>
+				</tr>
+			</Table>
+			<h2 class="wa-heading-l">Stack</h2>
+			{occurrence.stack === null || occurrence.stack === undefined ? <p class="wa-color-text-quiet">None recorded.</p> : <Stack text={occurrence.stack} />}
+		</section>
+	);
+}
+
+/** Which Errors page a path is: the list, an occurrence (by its id), or a group (by its fingerprint). */
+export function errorsPageFor(path: string) {
+	const rest = decodeURIComponent(path.slice("/errors".length).replace(/^\//u, ""));
+
+	return rest === "" ? <ErrorsPage /> : isErrorId(rest) ? <ErrorOccurrencePage id={rest} /> : <ErrorGroupPage fingerprint={rest} />;
+}

@@ -4,6 +4,7 @@ import { publicKey } from "@brianjenkins94/util/auth/dpop";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { callbackEndpoint, metadataEndpoint, startEndpoint } from "./github.ts";
 import { deleteAccountEndpoint, purge, revokeAllEndpoint, revokeSessionEndpoint, sessionsEndpoint } from "./account.ts";
@@ -26,7 +27,8 @@ import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
 import { allowedOrigins } from "./clients.ts";
 import { maintenance, maintenanceGate } from "./maintenance.ts";
 import { checkSpend } from "./spend.ts";
-import { ensureCanary } from "./tripwire.ts";
+import { Breach, ensureCanary, unwatched } from "./tripwire.ts";
+import { expireErrors, recordError } from "./errors.ts";
 
 export { Attempt } from "./attempt.ts";
 export { Grant } from "./grant.ts";
@@ -229,11 +231,29 @@ app.notFound(async (context) => {
 	return context.json({ "error": "not_found" }, 404);
 });
 
-// The error's name only: a message can quote whatever input caused it.
-app.onError((error, context) => {
+// Every uncaught error recorded (src/errors.ts, OPERATIONS.md O4), redacted, under the id the person is shown, so "it
+// broke" goes from their words to the stack in one search. The span has the name only: a message can quote whatever
+// input caused it. A tripwire breach answers for itself (src/tripwire.ts).
+app.onError(async (error, context) => {
 	context.get("span")?.error("request failed", { "error": error.name });
 
-	return context.json({ "error": "internal" }, 500);
+	if (error instanceof Breach) {
+		return context.json({ "error": "internal" }, 500);
+	}
+
+	const id = await recordError(unwatched(context.env), {
+		"source": "api",
+		"name": error.name,
+		"message": error.message,
+		"stack": error.stack,
+		"route": `${context.req.method} ${routePath(context, -1)}`,
+		"release": context.env.RELEASE ?? "local",
+		"traceId": (context.get("span") as { "traceId"?: string } | undefined)?.traceId ?? null,
+		"grantId": context.get("grant") ?? null,
+		"userId": context.get("user") ?? null
+	}).catch(() => undefined);
+
+	return context.json({ "error": "internal", ...id === undefined ? {} : { "id": id } }, 500);
 });
 
 /** The cost guard's cron (wrangler.jsonc's triggers). */
@@ -268,6 +288,8 @@ export default {
 		}));
 		context.waitUntil(log.span("inbox.expire", {}, async () => {
 			await expireInbox(env.DB);
+			// Errors (src/errors.ts): occurrences 30 days, groups 90 after last seen.
+			await expireErrors(env.DB);
 			// Emails to the owner (src/mail.ts): kept 90 days.
 			await env.DB.prepare("DELETE FROM alerts WHERE at < ?").bind(Date.now() - 90 * 86_400_000).run();
 		}));

@@ -110,7 +110,8 @@ export async function purge(env: Bindings, now = Date.now()): Promise<number> {
 			env.DB.prepare("DELETE FROM recovery_codes WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM email_mfa WHERE user_id = ?").bind(user),
 			env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user),
-			env.DB.prepare("UPDATE audit SET user_id = NULL WHERE user_id = ?").bind(user)
+			env.DB.prepare("UPDATE audit SET user_id = NULL WHERE user_id = ?").bind(user),
+			env.DB.prepare("UPDATE error_occurrences SET user_id = NULL, grant_id = NULL WHERE user_id = ?").bind(user)
 		]);
 		await audit(env, "account_purged", {}, NOWHERE, { "reason": `deleted more than ${GRACE_DAYS} days ago`, "detail": `${grants.length} sign-in(s) erased` });
 	}

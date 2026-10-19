@@ -153,7 +153,7 @@ function Login({ id }: { "id": number | null }) {
 }
 
 /** A moment, relative ("3 minutes ago"), with the exact time on hover. */
-function When({ at }: { "at": number | null }) {
+export function When({ at }: { "at": number | null }) {
 	return at === null ? <span class="wa-color-text-quiet">never</span> : <wa-relative-time date={new Date(at).toISOString()} title={new Date(at).toLocaleString()} />;
 }
 

@@ -163,3 +163,22 @@ test("every alert to the owner is logged, with whether it was sent; the Mail pag
 	assert.ok(toOwner().some((message) => message.subject === "[unusually good local] Test alert"));
 	assert.equal((await (await byGitHub(VIEWER, "admin")).call("POST", "/admin/alerts/test", {})).status, 403, "a viewer can look, not send");
 });
+
+test("past five alerts in fifteen minutes, the rest are held: logged for the Mail page, not emailed; the fifth says so", async () => {
+	await env.DB.prepare("DELETE FROM alerts").run();
+
+	const owner = await byGitHub(OWNER, "admin");
+	const before = toOwner().length;
+
+	for (let count = 0; count < 7; count += 1) {
+		await owner.call("POST", "/admin/alerts/test", {});
+	}
+
+	assert.equal(toOwner().length - before, 5, "five emailed");
+	assert.match(toOwner().at(-1)?.text ?? "", /This is the 5th alert in 15 minutes/u);
+
+	const alerts = (await (await owner.call("GET", "/admin/alerts")).json() as { "alerts": { "status": string; "detail": string | null }[] }).alerts;
+
+	assert.equal(alerts.length, 7, "all seven logged");
+	assert.deepEqual(alerts.slice(0, 2).map((alert) => [alert.status, alert.detail]), [["not sent", "held: 5 already sent in 15 minutes"], ["not sent", "held: 5 already sent in 15 minutes"]]);
+});

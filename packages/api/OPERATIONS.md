@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19; O1, O2 and O3 built.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1 to O4 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -31,6 +31,9 @@ person's problem easy to look into. Each step lands green, tested in workerd, as
   took it (and its message id) or why it wasn't sent. The admin app's Mail page lists them with Cloudflare's delivery
   status for each (matched by message id from its per-message analytics: delivered, bounced and why), and has **Send a
   test alert**, so whether alerts arrive is checked there, not asked about. Kept 90 days.
+- **At most five alerts in fifteen minutes** (`ALERTS_PER_WINDOW`, src/mail.ts; asked for 2026-10-19): past that, an
+  alert is held: logged on the Mail page ("held: 5 already sent in 15 minutes"), not emailed. The fifth says so. Sign-in
+  codes to people aren't alerts: they have their own limits (per address, per IP).
 
 ## The cost guard
 
@@ -162,7 +165,22 @@ Each lands green and is tried before the next.
   - 4 tests in test/tripwire.test.ts (the canary seeded; a request reading the canary's value end to end; the watched
     binding against a stand-in D1: another user's row trips or is reported, one's own doesn't, `crossUser` is
     unwatched; the canary in any column, a batch and raw rows).
-- **O4 · server errors.** Error ids, `onError`, the `errors` table, the Errors page.
+- **O4 · server errors.** *Built 2026-10-19* (src/errors.ts, migrations/0016; the admin app's src/errors.tsx):
+  - `app.onError` records every uncaught error but a tripwire breach (which answers for itself), and answers
+    `500 { error: "internal", id: "E-ABCD-EFGH" }` (util/auth/codes' symbols).
+  - Fingerprint: util/hash's `shortHash` of the source, the name and the top five stack frames by function name (no
+    line numbers, which change every bundle), or the route when there are none.
+  - Stored redacted: util/redact's `redactString`, and email addresses masked; message 500 characters, stack 4,000.
+  - `errors` (a group: first and last seen, count, the releases it's appeared in) and `error_occurrences` (route,
+    release, trace id, sign-in, user). Occurrences 30 days, groups 90 after last seen; a purged account's occurrences
+    lose their user and sign-in.
+  - `RELEASE`: the deployed commit (`wrangler deploy --var RELEASE:…` in cd.yml and production.yml).
+  - The owner emailed for a new group (at most one such email an hour) and when a group reaches `SURGE` (50) in an hour.
+  - `errors:read` (owner, viewer): `GET /admin/errors`, `/admin/errors/:fingerprint`, `/admin/errors/occurrence/:id`
+    (the id however it's typed). The Errors page: groups, a group's occurrences, an occurrence's stack, release, trace
+    and whose sign-in, and a search by id.
+  - 2 tests in test/errors.test.ts (scrubbing and fingerprints; a failing request end to end: the id, one group for two
+    occurrences, the owner told once, found by group and by id however typed, a surge emailed once).
 - **O5 · server timelines.** Request events in the Grant, the Timeline on a sign-in's page, `sessions:replay`.
 - **O6 · editor events and errors.** The vocabulary, `POST /session/events`, `POST /errors` (signed in and anonymous),
   the editor's error notice with its id.

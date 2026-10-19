@@ -12,7 +12,7 @@ import { unwatched } from "./tripwire.ts";
  */
 
 /** Everything the admin API can be asked to do, one string per action. */
-export const PERMISSIONS = ["users:read", "sessions:read", "sessions:revoke", "audit:read", "audit:verify", "traffic:read", "behavior:read", "architecture:read", "mail:read", "mail:test", "maintenance:switch"] as const;
+export const PERMISSIONS = ["users:read", "sessions:read", "sessions:revoke", "audit:read", "audit:verify", "traffic:read", "behavior:read", "architecture:read", "mail:read", "mail:test", "maintenance:switch", "errors:read"] as const;
 
 export type Permission = typeof PERMISSIONS[number];
 

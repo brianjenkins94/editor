@@ -46,6 +46,11 @@ export async function send(env: Bindings, mail: Mail): Promise<{ "ok": true; "me
 	}
 }
 
+/** The owner gets at most this many alerts in ALERT_WINDOW (decided 2026-10-19): five in fifteen minutes. */
+export const ALERTS_PER_WINDOW = 5;
+
+export const ALERT_WINDOW = 15 * 60_000;
+
 /** Keep what the owner was (or wasn't) told: the Mail page's alerts (migrations/0015). Best effort. */
 async function logAlert(env: Bindings, subject: string, text: string, sent: { "ok": true; "messageId"?: string } | { "ok": false; "reason": string }): Promise<void> {
 	await env.DB.prepare("INSERT INTO alerts (at, subject, text, sent, message_id, reason) VALUES (?, ?, ?, ?, ?, ?)").bind(Date.now(), subject, text, "reason" in sent ? 0 : 1, "messageId" in sent ? sent.messageId ?? null : null, "reason" in sent ? sent.reason : null).run().catch(() => undefined);
@@ -59,6 +64,23 @@ async function logAlert(env: Bindings, subject: string, text: string, sent: { "o
  */
 export async function tellOwner(env: Bindings, subject: string, text: string): Promise<void> {
 	const { log } = await import("./log.ts");
+
+	// At most ALERTS_PER_WINDOW emails in ALERT_WINDOW: past that, held (logged for the Mail page, not sent), so a flapping
+	// problem can't flood the inbox. The last one sent says so.
+	const sentLately = (await env.DB.prepare("SELECT COUNT(*) AS n FROM alerts WHERE sent = 1 AND at > ?").bind(Date.now() - ALERT_WINDOW).first<{ "n": number }>().catch(() => null))?.n ?? 0;
+
+	if (sentLately >= ALERTS_PER_WINDOW) {
+		log.warn("owner not emailed", { "subject": subject, "reason": "held" });
+		await logAlert(env, subject, text, { "ok": false, "reason": `held: ${ALERTS_PER_WINDOW} already sent in ${ALERT_WINDOW / 60_000} minutes` });
+
+		return;
+	}
+
+	if (sentLately === ALERTS_PER_WINDOW - 1) {
+		text = `${text}
+
+This is the ${ALERTS_PER_WINDOW}th alert in ${ALERT_WINDOW / 60_000} minutes: until that's fewer, further alerts are held, logged on the admin app's Mail page but not emailed.`;
+	}
 
 	if (env.ALERT_EMAIL === undefined || !canSend(env)) {
 		const reason = env.ALERT_EMAIL === undefined ? "no ALERT_EMAIL" : "can't send here";

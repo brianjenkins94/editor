@@ -14,6 +14,7 @@ import { adminSession } from "./tokens.ts";
 import { trafficEndpoint } from "./traffic.ts";
 import { down, maintenance, setMaintenance } from "./maintenance.ts";
 import { spendEndpoint } from "./spend.ts";
+import { errorGroupEndpoint, errorOccurrenceEndpoint, errorsEndpoint } from "./errors.ts";
 
 /**
  * The admin API (packages/admin/README.md, "The admin API"), mounted at /admin. Only tokens issued to the `admin` client
@@ -171,6 +172,13 @@ admin.get("/inbox", requires("mail:read"), inboxEndpoint);
 /** The email smoke test (src/smoke.ts), now: a sign-in by email with our own address, the code read back from our inbox.
  *  It sends a real email, so it's a permission of its own. */
 admin.post("/mail/smoke", requires("mail:test"), async (context) => context.json(await smokeTest(context.env, context.executionCtx)));
+
+/** Errors (src/errors.ts, OPERATIONS.md O4): the groups, a group's occurrences, one occurrence by the id a person quoted. */
+admin.get("/errors", requires("errors:read"), errorsEndpoint);
+
+admin.get("/errors/occurrence/:id", requires("errors:read"), errorOccurrenceEndpoint);
+
+admin.get("/errors/:fingerprint", requires("errors:read"), errorGroupEndpoint);
 
 /** The emails to the owner (src/mail.ts, `tellOwner`): each, and what Cloudflare says became of it; and a test one. */
 admin.get("/alerts", requires("mail:read"), alertsEndpoint);

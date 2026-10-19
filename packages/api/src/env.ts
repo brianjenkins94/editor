@@ -39,6 +39,8 @@ export interface Bindings {
 	/** "enforce" locally and in the tests: the tripwire trips on another user's row from the start (src/tripwire.ts).
 	 *  "by-date" in dev and production: from ENFORCE_FROM. */
 	"TRIPWIRE"?: string;
+	/** The deployed commit (`wrangler deploy --var RELEASE:…`, cd.yml and production.yml): errors say which release. */
+	"RELEASE"?: string;
 	/** Email (src/mail.ts, SIGN-IN.md C2): Cloudflare Email Service's `send_email` binding where it's set up; in the harness
 	 *  and the tests, an outbox stand-in's URL instead. Codes are an HMAC under CODE_KEY (a secret). Without either, or
 	 *  without the key, email sign-in says it isn't set up. */

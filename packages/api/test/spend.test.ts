@@ -104,7 +104,7 @@ const switchedOn = async (): Promise<boolean> => (await (await browse(at("/statu
 beforeEach(async () => {
 	analytics.down = false;
 	outbox.length = 0;
-	await env.DB.batch([env.DB.prepare("DELETE FROM audit WHERE event LIKE 'spend_%' OR event LIKE 'maintenance_%'"), env.DB.prepare("UPDATE maintenance SET switched_on = 0, reason = NULL, by = NULL, at = NULL, noticed = 1 WHERE id = 1")]);
+	await env.DB.batch([env.DB.prepare("DELETE FROM audit WHERE event LIKE 'spend_%' OR event LIKE 'maintenance_%'"), env.DB.prepare("DELETE FROM alerts"), env.DB.prepare("UPDATE maintenance SET switched_on = 0, reason = NULL, by = NULL, at = NULL, noticed = 1 WHERE id = 1")]);
 });
 
 test("under half the budget, nothing; past half, the owner emailed once a day; the admin app sees it priced by meter", async () => {

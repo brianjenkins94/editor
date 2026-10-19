@@ -24,6 +24,7 @@ import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { ArchitecturePage } from "./architecture";
 import { loginOf } from "./logins";
+import { errorsPageFor } from "./errors";
 import { MailPage } from "./mail";
 import type { Maintenance } from "./maintenance";
 import { KillSwitch, MaintenanceBanner } from "./maintenance";
@@ -141,6 +142,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 						: path === "/unusual" ? <UnusualPage />
 							: path === "/architecture" ? <ArchitecturePage query={query} />
 								: path === "/mail" ? <MailPage query={query} />
+								: path === "/errors" || path.startsWith("/errors/") ? errorsPageFor(path)
 									: path === "/account" ? <AccountPage api={ACCOUNT} />
 								: <Overview switch={me.permissions.includes("maintenance:switch") ? <KillSwitch maintenance={me.maintenance} /> : undefined} />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
@@ -167,6 +169,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/sessions", "Sign-ins", path === "/sessions")}
 				{link("#/audit", "Audit log", path === "/audit")}
 				{link("#/unusual", "Unusual", path === "/unusual")}
+				{link("#/errors", "Errors", path.startsWith("/errors"))}
 				{link("#/mail", "Mail", path === "/mail")}
 				{link("#/traffic", "Traffic", path === "/traffic")}
 				{link("#/architecture", "Architecture", path === "/architecture")}
