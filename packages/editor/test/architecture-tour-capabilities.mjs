@@ -91,7 +91,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	// Allow, from the margin's own button (this call): the call runs; nothing is written to the policy.
 	await start();
 	await workbench.evaluate(() => {
-		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Allow").click();
+		[...document.querySelectorAll("[data-item=\"ask\"] .live-values-choice")].find((button) => button.textContent === "Allow").click();
 	});
 	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
 	assert.deepEqual(await silo("read"), [], "Allow once writes no rule");
@@ -128,7 +128,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	});
 	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
 	await workbench.evaluate(() => {
-		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Rule…").click();
+		[...document.querySelectorAll("[data-item=\"ask\"] .live-values-choice")].find((button) => button.textContent === "Rule…").click();
 	});
 	assert.equal(await eventually("the rule editor, prefilled", status), "Covers this call: allows it");
 	await resourceRow([".rule-editor-operator", "matches", "change"]);
@@ -847,7 +847,7 @@ test("mock a call's result: given at its capability stop, from what it returned 
 	assert.equal(stopped.line, 2);
 	await eventually("the question", () => workbench.evaluate(() => document.querySelector("[data-item=\"ask\"]") !== null || undefined));
 	await workbench.evaluate(() => {
-		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Rule…").click();
+		[...document.querySelectorAll("[data-item=\"ask\"] .live-values-choice")].find((button) => button.textContent === "Rule…").click();
 	});
 
 	assert.match(await eventually("the rule, given what it returned", async () => ((await ruleStatus() ?? "").startsWith("Covers this call: gives it what it returned on ") ? ruleStatus() : undefined)), /^Covers this call: gives it what it returned on /u);

@@ -122,12 +122,12 @@ test("an extension's pane view: its tab, its items level with their code, follow
 	await workbench.locator(".notes-margin-cell .live-values-choice", { "hasText": "Click" }).click();
 	await eventually("the click, in its content", async () => (await cells(workbench)).some((cell) => cell.text.includes("clicked a")));
 
-	// Its input submits what was typed.
-	const input = workbench.locator(".notes-margin-cell input.live-values-input");
+	// Its input submits what was typed (a wa-input: typed into the input inside it).
+	const input = workbench.locator(".notes-margin-cell .live-values-input input");
 
 	await input.fill("hi there");
 	await input.press("Enter");
-	await eventually("what was typed, in its content", () => workbench.evaluate(() => document.querySelector(".notes-margin-cell input.live-values-input")?.value === "hi there"));
+	await eventually("what was typed, in its content", () => workbench.evaluate(() => document.querySelector(".notes-margin-cell .live-values-input")?.value === "hi there"));
 
 	// The native face (step 5): the pane hidden, the same content as VS Code's own annotations — a row as an inlay hint
 	// (its label and latest value), prose, buttons, the input and the card as CodeLenses, prose whole on hover.

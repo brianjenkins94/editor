@@ -43,4 +43,11 @@
 	--wa-form-control-value-color: var(--vscode-input-foreground);
 	--wa-form-control-placeholder-color: var(--vscode-input-placeholderForeground);
 	--wa-form-control-activated-color: var(--vscode-focusBorder);
+
+	/* What Web Awesome has no token for: a value's colours as VS Code's debugger shows them, so the Margin's live values
+	 * read like its hover. Not --wa-*, since they aren't Web Awesome's. */
+	--code-value-name: var(--vscode-debugTokenExpression-name);
+	--code-value-string: var(--vscode-debugTokenExpression-string);
+	--code-value-number: var(--vscode-debugTokenExpression-number);
+	--code-value-boolean: var(--vscode-debugTokenExpression-boolean);
 }

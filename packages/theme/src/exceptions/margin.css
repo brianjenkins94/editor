@@ -1,168 +1,189 @@
-/* The right-hand side (pane.ts): the frame beside the code, its cells and entries. */
+/*
+ * The right-hand side (pane.ts): the frame beside the code, its cells and entries. Bespoke, since nothing in Web
+ * Awesome is laid out line for line with the code: the frame, its sash, the gutter column, the cards around a step's
+ * lines and the tab strip on the pane's first line. All on --wa-* tokens (theme/vscode maps them onto the VS Code
+ * theme); the Margin's accent is the palette's purple, as the architecture view's hub links are.
+ */
 
-.notes-margin {
-  position: absolute;
-  top: 0;
-  overflow: hidden;
-  background: var(--vscode-editor-background);
-  border-left: 1px solid var(--vscode-editorRuler-foreground, var(--vscode-panel-border));
-  color: var(--vscode-editor-foreground);
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
-  z-index: 5;
-}
+/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
+ * are adopted, so the order is declared here). */
+@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
 
-.notes-margin-sash {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -3px;
-  width: 5px;
-  cursor: col-resize;
-  z-index: 1;
-}
+@layer app {
+  /* The Margin's colours, for every part of it: the frame, the gutter column and the code's marked lines are all in the
+   * editor, not in one another. */
+  .monaco-editor {
+    --margin-accent: var(--wa-color-purple-60);
+    --margin-marked: color-mix(in srgb, var(--margin-accent) 12%, transparent);
+    --margin-card: color-mix(in srgb, var(--wa-color-surface-raised) 55%, transparent);
+  }
 
-.notes-margin-sash:hover,
-.notes-margin-sash.dragging {
-  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
-}
+  .notes-margin {
+    position: absolute;
+    top: 0;
+    overflow: hidden;
+    background: var(--wa-color-surface-default);
+    border-left: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    color: var(--wa-color-text-normal);
+    font-family: var(--wa-font-family-body);
+    font-size: var(--wa-font-size-m);
+    z-index: 5;
+  }
 
-/* The gutter column, left of the code (its own overlay): a mark per line, the consumer's to style. */
-.notes-margin-gutter {
-  position: absolute;
-  top: 0;
-  overflow: hidden;
-}
+  .notes-margin-sash {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    width: 5px;
+    cursor: col-resize;
+    z-index: 1;
+  }
 
-/* A mark as VS Code draws its change bar in this lane (dirtydiffDecorator.css: 5px in, scm.diffDecorationsGutterWidth's
-   default 3px wide), so the column looks native. */
-.notes-margin-mark {
-  position: absolute;
-  left: 5px;
-  width: 3px;
-}
+  .notes-margin-sash:hover,
+  .notes-margin-sash.dragging {
+    background: var(--wa-color-focus);
+  }
 
-.notes-margin-cell {
-  position: absolute;
-  left: 0;
-  right: 0;
-  padding: 0 12px;
-  box-sizing: border-box;
-  border-left: 2px solid transparent;
-}
+  /* The gutter column, left of the code (its own overlay): a mark per line, the consumer's to style. */
+  .notes-margin-gutter {
+    position: absolute;
+    top: 0;
+    overflow: hidden;
+  }
 
-.notes-margin-cell.lit {
-  border-left-color: var(--vscode-charts-purple, #b180d7);
-}
+  /* A mark as VS Code draws its change bar in this lane (dirtydiffDecorator.css: 5px in, scm.diffDecorationsGutterWidth's
+   * default 3px wide), so the column looks native. */
+  .notes-margin-mark {
+    position: absolute;
+    left: 5px;
+    width: 3px;
+  }
 
-/* Line for line with the code (the frame sets the editor's line height): a one-line note is as tall as its line. */
-.notes-margin-entry + .notes-margin-entry {
-  margin-top: 6px;
-}
+  .notes-margin-cell {
+    position: absolute;
+    left: 0;
+    right: 0;
+    padding: 0 var(--wa-space-m);
+    box-sizing: border-box;
+    border-left: var(--wa-border-width-m) solid transparent;
+  }
 
-.notes-margin-entry p {
-  margin: 0 0 4px;
-}
+  .notes-margin-cell.lit {
+    border-left-color: var(--margin-accent);
+  }
 
-.notes-margin-entry p:last-child {
-  margin-bottom: 0;
-}
+  /* Line for line with the code (the frame sets the editor's line height): a one-line note is as tall as its line. */
+  .notes-margin-entry + .notes-margin-entry {
+    margin-top: var(--wa-space-xs);
+  }
 
-.notes-margin-entry code {
-  font-family: var(--notes-margin-code-font-family, monospace);
-  font-size: 0.92em;
-}
+  .notes-margin-entry p {
+    margin: 0 0 var(--wa-space-2xs);
+  }
 
-.notes-margin-marked {
-  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 12%, transparent);
-}
+  .notes-margin-entry p:last-child {
+    margin-bottom: 0;
+  }
 
-/* A group of entries (a step, in the program's projection): a card around its lines, behind its entries, with its
-   label on its bottom border. */
-.notes-margin-group {
-  position: absolute;
-  left: 4px;
-  right: 6px;
-  box-sizing: border-box;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 55%, transparent);
-  pointer-events: none;
-}
+  .notes-margin-entry code {
+    font-family: var(--notes-margin-code-font-family, var(--wa-font-family-code));
+    font-size: var(--notes-margin-code-font-size, var(--wa-font-size-s));
+  }
 
-.notes-margin-group.lit {
-  border-color: var(--vscode-focusBorder);
-}
+  .notes-margin-marked {
+    background: var(--margin-marked);
+  }
 
-.notes-margin-group.lit .notes-margin-group-label {
-  color: var(--vscode-foreground);
-}
+  /* A group of entries (a step, in the program's projection): a card around its lines, behind its entries, with its
+   * label on its bottom border. */
+  .notes-margin-group {
+    position: absolute;
+    left: 4px;
+    right: 6px;
+    box-sizing: border-box;
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    border-radius: var(--wa-border-radius-m);
+    background: var(--margin-card);
+    pointer-events: none;
+  }
 
-/* On the card's bottom border, like a legend: in the blank line between steps, clear of the values on its lines. */
-.notes-margin-group-label {
-  position: absolute;
-  bottom: -9px;
-  right: 8px;
-  max-width: 80%;
-  padding: 0 4px;
-  background: var(--vscode-editor-background);
-  overflow: hidden;
-  font-size: 11px;
-  line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--vscode-descriptionForeground);
-  pointer-events: auto;
-}
+  .notes-margin-group.lit {
+    border-color: var(--wa-color-focus);
+  }
 
+  .notes-margin-group.lit .notes-margin-group-label {
+    color: var(--wa-color-text-normal);
+  }
 
-/* The strip on the pane's first line (the editor's top padding is that line): the pane's views, as tabs. Pinned, over the
-   rows that scroll under it. */
-.notes-margin-tabs {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  gap: 2px;
-  padding: 0 8px;
-  box-sizing: border-box;
-  background: var(--vscode-editor-background);
-  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  z-index: 2;
-}
+  /* On the card's bottom border, like a legend: in the blank line between steps, clear of the values on its lines. */
+  .notes-margin-group-label {
+    position: absolute;
+    bottom: -9px;
+    right: 8px;
+    max-width: 80%;
+    padding: 0 var(--wa-space-2xs);
+    background: var(--wa-color-surface-default);
+    overflow: hidden;
+    font-size: var(--wa-font-size-xs);
+    line-height: var(--wa-line-height-condensed);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--wa-color-text-quiet);
+    pointer-events: auto;
+  }
 
-.notes-margin-tabs[hidden] {
-  display: none;
-}
+  /* The strip on the pane's first line (the editor's top padding is that line): the pane's views, as tabs. Pinned, over
+   * the rows that scroll under it. */
+  .notes-margin-tabs {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    gap: var(--wa-space-3xs);
+    padding: 0 var(--wa-space-s);
+    box-sizing: border-box;
+    background: var(--wa-color-surface-default);
+    border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    z-index: 2;
+  }
 
-.notes-margin-tab {
-  padding: 0 8px;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  margin-bottom: -1px;
-  background: none;
-  color: var(--vscode-descriptionForeground);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
+  .notes-margin-tabs[hidden] {
+    display: none;
+  }
 
-.notes-margin-tab:hover:not(:disabled) {
-  color: var(--vscode-foreground);
-}
+  .notes-margin-tab {
+    padding: 0 var(--wa-space-s);
+    border: 0;
+    border-bottom: var(--wa-border-width-s) solid transparent;
+    /* (its underline over the strip's border) */
+    position: relative;
+    top: var(--wa-border-width-s);
+    background: none;
+    color: var(--wa-color-text-quiet);
+    font: inherit;
+    font-size: var(--wa-font-size-xs);
+    white-space: nowrap;
+    cursor: pointer;
+  }
 
-.notes-margin-tab[aria-selected="true"] {
-  color: var(--vscode-foreground);
-  border-bottom-color: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
-}
+  .notes-margin-tab:hover:not(:disabled) {
+    color: var(--wa-color-text-normal);
+  }
 
-.notes-margin-tab:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
+  .notes-margin-tab[aria-selected="true"] {
+    color: var(--wa-color-text-normal);
+    border-bottom-color: var(--wa-color-focus);
+  }
 
-.notes-margin-tab:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: -1px;
+  .notes-margin-tab:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .notes-margin-tab:focus-visible {
+    outline: var(--wa-border-width-s) solid var(--wa-color-focus);
+    outline-offset: calc(-1 * var(--wa-border-width-s));
+  }
 }

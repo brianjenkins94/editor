@@ -36,6 +36,14 @@ export function followVsCodeTheme(workbench) {
 		document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 	}
 
+	// VS Code defines --vscode-font-family only in webviews. In its own document the UI font is the workbench element's
+	// (set by platform), so the bridge's font tokens read that.
+	const style = document.defaultView.getComputedStyle(workbench);
+
+	if (style.getPropertyValue("--vscode-font-family") === "") {
+		workbench.style.setProperty("--vscode-font-family", style.fontFamily);
+	}
+
 	function sync() {
 		const dark = DARK.some((type) => workbench.classList.contains(type));
 

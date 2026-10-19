@@ -141,13 +141,6 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.wrap = editor.getOption(monaco.editor.EditorOption.wrappingInfo).wrappingColumn !== -1;
 		editor.addOverlayWidget(this);
 		editor.addOverlayWidget(this.gutterWidget);
-
-		// The workbench's UI font, as a webview has it (--vscode-font-family / -size exist only in webviews): for what's set
-		// in the UI's type, not the code's — buttons, a rule's rows.
-		const workbench = getComputedStyle(editor.getContainerDomNode().closest(".monaco-workbench") ?? document.body);
-
-		this.element.style.setProperty("--vscode-font-family", workbench.fontFamily);
-		this.element.style.setProperty("--vscode-font-size", workbench.fontSize);
 		this.listeners.push(
 			editor.onDidScrollChange(() => { this.place(); }),
 			editor.onDidLayoutChange(() => { this.place(); }),
@@ -467,6 +460,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 		// The editor's own font for code in a note (VS Code's --vscode-editor-font-* aren't defined in here).
 		this.element.style.setProperty("--notes-margin-code-font-family", font.fontFamily);
 		this.element.style.setProperty("--notes-margin-code-font-size", `${font.fontSize}px`);
+		// (and the line's height, for what has to fit on one: a row's buttons)
+		this.element.style.setProperty("--notes-margin-line-height", `${lineHeight}px`);
 
 		// The gutter column: the line-decorations lane's left end, right of the line numbers (where the change bars were).
 		Object.assign(this.gutter.style, { "left": `${layout.decorationsLeft}px`, "width": `${GUTTER_WIDTH}px`, "height": `${layout.height}px` });

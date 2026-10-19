@@ -7,10 +7,10 @@ lives today, and proposes what this package should become.
 
 Status (2026-10-19):
 
-- Enforcement steps 4.1–4.3 are built and set to **error**. The ESLint half is at **zero**: every native element
-  it found is a Web Awesome component now, and every stylesheet left is a named exception in
-  `src/exceptions/` (§3). Stylelint still reports 224 errors, all in `pane-views.css` and `margin.css` (every
-  other exception is at zero), and runs only via `npm run lint:css`. See [§6](#6-counts) for the counts.
+- Enforcement steps 4.1–4.3 are built and set to **error**. Both halves are at **zero**: every native element
+  ESLint found is a Web Awesome component now, every stylesheet left is a named exception in `src/exceptions/`
+  (§3), and stylelint reports nothing in any of them. Stylelint still runs only via `npm run lint:css`, not in CI.
+  See [§6](#6-counts) for the counts.
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry (§3) is built: admin takes `theme`, the shell `theme/chrome` (no native styles), and the
   shell's Stitches `css({…})` is on `--wa-*` tokens (§1). The budget (4.5) isn't built yet.
@@ -189,16 +189,16 @@ In priority order. Each step closes one of the gaps above.
    - Web Awesome's copy in `packages/theme/node_modules` is a stale 3.12, so the editor build now dedupes
      `@awesome.me/webawesome` to its own 3.14.
    The `theme` entry for the shell, admin and account, which replaces their separate setups, is built too (§3).
-2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). Next: the
-   stylelint errors in `src/exceptions/` (735, now 224), shrinking each file by replacing what Web Awesome covers.
-   Every file but `pane-views` and `margin` is done (§6).
+2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). ~~Then the
+   stylelint errors in `src/exceptions/` (735), shrinking each file by replacing what Web Awesome covers.~~ Done
+   2026-10-19: every file is at zero (§6). Left: wiring stylelint into CI, a lib change (§6).
 3. ~~Convert the biggest file first: `architecture-view`, then `rule-editor`, then admin.~~ Done 2026-10-19 (§6).
 4. Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.
 5. Add the budget (4.5) once the approach that replaces it is settled.
 
 Rough expectation, not measured: most of `architecture-view`, `rule-editor`, `rule-view`, `admin` and the event-sheet
 inline styles go away. `pane-views`, the margin (`margin.css`) and the graph canvas mostly stay, as named
-exceptions.
+exceptions. (So it went: `pane-views` lost its buttons, menu and input to Web Awesome, and kept its line-aligned rows.)
 
 ## 6. Counts
 
@@ -295,6 +295,43 @@ Re-run with `npx eslint .` and `npm run lint:css`.
   pair, and Your account with an authenticator being set up. Traffic's agent table needs an analytics token, so it
   wasn't seen. The capabilities tour (which drives the rule editor) passes: 24/24.
 
+**Cleared (stylelint, `pane-views.css` 163 → 0 and `margin.css` 61 → 0):**
+
+- The pane's buttons are `wa-button`s (size `s`): an item's choices in a `wa-cluster`, and a choice with ways to go
+  (Allow: this call, this run, always) a split button — a `wa-button-group` of the button and a `wa-dropdown` whose
+  trigger is a caret `wa-button`, its ways `wa-dropdown-item`s. That retired `.live-values-split`, `.live-values-menu`,
+  `.live-values-menu-item`, `.live-values-choice.more` and the hand-rolled outside-click and Escape handling. A typed
+  value is a `wa-input`. The class names the tours query stay on the components, so `.live-values-choice`,
+  `.live-values-split` and `.live-values-menu-item` still find them; the tours that clicked a row's `button` or filled
+  an `input.live-values-input` now click `.live-values-choice` and fill the input inside `.live-values-input`.
+- A row's controls are no taller than its line: `--wa-form-control-height` is the editor's line height
+  (`--notes-margin-line-height`, which `pane.ts` now sets beside the code font), and the row's `white-space: pre` is
+  kept out of them. Otherwise `pre` renders the whitespace in the button's shadow template, a hidden Mock… button is
+  59px tall, and every row grows a view zone under its line.
+- What's left is the line-aligned layout (rows, columns per turn, the gutter column's marks, a step card and its
+  label, the tab strip, the sash), all inside `@layer app` on `--wa-*` tokens. Their literal colours became Web
+  Awesome's fills and text tokens: coverage and a run's end are `success` / `warning` / `danger`, a tone's bar the
+  variant's fill, a step's state the variant's `on-quiet`. The Margin's accent (`--margin-accent`) is the palette's
+  `--wa-color-purple-60`, as the architecture view's hub links are, so it doesn't follow the light/dark mode.
+  Spacing measured in the code's characters is `--live-values-ch` (`1ch`), named once, not a Web Awesome step.
+- Two things Web Awesome has no token for went into the bridge (`vscode.css` / `vscode.js`), the one place
+  `--vscode-*` is read:
+  - a value's colours as VS Code's debugger shows them, `--code-value-name` / `-string` / `-number` / `-boolean`
+    (not `--wa-*`, since they aren't Web Awesome's), so live values still read like the debugger's hover in any
+    theme;
+  - VS Code's UI font. `--vscode-font-family` is defined only in webviews, so in the workbench the bridge's
+    `--wa-font-family-body` was empty and components fell back to inheriting. `followVsCodeTheme` now fills it from
+    the workbench element's font, and `pane.ts` no longer sets `--vscode-font-family` / `-size` on the frame itself.
+- Gone as dead: `.live-values-choice.allow` and `.live-values-choice.mock`, `.live-values-check`, `.live-values-row.mocking`
+  and `.live-values-input.refused` (nothing set those classes). `pane-views.css` is 412 → 297 lines (183 → 107
+  declarations); `margin.css` 168 → 189, its declarations the same less the font workaround, plus the layer and
+  the accent tokens.
+- Checked in the running editor, light (Light+) and dark (Dark+), switched live: a loop's turns in columns, the
+  debugger's value colours, coverage marks, step cards and their labels, the tabs, and every row exactly one line
+  (18px) with no view zones under them. In a debug run stopped at `fs.writeFileSync`, the ask showed Allow ▾ /
+  Skip ▾ / Deny ▾ and Rule…; Allow's caret opened this call / this run / always over the pane (not clipped by the
+  frame), and choosing this run let the write happen.
+
 **Before clearing** (the baseline):
 
 **ESLint** (`webawesome/*`, in `.ts`/`.tsx`/`.js`):
@@ -308,15 +345,15 @@ Re-run with `npx eslint .` and `npm run lint:css`.
 options per file instead of merging them, so a second `no-restricted-imports` would silently undo the realm
 boundaries.
 
-**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 after the ESLint half, 224
-in 2 now (by rule below, at the baseline). The exceptions stay held to every rule: the theme's own override covers
+**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 after the ESLint half, 0
+now (by rule below, at the baseline). The exceptions stay held to every rule: the theme's own override covers
 only `theme.css` and `vscode.css`.
 
 | Rule | Baseline | Now |
 | --- | ---: | ---: |
-| `webawesome/no-unlayered-rules`: a rule outside `@layer` | 389 | 91 |
-| `scale-unlimited/declaration-strict-value`: a literal color/space/type/radius where a `--wa-*` token belongs | 273 | 60 |
-| `declaration-property-value-disallowed-list`: a `var(--vscode-*)` | 142 | 73 |
+| `webawesome/no-unlayered-rules`: a rule outside `@layer` | 389 | 0 |
+| `scale-unlimited/declaration-strict-value`: a literal color/space/type/radius where a `--wa-*` token belongs | 273 | 0 |
+| `declaration-property-value-disallowed-list`: a `var(--vscode-*)` | 142 | 0 |
 | `selector-disallowed-list`: selecting `wa-*` tags, `::part()`, or our own `.wa-*` classes | 58 | 0 |
 | `declaration-no-important` | 2 | 0 |
 
@@ -326,9 +363,9 @@ The files are in `src/exceptions/` now; the paths are where each one came from.
 | --- | ---: |
 | `editor/shell/git-panel.css` | 216 → 0 |
 | `editor/workbench/architecture-view.css` | 205 → 0 |
-| `editor/workbench/pane-views.css` | 163 |
+| `editor/workbench/pane-views.css` | 163 → 0 |
 | `editor/workbench/rule-editor.css` | 65 → 0 |
-| `monaco-vscode-api/pane.css` (`margin.css`) | 61 |
+| `monaco-vscode-api/pane.css` (`margin.css`) | 61 → 0 |
 | `api/public/sign-in.css` | 56 → 0 |
 | `editor/workbench/rule-view.css` | 33 → 0 |
 | `admin/src/admin.css` | 30 → 0 |

@@ -9,6 +9,8 @@
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
+import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
+import type WaDropdownItem from "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
 import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup, PaneItem, PaneViewDeclaration } from "@brianjenkins94/editor-api/pane";
 import type { PaneMark as FrameMark, PaneEntry, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
 import type * as vscodeApi from "vscode";
@@ -19,6 +21,11 @@ import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, 
 import marginCss from "theme/exceptions/margin.css?raw";
 import css from "theme/exceptions/pane-views.css?raw";
 import { installNativeFace } from "./pane-native";
+import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/button-group/button-group.js";
+import "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
+import "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
+import "@awesome.me/webawesome/dist/components/input/input.js";
 
 /** The Margin (the margin extension's): the view shown first, and the one shown until another is chosen. */
 const MARGIN = "margin";
@@ -180,10 +187,10 @@ function cellOf(cell: PaneCell, className: string, width?: number): HTMLSpanElem
 /** Draw `item` into `element`, in the Margin's look, level with line `line`; what it returns is called when it goes. */
 function renderItem(item: PaneItem, element: HTMLElement, line: number, columns: Columns | undefined, state: DrawState): (() => void) | undefined {
 	const { content } = item;
-	const buttons: HTMLButtonElement[] = [];
+	const buttons: (WaButton | WaDropdownItem)[] = [];
 	let dispose: (() => void) | undefined;
 	// A button's command: the item's buttons off until it's drawn again, this one marked — and why, if it fails.
-	const act = (command: PaneCommand, chosen: HTMLButtonElement): void => {
+	const act = (command: PaneCommand, chosen: WaButton): void => {
 		for (const each of buttons) {
 			each.disabled = true;
 		}
@@ -195,9 +202,8 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 		});
 	};
 
-	const button = (command: PaneCommand, className: string, onClick: (self: HTMLButtonElement) => void): HTMLButtonElement => {
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		const made = Object.assign(document.createElement("button"), { "className": className, "textContent": command.title, "title": command.tooltip ?? command.title, "disabled": command.disabled === true });
+	const button = (command: PaneCommand, className: string, onClick: (self: WaButton) => void): WaButton => {
+		const made = Object.assign(document.createElement("wa-button"), { "className": className, "size": "s", "textContent": command.title, "title": command.tooltip ?? command.title, "disabled": command.disabled === true });
 
 		made.addEventListener("click", () => {
 			onClick(made);
@@ -207,7 +213,7 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 		return made;
 	};
 
-	// A button — and, with `more`, ▾ beside it, a menu of the ways it can go.
+	// A button — and, with `more`, a split button: its caret a menu of the ways it can go.
 	const actionOf = (action: PaneAction): HTMLElement => {
 		const main = button(action, "live-values-choice", (self) => {
 			act(action, self);
@@ -217,33 +223,27 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 			return main;
 		}
 
-		const group = Object.assign(document.createElement("span"), { "className": "live-values-split" });
-		const menu = Object.assign(document.createElement("div"), { "className": "live-values-menu", "hidden": true });
-		const close = (event: Event): void => {
-			if (!group.contains(event.target as Node) || (event instanceof KeyboardEvent && event.key === "Escape")) {
-				menu.hidden = true;
-				document.removeEventListener("pointerdown", close, true);
-				document.removeEventListener("keydown", close, true);
-			}
-		};
+		const group = Object.assign(document.createElement("wa-button-group"), { "className": "live-values-split", "label": action.title });
+		const menu = Object.assign(document.createElement("wa-dropdown"), { "size": "s", "placement": "bottom-start" });
+		const more = Object.assign(document.createElement("wa-button"), { "className": "live-values-choice more", "size": "s", "withCaret": true, "title": `${action.title}: for how long`, "slot": "trigger" });
 
-		const more = button({ "title": "▾", "command": "", "tooltip": `${action.title}: for how long` }, "live-values-choice more", () => {
-			menu.hidden = !menu.hidden;
+		more.append(Object.assign(document.createElement("span"), { "className": "wa-visually-hidden", "textContent": `${action.title}: for how long` }));
+		buttons.push(more);
+		action.more.forEach((way, index) => {
+			const each = Object.assign(document.createElement("wa-dropdown-item"), { "className": "live-values-menu-item", "value": String(index), "textContent": way.title, "title": way.tooltip ?? way.title, "disabled": way.disabled === true });
 
-			if (!menu.hidden) {
-				document.addEventListener("pointerdown", close, true);
-				document.addEventListener("keydown", close, true);
+			buttons.push(each);
+			menu.append(each);
+		});
+		menu.prepend(more);
+		menu.addEventListener("wa-select", (event) => {
+			const way = action.more?.[Number((event as CustomEvent<{ "item": WaDropdownItem }>).detail.item.value)];
+
+			if (way !== undefined) {
+				act(way, main);
 			}
 		});
-
-		for (const way of action.more) {
-			menu.append(button(way, "live-values-menu-item", () => {
-				menu.hidden = true;
-				act(way, main);
-			}));
-		}
-
-		group.append(main, more, menu);
+		group.append(main, menu);
 
 		return group;
 	};
@@ -298,19 +298,18 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 
 			// A row's buttons at its end, shown as it's hovered.
 			if (item.actions !== undefined && item.actions.length > 0) {
-				const tools = Object.assign(document.createElement("span"), { "className": "live-values-mock" });
+				const tools = Object.assign(document.createElement("span"), { "className": "live-values-mock wa-cluster wa-gap-2xs" });
 
 				tools.append(...item.actions.map(actionOf));
 				row.append(tools);
 			}
 		} else {
 			const { input } = content;
-			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-			const field = Object.assign(document.createElement("input"), { "className": "live-values-input", "value": input.value, "placeholder": input.placeholder ?? "" });
+			const field = Object.assign(document.createElement("wa-input"), { "className": "live-values-input", "size": "s", "value": input.value, "placeholder": input.placeholder ?? "" });
 
 			field.addEventListener("keydown", (event) => {
 				if (event.key === "Enter") {
-					void run(input.submit, field.value).catch(() => undefined);
+					void run(input.submit, field.value ?? "").catch(() => undefined);
 				}
 			});
 			row.append(field);
@@ -320,7 +319,7 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 	}
 
 	if (!("cells" in content) && item.actions !== undefined && item.actions.length > 0) {
-		const choices = Object.assign(document.createElement("div"), { "className": "live-values-choices" });
+		const choices = Object.assign(document.createElement("div"), { "className": "live-values-choices wa-cluster wa-gap-xs" });
 
 		choices.append(...item.actions.map(actionOf));
 		element.append(choices);

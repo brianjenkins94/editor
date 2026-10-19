@@ -664,7 +664,7 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 	// high's Mock…: the rule editor under its row, its value set to 3, then a button.
 	const mockHigh = async (button) => {
 		await workbench.evaluate(() => {
-			[...document.querySelectorAll(".live-values-row[data-line=\"2\"] button")].find((each) => each.textContent === "Mock…").click();
+			[...document.querySelectorAll(".live-values-row[data-line=\"2\"] .live-values-choice")].find((each) => each.textContent === "Mock…").click();
 		});
 		await eventually("high's rule editor", () => inRuleView(() => document.querySelector(".rule-panel .rule-editor-then wa-input") !== null || undefined));
 		await inRuleView((label) => {
@@ -745,7 +745,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 	// The Mock's editor (the Rule view): open it (on the row), read what it says, give process.argv these runs' command
 	// lines, press a button.
 	const mock = (action, argument) => (action === "open" ? workbench.evaluate(() => {
-		[...document.querySelectorAll(".live-values-row[data-line=\"0\"] button")].find((button) => button.textContent === "Mock…").click();
+		[...document.querySelectorAll(".live-values-row[data-line=\"0\"] .live-values-choice")].find((button) => button.textContent === "Mock…").click();
 
 		return true;
 	}) : inRuleView(([what, value]) => {

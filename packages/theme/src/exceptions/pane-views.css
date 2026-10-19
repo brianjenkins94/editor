@@ -1,412 +1,297 @@
-/* The pane's look (pane-views.ts draws every view in it, the Margin's look): a row per line, its label, then its value
-   or a column per turn. */
-
-.live-values-row {
-  display: flex;
-  white-space: pre;
-  font-family: var(--notes-margin-code-font-family, monospace);
-  font-size: var(--notes-margin-code-font-size);
-}
-
-.live-values-label {
-  flex: none;
-  padding-right: 1ch;
-  color: var(--vscode-debugTokenExpression-name, var(--vscode-symbolIcon-variableForeground));
-}
-
-.live-values-cell {
-  flex: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.live-values-cell.turn {
-  padding: 0 1ch 0 0;
-  border-left: 1px solid var(--vscode-editorIndentGuide-background1, transparent);
-  padding-left: 1ch;
-}
-
-.live-values-cell.lit {
-  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 22%, transparent);
-}
-
-.live-values-cell.held {
-  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 35%, transparent);
-}
-
-.live-values-cell.turn {
-  cursor: pointer;
-}
-
-/* A value beside its label shrinks to the margin, cut short with an ellipsis. */
-.live-values-cell.inline {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-/* The cursor's line opens up (pane.ts lights the margin's cell at the cursor): each value whole, wrapped in its column,
-   the cell growing for it. */
-.notes-margin-cell.lit .live-values-row {
-  align-items: start;
-}
-
-.notes-margin-cell.lit .live-values-cell {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.live-values-string {
-  color: var(--vscode-debugTokenExpression-string);
-}
-
-.live-values-number {
-  color: var(--vscode-debugTokenExpression-number);
-}
-
-.live-values-boolean {
-  color: var(--vscode-debugTokenExpression-boolean);
-}
-
-.live-values-branch {
-  color: var(--vscode-descriptionForeground);
-  font-style: italic;
-}
-
-.live-values-choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.live-values-choice {
-  padding: 1px 8px;
-  white-space: nowrap;
-  border: 1px solid var(--vscode-button-border, transparent);
-  border-radius: 2px;
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
-  cursor: pointer;
-}
-
-.live-values-choice.allow {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-}
-
-/* A verb and its ▾ (pane-views.ts's split buttons): one control, the ▾ opening how long — this call, this
-   run, always — under it. */
-.live-values-split {
-  position: relative;
-  display: inline-flex;
-}
-
-.live-values-split > .live-values-choice:first-child {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.live-values-choice.more {
-  padding: 1px 4px;
-  border-left: 1px solid var(--vscode-button-separator, rgba(128, 128, 128, 0.4));
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-}
-
-.live-values-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  min-width: 100%;
-  margin-top: 2px;
-  padding: 2px 0;
-  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)));
-  border-radius: 3px;
-  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
-  color: var(--vscode-menu-foreground, var(--vscode-foreground));
-  font-family: var(--vscode-font-family);
-  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
-}
-
-.live-values-menu[hidden] {
-  display: none;
-}
-
-.live-values-menu-item {
-  padding: 2px 10px;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.live-values-menu-item:hover:not(:disabled) {
-  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
-  color: var(--vscode-menu-selectionForeground, inherit);
-}
-
-.live-values-menu-item:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.live-values-choice:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.live-values-choice.chosen {
-  opacity: 1;
-  outline: 1px solid var(--vscode-focusBorder);
-}
-
-.live-values-ask-error {
-  margin-top: 4px;
-  color: var(--vscode-errorForeground);
-  font-family: var(--vscode-font-family);
-}
-
-/* Coverage's marks in the margin's gutter column (coverage.ts), shaped as VS Code's own gutter bars (margin.css): green
-   beside a line that ran, red beside one that didn't, the two striped beside one that partly ran (as its coverage
-   stripes) — and, in a high-contrast theme, a solid line rather than a fill, as its coverage does. */
-.notes-margin-mark.coverage-ran {
-  background: #2ea04390;
-}
-
-.notes-margin-mark.coverage-missed {
-  background: #f85149c0;
-}
-
-.notes-margin-mark.coverage-partial {
-  background-image: linear-gradient(45deg, #2ea04390 25%, #f85149c0 25%, #f85149c0 50%, #2ea04390 50%, #2ea04390 75%, #f85149c0 75%);
-  background-size: 6px 6px;
-}
-
-.hc-black .notes-margin-mark[class*="coverage-"],
-.hc-light .notes-margin-mark[class*="coverage-"] {
-  background: none;
-  border-left: 3px solid #2ea043;
-  box-sizing: border-box;
-}
-
-.hc-black .notes-margin-mark.coverage-missed,
-.hc-light .notes-margin-mark.coverage-missed {
-  border-left-color: #f85149;
-}
-
-/* How the last run ended short, in the gutter column: a near-square badge, centred on where its bar would be (6.5px
-   in: pane.css) and on the line, clear of the line number — beside the line it crashed on or was stopped at. The mark
-   spans the line; the badge is drawn inside it. */
-.notes-margin-mark.run-crashed,
-.notes-margin-mark.run-stopped {
-  left: 2px;
-  width: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-}
-
-.notes-margin-mark.run-crashed::before,
-.notes-margin-mark.run-stopped::before {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 9px;
-  height: 11px;
-  border-radius: 2px;
-  color: var(--vscode-editor-background, #fff);
-  font-size: 9px;
-  line-height: 1;
-  font-weight: bold;
-}
-
-.notes-margin-mark.run-crashed::before {
-  content: "✕";
-  background: var(--vscode-editorError-foreground, #e51400);
-}
-
-.notes-margin-mark.run-stopped::before {
-  content: "■";
-  background: var(--vscode-editorWarning-foreground, #bf8803);
-  font-size: 7px;
-}
-
-/* A mocked value's box, and a value set by hand. */
-.live-values-input {
-  flex: none;
-  width: 14ch;
-  margin-right: 1ch;
-  padding: 0 2px;
-  border: 1px solid var(--vscode-focusBorder);
-  background: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
-  font: inherit;
-}
-
-.live-values-input.refused {
-  border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-editorError-foreground));
-}
-
-.live-values-set {
-  color: var(--vscode-charts-orange, #d18616);
-  font-weight: bold;
-}
-
-/* A call that wasn't made — skipped at its stop, or by a live run (LIVE-VALUES.md): what didn't happen, muted. */
-.live-values-skip {
-  color: var(--vscode-descriptionForeground);
-  font-style: italic;
-}
-
-/* Mocking a value (the Margin's): a variable's Mock checkbox, on its row's hover or at the cursor, so rows don't grow
-   controls nobody asked for — and, checked, the run's value struck through and a box for the one to set; process.argv's
-   Mock… always there, beside what a rule gives it. */
-.live-values-mock {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-self: center;
-  align-items: center;
-  gap: 4px;
-  margin-left: 1ch;
-  visibility: hidden;
-  font-family: var(--vscode-font-family);
-  font-size: calc(var(--notes-margin-code-font-size, 12px) - 1px);
-  color: var(--vscode-descriptionForeground);
-}
-
-.live-values-mock.shown,
-.live-values-row:hover .live-values-mock,
-.notes-margin-cell.lit .live-values-mock {
-  visibility: visible;
-}
-
-.live-values-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  cursor: pointer;
-}
-
-.live-values-check input {
-  margin: 0;
-}
-
-.live-values-row.mocking {
-  flex-wrap: wrap;
-}
-
-.live-values-row.mocking .live-values-cell {
-  text-decoration: line-through;
-  opacity: 0.6;
-}
-
-/* What a rule gives process.argv, in the code's type: each run's arguments, as a command line. */
-.live-values-given {
-  font-family: var(--notes-margin-code-font-family, monospace);
-  font-size: var(--notes-margin-code-font-size, 12px);
-  color: var(--vscode-editor-foreground);
-}
-
-.live-values-choice.mock {
-  padding: 0 6px;
-  font-size: inherit;
-}
-
-.live-values-input {
-  font-family: var(--notes-margin-code-font-family, monospace);
-}
-
-/* A step's card label (the card is the margin's, pane.css): its title, what it is, whether it ran. */
-.live-values-step-title {
-  color: var(--vscode-foreground);
-}
-
-.live-values-step-detail,
-.live-values-step-ran {
-  margin-left: 6px;
-}
-
-.live-values-step-ran.ran {
-  color: var(--vscode-testing-iconPassed, #2ea043);
-}
-
-.live-values-step-ran.missed {
-  color: var(--vscode-testing-iconFailed, #f85149);
-}
-
-.live-values-step-ran.partial {
-  color: var(--vscode-editorWarning-foreground, #d29922);
-}
-
-/* A placed rule, in the gutter column (RULES.md: *at*): a small purple diamond beside the first line of the code it's
-   placed at, over coverage's bar — so a mocked variable or a given result isn't invisible. Hollow where it was found by
-   a weak match. */
-.notes-margin-mark.rule-placed {
-  left: 2px;
-  width: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-}
-
-.notes-margin-mark.rule-placed::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  transform: rotate(45deg);
-  background: var(--vscode-charts-purple, #b180d7);
-  box-shadow: 0 0 0 1px var(--vscode-editor-background, #fff);
-}
-
-.notes-margin-mark.rule-placed.uncertain::before {
-  background: var(--vscode-editor-background, #fff);
-  box-shadow: inset 0 0 0 1.5px var(--vscode-charts-purple, #b180d7);
-}
-
-/* A pane view's item (pane-views.ts), marked by its tone. */
-.pane-item.tone-question,
-.pane-item.tone-info,
-.pane-item.tone-warning,
-.pane-item.tone-error {
-	padding-left: 6px;
-	border-left: 2px solid var(--tone);
-}
-
-.pane-item.tone-question { --tone: var(--vscode-editorInfo-foreground); }
-.pane-item.tone-info { --tone: var(--vscode-editorHint-foreground, var(--vscode-editorInfo-foreground)); }
-.pane-item.tone-warning { --tone: var(--vscode-editorWarning-foreground); }
-.pane-item.tone-error { --tone: var(--vscode-editorError-foreground); }
-
-/* A row's lead cells (a function's call picker: ‹ 2/5 ›), and any cell that does something when clicked. */
-.live-values-cell.lead {
-  flex: none;
-  padding: 0 0.25ch;
-  color: var(--vscode-descriptionForeground);
-}
-
-.live-values-cell.lead + .live-values-label {
-  margin-left: 1ch;
-}
-
-.live-values-cell.lead.clickable {
-  color: var(--vscode-textLink-foreground);
-}
-
-.live-values-cell.clickable {
-  cursor: pointer;
-}
-
-/* A pane view's prose sits on its line: no paragraph margins. */
-.pane-item .pane-markdown p {
-	margin: 0;
+/*
+ * The pane's look (pane-views.ts draws every view in it, the Margin's look): a row per line, its label, then its value
+ * or a column per turn. Its buttons, split buttons and input are Web Awesome's; what's left is bespoke, since nothing
+ * in Web Awesome lines up with the code's lines and characters: the rows and their columns, a value's colour by its
+ * kind, the marks in the gutter column and a step card's label. All on --wa-* tokens (theme/vscode maps them onto the
+ * VS Code theme), plus the bridge's --code-value-* for what the debugger shows; the Margin's accent is margin.css's.
+ */
+
+/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
+ * are adopted, so the order is declared here). */
+@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
+
+@layer app {
+  .monaco-editor {
+    /* A character column: the rows line up with the code's characters, so their gaps are measured in them, not on Web
+     * Awesome's space scale. */
+    --live-values-ch: 1ch;
+    --live-values-lit: color-mix(in srgb, var(--margin-accent) 22%, transparent);
+    --live-values-held: color-mix(in srgb, var(--margin-accent) 35%, transparent);
+    --live-values-ran: color-mix(in srgb, var(--wa-color-success-fill-loud) 56%, transparent);
+    --live-values-missed: color-mix(in srgb, var(--wa-color-danger-fill-loud) 75%, transparent);
+  }
+
+  .live-values-row {
+    display: flex;
+    white-space: pre;
+    font-family: var(--notes-margin-code-font-family, var(--wa-font-family-code));
+    font-size: var(--notes-margin-code-font-size, var(--wa-font-size-s));
+  }
+
+  .live-values-label {
+    flex: none;
+    padding-right: var(--live-values-ch);
+    color: var(--code-value-name);
+  }
+
+  .live-values-cell {
+    flex: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .live-values-cell.turn {
+    padding: 0 var(--live-values-ch);
+    border-left: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    cursor: pointer;
+  }
+
+  .live-values-cell.lit {
+    background: var(--live-values-lit);
+  }
+
+  .live-values-cell.held {
+    background: var(--live-values-held);
+  }
+
+  /* A value beside its label shrinks to the margin, cut short with an ellipsis. */
+  .live-values-cell.inline {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  /* The cursor's line opens up (pane.ts lights the margin's cell at the cursor): each value whole, wrapped in its
+   * column, the cell growing for it. */
+  .notes-margin-cell.lit .live-values-row {
+    align-items: start;
+  }
+
+  .notes-margin-cell.lit .live-values-cell {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .live-values-string {
+    color: var(--code-value-string);
+  }
+
+  .live-values-number {
+    color: var(--code-value-number);
+  }
+
+  .live-values-boolean {
+    color: var(--code-value-boolean);
+  }
+
+  .live-values-branch {
+    color: var(--wa-color-text-quiet);
+    font-style: italic;
+  }
+
+  /* A value set by hand or by a rule. */
+  .live-values-set {
+    color: var(--wa-color-orange-60);
+    font-weight: var(--wa-font-weight-bold);
+  }
+
+  /* A call that wasn't made — skipped at its stop, or by a live run (LIVE-VALUES.md): what didn't happen, muted. */
+  .live-values-skip {
+    color: var(--wa-color-text-quiet);
+    font-style: italic;
+  }
+
+  /* An item's buttons, under it (a wa-cluster). */
+  .live-values-choices {
+    margin-top: var(--wa-space-2xs);
+  }
+
+  /* The one clicked, while the item's buttons are off until it's drawn again. */
+  .live-values-choice.chosen {
+    outline: var(--wa-border-width-s) solid var(--wa-color-focus);
+    outline-offset: var(--wa-border-width-s);
+  }
+
+  .live-values-ask-error {
+    margin-top: var(--wa-space-2xs);
+    color: var(--wa-color-danger-on-quiet);
+    font-family: var(--wa-font-family-body);
+  }
+
+  /* A row's buttons at its end (a wa-cluster), on its hover or at the cursor, so rows don't grow controls nobody asked
+   * for: process.argv's Mock… is always there, beside what a rule gives it. */
+  .live-values-mock {
+    align-self: center;
+    margin-left: var(--live-values-ch);
+    visibility: hidden;
+  }
+
+  /* A row's controls are no taller than its line (so a row stays as tall as the code's), and the row's `pre` stays out
+   * of them. Buttons are in the UI's type. */
+  .live-values-mock,
+  .live-values-input {
+    --wa-form-control-height: var(--notes-margin-line-height);
+    white-space: normal;
+    line-height: var(--wa-line-height-condensed);
+  }
+
+  .live-values-mock {
+    font-family: var(--wa-font-family-body);
+  }
+
+  .live-values-mock.shown,
+  .live-values-row:hover .live-values-mock,
+  .notes-margin-cell.lit .live-values-mock {
+    visibility: visible;
+  }
+
+  /* A value typed in (process.argv's Mock…): as wide as a short command line, in the code's type. */
+  .live-values-input {
+    flex: none;
+    width: 14ch;
+    margin-right: var(--live-values-ch);
+  }
+
+  /* Coverage's marks in the margin's gutter column (coverage.ts), shaped as VS Code's own gutter bars (margin.css):
+   * green beside a line that ran, red beside one that didn't, the two striped beside one that partly ran (as its
+   * coverage stripes) — and, in a high-contrast theme, a solid line rather than a fill, as its coverage does. */
+  .notes-margin-mark.coverage-ran {
+    background: var(--live-values-ran);
+  }
+
+  .notes-margin-mark.coverage-missed {
+    background: var(--live-values-missed);
+  }
+
+  .notes-margin-mark.coverage-partial {
+    background-image: linear-gradient(45deg, var(--live-values-ran) 25%, var(--live-values-missed) 25%, var(--live-values-missed) 50%, var(--live-values-ran) 50%, var(--live-values-ran) 75%, var(--live-values-missed) 75%);
+    background-size: 6px 6px;
+  }
+
+  .hc-black .notes-margin-mark[class*="coverage-"],
+  .hc-light .notes-margin-mark[class*="coverage-"] {
+    background: none;
+    border-left: 3px solid var(--wa-color-success-fill-loud);
+    box-sizing: border-box;
+  }
+
+  .hc-black .notes-margin-mark.coverage-missed,
+  .hc-light .notes-margin-mark.coverage-missed {
+    border-left-color: var(--wa-color-danger-fill-loud);
+  }
+
+  /* How the last run ended short, in the gutter column: a near-square badge, centred on where its bar would be (6.5px
+   * in: margin.css) and on the line, clear of the line number — beside the line it crashed on or was stopped at. The
+   * mark spans the line; the badge is drawn inside it. A placed rule (RULES.md: *at*) is a small diamond there, over
+   * coverage's bar, so a mocked variable or a given result isn't invisible. */
+  .notes-margin-mark.run-crashed,
+  .notes-margin-mark.run-stopped,
+  .notes-margin-mark.rule-placed {
+    left: 2px;
+    width: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+  }
+
+  .notes-margin-mark.run-crashed::before,
+  .notes-margin-mark.run-stopped::before {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 9px;
+    height: 11px;
+    border-radius: var(--wa-border-radius-s);
+    font-size: var(--wa-font-size-3xs);
+    line-height: var(--wa-line-height-condensed);
+    font-weight: var(--wa-font-weight-bold);
+  }
+
+  .notes-margin-mark.run-crashed::before {
+    content: "✕";
+    background: var(--wa-color-danger-fill-loud);
+    color: var(--wa-color-danger-on-loud);
+  }
+
+  .notes-margin-mark.run-stopped::before {
+    content: "▪";
+    background: var(--wa-color-warning-fill-loud);
+    color: var(--wa-color-warning-on-loud);
+  }
+
+  /* Hollow where it was found by a weak match. */
+  .notes-margin-mark.rule-placed::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    box-sizing: border-box;
+    transform: rotate(45deg);
+    background: var(--margin-accent);
+    box-shadow: 0 0 0 var(--wa-border-width-s) var(--wa-color-surface-default);
+  }
+
+  .notes-margin-mark.rule-placed.uncertain::before {
+    background: var(--wa-color-surface-default);
+    border: 1.5px solid var(--margin-accent);
+  }
+
+  /* A step's card label (the card is the margin's, margin.css): its title, what it is, whether it ran. */
+  .live-values-step-title {
+    color: var(--wa-color-text-normal);
+  }
+
+  .live-values-step-detail,
+  .live-values-step-ran {
+    margin-left: var(--wa-space-xs);
+  }
+
+  .live-values-step-ran.ran {
+    color: var(--wa-color-success-on-quiet);
+  }
+
+  .live-values-step-ran.missed {
+    color: var(--wa-color-danger-on-quiet);
+  }
+
+  .live-values-step-ran.partial {
+    color: var(--wa-color-warning-on-quiet);
+  }
+
+  /* A pane view's item (pane-views.ts), marked by its tone. */
+  .pane-item.tone-question,
+  .pane-item.tone-info,
+  .pane-item.tone-warning,
+  .pane-item.tone-error {
+    padding-left: var(--wa-space-xs);
+    border-left: var(--wa-border-width-m) solid var(--tone);
+  }
+
+  .pane-item.tone-question { --tone: var(--wa-color-brand-fill-loud); }
+  .pane-item.tone-info { --tone: var(--wa-color-neutral-fill-loud); }
+  .pane-item.tone-warning { --tone: var(--wa-color-warning-fill-loud); }
+  .pane-item.tone-error { --tone: var(--wa-color-danger-fill-loud); }
+
+  /* A row's lead cells (a function's call picker: ‹ 2/5 ›), and any cell that does something when clicked. */
+  .live-values-cell.lead {
+    flex: none;
+    padding: 0 var(--wa-space-3xs);
+    color: var(--wa-color-text-quiet);
+  }
+
+  .live-values-cell.lead + .live-values-label {
+    margin-left: var(--live-values-ch);
+  }
+
+  .live-values-cell.lead.clickable {
+    color: var(--wa-color-text-link);
+  }
+
+  .live-values-cell.clickable {
+    cursor: pointer;
+  }
+
+  /* A pane view's prose sits on its line: no paragraph margins. */
+  .pane-item .pane-markdown p {
+    margin: 0;
+  }
 }
