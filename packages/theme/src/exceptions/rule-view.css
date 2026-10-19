@@ -1,31 +1,25 @@
-/* The Rule view (rule-view.ts, under the Rules tree): the rule editor (rule-editor.css), what the rule as edited would
-   do, then its buttons. */
+/*
+ * The Rule view (editor/workbench/rule-view.ts, under the Rules tree): a wa-card holding the rule editor
+ * (rule-editor.css), what the rule as edited would do, then its wa-buttons. Left here: the view's room in the sidebar,
+ * the card's spacing, and a refused verdict's colour — on --wa-* tokens.
+ */
 
-.rule-view {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  padding: 4px 12px 8px 20px;
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size, 13px);
-  color: var(--vscode-foreground);
+/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
+ * are adopted, so the order is declared here). */
+@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
+
+@layer app {
+  .rule-view {
+    flex: 1;
+    min-width: 0;
+    padding: var(--wa-space-2xs) var(--wa-space-m) var(--wa-space-s) var(--wa-space-l);
+  }
+
+  .rule-panel {
+    --spacing: var(--wa-space-s);
+  }
+
+  .rule-panel-status.refused {
+    color: var(--wa-color-danger-on-quiet);
+  }
 }
-
-.rule-panel {
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: 3px;
-  background: var(--vscode-editorWidget-background);
-}
-
-.rule-panel-status {
-  margin-top: 6px;
-  color: var(--vscode-descriptionForeground);
-}
-
-.rule-panel-status.refused {
-  color: var(--vscode-errorForeground);
-}
-

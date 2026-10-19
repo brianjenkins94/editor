@@ -9,7 +9,8 @@
  * string is a text box (its `examples` offered), an `enum` a select, an array a list with − and +, a number a number,
  * a boolean a checkbox, anything else a JSON literal. One editor for every seam, rather than a form per feature.
  *
- * Vanilla DOM in VS Code's own look (its input, dropdown and toolbar colors; its icons drawn here, as strokes). Core's,
+ * Vanilla DOM: Web Awesome's controls and layout utilities, in VS Code's own look (theme/vscode maps its colors onto
+ * Web Awesome's tokens; its icons drawn here, as strokes). Core's,
  * in the Rule view (rule-view.ts); a rule as a sentence and what it would do are editor-api's (`./rules`), which the
  * capabilities extension's Rules tree shares.
  */
@@ -147,12 +148,13 @@ function arrayInput(object: Record<string, unknown>, value: unknown, changed: (v
 	const items = Array.isArray(value) ? [...value as unknown[]] : [];
 	const itemSchema = object["items"] as Schema | undefined;
 	// A list of lists (process.argv's runs): each on a line of its own.
-	const list = element("span", `rule-editor-list${typeof itemSchema === "object" && itemSchema["type"] === "array" ? " nested" : ""}`);
+	const nested = typeof itemSchema === "object" && itemSchema["type"] === "array";
+	const list = element("span", nested ? "rule-editor-list nested wa-stack wa-gap-3xs" : "rule-editor-list wa-cluster wa-gap-3xs");
 	const draw = (): void => {
 		list.replaceChildren();
 
 		for (const [index, item] of items.entries()) {
-			const entry = element("span", "rule-editor-list-item");
+			const entry = element("span", `rule-editor-list-item wa-cluster wa-gap-3xs${nested ? " wa-flex-nowrap" : ""}`);
 
 			entry.append(schemaInput(itemSchema, item, (next) => {
 				items[index] = next;
@@ -165,11 +167,15 @@ function arrayInput(object: Record<string, unknown>, value: unknown, changed: (v
 			list.append(entry);
 		}
 
-		list.append(iconButton("add", "Another", () => {
+		const add = iconButton("add", "Another", () => {
 			items.push(initial(itemSchema));
 			changed([...items]);
 			draw();
-		}));
+		});
+
+		// Under a list of lists, not as wide as it.
+		add.classList.toggle("wa-align-self-start", nested);
+		list.append(add);
 	};
 
 	draw();
@@ -226,7 +232,7 @@ export function schemaInput(schema: Schema | undefined, value: unknown, changed:
 
 	// A place in the code: chosen where it is (from the line, in the margin), not typed — shown, not edited.
 	if (object["format"] === "span") {
-		return element("span", "rule-editor-place", { "textContent": sayPlace(value), "title": "A statement, followed through edits: where it is, not its line number" });
+		return element("span", "rule-editor-place wa-text-truncate", { "textContent": sayPlace(value), "title": "A statement, followed through edits: where it is, not its line number" });
 	}
 
 	if (type === "array") {
@@ -288,7 +294,7 @@ export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): Rule
 	}
 
 	const edited: Rule = structuredClone(rule);
-	const root = element("div", "rule-editor");
+	const root = element("div", "rule-editor wa-stack wa-gap-xs");
 	const firstTarget = Object.keys(catalog.targets)[0] ?? "";
 	const operatorsOf = (targetId: string): string[] => catalog.types[catalog.targets[targetId]?.type_id ?? ""] ?? Object.keys(catalog.operators);
 	const changed = (): void => {
@@ -303,7 +309,7 @@ export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): Rule
 
 	/** A row's − and +: remove it from `siblings` (not the last of the top level), add a row after it, or with ⌥ a group. */
 	const tools = (siblings: Predicate[], index: number, removable: boolean): HTMLElement => {
-		const span = element("span", "rule-editor-tools");
+		const span = element("span", "rule-editor-tools wa-cluster wa-gap-0 wa-flex-nowrap");
 		const remove = iconButton("remove", "Remove this condition", () => {
 			siblings.splice(index, 1);
 			render();
@@ -324,7 +330,7 @@ export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): Rule
 	};
 
 	const renderComparison = (row: Comparison, siblings: Predicate[], index: number, removable: boolean): HTMLElement => {
-		const line = element("div", "rule-editor-row");
+		const line = element("div", "rule-editor-row wa-cluster wa-gap-2xs");
 		const targets: [string, string][] = Object.entries(catalog.targets).map(([id, { label }]) => [id, label]);
 
 		// A target the catalog doesn't have (written by hand) is kept, as itself.
@@ -372,17 +378,17 @@ export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): Rule
 
 	const renderCompound = (compound: Compound, siblings: Predicate[] | undefined, index: number): HTMLElement => {
 		const group = element("div", `rule-editor-group${siblings === undefined ? " top" : ""}`);
-		const head = element("div", "rule-editor-row rule-editor-head");
-		const rows = element("div", "rule-editor-rows");
+		const head = element("div", "rule-editor-row rule-editor-head wa-cluster wa-gap-2xs");
+		const rows = element("div", "rule-editor-rows wa-stack wa-gap-3xs");
 		const lead = siblings === undefined ? "When" : "";
 
 		head.append(
-			...lead === "" ? [] : [element("span", "rule-editor-word", { "textContent": lead })],
+			...lead === "" ? [] : [element("span", "wa-color-text-quiet", { "textContent": lead })],
 			select("rule-editor-logical", Object.entries(LOGICAL), compound.logicalType_id, (logical) => {
 				compound["logicalType_id"] = logical as Compound["logicalType_id"];
 				changed();
 			}),
-			element("span", "rule-editor-word", { "textContent": "of these are true" })
+			element("span", "wa-color-text-quiet", { "textContent": "of these are true" })
 		);
 
 		if (siblings !== undefined) {
@@ -422,11 +428,11 @@ export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): Rule
 	const offered = Object.entries(catalog.actions).filter(([, { targets }]) => targets === undefined || targets.length > 0);
 
 	const renderActions = (): HTMLElement => {
-		const block = element("div", "rule-editor-then");
+		const block = element("div", "rule-editor-then wa-stack wa-gap-3xs");
 
 		for (const [index, action] of edited.then.entries()) {
-			const line = element("div", "rule-editor-row");
-			const tools = element("span", "rule-editor-tools");
+			const line = element("div", "rule-editor-row wa-cluster wa-gap-2xs");
+			const tools = element("span", "rule-editor-tools wa-cluster wa-gap-0 wa-flex-nowrap");
 			const remove = iconButton("remove", "Remove this action", () => {
 				edited.then.splice(index, 1);
 				render();
@@ -447,7 +453,7 @@ export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): Rule
 				changed();
 			}));
 			line.append(
-				element("span", "rule-editor-word", { "textContent": index === 0 ? "Then" : "and" }),
+				element("span", "wa-color-text-quiet", { "textContent": index === 0 ? "Then" : "and" }),
 				select("rule-editor-action", actions, action.action_id, (actionId) => {
 					edited.then[index] = actionOf(actionId);
 					render();

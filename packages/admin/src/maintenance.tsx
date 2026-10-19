@@ -82,7 +82,7 @@ export function KillSwitch({ maintenance }: { "maintenance": Maintenance }) {
 				{confirming
 					? (
 						<form
-							class="wa-cluster wa-gap-s maintenance-form"
+							class="wa-cluster wa-gap-s wa-align-items-end"
 							onSubmit={(event) => {
 								event.preventDefault();
 								setBusy(true);

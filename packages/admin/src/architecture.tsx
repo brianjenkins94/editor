@@ -294,7 +294,7 @@ export function ArchitecturePage({ query }: { "query": URLSearchParams }) {
 				The <strong>{environment}</strong> system, drawn from its code: the Workers, hosts and bindings from {workers.map((worker) => worker.config).join(", ")}, read when this app was built; the API's routes, stores and tables from the API itself, live ({at === undefined ? "" : new Date(at).toLocaleTimeString()}, every minute). Names and counts only: no one's data. Click a box to follow it.
 			</p>
 			<Diagram nodes={nodes} edges={edges} />
-			<div class="wa-grid wa-gap-l pair">
+			<div class="wa-grid wa-gap-l wa-align-items-start pair">
 				<Section title={`Routes (${described.routes.length})`}>
 					<div class="mono">{described.routes.map((route) => <div key={`${route.method} ${route.path}`}>{route.method} {route.path}</div>)}</div>
 				</Section>

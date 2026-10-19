@@ -237,7 +237,7 @@ export function MailPage({ query }: { "query": URLSearchParams }) {
 					</tr>
 				))}
 			</Table>
-			<div class="wa-grid wa-gap-l pair">
+			<div class="wa-grid wa-gap-l wa-align-items-start pair">
 				<div class="wa-stack">
 					<h2 class="wa-heading-l">Refused, by reason</h2>
 					{mail.refusals.length === 0 ? <p class="wa-color-text-quiet">None.</p> : (

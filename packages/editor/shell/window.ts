@@ -76,35 +76,36 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 
 	const win = document.createElement("div");
 
-	win.className = "wa-win";
+	win.className = "pane-window";
 	win.style.width = width + "px";
 
 	const card = document.createElement("wa-card");
 
+	card.className = "pane-window-card";
 	card.setAttribute("with-header", "");
 	card.setAttribute("with-header-actions", "");
 
 	const bar = document.createElement("div");
 
-	bar.className = "wa-win__bar";
+	bar.className = "pane-window-bar wa-cluster wa-gap-2xs wa-flex-nowrap";
 	bar.setAttribute("slot", "header");
 
 	const titleEl = document.createElement("span");
 
-	titleEl.className = "wa-win__title";
+	titleEl.className = "pane-window-title wa-text-truncate wa-font-weight-semibold";
 	titleEl.textContent = options.title;
 	titleEl.title = options.title;
 	bar.appendChild(titleEl);
 
 	const actions = document.createElement("div");
 
-	actions.className = "wa-win__actions";
+	actions.className = "pane-window-actions wa-cluster wa-gap-3xs wa-flex-nowrap";
 	actions.setAttribute("slot", "header-actions");
 
 	// Caller-owned header actions (e.g. the debug toolbar), left of the built-in collapse/close controls.
 	const headerExtras = document.createElement("div");
 
-	headerExtras.className = "wa-win__extras";
+	headerExtras.className = "pane-window-extras wa-cluster wa-gap-3xs wa-flex-nowrap";
 	actions.appendChild(headerExtras);
 
 	const collapseBtn = document.createElement("wa-button");
@@ -126,7 +127,7 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 
 	const body = document.createElement("div");
 
-	body.className = "wa-win__body";
+	body.className = "pane-window-body";
 	body.style.height = height + "px";
 
 	card.append(bar, actions, body);
@@ -140,6 +141,8 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 
 	function setCollapsed(collapsed: boolean): void {
 		win.toggleAttribute("data-collapsed", collapsed);
+		// The card has no padding of its own (window.css), so without its body it's just the title bar.
+		body.hidden = collapsed;
 		collapseBtn.textContent = collapsed ? "+" : "–";
 		collapseBtn.title = collapsed ? "Expand" : "Collapse";
 		saveState(options.storageKey, { "collapsed": collapsed });
