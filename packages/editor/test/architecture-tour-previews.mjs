@@ -312,18 +312,27 @@ test("node script: a service runs in the debugger, and stopping it leaves the pr
 });
 
 // A preview asks for localhost:<port> as on a developer's machine, and the server on that port answers — here a node service
-// on 3001 asked from the 5173 preview: its events arrive as they're written (not when the response ends), and an upload
-// longer than one piece reaches it whole.
+// on 3001 asked from the 5173 preview: each of its events arrives while the response is still open (the next is written
+// only once the page has it), and an upload longer than one piece reaches it whole.
 test("localhost: a preview's request for another port reaches its server, streamed both ways", async () => {
 	const workbench = session.workbench();
 	const server = [
 		"const http = require('http');",
+		"let events;",
+		"let sent = 0;",
 		"http.createServer((req, res) => {",
 		"\tif (req.url === '/events') {",
 		"\t\tres.writeHead(200, { 'content-type': 'text/event-stream' });",
-		"\t\tlet sent = 0;",
-		"\t\tconst timer = setInterval(() => { sent += 1; res.write('data: ' + sent + '\\n\\n'); if (sent === 3) { clearInterval(timer); res.end(); } }, 400);",
-		"\t\treq.on('close', () => clearInterval(timer));",
+		"\t\tevents = res;",
+		"\t\tsent = 1;",
+		"\t\tres.write('data: 1\\n\\n');",
+		"\t\treturn;",
+		"\t}",
+		"\tif (req.url === '/next') {",
+		"\t\tsent += 1;",
+		"\t\tevents.write('data: ' + sent + '\\n\\n');",
+		"\t\tif (sent === 3) events.end();",
+		"\t\tres.end('wrote ' + sent);",
 		"\t\treturn;",
 		"\t}",
 		"\tlet size = 0;",
@@ -347,20 +356,46 @@ test("localhost: a preview's request for another port reaches its server, stream
 
 	await eventually("the server on 3001, from the preview", async () => (await preview()?.evaluate(async () => (await fetch("http://localhost:3001/ping").then((response) => response.text(), () => "")).startsWith("GET")).catch(() => false)) || undefined);
 
+	// Each event is written only once the page has the one before (it asks for the next): a body held back until its end
+	// would leave the page waiting on the first. (Not timed: every piece crosses the tab's main thread, so a long task
+	// there — the workbench's, on a loaded runner — holds the pieces written meanwhile, and they arrive together.)
 	const events = await preview().evaluate(async () => {
 		const reader = (await fetch("http://localhost:3001/events")).body.getReader();
-		const arrived = [];
+		const late = () => new Promise((resolve) => {
+			setTimeout(() => {
+				resolve("late");
+			}, 20_000);
+		});
+		const read = () => Promise.race([reader.read(), late()]);
+		let text = "";
+		let pieces = 0;
 
-		for (let read = await reader.read(); !read.done; read = await reader.read()) {
-			arrived.push({ "text": new TextDecoder().decode(read.value), "at": performance.now() });
+		for (let event = 1; event <= 3; event += 1) {
+			while (!text.endsWith(`data: ${event}\n\n`)) {
+				const piece = await read();
+
+				if (piece === "late" || piece.done) {
+					return { "text": text, "pieces": pieces, "missing": event };
+				}
+
+				text += new TextDecoder().decode(piece.value);
+				pieces += 1;
+			}
+
+			if (event < 3) {
+				await fetch("http://localhost:3001/next");
+			}
 		}
 
-		return arrived;
+		const end = await read();
+
+		return { "text": text, "pieces": pieces, "ended": end !== "late" && end.done };
 	});
 
-	assert.equal(events.map((piece) => piece.text).join(""), "data: 1\n\ndata: 2\n\ndata: 3\n\n");
-	assert.ok(events.length >= 3, `each event as it's written, not the whole at the end: ${events.length} pieces`);
-	assert.ok(events.at(-1).at - events[0].at > 500, "spread over the time they were written in");
+	assert.equal(events.missing, undefined, `each event as it's written, not the whole at the end: event ${events.missing} didn't arrive while the response was open (${JSON.stringify(events.text)})`);
+	assert.equal(events.text, "data: 1\n\ndata: 2\n\ndata: 3\n\n");
+	assert.ok(events.pieces >= 3, `in pieces as written: ${events.pieces}`);
+	assert.ok(events.ended, "and it ends when the server ends it");
 
 	const upload = await preview().evaluate(async () => (await fetch("http://localhost:3001/upload", { "method": "POST", "body": new Uint8Array(700_000) })).text());
 
