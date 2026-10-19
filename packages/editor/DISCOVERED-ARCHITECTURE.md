@@ -164,6 +164,10 @@ own — and it waits until discovery has shown how far it gets alone.
    and the Flows tab names the component each message ends at. A line has a component at the receiving end only: the hub
    knows where a subscription was registered, not where a send came from, so the sender is its hub. Not yet: flows longer
    than the store's recent log.
+   *2026-10-19:* the view's side panel is gone: the Inspector, Flows, Conformance and Log tabs. The canvas, the feature
+   lens and the components on it stay. What needs review is debug-mcp's `architecture_state` (its `violations`, the
+   workbench's `architecture.violations`), a channel's traffic is `architecture_state` with `channel`, and flows are
+   observability's `flowsOf`, which the tour checks.
 6. **The diagram from the tour**, and the model trimmed to its rules. Done: `tourDiagram()` renders what the tour saw —
    every context, extension and store in its container, what joined them (a hub link, a declared channel's protocol, an
    extension's commands, a store's reads and writes), the stores with their writers and readers, and each hub's

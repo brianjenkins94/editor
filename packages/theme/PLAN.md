@@ -231,8 +231,8 @@ Re-run with `npx eslint .` and `npm run lint:css`.
   log rows `wa-cluster`s with `wa-text-truncate` cells. That retired `.arch-chip`, `.arch-legend`, `.arch-spacer`,
   `.arch-state`, `.arch-subject(s)`, `.arch-section`, `.arch-muted`, `.arch-link`, `.arch-list` and most of the
   `.arch-event-*` and `.arch-flow*` rules.
-- What's left is the canvas and side panel's layout (and its narrow-editor container query), the key/value grid, the
-  table, a few log-row details, and the SVG diagram. It's in `@layer app`, on `--wa-*` tokens only. The diagram's
+- What's left is the canvas's layout and the SVG diagram. (The side panel went on 2026-10-19, with its key/value grid,
+  table and log rows: its data is debug-mcp's `architecture_state`, `violations` included.) It's in `@layer app`, on `--wa-*` tokens only. The diagram's
   pulses use the same variant tokens as the kind badges; hub links are the palette's `--wa-color-purple-60`, which
   doesn't follow the light/dark mode.
 - The sheet declares the layer order, ending in `app`. The view's `<style>` comes before the adopted Web Awesome

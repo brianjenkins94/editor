@@ -494,22 +494,6 @@ export function familiesOnLink(first: string, second: string): SubjectFamily[] {
 	return subjects.filter((family) => (["event", "call"] as const).some((kind) => familyAllowsHop(family, kind, first, second) || familyAllowsHop(family, kind, second, first)));
 }
 
-/** Which way a family's events and calls cross the link `first`–`second`: `→` (first to second), `←`, or `⇄`. */
-export function directionOnLink(family: SubjectFamily, first: string, second: string): "→" | "←" | "⇄" | undefined {
-	const forward = familyAllowsHop(family, "event", first, second);
-	const backward = familyAllowsHop(family, "event", second, first);
-
-	if (forward && backward) {
-		return "⇄";
-	}
-
-	if (forward) {
-		return "→";
-	}
-
-	return backward ? "←" : undefined;
-}
-
 /** Whether the model lets `label` (a hub message) cross from `first` to `second`. */
 export function allowedOnLink(label: string, first: string, second: string): boolean {
 	const subject = subjectOfLabel(label);

@@ -10,20 +10,18 @@
  */
 import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
 import type { Hub } from "@brianjenkins94/hub";
-import type { ChannelStats, FlowMessage, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
+import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture-model";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { ArchitectureStore, collectArchReports, flowsOf, requestArchSync } from "@brianjenkins94/observability";
+import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import css from "theme/exceptions/architecture-view.css?raw";
-import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjects as subjectFamilies, subjectMatches, subjectOfLabel } from "../shared/architecture-model";
+import { appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, DYNAMIC_PREFIXES, dynamicContainer, hubLinks, nodeSpec, subjectOfLabel } from "../shared/architecture-model";
 import { windowTitle } from "../shared/virtual-path";
 import "@awesome.me/webawesome/dist/components/badge/badge.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/input/input.js";
 import "@awesome.me/webawesome/dist/components/option/option.js";
 import "@awesome.me/webawesome/dist/components/select/select.js";
-import "@awesome.me/webawesome/dist/components/tab/tab.js";
-import "@awesome.me/webawesome/dist/components/tab-group/tab-group.js";
 import "@awesome.me/webawesome/dist/components/tag/tag.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -57,15 +55,9 @@ type Variant = "brand" | "neutral" | "success" | "warning" | "danger";
 /** Each kind's Web Awesome variant: its chip's, and (in the exception CSS) its pulse's fill. An ack is neutral, outlined. */
 const KIND_VARIANTS: Partial<Record<string, Variant>> = { "request": "brand", "reply": "success", "event": "neutral", "message": "warning", "error": "danger" };
 
-/** A context's (or a line's) state, as a badge's variant. */
-const STATE_VARIANTS: Partial<Record<string, Variant>> = { "alive": "success", "unresponsive": "danger" };
-
 // ── the store: one per workbench, kept across pane close/reopen so history survives ──────────────────────────
 
 let shared: ArchitectureStore | undefined;
-// Payload capture (opt-in: it records the app's data) — every reporter's sampled messages keep what they carried. The
-// reporters' setting, so one for every view of it.
-let capturing = false;
 
 /** The workbench's architecture store — created on first use: subscribes to every reporter and asks for a sync. */
 export function architectureStore(hub: Hub): ArchitectureStore {
@@ -74,11 +66,6 @@ export function architectureStore(hub: Hub): ArchitectureStore {
 
 		shared = store;
 		collectArchReports(hub, (report) => {
-			// While capturing, a reporter that's new to us (a worker just started) is told too.
-			if (capturing && !store.reporters.has(report.reporter)) {
-				requestArchSync(hub, { "capture": true });
-			}
-
 			store.apply(report);
 		});
 		// The subscription's interest has to reach the other hubs before they're asked to answer.
@@ -154,16 +141,6 @@ function chip(kind: string): HTMLElement {
 	return html("wa-badge", { "variant": KIND_VARIANTS[kind] ?? "neutral", "appearance": kind in KIND_VARIANTS ? undefined : "outlined" }, kind);
 }
 
-/** A state, as an outlined pill. */
-function stateBadge(state: string, text: string): HTMLElement {
-	return html("wa-badge", { "variant": STATE_VARIANTS[state] ?? "neutral", "appearance": "outlined", "pill": "", "class": "wa-align-self-start" }, text);
-}
-
-/** Subjects (or patterns), each a tag; `unexpected` ones are danger. */
-function subjectTags(subjects: { "text": string; "title"?: string; "unexpected"?: boolean }[]): HTMLElement {
-	return html("div", { "class": "wa-cluster wa-gap-2xs" }, ...subjects.map(({ text, title, unexpected }) => html("wa-tag", { "size": "xs", "variant": unexpected === true ? "danger" : "neutral", "class": "arch-mono", "title": title }, text)));
-}
-
 function svgElement<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<string, string | number | undefined> = {}, text?: string): SVGElementTagNameMap[K] {
 	const element = document.createElementNS(SVG_NS, tag);
 
@@ -188,22 +165,8 @@ function formatCount(count: number): string {
 	return count < 1_000_000 ? (count / 1000).toFixed(count < 10_000 ? 1 : 0) + "k" : (count / 1_000_000).toFixed(1) + "M";
 }
 
-function formatBytes(bytes: number): string {
-	if (bytes < 1024) {
-		return bytes + " B";
-	}
-
-	return bytes < 1024 * 1024 ? (bytes / 1024).toFixed(1) + " KB" : (bytes / 1024 / 1024).toFixed(1) + " MB";
-}
-
 function formatRate(rate: number): string {
 	return rate >= 10 ? Math.round(rate) + "/s" : rate.toFixed(1) + "/s";
-}
-
-function formatTime(time: number): string {
-	const date = new Date(time);
-
-	return date.toLocaleTimeString([], { "hour12": false }) + "." + String(date.getMilliseconds()).padStart(3, "0");
 }
 
 function containerOf(node: RuntimeNode, app: ReadonlySet<string> = new Set()): string {
@@ -238,20 +201,6 @@ function detailOf(node: RuntimeNode): string {
 	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? (window === undefined ? "" : "in " + windowTitle(window));
 }
 
-/** A context the model doesn't list: a previewed app's own, created at runtime (its channels are declared by prefix),
- *  or a finding. */
-function undeclaredNote(id: string, app: ReadonlySet<string>): HTMLElement {
-	if (app.has(id)) {
-		return html("p", { "class": "wa-color-text-quiet" }, "The previewed app's own context — its hubs joined the editor's tree through the shell's preview link. Its architecture, not the editor's: nothing in the model to check it against.");
-	}
-
-	const prefix = DYNAMIC_PREFIXES.find((candidate) => id.startsWith(candidate));
-
-	return prefix === undefined
-		? html("p", { "class": "arch-violations" }, "Not in the model.")
-		: html("p", { "class": "wa-color-text-quiet" }, "Created at runtime — the model declares its channels as " + prefix + "*.");
-}
-
 function isVisible(node: RuntimeNode, now: number, showDeclared: boolean): boolean {
 	if (node.state === "declared") {
 		return showDeclared && node.spec.dynamic !== true;
@@ -271,44 +220,6 @@ function badgeOf(node: RuntimeNode): string {
 	}
 
 	return node.spawnCount > 1 ? node.spawnCount + " starts" : "";
-}
-
-/** A sample's ends, the way it went (none without its channel). */
-function sampleEnds(sample: StoredSample, channel: ChannelStats | undefined): [string, string] {
-	if (channel === undefined) {
-		return ["", ""];
-	}
-
-	return sample.forward ? [channel.a, channel.b] : [channel.b, channel.a];
-}
-
-/** A context's facts, for the Inspector: those it lacks are left out. */
-function contextFacts(id: string, node: RuntimeNode | undefined, declared: ReturnType<typeof nodeSpec>, container: ContainerSpec | undefined): [string, string | undefined][] {
-	return [
-		["Id", id],
-		["Runs in", container === undefined ? undefined : container.label + " — " + container.caption],
-		["Detail", declared?.detail ?? node?.spec.detail],
-		["Only", declared?.condition],
-		["Instances", node !== undefined && node.instances > 0 ? String(node.instances) : undefined],
-		["Started", node !== undefined && node.spawnCount > 1 ? node.spawnCount + " times" : undefined],
-		["First seen", node?.createdAt === undefined ? undefined : formatTime(node.createdAt)],
-		["Ended", node?.endedAt === undefined ? undefined : formatTime(node.endedAt)],
-		["Reported by", node === undefined ? undefined : [...node.reporters].join(", ")],
-		...Object.entries(node?.spec.meta ?? {}).map(([key, value]): [string, string] => [key, value])
-	];
-}
-
-/** What the model declares a line as, in words. */
-function declaredKindText(declared: NonNullable<ReturnType<typeof declaredOn>>): string {
-	if (declared.type === "hub") {
-		return "hub link";
-	}
-
-	if (declared.type === "discovered") {
-		return declared.kind === "commands" ? "discovered: extensions' commands (VS Code's command surface)" : "discovered: a store, by what's written to it and read from it";
-	}
-
-	return "declared channel";
 }
 
 /** Cut `text` (in the document, so it can be measured) to `width` with an ellipsis; the whole of it, its tooltip. */
@@ -580,48 +491,9 @@ function edgePath(from: Rect, to: Rect): string {
 	return `M ${x1} ${fromY} C ${leftToRight ? x1 + curve : x1 - curve} ${fromY} ${leftToRight ? x2 - curve : x2 + curve} ${toY} ${x2} ${toY}`;
 }
 
-/** A channel's kind in the Mermaid: what the model declares it as, or UNDECLARED. */
-function mermaidKind(declared: ReturnType<typeof declaredOn>): string {
-	if (declared === undefined) {
-		return "UNDECLARED";
-	}
-
-	if (declared.type === "hub") {
-		return "hub";
-	}
-
-	if (declared.type === "discovered") {
-		return declared.kind === "commands" ? "commands" : "store";
-	}
-
-	return declared.spec.protocol;
-}
-
-/** Mermaid of what's OBSERVED, counts and all (ARCHITECTURE.md's, one of a kind each, is the tour's: `tourDiagram`). */
-function observedMermaid(store: ArchitectureStore): string {
-	const id = (value: string): string => value.replaceAll(/\W/gu, "_");
-	const lines = ["flowchart LR"];
-
-	for (const node of store.nodes.values()) {
-		if (node.state !== "declared" && !store.media().has(node.id)) {
-			lines.push(`  ${id(node.id)}["${labelOf(store, node.id).replaceAll("\"", "'")}"]`);
-		}
-	}
-
-	for (const channel of store.channels.values()) {
-		const declared = declaredOn(channel);
-		const label = mermaidKind(declared) + (channel.medium === undefined ? "" : " via " + channel.medium) + " · " + formatCount(channel.count);
-
-		lines.push(`  ${id(channel.a)} ${declared?.type === "hub" ? "<==>" : "<-->"}|${label}| ${id(channel.b)}`);
-	}
-
-	return lines.join("\n");
-}
-
 // ── the view ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 type Selection = { "type": "node"; "id": string } | { "type": "edge"; "id": string } | undefined;
-type Tab = "inspector" | "conformance" | "flows" | "log";
 
 /** The words a channel's label or a node's id is made of, as a feature lens reads them: a subject's tokens, a command's
  *  (`cmd editor.annotations.resolve`), a store's path segments (`store:.silo/evidence/…`). */
@@ -677,16 +549,12 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	const store = architectureStore(hub);
 	const disposables: (() => void)[] = [];
 	let selection: Selection;
-	let tab: Tab = "inspector";
 	/** The feature the lens lights up (featureOf), or none. */
 	let feature: string | undefined;
 	let paused = false;
 	let showAcks = false;
 	let showDeclared = true;
 	const collapsed = loadCollapsed();
-	let zoom = 1;
-	let autoFit = true;
-	let logFilter = "";
 	let hovered: string | undefined;
 
 	root.classList.add("arch-root", "wa-stack", "wa-gap-0", "wa-body-s", "wa-color-text-normal");
@@ -721,7 +589,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	featureSelect.addEventListener("change", () => {
 		feature = featureSelect.value === "" || featureSelect.value === null ? undefined : String(featureSelect.value);
 		applySelection();
-		refreshPanel();
 	});
 	const button = (label: string, title: string, onClick: (element: WaButton) => void): WaButton => {
 		const element = html("wa-button", { "size": "s", "variant": "neutral", "title": title }, label);
@@ -747,17 +614,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		return element;
 	};
 
-	const copy = (element: WaButton, text: string): void => {
-		const label = element.textContent;
-
-		void navigator.clipboard.writeText(text).then(() => {
-			element.textContent = "Copied";
-			setTimeout(() => {
-				element.textContent = label;
-			}, 1500);
-		});
-	};
-
 	root.append(html(
 		"div",
 		{ "class": "arch-toolbar wa-split wa-gap-s" },
@@ -780,39 +636,19 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			}),
 			toggle("Acks", "Show RPC acknowledgements", showAcks, (value) => {
 				showAcks = value;
-				refreshPanel();
-			}),
-			toggle("Payloads", "Capture what each message carries, everywhere (it records the app's data) — shown in a channel's recent traffic", capturing, (value) => {
-				capturing = value;
-				requestArchSync(hub, { "capture": value });
 			}),
 			toggle("Idle", "Show declared contexts that aren't running", showDeclared, (value) => {
 				showDeclared = value;
 				scheduleRender();
 			}),
 			featureSelect,
-			button("−", "Zoom out", () => { setZoom(zoom / 1.2); }),
-			button("Fit", "Fit the width", () => {
-				autoFit = true;
-				fit();
-			}),
-			button("+", "Zoom in", () => { setZoom(zoom * 1.2); }),
 			button("Reset", "Reset the counters", () => {
 				store.resetCounters();
-				refreshPanel();
-			}),
-			button("Mermaid", "Copy the OBSERVED architecture as a Mermaid flowchart", (element) => { copy(element, observedMermaid(store)); }),
-			button("Export", "Download a JSON snapshot of everything recorded", () => {
-				const url = URL.createObjectURL(new Blob([JSON.stringify(store.snapshot(), null, 2)], { "type": "application/json" }));
-				const link = html("a", { "href": url, "download": "architecture-" + new Date().toISOString().replaceAll(/[:.]/gu, "-") + ".json" });
-
-				link.click();
-				URL.revokeObjectURL(url);
 			})
 		)
 	));
 
-	// ── canvas + side panel
+	// ── canvas
 	const svg = svgElement("svg", { "class": "arch-svg" });
 	const containerLayer = svgElement("g");
 	const edgeLayer = svgElement("g");
@@ -822,23 +658,14 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	svg.append(containerLayer, edgeLayer, nodeLayer, pulseLayer);
 
 	const canvas = html("div", { "class": "arch-canvas" }, svg);
-	const tabs = html("wa-tab-group", { "without-scroll-controls": "" });
-	const panel = html("div", { "class": "arch-panel wa-stack wa-gap-m" });
 
-	root.append(html("div", { "class": "arch-body" }, canvas, html("div", { "class": "arch-side" }, tabs, panel)));
+	root.append(html("div", { "class": "arch-body" }, canvas));
 
 	svg.addEventListener("click", (event) => {
 		if (event.target === svg) {
 			select(undefined);
 		}
 	});
-	canvas.addEventListener("wheel", (event) => {
-		if (event.ctrlKey || event.metaKey) {
-			event.preventDefault();
-			setZoom(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
-		}
-	}, { "passive": false });
-
 	// The editor pane's scrollable element consumes wheel events: let ours scroll natively.
 	const stopWheel = (event: WheelEvent): void => {
 		event.stopPropagation();
@@ -880,24 +707,13 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 	}
 
-	function applyZoom(): void {
-		if (layout !== undefined) {
-			svg.setAttribute("width", String(layout.width * zoom));
-			svg.setAttribute("height", String(layout.height * zoom));
-		}
-	}
-
-	function setZoom(value: number): void {
-		autoFit = false;
-		zoom = Math.min(3, Math.max(0.25, value));
-		applyZoom();
-	}
-
+	/** The diagram at the pane's width (width only: it's tall, and scrolling vertically reads better). */
 	function fit(): void {
 		if (layout !== undefined && canvas.clientWidth > 0) {
-			// Width only: the diagram is tall, scrolling vertically reads better.
-			zoom = Math.min(1.25, Math.max(0.25, (canvas.clientWidth - 16) / layout.width));
-			applyZoom();
+			const scale = Math.min(1.25, Math.max(0.25, (canvas.clientWidth - 16) / layout.width));
+
+			svg.setAttribute("width", String(layout.width * scale));
+			svg.setAttribute("height", String(layout.height * scale));
 		}
 	}
 
@@ -1057,7 +873,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		components = componentsNow(drawnIds);
 		layout = computeLayout(drawn, collapsed, appInfo, components);
 		svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
-		applyZoom();
+		fit();
 		clearPulses();
 
 		containerLayer.replaceChildren();
@@ -1090,10 +906,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		drawContainerHeaders(visibleIds);
 		applySelection();
 		tick();
-
-		if (autoFit) {
-			fit();
-		}
 	}
 
 	/** A container's box, at `rect`. */
@@ -1111,7 +923,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			text.x = rect.x + 22;
 		}
 
-		// Standing for a node, the line beneath is that node's detail, as on a node's box (the caption is in the Inspector).
+		// Standing for a node, the line beneath is that node's detail, as on a node's box.
 		const caption = svgElement("text", { "x": text.x, "y": text.caption, "class": "arch-container-caption" }, standsFor === undefined ? container.caption : detailOf(standsFor));
 
 		group.append(
@@ -1262,7 +1074,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		nodeLayer.append(group);
 		nodeElements.set(node.id, group);
 
-		// Its components, each a row: hovering one lights its lines; a click picks the hub (its inspector lists them).
+		// Its components, each a row: hovering one lights its lines; a click picks the hub.
 		for (const component of components.get(node.id) ?? []) {
 			const id = componentId(node.id, component);
 			const row = layout.nodes.get(id);
@@ -1520,425 +1332,14 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 	}
 
-	// ── side panel
+	// ── what needs review, and what's picked
 	function conformance(): Violation[] {
 		return conformanceOf(store);
 	}
 
 	function select(value: Selection): void {
 		selection = value;
-
-		if (value !== undefined) {
-			tab = "inspector";
-		}
-
 		applySelection();
-		refreshPanel(true);
-	}
-
-	function link(label: string, target: Selection, className = "wa-link"): HTMLAnchorElement {
-		const element = html("a", { "class": className, "href": "#" }, label);
-
-		element.addEventListener("click", (event) => {
-			event.preventDefault();
-			select(target);
-		});
-
-		return element;
-	}
-
-	const section = (title: string, ...content: Child[]): HTMLElement => html("section", { "class": "wa-stack wa-gap-xs" }, html("h3", { "class": "wa-caption-xs wa-text-uppercase wa-font-weight-semibold" }, title), ...content);
-	const keyValues = (entries: [string, Node | string | undefined][]): HTMLElement => html("dl", { "class": "arch-kv" }, ...entries.filter(([, value]) => value !== undefined && value !== "").flatMap(([key, value]) => [html("dt", { "class": "wa-color-text-quiet" }, key), html("dd", null, value)]));
-	const table = (headers: string[], rows: Child[][]): HTMLElement => html("table", { "class": "arch-table" }, html("tr", null, ...headers.map((header) => html("th", null, header))), ...rows.map((row) => html("tr", null, ...row.map((cell) => html("td", { "class": "wa-text-truncate" }, cell)))));
-
-	function sampleRow(sample: StoredSample, channel: ChannelStats | undefined, withEndpoints: boolean): HTMLElement {
-		const [from, to] = sampleEnds(sample, channel);
-		// What it carried, when payload capture was on: on a line of its own, below.
-		const row = html(
-			"div",
-			{ "class": "arch-event wa-cluster wa-gap-xs wa-align-items-baseline wa-font-size-xs wa-text-nowrap " + (sample.payload === undefined ? "wa-flex-nowrap" : "wa-flex-wrap") },
-			html("span", { "class": "arch-mono wa-color-text-quiet" }, formatTime(sample.t)),
-			chip(sample.kind),
-			withEndpoints ? html("span", { "class": "arch-event-endpoints wa-color-text-quiet wa-text-truncate" }, labelOf(store, from) + " → " + labelOf(store, to)) : html("span", null, sample.forward ? "→" : "←"),
-			html("span", { "class": "arch-mono wa-text-truncate", "title": sample.label }, sample.label),
-			html("span", { "class": "arch-event-bytes arch-mono wa-color-text-quiet" }, sample.bytes > 0 ? formatBytes(sample.bytes) : ""),
-			sample.payload !== undefined && html("pre", { "class": "arch-event-payload arch-mono wa-color-text-quiet" }, sample.payload)
-		);
-
-		if (channel !== undefined && withEndpoints) {
-			row.addEventListener("click", () => {
-				select({ "type": "edge", "id": channel.id });
-			});
-		}
-
-		return row;
-	}
-
-	function renderOverview(): Child[] {
-		const now = Date.now();
-		const busiest = [...store.channels.values()].sort((left, right) => right.count - left.count).slice(0, 12);
-
-		return [
-			section(
-				"How to read it",
-				html("p", null, "Boxes are where code runs: realms (windows, workers) and origins (iframes). Solid double lines are hub links — the tree every context's hub federates over; thin lines are channels the probes observe outside the hubs (workers, extension hosts, network). Dots are messages."),
-				html("p", null, "Dashed means declared in the model (", html("code", null, "packages/editor/shared/architecture-model.ts"), ") but not seen yet; red means seen but not declared — fix the model or the code. Green lines were discovered, not declared: an extension's commands, and what's written to a store and read from it."),
-				html("p", null, "The rows in a hub's box are its components — what subscribed to it, by the function that did (or by namespace, where the build kept no names). A thin line from a row carries the messages that component handles; the hub link beside it keeps the counts."),
-				html("p", null, "Click a context or a line to inspect it. Pick a feature beside Idle to light only its part.")
-			),
-			section("Busiest channels", table(["Channel", "Messages", "Rate"], busiest.map((channel) => [
-				link(labelOf(store, channel.a) + " ⇄ " + labelOf(store, channel.b), { "type": "edge", "id": channel.id }),
-				formatCount(channel.count),
-				formatRate(store.rate(channel, now))
-			])))
-		];
-	}
-
-	function renderNode(id: string): Child[] {
-		const node = store.nodes.get(id);
-		const declared = nodeSpec(id);
-		const container = containers.find((candidate) => candidate.id === (node === undefined ? declared?.container : containerOf(node, app)));
-		const now = Date.now();
-		const channels = [...store.channels.values()].filter((channel) => channel.a === id || channel.b === id).sort((left, right) => right.count - left.count);
-		const topology = store.topology.get(id);
-
-		return [
-			html("h2", { "class": "wa-heading-m" }, labelOf(store, id)),
-			stateBadge(node?.state ?? "declared", node?.state ?? "not seen yet"),
-			section(
-				"Context",
-				keyValues(contextFacts(id, node, declared, container)),
-				html("p", null, declared?.description ?? ""),
-				declared === undefined ? undeclaredNote(id, app) : html("p", { "class": "wa-color-text-quiet" }, "Observed by: " + declared.observedBy)
-			),
-			// What's inside it, discovered: its subscriptions grouped by the function that registered them (DISCOVERED-ARCHITECTURE.md).
-			topology !== undefined && section(
-				"Components",
-				html("p", { "class": "wa-color-text-quiet" }, "What subscribed to this hub, by the function that registered it (or, where no name survived the build, by namespace)."),
-				...componentsOf(topology).map(({ component, subjects }) => html("div", { "class": "wa-stack wa-gap-3xs" }, html("div", { "class": "wa-font-weight-semibold" }, component), subjectTags(subjects.map((subject) => ({ "text": subject })))))
-			),
-			topology !== undefined && section(
-				"Hub",
-				keyValues([["Subscriptions", topology.subscriptions.length === 0 ? "none" : String(topology.subscriptions.length)]]),
-				subjectTags(topology.subscriptions.map((subject) => ({ "text": subject }))),
-				table(["Link", "Peer"], topology.links.map((entry) => [entry.id, entry.peerId === undefined ? "anonymous" : link(labelOf(store, entry.peerId), { "type": "node", "id": entry.peerId })]))
-			),
-			section("Channels", channels.length === 0 ? html("p", { "class": "wa-color-text-quiet" }, "No traffic observed yet.") : table(["With", "Messages", "Bytes", "Rate"], channels.map((channel) => [
-				html("span", null, link(labelOf(store, channel.a === id ? channel.b : channel.a), { "type": "edge", "id": channel.id }), declaredOn(channel) === undefined ? html("span", { "class": "arch-violations" }, " undeclared") : null),
-				formatCount(channel.count),
-				formatBytes(channel.bytes),
-				formatRate(store.rate(channel, now))
-			])))
-		];
-	}
-
-	/** An edge's Inspector header: its ends, its medium, its state, and what the model says crosses it. */
-	function edgeHeader(endA: string, endB: string, channel: ChannelStats | undefined, declared: ReturnType<typeof declaredOn>): Child[] {
-		const families = declared?.type === "hub" ? familiesOnLink(endA, endB) : [];
-
-		return [
-			html("h2", { "class": "wa-heading-m" }, link(labelOf(store, endA), { "type": "node", "id": endA }), " ⇄ ", link(labelOf(store, endB), { "type": "node", "id": endB })),
-			channel?.medium !== undefined && html("p", { "class": "wa-color-text-quiet" }, "Through ", html("code", null, labelOf(store, channel.medium)), ` (${store.nodes.get(channel.medium)?.spec.detail ?? "a channel"}) — only these two use it.`),
-			edgeState(endA, endB, channel, declared),
-			declared?.type === "channel" && section(declared.spec.protocol, keyValues([["Transport", declared.spec.transport], ["Not a hub link because", declared.spec.reason]]), html("p", null, declared.spec.description)),
-			declared?.type === "hub" && section(
-				"Subjects allowed across this link",
-				html("p", { "class": "wa-color-text-quiet" }, "Each the way its events and calls go: → toward ", html("code", null, labelOf(store, endB)), ", ← toward ", html("code", null, labelOf(store, endA)), "."),
-				subjectTags(families.map((family) => ({ "text": `${directionOnLink(family, endA, endB) ?? ""} ${family.pattern}`, "title": `from ${family.from.join(", ") || "nobody"} to ${family.to.join(", ") || "nobody"}` })))
-			)
-		];
-	}
-
-	/** An edge's state: the previewed app's own, undeclared, or what the model declares it as (and whether it's seen). */
-	function edgeState(endA: string, endB: string, channel: ChannelStats | undefined, declared: ReturnType<typeof declaredOn>): HTMLElement {
-		if (declared === undefined && (app.has(endA) || app.has(endB))) {
-			return stateBadge("alive", "the previewed app's own — not in the editor's model");
-		}
-
-		if (declared === undefined) {
-			return stateBadge("unresponsive", "undeclared: neither a hub link nor a channel in the model");
-		}
-
-		return stateBadge(channel === undefined ? "declared" : "alive", declaredKindText(declared) + (channel === undefined ? ", not seen yet" : ""));
-	}
-
-	function renderEdge(id: string): Child[] {
-		const edge = edges.get(id);
-		const channel = edge?.channel ?? store.channelById(id);
-		const endA = edge?.a ?? channel?.a;
-		const endB = edge?.b ?? channel?.b;
-
-		if (endA === undefined || endB === undefined) {
-			return [html("p", null, "This channel is gone.")];
-		}
-
-		const declared = channel === undefined ? declaredBetween(endA, endB) : declaredOn(channel);
-		const header = edgeHeader(endA, endB, channel, declared);
-
-		if (channel === undefined) {
-			return header;
-		}
-
-		const unexpected = (label: string): boolean => {
-			// Only hub-carried messages are subjects; a probe-observed message on the same pair isn't. Each is checked the
-			// way it went.
-			const stats = channel.labels.get(label);
-
-			if (declared?.type !== "hub" || stats === undefined || (stats.hub ?? 0) === 0 || subjectOfLabel(label) === undefined) {
-				return false;
-			}
-
-			return (stats.forward > 0 && !allowedOnLink(label, endA, endB)) || (stats.backward > 0 && !allowedOnLink(label, endB, endA));
-		};
-
-		const labels = [...channel.labels.entries()].filter(([label]) => showAcks || !label.startsWith("ack ")).sort(([, x], [, y]) => y.count - x.count);
-		const recent = channel.recent.filter((sample) => showAcks || sample.kind !== "ack").slice(-80).reverse();
-
-		return [
-			...header,
-			Object.keys(channel.interest).length > 0 && section(
-				"Interest",
-				...Object.entries(channel.interest).map(([hubId, interest]) => html(
-					"div",
-					null,
-					html("p", { "class": "wa-color-text-quiet" }, labelOf(store, hubId === endA ? endB : endA) + " asked " + labelOf(store, hubId) + " for:"),
-					subjectTags(interest.map((subject) => ({ "text": subject })))
-				))
-			),
-			section(
-				"Traffic",
-				keyValues([
-					["Messages", `${formatCount(channel.count)} (→ ${formatCount(channel.forward)} · ← ${formatCount(channel.backward)})`],
-					["Rate", formatRate(store.rate(channel))],
-					["Bytes", formatBytes(channel.bytes)],
-					["Errors", channel.errors > 0 ? String(channel.errors) : undefined],
-					["Last", channel.count > 0 ? formatTime(channel.lastAt) : undefined]
-				]),
-				html("p", { "class": "wa-color-text-quiet" }, "→ is " + labelOf(store, channel.a) + " to " + labelOf(store, channel.b))
-			),
-			section(`Messages (${labels.length} distinct)`, table(["Message", "→", "←", "Bytes"], labels.slice(0, 50).map(([label, stats]) => [
-				html("span", { "class": "arch-mono" + (unexpected(label) ? " arch-violations" : ""), "title": unexpected(label) ? "not allowed across this link by the model" : label }, label),
-				formatCount(stats.forward),
-				formatCount(stats.backward),
-				formatBytes(stats.bytes)
-			]))),
-			section("Recent", ...recent.map((sample) => sampleRow(sample, channel, false)))
-		];
-	}
-
-	function describeViolation(violation: Violation): Child {
-		switch (violation.type) {
-			case "undeclared-channel":
-				return html("span", null, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.between(violation.a, violation.b)?.id ?? violation.a + "|" + violation.b }, "wa-link arch-violations"), " — no hub link or channel in the model");
-			case "unexpected-subject":
-				return html("span", null, html("code", null, violation.subject), ` × ${formatCount(violation.count)} across `, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.between(violation.a, violation.b)?.id ?? violation.a + "|" + violation.b }), " — not among the hubs of any family that may cross it");
-			case "duplicate-peer":
-				return html("span", null, link(labelOf(store, violation.hub), { "type": "node", "id": violation.hub }), ` has ${violation.links} links to "${violation.peer}" — duplicate hub ids, or stale links`);
-			case "unknown-node":
-			default:
-				return html("span", null, link(labelOf(store, violation.id), { "type": "node", "id": violation.id }, "wa-link arch-violations"), " — not in the model");
-		}
-	}
-
-	function renderConformance(): Child[] {
-		const violations = conformance();
-		const observed = [...store.channels.values()].filter((channel) => channel.count > 0 || channel.linked);
-		const seen = (endA: string, endB: string): boolean => observed.some((channel) => (channel.a === endA && channel.b === endB) || (channel.a === endB && channel.b === endA));
-		const seenByChannel = seenChannels(observed);
-
-		return [
-			section(
-				"Summary",
-				keyValues([
-					["Hub links", `${hubLinks.filter(([endA, endB]) => seen(endA, endB)).length} / ${hubLinks.length} seen`],
-					["Channels", `${declaredChannels.filter((channel) => seenByChannel.has(channel)).length} / ${declaredChannels.length} seen`],
-					["To review", String(violations.length)]
-				]),
-				html("p", { "class": "wa-color-text-quiet" }, "The model: packages/editor/shared/architecture-model.ts. Change it with the architecture.")
-			),
-			section("To review", violations.length === 0 ? html("p", { "class": "wa-color-text-quiet" }, "Nothing — everything observed matches the model.") : html("ul", { "class": "wa-list-plain wa-stack wa-gap-2xs" }, ...violations.map((violation) => html("li", null, describeViolation(violation))))),
-			section("Hub links", table(["Link", "Messages"], hubLinks.map(([endA, endB]) => {
-				const channel = observed.find((candidate) => (candidate.a === endA && candidate.b === endB) || (candidate.a === endB && candidate.b === endA));
-
-				return [channel === undefined ? `${endA} ⇄ ${endB}` : link(`${endA} ⇄ ${endB}`, { "type": "edge", "id": channel.id }), channel === undefined ? "not seen" + (nodeSpec(endB)?.condition === undefined ? "" : ` (${nodeSpec(endB).condition})`) : formatCount(channel.count)];
-			}))),
-			section("Channels", table(["Channel", "Protocol", "Seen"], declaredChannels.map((channel) => [
-				`${channel.a} ⇄ ${channel.b}`,
-				channel.protocol,
-				String(seenByChannel.get(channel) ?? "no")
-			]))),
-			...untouched(observed)
-		];
-	}
-
-	/** The gaps the other way: the rules (subject families) and the discovered components no traffic touched this session
-	 *  — untested paths, or ones this session never took (DISCOVERED-ARCHITECTURE.md). */
-	function untouched(observed: ChannelStats[]): Child[] {
-		const seenSubjects = new Set(observed.flatMap((channel) => [...channel.labels].flatMap(([label, stats]) => {
-			const subject = (stats.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
-
-			return subject === undefined ? [] : [subject];
-		})));
-		// The reports themselves (`$sys.arch.*`) aren't counted — the reporter would be reporting its reports — but this
-		// view has them, so they ran.
-		const touched = (pattern: string): boolean => pattern.startsWith("$sys.arch.") || [...seenSubjects].some((subject) => subjectMatches(pattern, subject));
-		const rules = subjectFamilies.filter((family) => !touched(family.pattern));
-		const components = [...store.topology].flatMap(([hub, topology]) => componentsOf(topology).filter(({ subjects }) => !subjects.some((subject) => touched(subject.replace(/\(\)$/u, "")))).map(({ component, subjects }) => ({ "hub": hub, "component": component, "subjects": subjects })));
-
-		return [
-			section("Rules no traffic touched", rules.length === 0 ? html("p", { "class": "wa-color-text-quiet" }, "Every subject family was seen this session.") : table(["Subject", "From → to"], rules.map((family) => [family.pattern, `${family.from.join(", ")} → ${family.to.join(", ")}`]))),
-			section("Components no traffic touched", components.length === 0 ? html("p", { "class": "wa-color-text-quiet" }, "Every discovered component heard something this session.") : table(["Component", "Of", "Serves and hears"], components.map(({ hub, component, subjects }) => [component, labelOf(store, hub), subjects.join(", ")])))
-		];
-	}
-
-	const filterInput = html("wa-input", { "size": "s", "placeholder": "Filter (context, message…)", "type": "search" });
-	const logList = html("div", { "class": "arch-log" });
-
-	filterInput.addEventListener("input", () => {
-		logFilter = (filterInput.value ?? "").toLowerCase();
-		refreshPanel();
-	});
-
-	/** The flows in the recent traffic (observability's flowsOf): each message, and what it caused, across hubs —
-	 *  only those with more than one message, the newest first, and only the lens's feature's when one is lit. */
-	function renderFlows(): Child[] {
-		const samples = store.log.flatMap((sample) => {
-			const channel = store.channelById(sample.channel);
-
-			return channel === undefined ? [] : [{ ...sample, "from": sample.forward ? channel.a : channel.b, "to": sample.forward ? channel.b : channel.a }];
-		});
-		const everything = (message: FlowMessage): FlowMessage[] => [message, ...message.caused.flatMap(everything)];
-		// A flow's shape: what it is and what it caused, whatever its ids — so a flow that keeps happening reads once, ×N.
-		const shape = (message: FlowMessage): string => `${message.inferred === true ? "~" : ""}${message.label}[${message.path.join(">")}](${message.caused.map(shape).join(",")})`;
-		const grouped = <T extends FlowMessage>(messages: T[]): { "message": T; "count": number }[] => {
-			const groups = new Map<string, { "message": T; "count": number }>();
-
-			for (const message of messages) {
-				const known = groups.get(shape(message));
-
-				groups.set(shape(message), { "message": message, "count": (known?.count ?? 0) + 1 });
-			}
-
-			return [...groups.values()];
-		};
-
-		// With no lens, flows of more than one message; with one, every message of its feature's.
-		const flows = grouped(flowsOf(samples).filter((flow) => !flow.label.startsWith("$sys") && (feature === undefined ? flow.caused.length > 0 : everything(flow).some((message) => wordsOf(message.label).includes(feature))))).reverse().slice(0, 40);
-		// Where a message ends: its last hub, and the component there that handles it (a reply's is its caller's machinery).
-		const handledBy = (message: FlowMessage): string => {
-			const end = message.path.at(-1);
-			const topology = store.topology.get(end);
-			const subject = message.label.startsWith("↩") ? undefined : subjectOfLabel(message.label);
-			const component = topology === undefined || subject === undefined ? undefined : componentFor(topology, subject);
-
-			return labelOf(store, end) + (component === undefined ? "" : " · " + component);
-		};
-
-		const line = (message: FlowMessage, count: number, depth: number): HTMLElement[] => [
-			html("div", { "class": "wa-text-truncate" + (message.inferred === true ? " arch-inferred" : ""), "style": `padding-left: ${depth * 14}px`, "title": message.inferred === true ? "linked by timing: its cause wasn't named" : "" }, html("span", { "class": "arch-mono" }, message.label), html("span", { "class": "wa-color-text-quiet" }, " " + [...message.path.slice(0, -1).map((id) => labelOf(store, id)), handledBy(message)].join(" → ") + (count > 1 ? `  ×${count}` : ""))),
-			...grouped(message.caused).flatMap((child) => line(child.message, child.count, depth + 1))
-		];
-
-		return flows.length === 0
-			? [html("p", { "class": "wa-color-text-quiet" }, feature === undefined ? "No flows yet: a flow is a message and the ones it caused, followed by the causes the hub names." : `No ${feature} messages in the recent traffic.`)]
-			: [html("p", { "class": "wa-color-text-quiet" }, "Each message and the ones it caused, across hubs, the same shape counted once (×N); dimmed lines are linked by timing, their cause not named."), ...flows.map(({ message, count }) => html("div", { "class": "arch-flow-group" }, ...line(message, count, 0)))];
-	}
-
-	function renderLog(): Child[] {
-		const rows: HTMLElement[] = [];
-
-		for (let index = store.log.length - 1; index >= 0 && rows.length < 300; index -= 1) {
-			const sample = store.log[index];
-
-			if (showAcks || sample.kind !== "ack") {
-				const channel = store.channelById(sample.channel);
-
-				if (logFilter.length === 0 || `${sample.label} ${sample.kind} ${channel === undefined ? "" : labelOf(store, channel.a) + " " + labelOf(store, channel.b)}`.toLowerCase().includes(logFilter)) {
-					rows.push(sampleRow(sample, channel, true));
-				}
-			}
-		}
-
-		logList.replaceChildren(...rows);
-
-		return [filterInput, logList];
-	}
-
-	let panelHovered = false;
-
-	panel.addEventListener("mouseenter", () => {
-		panelHovered = true;
-	});
-	panel.addEventListener("mouseleave", () => {
-		panelHovered = false;
-	});
-
-	// Created once — rebuilding them every tick would swallow clicks landing mid-rebuild.
-	// Tabs only: the one panel below them draws whichever is open.
-	const tabButtons = new Map<Tab, HTMLElement>((["inspector", "conformance", "flows", "log"] as Tab[]).map((id) => {
-		const element = html("wa-tab", { "panel": id });
-
-		tabs.append(element);
-
-		return [id, element];
-	}));
-
-	// With no panels of its own the group emits no wa-tab-show: its choice is read once a click or a key has moved it.
-	const chosen = (): void => {
-		void tabs.updateComplete.then(() => {
-			const id = tabs.active as Tab;
-
-			if (id !== tab) {
-				tab = id;
-				refreshPanel(true);
-			}
-		});
-	};
-
-	tabs.addEventListener("click", chosen);
-	tabs.addEventListener("keydown", chosen);
-
-	/** The open tab's content: the Inspector's is the selection's, or the overview with none. */
-	function panelContent(): Child[] {
-		if (tab === "conformance") {
-			return renderConformance();
-		}
-
-		if (tab === "flows") {
-			return renderFlows();
-		}
-
-		if (tab === "log") {
-			return renderLog();
-		}
-
-		if (selection === undefined) {
-			return renderOverview();
-		}
-
-		return selection.type === "node" ? renderNode(selection.id) : renderEdge(selection.id);
-	}
-
-	function refreshPanel(force = false): void {
-		const violations = conformance().length;
-		const labels: Record<Tab, string> = { "inspector": "Inspector", "conformance": violations > 0 ? `Conformance (${violations})` : "Conformance", "flows": "Flows", "log": "Log" };
-
-		for (const [id, element] of tabButtons) {
-			element.textContent = labels[id];
-		}
-
-		tabs.active = tab;
-
-		// Don't move content under the mouse unless asked.
-		if (!force && (panelHovered || paused)) {
-			return;
-		}
-
-		const { scrollTop } = panel;
-		const content = panelContent();
-
-		panel.replaceChildren(...content.filter((child): child is Node | string => child !== null && child !== undefined && child !== false));
-		panel.scrollTop = force ? 0 : scrollTop;
 	}
 
 	// ── wiring
@@ -1958,13 +1359,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 
 		tick();
-		refreshPanel();
 	}, TICK_MS);
-	const resizeObserver = new ResizeObserver(() => {
-		if (autoFit) {
-			fit();
-		}
-	});
+	const resizeObserver = new ResizeObserver(fit);
 
 	resizeObserver.observe(canvas);
 	disposables.push(() => {
@@ -1974,7 +1370,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	});
 
 	render();
-	refreshPanel(true);
 
 	return {
 		"dispose": () => {
