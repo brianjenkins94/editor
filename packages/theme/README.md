@@ -25,6 +25,22 @@ import "@awesome.me/webawesome/dist/styles/utilities.css";
 import "theme";
 ```
 
+## In VS Code's document: `theme/vscode`
+
+The workbench (VS Code's document) uses the same tokens, mapped onto the active VS Code color theme:
+
+```ts
+import { followVsCodeTheme } from "theme/vscode";
+
+followVsCodeTheme(document.querySelector(".monaco-workbench"));
+```
+
+This adopts Web Awesome's theme and utility classes, these tokens, and `src/vscode.css` into that document.
+`src/vscode.css` is the bridge from `--wa-*` to `--vscode-*`, and the only place a `--vscode-*` variable may appear.
+The call also keeps the element's `wa-dark` / `wa-light` class in step with VS Code's theme type, so `<wa-*>`
+components there follow a theme switch live. [PLAN.md](PLAN.md) has the design and the plan for the rest of the
+custom CSS.
+
 ## This starter
 
 Dark-first, matching the editor shell's chrome, with the brand ramp set to the editor's blue accent (`#3794ff` at the

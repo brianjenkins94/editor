@@ -37,6 +37,7 @@ import notesExtension from "notes:extension";
 import { render } from "preact";
 import runningExtension from "running:extension";
 import sourceControlExtension from "source-control:extension";
+import { followVsCodeTheme } from "theme/vscode";
 import tsvalExtension from "tsval:extension";
 import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
@@ -517,6 +518,14 @@ function maybeBoot(): void {
 	})
 		.then(async () => {
 			bootSpan.info("monaco booted");
+			// Web Awesome in this document, on the active VS Code theme (theme/vscode): the workbench's own views draw
+			// with <wa-*> components, not CSS of their own.
+			const workbench = document.querySelector<HTMLElement>(".monaco-workbench");
+
+			if (workbench !== null) {
+				followVsCodeTheme(workbench);
+			}
+
 			// The writable workspace: a zen-fs-backed FileSystemProvider the type-checker reads through (priority 2,
 			// above boot's now defaults-only priority-1 base). This is the SOLE store for source — it gets the FULL
 			// `files` (source + type surface), so the workers/type-checker that attach to this same zen-fs see them,

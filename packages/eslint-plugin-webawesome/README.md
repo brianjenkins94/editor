@@ -27,6 +27,27 @@ it as a JSX component instead. The check requires a real tag name (a known HTML 
 and a closing `>`, so `a < b` and `List<T>` mentions don't false-fire. CSS in template strings is *not* flagged by
 this rule — reducing custom CSS is handled by adopting the theme package, not here.
 
+### `webawesome/prefer-components-wrapped`
+
+The same check as `prefer-components`, applied to calls through a local wrapper. A wrapper is a function in the same
+file that passes one of its parameters to `createElement` as the tag.
+
+```ts
+function html(tag, attributes) { const element = document.createElement(tag); … }
+html("button", { class: "arch-button" })  // ✗ use "wa-button"
+```
+
+### `webawesome/no-css-in-strings`, `webawesome/no-inline-styles`
+
+Flag CSS in a string or template literal, and inline styles: a JSX `style`, `el.style.… =`, or
+`setAttribute("style", …)`.
+
+### `webawesome/no-css-imports`
+
+Flags a stylesheet import, static or dynamic (`?raw` and `?inline` included), unless it comes from Web Awesome or the
+theme package. You can pass different package prefixes with `{ allow: [...] }`. A feature's own `.css` file is the
+custom CSS the theme is meant to replace. The CSS that remains is checked by the repo's `stylelint.config.js`.
+
 ## Usage
 
 Loaded directly in the repo's flat config (`eslint.config.js`) by relative path — no install needed — and scoped to the

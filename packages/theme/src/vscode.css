@@ -1,0 +1,45 @@
+/*
+ * theme/vscode — Web Awesome's tokens, mapped onto the active VS Code color theme.
+ *
+ * The one place a --vscode-* variable may appear (stylelint enforces it). VS Code declares its theme's variables on
+ * `.monaco-workbench`, so the mapping is declared there too: a custom property has to be resolved where the value it
+ * reads is defined. vscode.js puts Web Awesome's `wa-dark` / `wa-light` class on the same element, from VS Code's
+ * theme type, so every token not mapped here comes from Web Awesome's own ramp for that mode.
+ */
+
+.monaco-workbench {
+	/* Type and density: VS Code's UI font at its 13px size, and spacing to match. */
+	--wa-font-family-body: var(--vscode-font-family);
+	--wa-font-family-heading: var(--vscode-font-family);
+	--wa-font-family-code: var(--vscode-editor-font-family);
+	--wa-font-size-scale: 0.8125;
+	--wa-space-scale: 0.75;
+	--wa-border-radius-scale: 0.5;
+
+	/* Surfaces and text. */
+	--wa-color-surface-default: var(--vscode-editor-background);
+	--wa-color-surface-raised: var(--vscode-editorWidget-background);
+	--wa-color-surface-lowered: var(--vscode-sideBar-background);
+	--wa-color-surface-border: var(--vscode-editorWidget-border);
+	--wa-color-text-normal: var(--vscode-foreground);
+	--wa-color-text-quiet: var(--vscode-descriptionForeground);
+	--wa-color-text-link: var(--vscode-textLink-foreground);
+	--wa-color-focus: var(--vscode-focusBorder);
+
+	/* Brand is VS Code's primary button; neutral, its secondary button. */
+	--wa-color-brand-fill-loud: var(--vscode-button-background);
+	--wa-color-brand-on-loud: var(--vscode-button-foreground);
+	--wa-color-neutral-fill-loud: var(--vscode-button-secondaryBackground);
+	--wa-color-neutral-on-loud: var(--vscode-button-secondaryForeground);
+
+	/* Form controls (buttons included) are VS Code's height: Web Awesome's em-based padding, tightened from 0.75em/1em. */
+	--wa-form-control-padding-block: 0.35em;
+	--wa-form-control-padding-inline: 0.75em;
+
+	/* Form controls are VS Code's inputs. */
+	--wa-form-control-background-color: var(--vscode-input-background);
+	--wa-form-control-border-color: var(--vscode-input-border, var(--vscode-editorWidget-border));
+	--wa-form-control-value-color: var(--vscode-input-foreground);
+	--wa-form-control-placeholder-color: var(--vscode-input-placeholderForeground);
+	--wa-form-control-activated-color: var(--vscode-focusBorder);
+}

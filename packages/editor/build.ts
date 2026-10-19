@@ -26,7 +26,7 @@ export const root = url.fileURLToPath(new URL(".", import.meta.url));
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
 /** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */
-const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode"];
+const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode", "@awesome.me/webawesome"];
 
 // Every node builtin, bare (`fs`) and `node:`-prefixed — kept external so almostnode resolves them to its own
 // shims at runtime instead of vite bundling/polyfilling them.

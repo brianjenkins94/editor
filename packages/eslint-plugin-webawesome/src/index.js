@@ -17,6 +17,9 @@
  *   • no-inline-styles   — an inline style: a JSX `style` attribute, an `el.style.… =` assignment, or
  *     `setAttribute("style", …)`. Same reason — a class/token, not inline CSS. (Dynamic geometry that genuinely needs
  *     it, e.g. drag positioning, should be an explicit eslint-disable.)
+ *   • prefer-components-wrapped — the same native elements created through a local wrapper around createElement
+ *     (`html("button")`, `element("select")`), which prefer-components can't see.
+ *   • no-css-imports     — importing a stylesheet other than Web Awesome's or the theme's (`import "./foo.css"`).
  */
 
 /** Native tag → the Web Awesome component to use instead. Only CLEAR complements (from the WA 3.13 catalog); layout
@@ -459,12 +462,142 @@ const noInlineStyles = {
 	}
 };
 
+/** The tag argument of an element-creating call: `createElement(tag)` / `x.createElement(tag)` take it first,
+ *  `createElementNS(ns, tag)` second. Undefined for any other call. */
+function createElementTag(node) {
+	const callee = node.callee;
+	let name = callee.type === "Identifier" ? callee.name : undefined;
+
+	if (callee.type === "MemberExpression" && callee.property.type === "Identifier") {
+		name = callee.property.name;
+	}
+
+	if (name === "createElement") {
+		return node.arguments[0];
+	}
+
+	if (name === "createElementNS") {
+		return node.arguments[1];
+	}
+
+	return undefined;
+}
+
+/** The name a function is called by: its declaration's id, or the variable an arrow/function expression is bound to. */
+function functionName(fn) {
+	if (fn.id !== null && fn.id !== undefined) {
+		return fn.id.name;
+	}
+
+	const parent = fn.parent;
+
+	return parent?.type === "VariableDeclarator" && parent.id.type === "Identifier" ? parent.id.name : undefined;
+}
+
+/** The nearest function enclosing `node`. */
+function enclosingFunction(node) {
+	let current = node.parent;
+
+	while (current !== null && current !== undefined && !/^(?:FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/u.test(current.type)) {
+		current = current.parent;
+	}
+
+	return current;
+}
+
+const preferComponentsWrapped = {
+	"meta": {
+		"type": "problem",
+		"docs": { "description": "Use a Web Awesome component instead of a native element created through a local wrapper (`html(\"button\")`, `element(\"select\")`)." },
+		"messages": {
+			"wrapped": "{{wrapper}}(\"{{tag}}\") creates a native <{{tag}}> — use \"{{wa}}\". Web Awesome has a complement; a wrapper around createElement doesn't change that."
+		},
+		"schema": []
+	},
+	"create": function(context) {
+		// A wrapper is a function in this file that passes one of its own parameters to createElement as the tag. Calls
+		// are collected as the file is walked and judged at the end, once every wrapper in the file is known (a wrapper
+		// may be declared below its first use). Imported wrappers aren't resolved; none exist today.
+		const wrappers = new Map();
+		const calls = [];
+
+		return {
+			"CallExpression": function(node) {
+				const tag = createElementTag(node);
+
+				if (tag?.type === "Identifier") {
+					const fn = enclosingFunction(node);
+					const index = fn === null || fn === undefined ? -1 : fn.params.findIndex((param) => param.type === "Identifier" && param.name === tag.name);
+					const name = index === -1 ? undefined : functionName(fn);
+
+					if (name !== undefined) {
+						wrappers.set(name, index);
+					}
+				}
+
+				if (node.callee.type === "Identifier") {
+					calls.push(node);
+				}
+			},
+			"Program:exit": function() {
+				for (const node of calls) {
+					const index = wrappers.get(node.callee.name);
+					const arg = index === undefined ? undefined : node.arguments[index];
+					const wa = arg?.type === "Literal" && typeof arg.value === "string" ? NATIVE_TO_WA[arg.value] : undefined;
+
+					if (wa !== undefined) {
+						context.report({ "node": arg, "messageId": "wrapped", "data": { "wrapper": node.callee.name, "tag": arg.value, "wa": wa } });
+					}
+				}
+			}
+		};
+	}
+};
+
+/** Is `source` a stylesheet import (`./x.css`, `x.css?inline`)? */
+function isCssSource(source) {
+	return /\.css(?:\?.*)?$/u.test(source);
+}
+
+const noCssImports = {
+	"meta": {
+		"type": "problem",
+		"docs": { "description": "Import stylesheets only from the theme and Web Awesome — a feature's own .css file is the custom CSS we're removing." },
+		"messages": {
+			"cssImport": "Don't import \"{{source}}\" — style with Web Awesome components, utility classes and the theme's tokens. Stylesheets come only from {{allowed}}."
+		},
+		"schema": [{
+			"type": "object",
+			"properties": { "allow": { "type": "array", "items": { "type": "string" } } },
+			"additionalProperties": false
+		}]
+	},
+	"create": function(context) {
+		// Package prefixes whose stylesheets may be imported: Web Awesome's own, and the theme package.
+		const allow = context.options[0]?.allow ?? ["@awesome.me/webawesome", "theme"];
+		const allowed = (source) => allow.some((prefix) => source === prefix || source.startsWith(prefix + "/"));
+
+		function check(node, sourceNode) {
+			if (sourceNode?.type === "Literal" && typeof sourceNode.value === "string" && isCssSource(sourceNode.value) && !allowed(sourceNode.value)) {
+				context.report({ "node": node, "messageId": "cssImport", "data": { "source": sourceNode.value, "allowed": allow.join(" and ") } });
+			}
+		}
+
+		return {
+			"ImportDeclaration": (node) => check(node, node.source),
+			"ImportExpression": (node) => check(node, node.source)
+		};
+	}
+};
+
 export default {
 	"meta": { "name": "eslint-plugin-webawesome", "version": "0.0.0" },
 	"rules": {
 		"prefer-components": preferComponents,
+		"prefer-components-wrapped": preferComponentsWrapped,
 		"no-html-in-strings": noHtmlInStrings,
 		"no-css-in-strings": noCssInStrings,
-		"no-inline-styles": noInlineStyles
+		"no-inline-styles": noInlineStyles,
+		"no-css-imports": noCssImports
 	}
 };

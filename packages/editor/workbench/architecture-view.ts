@@ -6,6 +6,7 @@
  *
  * Plain DOM/SVG in the workbench realm (hosted by the component's editor pane), themed with VS Code's variables.
  */
+import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ChannelStats, FlowMessage, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture-model";
@@ -14,6 +15,7 @@ import { ArchitectureStore, collectArchReports, flowsOf, requestArchSync } from 
 import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjects as subjectFamilies, subjectMatches, subjectOfLabel } from "../shared/architecture-model";
 import { windowTitle } from "../shared/virtual-path";
 import css from "./architecture-view.css?raw";
+import "@awesome.me/webawesome/dist/components/button/button.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_HEIGHT = 44;
@@ -685,8 +687,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		applySelection();
 		refreshPanel();
 	});
-	const button = (label: string, title: string, onClick: (element: HTMLButtonElement) => void): HTMLButtonElement => {
-		const element = html("button", { "class": "arch-button", "title": title }, label);
+	const button = (label: string, title: string, onClick: (element: WaButton) => void): WaButton => {
+		const element = html("wa-button", { "size": "small", "variant": "neutral", "title": title }, label);
 
 		element.addEventListener("click", () => {
 			onClick(element);
@@ -695,20 +697,21 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		return element;
 	};
 
-	const toggle = (label: string, title: string, initial: boolean, onChange: (value: boolean) => void): HTMLButtonElement => {
+	// A toggle is on while it's the brand variant.
+	const toggle = (label: string, title: string, initial: boolean, onChange: (value: boolean) => void): WaButton => {
 		const element = button(label, title, () => {
-			const value = !element.classList.contains("checked");
+			const value = element.variant !== "brand";
 
-			element.classList.toggle("checked", value);
+			element.variant = value ? "brand" : "neutral";
 			onChange(value);
 		});
 
-		element.classList.toggle("checked", initial);
+		element.variant = initial ? "brand" : "neutral";
 
 		return element;
 	};
 
-	const copy = (element: HTMLButtonElement, text: string): void => {
+	const copy = (element: WaButton, text: string): void => {
 		const label = element.textContent;
 
 		void navigator.clipboard.writeText(text).then(() => {

@@ -1,13 +1,20 @@
 {
   "name": "theme",
   "version": "0.0.0",
-  "description": "The app's theme — a sandbox for rebranding via the --wa-* design tokens (the brand color ramp + semantic surface/text tokens) layered on Web Awesome, instead of hand-written CSS. Import AFTER Web Awesome's default theme.",
+  "description": "The app's theme: Web Awesome's --wa-* design tokens retoned for the brand, and (theme/vscode) mapped onto the active VS Code color theme in the workbench document. Tokens only, no component CSS.",
   "type": "module",
   "exports": {
     ".": "./src/theme.css",
-    "./theme.css": "./src/theme.css"
+    "./theme.css": "./src/theme.css",
+    "./vscode": {
+      "types": "./src/vscode.d.ts",
+      "default": "./src/vscode.js"
+    },
+    "./vscode.css": "./src/vscode.css"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "license": "MIT",
   "peerDependencies": {
     "@awesome.me/webawesome": ">=3"

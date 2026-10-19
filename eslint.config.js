@@ -51,8 +51,15 @@ export default [
 			"webawesome/prefer-components": "error",
 			"webawesome/no-html-in-strings": "error",
 			"webawesome/no-css-in-strings": "error",
-			"webawesome/no-inline-styles": "error"
+			"webawesome/no-inline-styles": "error",
+			"webawesome/prefer-components-wrapped": "error",
+			"webawesome/no-css-imports": "error"
 		}
+	},
+	{
+		// The theme package is where the stylesheets live: it adopts its own and Web Awesome's.
+		"files": ["packages/theme/**"],
+		"rules": { "webawesome/no-css-imports": "off" }
 	},
 	...realmBoundaries,
 	{
