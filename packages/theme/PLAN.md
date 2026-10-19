@@ -54,7 +54,12 @@ to write the CSS that remains, on Web Awesome tokens. Two follow-ups:
   Web Awesome's steps, and the dock's macOS traffic lights (their colours and 12px geometry are the point).
   `workbench/Workbench.tsx` stays on `--vscode-*`: its rules pin VS Code's own baseline in VS Code's document, where
   the `--wa-*` bridge may not be adopted yet.
-- The token rule (4.2) should eventually check `css({…})` values too, since today no rule reads them. Still open.
+- ~~The token rule (4.2) should eventually check `css({…})` values too, since today no rule reads them.~~ Done
+  2026-10-19: `webawesome/css-in-js-tokens`, an error. It reads the object literals given to Stitches' `css` /
+  `globalCss` / `keyframes` from `shared/theme`, nested selectors included. It flags literal colours (including
+  `var()` fallbacks), font sizes, `padding` / `margin` / `gap` lengths and radii, and its message names the step to
+  use. Layout geometry and line heights aren't checked. The one exception today is the dock's traffic lights, behind
+  a reasoned disable. `Workbench.tsx` is outside every `webawesome/*` rule already.
 
 ## 2. Where custom CSS lives today
 
@@ -153,7 +158,7 @@ In priority order. Each step closes one of the gaps above.
 2. **Stylelint for every `.css` file that remains** (new dependency; check the 7-day CI cooldown):
    - Colors, lengths, font sizes, radii and shadows must be `var(--wa-*)`
      (`stylelint-declaration-strict-value`). This is the equivalent of Bamboo's `prefer-token` /
-     `no-hardcoded-color`.
+     `no-hardcoded-color`. `webawesome/css-in-js-tokens` holds Stitches' `css({…})` to the same tokens (§1).
    - `--vscode-*` is allowed only in `theme/src/vscode.css`.
    - No `!important`. No selectors on `wa-*` tags or their internals (use `::part` only through the theme).
    - Every rule must be inside a declared `@layer` after Web Awesome's. This is the equivalent of

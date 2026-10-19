@@ -20,6 +20,8 @@
  *   • prefer-components-wrapped — the same native elements created through a local wrapper around createElement
  *     (`html("button")`, `element("select")`), which prefer-components can't see.
  *   • no-css-imports     — importing a stylesheet other than Web Awesome's or the theme's (`import "./foo.css"`).
+ *   • css-in-js-tokens   — a literal colour, font size, spacing length or radius in Stitches' `css({…})` /
+ *     `globalCss({…})`: the CSS-in-JS half of stylelint's token rule, so those values are `--wa-*` tokens too.
  */
 
 /** Native tag → the Web Awesome component to use instead. Only CLEAR complements (from the WA 3.13 catalog); layout
@@ -590,6 +592,146 @@ const noCssImports = {
 	}
 };
 
+/** Web Awesome's font-size steps, by their size at the default scale (themes/default.css). */
+const FONT_SIZE_TOKENS = { "10": "3xs", "11": "2xs", "12": "xs", "14": "s", "16": "m", "20": "l", "25": "xl", "32": "2xl", "41": "3xl", "52": "4xl", "66": "5xl" };
+
+/** Web Awesome's space steps, by their size at the default scale. */
+const SPACE_TOKENS = { "2": "3xs", "4": "2xs", "8": "xs", "12": "s", "16": "m", "24": "l", "32": "xl", "40": "2xl", "48": "3xl", "64": "4xl", "80": "5xl" };
+
+/** Web Awesome's radius steps, by their size at the default scale. */
+const RADIUS_TOKENS = { "3": "s", "6": "m", "12": "l" };
+
+/** CSS named colours worth catching (a value that is exactly one of them). `transparent`, `currentColor` and `inherit`
+ *  aren't colours to tokenize, so they aren't here. */
+const NAMED_COLORS = new Set(["black", "white", "red", "green", "blue", "yellow", "orange", "purple", "pink", "gray", "grey", "silver", "maroon", "navy", "teal", "olive", "lime", "aqua", "fuchsia", "cyan", "magenta", "brown", "gold", "indigo", "violet", "crimson", "coral", "salmon", "tomato"]);
+
+/** A literal colour in a CSS value: a hex colour or a colour function. */
+const LITERAL_COLOR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/iu;
+
+/** A literal length in a CSS value (`12px`, `0.5rem`), not one inside a custom property's name. */
+const LITERAL_LENGTH = /(?<![\w-])(-?(?:\d+(?:\.\d+)?|\.\d+))(px|rem|em)\b/giu;
+
+/** `fontSize` → `font-size`; a key already in kebab case (or a `--custom` property) stays as it is. */
+function cssProperty(key) {
+	return key.startsWith("--") ? key : key.replace(/[A-Z]/gu, (letter) => "-" + letter.toLowerCase());
+}
+
+/** The token to name for a literal `px` size, from a size → step table: the exact step, or the nearest one. */
+function nearestStep(px, steps) {
+	const sizes = Object.keys(steps).map(Number);
+	const nearest = sizes.reduce((best, size) => (Math.abs(size - px) < Math.abs(best - px) ? size : best), sizes[0]);
+
+	return { "step": steps[String(nearest)], "exact": nearest === px };
+}
+
+/** Is `property` a spacing property (padding, margin, gap), whose lengths are `--wa-space-*` steps? Layout geometry
+ *  (width, height, top, inset, …) has no token, so it isn't one. */
+function isSpacing(property) {
+	return /^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$|^(?:row-|column-)?gap$/u.test(property);
+}
+
+const cssInJsTokens = {
+	"meta": {
+		"type": "problem",
+		"docs": { "description": "Write CSS-in-JS (Stitches' `css({…})` / `globalCss({…})`) on Web Awesome's --wa-* tokens, not literal colours, font sizes, spacing or radii, which don't follow the theme." },
+		"messages": {
+			"color": "`{{value}}` is a literal colour in {{property}} — use a --wa-color-* token (surface-*, text-*, <variant>-fill-*/-border-*/-on-*, or a palette hue like --wa-color-orange-60), which follows the theme and its light/dark mode.",
+			"colorFallback": "`{{value}}` has a literal colour as a var() fallback in {{property}} — drop it: the --wa-* token is always defined where the theme is loaded.",
+			"fontSize": "`{{value}}` is a literal font size — use var(--wa-font-size-{{step}}){{nearest}}.",
+			"space": "`{{value}}` is a literal length in {{property}} — use var(--wa-space-{{step}}){{nearest}}.",
+			"radius": "`{{value}}` is a literal radius — use var(--wa-border-radius-{{step}}){{nearest}}."
+		},
+		"schema": [{
+			"type": "object",
+			"properties": { "sources": { "type": "array", "items": { "type": "string" } } },
+			"additionalProperties": false
+		}]
+	},
+	"create": function(context) {
+		// The modules whose `css` / `globalCss` / `keyframes` are Stitches': the editor's shared/theme by default.
+		const sources = (context.options[0]?.sources ?? ["(?:^|/)shared/theme$"]).map((source) => new RegExp(source, "u"));
+		const stitches = new Set();
+
+		function reportLengths(node, property, text, steps, messageId) {
+			for (const match of [...text.matchAll(LITERAL_LENGTH)].filter((length) => Number(length[1]) !== 0)) {
+				const amount = Number(match[1]);
+				const px = Math.abs(match[2] === "px" ? amount : amount * 16);
+				const { step, exact } = nearestStep(px, steps);
+
+				context.report({ "node": node, "messageId": messageId, "data": { "value": match[0], "property": property, "step": step, "nearest": exact ? "" : " (the nearest step)" } });
+			}
+		}
+
+		function checkValue(property, node) {
+			let text;
+
+			if (node.type === "Literal" && typeof node.value === "number") {
+				// Stitches writes a bare number as pixels (fontSize: 13 → 13px), except where CSS takes a bare number.
+				text = node.value + "px";
+			} else if (node.type === "Literal" && typeof node.value === "string") {
+				text = node.value;
+			} else if (node.type === "TemplateLiteral") {
+				text = node.quasis.map((quasi) => quasi.value.cooked ?? quasi.value.raw).join(" ");
+			} else {
+				return;
+			}
+
+			if (LITERAL_COLOR.test(text) || NAMED_COLORS.has(text.trim().toLowerCase())) {
+				context.report({ "node": node, "messageId": /var\([^,)]*,[^)]*(?:#|\()/u.test(text) ? "colorFallback" : "color", "data": { "value": text, "property": property } });
+			}
+
+			if (property === "font-size" || property === "font") {
+				reportLengths(node, property, text, FONT_SIZE_TOKENS, "fontSize");
+			} else if (isSpacing(property)) {
+				reportLengths(node, property, text, SPACE_TOKENS, "space");
+			} else if (/^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/u.test(property)) {
+				reportLengths(node, property, text, RADIUS_TOKENS, "radius");
+			}
+		}
+
+		function checkStyles(object) {
+			for (const entry of object.properties.filter((property) => property.type === "Property")) {
+				let key;
+
+				if (entry.key.type === "Identifier" && !entry.computed) {
+					key = entry.key.name;
+				} else if (entry.key.type === "Literal" && typeof entry.key.value === "string") {
+					key = entry.key.value;
+				}
+
+				if (entry.value.type === "ObjectExpression") {
+					checkStyles(entry.value); // a nested selector (`&:hover`), an at-rule, or a globalCss selector
+				} else if (key !== undefined) {
+					checkValue(cssProperty(key), entry.value);
+				}
+			}
+		}
+
+		return {
+			"ImportDeclaration": function(node) {
+				if (typeof node.source.value !== "string" || !sources.some((source) => source.test(node.source.value))) {
+					return;
+				}
+
+				for (const specifier of node.specifiers) {
+					if (specifier.type === "ImportSpecifier" && ["css", "globalCss", "keyframes"].includes(specifier.imported.name)) {
+						stitches.add(specifier.local.name);
+					}
+				}
+			},
+			"CallExpression": function(node) {
+				if (node.callee.type === "Identifier" && stitches.has(node.callee.name)) {
+					for (const argument of node.arguments) {
+						if (argument.type === "ObjectExpression") {
+							checkStyles(argument);
+						}
+					}
+				}
+			}
+		};
+	}
+};
+
 export default {
 	"meta": { "name": "eslint-plugin-webawesome", "version": "0.0.0" },
 	"rules": {
@@ -598,6 +740,7 @@ export default {
 		"no-html-in-strings": noHtmlInStrings,
 		"no-css-in-strings": noCssInStrings,
 		"no-inline-styles": noInlineStyles,
-		"no-css-imports": noCssImports
+		"no-css-imports": noCssImports,
+		"css-in-js-tokens": cssInJsTokens
 	}
 };

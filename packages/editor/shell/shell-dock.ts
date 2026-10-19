@@ -61,6 +61,7 @@ const paneActionsCss = css({ "display": "flex", "alignItems": "center", "height"
 // A group's window controls, macOS style — at the head of its tab bar, or a floating window's title bar: grey where
 // they do nothing, and in a group that isn't the active one until hovered; their glyphs show on hover. In a title bar
 // they're a utility panel's (an inspector's): smaller, to match the bar.
+/* eslint-disable webawesome/css-in-js-tokens -- macOS's traffic lights: their colours and geometry are the point, in either mode */
 const trafficLightsCss = css({
 	"display": "flex",
 	"alignItems": "center",
@@ -87,6 +88,7 @@ const trafficLightsCss = css({
 	"& > button:disabled, .dv-inactive-group &:not(:hover) > button": { "backgroundColor": "rgb(128 128 128 / 0.35)", "boxShadow": "none" },
 	".dv-floating-titlebar > &": { "gap": "5px", "paddingInline": "6px", "& > button": { "width": "9px", "height": "9px" } }
 });
+/* eslint-enable webawesome/css-in-js-tokens */
 // A floating window's title bar, inspector-height (dockview's is 22px).
 const injectDockGlobals = globalCss({ ".dv-floating-titlebar": { "--dv-floating-titlebar-height": "16px" } });
 
