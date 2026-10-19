@@ -694,6 +694,12 @@ function Shell() {
 							setSignedInAs(me.email?.address ?? "your account");
 						}
 					} else {
+						// Signed in either way; GitHub's login only when it can be read (not while the API's GitHub proxy is
+						// paused: packages/api OPERATIONS.md O8, when GitHub is reached directly, public repos only).
+						if (!cancelled) {
+							setSignedInAs("your GitHub account");
+						}
+
 						const { connectGitHub } = await import("./github");
 						const { login } = await (await connectGitHub()).viewer();
 
