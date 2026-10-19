@@ -11,6 +11,7 @@
   "dependencies": {
     "@awesome.me/webawesome": "^3.14.0",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "@jridgewell/trace-mapping": "^0.3.31",
     "account": "file:../account",
     "oauth4webapi": "^3.8.8",
     "preact": "latest",

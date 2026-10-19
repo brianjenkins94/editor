@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19; O1 to O6 built.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1 to O7 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -104,8 +104,8 @@ Make "it broke" one click from the person's own words to the cause.
   stack, release, the last few breadcrumbs (event names only, as the timeline's). **Signed out too**, but anonymous: no
   user, no sign-in, the IP only as the audit log's daily keyed hash; errors are worth knowing about from everyone, and
   that records no one.
-- **Readable stacks:** the editor's build keeps its source maps beside the release (not served to the public); the
-  admin app maps a stack through them when it's shown.
+- **Readable stacks:** the editor's build keeps its source maps per release, outside the site (not served to the
+  public); the admin app maps a stack through them when it's shown.
 - **The admin app:** an **Errors** page: groups by count and recency, new since a release highlighted; a group's
   occurrences; an occurrence's stack, breadcrumbs and, when signed in, its sign-in's timeline. Search by error id.
 - Alerting: a new fingerprint, or one whose rate jumps, emails the owner (at most hourly), through the same channel.
@@ -213,7 +213,22 @@ Each lands green and is tried before the next.
     occurrence; an occurrence shows its breadcrumbs.
   - 2 tests in test/session-events.test.ts (the vocabulary, the tag, signed out refused; an anonymous error with its IP
     hash, masked email and breadcrumbs, a signed-in one on the timeline).
-- **O7 · readable stacks.** Source maps kept per release, stacks mapped in the admin app.
+- **O7 · readable stacks.** *Built 2026-10-19* (scripts/keep-source-maps.ts, the `editor-source-maps` bucket; the admin
+  app's src/errors.tsx):
+  - Production's deploy (.github/workflows/production.yml) builds with `SOURCE_MAPS=hidden`: the editor's and the monaco
+    component's bundles get maps that the code doesn't name (packages/editor/build.ts, components/monaco-vscode-api).
+    Pages' build has none, as before; a dev error is the same commit's code, so production's maps of it serve.
+  - scripts/keep-source-maps.ts puts each in R2 as `<release>/<its path in the site>`, its sources rewritten as repo
+    paths (from whichever build folder most of them exist under) and without their text, then removes it from the
+    site; `.assetsignore` leaves maps out of the site anyway. About 90 maps and 28 MB a release. One bucket for dev and
+    production (a release is a commit), forgetting objects after 45 days (a lifecycle rule): ~13 GB at ten deploys a
+    day, cents a month. The step isn't fatal: without it, that release's stacks stay as they ran.
+  - `GET /admin/errors/maps/:release/:path` (`errors:read`) serves one, kept a day by the admin app's browser.
+  - The admin app maps an editor occurrence's stack as it shows it (`@jridgewell/trace-mapping`): under each frame, its
+    file, line and column in the repo and the name there; ours (packages/, components/) link to GitHub at the release.
+    Without maps for the release it says so and shows the stack as it ran.
+  - 1 test in test/session-events.test.ts (a map read by release and path; not kept, a path out of the release, not a
+    map, and an editor sign-in: refused).
 
 ## Open questions
 
@@ -221,3 +236,6 @@ Each lands green and is tried before the next.
 - Whether the tripwire should also cover the Grant and Attempt Durable Objects' own reads (they read by their own id,
   so a breach there needs a wrong id passed in, which the invariant on D1 would see first).
 - Error and timeline retention beyond 30 days, if investigations turn out to need it.
+- Editor error groups: production's code is minified, so its function names change between releases and the same
+  error can make a new group each release. Mapping the top frames when an error is recorded (the API reading the
+  release's maps) would group them by their real names; worth it if the Errors page gets noisy.

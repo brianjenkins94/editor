@@ -55,7 +55,7 @@ const standIn = `http://127.0.0.1:${(stand.address() as AddressInfo).port}`;
 const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9" } }] });
 const worker = server.getWorker();
 let base: URL;
-let env: { "DB": D1Database };
+let env: { "DB": D1Database; "SOURCE_MAPS": R2Bucket };
 
 before(async () => {
 	({ "url": base } = await server.listen());
@@ -123,4 +123,20 @@ test("an editor error, signed out: recorded with an id, nothing of who but a dai
 
 	assert.ok(items.some((item) => item.kind === "editor" && item.name === "error" && item.detail === signedInId), "its event, by id");
 	assert.ok(items.some((item) => item.kind === "error" && item.id === signedInId), "and the error itself");
+});
+
+test("a release's source maps (O7) are the admin app's to read, by release and path; never a path out of the release", async () => {
+	const map = { "version": 3, "sources": ["packages/editor/shell/shell.tsx"], "names": [], "mappings": "AAAA" };
+
+	await env.SOURCE_MAPS.put("abc1234/__vscode__/workbench.js.map", JSON.stringify(map));
+
+	const owner = await byGitHub(OWNER, "admin");
+	const read = await owner.call("GET", "/admin/errors/maps/abc1234/__vscode__/workbench.js.map");
+
+	assert.equal(read.status, 200);
+	assert.deepEqual(await read.json(), map);
+	assert.equal((await owner.call("GET", "/admin/errors/maps/abc1234/__vscode__/main.js.map")).status, 404, "not kept");
+	assert.equal((await owner.call("GET", "/admin/errors/maps/abc1234/__vscode__/%2E%2E/x.js.map")).status, 404, "no way out of the release");
+	assert.equal((await owner.call("GET", "/admin/errors/maps/abc1234/__vscode__/workbench.js")).status, 404, "maps only");
+	assert.equal((await (await byEmail(someone())).call("GET", "/admin/errors/maps/abc1234/__vscode__/workbench.js.map")).status, 403, "the editor's sign-in isn't the admin app's");
 });

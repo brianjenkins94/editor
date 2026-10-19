@@ -111,6 +111,23 @@ export async function errorGroupEndpoint(context: Context<AppEnv>): Promise<Resp
 	return group?.results[0] === undefined ? context.json({ "error": "not_found" }, 404) : context.json({ "error": group.results[0], "occurrences": occurrences?.results ?? [] });
 }
 
+/** GET /admin/errors/maps/:release/:path: one of the editor's source maps for a release (O7), kept by production's
+ *  deploy (scripts/keep-source-maps.ts): its sources as repo paths, no source text. The admin app maps an editor stack
+ *  through them as it shows it; the site never serves them. */
+export async function sourceMapEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const release = context.req.param("release") ?? "";
+	const path = context.req.param("path") ?? "";
+
+	if (!/^[\w.-]{1,40}$/u.test(release) || path.split("/").some((part) => part === ".." || part === "")) {
+		return context.json({ "error": "not_found" }, 404);
+	}
+
+	const map = await context.env.SOURCE_MAPS.get(`${release}/${path}`);
+
+	// A release's maps never change: the admin app can keep them for the day.
+	return map === null ? context.json({ "error": "not_found" }, 404) : context.body(map.body, 200, { "content-type": "application/json", "cache-control": "private, max-age=86400" });
+}
+
 /** GET /admin/errors/occurrence/:id: one occurrence, by the id the person quoted (case, the dash and spaces aside). */
 export async function errorOccurrenceEndpoint(context: Context<AppEnv>): Promise<Response> {
 	const typed = (context.req.param("id") ?? "").toUpperCase().replaceAll(/[\s-]/gu, "").replace(/^E/u, "");

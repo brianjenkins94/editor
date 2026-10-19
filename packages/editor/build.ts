@@ -26,6 +26,11 @@ import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./bu
 export const root = url.fileURLToPath(new URL(".", import.meta.url));
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
+/** Source maps: locally, every bundle of ours carries one, so a debugger and V8 coverage map back to the repo's files.
+ *  In CI none, but production's deploy asks for hidden ones (SOURCE_MAPS=hidden: written, not referenced from the code),
+ *  which it keeps per release outside the site for the admin app's stacks (packages/api/scripts/keep-source-maps.ts). */
+const sourcemap: boolean | "hidden" = !isCI || (process.env["SOURCE_MAPS"] === "hidden" ? "hidden" : false);
+
 /** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */
 const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode", "@awesome.me/webawesome"];
 
@@ -364,9 +369,7 @@ export async function preBuild(): Promise<void> {
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,
-			// Locally, every bundle of ours carries a source map — so a debugger, and V8 coverage from a session, map back to
-			// the repo's files; never in CI.
-			"sourcemap": !isCI,
+			"sourcemap": sourcemap,
 			"rollupOptions": {
 				"input": { "workbench": "workbench/workbench-entry.tsx" },
 				"external": ["@brianjenkins94/monaco-vscode-api/main"],
@@ -390,11 +393,11 @@ export async function preBuild(): Promise<void> {
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
 		"plugins": [unenvResolve(), bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
-		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
+		"worker": { "rollupOptions": { "output": { "sourcemap": sourcemap } } },
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
-			"sourcemap": !isCI,
+			"sourcemap": sourcemap,
 			"assetsInlineLimit": 0,
 			// These run as Web Workers (no DOM). Vite's default dynamic-import preload helper injects a
 			// <link rel=modulepreload> via `document`, which throws in a worker — so the node worker's lazy
@@ -451,7 +454,7 @@ export async function preBuild(): Promise<void> {
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
-			"sourcemap": !isCI,
+			"sourcemap": sourcemap,
 			"assetsInlineLimit": 0,
 			// (a worker: no `document` for the preload helper)
 			"modulePreload": false,
@@ -475,7 +478,7 @@ export async function preBuild(): Promise<void> {
 			"outDir": "dist",
 			"emptyOutDir": false,
 			"minify": false,
-			"sourcemap": !isCI,
+			"sourcemap": sourcemap,
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
@@ -505,7 +508,7 @@ export async function preBuild(): Promise<void> {
 			"outDir": "dist",
 			"emptyOutDir": false,
 			"minify": false,
-			"sourcemap": !isCI,
+			"sourcemap": sourcemap,
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
@@ -530,7 +533,7 @@ export async function preBuild(): Promise<void> {
 			"outDir": "dist",
 			"emptyOutDir": false,
 			"minify": false,
-			"sourcemap": !isCI,
+			"sourcemap": sourcemap,
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
@@ -636,7 +639,7 @@ async function hostBuild(): Promise<void> {
  * What a static host needs to serve the site well, beside it. The production site (packages/site/editor.jsonc, Workers
  * static assets) reads `_headers` — real cross-origin isolation headers, so the first load needn't wait for the service
  * worker to stamp them — `_redirects`, which serves the editor's page at every `env/<owner>/<repo>` (shell/address.ts), and
- * `.assetsignore`: the package tarballs are the releases' and Pages', not the site's. GitHub Pages reads none of them;
+ * `.assetsignore`: the package tarballs are the releases' and Pages', not the site's, and source maps are kept apart. GitHub Pages reads none of them;
  * there `404.html` is the editor's page, so a deep link opens the editor (with a 404 status, which the page doesn't mind).
  */
 function staticHostPlugin(): Plugin {
@@ -656,7 +659,7 @@ function staticHostPlugin(): Plugin {
 			// html_handling is "none" (editor.jsonc: no 307 from `x.html` to `x`), so the root names index.html itself. Named
 			// placeholders, not `/env/*`: a splat rewrite 404s under "none".
 			this.emitFile({ "type": "asset", "fileName": "_redirects", "source": ["/ /index.html 200", "/env/:owner/:repo /index.html 200", "/env/:owner/:repo/ /index.html 200", ""].join("\n") });
-			this.emitFile({ "type": "asset", "fileName": ".assetsignore", "source": "packages/\n" });
+			this.emitFile({ "type": "asset", "fileName": ".assetsignore", "source": "packages/\n*.map\n" });
 		}
 	};
 }

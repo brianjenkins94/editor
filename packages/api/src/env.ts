@@ -66,6 +66,8 @@ export interface Bindings {
 	"DB": D1Database;
 	/** The audit log's write-once copies (audit-copies.ts), in a bucket whose lock rules keep each as long as D1 keeps its row. */
 	"AUDIT_COPIES": R2Bucket;
+	/** The editor's source maps, by release (OPERATIONS.md O7): one bucket for dev and production, a release being a commit. */
+	"SOURCE_MAPS": R2Bucket;
 	"GRANTS": DurableObjectNamespace<Grant>;
 	/** Sign-ins in progress (src/attempt.ts), one per pushed authorization request. */
 	"ATTEMPTS": DurableObjectNamespace<import("./attempt.ts").Attempt>;

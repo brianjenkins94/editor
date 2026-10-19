@@ -41,8 +41,12 @@
           "env": { "GH_TOKEN": "${{ github.token }}" }
         },
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
-        # The same build as Pages' (docs/), from the same commit.
-        { "run": "pnpm run --if-present build" },
+        # The same build as Pages' (docs/), from the same commit, with hidden source maps (packages/editor/build.ts).
+        { "run": "pnpm run --if-present build", "env": { "SOURCE_MAPS": "hidden" } },
+        # Those maps kept per release in R2, outside the site, for the admin app to map an editor stack through
+        # (packages/api/OPERATIONS.md O7). Not fatal: without them that release's stacks only stay as they ran, and the
+        # site leaves maps out either way (docs/.assetsignore).
+        { "run": "node scripts/keep-source-maps.ts ../../docs $(git rev-parse --short HEAD)", "working-directory": "packages/api", "continue-on-error": true },
         # The API first: the site it serves signs in through it. The schema before the Worker that may need it.
         { "run": "pnpm exec wrangler d1 migrations apply editor-api --env production --remote", "working-directory": "packages/api" },
         # RELEASE: the commit, so an error says which release it came from (packages/api/src/errors.ts).

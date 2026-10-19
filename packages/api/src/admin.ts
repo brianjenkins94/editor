@@ -14,7 +14,7 @@ import { adminSession } from "./tokens.ts";
 import { trafficEndpoint } from "./traffic.ts";
 import { down, maintenance, setMaintenance } from "./maintenance.ts";
 import { spendEndpoint } from "./spend.ts";
-import { errorGroupEndpoint, errorOccurrenceEndpoint, errorsEndpoint } from "./errors.ts";
+import { errorGroupEndpoint, errorOccurrenceEndpoint, errorsEndpoint, sourceMapEndpoint } from "./errors.ts";
 import { timelineEndpoint } from "./timeline.ts";
 
 /**
@@ -178,6 +178,9 @@ admin.post("/mail/smoke", requires("mail:test"), async (context) => context.json
 admin.get("/errors", requires("errors:read"), errorsEndpoint);
 
 admin.get("/errors/occurrence/:id", requires("errors:read"), errorOccurrenceEndpoint);
+
+/** One of a release's source maps (O7), for the admin app to map an editor stack with. */
+admin.get("/errors/maps/:release/:path{.+\\.map}", requires("errors:read"), sourceMapEndpoint);
 
 admin.get("/errors/:fingerprint", requires("errors:read"), errorGroupEndpoint);
 

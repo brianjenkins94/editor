@@ -2,7 +2,11 @@
  * The Errors pages (packages/api/OPERATIONS.md, "Errors"; O4): every uncaught error, grouped, most recently seen first;
  * a group's occurrences; one occurrence (by the id a person quoted, `E-ABCD-EFGH`): its stack, release, trace id and,
  * if they were signed in, whose sign-in. Messages and stacks were redacted before they were stored. `errors:read`.
+ * An editor stack is mapped through its release's source maps (O7) as it's shown: each frame's file and line in the repo,
+ * ours linked to GitHub at that commit.
  */
+import type { SourceMapInput } from "@jridgewell/trace-mapping";
+import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping";
 import { useEffect, useState } from "preact/hooks";
 import { get } from "./session";
 import { Table, When } from "./views";
@@ -59,6 +63,81 @@ function FindById() {
 /** A stack, a line each. */
 function Stack({ text }: { "text": string }) {
 	return <div class="wa-stack wa-gap-3xs wa-font-family-code wa-caption-m">{text.split("\n").map((line, index) => <span key={index}>{line}</span>)}</div>;
+}
+
+const REPO = "https://github.com/brianjenkins94/editor";
+
+/** A frame's script as a path in the site, and its line and column: Chrome's `at f (https://…/__vscode__/main.js:1:2)`
+ *  or Firefox's `f@https://…`; the GitHub Pages copy's /editor/ base dropped. */
+const FRAME = /[a-z-]+:\/\/[^/\s)]+\/(?:editor\/)?([^\s():]+\.js):(\d+):(\d+)/u;
+
+interface Original { "source": string; "line": number; "column": number; "name": string | null }
+
+/** A frame's place in the repo: ours (packages/, components/) linked to GitHub at the release, others as they are. */
+function Place({ at, release }: { "at": Original; "release": string }) {
+	const where = `${at.source}:${at.line}:${at.column + 1}`;
+	const ours = /^(?:packages|components)\//u.test(at.source) && !at.source.includes("node_modules");
+
+	return (
+		<span class="wa-color-text-quiet">
+			{"  → "}
+			{ours ? <a href={`${REPO}/blob/${release}/${at.source}#L${at.line}`} target="_blank" rel="noreferrer">{where}</a> : where}
+			{at.name === null ? "" : ` (${at.name})`}
+		</span>
+	);
+}
+
+/** An editor stack, each frame mapped through its release's source maps (GET /admin/errors/maps/…; kept 45 days, by
+ *  production's deploys only). */
+function MappedStack({ text, release }: { "text": string; "release": string }) {
+	const lines = text.split("\n");
+	const [mapped, setMapped] = useState<(Original | undefined)[]>([]);
+	const [state, setState] = useState<"mapping" | "mapped" | "no maps">("mapping");
+
+	useEffect(() => {
+		const frames = lines.map((line) => FRAME.exec(line));
+		const paths = [...new Set(frames.flatMap((frame) => (frame?.[1] === undefined ? [] : [frame[1]])))];
+		let current = true;
+
+		void Promise.all(paths.map(async (path) => [path, await get<SourceMapInput>(`/errors/maps/${encodeURIComponent(release)}/${encodeURI(path)}.map`).then((map) => new TraceMap(map), () => undefined)] as const)).then((maps) => {
+			const byPath = new Map(maps);
+
+			if (!current) {
+				return;
+			}
+
+			setMapped(frames.map((frame) => {
+				const map = frame?.[1] === undefined ? undefined : byPath.get(frame[1]);
+				const at = map === undefined ? undefined : originalPositionFor(map, { "line": Number(frame?.[2]), "column": Number(frame?.[3]) - 1 });
+
+				return at?.source === null || at?.source === undefined ? undefined : { "source": at.source, "line": at.line, "column": at.column, "name": at.name };
+			}));
+			setState(maps.some(([, map]) => map !== undefined) ? "mapped" : "no maps");
+		});
+
+		return () => {
+			current = false;
+		};
+	}, [text, release]);
+
+	return (
+		<div class="wa-stack wa-gap-xs">
+			{state === "mapping" && <span class="wa-color-text-quiet">Mapping it through release {release}'s source maps…</span>}
+			{state === "no maps" && <span class="wa-color-text-quiet">Release {release}'s source maps aren't kept (only production's deploys keep them, for 45 days): the stack is as it ran.</span>}
+			<div class="wa-stack wa-gap-3xs wa-font-family-code wa-caption-m">
+				{lines.map((line, index) => {
+					const at = mapped[index];
+
+					return (
+						<div key={index} class="wa-stack wa-gap-0">
+							<span>{line}</span>
+							{at !== undefined && <Place at={at} release={release} />}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
 }
 
 export function ErrorsPage() {
@@ -163,7 +242,9 @@ export function ErrorOccurrencePage({ id }: { "id": string }) {
 				</div>
 			)}
 			<h2 class="wa-heading-l">Stack</h2>
-			{occurrence.stack === null || occurrence.stack === undefined ? <p class="wa-color-text-quiet">None recorded.</p> : <Stack text={occurrence.stack} />}
+			{occurrence.stack === null || occurrence.stack === undefined ? <p class="wa-color-text-quiet">None recorded.</p>
+				: occurrence.source === "editor" && occurrence.release !== null && /^[\da-f]{7,40}$/u.test(occurrence.release) ? <MappedStack text={occurrence.stack} release={occurrence.release} />
+					: <Stack text={occurrence.stack} />}
 		</section>
 	);
 }

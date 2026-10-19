@@ -16,9 +16,10 @@ export default mergeConfig(defaults, {
 		// Minified in CI, by vite's own (oxc) minifier — fast, and within the default node heap; left readable locally,
 		// beside the sourcemaps below. Nothing in the build depends on it either way.
 		"minify": isCI,
-		// Sourcemaps for local debugging only — NEVER in CI (they're ~62MB of @codingame maps + our chunk maps,
-		// debug-only and never fetched at runtime; drop-sourcemaps below strips the copied ones in CI too).
-		"sourcemap": !isCI,
+		// Sourcemaps for local debugging; in CI only hidden ones, when production's deploy asks (SOURCE_MAPS=hidden), to
+		// keep per release outside the site (packages/api/scripts/keep-source-maps.ts). drop-sourcemaps below strips
+		// the ~62MB of copied @codingame maps in CI either way.
+		"sourcemap": !isCI || (process.env["SOURCE_MAPS"] === "hidden" ? "hidden" : false),
 		"rollupOptions": {
 			"input": { "main": "main.ts" },
 			// Bundle everything; nothing is externalized. Output naming (deterministic content-hashed chunks +
@@ -130,8 +131,11 @@ export default mergeConfig(defaults, {
 					return;
 				}
 
+				// Our own chunks' maps (hidden ones, when asked for) stay.
+				const ours = new Set(Object.values(bundle).filter((output) => output.type === "chunk").map((chunk) => `${chunk.fileName}.map`));
+
 				for (const fileName of Object.keys(bundle)) {
-					if (fileName.endsWith(".map")) {
+					if (fileName.endsWith(".map") && !ours.has(fileName)) {
 						delete bundle[fileName];
 					}
 				}
