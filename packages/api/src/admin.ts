@@ -4,6 +4,7 @@ import { accountRoutes } from "./account-routes.ts";
 import { ROUTINE } from "./audit-copies.ts";
 import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
+import { grantStub } from "./grant.ts";
 import { githubIdColumn } from "./identities.ts";
 import { inboxEndpoint } from "./inbox.ts";
 import { alertsEndpoint, mailEndpoint, testAlertEndpoint } from "./mail-report.ts";
@@ -238,9 +239,16 @@ admin.post("/sessions/:id/revoke", requires("sessions:revoke"), async (context) 
 		return context.json({ "error": "not_found" }, 404);
 	}
 
+	const grant = grantStub(context.env, id);
+
+	// The tripwire's canary isn't anyone's sign-in, and ending it would leave the tripwire without its bait.
+	if (grant === undefined) {
+		return context.json({ "error": "canary", "message": "the tripwire's canary isn't a sign-in to end" }, 409);
+	}
+
 	const from = await origin(context);
 
-	await context.env.GRANTS.get(context.env.GRANTS.idFromString(id)).revoke({ "from": from, "reason": "ended by an admin" });
+	await grant.revoke({ "from": from, "reason": "ended by an admin" });
 	await audit(context.env, "admin_revoked", { "userId": context.get("user"), "grantId": context.get("grant") }, from, { "detail": `sign-in ${id} of user ${row.user_id}` });
 
 	return context.json({ "revoked": 1 });

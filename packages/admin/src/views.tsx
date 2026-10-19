@@ -295,7 +295,7 @@ function EndSignIn({ session, onClose }: { "session": Session; "onClose": (at?: 
 			onClose(Date.now());
 		}, (error: unknown) => {
 			setBusy(false);
-			setProblem(error instanceof Error && / 404$/u.test(error.message) ? "It had already ended." : error instanceof Error && / 403$/u.test(error.message) ? "Your roles don't include ending sign-ins." : "Couldn't end it. Try again.");
+			setProblem(error instanceof Error && / 404$/u.test(error.message) ? "It had already ended." : error instanceof Error && / 403$/u.test(error.message) ? "Your roles don't include ending sign-ins." : error instanceof Error && / 409$/u.test(error.message) ? "This is the tripwire's canary, not anyone's sign-in: it stays." : "Couldn't end it. Try again.");
 		});
 	};
 	const whose = session.githubId === undefined || session.githubId === null ? "Their" : <><Login id={session.githubId} />'s</>;

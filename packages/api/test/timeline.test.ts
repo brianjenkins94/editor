@@ -69,7 +69,7 @@ after(async () => {
 	stand.close();
 });
 
-const { byEmail, byGitHub } = testBrowser(server, () => base, { outbox, github, "db": () => env.DB });
+const { at, browse, byEmail, byGitHub } = testBrowser(server, () => base, { outbox, github, "db": () => env.DB });
 
 type Item = { "kind": string; "at": number; "route"?: string; "status"?: number; "event"?: string; "id"?: string };
 
@@ -125,4 +125,23 @@ test("RETAIN after a sign-in ends, its requests go; before then, and while it's 
 	assert.equal((await grant.timeline()).length, 1, "ended, but not 30 days ago");
 	await grant.expireTimeline(Date.now() + 31 * day);
 	assert.equal((await grant.timeline()).length, 0, "30 days after it ended: gone");
+});
+
+test("the tripwire's canary: its timeline is its audit rows and errors (it has no Grant), and it can't be ended", async () => {
+	assert.equal((await browse(`${at("/cdn-cgi/handler/scheduled")}?${new URLSearchParams({ "cron": "7 * * * *" })}`)).status, 200);
+
+	const canary = (await env.DB.prepare("SELECT id FROM grants WHERE label = 'canary'").first<{ "id": string }>())?.id as string;
+	const owner = await byGitHub(OWNER, "admin");
+	const read = await owner.call("GET", `/admin/sessions/${canary}/timeline`);
+
+	assert.equal(read.status, 200, "not the namespace's id, but no error");
+
+	const { items } = await read.json() as { "items": Item[] };
+
+	assert.equal(items.filter((item) => item.kind === "request" || item.kind === "editor").length, 0);
+
+	const ended = await owner.call("POST", `/admin/sessions/${canary}/revoke`, { "confirm": "revoke" });
+
+	assert.equal(ended.status, 409);
+	assert.equal((await env.DB.prepare("SELECT revoked_at FROM grants WHERE id = ?").bind(canary).first<{ "revoked_at": number | null }>())?.revoked_at, null, "still live: the tripwire keeps its bait");
 });

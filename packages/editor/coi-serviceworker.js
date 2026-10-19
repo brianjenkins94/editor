@@ -66,6 +66,12 @@ function recordPreviewRequest(event, pathname, label, responsePromise) {
 
 		architecture.record(preview, architecture.self, "request", event.request.method + " " + label);
 		responsePromise.then((response) => {
+			if (response.type === "error") {
+				architecture.record(architecture.self, preview, "error", "failed " + label);
+
+				return;
+			}
+
 			architecture.record(architecture.self, preview, response.status >= 400 ? "error" : "reply", response.status + " " + label);
 		}, () => {
 			architecture.record(architecture.self, preview, "error", "failed " + label);
@@ -152,10 +158,13 @@ async function gateAndFetch(event, request, requestUrl) {
 		void fetched.then((response) => record(event, request.url, response.status === 0 ? undefined : response.clone()), () => undefined);
 	}
 
+	// A request that fails on the network (offline, a host that doesn't answer, the page going away) is a network error for
+	// the page either way: answered as one, rather than a rejection respondWith leaves uncaught here — which the editor
+	// would report as an error of its own.
 	return fetched.catch((error) => {
-		console.error("[coi-serviceworker]", error);
+		console.warn("[coi-serviceworker] network error:", request.url, String(error));
 
-		return Promise.reject(error);
+		return Response.error();
 	});
 }
 

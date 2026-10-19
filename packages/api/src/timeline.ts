@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
+import { grantStub } from "./grant.ts";
 
 /**
  * A sign-in's timeline (OPERATIONS.md, "Session timelines"; O5), for drilling into one person's session from the admin
@@ -33,8 +34,9 @@ export async function timelineEndpoint(context: Context<AppEnv>): Promise<Respon
 		return context.json({ "error": "not_found" }, 404);
 	}
 
-	const grant = context.env.GRANTS.get(context.env.GRANTS.idFromString(id));
-	const [requests, editor] = await Promise.all([grant.timeline(), grant.editorTimeline()]);
+	// (The tripwire's canary has no Grant, so no requests or editor events: its audit rows and errors are all there is.)
+	const grant = grantStub(context.env, id);
+	const [requests, editor] = grant === undefined ? [[], []] : await Promise.all([grant.timeline(), grant.editorTimeline()]);
 	const items: Item[] = [
 		...requests.map((request): Item => ({ "kind": "request", ...request })),
 		...editor.map((event): Item => ({ "kind": "editor", ...event })),

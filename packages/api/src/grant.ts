@@ -124,6 +124,16 @@ export const SCHEMA = `
 
 export type Issued = { "ok": true; "userId": string; "refreshToken": string; "client": string } | { "ok": false };
 
+/** Sign-in `id`'s Grant, or none for a grants row the namespace never minted: the tripwire's canary (tripwire.ts), whose id
+ *  `idFromString` refuses. */
+export function grantStub(env: Bindings, id: string): DurableObjectStub<Grant> | undefined {
+	try {
+		return env.GRANTS.get(env.GRANTS.idFromString(id));
+	} catch {
+		return undefined;
+	}
+}
+
 export class Grant extends DurableObject<Bindings> {
 	private readonly sql = this.ctx.storage.sql;
 

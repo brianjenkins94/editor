@@ -582,16 +582,26 @@ export function AccountPage({ api, heading = true }: { "api": AccountApi; "headi
 	const [account, setAccount] = useState<Account | undefined>();
 	const [login, setLogin] = useState<string | undefined>();
 	const [reads, setReads] = useState(0);
+	const [failed, setFailed] = useState<string | undefined>();
 
 	useEffect(() => {
-		void api.get<Account>("/account").then((answer) => {
+		setFailed(undefined);
+		api.get<Account>("/account").then((answer) => {
 			setAccount(answer);
 
 			if (answer.githubId !== null) {
 				void api.loginOf?.(answer.githubId).then(setLogin);
 			}
+		}, (error: unknown) => {
+			// A sign-in that's ended (a 401: it expired, or was ended elsewhere) or an API out of reach: said here, rather than
+			// a spinner forever and an uncaught error for the editor to report.
+			setFailed(/: 401$/u.test(error instanceof Error ? error.message : String(error)) ? "You're signed out. Sign in again to see your account." : "Your account couldn't be loaded. Try again in a moment.");
 		});
 	}, [reads]);
+
+	if (failed !== undefined) {
+		return <wa-callout variant="warning">{failed}</wa-callout>;
+	}
 
 	if (account === undefined) {
 		return <wa-spinner />;
