@@ -643,10 +643,10 @@ export async function extensionContributions(key: string): Promise<{ "extension"
 	});
 }
 
-/** Call `listener` as extensions are registered and go (one loaded from outside, later than the built-in ones). */
-/** The commands that typing, moving the cursor and the suggest widget run many times a second, and the internal ones:
- *  left out of onWorkbenchActivity. */
-const NOISY = /^(?:_|type$|default:type$|compositionType$|compositionStart$|compositionEnd$|replacePreviousChar$|setContext$|cursor|delete|tab$|outdent$|scroll|undo$|redo$|editor\.action\.(?:trigger|inlineSuggest|wordHighlight|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|clipboard)|acceptSelectedSuggestion|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|editor\.action\.internal|notifications\.)/u;
+/** The commands that typing, moving the cursor and the suggest widget run many times a second, the internal ones, and
+ *  the editor's own request/answer reads (the hub and the shell poll them: annotations, metrics, the architecture, git
+ *  status, a pane's refresh): left out of onWorkbenchActivity. */
+const NOISY = /^(?:_|editor\.(?:annotations|metrics|arch|history)\.|editor\.git\.(?:status|file)$|editor\.pane\.refresh$|type$|default:type$|compositionType$|compositionStart$|compositionEnd$|replacePreviousChar$|setContext$|cursor|delete|tab$|outdent$|scroll|undo$|redo$|editor\.action\.(?:trigger|inlineSuggest|wordHighlight|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|clipboard)|acceptSelectedSuggestion|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|editor\.action\.internal|notifications\.)/u;
 
 /**
  * What the person does in the workbench, for the editor's session timeline (packages/api OPERATIONS.md, O6): each command
@@ -672,6 +672,7 @@ export async function onWorkbenchActivity(listener: (event: { "name": "command.r
 	};
 }
 
+/** Call `listener` as extensions are registered and go (one loaded from outside, later than the built-in ones). */
 export async function onExtensionsChanged(listener: () => void): Promise<{ "dispose": () => void }> {
 	return (await getService(IExtensionService)).onDidChangeExtensions(listener);
 }
