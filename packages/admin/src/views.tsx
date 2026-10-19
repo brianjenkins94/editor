@@ -178,7 +178,7 @@ export function Overview({ "switch": killSwitch }: { "switch"?: ComponentChildre
 	const today = useRead("/audit?since=24h&limit=500");
 	const suspicious = today.data?.rows.filter((row) => !ROUTINE.has(row.event));
 	const card = (label: string, value: number | undefined, href: string) => (
-		<a class="stat" href={href}>
+		<a class="wa-link-plain" href={href}>
 			<wa-card>
 				<div class="wa-stack wa-gap-2xs">
 					<span class="wa-caption-m">{label}</span>
@@ -447,7 +447,7 @@ export function Audit({ query }: { "query": URLSearchParams }) {
 	return (
 		<section class="wa-stack wa-gap-l">
 			<h1 class="wa-heading-xl">Audit log</h1>
-			<form class="wa-cluster wa-gap-m filters" onSubmit={(event) => {
+			<form class="wa-cluster wa-gap-m wa-align-items-end" onSubmit={(event) => {
 				event.preventDefault();
 				const field = (name: string): string => (event.currentTarget.elements.namedItem(name) as HTMLInputElement).value.trim();
 
@@ -535,11 +535,11 @@ export function TrafficPage({ query }: { "query": URLSearchParams }) {
 						<Table head={["Requests", "Status", "Host", "Path"]}>
 							{traffic.paths.map((row) => <tr key={`${row.host}${row.path}${row.status}`}><td>{row.requests}</td><td><Status code={row.status} /></td><td class="mono">{row.host}</td><td class="mono">{row.path}</td></tr>)}
 						</Table>
-						<div class="wa-grid wa-gap-l pair">
+						<div class="wa-grid wa-gap-l wa-align-items-start pair">
 							<div class="wa-stack">
 								<h2 class="wa-heading-l">Top agents</h2>
 								<Table head={["Requests", "User agent"]}>
-									{traffic.agents.map((row) => <tr key={row.agent}><td>{row.requests}</td><td class="mono agent" title={row.agent}>{row.agent === "" ? "(none)" : row.agent}</td></tr>)}
+									{traffic.agents.map((row) => <tr key={row.agent}><td>{row.requests}</td><td class="mono agent wa-text-truncate" title={row.agent}>{row.agent === "" ? "(none)" : row.agent}</td></tr>)}
 								</Table>
 							</div>
 							<div class="wa-stack">

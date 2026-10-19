@@ -266,6 +266,36 @@ Re-run with `npx eslint .` and `npm run lint:css`.
   the chunk timeline and its spotlight on the diff, a partial selection, a hunk discarded from the menu, and a file
   row's two-step discard.
 
+**Cleared (stylelint, the rule editor, Rule view, pane window, admin and account: 114 → 0):**
+
+- `rule-editor.css` (36 → 0): the editor's rows are `wa-cluster`s and its groups, actions and lists `wa-stack`s or
+  `wa-cluster`s, with the gap utilities; a list of lists' items take `wa-flex-nowrap` and its + `wa-align-self-start`;
+  the "When" / "of these are true" / "Then" words are `wa-color-text-quiet`, and a place in the code is
+  `wa-text-truncate`. Left in `@layer app`: each control's width in a row, where a row's list and its − + go, a
+  group's indent rule, and the place's chip. The `rule-editor-*` classes the tours query stay as hooks.
+- `rule-view.css` (15 → 0): the edit's panel is a `wa-card` (its `--spacing` set), the verdict
+  `wa-color-text-quiet`; left: the view's padding and a refused verdict's danger colour. Both workbench sheets declare
+  Web Awesome's layer order ending in `app`, as the architecture view's does: they're `<style>`s ahead of the adopted
+  Web Awesome sheets.
+- `window.css` (26 → 0): `.wa-win*` is `.pane-window*` now (the saved-position key in localStorage is unchanged, so
+  windows keep their places). Its title bar and controls are `wa-cluster`s, the title `wa-text-truncate` and
+  `wa-font-weight-semibold`. Both `::part()` rules are gone. The controls' compact padding is
+  `--wa-form-control-padding-inline` on their row. A collapsed window used to hide the card's `body` part; now the
+  card's `--spacing` is 0, the title bar and body pad themselves, and collapsing sets `hidden` on the body. The title
+  bar also shrinks now, so a long title truncates instead of pushing − and ✕ out of the card. That was already broken
+  before the change.
+- `admin.css` (29 → 0) and `account.css` (8 → 0): wrapped in `@layer app`. The app imports Web Awesome's stylesheet
+  first, so `app` already comes after its layers. The sign-in screen's centring, the filter, maintenance and code
+  forms' `align-items`, and the pairs' `align-items` are utilities (`wa-align-items-*`, `wa-justify-content-center`).
+  The stat cards and navigation links are `wa-link-plain`, a user agent cell is `wa-text-truncate`, and `html, body`
+  was Web Awesome's native styles already. The QR code's `background: white` is gone: uqr's SVG draws its own white
+  ground.
+- Checked in the running editor: the Rule view with a nested group, process.argv's runs and a disabled −, in light and
+  dark. Checked on a pane window: drag, collapse, expand, and the hairline before the caller's actions. Checked in the
+  admin app, signed in as the harness's owner: Overview, Audit log filters, the architecture diagram and its detail
+  pair, and Your account with an authenticator being set up. Traffic's agent table needs an analytics token, so it
+  wasn't seen. The capabilities tour (which drives the rule editor) passes: 24/24.
+
 **Before clearing** (the baseline):
 
 **ESLint** (`webawesome/*`, in `.ts`/`.tsx`/`.js`):
@@ -279,16 +309,16 @@ Re-run with `npx eslint .` and `npm run lint:css`.
 options per file instead of merging them, so a second `no-restricted-imports` would silently undo the realm
 boundaries.
 
-**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 after the ESLint half, 338
-in 7 now (by rule below, at the baseline). The exceptions stay held to every rule: the theme's own override covers
+**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 after the ESLint half, 224
+in 2 now (by rule below, at the baseline). The exceptions stay held to every rule: the theme's own override covers
 only `theme.css` and `vscode.css`.
 
 | Rule | Baseline | Now |
 | --- | ---: | ---: |
-| `webawesome/no-unlayered-rules`: a rule outside `@layer` | 389 | 234 |
-| `scale-unlimited/declaration-strict-value`: a literal color/space/type/radius where a `--wa-*` token belongs | 273 | 175 |
-| `declaration-property-value-disallowed-list`: a `var(--vscode-*)` | 142 | 87 |
-| `selector-disallowed-list`: selecting `wa-*` tags, `::part()`, or our own `.wa-*` classes | 58 | 58 |
+| `webawesome/no-unlayered-rules`: a rule outside `@layer` | 389 | 91 |
+| `scale-unlimited/declaration-strict-value`: a literal color/space/type/radius where a `--wa-*` token belongs | 273 | 60 |
+| `declaration-property-value-disallowed-list`: a `var(--vscode-*)` | 142 | 73 |
+| `selector-disallowed-list`: selecting `wa-*` tags, `::part()`, or our own `.wa-*` classes | 58 | 0 |
 | `declaration-no-important` | 2 | 0 |
 
 The files are in `src/exceptions/` now; the paths are where each one came from.
@@ -298,13 +328,13 @@ The files are in `src/exceptions/` now; the paths are where each one came from.
 | `editor/shell/git-panel.css` | 216 → 0 |
 | `editor/workbench/architecture-view.css` | 205 → 0 |
 | `editor/workbench/pane-views.css` | 163 |
-| `editor/workbench/rule-editor.css` | 65 → 36 |
+| `editor/workbench/rule-editor.css` | 65 → 0 |
 | `monaco-vscode-api/pane.css` (`margin.css`) | 61 |
 | `api/public/sign-in.css` | 56 → 0 |
-| `editor/workbench/rule-view.css` | 33 → 15 |
-| `admin/src/admin.css` | 30 → 29 (all unlayered; its values are already tokens) |
-| `editor/shell/window.css` | 26 (`.wa-win*` is our class with a Web Awesome prefix, plus `::part`) |
-| `account/src/account.css` | 9 → 8 |
+| `editor/workbench/rule-view.css` | 33 → 0 |
+| `admin/src/admin.css` | 30 → 0 |
+| `editor/shell/window.css` | 26 → 0 |
+| `account/src/account.css` | 9 → 0 |
 
 Most of the unlayered count is mechanical: wrapping each file in `@layer app { … }` clears it. The other rules
 measure the real work. The ESLint errors fail CI's `lint` (lib's `util-lint`). Stylelint runs only through

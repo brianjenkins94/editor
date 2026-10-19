@@ -20,6 +20,7 @@ import { registerCustomView, ViewContainerLocation, viewContainerRegistry } from
 import css from "theme/exceptions/rule-view.css?raw";
 import { ruleEditor } from "./rule-editor";
 import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/card/card.js";
 
 /** The edit shown: its request, and how it's answered. */
 interface Pending { "request": EditRequest; "answer": (answer: EditAnswer) => void }
@@ -34,8 +35,9 @@ function panelOf(policy: PolicyModule, request: EditRequest, pressed: (button: s
 	const rule = startingRule(request);
 	const catalog = request.variables === undefined ? catalogOf(policy) : withVariables(policy, request.variables);
 	const describe = (each: Rule): string => describeRule(each, catalog);
-	const panel = element("div", "rule-panel");
-	const status = element("div", "rule-panel-status");
+	const panel = element("wa-card", "rule-panel");
+	const body = element("div", "wa-stack wa-gap-xs");
+	const status = element("div", "rule-panel-status wa-color-text-quiet");
 	const choices = element("div", "wa-cluster wa-gap-xs");
 	let editor: ReturnType<typeof ruleEditor> | undefined;
 	const buttons = request.buttons.map((button) => {
@@ -61,7 +63,8 @@ function panelOf(policy: PolicyModule, request: EditRequest, pressed: (button: s
 
 	editor = ruleEditor({ "catalog": catalog, "rule": rule, "onChange": update });
 	choices.append(...buttons);
-	panel.append(editor.element, status, choices);
+	body.append(editor.element, status, choices);
+	panel.append(body);
 	update();
 
 	return panel;

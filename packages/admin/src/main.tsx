@@ -65,7 +65,7 @@ function SignIn({ problem }: { "problem"?: string }) {
 	const [busy, setBusy] = useState(false);
 
 	return (
-		<div class="auth-screen wa-stack">
+		<div class="auth-screen wa-stack wa-align-items-center wa-justify-content-center">
 			<wa-card class="auth-card">
 				<div class="wa-stack wa-gap-l">
 					<h1 class="wa-heading-l">Admin</h1>
@@ -108,7 +108,7 @@ function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 	}
 
 	return (
-		<div class="auth-screen wa-stack">
+		<div class="auth-screen wa-stack wa-align-items-center wa-justify-content-center">
 			<wa-card class="auth-card">
 				<div class="wa-stack wa-gap-l">
 					<h1 class="wa-heading-l">No access</h1>
@@ -147,7 +147,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 								: path === "/errors" || path.startsWith("/errors/") ? errorsPageFor(path)
 									: path === "/account" ? <AccountPage api={ACCOUNT} />
 								: <Overview switch={me.permissions.includes("maintenance:switch") ? <KillSwitch maintenance={me.maintenance} /> : undefined} />;
-	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
+	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "wa-link-plain active" : "wa-link-plain"}>{label}</a>;
 
 	useEffect(() => {
 		void get<{ "users": { "id": string; "githubId": number | null }[] }>("/users").then(({ users }) => users.find((user) => user.id === me.user)).then((self) => (self === undefined || self.githubId === null ? undefined : loginOf(self.githubId))).then(setLogin, () => undefined);
@@ -231,7 +231,7 @@ function App() {
 		};
 	}, []);
 
-	return state.kind === "loading" ? <div class="auth-screen wa-stack"><wa-spinner /></div>
+	return state.kind === "loading" ? <div class="auth-screen wa-stack wa-align-items-center wa-justify-content-center"><wa-spinner /></div>
 		: state.kind === "signedOut" ? <SignIn problem={state.problem} />
 			: state.me.roles.length === 0 ? <NoAccess me={state.me} onSignOut={signOut} />
 				: <Shell me={state.me} onSignOut={signOut} />;

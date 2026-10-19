@@ -274,7 +274,7 @@ function AddEmail({ onChanged }: { "onChanged": () => void }) {
 	if (sent === undefined) {
 		return (
 			<form
-				class="wa-cluster wa-gap-s account-code-form"
+				class="wa-cluster wa-gap-s wa-align-items-end"
 				onSubmit={(event) => {
 					event.preventDefault();
 
@@ -305,7 +305,7 @@ function AddEmail({ onChanged }: { "onChanged": () => void }) {
 			{taken === undefined
 				? (
 					<form
-						class="wa-cluster wa-gap-s account-code-form"
+						class="wa-cluster wa-gap-s wa-align-items-end"
 						onSubmit={(event) => {
 							event.preventDefault();
 							void add(sent, (event.currentTarget.elements.namedItem("code") as HTMLInputElement).value, false);
@@ -446,7 +446,7 @@ function TwoFactor({ account, onChanged }: { "account": Account; "onChanged": ()
 	};
 	const withCode = (label: string, action: string, path: string, then: (body: Partial<{ "recoveryCodes": string[] }>) => void) => (
 		<form
-			class="wa-cluster wa-gap-s account-code-form"
+			class="wa-cluster wa-gap-s wa-align-items-end"
 			onSubmit={(event) => {
 				event.preventDefault();
 				void call<{ "recoveryCodes": string[] }>(path, { "code": (event.currentTarget.elements.namedItem("code") as HTMLInputElement).value }, then);
@@ -531,7 +531,7 @@ function EmailTwoFactor({ account, onChanged }: { "account": Account; "onChanged
 			{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
 			{sent ? (
 				<form
-					class="wa-cluster wa-gap-s account-code-form"
+					class="wa-cluster wa-gap-s wa-align-items-end"
 					onSubmit={(event) => {
 						event.preventDefault();
 						setBusy(true);
