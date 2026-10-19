@@ -1,0 +1,6 @@
+{{subject}}
+
+{{text}}
+
+The admin app: {{admin}}
+Sent to ALERT_EMAIL by editor-api ({{environment}}). OPERATIONS.md says what each alert means.

@@ -65,7 +65,20 @@ export async function signOut(): Promise<void> {
 
 /** Whether GitHub is reached through the API's proxy: signed in, and the account is GitHub's. */
 export async function viaProxy(): Promise<boolean> {
-	return isSignedIn() && (await account()).githubId !== null;
+	try {
+		return isSignedIn() && (await account()).githubId !== null;
+	} catch {
+		// The API unreachable, or down for maintenance: GitHub as signed out, public repos.
+		return false;
+	}
+}
+
+/** Whether the API is down for maintenance (its kill switch: packages/api/OPERATIONS.md). Asked only when it matters:
+ *  signed in, or about to offer a sign-in. */
+export async function apiDown(): Promise<boolean> {
+	const answer = await fetch(`${API}/status`).catch(() => undefined);
+
+	return answer?.ok === true && (await answer.json() as { "maintenance"?: boolean }).maintenance === true;
 }
 
 /** The account routes, for packages/account's page: reads, and writes whose refusal it shows. */

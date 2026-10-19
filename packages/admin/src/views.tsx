@@ -127,7 +127,7 @@ export function Table({ head, children }: { "head": string[]; "children": Compon
 
 // ── Pages ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function Overview() {
+export function Overview({ "switch": killSwitch }: { "switch"?: ComponentChildren }) {
 	const users = useRead("/users");
 	const sessions = useRead("/sessions");
 	const today = useRead("/audit?since=24h&limit=500");
@@ -152,6 +152,7 @@ export function Overview() {
 				{card("Audit rows, last 24 hours", today.data?.rows.length, "#/audit?since=24h")}
 				{card("Worth a look, last 24 hours", suspicious?.length, "#/audit?since=24h&suspicious=true")}
 			</div>
+			{killSwitch}
 		</section>
 	);
 }

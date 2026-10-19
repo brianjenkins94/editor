@@ -24,6 +24,7 @@ import { githubApi, githubGit } from "./proxy.ts";
 import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
 import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
 import { allowedOrigins } from "./clients.ts";
+import { maintenance, maintenanceGate } from "./maintenance.ts";
 
 export { Attempt } from "./attempt.ts";
 export { Grant } from "./grant.ts";
@@ -102,7 +103,18 @@ app.use(cors({
 	"maxAge": 600
 }));
 
+// The kill switch (src/maintenance.ts, OPERATIONS.md): while it's on, everything but the owner's way back in is "Down for
+// maintenance", before any other work. After CORS, so a browser can read why.
+app.use(maintenanceGate);
+
 app.get("/health", (context) => context.json({ "ok": true, "environment": context.env.ENVIRONMENT }));
+
+// Whether the API is down for maintenance: what the editor asks, to say so instead of offering a sign-in that can't work.
+app.get("/status", async (context) => {
+	context.header("cache-control", "no-store");
+
+	return context.json({ "maintenance": (await maintenance(context.env)).on });
+});
 
 // The public half of the key access tokens are signed with (SIGNING_JWK, a secret: a private JWK with alg and kid), so
 // anyone can check a token we issued. Only ever the public members: publicKey drops the private ones.
@@ -240,8 +252,11 @@ export default {
 		context.waitUntil(log.span("inbox.expire", {}, async () => {
 			await expireInbox(env.DB);
 		}));
+		// Not while the kill switch is on: the API is down on purpose, and a sign-in through it would only fail.
 		context.waitUntil(log.span("smoke.email", {}, async () => {
-			await smokeTest(env, context);
+			if (!(await maintenance(env)).on) {
+				await smokeTest(env, context);
+			}
 		}));
 	},
 	// Email Routing's deliveries to our own addresses (src/inbox.ts).

@@ -35,7 +35,8 @@ export type AuditEvent =
 	| "password_set" | "password_reset"
 	| "mfa_enrolled" | "mfa_removed" | "mfa_recovery_codes"
 	| "identity_linked" | "account_merged"
-	| "passkey_added" | "passkey_removed";
+	| "passkey_added" | "passkey_removed"
+	| "maintenance_on" | "maintenance_off";
 
 /** The retention (audit-copies.ts: ROUTINE_DAYS for the everyday record, SUSPICIOUS_DAYS for the rest), applied daily by
  *  the Worker's cron trigger. Says how many rows went. The copies expire on their own (the bucket's lifecycle rules). */

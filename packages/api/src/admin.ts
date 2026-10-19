@@ -12,6 +12,7 @@ import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
 import { adminSession } from "./tokens.ts";
 import { trafficEndpoint } from "./traffic.ts";
+import { down, maintenance, setMaintenance } from "./maintenance.ts";
 
 /**
  * The admin API (packages/admin/README.md, "The admin API"), mounted at /admin. Only tokens issued to the `admin` client
@@ -29,11 +30,34 @@ admin.use(adminSession, async (context, next) => {
 	}
 });
 
-/** Who you are to the admin app: your user, roles and permissions, for it to draw itself. Any admin token may ask. */
+// While the kill switch is on (src/maintenance.ts), the admin API is the owner's only: to look, and to turn it off.
+admin.use(async (context, next) => {
+	if ((await maintenance(context.env)).on && !(await roles(context)).includes("owner")) {
+		return down(context);
+	}
+
+	await next();
+});
+
+/** Who you are to the admin app: your user, roles and permissions, for it to draw itself; and the kill switch, with
+ *  why and by whom. Any admin token may ask. */
 admin.get("/me", async (context) => {
 	const held = await roles(context);
 
-	return context.json({ "user": context.get("user"), "roles": held, "permissions": permissionsOf(held) });
+	return context.json({ "user": context.get("user"), "roles": held, "permissions": permissionsOf(held), "maintenance": await maintenance(context.env) });
+});
+
+/** The kill switch (OPERATIONS.md): `turn` "on" or "off", with a `reason` (on). The owner's only. */
+admin.post("/maintenance", requires("maintenance:switch"), async (context) => {
+	const form = await context.req.parseBody();
+	const turn = form["turn"];
+	const reason = typeof form["reason"] === "string" && form["reason"].trim() !== "" ? form["reason"].trim().slice(0, 200) : null;
+
+	if (turn !== "on" && turn !== "off") {
+		return context.json({ "error": "turn", "reason": "turn it on or off" }, 400);
+	}
+
+	return context.json(await setMaintenance(context.env, turn === "on", turn === "on" ? reason ?? "turned on by the owner" : reason, `user:${context.get("user")}`));
 });
 
 // ── Reads (B2) ─────────────────────────────────────────────────────────────────────────────────────────────────────

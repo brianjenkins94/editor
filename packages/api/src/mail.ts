@@ -1,5 +1,8 @@
 import type { Bindings } from "./env.ts";
+import { escapeHtml } from "@brianjenkins94/util/text";
 import { deliver, inboxAddresses } from "./inbox.ts";
+import ALERT_HTML from "./owner-alert.html";
+import ALERT_TEXT from "./owner-alert.txt";
 
 /**
  * Sending email (SIGN-IN.md, C2): through Cloudflare Email Service's `send_email` binding (`EMAIL`), from our own
@@ -40,5 +43,31 @@ export async function send(env: Bindings, mail: Mail): Promise<{ "ok": true } | 
 		return { "ok": true };
 	} catch (error) {
 		return { "ok": false, "reason": (error as { "code"?: string }).code ?? (error as Error).name };
+	}
+}
+
+/**
+ * Tell the owner, now, by email (OPERATIONS.md): the kill switch flipped, spend past its budget, the tripwire. To
+ * ALERT_EMAIL (a secret); without it, or without a way to send here, only logged. Best effort: never fails its caller.
+ */
+export async function tellOwner(env: Bindings, subject: string, text: string): Promise<void> {
+	const { log } = await import("./log.ts");
+
+	if (env.ALERT_EMAIL === undefined || !canSend(env)) {
+		log.warn("owner not emailed", { "subject": subject, "reason": env.ALERT_EMAIL === undefined ? "no ALERT_EMAIL" : "can't send here" });
+
+		return;
+	}
+
+	const fill: Record<string, string> = { "subject": subject, "text": text, "environment": env.ENVIRONMENT, "admin": env.ENVIRONMENT === "production" ? "https://admin.unusuallygood.dev/" : "http://localhost:5174/" };
+	const sent = await send(env, {
+		"to": env.ALERT_EMAIL,
+		"subject": `[unusually good ${env.ENVIRONMENT}] ${subject}`,
+		"text": ALERT_TEXT.replaceAll(/\{\{(\w+)\}\}/gu, (_, key: string) => fill[key] ?? ""),
+		"html": ALERT_HTML.replaceAll(/\{\{(\w+)\}\}/gu, (_, key: string) => escapeHtml(fill[key] ?? ""))
+	});
+
+	if ("reason" in sent) {
+		log.warn("owner not emailed", { "subject": subject, "reason": sent.reason });
 	}
 }

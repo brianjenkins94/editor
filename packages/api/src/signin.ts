@@ -10,6 +10,7 @@ import { canSend } from "./mail.ts";
 import { nonce } from "./tokens.ts";
 import { oauthRefusal } from "./refusals.ts";
 import { CLIENTS, isClient, methodsOf, pagesOf } from "./clients.ts";
+import { maintenance } from "./maintenance.ts";
 
 /**
  * Signing in through our own page (SIGN-IN.md, "The shape"):
@@ -142,8 +143,10 @@ export async function attemptEndpoint(context: Context<AppEnv>): Promise<Respons
 	}
 
 	const ready = (method: string): boolean => method !== "email" || (canSend(context.env) && context.env.CODE_KEY !== undefined);
+	// While the kill switch is on, only the owner's way back in: the admin client, by GitHub or a passkey (src/maintenance.ts).
+	const now = (await maintenance(context.env)).on ? (method: string): boolean => method === "github" || method === "passkey" : () => true;
 
-	return context.json({ "client": described.client, "name": isClient(described.client) ? CLIENTS[described.client].name : described.client, "methods": methodsOf(described.client).filter(ready) });
+	return context.json({ "client": described.client, "name": isClient(described.client) ? CLIENTS[described.client].name : described.client, "methods": methodsOf(described.client).filter(ready).filter(now) });
 }
 
 /** GET /auth/github: the page's GitHub choice, for this browser's attempt, when its client offers GitHub. */

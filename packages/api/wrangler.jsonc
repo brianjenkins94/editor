@@ -1,7 +1,8 @@
 // The editor's API Worker (README.md). Secrets are never in this file: `wrangler secret put` (SIGNING_JWK, NONCE_KEY,
 // TOKEN_KEK, AUDIT_KEY, STATE_KEY, GITHUB_CLIENT_SECRET; README.md's A0 says how to make each; and ANALYTICS_TOKEN,
 // Cloudflare's read-only analytics, packages/admin/README.md B4; CODE_KEY, 32 random bytes, emailed codes' HMAC key,
-// SIGN-IN.md C2; TOTP_KEK, 32 random bytes, what authenticator-app secrets are sealed under, C5). ANALYTICS_ACCOUNT and ANALYTICS_ZONE (unusuallygood.dev) are ids, not secrets. `send_email` is Cloudflare
+// SIGN-IN.md C2; TOTP_KEK, 32 random bytes, what authenticator-app secrets are sealed under, C5; ALERT_EMAIL, the owner's address,
+// where the kill switch emails, OPERATIONS.md O1). ANALYTICS_ACCOUNT and ANALYTICS_ZONE (unusuallygood.dev) are ids, not secrets. `send_email` is Cloudflare
 // Email Service, from no-reply@unusuallygood.dev only (the zone is onboarded for Email Sending).
 // The top level is local `wrangler dev` and the tests; `--env dev` and `--env production` are the deployments.
 // vars, bindings and observability are repeated per environment on purpose: wrangler doesn't inherit them, and each

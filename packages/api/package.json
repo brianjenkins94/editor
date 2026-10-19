@@ -24,6 +24,7 @@
     "test": "node --test --test-force-exit \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "audit": "node scripts/audit.ts",
+    "maintenance": "node scripts/maintenance.ts",
     "harness": "node harness/harness.ts"
   }
 }

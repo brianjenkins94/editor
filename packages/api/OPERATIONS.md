@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -107,9 +107,22 @@ Make "it broke" one click from the person's own words to the cause.
 
 Each lands green and is tried before the next.
 
-- **O1 · the kill switch.** The `maintenance` row and its 10-second read; the early 503 with the owner's exceptions;
-  `maintenance:switch` and the admin app's switch; `npm run maintenance`; `ALERT_EMAIL` and the email channel; the
-  editor's "down for maintenance" state.
+- **O1 · the kill switch.** *Built 2026-10-19* (src/maintenance.ts, migrations/0014, scripts/maintenance.ts; the admin
+  app's src/maintenance.tsx):
+  - The row has `noticed`: whoever flips it leaves it 0, and the first Worker to read it audits the flip and emails the
+    owner, once (a conditional update). So the admin app's flips and break-glass ones are recorded alike; the script
+    asks `/status` afterwards so a Worker notices at once.
+  - Owner's way back in: `/health`, `/status`, `/.well-known/*`, `/revoke`, the attempt routes (only admin attempts can
+    be opened while it's on: `/auth/par`, `/auth/start` and `/token` take the admin client only), and `/admin/*`, which
+    lets only the owner role through. `/auth/attempt` offers GitHub and passkeys only.
+  - Unreadable (D1 down): open, logged; a switch that can't be read mustn't turn every request into an error.
+  - `GET /status` (`{ maintenance }`, no reason): what the editor asks before offering a sign-in, and when signed in; on
+    it, it says "Signing in is down for maintenance" and works as signed out. The daily smoke test skips while it's on.
+  - `tellOwner` (src/mail.ts, templates src/owner-alert.*) emails ALERT_EMAIL; set it in dev and production with
+    `npx wrangler secret put ALERT_EMAIL --env <environment>` (your address, typed by you).
+  - 2 tests in test/maintenance.test.ts (on by the owner, everyone else down, the owner's way back in, off, audited and
+    emailed; a break-glass flip noticed by the next request, once). Tried in the harness: on from the Overview, the
+    banner, `/status`, a refused route, off from the banner.
 - **O2 · the cost guard.** The hourly cron, usage per meter from GraphQL, the price table, warn and trip, the Traffic
   page's spend; you set Cloudflare's billing notification.
 - **O3 · the tripwire.** The canary account; the wrapped D1 binding and `crossUser`; tests running every route under it;

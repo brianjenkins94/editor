@@ -29,3 +29,5 @@ main { padding: var(--wa-space-l); }
 .diagram .edge.back path { stroke-dasharray: 4 4; }
 .diagram .edge text { fill: var(--wa-color-text-quiet); font-size: var(--wa-font-size-xs); text-anchor: middle; }
 .diagram .edge.faded { opacity: 0.12; }
+/* The kill switch (src/maintenance.tsx). */
+.maintenance-form { align-items: end; }

@@ -11,7 +11,7 @@ import { githubIdColumn } from "./identities.ts";
  */
 
 /** Everything the admin API can be asked to do, one string per action. */
-export const PERMISSIONS = ["users:read", "sessions:read", "sessions:revoke", "audit:read", "audit:verify", "traffic:read", "behavior:read", "architecture:read", "mail:read", "mail:test"] as const;
+export const PERMISSIONS = ["users:read", "sessions:read", "sessions:revoke", "audit:read", "audit:verify", "traffic:read", "behavior:read", "architecture:read", "mail:read", "mail:test", "maintenance:switch"] as const;
 
 export type Permission = typeof PERMISSIONS[number];
 
@@ -21,7 +21,7 @@ const READS = PERMISSIONS.filter((permission) => permission.endsWith(":read") ||
 
 /**
  * The platform owner: every platform permission. A viewer: everything that only reads, nothing that changes anything
- * or sends anything (`sessions:revoke`, `mail:test`). (Organization roles come later, as rows.)
+ * or sends anything (`sessions:revoke`, `mail:test`, `maintenance:switch`). (Organization roles come later, as rows.)
  */
 export const ROLES = { "owner": PERMISSIONS, "viewer": READS } satisfies Record<string, readonly Permission[]>;
 

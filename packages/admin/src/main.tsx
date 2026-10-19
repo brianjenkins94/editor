@@ -24,13 +24,15 @@ import { useEffect, useState } from "preact/hooks";
 import { ArchitecturePage } from "./architecture";
 import { loginOf } from "./logins";
 import { MailPage } from "./mail";
+import type { Maintenance } from "./maintenance";
+import { KillSwitch, MaintenanceBanner } from "./maintenance";
 import { get, session, SIGNED_OUT, submit } from "./session";
 import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
 
 /** Your account (packages/account), through the admin API. */
 const ACCOUNT = { "get": get, "submit": submit, "loginOf": loginOf };
 
-interface Me { "user": string; "roles": string[]; "permissions": string[] }
+interface Me { "user": string; "roles": string[]; "permissions": string[]; "maintenance": Maintenance }
 
 /** Where the hash says we are: a page and its query. */
 function useRoute(): { "path": string; "query": URLSearchParams } {
@@ -139,7 +141,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 							: path === "/architecture" ? <ArchitecturePage query={query} />
 								: path === "/mail" ? <MailPage query={query} />
 									: path === "/account" ? <AccountPage api={ACCOUNT} />
-								: <Overview />;
+								: <Overview switch={me.permissions.includes("maintenance:switch") ? <KillSwitch maintenance={me.maintenance} /> : undefined} />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "active" : ""}>{label}</a>;
 
 	useEffect(() => {
@@ -169,7 +171,10 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 				{link("#/architecture", "Architecture", path === "/architecture")}
 				{link("#/account", "Your account", path === "/account")}
 			</nav>
-			<main><Permissions.Provider value={me.permissions}>{page}</Permissions.Provider></main>
+			<main class="wa-stack wa-gap-l">
+				<MaintenanceBanner maintenance={me.maintenance} canSwitch={me.permissions.includes("maintenance:switch")} />
+				<Permissions.Provider value={me.permissions}>{page}</Permissions.Provider>
+			</main>
 		</wa-page>
 	);
 }
@@ -206,9 +211,12 @@ function App() {
 
 			try {
 				setState({ "kind": "in", "me": await get<Me>("/me") });
-			} catch {
-				// Refused because the sign-in ended (an admin ended it, or it ran out): the client has signed out.
-				setState({ "kind": "signedOut", "problem": session.isSignedIn() ? "Couldn't reach the API." : "Your sign-in ended. Sign in again." });
+			} catch (error) {
+				// Refused because the sign-in ended (an admin ended it, or it ran out): the client has signed out. Or the API is
+				// down for maintenance (the kill switch), when only the owner gets through.
+				const down = error instanceof Error && / 503$/u.test(error.message);
+
+				setState({ "kind": "signedOut", "problem": down ? "The API is down for maintenance. Only the owner can sign in until it's back." : session.isSignedIn() ? "Couldn't reach the API." : "Your sign-in ended. Sign in again." });
 			}
 		})();
 

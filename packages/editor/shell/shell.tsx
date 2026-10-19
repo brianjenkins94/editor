@@ -358,6 +358,8 @@ function Shell() {
 	const [githubBusy, setGithubBusy] = useState(false);
 	const [githubError, setGithubError] = useState<string | undefined>(undefined);
 	const [signInHere, setSignInHere] = useState(false);
+	// The API down for maintenance (its kill switch): no sign-in offered; signed in, the editor carries on as signed out.
+	const [apiDown, setApiDown] = useState(false);
 	// Where you're signed in (listed when the popover opens, signed in), and the account deletion's confirmation step.
 	const [mySessions, setMySessions] = useState<Session[] | undefined>(undefined);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -666,7 +668,11 @@ function Shell() {
 			}
 
 			try {
-				if (session.isSignedIn()) {
+				if (session.isSignedIn() && await session.apiDown()) {
+					if (!cancelled) {
+						setApiDown(true);
+					}
+				} else if (session.isSignedIn()) {
 					const me = await session.account();
 
 					if (me.githubId === null) {
@@ -709,6 +715,15 @@ function Shell() {
 			githubLog.error("sign-in didn't start", { "error": errText(error) });
 		}
 	};
+
+	// Before offering a sign-in: whether the API is down for maintenance, asked when the popover opens signed out.
+	useEffect(() => {
+		if (!githubOpen || signedInAs !== undefined || !signInHere) {
+			return;
+		}
+
+		void import("./session").then(async (session) => session.apiDown()).then(setApiDown);
+	}, [githubOpen, signedInAs, signInHere]);
 
 	// Where you're signed in: listed each time the popover opens, signed in.
 	useEffect(() => {
@@ -1187,7 +1202,9 @@ function Shell() {
 							: <wa-button appearance="plain" variant="danger" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(true); }}>Delete account…</wa-button>}
 					</>
 				)
-				: signInHere
+				: signInHere && apiDown
+					? <span class={ghHint()}>Signing in is down for maintenance. Everything else works as signed out, and public repos load.</span>
+					: signInHere
 					? (
 						<>
 							<span class={ghHint()}>Optional: everything here works without an account. Sign in with GitHub for private repos and commits (GitHub's token stays on the editor's server: this browser never holds it), or with your email.</span>
