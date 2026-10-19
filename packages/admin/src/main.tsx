@@ -3,7 +3,7 @@
  * util/auth/client). Signed in, `GET /admin/me` says what the user's roles allow: nothing (a page that says so), or the
  * app shell (`<wa-page>`, its navigation in one slot) with the pages in views.tsx, by the address's hash.
  */
-import "@awesome.me/webawesome/dist/styles/webawesome.css";
+import "theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
 import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";

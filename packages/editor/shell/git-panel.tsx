@@ -19,9 +19,9 @@ import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
 import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/badge/badge.js";
-// Web Awesome's layer order first, so git-panel.css's `@layer app` is declared after it (the shell imports this module
-// before its own Web Awesome setup).
-import "./webawesome";
+// The theme (Web Awesome's layer order among it) first, so git-panel.css's `@layer app` is declared after it (the shell
+// imports this module before it imports the theme itself).
+import "theme/chrome";
 import "theme/exceptions/git-panel.css";
 
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }

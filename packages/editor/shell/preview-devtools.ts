@@ -32,7 +32,7 @@ export const PREVIEW_CDP = "preview.cdp";
 /** Event subject prefix: `preview.cdp.event.<key>` carries each raw event of that preview window's page. */
 export const PREVIEW_CDP_EVENT = "preview.cdp.event.";
 
-const panelClass = css({ "flex": "0 0 45%", "minHeight": 0, "borderBlockStart": "1px solid var(--wa-color-surface-border)", "& > iframe": { "display": "block", "border": 0, "width": "100%", "height": "100%" } });
+const panelClass = css({ "flex": "0 0 45%", "minHeight": 0, "borderBlockStart": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)", "& > iframe": { "display": "block", "border": 0, "width": "100%", "height": "100%" } });
 
 interface Chobitsu {
 	"setOnMessage": (onMessage: (message: string) => void) => void;

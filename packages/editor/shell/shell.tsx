@@ -39,8 +39,7 @@ import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "@awesome.me/webawesome/dist/components/input/input.js";
 import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
-import "./webawesome";
-import "theme"; // our brand tokens, layered on Web Awesome's default theme (must come after it)
+import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
 
 // The GitHub data plane's logger — spans + records federate to the `$sys.log.>` observability plane (debug-mcp).
 // The shell owns the token and the network calls, so this is where load/commit/connect are traced.
@@ -67,7 +66,7 @@ const injectGlobals = globalCss({
 	// `clip`, not `hidden`: the shell page must never scroll, and a hidden overflow still scrolls programmatically — as
 	// when VS Code focuses an editor in a dock panel mid-layout and the browser scrolls the page to show it.
 	"html, body": { "height": "100%", "margin": 0, "overflow": "clip" },
-	"body": { "backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-normal)", "fontFamily": "var(--wa-font-family-body, system-ui, sans-serif)" },
+	"body": { "backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-normal)", "fontFamily": "var(--wa-font-family-body)" },
 	// The shell fills the viewport; its menu/aside widths are theme-driven and collapse to 0 via the classes below.
 	".wa-shell": { "height": "100vh", "--menu-width": "260px", "--aside-width": "380px" },
 	// Collapsed = a slim rail, not hidden (the effect drives the exact value; these are the first-paint fallback).
@@ -76,7 +75,7 @@ const injectGlobals = globalCss({
 });
 
 // The top bar: branding + icon actions, spread across the header. wa-button (plain) for every control.
-const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "0 var(--wa-space-s)", "height": "40px", "borderBottom": "1px solid var(--wa-color-surface-border)" });
+const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "0 var(--wa-space-s)", "height": "40px", "borderBottom": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)" });
 const brand = css({ "fontWeight": "var(--wa-font-weight-semibold)", "marginInlineEnd": "var(--wa-space-s)", "color": "var(--wa-color-text-quiet)" });
 const spacer = css({ "flex": "1 1 auto" });
 
@@ -87,14 +86,14 @@ const runWrap = css({ "position": "relative", "display": "inline-flex" });
 const runBackdrop = css({ "position": "fixed", "inset": 0, "zIndex": 2147482000 });
 const runMenu = css({
 	"position": "absolute",
-	"top": "calc(100% + 4px)",
+	"top": "calc(100% + var(--wa-space-2xs))",
 	"insetInlineStart": 0,
 	"zIndex": 2147482001,
 	"minWidth": "240px",
 	"maxHeight": "60vh",
 	"overflowY": "auto",
 	"backgroundColor": "var(--wa-color-surface-raised)",
-	"border": "1px solid var(--wa-color-surface-border)",
+	"border": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)",
 	"borderRadius": "var(--wa-border-radius-m)",
 	"boxShadow": "var(--wa-shadow-l)",
 	"padding": "var(--wa-space-2xs)"
@@ -115,25 +114,25 @@ const runItem = css({
 	"color": "inherit",
 	"font": "inherit",
 	"&:hover": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
-	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "-2px" }
+	"&:focus-visible": { "outline": "var(--wa-focus-ring)", "outlineOffset": "calc(-1 * var(--wa-focus-ring-width))" }
 });
 const runItemName = css({ "fontWeight": "var(--wa-font-weight-semibold)" });
-const runItemMeta = css({ "marginInlineStart": "auto", "fontSize": "11px", "color": "var(--wa-color-text-quiet)" });
-const runGroup = css({ "padding": "var(--wa-space-2xs) var(--wa-space-xs) 0", "fontSize": "11px", "fontWeight": "var(--wa-font-weight-semibold)", "color": "var(--wa-color-text-quiet)", "textTransform": "uppercase", "letterSpacing": "0.04em" });
-const runItemLive = css({ "fontSize": "11px", "color": "var(--wa-color-success-on-quiet)" });
-const runEmpty = css({ "padding": "var(--wa-space-xs)", "fontSize": "12px", "color": "var(--wa-color-text-quiet)" });
+const runItemMeta = css({ "marginInlineStart": "auto", "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)" });
+const runGroup = css({ "padding": "var(--wa-space-2xs) var(--wa-space-xs) 0", "fontSize": "var(--wa-font-size-2xs)", "fontWeight": "var(--wa-font-weight-semibold)", "color": "var(--wa-color-text-quiet)", "textTransform": "uppercase", "letterSpacing": "0.04em" });
+const runItemLive = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-success-on-quiet)" });
+const runEmpty = css({ "padding": "var(--wa-space-xs)", "fontSize": "var(--wa-font-size-xs)", "color": "var(--wa-color-text-quiet)" });
 
 // GitHub connect popover — same anchored-popover pattern as the run picker, but right-aligned (the button sits on the
 // right of the header) and wider to hold the token field. The PAT is entered here, in the SHELL, and stays here.
 const githubMenu = css({
 	"position": "absolute",
-	"top": "calc(100% + 4px)",
+	"top": "calc(100% + var(--wa-space-2xs))",
 	"insetInlineEnd": 0,
 	"zIndex": 2147482001,
 	"width": "300px",
 	"maxWidth": "80vw",
 	"backgroundColor": "var(--wa-color-surface-raised)",
-	"border": "1px solid var(--wa-color-surface-border)",
+	"border": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)",
 	"borderRadius": "var(--wa-border-radius-m)",
 	"boxShadow": "var(--wa-shadow-l)",
 	"padding": "var(--wa-space-s)",
@@ -141,13 +140,13 @@ const githubMenu = css({
 	"flexDirection": "column",
 	"gap": "var(--wa-space-xs)"
 });
-const ghTitle = css({ "fontWeight": "var(--wa-font-weight-semibold)", "fontSize": "13px" });
-const ghHint = css({ "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "lineHeight": 1.45 });
+const ghTitle = css({ "fontWeight": "var(--wa-font-weight-semibold)", "fontSize": "var(--wa-font-size-s)" });
+const ghHint = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "lineHeight": 1.45 });
 const ghLink = css({ "color": "var(--wa-color-brand-fill-loud)", "textDecoration": "none", "whiteSpace": "nowrap", "&:hover": { "textDecoration": "underline" } });
-const ghInput = css({ "width": "100%", "&::part(input)": { "fontFamily": "var(--wa-font-family-code, monospace)" } });
-const ghError = css({ "fontSize": "11px", "color": "var(--wa-color-danger-fill-loud, #d94040)", "lineHeight": 1.4 });
-const ghOk = css({ "fontSize": "11px", "color": "var(--wa-color-success-fill-loud, #3a9d5d)", "lineHeight": 1.4 });
-const ghConnected = css({ "fontSize": "12px", "color": "var(--wa-color-text-normal)" });
+const ghInput = css({ "width": "100%", "&::part(input)": { "fontFamily": "var(--wa-font-family-code)" } });
+const ghError = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-danger-fill-loud)", "lineHeight": 1.4 });
+const ghOk = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-success-fill-loud)", "lineHeight": 1.4 });
+const ghConnected = css({ "fontSize": "var(--wa-font-size-xs)", "color": "var(--wa-color-text-normal)" });
 const ghActions = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-xs)", "marginBlockStart": "var(--wa-space-2xs)" });
 const ghSession = css({ "display": "flex", "alignItems": "center", "justifyContent": "space-between", "gap": "var(--wa-space-xs)" });
 const ghSessionText = css({ "display": "flex", "flexDirection": "column", "minWidth": 0 });
@@ -157,8 +156,8 @@ const ghSessionText = css({ "display": "flex", "flexDirection": "column", "minWi
 const sideCol = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "minHeight": 0 });
 // The panes flanking the editor get a border on the edge that meets it: the LHS project pane on its right, the RHS
 // changes pane on its left. `position: relative` anchors the absolute resize grip on that inner edge.
-const navPane = css({ "position": "relative", "borderInlineEnd": "1px solid var(--wa-color-surface-border)" });
-const asidePane = css({ "position": "relative", "borderInlineStart": "1px solid var(--wa-color-surface-border)" });
+const navPane = css({ "position": "relative", "borderInlineEnd": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)" });
+const asidePane = css({ "position": "relative", "borderInlineStart": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)" });
 
 // A thin drag grip straddling a pane's inner edge (the border meeting the editor) — absolute so it never shifts
 // layout, with a wider hit area than the 1px border and a hover/active accent. Pointer-capture drives the drag so
@@ -173,7 +172,7 @@ const resizer = css({
 	"touchAction": "none",
 	"&:hover": { "backgroundColor": "var(--wa-color-brand-fill-quiet)" },
 	"&:active": { "backgroundColor": "var(--wa-color-brand-fill-loud)" },
-	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "-2px" }
+	"&:focus-visible": { "outline": "var(--wa-focus-ring)", "outlineOffset": "calc(-1 * var(--wa-focus-ring-width))" }
 });
 const resizerRight = css({ "insetInlineEnd": "-3px" }); // nav pane: grip on its right edge
 const resizerLeft = css({ "insetInlineStart": "-3px" }); // aside pane: grip on its left edge
@@ -210,15 +209,15 @@ const RAIL_WIDTH = 68;
 const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-m)", "paddingBlockStart": "var(--wa-space-2xs)", "overflow": "hidden" });
 // Caption hugs its icon (tight) while the gap BETWEEN items (railRegion, above) is larger — so each icon+caption
 // reads as one unit.
-const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "2px" });
-const railCaption = css({ "fontSize": "10px", "lineHeight": 1.1, "color": "var(--wa-color-text-quiet)", "textAlign": "center", "maxWidth": "100%", "overflowWrap": "anywhere" });
+const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-3xs)" });
+const railCaption = css({ "fontSize": "var(--wa-font-size-3xs)", "lineHeight": 1.1, "color": "var(--wa-color-text-quiet)", "textAlign": "center", "maxWidth": "100%", "overflowWrap": "anywhere" });
 // Keeps an imperatively-mounted region (the git panel) in the DOM but out of view while its pane is collapsed.
 const hiddenBox = css({ "display": "none" });
 const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
 const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
 
 // Navigation (projects) region.
-const navHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "var(--wa-space-2xs) var(--wa-space-xs)", "textTransform": "uppercase", "fontSize": "11px", "letterSpacing": "0.06em", "color": "var(--wa-color-text-quiet)", "flex": "0 0 auto" });
+const navHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "var(--wa-space-2xs) var(--wa-space-xs)", "textTransform": "uppercase", "fontSize": "var(--wa-font-size-2xs)", "letterSpacing": "0.06em", "color": "var(--wa-color-text-quiet)", "flex": "0 0 auto" });
 const navHeadLabel = css({ "flex": "1 1 auto" });
 const picker = css({ "display": "flex", "flexDirection": "column", "gap": "var(--wa-space-2xs)", "padding": "var(--wa-space-xs)" });
 const projectCard = css({
@@ -226,12 +225,12 @@ const projectCard = css({
 	"--spacing": "var(--wa-space-xs)",
 	"&::part(body)": { "display": "block" },
 	"&:hover::part(body)": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
-	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "1px" },
+	"&:focus-visible": { "outline": "var(--wa-focus-ring)", "outlineOffset": "var(--wa-focus-ring-offset)" },
 	"&.selected::part(body)": { "backgroundColor": "var(--wa-color-brand-fill-quiet)" },
-	"&.selected": { "borderInlineStart": "2px solid var(--wa-color-brand-fill-loud)" }
+	"&.selected": { "borderInlineStart": "var(--wa-border-width-m) var(--wa-border-style) var(--wa-color-brand-fill-loud)" }
 });
 const projectName = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)" });
-const projectDesc = css({ "display": "block", "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "marginBlockStart": "2px", "whiteSpace": "normal" });
+const projectDesc = css({ "display": "block", "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "marginBlockStart": "var(--wa-space-3xs)", "whiteSpace": "normal" });
 
 // The dock fills the `main` region (the editor iframe is its fixed panel); the diff overlay covers it when a file is opened.
 const dockHostCss = css({ "position": "absolute", "inset": 0 });
@@ -245,8 +244,8 @@ const overlay = css({
 	"backgroundColor": "var(--wa-color-surface-default)",
 	"&.open": { "display": "flex" }
 });
-const overlayHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "height": "34px", "padding": "0 var(--wa-space-2xs) 0 var(--wa-space-s)", "borderBottom": "1px solid var(--wa-color-surface-border)", "flex": "0 0 auto" });
-const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-font-family-code, monospace)", "fontSize": "12px", "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis" });
+const overlayHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "height": "34px", "padding": "0 var(--wa-space-2xs) 0 var(--wa-space-s)", "borderBottom": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)", "flex": "0 0 auto" });
+const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-font-family-code)", "fontSize": "var(--wa-font-size-xs)", "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis" });
 const overlayBody = css({ "flex": "1 1 auto", "overflow": "auto", "minHeight": 0 });
 
 /** A lucide icon rendered into a Web Awesome button. */
@@ -1462,22 +1461,10 @@ function Shell() {
 	);
 }
 
-/** Reflect the OS light/dark preference onto Web Awesome's mode classes (WA switches via `.wa-light` / `.wa-dark`,
- *  not `prefers-color-scheme`), so the shell theme follows the system and updates live when it changes. */
-function applySystemColorScheme(): void {
-	const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-	document.documentElement.classList.toggle("wa-dark", dark);
-	document.documentElement.classList.toggle("wa-light", !dark);
-}
-
 /** Build the shell chrome, iframe the app, and wire the LHS picker over the hub. */
 export function renderShell(): void {
 	// Load milestones (with main.tsx's shell/import and the app iframe's own), for load investigations.
 	performance.mark("shell/render");
-	document.documentElement.classList.add("wa-theme-default");
-	applySystemColorScheme();
-	window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applySystemColorScheme);
 	injectGlobals();
 	render(<Shell />, document.body);
 }

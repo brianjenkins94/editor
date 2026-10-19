@@ -12,7 +12,8 @@ Status (2026-10-19):
   `src/exceptions/` (§3). Stylelint still reports 554 errors in those exceptions (`architecture-view.css` is at
   zero), and runs only via `npm run lint:css`. See [§6](#6-counts) for the counts.
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
-- The `theme` entry for the shell and admin, and the budget (4.5), aren't built yet.
+- The `theme` entry (§3) is built: admin takes `theme`, the shell `theme/chrome` (no native styles), and the
+  shell's Stitches `css({…})` is on `--wa-*` tokens (§1). The budget (4.5) isn't built yet.
 
 ## 1. bamboocss: borrow the ideas, don't adopt the library
 
@@ -41,9 +42,19 @@ step outside that vocabulary detectable, counted and budgeted. Lint the files th
 **Stitches stays.** The shell already has a CSS-in-JS layer: `@stitches/core`, set up in
 `editor/shared/theme.ts` (about 66 `css({…})` calls, almost all in `shell/`). Bamboo could replace it, but it would
 bring the Vite and native-binary requirements above with it. Stitches needs neither, so it stays as the shell's way
-to write the CSS that remains, on Web Awesome tokens. Two follow-ups: its `palette` of hard-coded hex values should
-become `--wa-*` tokens, and the token rule (4.2) should eventually check `css({…})` values too, since today no rule
-reads them.
+to write the CSS that remains, on Web Awesome tokens. Two follow-ups:
+
+- ~~Its `palette` of hard-coded hex values should become `--wa-*` tokens.~~ Done 2026-10-19. `palette` (and so
+  Stitches' `$` colors) is `var(--wa-*)` strings now, so it follows the theme and the light/dark mode. The `css({…})`
+  calls in the shell (`shell.tsx`, `shell-dock.ts`, `shell-preview.ts`, `preview-devtools.ts`) were mostly tokens
+  already; their literal font sizes, small gaps, popover offsets, borders and focus rings are tokens now too
+  (`--wa-font-size-3xs`…`s`, `--wa-space-3xs`/`2xs`, `--wa-border-width-*` with `--wa-border-style`,
+  `--wa-focus-ring`), and the hex fallbacks inside `var()` are gone. What's left as literals is layout geometry with
+  no token (the 40px top bar, the 260/380px side widths, the 68px rail, popover widths), a few line heights between
+  Web Awesome's steps, and the dock's macOS traffic lights (their colours and 12px geometry are the point).
+  `workbench/Workbench.tsx` stays on `--vscode-*`: its rules pin VS Code's own baseline in VS Code's document, where
+  the `--wa-*` bridge may not be adopted yet.
+- The token rule (4.2) should eventually check `css({…})` values too, since today no rule reads them. Still open.
 
 ## 2. Where custom CSS lives today
 
@@ -90,9 +101,25 @@ package has to make Web Awesome usable there.
 
 `theme` stays a token-only package, and it becomes the **one place** a document gets its styling from:
 
-- **`theme`** (shell, admin, account, site): Web Awesome's layers, native styles, utilities and default theme, then
-  our token overrides, in one import. Today admin imports `webawesome.css` and the shell hand-picks `default.css` and
-  `utilities.css`, which are two different setups.
+- **`theme`** (admin, and the account page in it; built): `src/index.js`. Web Awesome's layers, native styles,
+  utilities and default theme, then our brand tokens (`src/theme.css`), in one import. It also keeps the root's
+  `wa-light` / `wa-dark` class in step with `prefers-color-scheme`, live, since Web Awesome switches mode by that class
+  and not by the media query; the shell did that by hand before, and admin was always light.
+- **`theme/chrome`** (the shell, and the account dialog in it; built): `src/chrome.js`, the same setup without Web
+  Awesome's native styles, and `theme` is this plus `native.css`. One file holds the setup, and the two entries
+  differ only in that sheet.
+  - **The shell doesn't take native styles.** Tried 2026-10-19: they style bare elements and set `box-sizing` on
+    every box, and the shell is mostly other people's DOM (dockview, the codehike diff, the app and preview
+    iframes). In the running shell the rail's lucide icons shrank from 17px to 6px (`svg { max-width: 100% }`), the
+    app iframe took a 24px bottom margin (`iframe:has(+ *)`), and the dock's traffic-light `<button>`s would take a
+    form control's height and padding. The shell's own elements are Web Awesome components or Stitches classes, so
+    native styles would add nothing there. This is the same call as `theme/vscode`.
+  - Both entries import Web Awesome from the consumer's copy, so admin's and the editor's Vite configs (`dev.ts`
+    too, not only `build.ts`) list `@awesome.me/webawesome` in `resolve.dedupe`; without it the stale 3.12 in
+    `packages/theme/node_modules` is picked up.
+  - Not moved: the API's sign-in pages bundle Web Awesome's own `webawesome.css` with esbuild
+    (`api/scripts/webawesome.ts`), since the api doesn't depend on `theme`. Moving them means adding that dependency,
+    and they'd follow the system's mode too.
 - **`theme/vscode`** (the workbench document; built): `followVsCodeTheme(workbench)` in `src/vscode.js`. The
   workbench build emits no stylesheet to link, so the module imports the styles as text and adopts them into the
   document: Web Awesome's layers, default theme and utility classes, our brand tokens, then the bridge in
@@ -156,7 +183,7 @@ In priority order. Each step closes one of the gaps above.
    - VS Code's own font and layout are unchanged, and nothing was logged to the console.
    - Web Awesome's copy in `packages/theme/node_modules` is a stale 3.12, so the editor build now dedupes
      `@awesome.me/webawesome` to its own 3.14.
-   Still open: the `theme` entry for the shell, admin and account, which replaces their separate setups.
+   The `theme` entry for the shell, admin and account, which replaces their separate setups, is built too (§3).
 2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). Next: the
    stylelint errors in `src/exceptions/` (735, now 338), shrinking each file by replacing what Web Awesome covers.
    `architecture-view` and `git-panel` are done (§6).

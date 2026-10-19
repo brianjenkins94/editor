@@ -2,15 +2,11 @@
  * theme — the app's theme, layered on Web Awesome and expressed entirely in --wa-* design tokens.
  *
  * The whole point of this file (and this pivot): rebrand by RETONING WEB AWESOME'S TOKENS, not by writing our own
- * component CSS. Import order matters — the consumer loads Web Awesome's default theme FIRST, then this, so these
- * overrides win:
+ * component CSS. It comes after Web Awesome's default theme, so these overrides win; nothing imports it directly:
+ * `import "theme"` (or theme/chrome, or theme/vscode in VS Code's document) loads Web Awesome, then this.
  *
- *     import "@awesome.me/webawesome/dist/styles/themes/default.css";
- *     import "@awesome.me/webawesome/dist/styles/utilities.css";
- *     import "theme";   // ← this file, last
- *
- * MODE-AGNOSTIC. Web Awesome switches light/dark via the `.wa-light` / `.wa-dark` classes on the root (the shell sets
- * them from `prefers-color-scheme`), and its default theme supplies the per-mode SURFACE and TEXT tokens. So this file
+ * MODE-AGNOSTIC. Web Awesome switches light/dark via the `.wa-light` / `.wa-dark` classes on the root (the `theme`
+ * entry sets them from `prefers-color-scheme`), and its default theme supplies the per-mode SURFACE and TEXT tokens. So this file
  * overrides only the BRAND color ramp — `--wa-color-brand-{10..95}` (10 = darkest, 95 = lightest) — which the semantic
  * tokens point into (`--wa-color-brand-fill-loud: var(--wa-color-brand-50)`, and in dark mode fill-quiet →
  * brand-10, in light mode → brand-95). Because the ramp spans dark→light, the SAME ramp reads correctly in both

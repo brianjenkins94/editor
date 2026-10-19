@@ -50,7 +50,7 @@ const dropHintCss = css({
 	"position": "absolute",
 	"inset": "var(--wa-space-s)",
 	"pointerEvents": "none",
-	"border": "2px dashed var(--wa-color-brand-fill-loud)",
+	"border": "var(--wa-border-width-m) dashed var(--wa-color-brand-fill-loud)",
 	"borderRadius": "var(--wa-border-radius-m)",
 	"backgroundColor": "color-mix(in srgb, var(--wa-color-brand-fill-loud) 12%, transparent)",
 	"&[hidden]": { "display": "none" }
