@@ -27,6 +27,10 @@ person's problem easy to look into. Each step lands green, tested in workerd, as
   send codes with. This reverses "alerts are log-only" for these events only: the switch, the cost guard and the
   tripwire are what must reach you.
 - **Not the sites:** the editor and admin sites are static assets, which cost nothing to serve; they stay up.
+- **Every email to the owner is logged** (2026-10-19; `alerts`, migrations/0015): what it said, whether Email Service
+  took it (and its message id) or why it wasn't sent. The admin app's Mail page lists them with Cloudflare's delivery
+  status for each (matched by message id from its per-message analytics: delivered, bounced and why), and has **Send a
+  test alert**, so whether alerts arrive is checked there, not asked about. Kept 90 days.
 
 ## The cost guard
 

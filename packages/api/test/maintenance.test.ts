@@ -147,3 +147,19 @@ test("a break-glass flip, made straight in D1, is noticed by the next request: d
 	assert.equal((await editor.call("GET", "/account")).status, 200);
 	assert.equal((await flips()).at(-1)?.event, "maintenance_off");
 });
+
+test("every alert to the owner is logged, with whether it was sent; the Mail page lists them, and sends a test one", async () => {
+	const owner = await byGitHub(OWNER, "admin");
+	const read = async (): Promise<{ "configured": boolean; "alerts": { "subject": string; "status": string; "text": string }[] }> => (await owner.call("GET", "/admin/alerts")).json() as Promise<{ "configured": boolean; "alerts": { "subject": string; "status": string; "text": string }[] }>;
+
+	assert.equal((await owner.call("POST", "/admin/alerts/test", {})).status, 200);
+
+	const alerts = await read();
+
+	assert.equal(alerts.configured, true);
+	assert.equal(alerts.alerts[0]?.subject, "Test alert");
+	assert.equal(alerts.alerts[0]?.status, "sent", "taken by the outbox; no delivery report here");
+	assert.ok(alerts.alerts.some((alert) => alert.subject === "The API is down for maintenance" && /Why: looking into something/u.test(alert.text)), "the earlier flips are there too, with what they said");
+	assert.ok(toOwner().some((message) => message.subject === "[unusually good local] Test alert"));
+	assert.equal((await (await byGitHub(VIEWER, "admin")).call("POST", "/admin/alerts/test", {})).status, 403, "a viewer can look, not send");
+});

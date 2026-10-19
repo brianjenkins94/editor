@@ -1,8 +1,9 @@
 /**
  * The Mail page (README.md): what our email did, from GET /admin/mail. Ours (the audit log: codes sent, sign-ins by
  * email, refusals on the way) beside Cloudflare's (Email Service's analytics: delivered or not, and SPF, DKIM and DMARC).
- * Counts by day and reason; never a user's address. And the smoke test (its last runs, and a run now), and our own
- * inbox (GET /admin/inbox: mail to our own addresses, who from and its subject).
+ * Counts by day and reason; never a user's address. And the smoke test (its last runs, and a run now), our own inbox
+ * (GET /admin/inbox: mail to our own addresses, who from and its subject), and the alerts emailed to the owner (GET
+ * /admin/alerts: each, and whether Cloudflare delivered it; and a test alert).
  */
 import { useContext, useEffect, useState } from "preact/hooks";
 import { get, post } from "./session";
@@ -16,6 +17,81 @@ interface Mail {
 	"authentication": { "check": string; "results": { "result": string; "count": number }[] }[];
 	"smoke": { "at": number; "passed": boolean; "reason": string }[];
 	"cloudflare": { "ok": true } | { "error": string };
+}
+
+interface Alerts {
+	"configured": boolean;
+	"delivery": string | null;
+	"alerts": { "id": number; "at": number; "subject": string; "text": string; "status": string; "detail": string | null }[];
+}
+
+/** How an alert's fate reads. */
+const variantOf = (status: string): string => (status === "delivered" ? "success" : status === "sent" ? "neutral" : "danger");
+
+/** The emails to the owner (the kill switch, the cost guard, the tripwire, errors): each, what it said, and what
+ *  Cloudflare says became of it; and a test alert, to check they arrive without anyone asking. */
+function AlertsSection() {
+	const canSend = useContext(Permissions).includes("mail:test");
+	const [alerts, setAlerts] = useState<Alerts | undefined>();
+	const [sending, setSending] = useState(false);
+	const [reads, setReads] = useState(0);
+	const [open, setOpen] = useState<number | undefined>();
+
+	useEffect(() => {
+		get<Alerts>("/alerts").then(setAlerts, () => undefined);
+	}, [reads]);
+
+	return (
+		<div class="wa-stack">
+			<div class="wa-split">
+				<h2 class="wa-heading-l">Alerts to you</h2>
+				{canSend && (
+					<wa-button
+						size="small"
+						loading={sending}
+						onClick={() => {
+							setSending(true);
+							post("/alerts/test", {}).finally(() => {
+								setSending(false);
+								setReads(reads + 1);
+								// Cloudflare's delivery record lags a minute or so: look again then.
+								setTimeout(() => {
+									setReads((count) => count + 1);
+								}, 90_000);
+							});
+						}}
+					>
+						Send a test alert
+					</wa-button>
+				)}
+			</div>
+			<p class="wa-color-text-quiet">Every email to ALERT_EMAIL: the kill switch flipping, spend past its budget, the tripwire, errors. "Sent" means Email Service took it and Cloudflare hasn't reported on it yet (a minute or two).</p>
+			{alerts !== undefined && !alerts.configured && <wa-callout variant="danger">ALERT_EMAIL isn't set in this environment: alerts are logged here but not sent.</wa-callout>}
+			{alerts?.delivery !== null && alerts?.delivery !== undefined && <wa-callout variant="neutral">{alerts.delivery}</wa-callout>}
+			{alerts === undefined ? <wa-spinner /> : alerts.alerts.length === 0 ? <p class="wa-color-text-quiet">None yet.</p> : (
+				<Table head={["When", "Alert", "Delivery"]}>
+					{alerts.alerts.map((alert) => (
+						<tr key={alert.id}>
+							<td>{new Date(alert.at).toLocaleString()}</td>
+							<td>
+								<a
+									href="#/mail"
+									onClick={(event) => {
+										event.preventDefault();
+										setOpen(open === alert.id ? undefined : alert.id);
+									}}
+								>
+									{alert.subject}
+								</a>
+								{open === alert.id && <div class="wa-stack wa-gap-3xs wa-caption-m">{alert.text.split("\n").map((line, index) => <span key={index}>{line}</span>)}</div>}
+							</td>
+							<td><wa-badge variant={variantOf(alert.status)}>{alert.status}</wa-badge>{alert.detail === null ? "" : ` ${alert.detail}`}</td>
+						</tr>
+					))}
+				</Table>
+			)}
+		</div>
+	);
 }
 
 interface Inbox { "addresses": string[]; "mail": { "id": number; "at": number; "address": string; "sender": string; "subject": string; "size": number }[] }
@@ -185,6 +261,7 @@ export function MailPage({ query }: { "query": URLSearchParams }) {
 					setReads(reads + 1);
 				}}
 			/>
+			<AlertsSection />
 			<InboxSection inbox={inbox} />
 			{cloudflare !== undefined && (
 				<div class="wa-stack">

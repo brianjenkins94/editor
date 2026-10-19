@@ -6,7 +6,7 @@ import { architectureEndpoint } from "./architecture.ts";
 import { audit, origin } from "./audit.ts";
 import { githubIdColumn } from "./identities.ts";
 import { inboxEndpoint } from "./inbox.ts";
-import { mailEndpoint } from "./mail-report.ts";
+import { alertsEndpoint, mailEndpoint, testAlertEndpoint } from "./mail-report.ts";
 import { smokeTest } from "./smoke.ts";
 import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
@@ -171,6 +171,11 @@ admin.get("/inbox", requires("mail:read"), inboxEndpoint);
 /** The email smoke test (src/smoke.ts), now: a sign-in by email with our own address, the code read back from our inbox.
  *  It sends a real email, so it's a permission of its own. */
 admin.post("/mail/smoke", requires("mail:test"), async (context) => context.json(await smokeTest(context.env, context.executionCtx)));
+
+/** The emails to the owner (src/mail.ts, `tellOwner`): each, and what Cloudflare says became of it; and a test one. */
+admin.get("/alerts", requires("mail:read"), alertsEndpoint);
+
+admin.post("/alerts/test", requires("mail:test"), testAlertEndpoint);
 
 /** The API as it runs, described by itself (src/architecture.ts): routes, stores and their tables, counts. */
 admin.get("/architecture", requires("architecture:read"), architectureEndpoint);

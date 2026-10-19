@@ -268,6 +268,8 @@ export default {
 		}));
 		context.waitUntil(log.span("inbox.expire", {}, async () => {
 			await expireInbox(env.DB);
+			// Emails to the owner (src/mail.ts): kept 90 days.
+			await env.DB.prepare("DELETE FROM alerts WHERE at < ?").bind(Date.now() - 90 * 86_400_000).run();
 		}));
 		// Not while the kill switch is on: the API is down on purpose, and a sign-in through it would only fail.
 		context.waitUntil(log.span("smoke.email", {}, async () => {

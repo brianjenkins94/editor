@@ -84,3 +84,70 @@ export async function mailEndpoint(context: Context<AppEnv>): Promise<Response> 
 		"cloudflare": "error" in cloudflare ? { "error": cloudflare.error } : { "ok": true }
 	});
 }
+
+// ── Alerts to the owner ───────────────────────────────────────────────────────────────────────────────────────────
+
+interface Alert { "id": number; "at": number; "subject": string; "text": string; "sent": number; "message_id": string | null; "reason": string | null }
+
+const ALERTS_QUERY = `query ($account: String!, $since: Time!, $until: Time!) { viewer { accounts(filter: { accountTag: $account }) {
+	emailSendingAdaptive(limit: 500, filter: { datetime_geq: $since, datetime_leq: $until, isLastEvent: 1 }, orderBy: [datetime_DESC]) { datetime messageId status errorCause subject }
+} } }`;
+
+/** An Email Service message id as the binding gives it, or as Cloudflare's analytics show the header: without <>. */
+const bare = (id: string | null): string => (id ?? "").replace(/^<|>$/gu, "");
+
+/**
+ * GET /admin/alerts: the last 50 emails to the owner (src/mail.ts, `tellOwner`), each with what Cloudflare says became
+ * of it: delivered, bounced and why, not yet known (its analytics lag a minute or two), or never sent (and why).
+ * Matched by message id, or for one without, by subject within ten minutes.
+ */
+export async function alertsEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const { results } = await context.env.DB.prepare("SELECT id, at, subject, text, sent, message_id, reason FROM alerts ORDER BY id DESC LIMIT 50").all<Alert>();
+	const oldest = results.at(-1)?.at;
+	let events: { "datetime": string; "messageId": string | null; "status": string; "errorCause": string | null; "subject": string }[] = [];
+	let delivery: string | undefined;
+
+	if (oldest !== undefined && context.env.ANALYTICS_TOKEN !== undefined && context.env.ANALYTICS_TOKEN !== "") {
+		const response = await fetch(`${context.env.CLOUDFLARE_API ?? "https://api.cloudflare.com"}/client/v4/graphql`, {
+			"method": "POST",
+			"headers": { "authorization": `Bearer ${context.env.ANALYTICS_TOKEN}`, "content-type": "application/json" },
+			"body": JSON.stringify({ "query": ALERTS_QUERY, "variables": { "account": context.env.ANALYTICS_ACCOUNT, "since": new Date(oldest - 60_000).toISOString(), "until": new Date().toISOString() } })
+		}).catch(() => undefined);
+		const answer = await response?.json().catch(() => ({})) as { "data"?: { "viewer": { "accounts": { "emailSendingAdaptive": typeof events }[] } }; "errors"?: { "message": string }[] | null } | undefined;
+
+		events = answer?.data?.viewer.accounts[0]?.emailSendingAdaptive ?? [];
+		delivery = response?.ok === true && (answer?.errors ?? []).length === 0 ? undefined : "Cloudflare's delivery analytics couldn't be read";
+	} else if (oldest !== undefined) {
+		delivery = "no ANALYTICS_TOKEN here: delivery isn't known";
+	}
+
+	return context.json({
+		"configured": context.env.ALERT_EMAIL !== undefined,
+		"delivery": delivery ?? null,
+		"alerts": results.map((alert) => {
+			const event = alert.sent === 0 ? undefined
+				: events.find((one) => alert.message_id !== null && bare(one.messageId) === bare(alert.message_id))
+					?? events.find((one) => one.subject.endsWith(alert.subject) && Math.abs(Date.parse(one.datetime) - alert.at) < 600_000);
+
+			return {
+				"id": alert.id,
+				"at": alert.at,
+				"subject": alert.subject,
+				"text": alert.text,
+				"status": alert.sent === 0 ? "not sent" : event === undefined ? "sent" : event.status,
+				"detail": alert.sent === 0 ? alert.reason : event?.errorCause ?? null
+			};
+		})
+	});
+}
+
+/** POST /admin/alerts/test: an alert, now, to check they reach the owner; it shows on the Mail page with its delivery. */
+export async function testAlertEndpoint(context: Context<AppEnv>): Promise<Response> {
+	const { tellOwner } = await import("./mail.ts");
+
+	await tellOwner(context.env, "Test alert", `Sent from the admin app's Mail page (by user ${context.get("user")}) to check that alerts reach you. Nothing is wrong.`);
+
+	const row = await context.env.DB.prepare("SELECT id, at, subject, sent, reason FROM alerts ORDER BY id DESC LIMIT 1").first<Pick<Alert, "id" | "at" | "subject" | "sent" | "reason">>();
+
+	return context.json({ "sent": row?.sent === 1, "reason": row?.reason ?? null });
+}
