@@ -65,6 +65,8 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 			const info: RunInfo = { ...run, "id": id, "state": "running", "startedAt": Date.now() };
 
 			running.set(id, { "info": info, "stop": stop });
+			// The session timeline (packages/api OPERATIONS.md O6): a run's kind, not what it ran.
+			hub.publish("session.event", { "name": "run.started", "detail": info.kind });
 
 			return {
 				"id": id,
@@ -79,6 +81,7 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 					}
 
 					Object.assign(info, { "state": endedState(exitCode, stopped), "endedAt": Date.now(), "exitCode": exitCode });
+					hub.publish("session.event", { "name": "run.ended", "detail": info.state });
 					ended.unshift(info);
 					ended.length = Math.min(ended.length, KEEP_ENDED);
 

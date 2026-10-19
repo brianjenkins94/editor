@@ -11,7 +11,7 @@ import {
 	IStorageService,
 	LogLevel
 } from "@codingame/monaco-vscode-api";
-import { IExtensionService } from "@codingame/monaco-vscode-api/services";
+import { ICommandService, IExtensionService, IViewsService } from "@codingame/monaco-vscode-api/services";
 import { StorageScope, StorageTarget } from "@codingame/monaco-vscode-api/vscode/vs/platform/storage/common/storage";
 import { BrowserAuxiliaryWindowService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/auxiliaryWindow/browser/auxiliaryWindowService";
 import getAuthenticationServiceOverride from "@codingame/monaco-vscode-authentication-service-override";
@@ -644,6 +644,34 @@ export async function extensionContributions(key: string): Promise<{ "extension"
 }
 
 /** Call `listener` as extensions are registered and go (one loaded from outside, later than the built-in ones). */
+/** The commands that typing, moving the cursor and the suggest widget run many times a second, and the internal ones:
+ *  left out of onWorkbenchActivity. */
+const NOISY = /^(?:_|type$|default:type$|compositionType$|compositionStart$|compositionEnd$|replacePreviousChar$|setContext$|cursor|delete|tab$|outdent$|scroll|undo$|redo$|editor\.action\.(?:trigger|inlineSuggest|wordHighlight|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|clipboard)|acceptSelectedSuggestion|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|editor\.action\.internal|notifications\.)/u;
+
+/**
+ * What the person does in the workbench, for the editor's session timeline (packages/api OPERATIONS.md, O6): each command
+ * run, by its id (the NOISY ones left out), and each view or panel shown, by its id. Never what was typed, or a file.
+ */
+export async function onWorkbenchActivity(listener: (event: { "name": "command.run" | "pane.opened"; "detail": string }) => void): Promise<{ "dispose": () => void }> {
+	const commands = (await getService(ICommandService)).onDidExecuteCommand((event) => {
+		if (!NOISY.test(event.commandId)) {
+			listener({ "name": "command.run", "detail": event.commandId });
+		}
+	});
+	const views = (await getService(IViewsService)).onDidChangeViewVisibility((event) => {
+		if (event.visible) {
+			listener({ "name": "pane.opened", "detail": event.id });
+		}
+	});
+
+	return {
+		"dispose": () => {
+			commands.dispose();
+			views.dispose();
+		}
+	};
+}
+
 export async function onExtensionsChanged(listener: () => void): Promise<{ "dispose": () => void }> {
 	return (await getService(IExtensionService)).onDidChangeExtensions(listener);
 }

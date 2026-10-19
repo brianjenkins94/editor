@@ -9,7 +9,7 @@ import { Table, When } from "./views";
 
 interface Group { "fingerprint": string; "source": string; "name": string; "message": string | null; "route": string | null; "first_seen": number; "last_seen": number; "count": number; "releases": string; "recent"?: number }
 
-interface Occurrence { "id": string; "at": number; "route": string | null; "release": string | null; "trace_id": string | null; "grant_id": string | null; "user_id": string | null; "message": string | null; "stack"?: string | null; "name"?: string; "source"?: string; "count"?: number; "fingerprint"?: string }
+interface Occurrence { "id": string; "at": number; "route": string | null; "release": string | null; "trace_id": string | null; "grant_id": string | null; "user_id": string | null; "message": string | null; "stack"?: string | null; "breadcrumbs"?: string | null; "name"?: string; "source"?: string; "count"?: number; "fingerprint"?: string }
 
 /** A read: its data (the caller says its shape), or what went wrong. */
 function useGet(path: string): { "data"?: unknown; "problem"?: string } {
@@ -155,6 +155,13 @@ export function ErrorOccurrencePage({ id }: { "id": string }) {
 					<td class="wa-font-family-code">{occurrence.trace_id ?? "—"}</td>
 				</tr>
 			</Table>
+			{occurrence.breadcrumbs !== null && occurrence.breadcrumbs !== undefined && (
+				<div class="wa-stack wa-gap-2xs">
+					<h2 class="wa-heading-l">Just before</h2>
+					<p class="wa-color-text-quiet">What the editor said happened last, oldest first (signed in, the sign-in's timeline has it all).</p>
+					<div class="wa-cluster wa-gap-2xs">{occurrence.breadcrumbs.split(",").map((crumb, index) => <wa-badge key={index} variant="neutral" appearance="outlined">{crumb}</wa-badge>)}</div>
+				</div>
+			)}
 			<h2 class="wa-heading-l">Stack</h2>
 			{occurrence.stack === null || occurrence.stack === undefined ? <p class="wa-color-text-quiet">None recorded.</p> : <Stack text={occurrence.stack} />}
 		</section>

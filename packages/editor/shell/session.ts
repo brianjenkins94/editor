@@ -81,6 +81,20 @@ export async function apiDown(): Promise<boolean> {
 	return answer?.ok === true && (await answer.json() as { "maintenance"?: boolean }).maintenance === true;
 }
 
+/** The session timeline's events (shell/reporting.ts), signed in: best effort. */
+export async function postEvents(events: { "name": string; "detail"?: string; "at": number }[]): Promise<void> {
+	await client.fetch(`${API}/session/events`, { "method": "POST", "headers": { "content-type": "application/json" }, "body": JSON.stringify({ "events": events }) }).catch(() => undefined);
+}
+
+/** An uncaught error, reported (shell/reporting.ts): with the sign-in when there is one, anonymously otherwise. Its id,
+ *  to show the person; undefined if it couldn't be reported. */
+export async function reportError(report: { "name": string; "message": string; "stack"?: string; "source": string; "release": string; "breadcrumbs": string[] }): Promise<string | undefined> {
+	const send = isSignedIn() ? client.fetch : fetch;
+	const answer = await send(`${API}/errors`, { "method": "POST", "headers": { "content-type": "application/json" }, "body": JSON.stringify(report) }).catch(() => undefined);
+
+	return answer?.ok === true ? (await answer.json() as { "id"?: string }).id : undefined;
+}
+
 /** The account routes, for packages/account's page: reads, and writes whose refusal it shows. */
 export const accountApi = {
 	"get": async <T>(path: string): Promise<T> => client.json<T>(path),

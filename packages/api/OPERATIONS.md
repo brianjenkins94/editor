@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19; O1 to O5 built.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1 to O6 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -193,8 +193,26 @@ Each lands green and is tried before the next.
   - Trace ids are shown, not linked: Cloudflare's dashboard finds them (Workers → editor-api → Observability).
   - 2 tests in test/timeline.test.ts (requests, a refusal and an error in order, a viewer reads, an editor token can't;
     the 30 days after the end).
-- **O6 · editor events and errors.** The vocabulary, `POST /session/events`, `POST /errors` (signed in and anonymous),
-  the editor's error notice with its id.
+- **O6 · editor events and errors.** *Built 2026-10-19* (src/session-events.ts, migrations/0017; the editor's
+  shell/reporting.ts):
+  - The vocabulary (`page.shown`, `repo.loaded`, `command.run`, `pane.opened`, `run.started`, `run.ended`, `error`), each
+    with the detail it may carry (an id, a run's kind or state, an error id) or none. `POST /session/events` (signed in,
+    an editor sign-in): at most 50 a batch, the rest of the vocabulary dropped, a wrong-shaped detail dropped, a
+    repository turned into its keyed tag; onto the Grant's `editor_events`, which keeps 5,000 a sign-in and 30 days,
+    as requests are (a cap on what's kept rather than a daily one: a busy day pushes out the oldest).
+  - `POST /errors` (signed in or not; ten a minute an IP, `ERRORS_BY_IP`): recorded as the API's own are, source
+    `editor`, route `editor <realm>`, with the last ten event names as breadcrumbs. Signed in, its sign-in and user, and
+    an `error` event on the timeline; signed out, only `ip_hash`. Answers `{ id }`.
+  - The editor: the shell reports (it holds the sign-in). The page shown and a repo loaded are its own; commands run and
+    panes shown come from the workbench (the component's `onWorkbenchActivity`, noisy commands like cursor moves and
+    typing left out), runs from runs.ts; all on the `session.event` subject (root and workbench → shell). Uncaught
+    errors: the root forwards every realm's (its log collector sees them), the shell listens for its own. Each is
+    reported once a minute at most, ten a page, never from automation (`navigator.webdriver`) or a copy that can't sign
+    in, and the build stamps the release (`editor:release`, the commit). The person sees a notice with the id to quote.
+  - The admin app: the timeline shows the editor's events (and filters to them), an error event linking to its
+    occurrence; an occurrence shows its breadcrumbs.
+  - 2 tests in test/session-events.test.ts (the vocabulary, the tag, signed out refused; an anonymous error with its IP
+    hash, masked email and breadcrumbs, a signed-in one on the timeline).
 - **O7 · readable stacks.** Source maps kept per release, stacks mapped in the admin app.
 
 ## Open questions

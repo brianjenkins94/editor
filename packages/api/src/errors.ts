@@ -39,6 +39,10 @@ export interface Occurrence {
 	"traceId"?: string | null;
 	"grantId"?: string | null;
 	"userId"?: string | null;
+	/** Signed out: the IP, as the audit log's daily keyed hash; nothing else of who. */
+	"ipHash"?: string | null;
+	/** What happened just before, by event name (the editor's). */
+	"breadcrumbs"?: string[];
 }
 
 /** Record an occurrence; its id. Tell the owner of a new group, or a surge. */
@@ -52,7 +56,7 @@ export async function recordError(env: Bindings, occurrence: Occurrence): Promis
 			ON CONFLICT (fingerprint) DO UPDATE SET last_seen = excluded.last_seen, count = count + 1,
 				releases = CASE WHEN instr(',' || releases || ',', ',' || excluded.releases || ',') > 0 THEN releases ELSE substr(releases || ',' || excluded.releases, -300) END
 			RETURNING first_seen, count`).bind(fingerprint, occurrence.source, occurrence.name.slice(0, 100), message, occurrence.route.slice(0, 200), now, now, occurrence.release),
-		env.DB.prepare("INSERT INTO error_occurrences (id, fingerprint, at, route, release, trace_id, grant_id, user_id, message, stack) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, fingerprint, now, occurrence.route.slice(0, 200), occurrence.release, occurrence.traceId ?? null, occurrence.grantId ?? null, occurrence.userId ?? null, message, occurrence.stack === undefined ? null : scrub(occurrence.stack, 4000))
+		env.DB.prepare("INSERT INTO error_occurrences (id, fingerprint, at, route, release, trace_id, grant_id, user_id, message, stack, ip_hash, breadcrumbs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, fingerprint, now, occurrence.route.slice(0, 200), occurrence.release, occurrence.traceId ?? null, occurrence.grantId ?? null, occurrence.userId ?? null, message, occurrence.stack === undefined ? null : scrub(occurrence.stack, 4000), occurrence.ipHash ?? null, occurrence.breadcrumbs === undefined || occurrence.breadcrumbs.length === 0 ? null : occurrence.breadcrumbs.join(",").slice(0, 500))
 	]);
 	const first = (group?.results[0] as { "first_seen": number } | undefined)?.first_seen === now;
 	const { tellOwner } = await import("./mail.ts");
@@ -111,7 +115,7 @@ export async function errorGroupEndpoint(context: Context<AppEnv>): Promise<Resp
 export async function errorOccurrenceEndpoint(context: Context<AppEnv>): Promise<Response> {
 	const typed = (context.req.param("id") ?? "").toUpperCase().replaceAll(/[\s-]/gu, "").replace(/^E/u, "");
 	const id = `E-${typed.slice(0, 4)}-${typed.slice(4)}`;
-	const occurrence = await context.env.DB.prepare(`SELECT o.id, o.fingerprint, o.at, o.route, o.release, o.trace_id, o.grant_id, o.user_id, o.message, o.stack, e.name, e.source, e.count
+	const occurrence = await context.env.DB.prepare(`SELECT o.id, o.fingerprint, o.at, o.route, o.release, o.trace_id, o.grant_id, o.user_id, o.message, o.stack, o.breadcrumbs, e.name, e.source, e.count
 		FROM error_occurrences o JOIN errors e ON e.fingerprint = o.fingerprint WHERE o.id = ?`).bind(id).first();
 
 	return occurrence === null ? context.json({ "error": "not_found" }, 404) : context.json({ "occurrence": occurrence });

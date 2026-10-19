@@ -30,11 +30,13 @@ import { css, globalCss, iconSvg } from "../shared/theme";
 import { envRepo, showRepo, site } from "./address";
 import { renderGitPanel } from "./git-panel";
 import { forgetPat, getRepoBinding, GITHUB_APP_INSTALL, setRepoBinding } from "./github-auth";
+import type { Reporting } from "./reporting";
 import type { Session } from "./session";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
 import "@awesome.me/webawesome/dist/components/page/page.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/callout/callout.js";
 import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "@awesome.me/webawesome/dist/components/input/input.js";
@@ -146,6 +148,8 @@ const ghHint = css({ "fontSize": "11px", "color": "var(--wa-color-text-quiet)", 
 const ghLink = css({ "color": "var(--wa-color-brand-fill-loud)", "textDecoration": "none", "whiteSpace": "nowrap", "&:hover": { "textDecoration": "underline" } });
 const ghInput = css({ "width": "100%", "&::part(input)": { "fontFamily": "var(--wa-font-family-code, monospace)" } });
 const ghError = css({ "fontSize": "11px", "color": "var(--wa-color-danger-fill-loud, #d94040)", "lineHeight": 1.4 });
+// An uncaught error's id (shell/reporting.ts), to quote: over everything, bottom right, until dismissed or a minute on.
+const errorNotice = css({ "position": "fixed", "insetInlineEnd": "var(--wa-space-m)", "insetBlockEnd": "var(--wa-space-m)", "zIndex": 2147483000, "maxWidth": "360px", "fontSize": "12px" });
 const ghOk = css({ "fontSize": "11px", "color": "var(--wa-color-success-fill-loud, #3a9d5d)", "lineHeight": 1.4 });
 const ghConnected = css({ "fontSize": "12px", "color": "var(--wa-color-text-normal)" });
 const ghActions = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-xs)", "marginBlockStart": "var(--wa-space-2xs)" });
@@ -377,6 +381,8 @@ function Shell() {
 	const overlayBodyRef = useRef<HTMLDivElement>(null);
 	const overlayCloseRef = useRef<HTMLElement>(null);
 	const hubRef = useRef<Hub>();
+	const reportingRef = useRef<Reporting>();
+	const [errorId, setErrorId] = useState<string | undefined>(undefined);
 	// Settles once the app answers (below): a repo opened from the address (`env/<owner>/<repo>`) is published only then.
 	const appReadyRef = useRef<{ "promise": Promise<void>; "resolve": () => void }>();
 
@@ -420,6 +426,10 @@ function Shell() {
 		const architecture = reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
 
 		hubRef.current = shellHub;
+		// The session timeline's events and every realm's uncaught errors, to the API (shell/reporting.ts).
+		void import("./reporting").then(({ startReporting }) => {
+			reportingRef.current = startReporting(shellHub, setErrorId);
+		});
 		shellHub.link(windowTransport(appFrame.contentWindow));
 
 		// The preview windows live in the top frame so they can roam beyond the editor — every server's (a dev server's, a
@@ -480,6 +490,21 @@ function Shell() {
 			}
 		})();
 	}, []);
+
+	// The error notice goes after a minute (dismissed sooner, or replaced by the next).
+	useEffect(() => {
+		if (errorId === undefined) {
+			return;
+		}
+
+		const timer = setTimeout(() => {
+			setErrorId(undefined);
+		}, 60_000);
+
+		return () => {
+			clearTimeout(timer);
+		};
+	}, [errorId]);
 
 	// Apply the pane widths to wa-page's CSS vars (collapsed → 0). Clamp against the live max so a narrow viewport
 	// can't leave a pane wider than the editor. Inline `setProperty` wins over the static `.wa-shell` defaults.
@@ -871,6 +896,7 @@ function Shell() {
 			setRepoBinding(binding);
 			setBoundRepo(binding);
 			showRepo(binding);
+			reportingRef.current?.event({ "name": "repo.loaded", "detail": `${owner}/${repo}` });
 			setGithubOpen(false);
 			setRepoInput("");
 			span.info("loaded", { "branch": meta.default_branch, "files": files.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0) });
@@ -1458,6 +1484,14 @@ function Shell() {
 			</div>
 
 			{AccountDialog !== undefined && <AccountDialog onClose={() => { setAccountDialog(undefined); }} />}
+			{errorId !== undefined && (
+				<wa-callout variant="danger" size="small" class={errorNotice()}>
+					<div class="wa-stack wa-gap-2xs">
+						<span>Something went wrong, and we've been told. If you get in touch about it, quote <strong>{errorId}</strong>.</span>
+						<wa-button size="small" appearance="plain" onClick={() => { setErrorId(undefined); }}>Dismiss</wa-button>
+					</div>
+				</wa-callout>
+			)}
 		</wa-page>
 	);
 }

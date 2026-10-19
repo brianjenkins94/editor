@@ -24,8 +24,9 @@ import { userWith } from "./identities.ts";
  *   - its last action and the transitions since its last flush (BEHAVIOR.md, B8), added to the shared model hourly;
  *   - GitHub's answer to connecting GitHub to the account (src/link.ts), sealed, for 2 minutes, until the app finishes it;
  *   - a passkey being added (src/passkeys.ts): its challenge, then the checked credential, until the app finishes it;
- *   - its timeline (OPERATIONS.md, "Session timelines"; O5): each request made through it (route, status, duration,
- *     trace id), at most EVENTS of them, none older than RETAIN, and none RETAIN after it ended.
+ *   - its timeline (OPERATIONS.md, "Session timelines"; O5, O6): each request made through it (route, status, duration,
+ *     trace id) and what the editor said happened (an event's name and detail, src/session-events.ts), at most EVENTS
+ *     of each, none older than RETAIN, and none RETAIN after it ended.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
  * an alarm revokes it, so GitHub's tokens aren't kept for a sign-in nobody finished.
  * GitHub's token is spent here, for the proxy (src/proxy.ts), and refreshed here, one refresh at a time: GitHub's refresh
@@ -116,6 +117,7 @@ export const SCHEMA = `
 	CREATE TABLE IF NOT EXISTS differences (name TEXT NOT NULL, kind TEXT NOT NULL, strength TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (name, kind, strength));
 	CREATE TABLE IF NOT EXISTS github_link (id INTEGER PRIMARY KEY CHECK (id = 1), github_id INTEGER NOT NULL, github TEXT NOT NULL, code_hash TEXT NOT NULL, expires INTEGER NOT NULL);
 	CREATE TABLE IF NOT EXISTS events (at INTEGER NOT NULL, route TEXT NOT NULL, status INTEGER NOT NULL, ms INTEGER NOT NULL, trace TEXT);
+	CREATE TABLE IF NOT EXISTS editor_events (at INTEGER NOT NULL, name TEXT NOT NULL, detail TEXT);
 	CREATE INDEX IF NOT EXISTS events_by_at ON events (at);
 	CREATE TABLE IF NOT EXISTS passkey_setup (id INTEGER PRIMARY KEY CHECK (id = 1), ticket_hash TEXT NOT NULL, challenge TEXT NOT NULL, return_to TEXT NOT NULL, credential TEXT, code_hash TEXT, expires INTEGER NOT NULL);
 `;
@@ -333,6 +335,22 @@ export class Grant extends DurableObject<Bindings> {
 		this.sql.exec("DELETE FROM events WHERE at < ? OR rowid <= (SELECT rowid FROM events ORDER BY rowid DESC LIMIT 1 OFFSET ?)", now - RETAIN, EVENTS);
 	}
 
+	/** What the editor said happened (POST /session/events, src/session-events.ts), checked there: kept as requests are. */
+	public async recordEditor(events: { "at": number; "name": string; "detail": string | null }[]): Promise<void> {
+		const now = Date.now();
+
+		for (const event of events) {
+			this.sql.exec("INSERT INTO editor_events (at, name, detail) VALUES (?, ?, ?)", event.at, event.name, event.detail);
+		}
+
+		this.sql.exec("DELETE FROM editor_events WHERE at < ? OR rowid <= (SELECT rowid FROM editor_events ORDER BY rowid DESC LIMIT 1 OFFSET ?)", now - RETAIN, EVENTS);
+	}
+
+	/** The editor's events, oldest first. */
+	public async editorTimeline(): Promise<{ "at": number; "name": string; "detail": string | null }[]> {
+		return this.sql.exec<{ "at": number; "name": string; "detail": string | null }>("SELECT at, name, detail FROM editor_events ORDER BY at, rowid").toArray();
+	}
+
 	/** The timeline's requests, oldest first (the admin app's sign-in page, src/admin.ts). */
 	public async timeline(): Promise<{ "at": number; "route": string; "status": number; "ms": number; "trace": string | null }[]> {
 		return this.sql.exec<{ "at": number; "route": string; "status": number; "ms": number; "trace": string | null }>("SELECT at, route, status, ms, trace FROM events ORDER BY at, rowid").toArray();
@@ -344,6 +362,7 @@ export class Grant extends DurableObject<Bindings> {
 
 		if (state?.revoked_at !== null && state?.revoked_at !== undefined && now >= state.revoked_at + RETAIN) {
 			this.sql.exec("DELETE FROM events");
+			this.sql.exec("DELETE FROM editor_events");
 		}
 	}
 

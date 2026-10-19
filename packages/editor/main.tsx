@@ -61,6 +61,15 @@ if (isolated && window.parent === window) {
 	installHubCollector(rootHub, (record) => {
 		consoleCollector(record);
 		spans.record(record);
+
+		// An uncaught error, from any realm (the error tap's records carry its file and line; a rejection says so; the
+		// workbench logs its own as "uncaught error"): to the shell, which reports it with its sign-in, if any, and shows
+		// its id (shell/reporting.ts; packages/api OPERATIONS.md O6).
+		const attrs = (record.attrs ?? {}) as { "src"?: unknown; "line"?: unknown; "stack"?: unknown; "message"?: unknown; "reason"?: unknown };
+
+		if (record.level === "error" && ("src" in attrs || record.message === "uncaught error" || record.message === "unhandled rejection" || record.message.startsWith("unhandledrejection: "))) {
+			rootHub.publish("session.event", { "name": "error", "error": { "message": String(attrs.message ?? attrs.reason ?? record.message), "stack": typeof attrs.stack === "string" ? attrs.stack : undefined, "source": record.context?.["source"] } });
+		}
 	});
 	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
 	// This tab's id. The service worker is shared by every tab of the origin and links each tab's root separately, so

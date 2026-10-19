@@ -21,7 +21,7 @@ import { failureText } from "@brianjenkins94/editor-api/failures";
 import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
-import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
 import capabilitiesExtension from "capabilities:extension";
@@ -677,6 +677,10 @@ function maybeBoot(): void {
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
 			bootSpan.end();
+			// The session timeline (packages/api OPERATIONS.md O6): commands run and panes shown, by id, to the shell.
+			void onWorkbenchActivity((event) => {
+				workbenchHub.publish("session.event", event);
+			});
 		})
 		.catch((error: unknown) => {
 			bootSpan.error("workbench boot failed", { "error": errText(error) });

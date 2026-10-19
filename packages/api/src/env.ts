@@ -61,6 +61,8 @@ export interface Bindings {
 	"TOKEN_BY_GRANT": RateLimit;
 	"PROXY_BY_USER": RateLimit;
 	"ALERTS": RateLimit;
+	/** The editor's error reports, by IP (src/session-events.ts): ten a minute. */
+	"ERRORS_BY_IP": RateLimit;
 	"DB": D1Database;
 	/** The audit log's write-once copies (audit-copies.ts), in a bucket whose lock rules keep each as long as D1 keeps its row. */
 	"AUDIT_COPIES": R2Bucket;

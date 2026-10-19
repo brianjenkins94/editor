@@ -1,6 +1,6 @@
 /**
  * A sign-in's page (packages/api/OPERATIONS.md, "Session timelines"; O5): who and how, and its timeline: every request
- * made through it, its audit rows and its errors, in order, from GET /admin/sessions/:id/timeline. What a signed-in
+ * made through it, what the editor said happened (O6), its audit rows and its errors, in order, from GET /admin/sessions/:id/timeline. What a signed-in
  * person's session did, for looking into their problem: never a screen, code, keystrokes or file contents.
  * `sessions:replay`; reading it is audited, as every admin read is.
  */
@@ -11,7 +11,8 @@ import { Table, When } from "./views";
 type Item =
 	| { "kind": "request"; "at": number; "route": string; "status": number; "ms": number; "trace": string | null }
 	| { "kind": "audit"; "at": number; "event": string; "reason": string | null; "detail": string | null; "trace": string | null }
-	| { "kind": "error"; "at": number; "id": string; "name": string; "route": string | null; "message": string | null; "trace": string | null };
+	| { "kind": "error"; "at": number; "id": string; "name": string; "route": string | null; "message": string | null; "trace": string | null }
+	| { "kind": "editor"; "at": number; "name": string; "detail": string | null; "trace"?: undefined };
 
 interface Timeline {
 	"session": { "id": string; "user_id": string; "client": string; "label": string | null; "method": string | null; "created_at": number; "last_used_at": number; "revoked_at": number | null };
@@ -24,6 +25,11 @@ function describe(item: Item) {
 		return [<span key="what" class="wa-font-family-code">{item.route}</span>, <span key="detail"><wa-badge variant={item.status >= 500 ? "danger" : item.status >= 400 ? "warning" : "success"}>{item.status}</wa-badge> {item.ms} ms</span>];
 	}
 
+	// What the editor said: a fixed vocabulary; a repo as the audit log's keyed tag, an error by its id.
+	if (item.kind === "editor") {
+		return [<span key="what" class="wa-cluster wa-gap-2xs"><wa-badge variant="brand" appearance="outlined">editor</wa-badge>{item.name}</span>, item.name === "error" && item.detail !== null ? <a key="detail" href={`#/errors/${item.detail}`}>{item.detail}</a> : <span key="detail" class="wa-font-family-code wa-color-text-quiet">{item.detail ?? ""}</span>];
+	}
+
 	if (item.kind === "audit") {
 		return [<strong key="what">{item.event}</strong>, <span key="detail" class="wa-color-text-quiet">{[item.reason, item.detail].filter((part) => part !== null).join(" · ")}</span>];
 	}
@@ -34,7 +40,7 @@ function describe(item: Item) {
 export function TimelinePage({ id }: { "id": string }) {
 	const [timeline, setTimeline] = useState<Timeline | undefined>();
 	const [problem, setProblem] = useState<string | undefined>();
-	const [only, setOnly] = useState<"all" | "audit" | "error">("all");
+	const [only, setOnly] = useState<"all" | "editor" | "audit" | "error">("all");
 
 	useEffect(() => {
 		get<Timeline>(`/sessions/${encodeURIComponent(id)}/timeline`).then(setTimeline, (error: unknown) => {
@@ -70,11 +76,12 @@ export function TimelinePage({ id }: { "id": string }) {
 					}}
 				>
 					<wa-option value="all">Everything ({items.length})</wa-option>
+					<wa-option value="editor">The editor's events only</wa-option>
 					<wa-option value="audit">Audit rows only</wa-option>
 					<wa-option value="error">Errors only</wa-option>
 				</wa-select>
 			</div>
-			<p class="wa-color-text-quiet">Each request through this sign-in (the last 30 days, at most 5,000), its audit rows and its errors, oldest first. A trace id finds the request in Cloudflare's logs (Workers → editor-api → Observability).</p>
+			<p class="wa-color-text-quiet">Each request through this sign-in (the last 30 days, at most 5,000), what the editor said happened (pages shown, repos loaded, commands run, panes opened, runs; never code, keystrokes or file contents), its audit rows and its errors, oldest first. A trace id finds the request in Cloudflare's logs (Workers → editor-api → Observability).</p>
 			{shown.length === 0 ? <p class="wa-color-text-quiet">Nothing yet.</p> : (
 				<Table head={["When", "What", "Detail", "Trace"]}>
 					{shown.map((item, index) => {

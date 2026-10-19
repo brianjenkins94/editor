@@ -13,6 +13,13 @@ declare module "dockview:css" {
 	export default css;
 }
 
+/** The commit being built (build.ts, `releasePlugin`): what the editor's error reports say they came from. */
+declare module "editor:release" {
+	const release: string;
+
+	export default release;
+}
+
 /** settings-defaults.jsonc, parsed — registered as the editor's configuration defaults (see snapshot.ts). */
 declare module "editor:settings-defaults" {
 	const defaults: Record<string, unknown>;

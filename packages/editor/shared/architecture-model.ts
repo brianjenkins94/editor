@@ -171,6 +171,9 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root", "preview:*"] },
 	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
 	// ── the shell ⇄ the app and the workbench ──
+	// What the session timeline and error reports need (packages/api OPERATIONS.md O6): the root's collected uncaught
+	// errors, the workbench's commands, panes and runs, to the shell, which holds the sign-in that sends them.
+	{ "pattern": "session.event", "from": ["root", "workbench"], "to": ["shell"] },
 	{ "pattern": "project.>", "from": ["shell"], "to": ["root"] },
 	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"] },
 	{ "pattern": "workbench.init", "from": ["workbench"], "to": ["root"] },

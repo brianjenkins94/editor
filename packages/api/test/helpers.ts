@@ -49,11 +49,12 @@ export function testBrowser(server: Harness, base: () => URL, { outbox = [], git
 		const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 		let nonce: string | undefined;
 		let token: string | undefined;
-		const call = async (method: string, path: string, fields?: Record<string, string>): Promise<Answer> => {
+		const call = async (method: string, path: string, fields?: Record<string, string>, json?: unknown): Promise<Answer> => {
 			for (let attempt = 0; ; attempt += 1) {
 				const ath = token === undefined ? {} : { "ath": await s256(token) };
 				const proof = await new SignJWT({ "htm": method, "htu": at(path), "jti": crypto.randomUUID(), "iat": Math.floor(Date.now() / 1000), ...nonce === undefined ? {} : { "nonce": nonce }, ...ath }).setProtectedHeader({ "typ": "dpop+jwt", "alg": "ES256", "jwk": jwk }).sign(privateKey);
-				const response = await browse(at(path), { "method": method, "headers": { "dpop": proof, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ...fields === undefined ? {} : { "content-type": "application/x-www-form-urlencoded" } }, ...fields === undefined ? {} : { "body": new URLSearchParams(fields).toString() } });
+				const body = json === undefined ? fields === undefined ? {} : { "body": new URLSearchParams(fields).toString(), "type": "application/x-www-form-urlencoded" } : { "body": JSON.stringify(json), "type": "application/json" };
+				const response = await browse(at(path), { "method": method, "headers": { "dpop": proof, ...token === undefined ? {} : { "authorization": `DPoP ${token}` }, ..."type" in body ? { "content-type": body.type } : {} }, ..."body" in body ? { "body": body.body } : {} });
 
 				nonce = response.headers.get("dpop-nonce") ?? nonce;
 

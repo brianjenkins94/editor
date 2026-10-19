@@ -29,6 +29,7 @@ import { maintenance, maintenanceGate } from "./maintenance.ts";
 import { checkSpend } from "./spend.ts";
 import { Breach, ensureCanary, unwatched } from "./tripwire.ts";
 import { expireErrors, recordError } from "./errors.ts";
+import { editorErrorEndpoint, sessionEventsEndpoint } from "./session-events.ts";
 
 export { Attempt } from "./attempt.ts";
 export { Grant } from "./grant.ts";
@@ -89,6 +90,8 @@ app.use("/auth/second", limit(4 * 1024));
 app.use("/auth/passkey", limit(8 * 1024));
 app.use("/auth/passkey/*", limit(4 * 1024));
 app.use("/passkey/register", limit(16 * 1024));
+app.use("/session/events", limit(16 * 1024));
+app.use("/errors", limit(32 * 1024));
 app.use("/revoke", limit(4 * 1024));
 app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
@@ -184,6 +187,12 @@ app.post("/sessions/revoke-all", session, revokeAllEndpoint);
 app.post("/sessions/:id/revoke", session, revokeSessionEndpoint);
 
 app.post("/account/delete", session, deleteAccountEndpoint);
+
+// What the editor reports (src/session-events.ts, OPERATIONS.md O6): signed in, its timeline's events; signed in or not,
+// its uncaught errors (ten a minute an IP), under the id it shows.
+app.post("/session/events", session, sessionEventsEndpoint);
+
+app.post("/errors", rateLimit("ERRORS_BY_IP", byIp), editorErrorEndpoint);
 
 // Your account (src/account-routes.ts): the same routes as the admin app's /admin/account, behind the editor's session.
 app.route("/account", accountRoutes(session));
