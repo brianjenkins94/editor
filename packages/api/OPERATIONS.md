@@ -165,6 +165,12 @@ Each lands green and is tried before the next.
   - 4 tests in test/tripwire.test.ts (the canary seeded; a request reading the canary's value end to end; the watched
     binding against a stand-in D1: another user's row trips or is reported, one's own doesn't, `crossUser` is
     unwatched; the canary in any column, a batch and raw rows).
+  - **Reviewed before enforcing** (2026-10-19): no `tripwire` or `tripwire_report` rows in production or dev; the
+    canary live in both. Every query that can return a `user_id` was read: on watched routes each is the caller's own
+    (`user_id = ?` the signed-in user) or `ownerOf`'s marked read; the rest run on routes the watch doesn't cover
+    (sign-in, reset, passkey sign-in, the token endpoint) or in a Durable Object. Every watched route is now driven by a
+    test under the enforcing tripwire: the one that wasn't, new recovery codes (`/account/mfa/recovery`), has a test
+    in test/password.test.ts. A new watched route needs one too, so the suite keeps standing for review.
 - **O4 · server errors.** *Built 2026-10-19* (src/errors.ts, migrations/0016; the admin app's src/errors.tsx):
   - `app.onError` records every uncaught error but a tripwire breach (which answers for itself), and answers
     `500 { error: "internal", id: "E-ABCD-EFGH" }` (util/auth/codes' symbols).

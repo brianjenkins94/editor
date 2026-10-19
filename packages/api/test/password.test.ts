@@ -342,6 +342,25 @@ test("setting up two-factor: the app's QR code, a code to confirm, ten recovery 
 	assert.equal(/"secret":"[A-Z2-7]{32}"/u.test(stored), false, "the secret is sealed");
 });
 
+test("new recovery codes: the app's code (not a recovery code) makes ten more; the old ones stop working", async () => {
+	const address = someone();
+	const { signedIn, app: codeNow, recovery } = await withMfa(address);
+
+	assert.equal((await signedIn.call("POST", "/admin/account/mfa/recovery", { "code": recovery[0] as string })).status, 400, "a recovery code can't make more");
+
+	const made = await signedIn.call("POST", "/admin/account/mfa/recovery", { "code": await codeNow(1) });
+	const { recoveryCodes } = await made.json() as { "recoveryCodes": string[] };
+
+	assert.equal(made.status, 200);
+	assert.equal(recoveryCodes.length, 10);
+	assert.equal(recoveryCodes.some((code) => recovery.includes(code)), false, "all new");
+	assert.equal((await (await signedIn.call("GET", "/admin/account")).json() as { "mfa": { "recoveryLeft": number } }).mfa.recoveryLeft, 10);
+
+	const { browser } = await firstFactorByEmail(address);
+
+	assert.equal((await form("/auth/second", browser.cookie, { "code": recovery[0] as string })).status, 400, "an old code is gone");
+});
+
 test("signing in with two-factor on: the emailed code, then the app's code (each step once), and the sign-in says both", async () => {
 	const address = someone();
 	const { app: codeNow } = await withMfa(address);
