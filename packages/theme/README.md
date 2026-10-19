@@ -41,6 +41,12 @@ The call also keeps the element's `wa-dark` / `wa-light` class in step with VS C
 components there follow a theme switch live. [PLAN.md](PLAN.md) has the design and the plan for the rest of the
 custom CSS.
 
+## What's left: `theme/exceptions/*`
+
+The custom CSS that Web Awesome doesn't cover yet, one file per surface: the only stylesheets code may import
+besides Web Awesome's and the theme's (`webawesome/no-css-imports`). A new file there is the review signal that
+something needs CSS of its own, and every file in it is held to the repo's stylelint rules.
+
 ## This starter
 
 Dark-first, matching the editor shell's chrome, with the brand ramp set to the editor's blue accent (`#3794ff` at the

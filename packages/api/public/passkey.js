@@ -2,6 +2,8 @@
 // not on the app's page. The app sent the browser here with a ticket and the registration's options in the fragment
 // (taken out of the address bar at once); the passkey made, POST /passkey/register checks it and answers with the app's
 // page to go back to, where the app finishes adding it.
+// (Web Awesome's components, bundled beside this page: scripts/webawesome.ts — defined before anything here makes one)
+import "/webawesome.js";
 import { create, supported } from "/webauthn.js";
 
 const steps = document.querySelector("#steps");
@@ -17,9 +19,8 @@ function say(text) {
 	problem.textContent = text;
 }
 
-// eslint-disable-next-line webawesome/prefer-components -- the sign-in pages are plain HTML and their own CSS: nothing runs here but our own files
-const button = Object.assign(document.createElement("button"), { "type": "button", "className": "method", "textContent": "Create a passkey" });
-const note = Object.assign(document.createElement("p"), { "className": "note", "textContent": "Your device asks for your fingerprint, face or PIN, or offers your password manager. The passkey stays there: we keep only its public key." });
+const button = Object.assign(document.createElement("wa-button"), { "variant": "brand", "textContent": "Create a passkey" });
+const note = Object.assign(document.createElement("p"), { "textContent": "Your device asks for your fingerprint, face or PIN, or offers your password manager. The passkey stays there: we keep only its public key." });
 
 button.addEventListener("click", async () => {
 	say("");

@@ -12,10 +12,15 @@ import type { ChannelStats, FlowMessage, RuntimeNode, StoredSample, TrafficKind 
 import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture-model";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { ArchitectureStore, collectArchReports, flowsOf, requestArchSync } from "@brianjenkins94/observability";
+import css from "theme/exceptions/architecture-view.css?raw";
 import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjects as subjectFamilies, subjectMatches, subjectOfLabel } from "../shared/architecture-model";
 import { windowTitle } from "../shared/virtual-path";
-import css from "./architecture-view.css?raw";
 import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/input/input.js";
+import "@awesome.me/webawesome/dist/components/option/option.js";
+import "@awesome.me/webawesome/dist/components/select/select.js";
+import "@awesome.me/webawesome/dist/components/tab/tab.js";
+import "@awesome.me/webawesome/dist/components/tab-group/tab-group.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_HEIGHT = 44;
@@ -660,7 +665,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	// ── toolbar
 	const summary = html("span", { "class": "arch-summary" });
 	// The feature lens: one feature lit, the rest faded — its features found in what's on the wire, refreshed as it opens.
-	const featureSelect = html("select", { "class": "arch-select", "title": "Light up one feature — found in the subjects, commands and stores seen" });
+	// (no feature lit is the select left empty: its placeholder, and its clear button to get back there)
+	const featureSelect = html("wa-select", { "size": "s", "placeholder": "All features", "with-clear": "", "title": "Light up one feature — found in the subjects, commands and stores seen" });
 	const refreshFeatures = (): void => {
 		const counts = new Map<string, number>();
 
@@ -676,19 +682,19 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 		const features = [...counts.keys()].sort();
 
-		featureSelect.replaceChildren(html("option", { "value": "" }, "All features"), ...features.map((name) => html("option", { "value": name, ...name === feature ? { "selected": "" } : {} }, name)));
+		featureSelect.replaceChildren(...features.map((name) => html("wa-option", { "value": name }, name)));
+		featureSelect.value = feature ?? "";
 	};
 
 	refreshFeatures();
-	featureSelect.addEventListener("focus", refreshFeatures);
-	featureSelect.addEventListener("pointerdown", refreshFeatures);
+	featureSelect.addEventListener("wa-show", refreshFeatures);
 	featureSelect.addEventListener("change", () => {
-		feature = featureSelect.value === "" ? undefined : featureSelect.value;
+		feature = featureSelect.value === "" || featureSelect.value === null ? undefined : String(featureSelect.value);
 		applySelection();
 		refreshPanel();
 	});
 	const button = (label: string, title: string, onClick: (element: WaButton) => void): WaButton => {
-		const element = html("wa-button", { "size": "small", "variant": "neutral", "title": title }, label);
+		const element = html("wa-button", { "size": "s", "variant": "neutral", "title": title }, label);
 
 		element.addEventListener("click", () => {
 			onClick(element);
@@ -779,7 +785,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	svg.append(containerLayer, edgeLayer, nodeLayer, pulseLayer);
 
 	const canvas = html("div", { "class": "arch-canvas" }, svg);
-	const tabs = html("div", { "class": "arch-tabs" });
+	const tabs = html("wa-tab-group", { "without-scroll-controls": "" });
 	const panel = html("div", { "class": "arch-panel" });
 
 	root.append(html("div", { "class": "arch-body" }, canvas, html("div", { "class": "arch-side" }, tabs, panel)));
@@ -1747,11 +1753,11 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		];
 	}
 
-	const filterInput = html("input", { "class": "arch-input", "placeholder": "Filter (context, message…)", "type": "search" });
+	const filterInput = html("wa-input", { "size": "s", "placeholder": "Filter (context, message…)", "type": "search" });
 	const logList = html("div", { "class": "arch-log" });
 
 	filterInput.addEventListener("input", () => {
-		logFilter = filterInput.value.toLowerCase();
+		logFilter = (filterInput.value ?? "").toLowerCase();
 		refreshPanel();
 	});
 
@@ -1830,17 +1836,29 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	});
 
 	// Created once — rebuilding them every tick would swallow clicks landing mid-rebuild.
-	const tabButtons = new Map<Tab, HTMLButtonElement>((["inspector", "conformance", "flows", "log"] as Tab[]).map((id) => {
-		const element = html("button", { "class": "arch-tab" });
+	// Tabs only: the one panel below them draws whichever is open.
+	const tabButtons = new Map<Tab, HTMLElement>((["inspector", "conformance", "flows", "log"] as Tab[]).map((id) => {
+		const element = html("wa-tab", { "panel": id });
 
-		element.addEventListener("click", () => {
-			tab = id;
-			refreshPanel(true);
-		});
 		tabs.append(element);
 
 		return [id, element];
 	}));
+
+	// With no panels of its own the group emits no wa-tab-show: its choice is read once a click or a key has moved it.
+	const chosen = (): void => {
+		void tabs.updateComplete.then(() => {
+			const id = tabs.active as Tab;
+
+			if (id !== tab) {
+				tab = id;
+				refreshPanel(true);
+			}
+		});
+	};
+
+	tabs.addEventListener("click", chosen);
+	tabs.addEventListener("keydown", chosen);
 
 	/** The open tab's content: the Inspector's is the selection's, or the overview with none. */
 	function panelContent(): Child[] {
@@ -1869,8 +1887,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 		for (const [id, element] of tabButtons) {
 			element.textContent = labels[id];
-			element.classList.toggle("active", id === tab);
 		}
+
+		tabs.active = tab;
 
 		// Don't move content under the mouse unless asked.
 		if (!force && (panelHovered || paused)) {

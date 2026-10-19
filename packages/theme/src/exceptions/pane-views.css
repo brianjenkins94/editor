@@ -174,7 +174,7 @@
   font-family: var(--vscode-font-family);
 }
 
-/* Coverage's marks in the margin's gutter column (coverage.ts), shaped as VS Code's own gutter bars (pane.css): green
+/* Coverage's marks in the margin's gutter column (coverage.ts), shaped as VS Code's own gutter bars (margin.css): green
    beside a line that ran, red beside one that didn't, the two striped beside one that partly ran (as its coverage
    stripes) — and, in a high-contrast theme, a solid line rather than a fill, as its coverage does. */
 .notes-margin-mark.coverage-ran {

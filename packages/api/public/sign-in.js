@@ -8,6 +8,8 @@
 //
 // The email's link is this page with the code in its fragment (#code=…): in the browser that started, it's sent as if
 // typed; anywhere else, there's no attempt here, and the page shows the code to type where the sign-in started.
+// (Web Awesome's components, bundled beside this page: scripts/webawesome.ts — defined before anything here makes one)
+import "/webawesome.js";
 import { get as askPasskey, supported as passkeys } from "/webauthn.js";
 
 const intro = document.querySelector("#for");
@@ -66,12 +68,9 @@ function explain(body) {
 /** The second step, for an account with two-factor on: a code from the authenticator app or a recovery code ("totp"),
  *  or the code just emailed ("email", after a password). */
 function secondForm(kind) {
-	const code = element("input", { "name": "code", "type": "text", "required": true, "autocomplete": "one-time-code", "spellcheck": false, "placeholder": kind === "email" ? "ABCD-2345" : "123456" });
-	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Sign in" });
-	const form = element("form", { "className": "stack" },
-		element("p", { "className": "note", "textContent": kind === "email" ? "This account has two-factor by email on. We sent a code to your email: type it to finish signing in." : "This account has two-factor on. Type the code from your authenticator app, or one of your recovery codes." }),
-		element("label", { "textContent": "Code" }, code),
-		submit);
+	const code = element("wa-input", { "label": "Code", "name": "code", "type": "text", "required": true, "autocomplete": "one-time-code", "spellcheck": false, "placeholder": kind === "email" ? "ABCD-2345" : "123456" });
+	const submit = element("wa-button", { "type": "submit", "variant": "brand", "textContent": "Sign in" });
+	const form = element("form", { "className": "wa-stack" }, element("p", { "textContent": kind === "email" ? "This account has two-factor by email on. We sent a code to your email: type it to finish signing in." : "This account has two-factor on. Type the code from your authenticator app, or one of your recovery codes." }), code, submit);
 
 	form.addEventListener("submit", async (event) => {
 		event.preventDefault();
@@ -98,7 +97,7 @@ function onward(body) {
 	if (body.second_factor !== undefined) {
 		say("");
 		methods.replaceChildren(secondForm(body.second_factor));
-		methods.querySelector("input").focus();
+		methods.querySelector("wa-input").focus();
 
 		return;
 	}
@@ -142,10 +141,10 @@ async function verify(code, button) {
 
 /** The code's form, once one is sent to `address`. */
 function codeForm(address) {
-	const code = element("input", { "name": "code", "type": "text", "required": true, "autocomplete": "one-time-code", "autocapitalize": "characters", "spellcheck": false, "placeholder": "ABCD-2345" });
-	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Sign in" });
-	const again = element("button", { "type": "button", "className": "secondary", "textContent": "Send another code" });
-	const form = element("form", { "className": "stack" }, element("p", { "className": "note", "textContent": `We sent a code to ${address}. It works for 10 minutes.` }), element("label", { "textContent": "Code" }, code), submit, again);
+	const code = element("wa-input", { "label": "Code", "name": "code", "type": "text", "required": true, "autocomplete": "one-time-code", "autocapitalize": "characters", "spellcheck": false, "placeholder": "ABCD-2345" });
+	const submit = element("wa-button", { "type": "submit", "variant": "brand", "textContent": "Sign in" });
+	const again = element("wa-button", { "appearance": "outlined", "textContent": "Send another code" });
+	const form = element("form", { "className": "wa-stack" }, element("p", { "textContent": `We sent a code to ${address}. It works for 10 minutes.` }), code, submit, again);
 
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
@@ -174,26 +173,20 @@ async function send(address, button) {
 
 	say("");
 	methods.replaceChildren(codeForm(address));
-	methods.querySelector("input").focus();
+	methods.querySelector("wa-input").focus();
 }
 
 /** Resetting a forgotten password (C4): a code to the address, then the code and a new password, and whether to end
  *  every sign-in of the account. The attempt is spent: the app signs in again, with the new password. */
 function resetForm(address) {
-	const ask = element("button", { "type": "button", "className": "method", "textContent": "Email me a reset code" });
-	const code = element("input", { "name": "code", "type": "text", "autocomplete": "one-time-code", "autocapitalize": "characters", "spellcheck": false, "placeholder": "ABCD-2345" });
-	const password = element("input", { "name": "password", "type": "password", "autocomplete": "new-password" });
-	const end = element("input", { "type": "checkbox", "checked": true });
-	const second = element("input", { "name": "second", "type": "text", "autocomplete": "one-time-code", "spellcheck": false, "placeholder": "Only if you've turned two-factor on" });
-	const submit = element("button", { "type": "submit", "className": "method", "textContent": "Reset my password" });
-	const rest = element("div", { "className": "stack", "hidden": true },
-		element("label", { "textContent": "Code" }, code),
-		element("label", { "textContent": "New password" }, password),
-		element("p", { "className": "note", "textContent": "10 to 100 characters: letters, digits, spaces and the symbols on a US keyboard. Checked against known breaches." }),
-		element("label", { "textContent": "Two-factor code, or a recovery code" }, second),
-		element("label", { "className": "check" }, end, "Also end every sign-in of this account, everywhere"),
-		submit);
-	const form = element("form", { "className": "stack" }, element("p", { "className": "note", "textContent": `Reset the password for ${address}.` }), ask, rest);
+	const ask = element("wa-button", { "variant": "brand", "textContent": "Email me a reset code" });
+	const code = element("wa-input", { "label": "Code", "name": "code", "type": "text", "autocomplete": "one-time-code", "autocapitalize": "characters", "spellcheck": false, "placeholder": "ABCD-2345" });
+	const password = element("wa-input", { "label": "New password", "hint": "10 to 100 characters: letters, digits, spaces and the symbols on a US keyboard. Checked against known breaches.", "name": "password", "type": "password", "autocomplete": "new-password" });
+	const end = element("wa-checkbox", { "checked": true, "textContent": "Also end every sign-in of this account, everywhere" });
+	const second = element("wa-input", { "label": "Two-factor code, or a recovery code", "name": "second", "type": "text", "autocomplete": "one-time-code", "spellcheck": false, "placeholder": "Only if you've turned two-factor on" });
+	const submit = element("wa-button", { "type": "submit", "variant": "brand", "textContent": "Reset my password" });
+	const rest = element("div", { "className": "wa-stack", "hidden": true }, code, password, second, end, submit);
+	const form = element("form", { "className": "wa-stack" }, element("p", { "textContent": `Reset the password for ${address}.` }), ask, rest);
 
 	ask.addEventListener("click", async () => {
 		ask.disabled = true;
@@ -210,7 +203,8 @@ function resetForm(address) {
 
 		say("");
 		ask.textContent = "Send another code";
-		ask.className = "secondary";
+		ask.variant = "neutral";
+		ask.appearance = "outlined";
 		rest.hidden = false;
 		code.focus();
 	});
@@ -229,7 +223,7 @@ function resetForm(address) {
 		}
 
 		say("");
-		methods.replaceChildren(element("p", { "className": "note", "textContent": `Your password is reset${body.ended > 0 ? `, and ${body.ended} sign-in${body.ended === 1 ? "" : "s"} ended` : ""}. Go back to the app and sign in with it.` }));
+		methods.replaceChildren(element("p", { "textContent": `Your password is reset${body.ended > 0 ? `, and ${body.ended} sign-in${body.ended === 1 ? "" : "s"} ended` : ""}. Go back to the app and sign in with it.` }));
 	});
 
 	return form;
@@ -269,14 +263,13 @@ async function passkeySignIn(button) {
  *  password a step away. */
 function emailForm(offered) {
 	const byEmail = offered.includes("email");
-	const address = element("input", { "name": "address", "type": "email", "required": true, "autocomplete": "username email", "placeholder": "you@example.com" });
-	const password = element("input", { "name": "password", "type": "password", "autocomplete": "current-password" });
-	const passwordLabel = element("label", { "textContent": "Password", "hidden": byEmail }, password);
-	const codeButton = element("button", { "type": "submit", "className": "method", "textContent": "Email me a code", "hidden": !byEmail });
-	const signInButton = element("button", { "type": "submit", "className": "method", "textContent": "Sign in", "hidden": byEmail });
-	const toggle = element("button", { "type": "button", "className": "secondary", "textContent": "Use a password instead", "hidden": !(byEmail && offered.includes("password")) });
-	const forgot = element("button", { "type": "button", "className": "link", "textContent": "Forgot your password?", "hidden": byEmail });
-	const form = element("form", { "className": "stack" }, element("label", { "textContent": "Email" }, address), passwordLabel, codeButton, signInButton, toggle, forgot);
+	const address = element("wa-input", { "label": "Email", "name": "address", "type": "email", "required": true, "autocomplete": "username email", "placeholder": "you@example.com" });
+	const password = element("wa-input", { "label": "Password", "name": "password", "type": "password", "autocomplete": "current-password", "hidden": byEmail });
+	const codeButton = element("wa-button", { "type": "submit", "variant": "brand", "textContent": "Email me a code", "hidden": !byEmail });
+	const signInButton = element("wa-button", { "type": "submit", "variant": "brand", "textContent": "Sign in", "hidden": byEmail });
+	const toggle = element("wa-button", { "appearance": "outlined", "textContent": "Use a password instead", "hidden": !(byEmail && offered.includes("password")) });
+	const forgot = element("wa-button", { "appearance": "plain", "size": "s", "textContent": "Forgot your password?", "hidden": byEmail });
+	const form = element("form", { "className": "wa-stack" }, address, password, codeButton, signInButton, toggle, forgot);
 
 	forgot.addEventListener("click", () => {
 		if (!address.reportValidity()) {
@@ -288,9 +281,9 @@ function emailForm(offered) {
 	});
 
 	toggle.addEventListener("click", () => {
-		const usePassword = passwordLabel.hidden;
+		const usePassword = password.hidden;
 
-		passwordLabel.hidden = !usePassword;
+		password.hidden = !usePassword;
 		password.required = usePassword;
 		codeButton.hidden = usePassword;
 		signInButton.hidden = !usePassword;
@@ -302,7 +295,7 @@ function emailForm(offered) {
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
 		say("");
-		void (passwordLabel.hidden ? send(address.value, codeButton) : signIn(address.value, password.value, signInButton));
+		void (password.hidden ? send(address.value, codeButton) : signIn(address.value, password.value, signInButton));
 	});
 
 	return form;
@@ -324,11 +317,11 @@ if (response.ok) {
 	intro.textContent = `to ${name}`;
 
 	if (offered.includes("github")) {
-		choices.push(element("a", { "className": "method", "href": "/auth/github", "textContent": "Continue with GitHub" }));
+		choices.push(element("wa-button", { "variant": "brand", "href": "/auth/github", "textContent": "Continue with GitHub" }));
 	}
 
 	if (offered.includes("passkey") && passkeys()) {
-		const button = element("button", { "type": "button", "className": "method", "textContent": "Sign in with a passkey" });
+		const button = element("wa-button", { "variant": "brand", "textContent": "Sign in with a passkey" });
 
 		button.addEventListener("click", () => {
 			void passkeySignIn(button);
@@ -338,7 +331,7 @@ if (response.ok) {
 
 	if (offered.includes("email") || offered.includes("password")) {
 		if (choices.length > 0) {
-			choices.push(element("p", { "className": "or", "textContent": "or" }));
+			choices.push(element("p", { "className": "wa-caption-m wa-text-center", "textContent": "or" }));
 		}
 
 		choices.push(emailForm(offered));
@@ -347,7 +340,7 @@ if (response.ok) {
 	methods.replaceChildren(...choices);
 
 	if (linked !== null && offered.includes("email")) {
-		const button = element("button", { "type": "button", "className": "method", "textContent": "Signing in…", "disabled": true });
+		const button = element("wa-button", { "variant": "brand", "textContent": "Signing in…", "disabled": true });
 
 		// On a match the page moves on to the app; otherwise, the reason, and the choices again.
 		methods.replaceChildren(button);
@@ -358,7 +351,7 @@ if (response.ok) {
 } else if (linked !== null) {
 	// The link, opened somewhere other than where the sign-in started: the code, to type there.
 	intro.textContent = "";
-	methods.replaceChildren(element("p", { "className": "note", "textContent": "Type this code on the sign-in page, in the browser where you started:" }), element("p", { "className": "code", "textContent": `${linked.slice(0, 4)}-${linked.slice(4)}` }));
+	methods.replaceChildren(element("p", { "textContent": "Type this code on the sign-in page, in the browser where you started:" }), element("p", { "className": "wa-heading-2xl wa-text-center" }, element("code", { "textContent": `${linked.slice(0, 4)}-${linked.slice(4)}` })));
 } else {
 	intro.textContent = "";
 	say("This sign-in has expired or was opened somewhere else. Go back to the app and sign in again.");

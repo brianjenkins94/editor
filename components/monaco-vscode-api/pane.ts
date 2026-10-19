@@ -33,7 +33,6 @@ import { getService, ICodeEditorService } from "@codingame/monaco-vscode-api";
 import { CommandsRegistry } from "@codingame/monaco-vscode-api/monaco";
 import { renderMarkdown as renderVsMarkdown } from "@codingame/monaco-vscode-api/vscode/vs/base/browser/markdownRenderer";
 import * as monaco from "monaco-editor";
-import css from "./pane.css?raw";
 
 /** An entry, about lines `fromLine`–`toLine` (0-based, inclusive, as VS Code's). */
 export interface PaneEntry { "id": string; "fromLine": number; "toLine": number }
@@ -53,7 +52,7 @@ export interface PaneView { "id": string; "label": string; "title"?: string; "di
 let views: { "list": PaneView[]; "active": string; "select": (id: string) => void } = { "list": [], "active": "", "select": () => undefined };
 
 /** The gutter column's width, at the line-decorations lane's left end: a mark sits in it as VS Code's change bar would
- *  (pane.css), with room for a consumer's badge centred on it. */
+ *  (the editor's theme: theme/exceptions/margin.css, which the editor's pane-views.ts puts in), with room for a consumer's badge centred on it. */
 const GUTTER_WIDTH = 12;
 
 /** Each file's entries, how to render them, and its marks, by URI. */
@@ -501,11 +500,6 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 /** Keep each editor's frame to its file's pane, as editors come and go and change files. */
 async function start(): Promise<void> {
-	const style = document.createElement("style");
-
-	style.textContent = css;
-	document.head.append(style);
-
 	const service = await getService(ICodeEditorService);
 
 	codeEditors = service as unknown as WrapService;

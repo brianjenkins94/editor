@@ -207,7 +207,7 @@ function Passkeys({ account, onChanged }: { "account": Account; "onChanged": () 
 				<div class="wa-cluster wa-gap-s" key={passkey.id}>
 					<span>
 						Added {when(passkey.createdAt)}, {passkey.lastUsedAt === null ? "not used yet" : `last used ${when(passkey.lastUsedAt)}`}
-						<span class="account-muted"> · {passkey.synced ? "synced" : "this device only"}</span>
+						<span class="wa-color-text-quiet"> · {passkey.synced ? "synced" : "this device only"}</span>
 					</span>
 					<wa-button
 						size="small"
@@ -341,7 +341,7 @@ function SetPassword({ account, onSet }: { "account": Account; "onSet": () => vo
 	const [done, setDone] = useState(false);
 
 	if (account.email === null) {
-		return <p class="account-muted">A password signs in with your email, and this account has none yet: add one above.</p>;
+		return <p class="wa-color-text-quiet">A password signs in with your email, and this account has none yet: add one above.</p>;
 	}
 
 	if (done) {
@@ -400,7 +400,7 @@ function SetPassword({ account, onSet }: { "account": Account; "onSet": () => vo
 				});
 			}}
 		>
-			<p class="account-muted">We sent a code to {sent}. It works for 10 minutes.</p>
+			<p class="wa-color-text-quiet">We sent a code to {sent}. It works for 10 minutes.</p>
 			<wa-input name="code" label="Code" placeholder="ABCD-2345" autocomplete="one-time-code" required />
 			<wa-input name="password" type="password" label="New password" hint="10 to 100 characters: letters, digits, spaces and the symbols on a US keyboard. Checked against known breaches." autocomplete="new-password" password-toggle required />
 			{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
@@ -483,7 +483,7 @@ function TwoFactor({ account, onChanged }: { "account": Account; "onChanged": ()
 				<div class="wa-stack">
 					<p>Scan this with your authenticator app, then type the code it shows.</p>
 					<img class="account-qr" alt="QR code for your authenticator app" src={`data:image/svg+xml;utf8,${encodeURIComponent(renderSVG(setup.uri, { "border": 2 }))}`} />
-					<p class="account-muted">Or enter this key by hand: <span class="account-mono">{setup.secret.replaceAll(/(.{4})/gu, "$1 ").trim()}</span></p>
+					<p class="wa-color-text-quiet">Or enter this key by hand: <span class="account-mono">{setup.secret.replaceAll(/(.{4})/gu, "$1 ").trim()}</span></p>
 					{withCode("Code from the app", "Turn on", "/account/mfa/confirm", (body) => {
 						setCodes(body.recoveryCodes);
 						setSetup(undefined);
@@ -660,7 +660,7 @@ export function AccountPage({ api, heading = true }: { "api": AccountApi; "headi
 						setReads(reads + 1);
 					}}
 				/>
-				<p class="account-mono account-muted">{account.user}</p>
+				<p class="account-mono wa-color-text-quiet">{account.user}</p>
 			</section>
 		</Api.Provider>
 	);

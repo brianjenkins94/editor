@@ -4,15 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Add a passkey</title>
+<link rel="stylesheet" href="/webawesome.css">
 <link rel="stylesheet" href="/sign-in.css">
 <script type="module" src="/passkey.js"></script>
 </head>
 <body>
-<main class="card">
-	<h1>Add a passkey</h1>
-	<p class="caption">to your account</p>
-	<div id="steps" class="stack"></div>
-	<p id="problem" class="problem" hidden></p>
+<main class="sign-in">
+<wa-card>
+	<div class="wa-stack">
+		<h1 class="wa-heading-xl">Add a passkey</h1>
+		<p class="wa-caption-m">to your account</p>
+		<div id="steps" class="wa-stack"></div>
+		<wa-callout id="problem" variant="danger" hidden></wa-callout>
+	</div>
+</wa-card>
 </main>
 </body>
 </html>

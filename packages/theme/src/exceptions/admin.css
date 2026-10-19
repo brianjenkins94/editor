@@ -10,7 +10,6 @@ main { padding: var(--wa-space-l); }
 .table { overflow-x: auto; }
 .table th, .table td { white-space: nowrap; }
 .mono { font-family: var(--wa-font-family-code); font-size: var(--wa-font-size-s); }
-.muted { color: var(--wa-color-text-quiet); }
 .filters { align-items: end; }
 .pair { --min-column-size: 24rem; align-items: start; }
 .agent { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

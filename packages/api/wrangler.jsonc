@@ -29,6 +29,9 @@
   "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }, { "name": "ATTEMPTS", "class_name": "Attempt" }] },
   // The sign-in page (public/sign-in.html, SIGN-IN.md), served beside the Worker; everything else is the Worker's.
   "assets": { "directory": "public" },
+  // Web Awesome for the sign-in pages, bundled into public/ as two of their own files (scripts/webawesome.ts), before
+  // every `dev` and `deploy`.
+  "build": { "command": "node scripts/webawesome.ts" },
   "d1_databases": [{ "binding": "DB", "database_name": "editor-api-local", "database_id": "local", "migrations_dir": "migrations" }],
   // The audit log's write-once copies (src/audit-copies.ts). The deployed buckets have lock rules (`routine/` 90 days,
   // `suspicious/` 365) and expiry rules a day after, made with `wrangler r2 bucket lock add` / `lifecycle add` (README.md).

@@ -33,7 +33,7 @@ const NEUTRAL_VALUES = ["inherit", "initial", "unset", "revert", "currentColor",
 export default {
 	"defaultSeverity": "error",
 	"plugins": ["stylelint-declaration-strict-value", noUnlayeredRules],
-	"ignoreFiles": ["**/node_modules/**", "**/dist/**", "**/demo/**", "docs/**", "contrib/**"],
+	"ignoreFiles": ["**/node_modules/**", "**/dist/**", "**/demo/**", "docs/**", "contrib/**", "packages/api/public/webawesome.css"],
 	"rules": {
 		// Colors, spacing, type and shape come from the theme: a Web Awesome token (`var(--wa-*)`), not a literal.
 		// Bamboo's `prefer-token` / `no-hardcoded-color`.
@@ -74,8 +74,9 @@ export default {
 	},
 	"overrides": [
 		{
-			// The theme IS the token layer: unlayered on purpose so its overrides win over Web Awesome's layers.
-			"files": ["packages/theme/**/*.css"],
+			// The theme's tokens: unlayered on purpose so their overrides win over Web Awesome's layers, and the one place
+			// --vscode-* is read. (Its exceptions/ are custom CSS like any other, held to every rule.)
+			"files": ["packages/theme/src/theme.css", "packages/theme/src/vscode.css"],
 			"rules": {
 				[UNLAYERED]: null,
 				"declaration-property-value-disallowed-list": null

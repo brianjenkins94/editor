@@ -13,10 +13,19 @@
  * in the Rule view (rule-view.ts); a rule as a sentence and what it would do are editor-api's (`./rules`), which the
  * capabilities extension's Rules tree shares.
  */
+import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
+import type WaInput from "@awesome.me/webawesome/dist/components/input/input.js";
 import type { RuleCatalog } from "@brianjenkins94/editor-api/rules";
 import type { Action, Comparison, Compound, Predicate, Rule, Schema } from "@brianjenkins94/util/silo/policy";
 import { joinCommandLine, sayPlace } from "@brianjenkins94/editor-api/rules";
-import css from "./rule-editor.css?raw";
+import css from "theme/exceptions/rule-editor.css?raw";
+import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
+import "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
+import "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
+import "@awesome.me/webawesome/dist/components/input/input.js";
+import "@awesome.me/webawesome/dist/components/option/option.js";
+import "@awesome.me/webawesome/dist/components/select/select.js";
 
 export interface RuleEditorOptions {
 	"catalog": RuleCatalog;
@@ -66,22 +75,22 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: strin
 	return Object.assign(document.createElement(tag), { "className": className, ...properties });
 }
 
-/** A select of `options` ([value, label]), `value` chosen — with a chevron, as VS Code's own select boxes have. */
+/** A select of `options` ([value, label]), `value` chosen. */
 function select(className: string, options: [string, string][], value: string, changed: (value: string) => void): HTMLElement {
-	const wrap = element("span", `rule-editor-select-wrap ${className}`);
-	const each = element("select", "rule-editor-select");
+	const each = element("wa-select", `rule-editor-select ${className}`, { "size": "s" });
 
-	for (const [option, label] of options) {
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		each.append(Object.assign(document.createElement("option"), { "value": option, "textContent": label, "selected": option === value }));
-	}
-
+	each.append(...options.map(([option, label]) => element("wa-option", "", { "value": option, "textContent": label })));
+	each.value = value;
 	each.addEventListener("change", () => {
-		changed(each.value);
+		changed(String(each.value));
 	});
-	wrap.append(each, icon("chevron-down"));
 
-	return wrap;
+	return each;
+}
+
+/** A text input, sized for a rule's row. */
+function textInput(className: string, properties: Partial<WaInput> = {}): WaInput {
+	return element("wa-input", `rule-editor-argument ${className}`, { "size": "s", "spellcheck": false, ...properties });
 }
 
 /** The icons the editor draws (codicon's shapes, as strokes in the text's color). */
@@ -108,8 +117,8 @@ function icon(name: keyof typeof ICONS): SVGSVGElement {
 }
 
 /** An icon button. */
-function iconButton(name: keyof typeof ICONS, title: string, clicked: (event: MouseEvent) => void): HTMLButtonElement {
-	const each = element("button", "rule-editor-button", { "title": title, "type": "button" });
+function iconButton(name: keyof typeof ICONS, title: string, clicked: (event: MouseEvent) => void): WaButton {
+	const each = element("wa-button", "rule-editor-button", { "title": title, "size": "s", "appearance": "plain" });
 
 	each.append(icon(name));
 	each.addEventListener("click", clicked);
@@ -126,10 +135,10 @@ function splitCommandLine(text: string): string[] {
 function arrayInput(object: Record<string, unknown>, value: unknown, changed: (value: unknown) => void): HTMLElement {
 	// Arguments, as you'd type them after a command (process.argv's): one box, not a box per argument.
 	if (object["format"] === "command-line") {
-		const line = element("input", "rule-editor-argument command-line", { "spellcheck": false, "value": joinCommandLine(Array.isArray(value) ? value : []), "placeholder": "arguments, as a command line", "title": "As you'd type them after `node file.js`: separated by spaces, quoted to keep one together" });
+		const line = textInput("command-line", { "value": joinCommandLine(Array.isArray(value) ? value : []), "placeholder": "arguments, as a command line", "title": "As you'd type them after `node file.js`: separated by spaces, quoted to keep one together" });
 
 		line.addEventListener("input", () => {
-			changed(splitCommandLine(line.value));
+			changed(splitCommandLine(line.value ?? ""));
 		});
 
 		return line;
@@ -169,7 +178,7 @@ function arrayInput(object: Record<string, unknown>, value: unknown, changed: (v
 }
 
 /** An input for a string: a text box, offering its `examples` as it's typed in. */
-function stringInput(object: Record<string, unknown>, input: HTMLInputElement, value: unknown, changed: (value: unknown) => void): HTMLElement {
+function stringInput(object: Record<string, unknown>, input: WaInput, value: unknown, changed: (value: unknown) => void): HTMLElement {
 	input.value = typeof value === "string" ? value : "";
 	input.placeholder = object["format"] === "glob" ? "a glob: /workspace/**" : "";
 	input.title = object["format"] === "glob" ? "* is anything but /, ** anything at all, ? one character" : "";
@@ -182,19 +191,24 @@ function stringInput(object: Record<string, unknown>, input: HTMLInputElement, v
 		return input;
 	}
 
-	// Its examples offered as it's typed in.
-	const wrap = element("span", "rule-editor-examples");
-	const list = element("datalist", "", { "id": `rule-editor-examples-${Math.random().toString(36).slice(2)}` });
+	// Its examples, a menu at its end: one chosen is typed in.
+	const examples = element("wa-dropdown", "", { "size": "s" });
+	const trigger = iconButton("chevron-down", "Examples", () => undefined);
 
-	for (const example of object["examples"] as unknown[]) {
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		list.append(Object.assign(document.createElement("option"), { "value": typeof example === "string" ? example : JSON.stringify(example) }));
-	}
+	trigger.slot = "trigger";
+	examples.append(trigger, ...(object["examples"] as unknown[]).map((example) => {
+		const text = typeof example === "string" ? example : JSON.stringify(example);
 
-	input.setAttribute("list", list.id);
-	wrap.append(input, list);
+		return element("wa-dropdown-item", "", { "value": text, "textContent": text });
+	}));
+	examples.addEventListener("wa-select", (event) => {
+		input.value = (event as CustomEvent<{ "item": { "value": string } }>).detail.item.value;
+		changed(input.value);
+	});
+	examples.slot = "end";
+	input.append(examples);
 
-	return wrap;
+	return input;
 }
 
 /** An input for a value of `schema`, showing `value`; `changed` with each valid edit. */
@@ -220,7 +234,7 @@ export function schemaInput(schema: Schema | undefined, value: unknown, changed:
 	}
 
 	if (type === "boolean") {
-		const box = element("input", "rule-editor-check", { "type": "checkbox", "checked": value === true });
+		const box = element("wa-checkbox", "rule-editor-check", { "size": "s", "checked": value === true });
 
 		box.addEventListener("change", () => {
 			changed(box.checked);
@@ -229,7 +243,7 @@ export function schemaInput(schema: Schema | undefined, value: unknown, changed:
 		return box;
 	}
 
-	const input = element("input", "rule-editor-argument", { "spellcheck": false });
+	const input = textInput("");
 
 	if (type === "string") {
 		return stringInput(object, input, value, changed);
@@ -239,7 +253,7 @@ export function schemaInput(schema: Schema | undefined, value: unknown, changed:
 		input.type = "number";
 		input.value = String(typeof value === "number" ? value : 0);
 		input.addEventListener("input", () => {
-			if (input.value !== "") {
+			if (input.value !== "" && input.value !== null) {
 				changed(Number(input.value));
 			}
 		});
@@ -252,11 +266,11 @@ export function schemaInput(schema: Schema | undefined, value: unknown, changed:
 	input.placeholder = "a literal: 'text', 4, true, [1, 2], { \"a\": 1 }";
 	input.addEventListener("input", () => {
 		try {
-			changed(JSON.parse(input.value));
-			input.classList.remove("invalid");
+			changed(JSON.parse(input.value ?? ""));
+			input.setCustomValidity("");
 		} catch {
 			if (typeof schema === "object") {
-				input.classList.add("invalid");
+				input.setCustomValidity("Not a literal: 'text', 4, true, [1, 2], { \"a\": 1 }");
 			} else {
 				changed(input.value);
 			}

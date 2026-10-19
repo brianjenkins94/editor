@@ -18,7 +18,7 @@ import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
 import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/badge/badge.js";
-import "./git-panel.css";
+import "theme/exceptions/git-panel.css";
 
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
 

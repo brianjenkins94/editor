@@ -1,25 +1,15 @@
-/* The sign-in card (Web Awesome's login recipe, by hand: this page loads nothing but its own files). */
-:root { color-scheme: light dark; --line: color-mix(in srgb, CanvasText 18%, transparent); --brand: #0969da; }
-* { box-sizing: border-box; }
-html, body { min-height: 100%; margin: 0; }
-body { display: grid; place-items: center; min-height: 100vh; padding: 16px; font: 15px/1.5 system-ui, sans-serif; background: Canvas; color: CanvasText; }
-.card { width: 100%; max-width: 24rem; padding: 28px; border: 1px solid var(--line); border-radius: 12px; }
-h1 { margin: 0 0 4px; font-size: 1.5rem; }
-.caption { margin: 0 0 20px; opacity: 0.75; }
-.stack { display: grid; gap: 10px; }
-.method { display: block; padding: 10px 14px; border-radius: 8px; text-align: center; text-decoration: none; font-weight: 600; background: var(--brand); color: white; }
-.method:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 50%, transparent); outline-offset: 2px; }
-.problem { margin: 16px 0 0; }
-form.stack { gap: 12px; }
-label { display: grid; gap: 4px; font-weight: 600; }
-input { padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-weight: 400; background: Canvas; color: CanvasText; }
-input:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 50%, transparent); outline-offset: 1px; }
-button.method { width: 100%; border: 0; font: inherit; font-weight: 600; cursor: pointer; }
-button:disabled { opacity: 0.6; cursor: default; }
-.secondary { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: transparent; color: inherit; cursor: pointer; }
-.or { margin: 4px 0; text-align: center; opacity: 0.6; }
-.note { margin: 0; }
-.code { margin: 8px 0 0; font: 600 1.6rem/1.2 ui-monospace, monospace; letter-spacing: 2px; text-align: center; }
-.link { padding: 0; border: 0; background: none; color: var(--brand); font: inherit; text-decoration: underline; cursor: pointer; justify-self: center; }
-label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
-[hidden] { display: none !important; }
+/* The sign-in pages (sign-in.html, passkey.html): Web Awesome's card, centred on the page. Everything else is Web
+   Awesome's (webawesome.css: its native styles, utility classes and default theme). */
+@layer page {
+  body {
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    padding: var(--wa-space-m);
+  }
+
+  .sign-in {
+    width: 100%;
+    max-width: 24rem;
+  }
+}

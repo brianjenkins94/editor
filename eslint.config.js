@@ -73,7 +73,8 @@ export default [
 		// un-lintable / non-source paths are ignored:
 		//   • build output (dist) and monaco's regenerated demo (vendored CodinGame source)
 		//   • tsval's vendored differential corpora, generated test reports, and markdown (no tsconfig for typed rules)
-		"ignores": ["**/dist/**", "**/demo/**", "packages/tsval/vendor/**", "packages/*/test/reports/**", "**/*.md"]
+		//   • the sign-in pages' Web Awesome bundle (packages/api/scripts/webawesome.ts), build output
+		"ignores": ["**/dist/**", "**/demo/**", "packages/tsval/vendor/**", "packages/*/test/reports/**", "**/*.md", "packages/api/public/webawesome.js"]
 	},
 	{
 		// tsval's tests run on `node:test`, not vitest. @antfu's test config assumes vitest and its auto-fix

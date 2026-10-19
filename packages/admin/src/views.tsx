@@ -66,10 +66,10 @@ function SpendSection() {
 			return (
 				<div class="wa-stack">
 					<h2 class="wa-heading-l">Spend</h2>
-					<p class="muted">The last 24 hours at Cloudflare's overage rates (what the plan includes isn't taken off, so this is high). At {money(spend.warnAt)} you're emailed; at {money(spend.budget)} the cost guard turns the kill switch on. Checked hourly.</p>
+					<p class="wa-color-text-quiet">The last 24 hours at Cloudflare's overage rates (what the plan includes isn't taken off, so this is high). At {money(spend.warnAt)} you're emailed; at {money(spend.budget)} the cost guard turns the kill switch on. Checked hourly.</p>
 					<div class="wa-cluster wa-gap-s">
 						<strong class="wa-heading-2xl">{money(spend.last24Hours.total)}</strong>
-						<span class="muted">of {money(spend.budget)} a day</span>
+						<span class="wa-color-text-quiet">of {money(spend.budget)} a day</span>
 					</div>
 					<wa-progress-bar value={share * 100} label="Share of the daily budget" />
 					<Table head={["Meter", "Last 24 hours", "Cost"]}>
@@ -149,12 +149,12 @@ function Login({ id }: { "id": number | null }) {
 		}
 	}, [id]);
 
-	return id === null ? <span class="muted" title="No GitHub account: signs in by email">by email</span> : <span title={`GitHub user ${id}`}>{login ?? `#${id}`}</span>;
+	return id === null ? <span class="wa-color-text-quiet" title="No GitHub account: signs in by email">by email</span> : <span title={`GitHub user ${id}`}>{login ?? `#${id}`}</span>;
 }
 
 /** A moment, relative ("3 minutes ago"), with the exact time on hover. */
 function When({ at }: { "at": number | null }) {
-	return at === null ? <span class="muted">never</span> : <wa-relative-time date={new Date(at).toISOString()} title={new Date(at).toLocaleString()} />;
+	return at === null ? <span class="wa-color-text-quiet">never</span> : <wa-relative-time date={new Date(at).toISOString()} title={new Date(at).toLocaleString()} />;
 }
 
 const short = (id: string | null | undefined): string => (typeof id === "string" ? `${id.slice(0, 8)}…` : "");
@@ -256,13 +256,13 @@ function SessionRows<S extends Session>({ sessions, withUser, columns }: { "sess
 						<tr key={session.id}>
 							{withUser && <td><a href={`#/users/${session.userId}`}><Login id={session.githubId ?? null} /></a></td>}
 							<td><wa-badge variant={session.client === "admin" ? "brand" : "neutral"}>{session.client}</wa-badge></td>
-							<td>{session.label ?? <span class="muted">unknown</span>}</td>
+							<td>{session.label ?? <span class="wa-color-text-quiet">unknown</span>}</td>
 							<td><When at={session.createdAt} /></td>
 							<td><When at={session.lastUsedAt} /></td>
 							<td>{revokedAt === null ? <wa-badge variant="success">live</wa-badge> : <When at={revokedAt} />}</td>
 							<td class="mono">{short(session.id)}</td>
 							{columns?.cells(session)}
-							{canEnd && <td>{session.current ? <span class="muted">this one</span> : revokedAt === null && endButton(session)}</td>}
+							{canEnd && <td>{session.current ? <span class="wa-color-text-quiet">this one</span> : revokedAt === null && endButton(session)}</td>}
 						</tr>
 					);
 				})}
@@ -313,7 +313,7 @@ function EndSignIn({ session, onClose }: { "session": Session; "onClose": (at?: 
 				<p>
 					{whose} {session.client} sign-in{session.label === null ? "" : ` on ${session.label}`}, started <When at={session.createdAt} />, stops working at once, and its GitHub token is revoked. They can sign in again.
 				</p>
-				<p class="muted">The audit log records that you ended it.</p>
+				<p class="wa-color-text-quiet">The audit log records that you ended it.</p>
 				{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
 			</div>
 			<wa-button slot="footer" appearance="plain" data-dialog="close">Cancel</wa-button>
@@ -348,7 +348,7 @@ export function UserPage({ id }: { "id": string }) {
 		<Loading read={read}>{() => (
 			<section class="wa-stack wa-gap-l">
 				<h1 class="wa-heading-xl"><Login id={read.data!.user.githubId} /> <Deleted at={read.data!.user.deletedAt} /></h1>
-				<p class="muted">{read.data!.user.githubId === null ? "No GitHub account" : `GitHub user ${read.data!.user.githubId}`} · joined <When at={read.data!.user.createdAt} /> · our id <span class="mono">{id}</span></p>
+				<p class="wa-color-text-quiet">{read.data!.user.githubId === null ? "No GitHub account" : `GitHub user ${read.data!.user.githubId}`} · joined <When at={read.data!.user.createdAt} /> · our id <span class="mono">{id}</span></p>
 				{read.data!.user.deletedAt !== null && <wa-callout variant="warning">They deleted their account <When at={read.data!.user.deletedAt} />. It's purged after {new Date(read.data!.user.deletedAt + PURGE_AFTER).toLocaleDateString()}, unless they sign in again before then.</wa-callout>}
 				<h2 class="wa-heading-l">Sign-ins</h2>
 				<SessionRows sessions={read.data!.sessions} withUser={false} />
@@ -385,10 +385,10 @@ export function UnusualPage() {
 	const columns: Columns<Unusual> = {
 		"head": ["Surprise", "Flags", "Most surprising steps"],
 		"cells": (session) => [
-			<td key="score" title={`${session.score.steps} steps scored`}><wa-badge variant={session.score.mean >= 6 ? "danger" : session.score.mean >= 4 ? "warning" : "neutral"}>{session.score.mean.toFixed(1)} bits</wa-badge> <span class="muted">{session.score.steps}</span></td>,
+			<td key="score" title={`${session.score.steps} steps scored`}><wa-badge variant={session.score.mean >= 6 ? "danger" : session.score.mean >= 4 ? "warning" : "neutral"}>{session.score.mean.toFixed(1)} bits</wa-badge> <span class="wa-color-text-quiet">{session.score.steps}</span></td>,
 			<td key="flags"><div class="wa-cluster wa-gap-2xs">{Object.entries(session.flags).map(([event, count]) => <wa-badge key={event} variant="warning" appearance="outlined">{event} {count}</wa-badge>)}</div></td>,
 			<td key="top">
-				{session.score.top.map((step) => <div key={`${step.from}${step.to}${step.gap}`} class="mono">{call(step.from)} → {call(step.to)} <span class="muted">{GAPS[step.gap]}, {step.bits} bits</span></div>)}
+				{session.score.top.map((step) => <div key={`${step.from}${step.to}${step.gap}`} class="mono">{call(step.from)} → {call(step.to)} <span class="wa-color-text-quiet">{GAPS[step.gap]}, {step.bits} bits</span></div>)}
 			</td>
 		]
 	};
@@ -396,8 +396,8 @@ export function UnusualPage() {
 	return (
 		<section class="wa-stack wa-gap-l">
 			<h1 class="wa-heading-xl">Unusual sign-ins</h1>
-			<p class="muted">Each sign-in's steps, scored against what sign-ins usually do next (packages/api/BEHAVIOR.md): the mean surprise a step, in bits, highest first. Steps and calls are templates; no values, repositories or contents.</p>
-			<Loading read={read}>{() => (read.data!.sessions.length === 0 ? <p class="muted">Nothing scored yet: sign-ins are scored an hour after they're used.</p> : <SessionRows sessions={read.data!.sessions} withUser={true} columns={columns} />)}</Loading>
+			<p class="wa-color-text-quiet">Each sign-in's steps, scored against what sign-ins usually do next (packages/api/BEHAVIOR.md): the mean surprise a step, in bits, highest first. Steps and calls are templates; no values, repositories or contents.</p>
+			<Loading read={read}>{() => (read.data!.sessions.length === 0 ? <p class="wa-color-text-quiet">Nothing scored yet: sign-ins are scored an hour after they're used.</p> : <SessionRows sessions={read.data!.sessions} withUser={true} columns={columns} />)}</Loading>
 		</section>
 	);
 }
@@ -504,7 +504,7 @@ export function TrafficPage({ query }: { "query": URLSearchParams }) {
 				return (
 					<div class="wa-stack wa-gap-l">
 						<SpendSection />
-						<p class="muted">Cloudflare's analytics, {new Date(traffic.window.since).toLocaleString()} to {new Date(traffic.window.until).toLocaleString()}. The Free plan has no network (ASN) or security-event breakdowns.</p>
+						<p class="wa-color-text-quiet">Cloudflare's analytics, {new Date(traffic.window.since).toLocaleString()} to {new Date(traffic.window.until).toLocaleString()}. The Free plan has no network (ASN) or security-event breakdowns.</p>
 						<h2 class="wa-heading-l">Workers</h2>
 						<Table head={["Worker", "Requests", "Errors", "Subrequests", "CPU p50", "CPU p99"]}>
 							{traffic.workers.map((row) => (

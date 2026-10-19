@@ -15,7 +15,7 @@
 /* eslint-disable webawesome/no-inline-styles -- a draggable, fixed-position window primitive: left/top/width/height are per-instance geometry set imperatively (drag + persisted position), not themeable chrome */
 import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
-import "./window.css";
+import "theme/exceptions/window.css";
 
 export interface PaneWindow {
 	readonly "element": HTMLElement;

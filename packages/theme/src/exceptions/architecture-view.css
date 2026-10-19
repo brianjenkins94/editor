@@ -81,27 +81,6 @@
   min-height: 0;
 }
 
-.arch-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--arch-border);
-  flex: none;
-}
-
-.arch-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--arch-muted);
-  padding: 6px 12px;
-  font: inherit;
-  cursor: pointer;
-}
-
-.arch-tab.active {
-  color: var(--arch-fg);
-  border-bottom-color: var(--arch-accent);
-}
-
 .arch-panel {
   flex: 1;
   overflow: auto;
@@ -225,21 +204,6 @@
   margin: 0;
   padding-left: 16px;
   line-height: 1.6;
-}
-
-.arch-input {
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--vscode-input-background, #3c3c3c);
-  color: var(--vscode-input-foreground, #cccccc);
-  border: 1px solid var(--vscode-input-border, transparent);
-  padding: 4px 6px;
-  font: inherit;
-  margin-bottom: 6px;
-}
-
-.arch-input:focus {
-  outline: 1px solid var(--arch-accent);
 }
 
 .arch-event {
@@ -586,15 +550,6 @@ g.selected > .arch-edge {
 }
 
 /* The feature lens */
-.arch-select {
-  background: var(--arch-surface);
-  color: var(--arch-fg);
-  border: 1px solid var(--arch-border);
-  border-radius: 3px;
-  padding: 2px 4px;
-  font: inherit;
-}
-
 /* Flows: a message and the ones it caused */
 .arch-flow-group {
   border-left: 2px solid var(--arch-border);

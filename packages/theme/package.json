@@ -1,7 +1,7 @@
 {
   "name": "theme",
   "version": "0.0.0",
-  "description": "The app's theme: Web Awesome's --wa-* design tokens retoned for the brand, and (theme/vscode) mapped onto the active VS Code color theme in the workbench document. Tokens only, no component CSS.",
+  "description": "The app's theme: Web Awesome's --wa-* design tokens retoned for the brand, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, and (theme/exceptions/*) the custom CSS that's left, each file a named exception (PLAN.md).",
   "type": "module",
   "exports": {
     ".": "./src/theme.css",
@@ -10,7 +10,8 @@
       "types": "./src/vscode.d.ts",
       "default": "./src/vscode.js"
     },
-    "./vscode.css": "./src/vscode.css"
+    "./vscode.css": "./src/vscode.css",
+    "./exceptions/*": "./src/exceptions/*"
   },
   "files": [
     "src"

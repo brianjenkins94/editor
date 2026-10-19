@@ -17,8 +17,9 @@ import type { Rule } from "@brianjenkins94/util/silo/policy";
 import type * as vscodeApi from "vscode";
 import { catalogOf, describeRule, startingRule, verdictOf, withVariables } from "@brianjenkins94/editor-api/rules";
 import { registerCustomView, ViewContainerLocation, viewContainerRegistry } from "@brianjenkins94/monaco-vscode-api/main";
+import css from "theme/exceptions/rule-view.css?raw";
 import { ruleEditor } from "./rule-editor";
-import css from "./rule-view.css?raw";
+import "@awesome.me/webawesome/dist/components/button/button.js";
 
 /** The edit shown: its request, and how it's answered. */
 interface Pending { "request": EditRequest; "answer": (answer: EditAnswer) => void }
@@ -35,10 +36,11 @@ function panelOf(policy: PolicyModule, request: EditRequest, pressed: (button: s
 	const describe = (each: Rule): string => describeRule(each, catalog);
 	const panel = element("div", "rule-panel");
 	const status = element("div", "rule-panel-status");
-	const choices = element("div", "rule-panel-choices");
+	const choices = element("div", "wa-cluster wa-gap-xs");
 	let editor: ReturnType<typeof ruleEditor> | undefined;
 	const buttons = request.buttons.map((button) => {
-		const each = element("button", `rule-panel-choice ${button.className}`, { "textContent": button.label, "title": button.title, "type": "button" });
+		// (Save is the one that's the brand's: the rest are neutral)
+		const each = element("wa-button", "", { "size": "s", "variant": button.className === "save" ? "brand" : "neutral", "textContent": button.label, "title": button.title });
 
 		each.addEventListener("click", () => {
 			pressed(button.id, editor?.rule() ?? rule);
@@ -73,7 +75,7 @@ export function registerRuleView(vscode: typeof vscodeApi): void {
 	let panel: HTMLElement | undefined;
 
 	const render = (): void => {
-		root?.replaceChildren(panel ?? element("div", "rule-view-empty", { "textContent": "Open a rule in Rules above — or make one with New Rule." }));
+		root?.replaceChildren(panel ?? element("div", "wa-color-text-quiet", { "textContent": "Open a rule in Rules above — or make one with New Rule." }));
 	};
 
 	/** The edit's done: the view empty, and gone until a rule's edited again (the Explorer keeps its room). */

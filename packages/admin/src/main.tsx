@@ -17,8 +17,8 @@ import "@awesome.me/webawesome/dist/components/option/option.js";
 import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
 import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import "@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js";
-import "account/account.css";
-import "./admin.css";
+import "theme/exceptions/account.css";
+import "theme/exceptions/admin.css";
 import { AccountPage } from "account";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -110,8 +110,8 @@ function NoAccess({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 			<wa-card class="auth-card">
 				<div class="wa-stack wa-gap-l">
 					<h1 class="wa-heading-l">No access</h1>
-					<p>You're signed in, but this sign-in holds no admin roles. <span class="mono muted">{me.user}</span></p>
-					<p class="muted">Roles go with a sign-in made with GitHub or a passkey, or with an authenticator app as its second step.</p>
+					<p>You're signed in, but this sign-in holds no admin roles. <span class="mono wa-color-text-quiet">{me.user}</span></p>
+					<p class="wa-color-text-quiet">Roles go with a sign-in made with GitHub or a passkey, or with an authenticator app as its second step.</p>
 					<div class="wa-cluster">
 						<wa-button
 							appearance="outlined"

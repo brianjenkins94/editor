@@ -6,7 +6,7 @@
 import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import "@awesome.me/webawesome/dist/components/callout/callout.js";
 import "@awesome.me/webawesome/dist/components/spinner/spinner.js";
-import "account/account.css";
+import "theme/exceptions/account.css";
 import { AccountPage } from "account";
 import { accountApi } from "./session";
 

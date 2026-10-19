@@ -7,10 +7,11 @@ lives today, and proposes what this package should become.
 
 Status (2026-10-19):
 
-- Enforcement steps 4.1–4.3 are built and set to **error**. The existing violations are not suppressed, so
-  `npm run lint` and `npm run lint:css` fail until they're fixed. See [§6](#6-baseline-counts) for the counts.
-- `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**. The
-  architecture view's toolbar buttons are `<wa-button>`s that follow the VS Code theme.
+- Enforcement steps 4.1–4.3 are built and set to **error**. The ESLint half is at **zero**: every native element
+  it found is a Web Awesome component now, and every stylesheet left is a named exception in
+  `src/exceptions/` (§3). Stylelint still reports 735 errors in those exceptions, and runs only via
+  `npm run lint:css`. See [§6](#6-counts) for the counts.
+- `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry for the shell and admin, and the budget (4.5), aren't built yet.
 
 ## 1. bamboocss: borrow the ideas, don't adopt the library
@@ -106,8 +107,14 @@ package has to make Web Awesome usable there.
     `hc-light`) onto Web Awesome's `wa-light` / `wa-dark`. Every token the bridge doesn't map comes from Web
     Awesome's ramp for that mode.
   - `src/vscode.css` is the **only** place a `--vscode-*` variable may appear.
-- **No component CSS.** The package contains token assignments only. A rule that targets a component (`wa-button {
-  … }`, `::part(…)`) isn't a theme; it's an exception (see below).
+- **`theme/exceptions/*`** (built): the custom CSS that's left, one file per surface. These are the only
+  stylesheets code may import besides Web Awesome's and the theme's own (4.1). A new file here is the visible "this
+  needs custom CSS" in review. Each file is held to every stylelint rule, unlike `theme.css` and `vscode.css`.
+  The workbench views import theirs as text (`?raw`), and the shell and admin import theirs as stylesheets.
+  `margin.css` used to be the monaco component's own `pane.css`; the editor's `pane-views.ts` now puts it into the
+  document, so the component ships no CSS.
+- **No component CSS in the tokens.** `theme.css` and `vscode.css` hold token assignments only. A rule that targets
+  a component (`wa-button { … }`, `::part(…)`) isn't a theme; it belongs in an exception.
 
 ## 4. Enforcement: make the discipline mechanical
 
@@ -150,20 +157,40 @@ In priority order. Each step closes one of the gaps above.
    - Web Awesome's copy in `packages/theme/node_modules` is a stale 3.12, so the editor build now dedupes
      `@awesome.me/webawesome` to its own 3.14.
    Still open: the `theme` entry for the shell, admin and account, which replaces their separate setups.
-2. Lint gaps 4.1–4.3 as errors (done). Fix the violations they report.
+2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). Next: the
+   735 stylelint errors in `src/exceptions/`, shrinking each file by replacing what Web Awesome covers.
 3. Convert the biggest file first: `architecture-view` (toolbar, tabs, tables, inputs, chips → components). Then
    `rule-editor`, then admin (native tables plus utilities, which should get close to zero CSS).
 4. Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.
 5. Add the budget (4.5) once the approach that replaces it is settled.
 
 Rough expectation, not measured: most of `architecture-view`, `rule-editor`, `rule-view`, `admin` and the event-sheet
-inline styles go away. `pane-views`, the margin in `pane.css` and the graph canvas mostly stay, as named
+inline styles go away. `pane-views`, the margin (`margin.css`) and the graph canvas mostly stay, as named
 exceptions.
 
-## 6. Baseline counts
+## 6. Counts
 
-Taken 2026-10-19, when the rules were added. Each one is an error, so these are the violations that fail lint
-today. Re-run with `npx eslint .` and `npm run lint:css`.
+Baseline taken 2026-10-19 when the rules were added, then again after the ESLint half was cleared the same day.
+Re-run with `npx eslint .` and `npm run lint:css`.
+
+**Cleared (ESLint, 40 → 0):**
+
+- The architecture view's select, filter and tabs are `wa-select`, `wa-input` and a `wa-tab-group`. The tab group
+  holds only tabs; the view's one panel draws the open one, so the open tab is read from the group after a click or
+  a key, since the group emits no `wa-tab-show` without panels.
+- The rule editor's controls are `wa-select`, `wa-input`, `wa-checkbox`, and plain `wa-button` icon buttons. Its
+  examples were a `<datalist>`, which a shadow-DOM input can't use, so they're a `wa-dropdown` at the input's end
+  now. The rule view's buttons are `wa-button`s.
+- The API's sign-in and passkey pages are `wa-card`, `wa-input`, `wa-button`, `wa-checkbox` and `wa-callout`, plus
+  utility classes, and `sign-in.css` is down to centring the card. The pages still load only their own origin's
+  files: `scripts/webawesome.ts` bundles the five components and Web Awesome's stylesheet into
+  `public/webawesome.{js,css}` (build output, gitignored), and wrangler's `build.command` runs it before `dev` and
+  `deploy`, and in the test harness. One CSP change was needed: `/sign-in*` allows `connect-src data:`, because
+  the checkbox fetches its checkmark as a `data:` SVG. A `data:` URL reaches no server. Checked against the real
+  CSP in the harness: a full email-code sign-in works (submitting by click and by Enter), with no CSP errors.
+- `.muted` / `.account-muted` became Web Awesome's `wa-color-text-quiet` (30 uses), and their rules are gone.
+
+**Before clearing** (the baseline):
 
 **ESLint** (`webawesome/*`, in `.ts`/`.tsx`/`.js`):
 
@@ -176,7 +203,8 @@ today. Re-run with `npx eslint .` and `npm run lint:css`.
 options per file instead of merging them, so a second `no-restricted-imports` would silently undo the realm
 boundaries.
 
-**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files (854 after the toolbar buttons).
+**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 now. The exceptions stay
+held to every rule: the theme's own override covers only `theme.css` and `vscode.css`.
 
 | Rule | Errors |
 | --- | ---: |

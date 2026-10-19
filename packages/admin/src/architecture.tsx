@@ -290,7 +290,7 @@ export function ArchitecturePage({ query }: { "query": URLSearchParams }) {
 	return (
 		<section class="wa-stack wa-gap-l">
 			<h1 class="wa-heading-xl">Architecture</h1>
-			<p class="muted">
+			<p class="wa-color-text-quiet">
 				The <strong>{environment}</strong> system, drawn from its code: the Workers, hosts and bindings from {workers.map((worker) => worker.config).join(", ")}, read when this app was built; the API's routes, stores and tables from the API itself, live ({at === undefined ? "" : new Date(at).toLocaleTimeString()}, every minute). Names and counts only: no one's data. Click a box to follow it.
 			</p>
 			<Diagram nodes={nodes} edges={edges} />

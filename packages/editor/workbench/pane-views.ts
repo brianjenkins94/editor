@@ -16,8 +16,9 @@ import type { NativeDrawing } from "./pane-native";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
+import marginCss from "theme/exceptions/margin.css?raw";
+import css from "theme/exceptions/pane-views.css?raw";
 import { installNativeFace } from "./pane-native";
-import css from "./pane-views.css?raw";
 
 /** The Margin (the margin extension's): the view shown first, and the one shown until another is chosen. */
 const MARGIN = "margin";
@@ -477,7 +478,8 @@ function refreshView(view: string, uri?: string): void {
 /** Read the views extensions declare, offer them, and draw the one shown as files show and change. */
 export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable[] {
 	api = vscode;
-	document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
+	// (and the Margin's frame around each editor, which the component draws: pane.ts)
+	document.head.append(Object.assign(document.createElement("style"), { "textContent": marginCss + "\n" + css }));
 
 	const read = async (): Promise<void> => {
 		declared = (await extensionContributions("paneViews")).flatMap(({ value }) => (Array.isArray(value) ? value.filter((view): view is PaneViewDeclaration => typeof view?.id === "string") : []));

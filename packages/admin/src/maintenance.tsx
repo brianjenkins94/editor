@@ -77,7 +77,7 @@ export function KillSwitch({ maintenance }: { "maintenance": Maintenance }) {
 		<wa-card>
 			<div class="wa-stack">
 				<h2 class="wa-heading-m">Kill switch</h2>
-				<p class="muted">Takes the API down for everyone but you: the editor carries on signed out, the sites stay up. Every flip is audited and emailed to you.</p>
+				<p class="wa-color-text-quiet">Takes the API down for everyone but you: the editor carries on signed out, the sites stay up. Every flip is audited and emailed to you.</p>
 				{problem !== undefined && <wa-callout variant="danger">{problem}</wa-callout>}
 				{confirming
 					? (
