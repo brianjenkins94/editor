@@ -74,8 +74,8 @@ The eslint plugin is doing its job on `.ts`/`.tsx`. The CSS reached the codebase
    `rule-editor.ts` go through local helpers, so the rule never sees them, and each comes with a bespoke class and
    CSS file.
 3. **Class names are unchecked.** Any `class`/`className` is allowed, so a bespoke class plus a CSS file is the
-   path of least resistance. A `wa-` prefix proves nothing: `wa-diff-body` is our own class, styled in
-   `git-panel.css`.
+   path of least resistance. A `wa-` prefix proves nothing: `wa-diff-body` was our own class, styled in
+   `git-panel.css` (gone since the panel's rebuild, §6).
 4. **Disables are free.** A reasoned `eslint-disable` comment is accepted. All 38 have plausible reasons, and that
    is the problem: there is no budget, so the count only grows.
 
@@ -158,7 +158,8 @@ In priority order. Each step closes one of the gaps above.
      `@awesome.me/webawesome` to its own 3.14.
    Still open: the `theme` entry for the shell, admin and account, which replaces their separate setups.
 2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). Next: the
-   735 stylelint errors in `src/exceptions/`, shrinking each file by replacing what Web Awesome covers.
+   stylelint errors in `src/exceptions/` (735, now 519), shrinking each file by replacing what Web Awesome covers.
+   `git-panel` is done (§6).
 3. Convert the biggest file first: `architecture-view` (toolbar, tabs, tables, inputs, chips → components). Then
    `rule-editor`, then admin (native tables plus utilities, which should get close to zero CSS).
 4. Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.
@@ -190,6 +191,30 @@ Re-run with `npx eslint .` and `npm run lint:css`.
   CSP in the harness: a full email-code sign-in works (submitting by click and by Enter), with no CSP errors.
 - `.muted` / `.account-muted` became Web Awesome's `wa-color-text-quiet` (30 uses), and their rules are gone.
 
+**Cleared (stylelint, `git-panel.css` 216 → 0):**
+
+- The shell's review panel lays out with `wa-stack`, `wa-cluster` and `wa-split`, and its type and colour come from
+  the text utilities (`wa-font-size-*`, `wa-color-text-quiet`, `wa-text-truncate`, `wa-text-uppercase`). The empty
+  state, the header count and the chunk rows need no CSS of their own.
+- The A/M/D letters are `wa-badge`s in the `success` / `warning` / `danger` variants, and a chunk's edit count is an
+  outlined neutral `wa-badge`. The diff's verdict banner takes Web Awesome's variant classes (`wa-neutral` /
+  `wa-warning` / `wa-danger`), so its text and dot read the generic `--wa-color-on-quiet` / `--wa-color-fill-loud`.
+- `.wa-diff-body` is gone rather than renamed: the diff's classes (`sxs-*`) are unique, so they need no scoping class,
+  and the shell's overlay no longer has to declare one in its JSX. The `.gp .commit wa-textarea` width rule went too,
+  since a stack stretches its children. The shell's legacy `--bg` / `--line` / `--fg` / `--muted` / `--accent` aliases
+  had no reader left, and are gone.
+- The diff's flex boxes (gutter cells, fold slot, hunk bar, pick toggle) take `wa-cluster` and the alignment
+  utilities, and its right-click discard menu is a danger `wa-button` at the pointer, with no menu CSS. (React 18
+  sets `className` on a custom element as a literal `classname` attribute, so that button is given `class`.)
+- What's left is 151 declarations in 54 rules, from 249 in 74: the panel's sizing and padding, the rows' hover and
+  current states, and the codehike side-by-side grid, all inside `@layer app` and on `--wa-*` tokens. Its 25 literal
+  colours became Web Awesome's fills (`neutral`, `brand`, `success`, `warning`, `danger`) and surfaces.
+- `git-panel.tsx` imports the shell's Web Awesome setup before the sheet, so the `app` layer is declared after Web
+  Awesome's own layers: the shell imports the panel before that setup. A layer declared first ranks lowest.
+- Checked in the running editor, dark and light: a commit, `M` rows, the semantic-change banner,
+  the chunk timeline and its spotlight on the diff, a partial selection, a hunk discarded from the menu, and a file
+  row's two-step discard.
+
 **Before clearing** (the baseline):
 
 **ESLint** (`webawesome/*`, in `.ts`/`.tsx`/`.js`):
@@ -203,7 +228,8 @@ Re-run with `npx eslint .` and `npm run lint:css`.
 options per file instead of merging them, so a second `no-restricted-imports` would silently undo the realm
 boundaries.
 
-**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 now. The exceptions stay
+**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 after the ESLint half, 519
+now (by rule below, at the baseline). The exceptions stay
 held to every rule: the theme's own override covers only `theme.css` and `vscode.css`.
 
 | Rule | Errors |
@@ -216,7 +242,7 @@ held to every rule: the theme's own override covers only `theme.css` and `vscode
 
 | File | Errors |
 | --- | ---: |
-| `editor/shell/git-panel.css` | 216 |
+| `editor/shell/git-panel.css` | 216 → 0 |
 | `editor/workbench/architecture-view.css` | 205 → 195 |
 | `editor/workbench/pane-views.css` | 163 |
 | `editor/workbench/rule-editor.css` | 65 |
