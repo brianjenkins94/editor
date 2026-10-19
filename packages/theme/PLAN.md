@@ -9,8 +9,8 @@ Status (2026-10-19):
 
 - Enforcement steps 4.1–4.3 are built and set to **error**. The ESLint half is at **zero**: every native element
   it found is a Web Awesome component now, and every stylesheet left is a named exception in
-  `src/exceptions/` (§3). Stylelint still reports 554 errors in those exceptions (`architecture-view.css` is at
-  zero), and runs only via `npm run lint:css`. See [§6](#6-counts) for the counts.
+  `src/exceptions/` (§3). Stylelint still reports 224 errors, all in `pane-views.css` and `margin.css` (every
+  other exception is at zero), and runs only via `npm run lint:css`. See [§6](#6-counts) for the counts.
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry (§3) is built: admin takes `theme`, the shell `theme/chrome` (no native styles), and the
   shell's Stitches `css({…})` is on `--wa-*` tokens (§1). The budget (4.5) isn't built yet.
@@ -190,10 +190,9 @@ In priority order. Each step closes one of the gaps above.
      `@awesome.me/webawesome` to its own 3.14.
    The `theme` entry for the shell, admin and account, which replaces their separate setups, is built too (§3).
 2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). Next: the
-   stylelint errors in `src/exceptions/` (735, now 338), shrinking each file by replacing what Web Awesome covers.
-   `architecture-view` and `git-panel` are done (§6).
-3. ~~Convert the biggest file first: `architecture-view`.~~ Done 2026-10-19 (§6). Then `rule-editor`, then admin
-   (native tables plus utilities, which should get close to zero CSS).
+   stylelint errors in `src/exceptions/` (735, now 224), shrinking each file by replacing what Web Awesome covers.
+   Every file but `pane-views` and `margin` is done (§6).
+3. ~~Convert the biggest file first: `architecture-view`, then `rule-editor`, then admin.~~ Done 2026-10-19 (§6).
 4. Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.
 5. Add the budget (4.5) once the approach that replaces it is settled.
 
