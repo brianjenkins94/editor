@@ -11,7 +11,8 @@
 	/* Type and density: VS Code's UI font at its 13px size, and spacing to match. */
 	--wa-font-family-body: var(--vscode-font-family);
 	--wa-font-family-heading: var(--vscode-font-family);
-	--wa-font-family-code: var(--vscode-editor-font-family);
+	/* VS Code sets its editor font on each editor, not here: outside one, Web Awesome's own code font. */
+	--wa-font-family-code: var(--vscode-editor-font-family, ui-monospace, monospace);
 	--wa-font-size-scale: 0.8125;
 	--wa-space-scale: 0.75;
 	--wa-border-radius-scale: 0.5;

@@ -1,607 +1,382 @@
-.arch-root {
-  --arch-bg: var(--vscode-editor-background, #1e1e1e);
-  --arch-fg: var(--vscode-foreground, #cccccc);
-  --arch-muted: var(--vscode-descriptionForeground, #9d9d9d);
-  --arch-border: var(--vscode-panel-border, #80808059);
-  --arch-surface: var(--vscode-editorWidget-background, #252526);
-  --arch-accent: var(--vscode-focusBorder, #007fd4);
-  --arch-request: var(--vscode-charts-blue, #3794ff);
-  --arch-reply: var(--vscode-charts-green, #89d185);
-  --arch-event: var(--vscode-charts-purple, #b180d7);
-  --arch-message: var(--vscode-charts-yellow, #cca700);
-  --arch-error: var(--vscode-charts-red, #f14c4c);
-  --arch-other: var(--vscode-charts-foreground, #cccccc);
-  --arch-alive: var(--vscode-charts-green, #89d185);
+/*
+ * The architecture view (editor/workbench/architecture-view.ts): what Web Awesome's components and utility classes
+ * don't cover. The page is theirs: badges, tags, the toolbar's cluster, sections and their captions, links. What's
+ * left is the canvas and side panel's layout, the table and log rows' alignment, and the SVG diagram, all on
+ * --wa-* tokens (theme/vscode maps them onto the VS Code theme).
+ */
 
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  background: var(--arch-bg);
-  color: var(--arch-fg);
-  font-family: var(--vscode-font-family, system-ui, sans-serif);
-  font-size: 12px;
-  overflow: hidden;
-  container-type: size;
-}
+/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
+ * are adopted, so the order is declared here). */
+@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
 
-.arch-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--arch-border);
-  flex: none;
-  flex-wrap: wrap;
-}
+@layer app {
+  .arch-root {
+    /* The diagram's colors: a message kind's matches its chip's variant (KIND_VARIANTS); hub links are purple. */
+    --arch-request: var(--wa-color-brand-fill-loud);
+    --arch-reply: var(--wa-color-success-fill-loud);
+    --arch-event: var(--wa-color-text-quiet);
+    --arch-message: var(--wa-color-warning-fill-loud);
+    --arch-error: var(--wa-color-danger-fill-loud);
+    --arch-hub: var(--wa-color-purple-60);
 
-.arch-title {
-  font-weight: 600;
-  font-size: 13px;
-}
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--wa-color-surface-default);
+    container-type: size;
+  }
 
-.arch-summary {
-  color: var(--arch-muted);
-  margin-right: 8px;
-}
+  .arch-root :is(code, .arch-mono) {
+    font-family: var(--wa-font-family-code);
+  }
 
-.arch-spacer {
-  flex: 1;
-}
+  .arch-toolbar {
+    flex: none;
+    box-sizing: border-box;
+    padding: var(--wa-space-xs) var(--wa-space-s);
+    border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  }
 
-.arch-legend {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.arch-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.arch-canvas {
-  flex: 1;
-  min-width: 0;
-  overflow: auto;
-  position: relative;
-}
-
-.arch-warning {
-  padding: 8px 12px;
-  color: var(--vscode-editorWarning-foreground, #cca700);
-}
-
-.arch-side {
-  width: 380px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--arch-border);
-  min-height: 0;
-}
-
-.arch-panel {
-  flex: 1;
-  overflow: auto;
-  padding: 8px 12px 16px;
-}
-
-.arch-panel h2 {
-  font-size: 14px;
-  margin: 4px 0 6px;
-  word-break: break-word;
-}
-
-.arch-section h3 {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--arch-muted);
-  margin: 14px 0 6px;
-}
-
-.arch-section p {
-  margin: 4px 0;
-  line-height: 1.45;
-}
-
-.arch-muted {
-  color: var(--arch-muted);
-}
-
-.arch-violations {
-  color: var(--arch-error);
-}
-
-.arch-dim {
-  opacity: 0.6;
-}
-
-.arch-mono {
-  font-family: var(--vscode-editor-font-family, monospace);
-}
-
-.arch-link {
-  color: var(--vscode-textLink-foreground, #3794ff);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.arch-link:hover {
-  text-decoration: underline;
-}
-
-.arch-state {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  border: 1px solid currentColor;
-}
-
-.arch-state.state-alive {
-  color: var(--arch-alive);
-}
-
-.arch-state.state-unresponsive {
-  color: var(--arch-error);
-}
-
-.arch-state.state-declared,
-.arch-state.state-terminated {
-  color: var(--arch-muted);
-}
-
-.arch-kv {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 2px 12px;
-  margin: 0;
-}
-
-.arch-kv dt {
-  color: var(--arch-muted);
-}
-
-.arch-kv dd {
-  margin: 0;
-  word-break: break-all;
-}
-
-.arch-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.arch-table th {
-  text-align: left;
-  font-weight: normal;
-  color: var(--arch-muted);
-  border-bottom: 1px solid var(--arch-border);
-  padding: 2px 4px;
-}
-
-.arch-table th:not(:first-child),
-.arch-table td:not(:first-child) {
-  width: 64px;
-  text-align: right;
-}
-
-.arch-table td {
-  padding: 2px 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.arch-table tr:hover td {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
-
-.arch-list {
-  margin: 0;
-  padding-left: 16px;
-  line-height: 1.6;
-}
-
-.arch-event {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  padding: 1px 0;
-  white-space: nowrap;
-  font-size: 11px;
-}
-
-.arch-log .arch-event {
-  cursor: pointer;
-}
-
-.arch-log .arch-event:hover {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
-
-.arch-event-time,
-.arch-event-bytes {
-  color: var(--arch-muted);
-  flex: none;
-  font-family: var(--vscode-editor-font-family, monospace);
-}
-
-.arch-event-bytes {
-  margin-left: auto;
-}
-
-.arch-event:has(.arch-event-payload) {
-  flex-wrap: wrap;
-}
-
-.arch-event-payload {
-  flex-basis: 100%;
-  margin: 0 0 2px 12px;
-  color: var(--arch-muted);
-  font-family: var(--vscode-editor-font-family, monospace);
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 8em;
-  overflow: auto;
-}
-
-.arch-event-endpoints {
-  color: var(--arch-muted);
-  flex: none;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.arch-event-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--vscode-editor-font-family, monospace);
-}
-
-.arch-chip {
-  display: inline-block;
-  flex: none;
-  border-radius: 3px;
-  padding: 0 4px;
-  font-size: 10px;
-  line-height: 15px;
-  color: var(--arch-bg);
-  background: var(--arch-other);
-}
-
-.arch-chip.k-request,
-.arch-pulse.k-request {
-  background: var(--arch-request);
-  fill: var(--arch-request);
-}
-
-.arch-chip.k-reply,
-.arch-pulse.k-reply {
-  background: var(--arch-reply);
-  fill: var(--arch-reply);
-}
-
-.arch-chip.k-event,
-.arch-pulse.k-event {
-  background: var(--arch-event);
-  fill: var(--arch-event);
-}
-
-.arch-chip.k-message,
-.arch-pulse.k-message {
-  background: var(--arch-message);
-  fill: var(--arch-message);
-}
-
-.arch-chip.k-error,
-.arch-pulse.k-error {
-  background: var(--arch-error);
-  fill: var(--arch-error);
-}
-
-.arch-pulse {
-  fill: var(--arch-other);
-  pointer-events: none;
-}
-
-/* Narrow editors: the panel goes below the diagram */
-@container (max-width: 900px) {
   .arch-body {
-    flex-direction: column;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .arch-canvas {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
   }
 
   .arch-side {
-    width: auto;
-    height: 45%;
-    border-left: none;
-    border-top: 1px solid var(--arch-border);
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    width: 380px;
+    min-height: 0;
+    border-left: var(--wa-border-width-s) solid var(--wa-color-surface-border);
   }
-}
 
-/* Diagram */
+  .arch-panel {
+    flex: 1;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    padding: var(--wa-space-s) var(--wa-space-m) var(--wa-space-l);
+  }
 
-.arch-svg {
-  display: block;
-  user-select: none;
-}
+  /* Narrow editors: the panel goes below the diagram */
+  @container (max-width: 900px) {
+    .arch-body {
+      flex-direction: column;
+    }
 
-.arch-container rect {
-  fill: color-mix(in srgb, var(--arch-surface) 55%, transparent);
-  stroke: var(--arch-border);
-  stroke-width: 1;
-}
+    .arch-side {
+      width: auto;
+      height: 45%;
+      border-top: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+      border-left: none;
+    }
+  }
 
-.arch-container.kind-origin rect,
-.arch-container.kind-remote rect {
-  stroke-dasharray: 5 3;
-}
+  .arch-violations {
+    color: var(--wa-color-danger-on-quiet);
+  }
 
-.arch-container.kind-group rect {
-  fill: none;
-}
+  .arch-kv {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--wa-space-3xs) var(--wa-space-m);
 
-.arch-container-label {
-  fill: var(--arch-fg);
-  font-weight: 600;
-  font-size: 12px;
-}
+    dd {
+      margin: 0;
+    }
+  }
 
-.arch-container-caption {
-  fill: var(--arch-muted);
-  font-size: 10px;
-}
+  .arch-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
 
-.arch-node {
-  cursor: pointer;
-}
+    th {
+      color: var(--wa-color-text-quiet);
+      font-weight: inherit;
+      text-align: start;
+      border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    }
 
-.arch-node rect {
-  fill: var(--arch-surface);
-  stroke: var(--arch-border);
-  stroke-width: 1;
-  transition: stroke 0.2s;
-}
+    :is(th, td) {
+      padding: var(--wa-space-3xs) var(--wa-space-2xs);
+    }
 
-.arch-node rect.undeclared {
-  stroke: var(--arch-error);
-  stroke-dasharray: 4 2;
-}
+    :is(th, td):not(:first-child) {
+      width: 5em;
+      text-align: end;
+    }
 
-.arch-node.active rect {
-  stroke: var(--arch-accent);
-}
+    tr:hover td {
+      background: var(--wa-color-neutral-fill-quiet);
+    }
+  }
 
-.arch-node.selected rect {
-  stroke: var(--arch-accent);
-  stroke-width: 2;
-}
+  .arch-log .arch-event {
+    cursor: pointer;
 
-.arch-node-label {
-  fill: var(--arch-fg);
-  font-size: 12px;
-  font-weight: 600;
-}
+    &:hover {
+      background: var(--wa-color-neutral-fill-quiet);
+    }
+  }
 
-.arch-node-detail {
-  fill: var(--arch-muted);
-  font-size: 10px;
-}
+  .arch-event-endpoints {
+    flex: none;
+    max-width: 45%;
+  }
 
-.arch-node-badge {
-  fill: var(--arch-muted);
-  font-size: 10px;
-}
+  .arch-event-bytes {
+    flex: none;
+    margin-inline-start: auto;
+  }
 
-.arch-node-dot {
-  fill: var(--arch-muted);
-}
+  .arch-event-payload {
+    flex-basis: 100%;
+    max-height: 8em;
+    overflow: auto;
+    padding-inline-start: var(--wa-space-s);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
 
-.arch-node.state-alive .arch-node-dot {
-  fill: var(--arch-alive);
-}
+  /* Flows: a message and the ones it caused */
+  .arch-flow-group {
+    padding-inline-start: var(--wa-space-xs);
+    border-left: var(--wa-border-width-m) solid var(--wa-color-surface-border);
+  }
 
-.arch-node.state-unresponsive .arch-node-dot {
-  fill: var(--arch-error);
-}
+  .arch-inferred {
+    opacity: 0.55;
+  }
 
-.arch-node.state-declared,
-.arch-node.state-terminated {
-  opacity: 0.45;
-}
+  /* Diagram */
 
-.arch-node.state-declared rect {
-  stroke-dasharray: 3 3;
-}
+  .arch-svg {
+    display: block;
+    user-select: none;
+  }
 
-.arch-edge {
-  fill: none;
-  stroke: var(--arch-request);
-  stroke-opacity: 0.45;
-  stroke-width: 1.5;
-}
+  .arch-container rect,
+  .arch-node rect,
+  .arch-component-row rect {
+    fill: var(--wa-color-surface-raised);
+    stroke: var(--wa-color-surface-border);
+    stroke-width: 1;
+  }
 
-.arch-edge.status-undeclared {
-  stroke: var(--arch-error);
-  stroke-opacity: 0.8;
-}
+  .arch-container rect {
+    fill-opacity: 0.55;
+  }
 
-.arch-edge.status-ghost {
-  stroke: var(--arch-muted);
-  stroke-opacity: 0.35;
-  stroke-dasharray: 4 4;
-  stroke-width: 1 !important;
-}
+  .arch-container.kind-origin rect,
+  .arch-container.kind-remote rect {
+    stroke-dasharray: 5 3;
+  }
 
-.arch-edge-hit {
-  fill: none;
-  stroke: transparent;
-  stroke-width: 12;
-  cursor: pointer;
-}
+  .arch-container.kind-group rect {
+    fill: none;
+  }
 
-.arch-edge-label {
-  fill: var(--arch-muted);
-  font-size: 10px;
-  text-anchor: middle;
-  paint-order: stroke;
-  stroke: var(--arch-bg);
-  stroke-width: 3px;
-  pointer-events: none;
-}
+  .arch-container-label,
+  .arch-node-label {
+    fill: var(--wa-color-text-normal);
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-semibold);
+  }
 
-g.hover > .arch-edge,
-g.focus > .arch-edge,
-g.selected > .arch-edge {
-  stroke-opacity: 1;
-}
+  .arch-container-caption,
+  .arch-node-detail,
+  .arch-node-badge {
+    fill: var(--wa-color-text-quiet);
+    font-size: var(--wa-font-size-xs);
+  }
 
-g.selected > .arch-edge {
-  stroke: var(--arch-accent);
-}
+  .arch-node {
+    cursor: pointer;
+  }
 
-.arch-svg.has-focus .arch-node:not(.focus) {
-  opacity: 0.35;
-}
+  .arch-node rect {
+    transition: stroke 0.2s;
+  }
 
-.arch-svg.has-focus g[data-edge]:not(.focus) {
-  opacity: 0.15;
-}
+  .arch-node rect.undeclared {
+    stroke: var(--arch-error);
+    stroke-dasharray: 4 2;
+  }
 
-.arch-svg.has-focus g.focus .arch-edge-label {
-  fill: var(--arch-fg);
-}
+  .arch-node.active rect {
+    stroke: var(--wa-color-focus);
+  }
 
-/* Discovered, not declared: extensions' commands, and what's written to stores and read from them */
-.arch-edge.type-discovered {
-  stroke: var(--arch-reply);
-  stroke-opacity: 0.5;
-}
+  .arch-node.selected rect {
+    stroke: var(--wa-color-focus);
+    stroke-width: 2;
+  }
 
-/* Hub links: the tree the hubs federate over — drawn heavier than probed channels */
-.arch-edge.type-hub {
-  stroke: var(--arch-event);
-  stroke-opacity: 0.55;
-}
+  .arch-node-dot {
+    fill: var(--wa-color-text-quiet);
+  }
 
-.arch-edge.type-hub.status-ghost {
-  stroke: var(--arch-muted);
-}
+  /* A box that stands for a node (the service worker's Network box) shows that node's status dot. */
+  :is(.arch-node, .arch-container.is-node).state-alive .arch-node-dot {
+    fill: var(--arch-reply);
+  }
 
-.arch-node.is-hub .arch-node-dot {
-  r: 5;
-}
+  :is(.arch-node, .arch-container.is-node).state-unresponsive .arch-node-dot {
+    fill: var(--arch-error);
+  }
 
-/* A box that stands for a node (the service worker's Network box) shows that node's status dot. */
-.arch-container.is-node.state-alive .arch-node-dot {
-  fill: var(--arch-alive);
-}
+  :is(.arch-node, .arch-container.is-node).is-hub .arch-node-dot {
+    r: 5;
+  }
 
-.arch-container.is-node.state-unresponsive .arch-node-dot {
-  fill: var(--arch-error);
-}
+  .arch-node.state-declared,
+  .arch-node.state-terminated {
+    opacity: 0.45;
+  }
 
-.arch-container.is-node.is-hub .arch-node-dot {
-  r: 5;
-}
+  .arch-node.state-declared rect {
+    stroke-dasharray: 3 3;
+  }
 
-.arch-subjects {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+  .arch-edge {
+    fill: none;
+    stroke: var(--arch-request);
+    stroke-opacity: 0.45;
+    stroke-width: 1.5;
+  }
 
-.arch-subject {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: var(--vscode-badge-background, #4d4d4d);
-  color: var(--vscode-badge-foreground, #ffffff);
-}
+  .arch-edge.status-undeclared {
+    stroke: var(--arch-error);
+    stroke-opacity: 0.8;
+  }
 
-.arch-subject.unexpected {
-  background: var(--arch-error);
-}
+  /* Idle (declared, not seen): tick() leaves its width alone. */
+  .arch-edge.status-ghost {
+    stroke: var(--wa-color-text-quiet);
+    stroke-opacity: 0.35;
+    stroke-dasharray: 4 4;
+    stroke-width: 1;
+  }
 
-/* A box that stands for a node (the service worker's Network box): its header is the node's hit target. */
-.arch-container-hit {
-  fill: transparent;
-  stroke: none;
-  pointer-events: all;
-  cursor: pointer;
-}
+  .arch-edge-hit {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 12;
+    cursor: pointer;
+  }
 
-/* A collapsible box's chevron; lines into a collapsed box overlap, so their numbers are hidden. */
-.arch-container-chevron {
-  fill: none;
-  stroke: var(--arch-muted);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
+  .arch-edge-label {
+    fill: var(--wa-color-text-quiet);
+    font-size: var(--wa-font-size-xs);
+    text-anchor: middle;
+    paint-order: stroke;
+    stroke: var(--wa-color-surface-default);
+    stroke-width: 3px;
+    pointer-events: none;
+  }
 
-.arch-edge-label:is(.into-collapsed *) {
-  display: none;
-}
+  g:is(.hover, .focus, .selected) > .arch-edge {
+    stroke-opacity: 1;
+  }
 
-/* The feature lens */
-/* Flows: a message and the ones it caused */
-.arch-flow-group {
-  border-left: 2px solid var(--arch-border);
-  margin: 0 0 10px;
-  padding: 2px 0 2px 8px;
-}
+  g.selected > .arch-edge {
+    stroke: var(--wa-color-focus);
+  }
 
-.arch-flow {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.6;
-}
+  .arch-svg.has-focus :is(.arch-node, .arch-component-row):not(.focus) {
+    opacity: 0.35;
+  }
 
-.arch-flow-label {
-  font-family: var(--vscode-editor-font-family, monospace);
-}
+  .arch-svg.has-focus g[data-edge]:not(.focus) {
+    opacity: 0.15;
+  }
 
-.arch-flow.inferred {
-  opacity: 0.55;
-}
+  .arch-svg.has-focus g.focus .arch-edge-label {
+    fill: var(--wa-color-text-normal);
+  }
 
-/* A hub's components: what registered its subscriptions */
-.arch-component {
-  margin: 0 0 8px;
-}
+  /* Discovered, not declared: extensions' commands, and what's written to stores and read from them */
+  .arch-edge.type-discovered {
+    stroke: var(--arch-reply);
+    stroke-opacity: 0.5;
+  }
 
-.arch-component-name {
-  font-weight: 600;
-  margin: 0 0 2px;
-}
+  /* Hub links: the tree the hubs federate over — drawn heavier than probed channels */
+  .arch-edge.type-hub {
+    stroke: var(--arch-hub);
+    stroke-opacity: 0.55;
+  }
 
-/* A hub's components: rows in its box, and the lines of the messages each handles */
-.arch-component-row rect {
-  fill: var(--arch-surface);
-  stroke: var(--arch-border);
-  stroke-width: 1;
-  cursor: pointer;
-}
+  .arch-edge.type-hub.status-ghost {
+    stroke: var(--wa-color-text-quiet);
+  }
 
-.arch-component-label {
-  font-size: 10px;
-  fill: var(--arch-fg);
-  pointer-events: none;
-}
+  /* A box that stands for a node (the service worker's Network box): its header is the node's hit target. */
+  .arch-container-hit {
+    fill: transparent;
+    stroke: none;
+    pointer-events: all;
+    cursor: pointer;
+  }
 
-.arch-edge.type-component {
-  stroke: var(--arch-event);
-  stroke-opacity: 0.4;
-  stroke-width: 1.25;
-}
+  /* A collapsible box's chevron; lines into a collapsed box overlap, so their numbers are hidden. */
+  .arch-container-chevron {
+    fill: none;
+    stroke: var(--wa-color-text-quiet);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
 
-.arch-svg.has-focus .arch-component-row:not(.focus) {
-  opacity: 0.35;
+  .into-collapsed .arch-edge-label {
+    display: none;
+  }
+
+  /* A hub's components: rows in its box, and the lines of the messages each handles */
+  .arch-component-row rect {
+    cursor: pointer;
+  }
+
+  .arch-component-label {
+    fill: var(--wa-color-text-normal);
+    font-size: var(--wa-font-size-xs);
+    pointer-events: none;
+  }
+
+  .arch-edge.type-component {
+    stroke: var(--arch-hub);
+    stroke-opacity: 0.4;
+    stroke-width: 1.25;
+  }
+
+  /* Messages in flight, in their kind's color */
+  .arch-pulse {
+    fill: var(--arch-event);
+    pointer-events: none;
+
+    &.k-request {
+      fill: var(--arch-request);
+    }
+
+    &.k-reply {
+      fill: var(--arch-reply);
+    }
+
+    &.k-message {
+      fill: var(--arch-message);
+    }
+
+    &.k-error {
+      fill: var(--arch-error);
+    }
+  }
 }

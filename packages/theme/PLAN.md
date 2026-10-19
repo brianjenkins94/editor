@@ -9,8 +9,8 @@ Status (2026-10-19):
 
 - Enforcement steps 4.1–4.3 are built and set to **error**. The ESLint half is at **zero**: every native element
   it found is a Web Awesome component now, and every stylesheet left is a named exception in
-  `src/exceptions/` (§3). Stylelint still reports 735 errors in those exceptions, and runs only via
-  `npm run lint:css`. See [§6](#6-counts) for the counts.
+  `src/exceptions/` (§3). Stylelint still reports 554 errors in those exceptions (`architecture-view.css` is at
+  zero), and runs only via `npm run lint:css`. See [§6](#6-counts) for the counts.
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry for the shell and admin, and the budget (4.5), aren't built yet.
 
@@ -158,9 +158,9 @@ In priority order. Each step closes one of the gaps above.
      `@awesome.me/webawesome` to its own 3.14.
    Still open: the `theme` entry for the shell, admin and account, which replaces their separate setups.
 2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). Next: the
-   735 stylelint errors in `src/exceptions/`, shrinking each file by replacing what Web Awesome covers.
-3. Convert the biggest file first: `architecture-view` (toolbar, tabs, tables, inputs, chips → components). Then
-   `rule-editor`, then admin (native tables plus utilities, which should get close to zero CSS).
+   554 stylelint errors left in `src/exceptions/`, shrinking each file by replacing what Web Awesome covers.
+3. ~~Convert the biggest file first: `architecture-view`.~~ Done 2026-10-19 (§6). Then `rule-editor`, then admin
+   (native tables plus utilities, which should get close to zero CSS).
 4. Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.
 5. Add the budget (4.5) once the approach that replaces it is settled.
 
@@ -190,6 +190,25 @@ Re-run with `npx eslint .` and `npm run lint:css`.
   CSP in the harness: a full email-code sign-in works (submitting by click and by Enter), with no CSP errors.
 - `.muted` / `.account-muted` became Web Awesome's `wa-color-text-quiet` (30 uses), and their rules are gone.
 
+**Cleared (stylelint, `architecture-view.css`: 181 → 0, 607 → 382 lines):**
+
+- The view is Web Awesome markup now. Message kinds are `wa-badge`s (request brand, reply success, event neutral,
+  message warning, error danger, an ack neutral and outlined), states are outlined pill badges, subjects are
+  `wa-tag`s. The toolbar is a `wa-split` of two `wa-cluster`s. The side panel and its sections are `wa-stack`s, with
+  `wa-heading-*` titles and `wa-caption-xs` section captions; links are `wa-link`, muted text `wa-color-text-quiet`,
+  log rows `wa-cluster`s with `wa-text-truncate` cells. That retired `.arch-chip`, `.arch-legend`, `.arch-spacer`,
+  `.arch-state`, `.arch-subject(s)`, `.arch-section`, `.arch-muted`, `.arch-link`, `.arch-list` and most of the
+  `.arch-event-*` and `.arch-flow*` rules.
+- What's left is the canvas and side panel's layout (and its narrow-editor container query), the key/value grid, the
+  table, a few log-row details, and the SVG diagram. It's in `@layer app`, on `--wa-*` tokens only. The diagram's
+  pulses use the same variant tokens as the kind badges; hub links are the palette's `--wa-color-purple-60`, which
+  doesn't follow the light/dark mode.
+- The sheet declares the layer order, ending in `app`. The view's `<style>` comes before the adopted Web Awesome
+  sheets in the document, so an `app` layer it merely opened would rank below every Web Awesome layer.
+- A ghost edge's thin stroke no longer needs `!important`: `tick()` leaves its width to the stylesheet.
+- `theme/vscode` now falls back to Web Awesome's code font: VS Code sets `--vscode-editor-font-family` on each
+  editor, not on `.monaco-workbench`, so outside an editor the mapping was empty.
+
 **Before clearing** (the baseline):
 
 **ESLint** (`webawesome/*`, in `.ts`/`.tsx`/`.js`):
@@ -203,29 +222,31 @@ Re-run with `npx eslint .` and `npm run lint:css`.
 options per file instead of merging them, so a second `no-restricted-imports` would silently undo the realm
 boundaries.
 
-**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 735 now. The exceptions stay
-held to every rule: the theme's own override covers only `theme.css` and `vscode.css`.
+**Stylelint** (`stylelint.config.js`, 4.2): 864 errors in 10 files at the baseline, 554 in 8 now. The exceptions
+stay held to every rule: the theme's own override covers only `theme.css` and `vscode.css`.
 
-| Rule | Errors |
-| --- | ---: |
-| `webawesome/no-unlayered-rules`: a rule outside `@layer` | 389 |
-| `scale-unlimited/declaration-strict-value`: a literal color/space/type/radius where a `--wa-*` token belongs | 273 |
-| `declaration-property-value-disallowed-list`: a `var(--vscode-*)` | 142 |
-| `selector-disallowed-list`: selecting `wa-*` tags, `::part()`, or our own `.wa-*` classes | 58 |
-| `declaration-no-important` | 2 |
+| Rule | Baseline | Now |
+| --- | ---: | ---: |
+| `webawesome/no-unlayered-rules`: a rule outside `@layer` | 389 | 234 |
+| `scale-unlimited/declaration-strict-value`: a literal color/space/type/radius where a `--wa-*` token belongs | 273 | 175 |
+| `declaration-property-value-disallowed-list`: a `var(--vscode-*)` | 142 | 87 |
+| `selector-disallowed-list`: selecting `wa-*` tags, `::part()`, or our own `.wa-*` classes | 58 | 58 |
+| `declaration-no-important` | 2 | 0 |
 
-| File | Errors |
+The files are in `src/exceptions/` now; the paths are where each one came from.
+
+| File | Baseline → now |
 | --- | ---: |
 | `editor/shell/git-panel.css` | 216 |
-| `editor/workbench/architecture-view.css` | 205 → 195 |
+| `editor/workbench/architecture-view.css` | 205 → 0 |
 | `editor/workbench/pane-views.css` | 163 |
-| `editor/workbench/rule-editor.css` | 65 |
-| `monaco-vscode-api/pane.css` | 61 |
-| `api/public/sign-in.css` | 56 |
-| `editor/workbench/rule-view.css` | 33 |
-| `admin/src/admin.css` | 30 (all unlayered; its values are already tokens) |
+| `editor/workbench/rule-editor.css` | 65 → 36 |
+| `monaco-vscode-api/pane.css` (`margin.css`) | 61 |
+| `api/public/sign-in.css` | 56 → 0 |
+| `editor/workbench/rule-view.css` | 33 → 15 |
+| `admin/src/admin.css` | 30 → 29 (all unlayered; its values are already tokens) |
 | `editor/shell/window.css` | 26 (`.wa-win*` is our class with a Web Awesome prefix, plus `::part`) |
-| `account/src/account.css` | 9 |
+| `account/src/account.css` | 9 → 8 |
 
 Most of the unlayered count is mechanical: wrapping each file in `@layer app { … }` clears it. The other rules
 measure the real work. The ESLint errors fail CI's `lint` (lib's `util-lint`). Stylelint runs only through
