@@ -10,6 +10,7 @@ import type { Difference } from "./behavior.ts";
 import { actionOf, described, fingerprint } from "./behavior.ts";
 import type { AppEnv, Bindings } from "./env.ts";
 import { isClient } from "./clients.ts";
+import { watch } from "./tripwire.ts";
 
 /**
  * Our tokens (README.md, "Tokens and the flow"): /token redeems a code or rotates a refresh token for a DPoP-bound access
@@ -260,7 +261,8 @@ const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, 
 	context.set("grant", signed.grant);
 	context.set("client", client);
 
-	await next();
+	// The rest of the request reads D1 through the tripwire's eyes (src/tripwire.ts): nothing of another user's.
+	await watch(context, next);
 });
 
 /** The editor's routes: its account endpoints and the GitHub proxy. */

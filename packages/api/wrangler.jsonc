@@ -41,7 +41,7 @@
   // through its localhost callback.
   // Our OAuth clients (each app's name, sign-in methods and pages, and so the origins allowed) are src/clients.ts.
   // OWNERS are GitHub user ids (src/rbac.ts): brianjenkins94.
-  "vars": { "ENVIRONMENT": "local", "INBOX": "smoke-test@unusuallygood.dev", "OWNERS": [9398474], "VIEWERS": [64174526], "ANALYTICS_ACCOUNT": "3ade13ae64e29b20e6b7c61f9ae7b714", "ANALYTICS_ZONE": "54d20cd60d5353f2080a1c8aec6def0d", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" },
+  "vars": { "ENVIRONMENT": "local", "TRIPWIRE": "enforce", "INBOX": "smoke-test@unusuallygood.dev", "OWNERS": [9398474], "VIEWERS": [64174526], "ANALYTICS_ACCOUNT": "3ade13ae64e29b20e6b7c61f9ae7b714", "ANALYTICS_ZONE": "54d20cd60d5353f2080a1c8aec6def0d", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" },
   "env": {
     "dev": {
       "name": "editor-api-dev",

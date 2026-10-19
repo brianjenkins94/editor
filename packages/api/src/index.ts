@@ -26,6 +26,7 @@ import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
 import { allowedOrigins } from "./clients.ts";
 import { maintenance, maintenanceGate } from "./maintenance.ts";
 import { checkSpend } from "./spend.ts";
+import { ensureCanary } from "./tripwire.ts";
 
 export { Attempt } from "./attempt.ts";
 export { Grant } from "./grant.ts";
@@ -240,13 +241,17 @@ const HOURLY = "7 * * * *";
 
 export default {
 	"fetch": app.fetch,
-	// Hourly (wrangler.jsonc's second cron): the cost guard (spend.ts). Daily: the audit log's retention (audit.ts),
+	// Hourly (wrangler.jsonc's second cron): the cost guard (spend.ts) and the tripwire's canary (tripwire.ts). Daily: the audit log's retention (audit.ts),
 	// deleted accounts past their grace period purged (account.ts), the likely-next-action model's counts faded
 	// (behavior.ts), our inbox's day kept (inbox.ts), and the email smoke test run (smoke.ts).
 	"scheduled": async (controller, env, context) => {
 		if (controller.cron === HOURLY) {
 			context.waitUntil(log.span("spend.check", {}, async (span) => {
 				span.info("spend checked", await checkSpend(env));
+			}));
+			// The tripwire's canary account, there within the hour of a first deploy (idempotent).
+			context.waitUntil(log.span("tripwire.canary", {}, async () => {
+				await ensureCanary(env);
 			}));
 
 			return;

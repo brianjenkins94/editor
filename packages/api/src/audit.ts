@@ -37,7 +37,8 @@ export type AuditEvent =
 	| "identity_linked" | "account_merged"
 	| "passkey_added" | "passkey_removed"
 	| "maintenance_on" | "maintenance_off"
-	| "spend_warning" | "spend_tripped" | "spend_unreadable" | "spend_blind";
+	| "spend_warning" | "spend_tripped" | "spend_unreadable" | "spend_blind"
+	| "tripwire" | "tripwire_report";
 
 /** The retention (audit-copies.ts: ROUTINE_DAYS for the everyday record, SUSPICIOUS_DAYS for the rest), applied daily by
  *  the Worker's cron trigger. Says how many rows went. The copies expire on their own (the bucket's lifecycle rules). */

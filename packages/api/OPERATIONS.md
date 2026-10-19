@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19; O1 and O2 built.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1, O2 and O3 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -139,8 +139,25 @@ Each lands green and is tried before the next.
     Spend section. First reading in production's account: $0.0015 a day.
   - 3 tests in test/spend.test.ts, against a GraphQL stand-in, the cron triggered through the harness. Your click:
     Cloudflare's own billing notification (dashboard → Notifications → Usage Based Billing), the backstop.
-- **O3 · the tripwire.** The canary account; the wrapped D1 binding and `crossUser`; tests running every route under it;
-  report-only, then enforcing after a week in production.
+- **O3 · the tripwire.** *Built 2026-10-19* (src/tripwire.ts):
+  - **Watched:** every request through a user's sign-in, either client (the session middleware, src/tokens.ts, hands the
+    rest of the request a watched D1 binding). A route's permission lifts the watch (`requires`, src/rbac.ts): reading
+    across users is what admin permissions are for. `crossUser(db, why)` for a read that looks at another account on
+    purpose: one today, linking's `ownerOf` (src/identities.ts). The editor's session revoke now asks only for the
+    caller's own sign-in rather than reading any and comparing.
+  - **Seen:** every row of `first`, `all`, `raw` and `batch`: a `user_id` that isn't the signed-in user's, or any value
+    that's the canary's. Grant and Attempt Durable Objects' own reads aren't watched (open question below).
+  - **The canary:** a user, an email identity and a live sign-in, ids derived from AUDIT_KEY (the public repo doesn't
+    name them), made idempotently by the hourly cron.
+  - **Enforcing** from `ENFORCE_FROM` (2026-10-26) for another user's row; the canary from the start; and always locally
+    and in the tests (`TRIPWIRE: "enforce"`, wrangler.jsonc's local vars), so the whole suite (every route it drives)
+    fails on a cross-user read instead of passing with a report. It passed: no route reads another user's row.
+  - **A breach:** 500 `{ error: internal }`, the user's sign-ins revoked, the switch on "by tripwire", `tripwire` audited
+    (route, query text, the value read), the owner emailed. **Reported** (before enforcing): `tripwire_report`, the owner
+    emailed at most hourly.
+  - 4 tests in test/tripwire.test.ts (the canary seeded; a request reading the canary's value end to end; the watched
+    binding against a stand-in D1: another user's row trips or is reported, one's own doesn't, `crossUser` is
+    unwatched; the canary in any column, a batch and raw rows).
 - **O4 · server errors.** Error ids, `onError`, the `errors` table, the Errors page.
 - **O5 · server timelines.** Request events in the Grant, the Timeline on a sign-in's page, `sessions:replay`.
 - **O6 · editor events and errors.** The vocabulary, `POST /session/events`, `POST /errors` (signed in and anonymous),

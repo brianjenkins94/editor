@@ -27,9 +27,10 @@ export async function sessionsEndpoint(context: Context<AppEnv>): Promise<Respon
 /** POST /sessions/:id/revoke: end one of the user's sign-ins. Anyone else's is a 404 — and recorded, being a probe. */
 export async function revokeSessionEndpoint(context: Context<AppEnv>): Promise<Response> {
 	const id = context.req.param("id") ?? "";
-	const row = /^[0-9a-f]{64}$/u.test(id) ? await context.env.DB.prepare("SELECT user_id FROM grants WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ "user_id": string }>() : null;
+	// Only the user's own: another's isn't read at all (the tripwire would see it, src/tripwire.ts), it just isn't found.
+	const row = /^[0-9a-f]{64}$/u.test(id) ? await context.env.DB.prepare("SELECT id FROM grants WHERE id = ? AND user_id = ? AND revoked_at IS NULL").bind(id, context.get("user")).first<{ "id": string }>() : null;
 
-	if (row?.user_id !== context.get("user")) {
+	if (row === null) {
 		await audit(context.env, "auth_refused", { "userId": context.get("user"), "grantId": context.get("grant") }, await origin(context), { "reason": "not one of your sessions", "detail": `POST /sessions/${id.slice(0, 64)}/revoke` });
 
 		return context.json({ "error": "not_found" }, 404);

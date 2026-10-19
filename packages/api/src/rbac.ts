@@ -3,6 +3,7 @@ import type { AppEnv, Bindings } from "./env.ts";
 import { createMiddleware } from "hono/factory";
 import { audit, origin } from "./audit.ts";
 import { githubIdColumn } from "./identities.ts";
+import { unwatched } from "./tripwire.ts";
 
 /**
  * Roles and permissions (packages/admin/README.md, "Roles and permissions"). Permissions are fixed strings; roles map to
@@ -79,5 +80,7 @@ export const requires = (permission: Permission) => createMiddleware<AppEnv>(asy
 		return context.json({ "error": "forbidden" }, 403);
 	}
 
+	// A permission is what lets a route read across users: the tripwire's watch lifts for it (src/tripwire.ts).
+	context.env = unwatched(context.env);
 	await next();
 });

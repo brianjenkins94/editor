@@ -1,4 +1,5 @@
 import type { Bindings } from "./env.ts";
+import { crossUser } from "./tripwire.ts";
 
 /**
  * Linked identities (migrations/0012; SIGN-IN.md, "Linking accounts"): each way of proving who you are, one row each,
@@ -31,7 +32,7 @@ export async function emailOf(env: Bindings, user: string): Promise<string | nul
 
 /** Whose `subject` is, with `provider`: the user, or undefined. */
 export async function ownerOf(env: Bindings, provider: Provider, subject: string): Promise<string | undefined> {
-	return (await env.DB.prepare("SELECT user_id FROM identities WHERE provider = ? AND lower(subject) = lower(?)").bind(provider, subject).first<{ "user_id": string }>())?.user_id;
+	return (await crossUser(env.DB, "whose is this identity: linking's conflict check, src/link.ts").prepare("SELECT user_id FROM identities WHERE provider = ? AND lower(subject) = lower(?)").bind(provider, subject).first<{ "user_id": string }>())?.user_id;
 }
 
 /**

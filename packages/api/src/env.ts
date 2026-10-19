@@ -36,6 +36,8 @@ export interface Bindings {
 	/** The owner's address (a secret, so it isn't in the repo): where the kill switch, the cost guard and the tripwire
 	 *  email (src/mail.ts, `tellOwner`; OPERATIONS.md). Without it they're logged only. */
 	"ALERT_EMAIL"?: string;
+	/** "enforce" locally and in the tests: the tripwire trips on another user's row from the start (src/tripwire.ts). */
+	"TRIPWIRE"?: string;
 	/** Email (src/mail.ts, SIGN-IN.md C2): Cloudflare Email Service's `send_email` binding where it's set up; in the harness
 	 *  and the tests, an outbox stand-in's URL instead. Codes are an HMAC under CODE_KEY (a secret). Without either, or
 	 *  without the key, email sign-in says it isn't set up. */
