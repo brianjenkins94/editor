@@ -10,7 +10,7 @@
  * games/packages/window's VtWindow.
  *
  * The theme tokens the `--wa-*` vars resolve against must be loaded once in this document — import
- * ./webawesome there (the host page does).
+ * "theme/chrome" there (the shell does).
  */
 /* eslint-disable webawesome/no-inline-styles -- a draggable, fixed-position window primitive: left/top/width/height are per-instance geometry set imperatively (drag + persisted position), not themeable chrome */
 import "@awesome.me/webawesome/dist/components/card/card.js";

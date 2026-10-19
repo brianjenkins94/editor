@@ -72,10 +72,10 @@ const poppedLayer = css({
 	"&[hidden]": { "display": "none" }
 });
 const promptTitle = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)", "marginBlockEnd": "var(--wa-space-2xs)" });
-const promptScope = css({ "display": "block", "fontFamily": "var(--wa-font-family-code, monospace)", "fontSize": "12px", "wordBreak": "break-all", "color": "var(--wa-color-text-quiet)", "marginBlockEnd": "var(--wa-space-s)" });
-const promptWhy = css({ "display": "block", "fontSize": "12px", "marginBlockEnd": "var(--wa-space-s)" });
+const promptScope = css({ "display": "block", "fontFamily": "var(--wa-font-family-code)", "fontSize": "var(--wa-font-size-xs)", "wordBreak": "break-all", "color": "var(--wa-color-text-quiet)", "marginBlockEnd": "var(--wa-space-s)" });
+const promptWhy = css({ "display": "block", "fontSize": "var(--wa-font-size-xs)", "marginBlockEnd": "var(--wa-space-s)" });
 const promptActions = css({ "display": "flex", "flexWrap": "wrap", "gap": "var(--wa-space-2xs)", "justifyContent": "flex-end" });
-const promptNote = css({ "display": "block", "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "textAlign": "end", "marginBlockStart": "var(--wa-space-2xs)" });
+const promptNote = css({ "display": "block", "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "textAlign": "end", "marginBlockStart": "var(--wa-space-2xs)" });
 
 /** What the prompt overlay reports back (mirrors the ext-host decider's expectations). */
 type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize" | "rule";

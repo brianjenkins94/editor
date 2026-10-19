@@ -53,7 +53,8 @@ export default [
 			"webawesome/no-css-in-strings": "error",
 			"webawesome/no-inline-styles": "error",
 			"webawesome/prefer-components-wrapped": "error",
-			"webawesome/no-css-imports": "error"
+			"webawesome/no-css-imports": "error",
+			"webawesome/css-in-js-tokens": "error"
 		}
 	},
 	{

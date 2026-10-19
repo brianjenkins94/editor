@@ -48,6 +48,27 @@ Flags a stylesheet import, static or dynamic (`?raw` and `?inline` included), un
 theme package. You can pass different package prefixes with `{ allow: [...] }`. A feature's own `.css` file is the
 custom CSS the theme is meant to replace. The CSS that remains is checked by the repo's `stylelint.config.js`.
 
+### `webawesome/css-in-js-tokens`
+
+The CSS-in-JS half of stylelint's token rule. It applies to the object literals passed to Stitches' `css`,
+`globalCss` and `keyframes` (imported from the editor's `shared/theme`, or from modules matching
+`{ sources: [regex, ...] }`), nested selectors included. It flags:
+
+- a literal colour: a hex value, a colour function, a named colour, or one used as a `var()` fallback;
+- a literal font size (a bare number is pixels to Stitches);
+- a literal length in `padding`, `margin` or `gap`;
+- a literal radius.
+
+The message names the `--wa-*` step to use, or the nearest one.
+
+```ts
+css({ "fontSize": "12px" })                          // ✗ var(--wa-font-size-xs)
+css({ "padding": "0 4px" })                          // ✗ var(--wa-space-2xs)
+css({ "color": "var(--wa-color-text-quiet, #888)" })  // ✗ drop the fallback
+```
+
+Layout geometry (`width`, `height`, `top`, `inset`, …) has no token and isn't checked; nor are line heights yet.
+
 ## Usage
 
 Loaded directly in the repo's flat config (`eslint.config.js`) by relative path — no install needed — and scoped to the

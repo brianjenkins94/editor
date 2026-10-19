@@ -7,8 +7,9 @@ import { deployment } from "./deployment";
 export default defineConfig({
 	"plugins": [deployment()],
 	"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
-	// packages/account is linked (file:), and imports preact from where it is: one copy, the app's.
-	"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime"] },
+	// packages/account and packages/theme are linked (file:), and import preact and Web Awesome from where they are: one
+	// copy, the app's.
+	"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@awesome.me/webawesome"] },
 	"server": { "port": 5174, "strictPort": true },
 	"build": { "target": "es2022" }
 });

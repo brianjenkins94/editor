@@ -17,13 +17,24 @@ component at once.
 
 ## Usage
 
-Import **after** Web Awesome's default theme so the overrides win:
+One import sets a document up: Web Awesome's layers, native styles, utility classes and default theme, then these
+tokens, so the overrides win. It also keeps the root's `wa-light` / `wa-dark` class in step with the system's
+light/dark preference, since Web Awesome switches mode by that class.
 
 ```ts
-import "@awesome.me/webawesome/dist/styles/themes/default.css";
-import "@awesome.me/webawesome/dist/styles/utilities.css";
 import "theme";
 ```
+
+App chrome that hosts other people's DOM (the editor's shell: dockview, the codehike diff, iframes) takes
+`theme/chrome` instead: the same, without Web Awesome's native styles, which style bare `button`, `svg`, `iframe`,
+`pre` and `table` and make every box border-box.
+
+```ts
+import "theme/chrome";
+```
+
+Web Awesome resolves from the consumer's copy: list `@awesome.me/webawesome` in its Vite `resolve.dedupe`, as admin
+and the editor do, or a stale copy beside this package can be picked up.
 
 ## In VS Code's document: `theme/vscode`
 
@@ -49,5 +60,5 @@ something needs CSS of its own, and every file in it is held to the repo's style
 
 ## This starter
 
-Dark-first, matching the editor shell's chrome, with the brand ramp set to the editor's blue accent (`#3794ff` at the
+Light and dark alike, following the system, with the brand ramp set to the editor's blue accent (`#3794ff` at the
 mid step). Every value is a starting point — iterate here rather than in component styles.
