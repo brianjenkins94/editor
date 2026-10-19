@@ -567,6 +567,7 @@ flowchart LR
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
+| Shell | session | `session.event` |
 | Workbench | annotations | `annotations.classify()`, `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
