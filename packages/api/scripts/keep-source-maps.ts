@@ -63,7 +63,10 @@ async function upload(key: string, body: string): Promise<void> {
 		}
 
 		if (answer.status === 401 || answer.status === 403) {
-			throw new Error(`Cloudflare refused ${key} (${answer.status}): the API token needs Workers R2 Storage: Edit.`);
+			// Which token it was (its id, not its value), to find it in the dashboard, and Cloudflare's own words.
+			const token = await fetch("https://api.cloudflare.com/client/v4/user/tokens/verify", { "headers": { "authorization": `Bearer ${process.env["CLOUDFLARE_API_TOKEN"]}` } }).then(async (verified) => (await verified.json() as { "result"?: { "id"?: string } }).result?.id, () => undefined);
+
+			throw new Error(`Cloudflare refused ${key} (${answer.status}: ${(await answer.text()).slice(0, 300)}): the API token (id ${token ?? "unknown"}) needs Workers R2 Storage: Edit on this account.`);
 		}
 
 		if (attempt === 3) {
