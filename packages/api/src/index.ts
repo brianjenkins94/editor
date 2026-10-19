@@ -25,7 +25,7 @@ import { githubApi, githubGit } from "./proxy.ts";
 import { attemptEndpoint, githubEndpoint, parEndpoint, startEndpoint as signInStart } from "./signin.ts";
 import { revokeEndpoint, session, signedIn, tokenEndpoint } from "./tokens.ts";
 import { allowedOrigins } from "./clients.ts";
-import { maintenance, maintenanceGate } from "./maintenance.ts";
+import { maintenance, maintenanceGate, pausable, switches } from "./maintenance.ts";
 import { checkSpend } from "./spend.ts";
 import { Breach, ensureCanary, unwatched } from "./tripwire.ts";
 import { expireErrors, recordError } from "./errors.ts";
@@ -116,11 +116,12 @@ app.use(maintenanceGate);
 
 app.get("/health", (context) => context.json({ "ok": true, "environment": context.env.ENVIRONMENT }));
 
-// Whether the API is down for maintenance: what the editor asks, to say so instead of offering a sign-in that can't work.
+// Whether the API is down for maintenance, and which of its parts are paused (src/maintenance.ts): what the editor asks,
+// to say so instead of offering what can't work, and to go to GitHub directly while the proxy is paused.
 app.get("/status", async (context) => {
 	context.header("cache-control", "no-store");
 
-	return context.json({ "maintenance": (await maintenance(context.env)).on });
+	return context.json({ "maintenance": (await maintenance(context.env)).on, "paused": Object.keys(await switches(context.env)) });
 });
 
 // The public half of the key access tokens are signed with (SIGNING_JWK, a secret: a private JWK with alg and kid), so
@@ -201,9 +202,9 @@ app.route("/account", accountRoutes(session));
 app.route("/admin", admin);
 
 // GitHub, for a signed-in browser (src/proxy.ts): the API calls the editor makes, and a clone's fetch.
-app.on(["GET", "POST", "PATCH"], "/github/api/*", session, rateLimit("PROXY_BY_USER", byUser), githubApi);
+app.on(["GET", "POST", "PATCH"], "/github/api/*", pausable("github-proxy"), session, rateLimit("PROXY_BY_USER", byUser), githubApi);
 
-app.on(["GET", "POST"], "/github/git/*", session, rateLimit("PROXY_BY_USER", byUser), githubGit);
+app.on(["GET", "POST"], "/github/git/*", pausable("github-proxy"), session, rateLimit("PROXY_BY_USER", byUser), githubGit);
 
 // The router's table, for the admin app's architecture page (src/architecture.ts): every route, by method and template;
 // middleware (registered for every method) isn't a route.

@@ -16,6 +16,7 @@ import "@awesome.me/webawesome/dist/components/select/select.js";
 import "@awesome.me/webawesome/dist/components/option/option.js";
 import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
 import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
+import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js";
 import "theme/exceptions/account.css";
 import "theme/exceptions/admin.css";
@@ -27,15 +28,15 @@ import { loginOf } from "./logins";
 import { errorsPageFor } from "./errors";
 import { TimelinePage } from "./timeline";
 import { MailPage } from "./mail";
-import type { Maintenance } from "./maintenance";
-import { KillSwitch, MaintenanceBanner } from "./maintenance";
+import type { Maintenance, SwitchState } from "./maintenance";
+import { KillSwitch, MaintenanceBanner, PausedBanner, Switches } from "./maintenance";
 import { get, session, SIGNED_OUT, submit } from "./session";
 import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
 
 /** Your account (packages/account), through the admin API. */
 const ACCOUNT = { "get": get, "submit": submit, "loginOf": loginOf };
 
-interface Me { "user": string; "roles": string[]; "permissions": string[]; "maintenance": Maintenance }
+interface Me { "user": string; "roles": string[]; "permissions": string[]; "maintenance": Maintenance; "switches": SwitchState[] }
 
 /** Where the hash says we are: a page and its query. */
 function useRoute(): { "path": string; "query": URLSearchParams } {
@@ -146,7 +147,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 								: path === "/mail" ? <MailPage query={query} />
 								: path === "/errors" || path.startsWith("/errors/") ? errorsPageFor(path)
 									: path === "/account" ? <AccountPage api={ACCOUNT} />
-								: <Overview switch={me.permissions.includes("maintenance:switch") ? <KillSwitch maintenance={me.maintenance} /> : undefined} />;
+								: <Overview switch={me.permissions.includes("maintenance:switch") ? <><KillSwitch maintenance={me.maintenance} /><Switches switches={me.switches} /></> : undefined} />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "wa-link-plain active" : "wa-link-plain"}>{label}</a>;
 
 	useEffect(() => {
@@ -179,6 +180,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 			</nav>
 			<main class="wa-stack wa-gap-l">
 				<MaintenanceBanner maintenance={me.maintenance} canSwitch={me.permissions.includes("maintenance:switch")} />
+				<PausedBanner switches={me.switches} canSwitch={me.permissions.includes("maintenance:switch")} />
 				<Permissions.Provider value={me.permissions}>{page}</Permissions.Provider>
 			</main>
 		</wa-page>

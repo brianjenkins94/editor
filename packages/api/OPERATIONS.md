@@ -1,6 +1,6 @@
 # Operations: cost guard, kill switch, tripwire, session timelines, errors
 
-Status: **design, 2026-10-19; O1 to O7 built.** Decided with the owner the same day: session replay is an **event timeline** (no
+Status: **design, 2026-10-19; O1 to O8 built.** Decided with the owner the same day: session replay is an **event timeline** (no
 screen, no code, no keystrokes); the kill switch takes down **the API only**; runaway costs **email the owner and trip
 the switch automatically**, against a **$20 a day** budget.
 
@@ -235,6 +235,23 @@ Each lands green and is tried before the next.
     Without maps for the release it says so and shows the stack as it ran.
   - 1 test in test/session-events.test.ts (a map read by release and path; not kept, a path out of the release, not a
     map, and an editor sign-in: refused).
+- **O8 · narrower switches.** *Built 2026-10-19*, after O1–O7, on the owner's ask for LaunchDarkly-like switches
+  (src/maintenance.ts, `SWITCHES`; migrations/0018; the admin app's Overview and banners). One part of the API paused,
+  not all of it, by the kill switch's own mechanism: a `switches` row each (no row is on), read at most every 10 seconds
+  per isolate, open when unreadable, every flip audited (`switch_paused`, `switch_resumed`) and emailed however it was
+  made (a row changed straight in D1 is noticed as the kill switch's is). The first three, for the likeliest bad days:
+  - `sign-ups`: a first sign-in that would make an account, by email or GitHub, is refused (503, or GitHub's
+    `temporarily_unavailable` back to the app). By email it's told after the code, so asking says nothing about whose
+    addresses have accounts. Existing accounts sign in as usual.
+  - `email-codes`: `sendCode` sends nothing (503), whatever the code was for; the sign-in page stops offering email.
+    Two-factor by email can't finish meanwhile: the price of the switch.
+  - `github-proxy`: `/github/api/*` and `/github/git/*` refuse (503); `/status` lists it, and the editor goes to GitHub
+    directly (public repositories), as signed out.
+  - `POST /admin/switches` (`maintenance:switch`, the owner's), `/admin/me` lists each with what it pauses; a paused one
+    is a banner on every page with Resume, and the Overview has a card to pause one with a reason.
+  - Not yet: audiences (owners first, a percentage), editor features behind switches, the cost guard or tripwire
+    pausing a part instead of the whole API. Each would be another row in SWITCHES and its check.
+  - 3 tests in test/switches.test.ts (each switch end to end; the owner's only; the rest carries on).
 
 ## Open questions
 

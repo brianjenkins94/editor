@@ -98,7 +98,7 @@ test("the owner turns it on: the API is down for everyone else, the owner's way 
 	assert.equal(refused.headers.get("retry-after"), "300");
 	assert.equal((await viewer.call("GET", "/admin/me")).status, 503, "the admin API is the owner's only");
 	assert.equal((await browse(at("/auth/email"), { "method": "POST", "headers": { "content-type": "application/x-www-form-urlencoded" }, "body": "address=a%40example.com" })).status, 503);
-	assert.deepEqual(await (await browse(at("/status"))).json(), { "maintenance": true });
+	assert.deepEqual(await (await browse(at("/status"))).json(), { "maintenance": true, "paused": [] });
 	assert.equal((await browse(at("/health"))).status, 200);
 
 	// The editor can't even start a sign-in; the admin app can, by GitHub or a passkey only.

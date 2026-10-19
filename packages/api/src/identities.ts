@@ -35,6 +35,15 @@ export async function ownerOf(env: Bindings, provider: Provider, subject: string
 	return (await crossUser(env.DB, "whose is this identity: linking's conflict check, src/link.ts").prepare("SELECT user_id FROM identities WHERE provider = ? AND lower(subject) = lower(?)").bind(provider, subject).first<{ "user_id": string }>())?.user_id;
 }
 
+/** Whether a first sign-in with `subject` would make an account while new accounts are paused (the `sign-ups` switch,
+ *  src/maintenance.ts): paused, and the identity is nobody's yet. */
+export async function signUpPaused(env: Bindings, provider: Provider, subject: string): Promise<boolean> {
+	// Here, not above: Node tests import this module, and maintenance.ts imports mail.ts's templates.
+	const { isPaused } = await import("./maintenance.ts");
+
+	return await isPaused(env, "sign-ups") && await ownerOf(env, provider, subject) === undefined;
+}
+
 /**
  * The user `subject` belongs to, proven theirs just now (`verified_at` set): found, or a user made with it. Made in one
  * batch (a transaction), the user only if the identity is nobody's, so two first sign-ins at once make one user.

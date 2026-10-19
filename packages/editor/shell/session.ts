@@ -63,22 +63,29 @@ export async function signOut(): Promise<void> {
 	await client.signOut();
 }
 
-/** Whether GitHub is reached through the API's proxy: signed in, and the account is GitHub's. */
+/** The API's switches (packages/api/OPERATIONS.md: the kill switch, and the parts paused), from GET /status; as all on
+ *  when it can't be read. */
+async function status(): Promise<{ "maintenance": boolean; "paused": string[] }> {
+	const answer = await fetch(`${API}/status`).catch(() => undefined);
+	const read = answer?.ok === true ? await answer.json().catch(() => ({})) as { "maintenance"?: boolean; "paused"?: string[] } : {};
+
+	return { "maintenance": read.maintenance === true, "paused": Array.isArray(read.paused) ? read.paused : [] };
+}
+
+/** Whether GitHub is reached through the API's proxy: signed in, the account is GitHub's, and the proxy isn't paused. */
 export async function viaProxy(): Promise<boolean> {
 	try {
-		return isSignedIn() && (await account()).githubId !== null;
+		return isSignedIn() && (await account()).githubId !== null && !(await status()).paused.includes("github-proxy");
 	} catch {
 		// The API unreachable, or down for maintenance: GitHub as signed out, public repos.
 		return false;
 	}
 }
 
-/** Whether the API is down for maintenance (its kill switch: packages/api/OPERATIONS.md). Asked only when it matters:
- *  signed in, or about to offer a sign-in. */
+/** Whether the API is down for maintenance (its kill switch). Asked only when it matters: signed in, or about to offer
+ *  a sign-in. */
 export async function apiDown(): Promise<boolean> {
-	const answer = await fetch(`${API}/status`).catch(() => undefined);
-
-	return answer?.ok === true && (await answer.json() as { "maintenance"?: boolean }).maintenance === true;
+	return (await status()).maintenance;
 }
 
 /** The session timeline's events (shell/reporting.ts), signed in: best effort. */

@@ -13,7 +13,7 @@ import { repositoryTag } from "./behavior.ts";
 import { permissionsOf, requires, roles } from "./rbac.ts";
 import { adminSession } from "./tokens.ts";
 import { trafficEndpoint } from "./traffic.ts";
-import { down, maintenance, setMaintenance } from "./maintenance.ts";
+import { down, isSwitch, maintenance, setMaintenance, setSwitch, switches, SWITCHES } from "./maintenance.ts";
 import { spendEndpoint } from "./spend.ts";
 import { errorGroupEndpoint, errorOccurrenceEndpoint, errorsEndpoint, sourceMapEndpoint } from "./errors.ts";
 import { timelineEndpoint } from "./timeline.ts";
@@ -43,12 +43,28 @@ admin.use(async (context, next) => {
 	await next();
 });
 
-/** Who you are to the admin app: your user, roles and permissions, for it to draw itself; and the kill switch, with
- *  why and by whom. Any admin token may ask. */
+/** Who you are to the admin app: your user, roles and permissions, for it to draw itself; the kill switch, with why
+ *  and by whom; and the narrower switches, each with what it pauses and whether it is. Any admin token may ask. */
 admin.get("/me", async (context) => {
 	const held = await roles(context);
+	const paused = await switches(context.env);
 
-	return context.json({ "user": context.get("user"), "roles": held, "permissions": permissionsOf(held), "maintenance": await maintenance(context.env) });
+	return context.json({ "user": context.get("user"), "roles": held, "permissions": permissionsOf(held), "maintenance": await maintenance(context.env), "switches": Object.entries(SWITCHES).map(([name, { what, detail }]) => ({ "name": name, "what": what, "detail": detail, "paused": paused[name as keyof typeof SWITCHES] ?? null })) });
+});
+
+/** The narrower switches (src/maintenance.ts, O8): `name` one of SWITCHES, `turn` "pause" (with a `reason`) or
+ *  "resume". The owner's only, as the kill switch is. Answers the paused switches. */
+admin.post("/switches", requires("maintenance:switch"), async (context) => {
+	const form = await context.req.parseBody();
+	const name = typeof form["name"] === "string" ? form["name"] : "";
+	const turn = form["turn"];
+	const reason = typeof form["reason"] === "string" && form["reason"].trim() !== "" ? form["reason"].trim().slice(0, 200) : null;
+
+	if (!isSwitch(name) || (turn !== "pause" && turn !== "resume")) {
+		return context.json({ "error": "switch", "reason": "pause or resume one of the switches" }, 400);
+	}
+
+	return context.json({ "paused": await setSwitch(context.env, name, turn === "pause", reason, `user:${context.get("user")}`) });
 });
 
 /** The kill switch (OPERATIONS.md): `turn` "on" or "off", with a `reason` (on). The owner's only. */

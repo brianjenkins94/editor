@@ -10,6 +10,8 @@ import { tellOwner } from "./mail.ts";
  * API answers "Down for maintenance" before doing anything else, except what the owner needs to look and turn it off:
  * the admin app's sign-in by GitHub or a passkey, and /admin/* for the owner role (src/admin.ts).
  *
+ * Beside it, the narrower switches (SWITCHES, below): one part of the API paused rather than all of it.
+ *
  * Whoever flips it (the owner from the admin app, the cost guard, the tripwire, or `npm run maintenance` through
  * wrangler), the row records who and why, unnoticed; the first Worker to read it notices, once (a conditional update),
  * and audits the flip and emails the owner. So every flip is recorded the same way, however it was made.
@@ -82,6 +84,111 @@ export async function setMaintenance(env: Bindings, on: boolean, reason: string 
 
 	return maintenance(env);
 }
+
+// ── The narrower switches (OPERATIONS.md O8) ────────────────────────────────────────────────────────────────────────
+// One part of the API paused, not all of it: the same mechanism as the kill switch (a D1 row each, read at most every
+// 10 seconds per isolate, every flip audited and emailed however it was made, open when unreadable), for the likeliest
+// bad days. No row is on.
+
+/** Each switch: what it pauses, in the admin app's words, and what the public is told while it's paused. */
+export const SWITCHES = {
+	"sign-ups": { "what": "New accounts", "detail": "A first sign-in that would make an account is refused, by email or GitHub. Existing accounts sign in as usual.", "public": "New accounts are paused for now. If you already have one, sign in with it." },
+	"email-codes": { "what": "Emailed codes", "detail": "No code is emailed: signing in or resetting a password by email, linking an email, two-factor by email. The sign-in page stops offering email.", "public": "Emailed codes are paused for now. Sign in another way, or try again later." },
+	"github-proxy": { "what": "The GitHub proxy", "detail": "GitHub calls and cloning through the API are refused; the editor goes to GitHub directly instead, public repositories only.", "public": "Reaching GitHub through the API is paused for now." }
+} as const;
+
+export type Switch = keyof typeof SWITCHES;
+
+export const isSwitch = (name: string): name is Switch => Object.hasOwn(SWITCHES, name);
+
+export interface Paused { "reason": string | null; "by": string | null; "at": number }
+
+let switchesCached: { "paused": Partial<Record<Switch, Paused>>; "until": number } | undefined;
+
+/** A switch's flip just made: audited and the owner emailed, by the one reader whose conditional update marks it. */
+async function noticeSwitch(env: Bindings, row: { "name": Switch; "paused": number; "reason": string | null; "by": string | null; "at": number }): Promise<void> {
+	const marked = await env.DB.prepare("UPDATE switches SET noticed = 1 WHERE name = ? AND noticed = 0 AND at = ?").bind(row.name, row.at).run();
+
+	if (marked.meta.changes !== 1) {
+		return;
+	}
+
+	const user = row.by?.startsWith("user:") === true ? row.by.slice("user:".length) : undefined;
+	const { what, detail } = SWITCHES[row.name];
+
+	await audit(env, row.paused === 1 ? "switch_paused" : "switch_resumed", user === undefined ? {} : { "userId": user }, NOWHERE, { "reason": row.name, "detail": `by ${row.by ?? "unknown"}${row.reason === null ? "" : ` · ${row.reason}`}` });
+	await tellOwner(env, `${row.paused === 1 ? "Paused" : "Resumed"}: ${what}`, [
+		row.paused === 1 ? `${detail}` : `${what}: as usual again.`,
+		`Why: ${row.reason ?? "no reason given"}`,
+		`By: ${row.by ?? "unknown"}`,
+		row.paused === 1 ? "Resume it from the admin app's Overview." : ""
+	].filter((line) => line !== "").join("\n"));
+}
+
+/** The paused switches, as of at most 10 seconds ago; flips not yet noticed are noticed now. Unreadable: none paused. */
+export async function switches(env: Bindings): Promise<Partial<Record<Switch, Paused>>> {
+	const now = Date.now();
+
+	if (switchesCached !== undefined && switchesCached.until > now) {
+		return switchesCached.paused;
+	}
+
+	const rows = await env.DB.prepare("SELECT name, paused, reason, by, at, noticed FROM switches").all<{ "name": string; "paused": number; "reason": string | null; "by": string | null; "at": number; "noticed": number }>().then((read) => read.results, async (error: unknown) => {
+		const { log } = await import("./log.ts");
+
+		log.error("switches unreadable", { "error": error instanceof Error ? error.message : String(error) });
+
+		return [];
+	});
+	const paused: Partial<Record<Switch, Paused>> = {};
+
+	for (const row of rows) {
+		if (!isSwitch(row.name)) {
+			continue;
+		}
+
+		if (row.paused === 1) {
+			paused[row.name] = { "reason": row.reason, "by": row.by, "at": row.at };
+		}
+
+		if (row.noticed === 0) {
+			await noticeSwitch(env, { ...row, "name": row.name });
+		}
+	}
+
+	switchesCached = { "paused": paused, "until": now + TTL };
+
+	return paused;
+}
+
+/** Whether `name` is paused now. */
+export const isPaused = async (env: Bindings, name: Switch): Promise<boolean> => (await switches(env))[name] !== undefined;
+
+/** Pause or resume a switch: `by` as for the kill switch. Noticed at once here, seen everywhere within 10 seconds. */
+export async function setSwitch(env: Bindings, name: Switch, paused: boolean, reason: string | null, by: string): Promise<Partial<Record<Switch, Paused>>> {
+	await env.DB.prepare("INSERT INTO switches (name, paused, reason, by, at, noticed) VALUES (?, ?, ?, ?, ?, 0) ON CONFLICT (name) DO UPDATE SET paused = excluded.paused, reason = excluded.reason, by = excluded.by, at = excluded.at, noticed = 0").bind(name, paused ? 1 : 0, reason, by, Date.now()).run();
+	switchesCached = undefined;
+
+	return switches(env);
+}
+
+/** The answer while a switch is paused: 503, what the public is told, try again in five minutes. */
+export function paused(context: Context<AppEnv>, name: Switch): Response {
+	context.get("span").info("request refused", { "reason": `paused: ${name}` });
+	context.header("retry-after", "300");
+	context.header("cache-control", "no-store");
+
+	return context.json({ "error": "paused", "switch": name, "reason": SWITCHES[name].public }, 503);
+}
+
+/** A route that a switch pauses (the GitHub proxy's). */
+export const pausable = (name: Switch) => createMiddleware<AppEnv>(async (context, next) => {
+	if (await isPaused(context.env, name)) {
+		return paused(context, name);
+	}
+
+	await next();
+});
 
 /** The answer while it's on: 503, the public reason, try again in five minutes. */
 export function down(context: Context<AppEnv>): Response {

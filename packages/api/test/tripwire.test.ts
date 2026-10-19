@@ -85,7 +85,7 @@ test("a request that reads the canary's data: nothing answered, the user's sign-
 	assert.equal(answer.status, 500);
 	assert.deepEqual(await answer.json(), { "error": "internal" }, "nothing of what was read");
 	assert.equal((await other.call("GET", "/sessions")).status, 503, "the API is down for maintenance");
-	assert.deepEqual(await (await browse(at("/status"))).json(), { "maintenance": true });
+	assert.deepEqual(await (await browse(at("/status"))).json(), { "maintenance": true, "paused": [] });
 
 	const row = await env.DB.prepare("SELECT reason, detail FROM audit WHERE event = 'tripwire'").first<{ "reason": string; "detail": string }>();
 

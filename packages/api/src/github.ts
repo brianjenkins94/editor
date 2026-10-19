@@ -9,6 +9,8 @@ import { origin } from "./audit.ts";
 import { forgetAttempt, heldAttempt } from "./attempt.ts";
 import { oauthRefusal } from "./refusals.ts";
 import { isClient, pagesOf } from "./clients.ts";
+import { signUpPaused } from "./identities.ts";
+import { SWITCHES } from "./maintenance.ts";
 
 /**
  * Signing in with GitHub (README.md, "Tokens and the flow", steps 1–2). The app sends the browser to /auth/github/start
@@ -232,6 +234,13 @@ export async function callbackEndpoint(context: Context<AppEnv>): Promise<Respon
 		context.get("span").info("sign-in failed at GitHub", { "reason": user.failed });
 
 		return answer(context, request, { "error": "server_error" });
+	}
+
+	// New accounts paused (the `sign-ups` switch): a GitHub user who has none yet doesn't get one.
+	if (await signUpPaused(context.env, "github", String(user.id))) {
+		context.get("span").info("sign-in refused", { "reason": "paused: sign-ups" });
+
+		return answer(context, request, { "error": "temporarily_unavailable", "error_description": SWITCHES["sign-ups"].public });
 	}
 
 	const grant = context.env.GRANTS.get(context.env.GRANTS.newUniqueId());

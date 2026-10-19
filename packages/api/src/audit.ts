@@ -37,6 +37,7 @@ export type AuditEvent =
 	| "identity_linked" | "account_merged"
 	| "passkey_added" | "passkey_removed"
 	| "maintenance_on" | "maintenance_off"
+	| "switch_paused" | "switch_resumed"
 	| "spend_warning" | "spend_tripped" | "spend_unreadable" | "spend_blind"
 	| "tripwire" | "tripwire_report";
 

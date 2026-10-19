@@ -10,7 +10,7 @@ import { canSend } from "./mail.ts";
 import { nonce } from "./tokens.ts";
 import { oauthRefusal } from "./refusals.ts";
 import { CLIENTS, isClient, methodsOf, pagesOf } from "./clients.ts";
-import { maintenance } from "./maintenance.ts";
+import { isPaused, maintenance } from "./maintenance.ts";
 
 /**
  * Signing in through our own page (SIGN-IN.md, "The shape"):
@@ -142,7 +142,9 @@ export async function attemptEndpoint(context: Context<AppEnv>): Promise<Respons
 		return context.json({ "error": "no_attempt" }, 401);
 	}
 
-	const ready = (method: string): boolean => method !== "email" || (canSend(context.env) && context.env.CODE_KEY !== undefined);
+	// Email needs mail set up here, and emailed codes not paused (the `email-codes` switch, src/maintenance.ts).
+	const emailing = canSend(context.env) && context.env.CODE_KEY !== undefined && !await isPaused(context.env, "email-codes");
+	const ready = (method: string): boolean => method !== "email" || emailing;
 	// While the kill switch is on, only the owner's way back in: the admin client, by GitHub or a passkey (src/maintenance.ts).
 	const now = (await maintenance(context.env)).on ? (method: string): boolean => method === "github" || method === "passkey" : () => true;
 

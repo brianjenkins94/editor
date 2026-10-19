@@ -10,7 +10,8 @@ import ACTION_TEXT from "./action-code.txt";
 import CODE_HTML from "./email-code.html";
 import CODE_TEXT from "./email-code.txt";
 import { canSend, send } from "./mail.ts";
-import { userWith } from "./identities.ts";
+import { signUpPaused, userWith } from "./identities.ts";
+import { isPaused, SWITCHES } from "./maintenance.ts";
 import { hasMfa } from "./mfa-state.ts";
 import { heldAttempt } from "./attempt.ts";
 import { askSecondFactor, signInAs } from "./signin.ts";
@@ -51,7 +52,14 @@ export const codeHash = async (env: Bindings, bound: string, code: string): Prom
  * link (src/email-code.*); an action's (setting a password) has only the code (src/action-code.*). What stopped it, if
  * something did: an HTTP status, an error and a reason for the caller to refuse with.
  */
-export async function sendCode(context: Context<AppEnv>, address: string, code: string, purpose: { "kind": "sign-in" } | { "kind": "action"; "action": string }): Promise<{ "ok": true } | { "ok": false; "status": 429 | 502; "error": string; "reason": string }> {
+export async function sendCode(context: Context<AppEnv>, address: string, code: string, purpose: { "kind": "sign-in" } | { "kind": "action"; "action": string }): Promise<{ "ok": true } | { "ok": false; "status": 429 | 502 | 503; "error": string; "reason": string }> {
+	// Paused (the `email-codes` switch, src/maintenance.ts): no code goes out, whatever it was for.
+	if (await isPaused(context.env, "email-codes")) {
+		context.header("retry-after", "300");
+
+		return { "ok": false, "status": 503, "error": "paused", "reason": SWITCHES["email-codes"].public };
+	}
+
 	const tag = await keyed(context.env, "email", address.toLowerCase());
 	const now = Date.now();
 	const sent = await context.env.DB.prepare("SELECT COUNT(*) AS count, MAX(at) AS last FROM audit WHERE event = 'email_code_sent' AND detail = ? AND at > ?").bind(tag, now - 3_600_000).first<{ "count": number; "last": number | null }>();
@@ -168,6 +176,12 @@ export async function verifyEndpoint(context: Context<AppEnv>): Promise<Response
 
 	if ("reason" in confirmed) {
 		return refuse(context, confirmed.reason === "too many tries" ? 429 : 400, "code", confirmed.reason);
+	}
+
+	// New accounts paused (the `sign-ups` switch): an address that's nobody's yet doesn't become one. Told only now, after
+	// the code proved the address, so asking says nothing about whose addresses have accounts.
+	if (await signUpPaused(context.env, "email", confirmed.address)) {
+		return refuse(context, 503, "paused", SWITCHES["sign-ups"].public);
 	}
 
 	const user = await userOf(context.env, confirmed.address, Date.now());
