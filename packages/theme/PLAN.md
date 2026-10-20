@@ -42,7 +42,7 @@ connection types, not fewer.
 **What to take from it.** Make Web Awesome's tokens, components and utility classes the closed vocabulary. Make every
 step outside that vocabulary detectable, counted and budgeted. Lint the files that actually hold CSS.
 
-**Stitches stays.** The shell already has a CSS-in-JS layer: `@stitches/core`, set up in
+**Stitches stays** (and goes repo-wide, through `theme`: §7.5). The shell already has a CSS-in-JS layer: `@stitches/core`, set up in
 `editor/shared/theme.ts` (about 66 `css({…})` calls, almost all in `shell/`). Bamboo could replace it, but it would
 bring the Vite and native-binary requirements above with it. Stitches needs neither, so it stays as the shell's way
 to write the CSS that remains, on Web Awesome tokens. Two follow-ups:
@@ -421,7 +421,8 @@ measure the real work. The ESLint errors fail CI's `lint` (lib's `util-lint`). S
 
 ## 7. Confinement: all styling in this package
 
-The next goal (2026-10-20): every bit of styling lives in `theme`, and other packages use only what it exports. Web
+The next goal (2026-10-20): every bit of styling goes through `theme`, and other packages use only what it exports
+(its classes and recipes, the Web Awesome components it allows, and its Stitches instance, 7.5). Web
 Awesome is reached only through `theme` too, which makes it the place to curate the catalog and to add fragments of
 our own, so consistency of look and layout is enforced in practice and not only by review. Each step adds a lint rule
 that fails when styling turns up outside, so the confinement holds once it's reached.
@@ -431,8 +432,8 @@ Where it stands (2026-10-20):
 - **Stylesheets** are confined already. Every `.css` file the editor uses is in `src/exceptions/`, and
   `webawesome/no-css-imports` fails any other stylesheet import. The one stray is `packages/api/public/sign-in.css`
   (15 lines): the API doesn't depend on `theme` (§3).
-- **CSS-in-JS** isn't. Stitches is set up in `packages/editor/shared/theme.ts`, with about 70 `css()` calls in the
-  shell (`shell.tsx` 49, `shell-preview.ts` 10, `shell-dock.ts` 8, `preview-devtools.ts` 1).
+- **CSS-in-JS** isn't. Stitches is set up in `packages/editor/shared/theme.ts`, not `theme`, with about 70 `css()`
+  calls in the shell (`shell.tsx` 49, `shell-preview.ts` 10, `shell-dock.ts` 8, `preview-devtools.ts` 1).
 - **Web Awesome** is imported directly by 16 files outside `theme`, for 19 components: badge, button, button-group,
   callout, card, checkbox, dialog, divider, dropdown, dropdown-item, input, option, page, progress-bar,
   relative-time, select, spinner, tag, textarea. The most used tags are `wa-button` (79), `wa-callout` (37),
@@ -515,26 +516,38 @@ elements: code uses what `theme` exports and nothing else.
   decides what it means (the pane and the event sheet's grid already do). Every other inline style stays an error,
   so `no-inline-styles` needs no disables for geometry.
 
-### 7.5 The shell's styles: Stitches, inside `theme`
+### 7.5 Stitches, repo-wide, through `theme`
 
-The about 70 Stitches `css()` calls are the last styling outside `theme`. Decided 2026-10-20: Stitches stays where it
-helps, as `theme`'s own tool. `theme` uses it to generate classes (typed names, and variants next to their
-definitions) and exports them by name; importers never know how they're made. The shell's `css()` calls move into
-`theme` (with `shared/theme.ts`'s setup), and a rule fails a `@stitches/core` import or a `css()` call outside
-`theme`.
+Decided 2026-10-20: Stitches is adopted repo-wide, wherever it helps (its variants, compound variants, token scales,
+utils, `keyframes` and `globalCss`), not only in `theme`. What's confined is its setup: `theme` exports the one
+configured instance (today's `packages/editor/shared/theme.ts`, its tokens all `--wa-*`), so every `css()` call in
+the repo shares one token map and one place to change it.
 
-- Where it helps is the question for each recipe or style: one with variants or typed names is a Stitches export, one
-  a plain class covers stays in a sheet. Recipes (7.3) can be either; to a consumer both are a class name.
-- `css-in-js-tokens` keeps holding its values to the tokens, now inside `theme`.
-- Considered and not taken: dropping Stitches, so the shell is written as everything else is (Web Awesome, recipes and
-  an exception sheet) with one way to write CSS.
+- A rule fails a `@stitches/core` import outside `theme`: one instance, not one per package.
+- `css-in-js-tokens` holds every `css()` / `globalCss()` / `keyframes()` call to the tokens, wherever it is, reading
+  calls on `theme`'s instance instead of `shared/theme`'s.
+- So 7's contract becomes "styling goes through what `theme` exports": its classes and recipes, the Web Awesome
+  components it allows, and its Stitches instance. `.css` files stay confined to `theme` (7.1).
+- Recipes (7.3) with variants are a natural Stitches export: a toolbar or a section caption with its sizes and tones
+  as variants, one class to a consumer.
+- Two things to settle in a spike before it spreads:
+  - **Cascade layers.** `@stitches/core` inserts its rules unlayered (it has no `@layer` support), so a Stitches class
+    outranks every Web Awesome layer and the `app`-layered sheets alike. That's usually the wanted result, but
+    `css/use-layers` can't hold it, so precedence follows two systems. Find out whether its output can be put in a
+    layer, or decide that Stitches is the top of the cascade.
+  - **Other documents.** It injects into the `document.head` of the realm that loads it. A webview's policy allows
+    that (`style-src 'unsafe-inline'`). VS Code's auxiliary windows copy the workbench's stylesheets, and whether
+    that includes rules Stitches inserted (`insertRule`, not text) needs checking before the workbench uses it.
+- It's finished, not maintained: 1.2.8 (May 2023) is its last release. It's small and has no dependencies, so it's a
+  risk to watch, not a blocker; pin it rather than `latest`.
 
 ### 7.6 The budget
 
 §4.5's two numbers, once everything they count is in one package: exception declarations (518 today, in 11 sheets)
 and `webawesome/*` disables (39 lines today), both allowed only to go down, held in a committed file that a raise has to edit, as
-`test/performance.mjs` holds the performance budgets. Stitches stays (7.5), so its `css()` declarations count with the
-sheets (`css-in-js-tokens` already reads them): moving a style from a sheet into Stitches can't hide it.
+`test/performance.mjs` holds the performance budgets. Stitches is repo-wide (7.5), so every `css()` declaration
+counts with the sheets, wherever it is (`css-in-js-tokens` already reads them): moving a style from a sheet into
+Stitches can't hide it.
 
 ### 7.7 Documents outside the rule
 
@@ -550,7 +563,8 @@ Each needs either `theme` as a dependency or a declared exemption:
 2. Web Awesome only through `theme`, and the tag allowlist (7.2).
 3. Recipes, from the duplication above (7.3).
 4. `known-classes` (7.4).
-5. The shell's styles into `theme`, as Stitches exports (7.5).
+5. Stitches through `theme` (7.5): the spike on layers and auxiliary windows, then `theme` exports the instance and
+   the shell imports it from there.
 6. The budget (7.6).
 
 ## Open questions
