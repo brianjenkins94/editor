@@ -93,7 +93,7 @@
         {
           "if": "${{ failure() }}",
           "uses": "actions/upload-artifact@v4",
-          "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json", "if-no-files-found": "ignore" }
+          "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json\n/tmp/architecture-*.png", "if-no-files-found": "ignore" }
         }
       ],
       "timeout-minutes": 15

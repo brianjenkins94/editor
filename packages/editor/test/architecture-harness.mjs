@@ -115,6 +115,37 @@ export async function globalTeardown() {
 	}
 }
 
+/**
+ * What a session that didn't boot was showing, kept as `architecture-boot-<time>.json` / `.png` in the temp folder (CI
+ * uploads its `architecture-*` files when a run fails): every frame (its URL, how far it got, its first text, and whether
+ * it's the workbench with its architecture view up), the service worker as Playwright and as the page see it, what the
+ * page printed last, and a screenshot. Returns a few lines saying the same, for the error.
+ */
+async function bootDiagnostics(context, page, printed, missing) {
+	const file = path.join(fs.tmpdir(), `architecture-boot-${Date.now()}`);
+	const inFrame = async (frame, read) => frame.evaluate(read).catch((error) => ({ "unreadable": error.message.split("\n")[0] }));
+	const frames = await Promise.all(page.frames().map(async (frame) => ({
+		"url": frame.url(),
+		"detached": frame.isDetached(),
+		"state": await inFrame(frame, () => ({ "readyState": document.readyState, "crossOriginIsolated": globalThis.crossOriginIsolated, "architecture": globalThis.__architecture !== undefined, "text": document.body?.innerText.trim().slice(0, 300) ?? null }))
+	})));
+	const serviceWorker = await inFrame(page.mainFrame(), async () => ({
+		"controller": navigator.serviceWorker?.controller?.scriptURL ?? null,
+		"registrations": (await navigator.serviceWorker?.getRegistrations() ?? []).map((registration) => ({ "scope": registration.scope, "active": registration.active?.state ?? null, "installing": registration.installing?.state ?? null, "waiting": registration.waiting?.state ?? null }))
+	}));
+	const report = { "missing": missing, "url": page.url(), "workers": context.serviceWorkers().map((worker) => worker.url()), "serviceWorker": serviceWorker, "frames": frames, "printed": printed.slice(-60) };
+
+	fs.writeFileSync(file + ".json", JSON.stringify(report, null, "\t"));
+	await page.screenshot({ "path": file + ".png" }).catch(() => undefined);
+
+	return [
+		`Diagnostics: ${file}.json (and .png)`,
+		`service worker: ${JSON.stringify(serviceWorker)} (Playwright sees ${report.workers.length === 0 ? "none" : report.workers.join(", ")})`,
+		...frames.map((frame) => `frame ${frame.url || "(no url)"}${frame.detached ? " (detached)" : ""}: ${JSON.stringify(frame.state)}`),
+		...printed.length === 0 ? ["the page printed nothing"] : ["the page's last lines:", ...printed.slice(-8).map((line) => "  " + line.slice(0, 300))]
+	].join("\n");
+}
+
 // ── the session ───────────────────────────────────────────────────────────────────────────────────────────────
 
 export async function startSession(options = {}) {
@@ -323,9 +354,10 @@ export async function startSession(options = {}) {
 		} catch {
 			const missing = BOOT_REALMS.filter((id) => snapshot === undefined || !alive(id)(snapshot));
 			const errors = [...new Set(pageErrors)].slice(-8);
+			const diagnostics = await bootDiagnostics(context, page, printed, missing).catch((error) => `(no diagnostics: ${error.message})`);
 
 			await shutdown();
-			throw new Error(`The editor didn't boot in ${BOOT_TIMEOUT_MS / 1000} s: ${missing.join(", ")} never came up.` + (errors.length === 0 ? "" : "\nThe page's errors:\n  " + errors.join("\n  ")));
+			throw new Error(`The editor didn't boot in ${BOOT_TIMEOUT_MS / 1000} s: ${missing.join(", ")} never came up.` + (errors.length === 0 ? "" : "\nThe page's errors:\n  " + errors.join("\n  ")) + "\n" + diagnostics);
 		}
 	}
 
