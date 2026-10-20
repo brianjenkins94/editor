@@ -15,10 +15,10 @@ import type { DiffRowInfo } from "./git-codehike";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { Fragment, render } from "preact";
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
-import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
-import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/badge/badge.js";
+import "theme/components/checkbox";
+import "theme/components/textarea";
+import "theme/components/button";
+import "theme/components/badge";
 // The theme (Web Awesome's layer order among it) first, so git-panel.css's `@layer app` is declared after it (the shell
 // imports this module before it imports the theme itself).
 import "theme/chrome";

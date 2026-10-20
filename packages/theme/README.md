@@ -52,6 +52,13 @@ The call also keeps the element's `wa-dark` / `wa-light` class in step with VS C
 components there follow a theme switch live. [PLAN.md](PLAN.md) has the design and the plan for the rest of the
 custom CSS.
 
+## Components: `theme/components/*`
+
+The Web Awesome components the app may use, one module each: importing `theme/components/button` registers
+`<wa-button>`, and `import type WaButton from "theme/components/button"` is its type. Code reaches Web Awesome only
+through this package (`webawesome/through-theme`), and uses only the components here (`webawesome/known-components`):
+to allow another, add `src/components/<name>.js` and `.d.ts`, each a one-line re-export.
+
 ## What's left: `theme/exceptions/*`
 
 The custom CSS that Web Awesome doesn't cover yet, one file per surface: the only stylesheets code may import

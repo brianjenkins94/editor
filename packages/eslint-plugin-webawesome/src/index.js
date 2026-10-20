@@ -28,6 +28,10 @@
  *   • css-no-vscode-variables — a `var(--vscode-*)`: VS Code's theme is read through theme/vscode's mapping only.
  *   • css-no-wa-selectors     — selecting a `wa-*` component, its `::part()`, or a `.wa-*` class of our own.
  *   • css-only-in-theme       — a stylesheet outside the theme package (enabled for the files that aren't in it).
+ *
+ * And Web Awesome through the theme package (packages/theme/PLAN.md §7.2):
+ *   • through-theme    — importing Web Awesome itself, not the theme's re-export (theme/components/<name>, theme, …).
+ *   • known-components — a `wa-*` component the theme doesn't export, in JSX or given to a create call.
  * Layers and `!important` are the CSS language's own rules (css/use-layers, css/no-important).
  */
 
@@ -849,6 +853,85 @@ const cssOnlyInTheme = {
 	}
 };
 
+// --- Web Awesome through the theme package (packages/theme/PLAN.md §7.2): it re-exports the components the app may
+//     use (theme/components/<name>) and the styles (theme, theme/chrome, theme/vscode). ---
+
+/** The theme package's way in to `source`, a Web Awesome module. */
+function throughThemeFor(source) {
+	const component = /\/dist\/components\/([a-z-]+)\//u.exec(source);
+
+	return component === null ? "theme, theme/chrome or theme/vscode (for its styles)" : `theme/components/${component[1]}`;
+}
+
+const throughTheme = {
+	"meta": {
+		"type": "problem",
+		"docs": { "description": "Reach Web Awesome only through the theme package, which re-exports what the app may use: theme/components/<name> for a component, theme / theme/chrome / theme/vscode for its styles." },
+		"messages": { "direct": "`{{source}}` is Web Awesome itself — import {{instead}} instead: the theme package is the only way in to it (packages/theme/PLAN.md §7.2)." },
+		"schema": []
+	},
+	"create": function(context) {
+		function check(node, source) {
+			if (source?.type === "Literal" && typeof source.value === "string" && /^@awesome\.me\/webawesome(?:\/|$)/u.test(source.value)) {
+				context.report({ "node": source, "messageId": "direct", "data": { "source": source.value, "instead": throughThemeFor(source.value) } });
+			}
+		}
+
+		return {
+			"ImportDeclaration": (node) => check(node, node.source),
+			"ImportExpression": (node) => check(node, node.source),
+			"ExportNamedDeclaration": (node) => check(node, node.source),
+			"ExportAllDeclaration": (node) => check(node, node.source)
+		};
+	}
+};
+
+const knownComponents = {
+	"meta": {
+		"type": "problem",
+		"docs": { "description": "Use only the Web Awesome components the theme package exports (its curated catalog): a `wa-*` component in JSX or given to a create call (createElement, or a wrapper's) must be one of them. Custom elements are global, so an import rule alone can't stop a tag from being used." },
+		"messages": { "unknown": "`{{tag}}` isn't one of the Web Awesome components the theme exports — use one that is, or add packages/theme/src/components/{{name}}.js (and .d.ts) to allow it." },
+		"schema": [{
+			"type": "object",
+			"properties": {
+				"allowed": { "type": "array", "items": { "type": "string" } },
+				"catalog": { "type": "array", "items": { "type": "string" } }
+			},
+			"required": ["allowed", "catalog"],
+			"additionalProperties": false
+		}]
+	},
+	"create": function(context) {
+		// `allowed`: the components the theme exports; `catalog`: every Web Awesome component (so a utility class like
+		// `wa-dark` given to classList.add isn't mistaken for one). Both by name, without `wa-`.
+		const allowed = new Set(context.options[0].allowed);
+		const catalog = new Set(context.options[0].catalog);
+
+		function check(node, tag) {
+			const name = tag.slice("wa-".length);
+
+			if (tag.startsWith("wa-") && catalog.has(name) && !allowed.has(name)) {
+				context.report({ "node": node, "messageId": "unknown", "data": { "tag": tag, "name": name } });
+			}
+		}
+
+		return {
+			"JSXOpeningElement": function(node) {
+				if (node.name.type === "JSXIdentifier") {
+					check(node.name, node.name.name);
+				}
+			},
+			"CallExpression": function(node) {
+				const [first] = node.arguments;
+
+				if (first?.type === "Literal" && typeof first.value === "string") {
+					check(first, first.value);
+				}
+			}
+		};
+	}
+};
+
 export default {
 	"meta": { "name": "eslint-plugin-webawesome", "version": "0.0.0" },
 	"rules": {
@@ -862,6 +945,8 @@ export default {
 		"css-tokens": cssTokens,
 		"css-no-vscode-variables": cssNoVscodeVariables,
 		"css-no-wa-selectors": cssNoWebAwesomeSelectors,
-		"css-only-in-theme": cssOnlyInTheme
+		"css-only-in-theme": cssOnlyInTheme,
+		"through-theme": throughTheme,
+		"known-components": knownComponents
 	}
 };

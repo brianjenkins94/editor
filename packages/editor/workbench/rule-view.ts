@@ -19,8 +19,8 @@ import { catalogOf, describeRule, startingRule, verdictOf, withVariables } from 
 import { registerCustomView, ViewContainerLocation, viewContainerRegistry } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "theme/exceptions/rule-view.css?raw";
 import { ruleEditor } from "./rule-editor";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/card/card.js";
+import "theme/components/button";
+import "theme/components/card";
 
 /** The edit shown: its request, and how it's answered. */
 interface Pending { "request": EditRequest; "answer": (answer: EditAnswer) => void }

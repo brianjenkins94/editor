@@ -3,9 +3,9 @@
  * Your account, in a dialog over the editor (packages/account, the admin app's page too): how you sign in, a password,
  * two-factor. Loaded only when opened, so its QR code renderer stays out of the shell's bundle.
  */
-import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
-import "@awesome.me/webawesome/dist/components/callout/callout.js";
-import "@awesome.me/webawesome/dist/components/spinner/spinner.js";
+import "theme/components/dialog";
+import "theme/components/callout";
+import "theme/components/spinner";
 import "theme/exceptions/account.css";
 import { AccountPage } from "account";
 import { accountApi } from "./session";

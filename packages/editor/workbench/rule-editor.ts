@@ -14,19 +14,19 @@
  * in the Rule view (rule-view.ts); a rule as a sentence and what it would do are editor-api's (`./rules`), which the
  * capabilities extension's Rules tree shares.
  */
-import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
-import type WaInput from "@awesome.me/webawesome/dist/components/input/input.js";
 import type { RuleCatalog } from "@brianjenkins94/editor-api/rules";
 import type { Action, Comparison, Compound, Predicate, Rule, Schema } from "@brianjenkins94/util/silo/policy";
+import type WaButton from "theme/components/button";
+import type WaInput from "theme/components/input";
 import { joinCommandLine, sayPlace } from "@brianjenkins94/editor-api/rules";
 import css from "theme/exceptions/rule-editor.css?raw";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
-import "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
-import "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
-import "@awesome.me/webawesome/dist/components/input/input.js";
-import "@awesome.me/webawesome/dist/components/option/option.js";
-import "@awesome.me/webawesome/dist/components/select/select.js";
+import "theme/components/button";
+import "theme/components/checkbox";
+import "theme/components/dropdown";
+import "theme/components/dropdown-item";
+import "theme/components/input";
+import "theme/components/option";
+import "theme/components/select";
 
 export interface RuleEditorOptions {
 	"catalog": RuleCatalog;

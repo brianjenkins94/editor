@@ -1,6 +1,14 @@
 import { readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import * as path from "node:path";
 import config from "@brianjenkins94/util/eslint";
 import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
+
+// The Web Awesome components the app may use: what the theme package re-exports (packages/theme/src/components/, its
+// curated catalog, PLAN.md §7.2), and Web Awesome's whole catalog, so webawesome/known-components tells a component's tag
+// from a utility class. (Web Awesome resolved as the editor's code resolves it.)
+const THEME_COMPONENTS = readdirSync(new URL("packages/theme/src/components", import.meta.url)).filter((file) => file.endsWith(".js")).map((file) => file.slice(0, -".js".length));
+const WEB_AWESOME_COMPONENTS = readdirSync(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js"))));
 
 // The editor's folders are its realms (packages/editor/ARCHITECTURE.md): a realm imports another realm's code only
 // through shared/. A relative import that climbs out of its folder and into another realm's is an error. The
@@ -54,8 +62,17 @@ export default [
 			"webawesome/no-inline-styles": "error",
 			"webawesome/prefer-components-wrapped": "error",
 			"webawesome/no-css-imports": "error",
-			"webawesome/css-in-js-tokens": "error"
+			"webawesome/css-in-js-tokens": "error",
+			"webawesome/through-theme": "error",
+			"webawesome/known-components": ["error", { "allowed": THEME_COMPONENTS, "catalog": WEB_AWESOME_COMPONENTS }]
 		}
+	},
+	{
+		// The ways in to Web Awesome that aren't the theme's re-exports: the theme itself; the API's sign-in pages, which
+		// bundle Web Awesome themselves (the api doesn't depend on theme: PLAN.md §7.7); and this plugin, whose maps name
+		// Web Awesome's components as data.
+		"files": ["packages/theme/**", "packages/api/scripts/webawesome.ts", "packages/eslint-plugin-webawesome/**"],
+		"rules": { "webawesome/through-theme": "off", "webawesome/known-components": "off" }
 	},
 	{
 		// The theme package is where the stylesheets live: it adopts its own and Web Awesome's.

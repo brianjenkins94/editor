@@ -9,10 +9,10 @@
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
-import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
-import type WaDropdownItem from "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
 import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup, PaneItem, PaneViewDeclaration } from "@brianjenkins94/editor-api/pane";
 import type { PaneMark as FrameMark, PaneEntry, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
+import type WaButton from "theme/components/button";
+import type WaDropdownItem from "theme/components/dropdown-item";
 import type * as vscodeApi from "vscode";
 import type { NativeDrawing } from "./pane-native";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
@@ -21,11 +21,11 @@ import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, 
 import marginCss from "theme/exceptions/margin.css?raw";
 import css from "theme/exceptions/pane-views.css?raw";
 import { installNativeFace } from "./pane-native";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/button-group/button-group.js";
-import "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
-import "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
-import "@awesome.me/webawesome/dist/components/input/input.js";
+import "theme/components/button";
+import "theme/components/button-group";
+import "theme/components/dropdown";
+import "theme/components/dropdown-item";
+import "theme/components/input";
 
 /** The Margin (the margin extension's): the view shown first, and the one shown until another is chosen. */
 const MARGIN = "margin";

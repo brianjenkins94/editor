@@ -34,13 +34,13 @@ import type { Reporting } from "./reporting";
 import type { Session } from "./session";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
-import "@awesome.me/webawesome/dist/components/page/page.js";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/callout/callout.js";
-import "@awesome.me/webawesome/dist/components/card/card.js";
-import "@awesome.me/webawesome/dist/components/divider/divider.js";
-import "@awesome.me/webawesome/dist/components/input/input.js";
-import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
+import "theme/components/page";
+import "theme/components/button";
+import "theme/components/callout";
+import "theme/components/card";
+import "theme/components/divider";
+import "theme/components/input";
+import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
 
 // The GitHub data plane's logger — spans + records federate to the `$sys.log.>` observability plane (debug-mcp).

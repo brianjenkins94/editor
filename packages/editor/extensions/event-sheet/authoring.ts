@@ -5,14 +5,14 @@
  * VENDORS the whole game into the game dir (the user owns every file); the Map face re-projects it and, if a dev server is
  * running, HMR shows it run. The model + generator underneath are the real foundation; this is the tactile surface.
  */
-import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
+import type WaButton from "theme/components/button";
 import type { AuthoredGame } from "./generator";
 import type { Rule } from "./rules";
 import type { EventSheetHost } from "./view";
 import { generateGame, libraryComponents, objectPresets, spriteDataUrls } from "./generator";
 import { builtinBehaviors } from "./rules";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/tag/tag.js";
+import "theme/components/button";
+import "theme/components/tag";
 
 /** Capitalize the first letter (for auto-naming generated rules). */
 function capitalize(text: string): string {

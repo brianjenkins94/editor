@@ -4,20 +4,20 @@
  * app shell (`<wa-page>`, its navigation in one slot) with the pages in views.tsx, by the address's hash.
  */
 import "theme";
-import "@awesome.me/webawesome/dist/components/page/page.js";
-import "@awesome.me/webawesome/dist/components/card/card.js";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/badge/badge.js";
-import "@awesome.me/webawesome/dist/components/callout/callout.js";
-import "@awesome.me/webawesome/dist/components/spinner/spinner.js";
-import "@awesome.me/webawesome/dist/components/input/input.js";
-import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
-import "@awesome.me/webawesome/dist/components/select/select.js";
-import "@awesome.me/webawesome/dist/components/option/option.js";
-import "@awesome.me/webawesome/dist/components/relative-time/relative-time.js";
-import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
-import "@awesome.me/webawesome/dist/components/divider/divider.js";
-import "@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js";
+import "theme/components/page";
+import "theme/components/card";
+import "theme/components/button";
+import "theme/components/badge";
+import "theme/components/callout";
+import "theme/components/spinner";
+import "theme/components/input";
+import "theme/components/checkbox";
+import "theme/components/select";
+import "theme/components/option";
+import "theme/components/relative-time";
+import "theme/components/dialog";
+import "theme/components/divider";
+import "theme/components/progress-bar";
 import "theme/exceptions/account.css";
 import "theme/exceptions/admin.css";
 import { AccountPage } from "account";

@@ -8,21 +8,21 @@
  * classes, whose tokens theme/vscode maps onto the VS Code theme; only the diagram, the canvas layout and a few table
  * and log details are our own CSS (theme/exceptions/architecture-view.css).
  */
-import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
+import type WaButton from "theme/components/button";
 import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture-model";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import css from "theme/exceptions/architecture-view.css?raw";
 import { appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, DYNAMIC_PREFIXES, dynamicContainer, hubLinks, nodeSpec, subjectOfLabel } from "../shared/architecture-model";
 import { windowTitle } from "../shared/virtual-path";
-import "@awesome.me/webawesome/dist/components/badge/badge.js";
-import "@awesome.me/webawesome/dist/components/button/button.js";
-import "@awesome.me/webawesome/dist/components/input/input.js";
-import "@awesome.me/webawesome/dist/components/option/option.js";
-import "@awesome.me/webawesome/dist/components/select/select.js";
-import "@awesome.me/webawesome/dist/components/tag/tag.js";
+import "theme/components/badge";
+import "theme/components/button";
+import "theme/components/input";
+import "theme/components/option";
+import "theme/components/select";
+import "theme/components/tag";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_HEIGHT = 44;

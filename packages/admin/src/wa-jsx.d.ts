@@ -21,7 +21,6 @@ declare module "preact" {
 			"wa-select": WaAttributes;
 			"wa-option": WaAttributes;
 			"wa-relative-time": WaAttributes;
-			"wa-format-date": WaAttributes;
 			"wa-divider": WaAttributes;
 			"wa-dialog": WaAttributes;
 			"wa-progress-bar": WaAttributes;

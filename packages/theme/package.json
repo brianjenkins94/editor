@@ -1,7 +1,7 @@
 {
   "name": "theme",
   "version": "0.0.0",
-  "description": "The app's theme: (theme, and theme/chrome without Web Awesome's native styles) Web Awesome set up with its --wa-* design tokens retoned for the brand, following the system's light/dark mode, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, and (theme/exceptions/*) the custom CSS that's left, each file a named exception (PLAN.md).",
+  "description": "The app's theme: (theme, and theme/chrome without Web Awesome's native styles) Web Awesome set up with its --wa-* design tokens retoned for the brand, following the system's light/dark mode, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, (theme/components/*) the Web Awesome components the app may use, the only way in to them, and (theme/exceptions/*) the custom CSS that's left, each file a named exception (PLAN.md).",
   "type": "module",
   "exports": {
     ".": "./src/index.js",
@@ -12,6 +12,10 @@
       "default": "./src/vscode.js"
     },
     "./vscode.css": "./src/vscode.css",
+    "./components/*": {
+      "types": "./src/components/*.d.ts",
+      "default": "./src/components/*.js"
+    },
     "./exceptions/*": "./src/exceptions/*"
   },
   "files": [

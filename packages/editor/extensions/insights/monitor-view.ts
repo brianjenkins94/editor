@@ -5,7 +5,7 @@
  */
 import css from "theme/exceptions/insights-monitor.css?raw";
 import { followVsCodeTheme } from "theme/vscode";
-import "@awesome.me/webawesome/dist/components/card/card.js";
+import "theme/components/card";
 
 /** `source:name` → [t, value] points, oldest first (monitor.ts keeps them). */
 export type Series = Record<string, [number, number][]>;

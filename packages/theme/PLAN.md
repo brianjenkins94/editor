@@ -488,6 +488,32 @@ As built:
 
 ### 7.2 Web Awesome only through `theme`, and a tag allowlist
 
+Done 2026-10-20. As built:
+
+- `src/components/<name>.js` re-exports Web Awesome's component (importing it registers the element) and
+  `<name>.d.ts` its type, for the 19 the app uses: badge, button, button-group, callout, card, checkbox, dialog, divider,
+  dropdown, dropdown-item, input, option, page, progress-bar, relative-time, select, spinner, tag, textarea.
+  `package.json` exports them as `theme/components/*`. One module per component, so a document still loads only what
+  it uses. The 59 imports in the editor and admin are on them now, types included (`import type WaButton from
+  "theme/components/button"`).
+- `webawesome/through-theme` fails any `@awesome.me/webawesome` import (static, dynamic, or a re-export) outside `theme`,
+  naming the theme's way in. Exempt: `theme` itself, the API's sign-in bundler (`packages/api/scripts/webawesome.ts`,
+  §7.7) and the lint plugin, whose maps name components as data.
+- `webawesome/known-components` fails a `wa-*` component in JSX or given to a call (`createElement`, or a wrapper like
+  the rule editor's `element("wa-select", …)`) that `theme` doesn't export. Its two lists come from folders in
+  `eslint.config.js`: what `src/components/` holds (the allowlist), and Web Awesome's own `dist/components/` (the
+  catalog, so `classList.add("wa-dark")` isn't mistaken for a component). Adding a component is a file in
+  `src/components/`, visible in review.
+- The JSX typings (`packages/editor/wa-jsx.d.ts`, `packages/admin/src/wa-jsx.d.ts`) list only exported components now, so
+  TypeScript rejects the others in JSX too. They dropped `wa-icon`, `wa-tooltip`, `wa-drawer` and `wa-format-date`,
+  which nothing registered.
+- **Changed from the plan above:** Web Awesome stays a *peer* dependency of `theme`, not its own, and the consumers keep
+  theirs. A peer resolves to the consumer's copy, which is exactly "one copy", and it needs no reinstall. The
+  `resolve.dedupe` entries stay too: `packages/theme/node_modules` still has a stale 3.12 that `src/components/`'s
+  imports would otherwise find.
+- Checked: planted violations of both rules are caught (and a utility class and an exported tag aren't); ESLint 0
+  errors; tsc's errors file for file what they were; the architecture suites pass (97); the admin app builds.
+
 - `theme` re-exports each component it allows as `theme/components/<name>`: the side-effect registration and its
   types (`import type WaButton from "theme/components/button"`). Web Awesome becomes `theme`'s own dependency, and a
   plugin rule fails any `@awesome.me/webawesome` import outside `theme`. It's a plugin rule, not a
@@ -582,7 +608,7 @@ Each needs either `theme` as a dependency or a declared exemption:
 ### 7.8 Order
 
 1. ~~The CSS rules into ESLint, in lib, with the no-CSS-outside-`theme` rule (7.1).~~ Done 2026-10-20.
-2. Web Awesome only through `theme`, and the tag allowlist (7.2).
+2. ~~Web Awesome only through `theme`, and the tag allowlist (7.2).~~ Done 2026-10-20.
 3. Recipes, from the duplication above (7.3).
 4. `known-classes` (7.4).
 5. Stitches through `theme` (7.5): the spike on layers and auxiliary windows, then `theme` exports the instance and
