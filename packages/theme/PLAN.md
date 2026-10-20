@@ -14,7 +14,9 @@ Status (2026-10-19):
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry (§3) is built: admin takes `theme`, the shell `theme/chrome` (no native styles), and the
   shell's Stitches `css({…})` is on `--wa-*` tokens (§1). The event sheet's webview takes `theme/vscode` too, and its
-  inline styles are gone (§5 step 4). The budget (4.5) isn't built yet.
+  inline styles are gone (§5 step 4), and so is the insights monitor's page CSS (§6). The budget (4.5) isn't built
+  yet.
+- Next (2026-10-20): confinement, all styling in this package and Web Awesome only through it ([§7](#7-confinement-all-styling-in-this-package)).
 
 ## 1. bamboocss: borrow the ideas, don't adopt the library
 
@@ -157,7 +159,8 @@ In priority order. Each step closes one of the gaps above.
 1. **Only `theme` and `@awesome.me/webawesome` may be imported as CSS.** Add a `no-restricted-imports` pattern for
    `*.css` everywhere else. This is the strongest single rule: a feature can't ship its own stylesheet without an
    explicit exception.
-2. **Stylelint for every `.css` file that remains** (new dependency; check the 7-day CI cooldown):
+2. **Stylelint for every `.css` file that remains** (new dependency; check the 7-day CI cooldown; moving into ESLint,
+   §7.1):
    - Colors, lengths, font sizes, radii and shadows must be `var(--wa-*)`
      (`stylelint-declaration-strict-value`). This is the equivalent of Bamboo's `prefer-token` /
      `no-hardcoded-color`. `webawesome/css-in-js-tokens` holds Stitches' `css({…})` to the same tokens (§1).
@@ -193,11 +196,13 @@ In priority order. Each step closes one of the gaps above.
    The `theme` entry for the shell, admin and account, which replaces their separate setups, is built too (§3).
 2. ~~Lint gaps 4.1–4.3 as errors, and the ESLint violations they report fixed.~~ Done 2026-10-19 (§6). ~~Then the
    stylelint errors in `src/exceptions/` (735), shrinking each file by replacing what Web Awesome covers.~~ Done
-   2026-10-19: every file is at zero (§6). Left: wiring stylelint into CI, a lib change (§6).
+   2026-10-19: every file is at zero (§6). Left: getting CSS checked in CI, by moving the rules into ESLint in lib
+   (§7.1).
 3. ~~Convert the biggest file first: `architecture-view`, then `rule-editor`, then admin.~~ Done 2026-10-19 (§6).
 4. ~~Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.~~ Done
    2026-10-19 (§6). The webview takes `theme/vscode` rather than staying a declared exception (§3).
-5. Add the budget (4.5) once the approach that replaces it is settled.
+5. Add the budget (4.5) once the approach that replaces it is settled: that's confinement (§7), with the budget its
+   last step (7.6).
 
 Rough expectation, not measured: most of `architecture-view`, `rule-editor`, `rule-view`, `admin` and the event-sheet
 inline styles go away. `pane-views`, the margin (`margin.css`) and the graph canvas mostly stay, as named
@@ -413,6 +418,140 @@ The files are in `src/exceptions/` now; the paths are where each one came from.
 Most of the unlayered count is mechanical: wrapping each file in `@layer app { … }` clears it. The other rules
 measure the real work. The ESLint errors fail CI's `lint` (lib's `util-lint`). Stylelint runs only through
 `npm run lint:css`, because `util-lint` runs ESLint only. Wiring stylelint into CI is a lib change.
+
+## 7. Confinement: all styling in this package
+
+The next goal (2026-10-20): every bit of styling lives in `theme`, and other packages use only what it exports. Web
+Awesome is reached only through `theme` too, which makes it the place to curate the catalog and to add fragments of
+our own, so consistency of look and layout is enforced in practice and not only by review. Each step adds a lint rule
+that fails when styling turns up outside, so the confinement holds once it's reached.
+
+Where it stands (2026-10-20):
+
+- **Stylesheets** are confined already. Every `.css` file the editor uses is in `src/exceptions/`, and
+  `webawesome/no-css-imports` fails any other stylesheet import. The one stray is `packages/api/public/sign-in.css`
+  (15 lines): the API doesn't depend on `theme` (§3).
+- **CSS-in-JS** isn't. Stitches is set up in `packages/editor/shared/theme.ts`, with about 70 `css()` calls in the
+  shell (`shell.tsx` 49, `shell-preview.ts` 10, `shell-dock.ts` 8, `preview-devtools.ts` 1).
+- **Web Awesome** is imported directly by 16 files outside `theme`, for 19 components: badge, button, button-group,
+  callout, card, checkbox, dialog, divider, dropdown, dropdown-item, input, option, page, progress-bar,
+  relative-time, select, spinner, tag, textarea. The most used tags are `wa-button` (79), `wa-callout` (37),
+  `wa-badge` (21) and `wa-input` (18).
+- **Inline styles** are behind 18 `no-inline-styles` disables, almost all runtime geometry (a window's drag position,
+  a column as wide as its widest value, the pane frame's layout). Eight `style.setProperty` calls already hand
+  geometry to a sheet as custom properties (the pane, the event sheet's grid).
+
+### 7.1 The CSS rules move into ESLint (lib)
+
+Stylelint is a second linter with its own config, which is why `util-lint` (ESLint only) never ran it and CI doesn't
+check CSS (§6). ESLint lints CSS itself through its official plugin, `@eslint/css`, so the rules move into util's
+ESLint preset, `util-lint` covers CSS in every consumer, and stylelint goes:
+
+| Rule today (stylelint) | In ESLint |
+| --- | --- |
+| `webawesome/no-unlayered-rules`: every rule in an `@layer` | `css/use-layers` (built in) |
+| `declaration-no-important` | `css/no-important` (built in) |
+| `scale-unlimited/declaration-strict-value`: tokens, not literals | a `webawesome/*` rule, sharing `css-in-js-tokens`' logic so `.css` and Stitches are held to one token policy |
+| `declaration-property-value-disallowed-list`: `--vscode-*` only in `src/vscode.css` | a `webawesome/*` rule |
+| `selector-disallowed-list`: no `wa-*` tags, `::part()` or `.wa-*` classes of our own | a `webawesome/*` rule |
+
+- A new rule with them: **no `.css` file outside `packages/theme`**. With CSS linted by ESLint, that's a rule on
+  the file's path.
+- `@eslint/css` 2.0.1 was published on 2026-10-15, inside CI's 7-day cooldown: pin the newest version that's a week
+  old, or wait for 2.0.1 to clear it.
+- Then the editor drops `stylelint`, `stylelint-declaration-strict-value`, `stylelint.config.js` and `lint:css`.
+- `theme.css` and `vscode.css` keep their override: unlayered on purpose, and `vscode.css` the one place
+  `--vscode-*` is read.
+
+### 7.2 Web Awesome only through `theme`, and a tag allowlist
+
+- `theme` re-exports each component it allows as `theme/components/<name>`: the side-effect registration and its
+  types (`import type WaButton from "theme/components/button"`). Web Awesome becomes `theme`'s own dependency, and a
+  plugin rule fails any `@awesome.me/webawesome` import outside `theme`. It's a plugin rule, not a
+  `no-restricted-imports` pattern, for the reason `no-css-imports` is (§6): flat config replaces a rule's options per
+  file, so a second `no-restricted-imports` would undo the realm boundaries.
+- Blocking imports doesn't block use. Custom elements are registered globally, so once anything registers
+  `wa-button`, any file can write `<wa-button>` or `createElement("wa-button")` with no import at all. The real
+  enforcement is on tags: a `wa-*` element in JSX, `createElement` or markup must be one `theme` exports, and
+  otherwise the rule names the component or fragment to use. `prefer-components` already finds these tags, so the
+  rule is its extension (the element-side twin of `known-classes`, 7.4).
+- The allowlist is the curated catalog. Adding a Web Awesome component is a change to `theme`, visible in review the
+  way a new exception sheet is.
+- It also tidies two things: one copy of Web Awesome (the `resolve.dedupe` entries in each Vite config, and the stale
+  3.12 under `packages/theme/node_modules`, can go), and an upgrade is a change to one package.
+
+### 7.3 Recipes and fragments
+
+What `theme` exports beyond Web Awesome's components: the shapes we keep building, so a surface composes them instead
+of restyling. The realms differ (the shell is React; the workbench, webviews and extensions are plain DOM), so a
+fragment has to work in both:
+
+1. **Recipes: classes.** They work in every realm at no runtime cost. The first ones come from duplication already in
+   `src/exceptions/`:
+   - the fixed full-viewport webview frame, identical in `event-sheet.css` and `insights-monitor.css`;
+   - the layer-order declaration, copied into every workbench and webview sheet (one shared prelude);
+   - a toolbar: a bar with a rule under it (the event sheet's, the architecture view's);
+   - the quiet uppercase section caption (the event sheet's headings and the architecture view's captions);
+   - dense controls, no taller than a code line (the pane's row controls, a pane window's title bar).
+2. **Fragments: custom elements of our own**, for structure that repeats and has behavior. Custom elements work in
+   React and plain DOM alike. The first candidate is the split button: the pane's Allow ▾ is a `wa-button-group` of a
+   button and a `wa-dropdown` on a caret, built by hand. A fragment would take an action and its ways, and give one
+   element.
+3. Not DOM helper functions (like the event sheet's `heading()`): React would need its own copy of each, so two
+   implementations of everything.
+
+Recipes first; a custom element only where a structure keeps coming back.
+
+### 7.4 `known-classes`
+
+§4.4: a `class` / `className` literal must be a Web Awesome utility (generated from the installed `utilities.css`)
+or a class `theme` declares (in a recipe or an exception sheet). It's the class side of the contract that 7.2 is for
+elements: code uses what `theme` exports and nothing else.
+
+- Other people's DOM needs an allowlist: Monaco and VS Code, dockview and codehike have class names of their own, and
+  some of ours style them (`git-panel.css` styles codehike's `sxs-*`). Without one, the rule would ban styling them
+  at all.
+- Runtime values go through custom properties: code may set `style.setProperty("--x", …)`, and a sheet in `theme`
+  decides what it means (the pane and the event sheet's grid already do). Every other inline style stays an error,
+  so `no-inline-styles` needs no disables for geometry.
+
+### 7.5 The shell's styles: Stitches, inside `theme`
+
+The about 70 Stitches `css()` calls are the last styling outside `theme`. Decided 2026-10-20: Stitches stays where it
+helps, as `theme`'s own tool. `theme` uses it to generate classes (typed names, and variants next to their
+definitions) and exports them by name; importers never know how they're made. The shell's `css()` calls move into
+`theme` (with `shared/theme.ts`'s setup), and a rule fails a `@stitches/core` import or a `css()` call outside
+`theme`.
+
+- Where it helps is the question for each recipe or style: one with variants or typed names is a Stitches export, one
+  a plain class covers stays in a sheet. Recipes (7.3) can be either; to a consumer both are a class name.
+- `css-in-js-tokens` keeps holding its values to the tokens, now inside `theme`.
+- Considered and not taken: dropping Stitches, so the shell is written as everything else is (Web Awesome, recipes and
+  an exception sheet) with one way to write CSS.
+
+### 7.6 The budget
+
+§4.5's two numbers, once everything they count is in one package: exception declarations (518 today, in 11 sheets)
+and `webawesome/*` disables (39 lines today), both allowed only to go down, held in a committed file that a raise has to edit, as
+`test/performance.mjs` holds the performance budgets. Stitches stays (7.5), so its `css()` declarations count with the
+sheets (`css-in-js-tokens` already reads them): moving a style from a sheet into Stitches can't hide it.
+
+### 7.7 Documents outside the rule
+
+Each needs either `theme` as a dependency or a declared exemption:
+
+- the API's sign-in pages (their own Web Awesome bundle, §3, and `sign-in.css`);
+- VS Code's own baseline in `packages/editor/workbench/Workbench.tsx`, on `--vscode-*`;
+- the game files `extensions/event-sheet/library.ts` emits: the game's CSS, not the editor's.
+
+### 7.8 Order
+
+1. The CSS rules into ESLint, in lib, with the no-CSS-outside-`theme` rule (7.1).
+2. Web Awesome only through `theme`, and the tag allowlist (7.2).
+3. Recipes, from the duplication above (7.3).
+4. `known-classes` (7.4).
+5. The shell's styles into `theme`, as Stitches exports (7.5).
+6. The budget (7.6).
 
 ## Open questions
 
