@@ -612,6 +612,32 @@ elements: code uses what `theme` exports and nothing else.
 
 ### 7.5 Stitches, repo-wide, through `theme`
 
+Done 2026-10-20, but for the layering decision below. As built:
+
+- `theme/stitches` (`src/stitches.ts`, TypeScript so the instance keeps its types; Vite builds it from source, as it does
+  the theme's other files) is the one instance: the palette and `css`, `globalCss`, `keyframes`, `theme`. The theme
+  depends on `@stitches/core`, pinned at 1.2.8, its last release; the editor no longer does. `shared/theme.ts` keeps
+  only the lucide icon helpers. The five importers (the shell's four files and `Workbench.tsx`) take `theme/stitches`.
+- `webawesome/through-theme` fails an `@stitches/*` import outside the theme too, naming `theme/stitches`;
+  `css-in-js-tokens` reads calls on `theme/stitches`' instance.
+- **Spike, layers:** Stitches emits an `"@layer name"` key as an `@layer name { … }` block, for a style, its nested
+  selectors, its variants and compound variants, and `globalCss` (checked with `getCssText()`), keeping its own order
+  (base, variants, compound) inside the layer. So a wrapper can put every call in a layer, as Panda (Bamboo's base)
+  does with `@layer reset, base, tokens, recipes, utilities`.
+- **Spike, other documents:** VS Code copies into a docked window only the stylesheets it made (each marked
+  `data-vscode`), so none of ours reached one: Workbench.tsx's Stitches (its classic look, 9c74eac, was missing there)
+  and the exception sheets in the workbench's head. `theme/sheet`'s `mirrorStyles(document)` copies the unmarked
+  `<style>`s (rules, not text, since Stitches inserts its) with the layer order first, and follows ones added after;
+  `openDockedWindow` calls it, and stops it when the window closes. Checked in Brave: a docked editor's tabs are square
+  now, its window holding the eight styles. A rule Stitches inserts later isn't followed (in VS Code's document its
+  styles are global ones made at boot).
+- **Open: layer it?** Stitches is unlayered today, the top of the cascade: that's how the shell's styles beat
+  dockview's CSS and Workbench.tsx's beat VS Code's. Layering it the Panda way costs: dockview's sheet (the shell
+  adopts it itself, `shell-dock.ts`) into a low `vendor` layer, one line; Workbench.tsx's VS Code overrides through a
+  named unlayered escape, since VS Code's CSS can't be layered; codehike styles inline, so nothing; and a visual pass
+  over the shell. In return precedence stops depending on specificity and insertion order.
+- Checked: ESLint 0 errors; tsc as before; the architecture suites pass (97).
+
 Decided 2026-10-20: Stitches is adopted repo-wide, wherever it helps (its variants, compound variants, token scales,
 utils, `keyframes` and `globalCss`), not only in `theme`. What's confined is its setup: `theme` exports the one
 configured instance (today's `packages/editor/shared/theme.ts`, its tokens all `--wa-*`), so every `css()` call in
@@ -657,8 +683,8 @@ Each needs either `theme` as a dependency or a declared exemption:
 2. ~~Web Awesome only through `theme`, and the tag allowlist (7.2).~~ Done 2026-10-20.
 3. ~~Recipes, from the duplication above (7.3).~~ Done 2026-10-20 (the fragment waits for a second use).
 4. ~~`known-classes` (7.4).~~ Done 2026-10-20.
-5. Stitches through `theme` (7.5): the spike on layers and auxiliary windows, then `theme` exports the instance and
-   the shell imports it from there.
+5. ~~Stitches through `theme` (7.5): the spike on layers and auxiliary windows, then `theme` exports the instance and
+   the shell imports it from there.~~ Done 2026-10-20; whether to layer it is open (7.5).
 6. The budget (7.6).
 
 ## Open questions

@@ -22,7 +22,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { css } from "../shared/theme";
+import { css } from "theme/stitches";
 
 const CHOBITSU_URL = "https://cdn.jsdelivr.net/npm/chobitsu@1.8.6/dist/chobitsu.js";
 const FRONTEND_URL = "https://cdn.jsdelivr.net/npm/chii@1.15.5/public/front_end";

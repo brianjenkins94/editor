@@ -51,7 +51,7 @@ custom CSS the theme is meant to replace. The CSS that remains is checked by the
 ### `webawesome/css-in-js-tokens`
 
 The CSS-in-JS half of the token policy (`css-tokens` is the stylesheet half). It applies to the object literals passed to Stitches' `css`,
-`globalCss` and `keyframes` (imported from the editor's `shared/theme`, or from modules matching
+`globalCss` and `keyframes` (imported from `theme/stitches`, or from modules matching
 `{ sources: [regex, ...] }`), nested selectors included. It flags:
 
 - a literal colour: a hex value, a colour function, a named colour, or one used as a `var()` fallback;

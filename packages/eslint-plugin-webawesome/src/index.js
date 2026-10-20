@@ -30,7 +30,8 @@
  *   • css-only-in-theme       — a stylesheet outside the theme package (enabled for the files that aren't in it).
  *
  * And Web Awesome through the theme package (packages/theme/PLAN.md §7.2):
- *   • through-theme    — importing Web Awesome itself, not the theme's re-export (theme/components/<name>, theme, …).
+ *   • through-theme    — importing Web Awesome or Stitches itself, not the theme's (theme/components/<name>, theme, …,
+ *     theme/stitches).
  *   • known-components — a `wa-*` component the theme doesn't export, in JSX or given to a create call.
  *   • known-classes    — a class name nothing styles or declares: not a Web Awesome utility, nor declared in the
  *     theme's stylesheets.
@@ -694,8 +695,8 @@ const cssInJsTokens = {
 		}]
 	},
 	"create": function(context) {
-		// The modules whose `css` / `globalCss` / `keyframes` are Stitches': the editor's shared/theme by default.
-		const sources = (context.options[0]?.sources ?? ["(?:^|/)shared/theme$"]).map((source) => new RegExp(source, "u"));
+		// The modules whose `css` / `globalCss` / `keyframes` are Stitches': the theme's one instance by default.
+		const sources = (context.options[0]?.sources ?? ["^theme/stitches$"]).map((source) => new RegExp(source, "u"));
 		const stitches = new Set();
 
 		function checkValue(property, node) {
@@ -858,8 +859,12 @@ const cssOnlyInTheme = {
 // --- Web Awesome through the theme package (packages/theme/PLAN.md §7.2): it re-exports the components the app may
 //     use (theme/components/<name>) and the styles (theme, theme/chrome, theme/vscode). ---
 
-/** The theme package's way in to `source`, a Web Awesome module. */
+/** The theme package's way in to `source`, a Web Awesome or Stitches module. */
 function throughThemeFor(source) {
+	if (source.startsWith("@stitches/")) {
+		return "theme/stitches (the app's one Stitches instance, on Web Awesome's tokens)";
+	}
+
 	const component = /\/dist\/components\/([a-z-]+)\//u.exec(source);
 
 	return component === null ? "theme, theme/chrome or theme/vscode (for its styles)" : `theme/components/${component[1]}`;
@@ -868,13 +873,13 @@ function throughThemeFor(source) {
 const throughTheme = {
 	"meta": {
 		"type": "problem",
-		"docs": { "description": "Reach Web Awesome only through the theme package, which re-exports what the app may use: theme/components/<name> for a component, theme / theme/chrome / theme/vscode for its styles." },
-		"messages": { "direct": "`{{source}}` is Web Awesome itself — import {{instead}} instead: the theme package is the only way in to it (packages/theme/PLAN.md §7.2)." },
+		"docs": { "description": "Reach Web Awesome and Stitches only through the theme package, which re-exports what the app may use: theme/components/<name> for a component, theme / theme/chrome / theme/vscode for Web Awesome's styles, theme/stitches for the one Stitches instance." },
+		"messages": { "direct": "`{{source}}` is reached only through the theme package — import {{instead}} instead (packages/theme/PLAN.md §7.2, §7.5)." },
 		"schema": []
 	},
 	"create": function(context) {
 		function check(node, source) {
-			if (source?.type === "Literal" && typeof source.value === "string" && /^@awesome\.me\/webawesome(?:\/|$)/u.test(source.value)) {
+			if (source?.type === "Literal" && typeof source.value === "string" && /^(?:@awesome\.me\/webawesome|@stitches\/[a-z-]+)(?:\/|$)/u.test(source.value)) {
 				context.report({ "node": source, "messageId": "direct", "data": { "source": source.value, "instead": throughThemeFor(source.value) } });
 			}
 		}

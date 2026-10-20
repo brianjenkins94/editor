@@ -67,6 +67,13 @@ label). Class names in code are a closed set (`webawesome/known-classes`): Web A
 Awesome's utilities. A surface's exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from
 `theme/sheet`, which puts the shared layer order (Web Awesome's, then `app`) first in the document once.
 
+## CSS-in-JS: `theme/stitches`
+
+The app's one Stitches instance (`css`, `globalCss`, `keyframes`, `theme`, and the `palette` of tokens under the shell's
+names); nothing else imports `@stitches/core` (`webawesome/through-theme`). Its values are `--wa-*` tokens
+(`webawesome/css-in-js-tokens`). In VS Code's document, `mirrorStyles` from `theme/sheet` copies it, and the exception
+sheets, into a docked window, which VS Code doesn't.
+
 ## What's left: `theme/exceptions/*`
 
 The custom CSS that Web Awesome doesn't cover yet, one file per surface: the only stylesheets code may import

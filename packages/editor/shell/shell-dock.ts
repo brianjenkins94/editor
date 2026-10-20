@@ -24,7 +24,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { DockviewComponent, getPanelData, themeDark, themeLight } from "dockview-core";
 import dockviewCss from "dockview:css";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
-import { css, globalCss } from "../shared/theme";
+import { css, globalCss } from "theme/stitches";
 
 /** The editor's panel (and its iframe's) id. */
 const EDITOR_PANEL = "editor";

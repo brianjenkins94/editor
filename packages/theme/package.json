@@ -12,6 +12,7 @@
       "default": "./src/vscode.js"
     },
     "./vscode.css": "./src/vscode.css",
+    "./stitches": "./src/stitches.ts",
     "./sheet": {
       "types": "./src/sheet.d.ts",
       "default": "./src/sheet.js"
@@ -27,6 +28,9 @@
     "src"
   ],
   "license": "MIT",
+  "dependencies": {
+    "@stitches/core": "1.2.8"
+  },
   "peerDependencies": {
     "@awesome.me/webawesome": ">=3"
   }

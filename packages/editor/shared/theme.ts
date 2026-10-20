@@ -1,42 +1,8 @@
 /**
- * Shared visual theme for the shell's CSS-in-JS: Web Awesome's tokens (packages/theme), so what's styled here follows
- * the theme and its light/dark mode.
- *
- * Two faces of the same tokens:
- *   • {@link palette} — `var(--wa-*)` strings, for consumers that style plain DOM / third-party widgets.
- *   • the Stitches instance (`css`/`theme`/…) — typed CSS-in-JS for component authors, with `$token`
- *     references resolving to the same palette.
- *
- * Every value is a `--wa-*` token, as in theme/exceptions: write `var(--wa-space-s)` / `var(--wa-font-size-xs)` /
- * `var(--wa-color-…)` in a `css({…})` call rather than a literal, which wouldn't follow the theme. The tokens resolve
- * only where the theme is loaded (`import "theme/chrome"` in the shell; theme/vscode in VS Code's document).
- *
- * Uses `@stitches/core` (framework-agnostic — no React) so it fits the source-export → bundle chain
- * with no build plugin; runtime-injects into document.head on first `css()` use.
+ * The shell's icons: lucide's, rendered without a UI framework. (Its styling setup — the Stitches instance and the
+ * palette — is the theme package's now: theme/stitches.)
  */
-import { createStitches } from "@stitches/core";
 import { createElement } from "lucide";
-
-/** The palette — the single source of truth for both faces below, each a Web Awesome token. */
-export const palette = {
-	"bg": "var(--wa-color-surface-default)",
-	"headerBg": "var(--wa-color-surface-raised)",
-	"border": "var(--wa-color-surface-border)",
-	"line": "var(--wa-color-neutral-border-quiet)",
-	"text": "var(--wa-color-text-normal)",
-	"title": "var(--wa-color-text-quiet)",
-	"btnBg": "var(--wa-color-neutral-fill-quiet)",
-	"btnText": "var(--wa-color-neutral-on-quiet)",
-	"btnHover": "var(--wa-color-neutral-fill-normal)",
-	"accent": "var(--wa-color-brand-fill-loud)",   // primary series / links
-	"accent2": "var(--wa-color-orange-60)"         // secondary series / guide-lines (warm contrast)
-} as const;
-
-export const { css, theme, globalCss } = createStitches({
-	"theme": {
-		"colors": { ...palette }
-	}
-});
 
 // ── Icons (lucide) ───────────────────────────────────────────────────────────────
 //

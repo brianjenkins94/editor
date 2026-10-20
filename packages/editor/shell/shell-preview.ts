@@ -26,7 +26,8 @@ import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTranspor
 import { installWindowMessageProbe, scopedTransport } from "@brianjenkins94/observability";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight } from "lucide";
 import { installAutoProfiler, installPreviewProfiler } from "../shared/preview-profile";
-import { css, iconSvg } from "../shared/theme";
+import { css } from "theme/stitches";
+import { iconSvg } from "../shared/theme";
 import { PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "../shared/virtual-path";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { createPaneWindow } from "./window";

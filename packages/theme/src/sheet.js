@@ -27,3 +27,48 @@ export function styleSheet(css, document = globalThis.document) {
 
 	return Object.assign(document.createElement("style"), { "textContent": css });
 }
+
+/**
+ * Copy the app's own `<style>`s from `source` into `target` — the document of a window VS Code opened, as a docked
+ * editor's frame — and keep copying the ones added after; returns a function that stops. VS Code copies its own
+ * stylesheets into such a window itself, and marks each `data-vscode`, but none of ours: the layer order, the exception
+ * sheets `styleSheet` made, and Stitches' (whose rules it inserts, so its text is empty: rules are copied, not text).
+ * A rule Stitches inserts after the copy isn't followed; in VS Code's document its styles are global ones made at boot.
+ */
+export function mirrorStyles(target, source = globalThis.document) {
+	const ours = (node) => node instanceof source.defaultView.HTMLStyleElement && !node.hasAttribute("data-vscode");
+	const copy = (style) => {
+		const clone = target.createElement("style");
+
+		for (const attribute of style.attributes) {
+			clone.setAttribute(attribute.name, attribute.value);
+		}
+
+		// (the layer order first, as in the source; then the rules, which need the element in its document)
+		target.head[style.dataset.layerOrder === undefined ? "append" : "prepend"](clone);
+
+		for (const rule of style.sheet?.cssRules ?? []) {
+			clone.sheet?.insertRule(rule.cssText, clone.sheet.cssRules.length);
+		}
+	};
+
+	for (const style of source.head.querySelectorAll("style")) {
+		if (ours(style)) {
+			copy(style);
+		}
+	}
+
+	const observer = new source.defaultView.MutationObserver((records) => {
+		for (const node of records.flatMap((record) => [...record.addedNodes])) {
+			if (ours(node)) {
+				copy(node);
+			}
+		}
+	});
+
+	observer.observe(source.head, { "childList": true });
+
+	return () => {
+		observer.disconnect();
+	};
+}

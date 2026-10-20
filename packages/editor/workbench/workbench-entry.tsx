@@ -37,6 +37,7 @@ import notesExtension from "notes:extension";
 import { render } from "preact";
 import runningExtension from "running:extension";
 import sourceControlExtension from "source-control:extension";
+import { mirrorStyles } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import tsvalExtension from "tsval:extension";
 import typeQueriesExtension from "type-queries:extension";
@@ -712,7 +713,12 @@ async function openDockedWindow(request: AuxiliaryWindowRequest): Promise<Window
 		const docked = frame?.contentWindow ?? undefined;
 
 		if (docked !== undefined) {
+			// (VS Code copies its own stylesheets into the window; ours — Workbench.tsx's Stitches, the exception sheets —
+			// theme/sheet copies)
+			const stopMirroring = mirrorStyles(docked.document);
+
 			docked.close = () => {
+				stopMirroring();
 				workbenchHub.publish("dock.closeWindow", { "name": name });
 			};
 		}

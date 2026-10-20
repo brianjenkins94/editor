@@ -9,7 +9,7 @@
  * Styling is stitches (`theme`), which injects into this document's head — this whole tree is rendered *inside the
  * iframe* by `workbench-entry.tsx`.
  */
-import { css, globalCss } from "../shared/theme";
+import { css, globalCss } from "theme/stitches";
 
 const mountCss = css({ "position": "absolute", "inset": 0 });
 
