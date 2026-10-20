@@ -13,6 +13,57 @@ import { css, globalCss } from "../shared/theme";
 
 const mountCss = css({ "position": "absolute", "inset": 0 });
 
+/** Where Modern UI is on (VS Code 1.142's `workbench.experimental.modernUI`), and an editor group's title within it. */
+const MODERN = ".monaco-workbench.modern-ui";
+const TITLE = `${MODERN} .part.editor > .content .editor-group-container > .title`;
+
+/**
+ * The workbench as it looked before Modern UI, with Modern UI on (VS Code's own look, so on --vscode-*). Its
+ * settings do most of it — compact density takes the gaps between the parts away, uppercase view headers bring those back
+ * (workbench-entry.tsx's configurationDefaults) — and this puts back what no setting reaches: square tabs on the tab bar's
+ * own background, each ruled off from the next, the active one's top border; flat pane headers and list rows; the classic
+ * type in titles and headers; a status bar without padding or its shadow line. Its rules are `!important` as Modern UI's
+ * are. What the layout sizes in code stays as Modern UI has it: the tab bar's height, the activity bar's width, the status
+ * bar's and the pane headers' heights.
+ */
+const classicLook = globalCss({
+	// Tabs: Modern UI draws the active one as a filled, outlined card joined to the editor ("connected"); classic tabs are
+	// plain boxes with a border between them.
+	[`${TITLE}, ${TITLE} .tabs-and-actions-container`]: { "backgroundColor": "var(--vscode-editorGroupHeader-tabsBackground) !important" },
+	[`${TITLE} .tabs-container`]: { "padding": "0 !important", "gap": "0 !important" },
+	[`${TITLE} .tabs-container > .tab`]: {
+		"margin": "0 !important",
+		"padding": "0 0 0 10px !important",
+		"borderRadius": "0 !important",
+		"borderRight": "1px solid var(--vscode-tab-border) !important",
+		"backgroundColor": "var(--vscode-tab-inactiveBackground) !important",
+		"minWidth": "fit-content !important",
+		"boxShadow": "none !important"
+	},
+	[`${TITLE} .tabs-container > .tab.active`]: { "backgroundColor": "var(--vscode-tab-activeBackground) !important" },
+	[`${TITLE} .tab > .tab-fill, ${TITLE} .tab > .tab-connected-edge, ${TITLE} .tab > .tab-divider, ${TITLE} .tab-connected-overflow-edge`]: { "display": "none !important" },
+	[`${TITLE} .tab > .tab-border-top-container`]: { "display": "block !important", "top": "0 !important" },
+	[`${TITLE} .tab .tab-label`]: {
+		"margin": "0 !important",
+		"height": "var(--editor-group-tab-height) !important",
+		"lineHeight": "var(--editor-group-tab-height) !important",
+		"color": "var(--vscode-tab-inactiveForeground) !important"
+	},
+	[`${TITLE} .tab.active .tab-label`]: { "color": "var(--vscode-tab-activeForeground) !important" },
+	[`${TITLE} .tab .tab-actions`]: { "margin": "auto 0 !important", "border": "0 !important", "borderRadius": "0 !important", "width": "28px !important", "height": "20px !important" },
+	[`${TITLE} .editor-actions`]: { "paddingRight": "8px !important", "marginBottom": "0 !important" },
+	// The side bar's title and its views' headers: classic type, and headers flat across the bar.
+	[`${MODERN} .part.sidebar > .composite.title`]: { "padding": "0 8px !important" },
+	[`${MODERN} .part.sidebar > .composite.title .title-label h2`]: { "fontSize": "11px !important", "fontWeight": "400 !important", "textTransform": "uppercase !important" },
+	[`${MODERN} .pane-header`]: { "margin": "0 !important", "paddingLeft": "0 !important", "borderRadius": "0 !important", "backgroundColor": "transparent !important" },
+	[`${MODERN} .pane-header .title`]: { "fontSize": "11px !important", "fontWeight": "700 !important", "textTransform": "uppercase !important" },
+	[`${MODERN} .monaco-list-row`]: { "borderRadius": "0 !important" },
+	// The status bar: edge to edge, its items square.
+	[`${MODERN} .part.statusbar`]: { "padding": "0 !important", "boxShadow": "none !important" },
+	[`${MODERN} .part.statusbar .statusbar-item`]: { "paddingLeft": "2px !important", "borderRadius": "0 !important" },
+	[`${MODERN} .part.statusbar .statusbar-item > a`]: { "padding": "0 8px !important", "borderRadius": "0 !important" }
+});
+
 const injectGlobals = globalCss({
 	// VS Code scopes the UI font to `.monaco-workbench-part` descendants only, so body-level
 	// overlays (context menus, the command palette) — which render in a bare `.context-view`
@@ -48,6 +99,7 @@ const injectGlobals = globalCss({
 /** Render the element the workbench mounts into, and report it once mounted. */
 export function Workbench({ onReady }: { "onReady": (container: HTMLElement) => void }) {
 	injectGlobals();
+	classicLook();
 
 	return (
 		<main

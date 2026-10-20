@@ -497,7 +497,12 @@ function maybeBoot(): void {
 			"workbench.layoutControl.enabled": false,
 			// No change bars in the gutter: their place is the Margin's gutter column (coverage: extensions/margin), and
 			// the shell's Changes panel is the git UI.
-			"scm.diffDecorations": "none"
+			"scm.diffDecorations": "none",
+			// VS Code 1.142's Modern UI stays on, in its compact density: no gaps between the parts (the layout reserves
+			// them in code, so CSS can't take them back) and uppercase view headers, as the workbench looked before. What
+			// it changes beyond its settings, the tabs most, Workbench.tsx puts back.
+			"window.density.layout": "compact",
+			"workbench.experimental.modernUIUppercaseViewHeaders": true
 		},
 		// Source Control and Extensions stay off the activity bar: the shell's changes panel is the git UI, and there's no
 		// extension management to do. (The Manage menu is hidden too, in Workbench.tsx.)
