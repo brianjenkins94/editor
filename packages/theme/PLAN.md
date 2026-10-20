@@ -9,7 +9,8 @@ Status (2026-10-19):
 
 - Enforcement steps 4.1–4.3 are built and set to **error**. Both halves are at **zero**: every native element
   ESLint found is a Web Awesome component now, every stylesheet left is a named exception in `src/exceptions/`
-  (§3), and stylelint reports nothing in any of them. Stylelint still runs only via `npm run lint:css`, not in CI.
+  (§3), and the stylesheet rules report nothing in any of them. Those rules are ESLint's now (§7.1): util's preset
+  lints CSS, so `util-lint` and CI check stylesheets once that util is published; stylelint is gone.
   See [§6](#6-counts) for the counts.
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry (§3) is built: admin takes `theme`, the shell `theme/chrome` (no native styles), and the
@@ -211,7 +212,7 @@ exceptions. (So it went: `pane-views` lost its buttons, menu and input to Web Aw
 ## 6. Counts
 
 Baseline taken 2026-10-19 when the rules were added, then again after the ESLint half was cleared the same day.
-Re-run with `npx eslint .` and `npm run lint:css`.
+Re-run with `npx eslint .` (stylesheets included since §7.1; the counts below were stylelint's).
 
 **Cleared (ESLint, 40 → 0):**
 
@@ -417,7 +418,7 @@ The files are in `src/exceptions/` now; the paths are where each one came from.
 
 Most of the unlayered count is mechanical: wrapping each file in `@layer app { … }` clears it. The other rules
 measure the real work. The ESLint errors fail CI's `lint` (lib's `util-lint`). Stylelint runs only through
-`npm run lint:css`, because `util-lint` runs ESLint only. Wiring stylelint into CI is a lib change.
+`npm run lint:css`, because `util-lint` ran ESLint only (2026-10-19; since §7.1 ESLint lints CSS itself).
 
 ## 7. Confinement: all styling in this package
 
@@ -444,6 +445,8 @@ Where it stands (2026-10-20):
 
 ### 7.1 The CSS rules move into ESLint (lib)
 
+Done 2026-10-20 (lib and the editor committed; the editor's half needs that util published first — see below).
+
 Stylelint is a second linter with its own config, which is why `util-lint` (ESLint only) never ran it and CI doesn't
 check CSS (§6). ESLint lints CSS itself through its official plugin, `@eslint/css`, so the rules move into util's
 ESLint preset, `util-lint` covers CSS in every consumer, and stylelint goes:
@@ -461,6 +464,25 @@ ESLint preset, `util-lint` covers CSS in every consumer, and stylelint goes:
 - `@eslint/css` 2.0.1 was published on 2026-10-15, inside CI's 7-day cooldown: pin the newest version that's a week
   old, or wait for 2.0.1 to clear it.
 - Then the editor drops `stylelint`, `stylelint-declaration-strict-value`, `stylelint.config.js` and `lint:css`.
+
+As built:
+
+- **util** (`util/eslint.ts`): `@eslint/css` (`^2.0.0`, so CI's cooldown takes 2.0.0) for `**/*.css`, its recommended
+  rules with the preset's severity meaning (auto-fixable warns, the rest errors), and `css/no-invalid-properties`
+  allowing variables a file doesn't declare (a stylesheet on a design system's tokens reads them from the system).
+  A config object with no `files` would apply JavaScript's rules to stylesheets, where they crash, so util's own leave
+  CSS out (`ignores`), and a consumer's need `files` (the editor's `no-void` block got them).
+- **eslint-plugin-webawesome**: `css-tokens` (one function, `tokenProblems`, behind it and `css-in-js-tokens`, so a
+  stylesheet and a Stitches call get the same policy and messages), `css-no-vscode-variables`, `css-no-wa-selectors`
+  and `css-only-in-theme`. The editor's config turns them on for `**/*.css` with `css/use-layers`, exempts
+  `theme.css` / `vscode.css` (token definitions, unlayered on purpose) and `packages/api/public/sign-in.css` (§7.7),
+  and allows `user-select` / `paint-order` under `css/use-baseline` (cosmetic where they fall short).
+- One policy is a little looser than stylelint's was: literal `font-weight`, `line-height` and `font-family` aren't
+  flagged (Stitches never was either). Planted violations of everything else are caught, with the step to use.
+- It found a bug stylelint missed: `r: 5` in `architecture-view.css`, a unitless length CSS drops, so a hub's dot
+  was drawn at its attribute's 4. It's `5px` now.
+- Order: the editor's config names the `css` plugin's rules, which only util's new preset registers, so util is
+  published before the editor's half is pushed, or CI's lint fails on a missing plugin.
 - `theme.css` and `vscode.css` keep their override: unlayered on purpose, and `vscode.css` the one place
   `--vscode-*` is read.
 
@@ -559,7 +581,7 @@ Each needs either `theme` as a dependency or a declared exemption:
 
 ### 7.8 Order
 
-1. The CSS rules into ESLint, in lib, with the no-CSS-outside-`theme` rule (7.1).
+1. ~~The CSS rules into ESLint, in lib, with the no-CSS-outside-`theme` rule (7.1).~~ Done 2026-10-20.
 2. Web Awesome only through `theme`, and the tag allowlist (7.2).
 3. Recipes, from the duplication above (7.3).
 4. `known-classes` (7.4).

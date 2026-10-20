@@ -62,9 +62,43 @@ export default [
 		"files": ["packages/theme/**"],
 		"rules": { "webawesome/no-css-imports": "off" }
 	},
+	{
+		// The CSS half of the guardrails (packages/theme/PLAN.md §4, §7), in ESLint's CSS language (util's preset registers
+		// it): every stylesheet on Web Awesome's tokens, in a layer, reading VS Code's theme only through theme/vscode, not
+		// selecting Web Awesome's components, and in the theme package.
+		"files": ["**/*.css"],
+		"plugins": { "webawesome": webawesome },
+		"rules": {
+			"css/use-layers": "error",
+			// Both are cosmetic where they fall short (Safari still prefixes user-select): text selection, an SVG label's halo.
+			"css/use-baseline": ["error", { "allowProperties": ["user-select", "paint-order"] }],
+			"webawesome/css-tokens": "error",
+			"webawesome/css-no-vscode-variables": "error",
+			"webawesome/css-no-wa-selectors": "error",
+			"webawesome/css-only-in-theme": "error"
+		}
+	},
+	{
+		"files": ["packages/theme/**/*.css"],
+		"rules": { "webawesome/css-only-in-theme": "off" }
+	},
+	{
+		// The theme's tokens: unlayered on purpose so they win over Web Awesome's layers, and token definitions, not uses —
+		// vscode.css the one place --vscode-* is read. (Its exceptions/ are custom CSS like any other, held to every rule.)
+		"files": ["packages/theme/src/theme.css", "packages/theme/src/vscode.css"],
+		"rules": { "css/use-layers": "off", "webawesome/css-tokens": "off", "webawesome/css-no-vscode-variables": "off" }
+	},
+	{
+		// The API's sign-in pages bundle Web Awesome themselves (the api doesn't depend on theme): their one sheet centres the
+		// card (PLAN.md §7.7).
+		"files": ["packages/api/public/sign-in.css"],
+		"rules": { "webawesome/css-only-in-theme": "off" }
+	},
 	...realmBoundaries,
 	{
-		// `void promise;` is how this repo says "fired on purpose, not awaited" — what no-floating-promises asks for.
+		// `void promise;` is how this repo says "fired on purpose, not awaited" — what no-floating-promises asks for. (Code
+		// only: a stylesheet is linted too, by ESLint's CSS language, where JavaScript's rules can't run.)
+		"files": ["**/*.{ts,tsx,mts,cts,js,mjs,cjs}"],
 		"rules": { "no-void": ["warn", { "allowAsStatement": true }] }
 	},
 	{
@@ -75,7 +109,7 @@ export default [
 		//   • build output (dist) and monaco's regenerated demo (vendored CodinGame source)
 		//   • tsval's vendored differential corpora, generated test reports, and markdown (no tsconfig for typed rules)
 		//   • the sign-in pages' Web Awesome bundle (packages/api/scripts/webawesome.ts), build output
-		"ignores": ["**/dist/**", "**/demo/**", "packages/tsval/vendor/**", "packages/*/test/reports/**", "**/*.md", "packages/api/public/webawesome.js"]
+		"ignores": ["**/dist/**", "**/demo/**", "packages/tsval/vendor/**", "packages/*/test/reports/**", "**/*.md", "packages/api/public/webawesome.js", "packages/api/public/webawesome.css"]
 	},
 	{
 		// tsval's tests run on `node:test`, not vitest. @antfu's test config assumes vitest and its auto-fix

@@ -21,7 +21,14 @@
  *     (`html("button")`, `element("select")`), which prefer-components can't see.
  *   • no-css-imports     — importing a stylesheet other than Web Awesome's or the theme's (`import "./foo.css"`).
  *   • css-in-js-tokens   — a literal colour, font size, spacing length or radius in Stitches' `css({…})` /
- *     `globalCss({…})`: the CSS-in-JS half of stylelint's token rule, so those values are `--wa-*` tokens too.
+ *     `globalCss({…})`, so those values are `--wa-*` tokens too.
+ *
+ * And for stylesheets, in ESLint's CSS language (@eslint/css, which util's preset registers for **\/*.css):
+ *   • css-tokens              — the same token policy as css-in-js-tokens, for a `.css` file's declarations.
+ *   • css-no-vscode-variables — a `var(--vscode-*)`: VS Code's theme is read through theme/vscode's mapping only.
+ *   • css-no-wa-selectors     — selecting a `wa-*` component, its `::part()`, or a `.wa-*` class of our own.
+ *   • css-only-in-theme       — a stylesheet outside the theme package (enabled for the files that aren't in it).
+ * Layers and `!important` are the CSS language's own rules (css/use-layers, css/no-important).
  */
 
 /** Native tag → the Web Awesome component to use instead. Only CLEAR complements (from the WA 3.13 catalog); layout
@@ -630,17 +637,50 @@ function isSpacing(property) {
 	return /^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$|^(?:row-|column-)?gap$/u.test(property);
 }
 
+/** The token messages: a value's literal colour, font size, spacing or radius, said with the step to use. One
+ *  policy for both of the places CSS is written — a stylesheet (`css-tokens`) and Stitches' `css({…})`
+ *  (`css-in-js-tokens`). */
+const TOKEN_MESSAGES = {
+	"color": "`{{value}}` is a literal colour in {{property}} — use a --wa-color-* token (surface-*, text-*, <variant>-fill-*/-border-*/-on-*, or a palette hue like --wa-color-orange-60), which follows the theme and its light/dark mode.",
+	"colorFallback": "`{{value}}` has a literal colour as a var() fallback in {{property}} — drop it: the --wa-* token is always defined where the theme is loaded.",
+	"fontSize": "`{{value}}` is a literal font size — use var(--wa-font-size-{{step}}){{nearest}}.",
+	"space": "`{{value}}` is a literal length in {{property}} — use var(--wa-space-{{step}}){{nearest}}.",
+	"radius": "`{{value}}` is a literal radius — use var(--wa-border-radius-{{step}}){{nearest}}."
+};
+
+/** What's wrong with `text` as `property`'s value, by the token policy: each a message id and its data. */
+function tokenProblems(property, text) {
+	const problems = [];
+	const lengths = (steps, messageId) => {
+		for (const match of [...text.matchAll(LITERAL_LENGTH)].filter((length) => Number(length[1]) !== 0)) {
+			const amount = Number(match[1]);
+			const px = Math.abs(match[2] === "px" ? amount : amount * 16);
+			const { step, exact } = nearestStep(px, steps);
+
+			problems.push({ "messageId": messageId, "data": { "value": match[0], "property": property, "step": step, "nearest": exact ? "" : " (the nearest step)" } });
+		}
+	};
+
+	if (LITERAL_COLOR.test(text) || NAMED_COLORS.has(text.trim().toLowerCase())) {
+		problems.push({ "messageId": /var\([^,)]*,[^)]*(?:#|\()/u.test(text) ? "colorFallback" : "color", "data": { "value": text, "property": property } });
+	}
+
+	if (property === "font-size" || property === "font") {
+		lengths(FONT_SIZE_TOKENS, "fontSize");
+	} else if (isSpacing(property)) {
+		lengths(SPACE_TOKENS, "space");
+	} else if (/^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/u.test(property)) {
+		lengths(RADIUS_TOKENS, "radius");
+	}
+
+	return problems;
+}
+
 const cssInJsTokens = {
 	"meta": {
 		"type": "problem",
 		"docs": { "description": "Write CSS-in-JS (Stitches' `css({…})` / `globalCss({…})`) on Web Awesome's --wa-* tokens, not literal colours, font sizes, spacing or radii, which don't follow the theme." },
-		"messages": {
-			"color": "`{{value}}` is a literal colour in {{property}} — use a --wa-color-* token (surface-*, text-*, <variant>-fill-*/-border-*/-on-*, or a palette hue like --wa-color-orange-60), which follows the theme and its light/dark mode.",
-			"colorFallback": "`{{value}}` has a literal colour as a var() fallback in {{property}} — drop it: the --wa-* token is always defined where the theme is loaded.",
-			"fontSize": "`{{value}}` is a literal font size — use var(--wa-font-size-{{step}}){{nearest}}.",
-			"space": "`{{value}}` is a literal length in {{property}} — use var(--wa-space-{{step}}){{nearest}}.",
-			"radius": "`{{value}}` is a literal radius — use var(--wa-border-radius-{{step}}){{nearest}}."
-		},
+		"messages": TOKEN_MESSAGES,
 		"schema": [{
 			"type": "object",
 			"properties": { "sources": { "type": "array", "items": { "type": "string" } } },
@@ -651,16 +691,6 @@ const cssInJsTokens = {
 		// The modules whose `css` / `globalCss` / `keyframes` are Stitches': the editor's shared/theme by default.
 		const sources = (context.options[0]?.sources ?? ["(?:^|/)shared/theme$"]).map((source) => new RegExp(source, "u"));
 		const stitches = new Set();
-
-		function reportLengths(node, property, text, steps, messageId) {
-			for (const match of [...text.matchAll(LITERAL_LENGTH)].filter((length) => Number(length[1]) !== 0)) {
-				const amount = Number(match[1]);
-				const px = Math.abs(match[2] === "px" ? amount : amount * 16);
-				const { step, exact } = nearestStep(px, steps);
-
-				context.report({ "node": node, "messageId": messageId, "data": { "value": match[0], "property": property, "step": step, "nearest": exact ? "" : " (the nearest step)" } });
-			}
-		}
 
 		function checkValue(property, node) {
 			let text;
@@ -676,16 +706,8 @@ const cssInJsTokens = {
 				return;
 			}
 
-			if (LITERAL_COLOR.test(text) || NAMED_COLORS.has(text.trim().toLowerCase())) {
-				context.report({ "node": node, "messageId": /var\([^,)]*,[^)]*(?:#|\()/u.test(text) ? "colorFallback" : "color", "data": { "value": text, "property": property } });
-			}
-
-			if (property === "font-size" || property === "font") {
-				reportLengths(node, property, text, FONT_SIZE_TOKENS, "fontSize");
-			} else if (isSpacing(property)) {
-				reportLengths(node, property, text, SPACE_TOKENS, "space");
-			} else if (/^border(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius$/u.test(property)) {
-				reportLengths(node, property, text, RADIUS_TOKENS, "radius");
+			for (const problem of tokenProblems(property, text)) {
+				context.report({ "node": node, ...problem });
 			}
 		}
 
@@ -732,6 +754,101 @@ const cssInJsTokens = {
 	}
 };
 
+// --- Stylesheets: rules for ESLint's CSS language (@eslint/css, which util's preset registers for **/*.css). The
+//     layer and !important rules are the language's own (css/use-layers, css/no-important). ---
+
+const cssTokens = {
+	"meta": {
+		"type": "problem",
+		"languages": ["css/css"],
+		"docs": { "description": "Write a stylesheet on Web Awesome's --wa-* tokens, not literal colours, font sizes, spacing or radii, which don't follow the theme — the policy css-in-js-tokens holds Stitches to." },
+		"messages": TOKEN_MESSAGES,
+		"schema": []
+	},
+	"create": function(context) {
+		return {
+			"Declaration": function(node) {
+				const property = node.property.toLowerCase();
+
+				for (const problem of tokenProblems(property, context.sourceCode.getText(node.value))) {
+					context.report({ "node": node, ...problem });
+				}
+			}
+		};
+	}
+};
+
+const cssNoVscodeVariables = {
+	"meta": {
+		"type": "problem",
+		"languages": ["css/css"],
+		"docs": { "description": "Read VS Code's theme through Web Awesome's tokens: theme/vscode maps it onto --wa-* in one place (packages/theme/src/vscode.css), the only place a --vscode-* variable may appear." },
+		"messages": { "vscode": "`{{name}}` is a VS Code theme variable — use the Web Awesome token theme/vscode maps it to (packages/theme/src/vscode.css), or add the mapping there." },
+		"schema": []
+	},
+	"create": function(context) {
+		return {
+			"Function": function(node) {
+				const name = node.name.toLowerCase() === "var" ? node.children[0] : undefined;
+
+				if (name?.type === "Identifier" && name.name.startsWith("--vscode-")) {
+					context.report({ "node": node, "messageId": "vscode", "data": { "name": name.name } });
+				}
+			}
+		};
+	}
+};
+
+const cssNoWebAwesomeSelectors = {
+	"meta": {
+		"type": "problem",
+		"languages": ["css/css"],
+		"docs": { "description": "Style Web Awesome's components through their tokens, not by selecting them: no `wa-*` type selectors, no `::part()`, and no `.wa-*` classes of our own (a wa- prefix must mean Web Awesome's)." },
+		"messages": {
+			"tag": "`{{name}}` selects a Web Awesome component — set its tokens (custom properties) on it or an ancestor instead.",
+			"part": "`::part()` reaches into a Web Awesome component — style it through its tokens.",
+			"class": "`.{{name}}` is a Web Awesome class name — use Web Awesome's utility as it is, or give ours a name of its own."
+		},
+		"schema": []
+	},
+	"create": function(context) {
+		return {
+			"TypeSelector": function(node) {
+				if (node.name.toLowerCase().startsWith("wa-")) {
+					context.report({ "node": node, "messageId": "tag", "data": { "name": node.name } });
+				}
+			},
+			"PseudoElementSelector": function(node) {
+				if (node.name.toLowerCase() === "part") {
+					context.report({ "node": node, "messageId": "part" });
+				}
+			},
+			"ClassSelector": function(node) {
+				if (node.name.startsWith("wa-")) {
+					context.report({ "node": node, "messageId": "class", "data": { "name": node.name } });
+				}
+			}
+		};
+	}
+};
+
+const cssOnlyInTheme = {
+	"meta": {
+		"type": "problem",
+		"languages": ["css/css"],
+		"docs": { "description": "Keep stylesheets in the theme package (packages/theme/PLAN.md §7): a surface's custom CSS is a named exception in theme/exceptions/, and other packages import what the theme exports." },
+		"messages": { "outside": "A stylesheet outside the theme package — put it in packages/theme/src/exceptions/ (a named exception) and import it from theme/exceptions/." },
+		"schema": []
+	},
+	"create": function(context) {
+		return {
+			"StyleSheet": function(node) {
+				context.report({ "node": node, "loc": { "line": 1, "column": 0 }, "messageId": "outside" });
+			}
+		};
+	}
+};
+
 export default {
 	"meta": { "name": "eslint-plugin-webawesome", "version": "0.0.0" },
 	"rules": {
@@ -741,6 +858,10 @@ export default {
 		"no-css-in-strings": noCssInStrings,
 		"no-inline-styles": noInlineStyles,
 		"no-css-imports": noCssImports,
-		"css-in-js-tokens": cssInJsTokens
+		"css-in-js-tokens": cssInJsTokens,
+		"css-tokens": cssTokens,
+		"css-no-vscode-variables": cssNoVscodeVariables,
+		"css-no-wa-selectors": cssNoWebAwesomeSelectors,
+		"css-only-in-theme": cssOnlyInTheme
 	}
 };

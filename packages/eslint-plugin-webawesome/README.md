@@ -46,11 +46,11 @@ Flag CSS in a string or template literal, and inline styles: a JSX `style`, `el.
 
 Flags a stylesheet import, static or dynamic (`?raw` and `?inline` included), unless it comes from Web Awesome or the
 theme package. You can pass different package prefixes with `{ allow: [...] }`. A feature's own `.css` file is the
-custom CSS the theme is meant to replace. The CSS that remains is checked by the repo's `stylelint.config.js`.
+custom CSS the theme is meant to replace. The CSS that remains is checked by the stylesheet rules below.
 
 ### `webawesome/css-in-js-tokens`
 
-The CSS-in-JS half of stylelint's token rule. It applies to the object literals passed to Stitches' `css`,
+The CSS-in-JS half of the token policy (`css-tokens` is the stylesheet half). It applies to the object literals passed to Stitches' `css`,
 `globalCss` and `keyframes` (imported from the editor's `shared/theme`, or from modules matching
 `{ sources: [regex, ...] }`), nested selectors included. It flags:
 
@@ -68,6 +68,32 @@ css({ "color": "var(--wa-color-text-quiet, #888)" })  // ✗ drop the fallback
 ```
 
 Layout geometry (`width`, `height`, `top`, `inset`, …) has no token and isn't checked; nor are line heights yet.
+
+## Stylesheets
+
+These four run in ESLint's CSS language (`@eslint/css`), which util's preset registers for `**/*.css`; enable them for
+the same files. Layers and `!important` are the language's own rules (`css/use-layers`, `css/no-important`).
+
+### `webawesome/css-tokens`
+
+The stylesheet half of the token policy: the same checks as `css-in-js-tokens` (a literal colour, font size, spacing
+length or radius, each with the step to use), on a `.css` file's declarations. Layout geometry (`width`, `top`, …) has
+no token, so it isn't checked.
+
+### `webawesome/css-no-vscode-variables`
+
+Flags `var(--vscode-*)`. VS Code's theme is read through the theme package's mapping (`packages/theme/src/vscode.css`)
+only; turn it off for that file.
+
+### `webawesome/css-no-wa-selectors`
+
+Flags selecting a Web Awesome component (a `wa-*` type selector), reaching into one (`::part()`), and a `.wa-*` class
+of our own. Style a component through its tokens.
+
+### `webawesome/css-only-in-theme`
+
+Flags every stylesheet it's enabled for. Enable it for `**/*.css` and turn it off for the theme package (and any
+declared exemption), so a stylesheet anywhere else fails.
 
 ## Usage
 

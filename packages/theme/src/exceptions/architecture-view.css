@@ -127,7 +127,7 @@
   }
 
   :is(.arch-node, .arch-container.is-node).is-hub .arch-node-dot {
-    r: 5;
+    r: 5px;
   }
 
   .arch-node.state-declared,

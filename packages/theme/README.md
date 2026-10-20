@@ -56,7 +56,8 @@ custom CSS.
 
 The custom CSS that Web Awesome doesn't cover yet, one file per surface: the only stylesheets code may import
 besides Web Awesome's and the theme's (`webawesome/no-css-imports`). A new file there is the review signal that
-something needs CSS of its own, and every file in it is held to the repo's stylelint rules.
+something needs CSS of its own, and every file in it is held to the stylesheet rules in the repo's `eslint.config.js`
+(`webawesome/css-*`, `css/use-layers`, and the CSS language's own, which util's ESLint preset registers).
 
 ## This starter
 
