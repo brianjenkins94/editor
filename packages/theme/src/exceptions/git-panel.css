@@ -11,8 +11,7 @@
 	/* The pane's only header (the shell's collapse button arrives at its end) — sized like the shell's "Projects" header
 	   so the two sides line up. */
 	/* border-box: wa-split makes it 100% wide, which its padding would otherwise overflow. */
-	.gp-head { flex: none; box-sizing: border-box; padding: var(--wa-space-2xs) var(--wa-space-xs) var(--wa-space-2xs) var(--wa-space-s);
-		letter-spacing: .06em; }
+	.gp-head { flex: none; box-sizing: border-box; padding: var(--wa-space-2xs) var(--wa-space-xs) var(--wa-space-2xs) var(--wa-space-s); }
 	.gp-files { flex: 1 1 0; min-height: 80px; overflow: auto; }
 	.gp-empty { padding: var(--wa-space-l) var(--wa-space-s); }
 	.gp-commit { flex: none; padding: var(--wa-space-s); background: var(--wa-color-surface-raised);

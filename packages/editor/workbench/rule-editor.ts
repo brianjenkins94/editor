@@ -20,6 +20,7 @@ import type WaButton from "theme/components/button";
 import type WaInput from "theme/components/input";
 import { joinCommandLine, sayPlace } from "@brianjenkins94/editor-api/rules";
 import css from "theme/exceptions/rule-editor.css?raw";
+import { styleSheet } from "theme/sheet";
 import "theme/components/button";
 import "theme/components/checkbox";
 import "theme/components/dropdown";
@@ -290,7 +291,7 @@ export function schemaInput(schema: Schema | undefined, value: unknown, changed:
 export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): RuleEditor {
 	if (!styled) {
 		styled = true;
-		document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
+		document.head.append(styleSheet(css));
 	}
 
 	const edited: Rule = structuredClone(rule);

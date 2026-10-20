@@ -4,6 +4,7 @@
  * polylines, one per series, in the palette's colours (theme/exceptions/insights-monitor.css).
  */
 import css from "theme/exceptions/insights-monitor.css?raw";
+import { styleSheet } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import "theme/components/card";
 
@@ -54,7 +55,7 @@ function drawCard(title: string, lines: Line[], from: number, fixed?: number): H
 
 	const max = fixed ?? Math.max(1, ...lines.flatMap((line) => line.points.map((point) => point[1]))) * 1.1;
 	const card = element("wa-card", "monitor-card", { "appearance": "outlined" });
-	const head = element("div", "wa-split wa-font-size-s wa-text-uppercase wa-color-text-quiet monitor-head");
+	const head = element("div", "wa-split app-caption");
 	const chart = document.createElementNS(SVG, "svg");
 	const legend = element("div", "wa-cluster wa-gap-xs wa-font-size-s");
 
@@ -139,10 +140,10 @@ function waiting(): HTMLElement {
 }
 
 function start(): void {
-	const container = element("div", "monitor wa-stack wa-gap-s");
+	const container = element("div", "monitor app-frame wa-stack wa-gap-s");
 
 	// Web Awesome on the VS Code theme (theme/vscode, as in the workbench), then what it doesn't cover.
-	document.head.append(element("style", "", { "textContent": css }));
+	document.head.append(styleSheet(css));
 	followVsCodeTheme(document.body);
 	container.append(waiting());
 	document.body.replaceChildren(container);

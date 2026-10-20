@@ -531,6 +531,27 @@ Done 2026-10-20. As built:
 
 ### 7.3 Recipes and fragments
 
+Done 2026-10-20 for the recipes; no fragment yet. As built:
+
+- `src/recipes.css`, in every theme entry (`theme/chrome` imports it, so `theme` too; `theme/vscode` adopts it):
+  `app-frame` (a document's whole view, fixed to the viewport, clear of a webview body's padding), `app-toolbar` (a
+  bar of controls ruled off from what's under it) and `app-caption` (a section's or card's label: small, quiet,
+  uppercase). The event sheet and the insights monitor take `app-frame`; the architecture view and the event sheet
+  `app-toolbar`; the event sheet's headings, the monitor's card heads and the git panel's header `app-caption`. Their
+  sheets lost those rules. The three captions had been three sizes (10, 11 and 12px) and two letter-spacings; the
+  recipe makes them one (11px, 0.04em, semibold), which is the point.
+- The layer-order prelude had been copied into the seven sheets a document gets as a `<style>` (`?raw`).
+  `theme/sheet`'s `styleSheet(css)` makes that `<style>` and, once per document, puts the order first in its head:
+  Web Awesome's own `@layer` statement (read from its `layers.css`, so an upgrade carries it) and then `app`. The seven
+  sheets no longer declare it. `window.css` still does: the shell imports it as a stylesheet, not through the helper.
+- Not extracted: dense controls. The pane's row controls (as tall as a code line) and a pane window's title bar
+  (compact padding) want different things; two different needs aren't a recipe yet.
+- The split-button fragment waits for a second use: the pane's Allow ▾ is still its only one, and the rule above is
+  "a custom element only where a structure keeps coming back".
+- Checked in the running editor (Brave, the dev server): the prelude first in the workbench's head, once; the
+  architecture toolbar, the git panel's header, the insights monitor and the event sheet (its webview's first time
+  seen running) on the recipes. The architecture suites pass (97); lint and tsc as before; admin builds.
+
 What `theme` exports beyond Web Awesome's components: the shapes we keep building, so a surface composes them instead
 of restyling. The realms differ (the shell is React; the workbench, webviews and extensions are plain DOM), so a
 fragment has to work in both:
@@ -609,7 +630,7 @@ Each needs either `theme` as a dependency or a declared exemption:
 
 1. ~~The CSS rules into ESLint, in lib, with the no-CSS-outside-`theme` rule (7.1).~~ Done 2026-10-20.
 2. ~~Web Awesome only through `theme`, and the tag allowlist (7.2).~~ Done 2026-10-20.
-3. Recipes, from the duplication above (7.3).
+3. ~~Recipes, from the duplication above (7.3).~~ Done 2026-10-20 (the fragment waits for a second use).
 4. `known-classes` (7.4).
 5. Stitches through `theme` (7.5): the spike on layers and auxiliary windows, then `theme` exports the instance and
    the shell imports it from there.

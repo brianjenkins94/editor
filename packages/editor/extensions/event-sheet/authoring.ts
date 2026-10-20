@@ -86,7 +86,7 @@ export function chip(text: string, onRemove?: () => void): HTMLElement {
 
 /** A section heading; `divided`, ruled off from the section above. */
 export function heading(text: string, divided = false): HTMLElement {
-	return element("div", `event-sheet-heading${divided ? " divided" : ""} wa-caption-xs wa-font-weight-semibold wa-text-uppercase wa-color-text-quiet`, { "textContent": text });
+	return element("div", `event-sheet-heading${divided ? " divided" : ""} app-caption`, { "textContent": text });
 }
 
 /** A quiet note: what's empty, or what a section is. */
@@ -261,7 +261,7 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 	container.replaceChildren();
 
 	// ── toolbar ──────────────────────────────────────────────────────────────────
-	const toolbar = element("div", "event-sheet-bar wa-cluster wa-gap-xs");
+	const toolbar = element("div", "app-toolbar wa-cluster wa-gap-xs");
 
 	const generate = button("Generate", () => {
 		void (async (): Promise<void> => {

@@ -5,10 +5,6 @@
  * theme); the Margin's accent is the palette's purple, as the architecture view's hub links are.
  */
 
-/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
- * are adopted, so the order is declared here). */
-@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
-
 @layer app {
   /* The Margin's colours, for every part of it: the frame, the gutter column and the code's marked lines are all in the
    * editor, not in one another. */

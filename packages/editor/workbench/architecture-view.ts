@@ -15,6 +15,7 @@ import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import css from "theme/exceptions/architecture-view.css?raw";
+import { styleSheet } from "theme/sheet";
 import { appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, DYNAMIC_PREFIXES, dynamicContainer, hubLinks, nodeSpec, subjectOfLabel } from "../shared/architecture-model";
 import { windowTitle } from "../shared/virtual-path";
 import "theme/components/badge";
@@ -558,7 +559,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	let hovered: string | undefined;
 
 	root.classList.add("arch-root", "wa-stack", "wa-gap-0", "wa-body-s", "wa-color-text-normal");
-	root.replaceChildren(html("style", null, css));
+	root.replaceChildren(styleSheet(css));
 
 	// ── toolbar
 	const summary = html("span", { "class": "wa-color-text-quiet" });
@@ -616,7 +617,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	root.append(html(
 		"div",
-		{ "class": "arch-toolbar wa-split wa-gap-s" },
+		{ "class": "arch-toolbar app-toolbar wa-split wa-gap-s" },
 		html(
 			"div",
 			{ "class": "wa-cluster wa-gap-s" },

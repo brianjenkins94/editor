@@ -59,6 +59,13 @@ The Web Awesome components the app may use, one module each: importing `theme/co
 through this package (`webawesome/through-theme`), and uses only the components here (`webawesome/known-components`):
 to allow another, add `src/components/<name>.js` and `.d.ts`, each a one-line re-export.
 
+## Recipes and sheets: `recipes.css`, `theme/sheet`
+
+The shapes the app kept rebuilding, one class each, in every theme entry: `app-frame` (a view fixed to the viewport),
+`app-toolbar` (a bar ruled off from what's under it) and `app-caption` (a quiet uppercase label). Compose them with Web
+Awesome's utilities. A surface's exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from
+`theme/sheet`, which puts the shared layer order (Web Awesome's, then `app`) first in the document once.
+
 ## What's left: `theme/exceptions/*`
 
 The custom CSS that Web Awesome doesn't cover yet, one file per surface: the only stylesheets code may import

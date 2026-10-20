@@ -4,7 +4,8 @@
  *
  *     import "theme/chrome";
  *
- * Web Awesome's layers, utility classes and default theme, then our brand tokens (theme.css), so the tokens win. Then
+ * Web Awesome's layers, utility classes and default theme, then our brand tokens (theme.css), so the tokens win, and the
+ * recipes (recipes.css: the app's shapes, one class each). Then
  * the document follows the system's light/dark preference: Web Awesome switches mode by the `wa-light` / `wa-dark`
  * class on the root, not by `prefers-color-scheme`, so the root's class is kept in step with it, live.
  *
@@ -16,6 +17,7 @@ import "@awesome.me/webawesome/dist/styles/layers.css";
 import "@awesome.me/webawesome/dist/styles/themes/default.css";
 import "@awesome.me/webawesome/dist/styles/utilities.css";
 import "./theme.css";
+import "./recipes.css";
 
 const dark = window.matchMedia("(prefers-color-scheme: dark)");
 

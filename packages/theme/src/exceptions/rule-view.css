@@ -4,10 +4,6 @@
  * the card's spacing, and a refused verdict's colour — on --wa-* tokens.
  */
 
-/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
- * are adopted, so the order is declared here). */
-@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
-
 @layer app {
   .rule-view {
     flex: 1;

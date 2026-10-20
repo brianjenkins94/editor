@@ -716,7 +716,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 
 	return (
 		<div class="gp wa-stack wa-gap-0 wa-font-size-s">
-			<div class="gp-head wa-split wa-flex-nowrap wa-gap-xs wa-font-size-2xs wa-text-uppercase wa-color-text-quiet">
+			<div class="gp-head app-caption wa-split wa-flex-nowrap wa-gap-xs">
 				<span class="wa-cluster wa-flex-nowrap wa-gap-xs">
 					<wa-checkbox checked={allChecked} indeterminate={someChecked} title="Select all changes" aria-label="Select all changes" onChange={(event: Event) => { toggleAll((event.target as HTMLInputElement).checked); }} />
 

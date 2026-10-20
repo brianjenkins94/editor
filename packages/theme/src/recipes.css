@@ -1,0 +1,32 @@
+/*
+ * Recipes: the shapes the app kept building in each surface's sheet, as one class each (PLAN.md §7.3). Every theme entry
+ * loads them (theme, theme/chrome, theme/vscode), so they're in every document beside Web Awesome's utilities. A
+ * surface composes them with those utilities and keeps only what's its own in its exception sheet.
+ */
+
+@layer app {
+  /* A document's whole view, fixed to the viewport: a webview's is clear of the padding VS Code's default webview styles
+   * give the body, which is unlayered, so a layered rule can't take it back. */
+  .app-frame {
+    position: fixed;
+    inset: 0;
+    overflow: auto;
+  }
+
+  /* A bar of controls along the top of a view, ruled off from what's under it. */
+  .app-toolbar {
+    flex: none;
+    box-sizing: border-box;
+    padding: var(--wa-space-xs) var(--wa-space-s);
+    border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  }
+
+  /* A section's or a card's label: small, quiet, uppercase. */
+  .app-caption {
+    color: var(--wa-color-text-quiet);
+    font-size: var(--wa-font-size-xs);
+    font-weight: var(--wa-font-weight-semibold);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+}

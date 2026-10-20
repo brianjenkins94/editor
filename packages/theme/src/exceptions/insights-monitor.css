@@ -4,26 +4,14 @@
  * tokens (theme/vscode maps them onto the VS Code theme in a webview too).
  */
 
-/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
- * are adopted, so the order is declared here). */
-@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
-
 @layer app {
-  /* The view fills the webview: fixed, so it's clear of the padding VS Code's default webview styles give the body
-   * (unlayered, so a layered rule can't take it back). */
+  /* The view's room inside its frame (app-frame, a recipe). */
   .monitor {
-    position: fixed;
-    inset: 0;
-    overflow: auto;
     padding: var(--wa-space-s);
   }
 
   .monitor-card {
     --spacing: var(--wa-space-xs);
-  }
-
-  .monitor-head {
-    letter-spacing: 0.04em;
   }
 
   .monitor-chart {

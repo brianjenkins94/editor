@@ -5,10 +5,6 @@
  * (a channel's traffic, what needs review) is debug-mcp's architecture_state.
  */
 
-/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
- * are adopted, so the order is declared here). */
-@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
-
 @layer app {
   .arch-root {
     /* The diagram's colors: a message kind's matches its chip's variant (KIND_VARIANTS); hub links are purple. */
@@ -23,13 +19,6 @@
     height: 100%;
     overflow: hidden;
     background: var(--wa-color-surface-default);
-  }
-
-  .arch-toolbar {
-    flex: none;
-    box-sizing: border-box;
-    padding: var(--wa-space-xs) var(--wa-space-s);
-    border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
   }
 
   .arch-body {

@@ -6,10 +6,6 @@
  * VS Code theme), plus the bridge's --code-value-* for what the debugger shows; the Margin's accent is margin.css's.
  */
 
-/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
- * are adopted, so the order is declared here). */
-@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
-
 @layer app {
   .monaco-editor {
     /* A character column: the rows line up with the code's characters, so their gaps are measured in them, not on Web

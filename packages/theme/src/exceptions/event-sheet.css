@@ -1,31 +1,11 @@
 /*
  * The event sheet's webview (extensions/event-sheet: view.ts and authoring.ts): what Web Awesome's components and
- * utility classes don't cover. Its buttons, tags, stacks and clusters are theirs; what's left is the view's frame, its
- * rows and headings, and the level's sprite grid, all on --wa-* tokens (theme/vscode maps them onto the VS Code theme
+ * utility classes don't cover. Its buttons, tags, stacks and clusters are theirs, and its frame, toolbar and headings'
+ * type are recipes (theme/recipes.css); what's left is its rows, its sections' padding, and the level's sprite grid, all on --wa-* tokens (theme/vscode maps them onto the VS Code theme
  * in a webview too).
  */
 
-/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
- * are adopted, so the order is declared here). */
-@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
-
 @layer app {
-  /* The view fills the webview: fixed, so it's clear of the padding VS Code's default webview styles give the body
-   * (unlayered, so a layered rule can't take it back). */
-  .event-sheet {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .event-sheet-bar {
-    flex: none;
-    padding: var(--wa-space-xs) var(--wa-space-s);
-    border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
-  }
-
   .event-sheet-body {
     flex: 1;
     min-height: 0;
@@ -39,7 +19,6 @@
 
   .event-sheet-heading {
     padding: var(--wa-space-s) var(--wa-space-s) var(--wa-space-2xs);
-    letter-spacing: 0.04em;
   }
 
   .event-sheet-heading.divided {

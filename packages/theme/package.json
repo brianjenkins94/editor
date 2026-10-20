@@ -12,6 +12,11 @@
       "default": "./src/vscode.js"
     },
     "./vscode.css": "./src/vscode.css",
+    "./sheet": {
+      "types": "./src/sheet.d.ts",
+      "default": "./src/sheet.js"
+    },
+    "./recipes.css": "./src/recipes.css",
     "./components/*": {
       "types": "./src/components/*.d.ts",
       "default": "./src/components/*.js"

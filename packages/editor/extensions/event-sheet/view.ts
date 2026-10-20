@@ -14,6 +14,7 @@
 import type { AuthoredGame } from "./generator";
 import type { Behavior, Composite, GameModel, GameObject, Rule } from "./recognizer";
 import css from "theme/exceptions/event-sheet.css?raw";
+import { styleSheet } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import { button, chip, element, heading, renderAuthoring } from "./authoring";
 import { authoredFromModel, blankGame, generateGame } from "./generator";
@@ -244,14 +245,14 @@ function connect(vscode: VsCodeWebviewApi, onRefresh: (why: "editor" | "save") =
 }
 
 function start(): void {
-	const view = element("div", "event-sheet");
-	const bar = element("div", "event-sheet-bar wa-cluster wa-gap-2xs");
+	const view = element("div", "event-sheet app-frame wa-stack wa-gap-0");
+	const bar = element("div", "app-toolbar wa-cluster wa-gap-2xs");
 	const body = element("div", "event-sheet-body");
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let rebuilding = 0;
 
 	// Web Awesome on the VS Code theme (theme/vscode, as in the workbench), then what it doesn't cover.
-	document.head.append(element("style", "", { "textContent": css }));
+	document.head.append(styleSheet(css));
 	followVsCodeTheme(document.body);
 	// Fixed toggle bar on top; the body swaps between Build (author) and Map (read).
 	view.append(bar, body);
