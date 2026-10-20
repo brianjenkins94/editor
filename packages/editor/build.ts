@@ -341,7 +341,8 @@ export async function preBuild(): Promise<void> {
 			// the Rule view's page)
 			bundledExtension("capabilities", { "node_modules/capabilities-ts-plugin/package.json": { "json": { "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "packages.js": { "worker": "packages-worker.js" } }),
 			bundledExtension("history", { "node_modules/history-ts-plugin/package.json": { "json": { "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" } } }),
-			bundledExtension("insights"),
+			// (its monitor webview's script, which it inlines into the page it serves)
+			bundledExtension("insights", { "monitor-view.js": { "script": "monitor-view.ts", "format": "iife" } }),
 			bundledExtension("margin"),
 			bundledExtension("running"),
 			bundledExtension("type-queries"),

@@ -357,6 +357,19 @@ Re-run with `npx eslint .` and `npm run lint:css`.
 - Not checked in the running editor (no dev server to hand); the architecture suites build the webview's script and
   pass. The game files `library.ts` emits keep their own CSS: they're the game's, not the editor's.
 
+**Cleared (the insights monitor's page, 2026-10-20):**
+
+- Its page was one string: a `<style>` on `--vscode-*` and a script building its cards as HTML, behind
+  `no-html-in-strings` / `no-css-in-strings` disables. The script is `extensions/insights/monitor-view.ts` now, built
+  like the event sheet's (`bundledExtension`'s `script`, listed in the manifest's `files`) and inlined into the page
+  `monitor.ts` serves; it builds its cards as elements, not markup. It calls `followVsCodeTheme(document.body)`.
+- A card is a `wa-card` (outlined), its head a `wa-split`, its legend a `wa-cluster`, their type the text utilities.
+  What's left is `src/exceptions/insights-monitor.css`: the frame (fixed, as the event sheet's) and the sparklines.
+- Its line colours were VS Code's `--vscode-charts-*`; they're the palette's `-60`s now (blue, orange, green,
+  purple, red, yellow), not a bridge entry: they only need to tell the lines apart, where the debugger's value colours
+  had to match the debugger's. Like the Margin's purple, they don't follow the light/dark mode.
+- Not checked in the running editor; the architecture suites build its script and pass (97).
+
 **Before clearing** (the baseline):
 
 **ESLint** (`webawesome/*`, in `.ts`/`.tsx`/`.js`):
@@ -407,8 +420,7 @@ measure the real work. The ESLint errors fail CI's `lint` (lib's `util-lint`). S
   Components are imported individually, so it is probably small. Measure it with the performance budgets.
 - ~~Should webviews (event sheet, insights monitor) get `theme/vscode` too, or stay as declared exceptions?~~ They get
   it (2026-10-19): one bridge, declared on a webview's `body` as well as `.monaco-workbench`, rather than a second
-  setup for webviews. The event sheet's does; the insights monitor's (`extensions/insights/monitor.ts`, a page of its
-  own CSS on `--vscode-*`) hasn't moved yet. A webview's page has to allow `connect-src data:` for Web Awesome's
-  icons.
+  setup for webviews. The event sheet's and the insights monitor's do (§6). A webview's page has to allow
+  `connect-src data:` if it shows Web Awesome's icons.
 - Is `known-classes` too strict for third-party DOM, such as Monaco and codehike? It probably needs a per-file
   allowlist for vendored markup.

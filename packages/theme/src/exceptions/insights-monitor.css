@@ -1,0 +1,53 @@
+/*
+ * The insights monitor's webview (extensions/insights: monitor-view.ts): what Web Awesome's cards and utility classes
+ * don't cover — the view's frame and the cards' sparklines, a line per series in the palette's colours. On --wa-*
+ * tokens (theme/vscode maps them onto the VS Code theme in a webview too).
+ */
+
+/* After Web Awesome's layers, so these win over its utilities (this sheet is in the document before theirs, which
+ * are adopted, so the order is declared here). */
+@layer wa-native, wa-base, wa-utilities, wa-color-palette, wa-color-variant, wa-theme, wa-theme-dimension, wa-theme-overrides, app;
+
+@layer app {
+  /* The view fills the webview: fixed, so it's clear of the padding VS Code's default webview styles give the body
+   * (unlayered, so a layered rule can't take it back). */
+  .monitor {
+    position: fixed;
+    inset: 0;
+    overflow: auto;
+    padding: var(--wa-space-s);
+  }
+
+  .monitor-card {
+    --spacing: var(--wa-space-xs);
+  }
+
+  .monitor-head {
+    letter-spacing: 0.04em;
+  }
+
+  .monitor-chart {
+    display: block;
+    width: 100%;
+    height: 56px;
+  }
+
+  .monitor-chart polyline {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  /* A series' colour, its line's and its legend's. */
+  .monitor-line-0 { --line: var(--wa-color-blue-60); }
+  .monitor-line-1 { --line: var(--wa-color-orange-60); }
+  .monitor-line-2 { --line: var(--wa-color-green-60); }
+  .monitor-line-3 { --line: var(--wa-color-purple-60); }
+  .monitor-line-4 { --line: var(--wa-color-red-60); }
+  .monitor-line-5 { --line: var(--wa-color-yellow-60); }
+
+  span[class^="monitor-line-"] {
+    color: var(--line);
+  }
+}

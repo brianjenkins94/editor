@@ -1,9 +1,10 @@
 /**
  * The monitor: the metrics plane drawn the way Monitor Pro draws a machine — a few numbers in the status bar, and a view of
  * sparkline cards. It reads samples through the `editor.metrics.read` command (served by whatever is on the hub — the
- * worker pod), so it uses nothing but VS Code's API, once a second.
+ * worker pod), so it uses nothing but VS Code's API, once a second. The cards are its webview's: monitor-view.ts.
  */
 import type { MetricsSample } from "@brianjenkins94/observability";
+import type { MonitorMessage } from "./monitor-view";
 import * as vscode from "vscode";
 
 /** Points kept per series: two minutes at one a second. */
@@ -103,7 +104,7 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 		}
 
 		showStatus();
-		void view?.webview.postMessage({ "series": Object.fromEntries(series) });
+		void view?.webview.postMessage({ "series": Object.fromEntries(series) } satisfies MonitorMessage);
 	};
 
 	const timer = setInterval(() => {
@@ -113,14 +114,14 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(memory, workspace, longFrames, spanErrors, { "dispose": () => {
 		clearInterval(timer);
 	} }, vscode.window.registerWebviewViewProvider("insights.monitor", {
-		"resolveWebviewView": (resolved) => {
-			view = resolved;
+		"resolveWebviewView": async (resolved) => {
 			resolved.webview.options = { "enableScripts": true };
-			resolved.webview.html = monitorHtml();
+			resolved.webview.html = await page(context);
+			view = resolved;
 			resolved.onDidDispose(() => {
 				view = undefined;
 			});
-			void resolved.webview.postMessage({ "series": Object.fromEntries(series) });
+			void resolved.webview.postMessage({ "series": Object.fromEntries(series) } satisfies MonitorMessage);
 		}
 	}));
 }
@@ -129,80 +130,13 @@ function formatMB(mb: number): string {
 	return mb >= 1024 ? (mb / 1024).toFixed(2) + " GB" : mb.toFixed(mb >= 100 ? 0 : 1) + " MB";
 }
 
-/** The cards: plain SVG polylines over the last two minutes, coloured with the theme's chart colours. */
-function monitorHtml(): string {
+/** The view's page: its script (monitor-view.ts, the cards) inline — a webview here can't load its resources by URL —
+ *  behind a strict policy. */
+async function page(context: vscode.ExtensionContext): Promise<string> {
+	const script = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, "monitor-view.js")));
 	const nonce = crypto.randomUUID().replaceAll("-", "");
+	const policy = `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`;
 
-	/* eslint-disable webawesome/no-html-in-strings, webawesome/no-css-in-strings -- a webview's own document, not the editor's chrome */
-	return `<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
-body { padding: 8px; font-family: var(--vscode-font-family); font-size: 12px; color: var(--vscode-foreground); }
-.card { border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; }
-.head { display: flex; justify-content: space-between; text-transform: uppercase; letter-spacing: .04em; opacity: .85; margin-bottom: 4px; }
-svg { width: 100%; height: 56px; display: block; }
-.legend { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 4px; opacity: .9; }
-.empty { opacity: .6; }
-</style></head>
-<body><div id="cards"><p class="empty">Waiting for metrics…</p></div>
-<script nonce="${nonce}">
-const COLORS = ["--vscode-charts-blue", "--vscode-charts-orange", "--vscode-charts-green", "--vscode-charts-purple", "--vscode-charts-red", "--vscode-charts-yellow"];
-const CARDS = [
-	{ "title": "Memory · MB", "match": /^workbench:memory\\.(.+)$/, "top": 6 },
-	{ "title": "Workspace · MB used", "match": /^workbench:workspace\\.(usedMB)$/, "name": () => "used" },
-	{ "title": "Long frames · %", "match": /^(\\w+):longFrames$/, "max": 100 },
-	{ "title": "Hub · messages/s", "match": /^workbench:(hub)$/, "name": () => "workbench hub" },
-	{ "title": "Storage · MB", "match": /^workbench:(storage)$/, "name": () => "origin" },
-	{ "title": "Spans · p95 ms", "match": /^root:spans\\.(.+)\\.p95$/, "top": 6 },
-	{ "title": "Spans · ended/s", "match": /^root:spans\\.(.+)\\.rate$/, "top": 6 },
-	{ "title": "Span errors · last 10 s", "match": /^root:spans\\.(.+)\\.errors$/, "top": 6, "nonzero": true }
-];
-const fmt = (v) => v >= 100 ? v.toFixed(0) : v.toFixed(1);
-/** The editor's own sources; any other is an app's (a preview's, named under its window: \`preview:5180/client-0\`). */
-const EDITOR = new Set(["workbench", "shell", "root"]);
-function drawCard(title, lines, { max: fixed, from } = {}) {
-	if (lines.length === 0) return "";
-	const max = fixed ?? Math.max(1, ...lines.flatMap((l) => l.points.map((p) => p[1]))) * 1.1;
-	const paths = lines.map((line, i) => {
-		const pts = line.points.filter((p) => p[0] >= from).map((p) => ((p[0] - from) / 1200).toFixed(1) + "," + (56 - (p[1] / max) * 54).toFixed(1)).join(" ");
-		return '<polyline fill="none" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke="var(' + COLORS[i % COLORS.length] + ')" points="' + pts + '"/>';
-	}).join("");
-	const legend = lines.map((line, i) => '<span style="color: var(' + COLORS[i % COLORS.length] + ')">' + line.name + " " + fmt(line.points.at(-1)?.[1] ?? 0) + "</span>").join("");
-	return '<div class="card"><div class="head"><span>' + title + '</span><span>max ' + fmt(max / (fixed ? 1 : 1.1)) + '</span></div><svg viewBox="0 0 100 56" preserveAspectRatio="none">' + paths + '</svg><div class="legend">' + legend + "</div></div>";
-}
-/** An app's gauges, with no card of their own to declare: one card per app and gauge (\`fps\`, \`lag\`), a line per source
- *  and key — so a game's FPS draws one line per client window, its lag one per client. */
-function appCards(series, from) {
-	const cards = new Map();
-	for (const [key, points] of Object.entries(series)) {
-		const at = key.lastIndexOf(":"); // a source can have a colon (\`preview:5180\`); a gauge's name can't
-		const source = key.slice(0, at);
-		const name = key.slice(at + 1);
-		if (EDITOR.has(source)) continue;
-		const slash = source.indexOf("/");
-		const app = slash === -1 ? source : source.slice(0, slash);
-		const dot = name.indexOf(".");
-		const gauge = dot === -1 ? name : name.slice(0, dot);
-		const title = gauge + " · " + app;
-		const line = [slash === -1 ? "" : source.slice(slash + 1), dot === -1 ? "" : name.slice(dot + 1)].filter(Boolean).join(" ") || app;
-		cards.set(title, [...cards.get(title) ?? [], { "name": line, points }]);
-	}
-	return [...cards].sort(([a], [b]) => a.localeCompare(b)).map(([title, lines]) => drawCard(title, lines.sort((a, b) => a.name.localeCompare(b.name)), { from })).join("");
-}
-function render(series) {
-	const now = Math.max(0, ...Object.values(series).map((points) => points.at(-1)?.[0] ?? 0));
-	const from = now - 120000;
-	const html = CARDS.map((card) => {
-		let lines = Object.entries(series).flatMap(([key, points]) => { const m = card.match.exec(key); return m ? [{ "name": card.name ? card.name(m[1]) : m[1], points }] : []; });
-		lines.sort((a, b) => (b.points.at(-1)?.[1] ?? 0) - (a.points.at(-1)?.[1] ?? 0));
-		if (card.nonzero) lines = lines.filter((line) => line.points.some((p) => p[1] > 0));
-		if (card.top) lines = lines.slice(0, card.top);
-		return drawCard(card.title, lines, { "max": card.max, from });
-	}).join("") + appCards(series, from);
-	document.getElementById("cards").innerHTML = html || '<p class="empty">Waiting for metrics…</p>';
-}
-window.addEventListener("message", (event) => { if (event.data && event.data.series) render(event.data.series); });
-</script></body></html>`;
-	/* eslint-enable webawesome/no-html-in-strings, webawesome/no-css-in-strings */
+	// eslint-disable-next-line webawesome/no-html-in-strings -- a webview is given its page as a string
+	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body><script nonce="${nonce}">${script.replaceAll("</script", "<\\/script")}</script></body></html>`;
 }
