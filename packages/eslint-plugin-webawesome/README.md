@@ -95,6 +95,13 @@ of our own. Style a component through its tokens.
 Flags every stylesheet it's enabled for. Enable it for `**/*.css` and turn it off for the theme package (and any
 declared exemption), so a stylesheet anywhere else fails.
 
+### `webawesome/known-classes`
+
+Flags a class name set as a literal (JSX `class` / `className`, an object's `class` / `className` passed to a call,
+`el.className = …`, `classList` calls, `setAttribute("class", …)`, and wrappers named in `wrappers`) that isn't in
+`known` (names from the stylesheets that declare them), doesn't start with one of `prefixes`, and matches none of
+`allow`. The repo's `eslint.config.js` builds `known` from Web Awesome's CSS, the theme's and Stitches' selector keys.
+
 ## Usage
 
 Loaded directly in the repo's flat config (`eslint.config.js`) by relative path — no install needed — and scoped to the

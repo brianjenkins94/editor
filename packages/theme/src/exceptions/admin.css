@@ -16,6 +16,7 @@
   .table { overflow-x: auto; }
   .table th, .table td { white-space: nowrap; }
   .mono { font-family: var(--wa-font-family-code); font-size: var(--wa-font-size-s); }
+  .problem { color: var(--wa-color-danger-on-quiet); }
   .agent { max-width: 40ch; }
 
   /* The architecture page's diagram (src/architecture.tsx): Web Awesome's tokens, so it follows the theme. */

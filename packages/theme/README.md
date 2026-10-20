@@ -62,7 +62,8 @@ to allow another, add `src/components/<name>.js` and `.d.ts`, each a one-line re
 ## Recipes and sheets: `recipes.css`, `theme/sheet`
 
 The shapes the app kept rebuilding, one class each, in every theme entry: `app-frame` (a view fixed to the viewport),
-`app-toolbar` (a bar ruled off from what's under it) and `app-caption` (a quiet uppercase label). Compose them with Web
+`app-toolbar` (a bar ruled off from what's under it), `app-code` (the code's font) and `app-caption` (a quiet uppercase
+label). Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, the theme's, or Stitches'. Compose them with Web
 Awesome's utilities. A surface's exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from
 `theme/sheet`, which puts the shared layer order (Web Awesome's, then `app`) first in the document once.
 

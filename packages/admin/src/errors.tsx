@@ -55,14 +55,14 @@ function FindById() {
 		>
 			<wa-input name="id" label="Find an error by its id" placeholder="E-ABCD-EFGH" />
 			<wa-button type="submit">Find</wa-button>
-			{problem !== undefined && <span class="wa-color-danger-on-quiet">{problem}</span>}
+			{problem !== undefined && <span class="problem">{problem}</span>}
 		</form>
 	);
 }
 
 /** A stack, a line each. */
 function Stack({ text }: { "text": string }) {
-	return <div class="wa-stack wa-gap-3xs wa-font-family-code wa-caption-m">{text.split("\n").map((line, index) => <span key={index}>{line}</span>)}</div>;
+	return <div class="wa-stack wa-gap-3xs app-code wa-caption-m">{text.split("\n").map((line, index) => <span key={index}>{line}</span>)}</div>;
 }
 
 const REPO = "https://github.com/brianjenkins94/editor";
@@ -124,7 +124,7 @@ function MappedStack({ text, release }: { "text": string; "release": string }) {
 		<div class="wa-stack wa-gap-xs">
 			{state === "mapping" && <span class="wa-color-text-quiet">Mapping it through release {release}'s source maps…</span>}
 			{state === "no maps" && <span class="wa-color-text-quiet">Release {release}'s source maps aren't kept (only production's deploys keep them, for 45 days): the stack is as it ran.</span>}
-			<div class="wa-stack wa-gap-3xs wa-font-family-code wa-caption-m">
+			<div class="wa-stack wa-gap-3xs app-code wa-caption-m">
 				{lines.map((line, index) => {
 					const at = mapped[index];
 
@@ -159,7 +159,7 @@ export function ErrorsPage() {
 							<td>{group.count}</td>
 							<td><When at={group.first_seen} /></td>
 							<td><When at={group.last_seen} /></td>
-							<td class="wa-font-family-code">{group.releases}</td>
+							<td class="app-code">{group.releases}</td>
 						</tr>
 					))}
 				</Table>
@@ -190,9 +190,9 @@ export function ErrorGroupPage({ fingerprint }: { "fingerprint": string }) {
 			<Table head={["Id", "When", "Release", "Signed in as"]}>
 				{occurrences.map((occurrence) => (
 					<tr key={occurrence.id}>
-						<td class="wa-font-family-code"><a href={`#/errors/${occurrence.id}`}>{occurrence.id}</a></td>
+						<td class="app-code"><a href={`#/errors/${occurrence.id}`}>{occurrence.id}</a></td>
 						<td><When at={occurrence.at} /></td>
-						<td class="wa-font-family-code">{occurrence.release}</td>
+						<td class="app-code">{occurrence.release}</td>
 						<td>{occurrence.user_id === null ? <span class="wa-color-text-quiet">signed out</span> : <a href={`#/users/${occurrence.user_id}`}>{occurrence.user_id.slice(0, 8)}…</a>}</td>
 					</tr>
 				))}
@@ -229,9 +229,9 @@ export function ErrorOccurrencePage({ id }: { "id": string }) {
 				<tr>
 					<td>{new Date(occurrence.at).toLocaleString()}</td>
 					<td>{occurrence.source} · {occurrence.route}</td>
-					<td class="wa-font-family-code">{occurrence.release}</td>
+					<td class="app-code">{occurrence.release}</td>
 					<td>{occurrence.user_id === null ? <span class="wa-color-text-quiet">signed out</span> : <a href={`#/users/${occurrence.user_id}`}>{occurrence.user_id.slice(0, 8)}…</a>}</td>
-					<td class="wa-font-family-code">{occurrence.trace_id ?? "—"}</td>
+					<td class="app-code">{occurrence.trace_id ?? "—"}</td>
 				</tr>
 			</Table>
 			{occurrence.breadcrumbs !== null && occurrence.breadcrumbs !== undefined && (

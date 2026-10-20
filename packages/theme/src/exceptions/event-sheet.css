@@ -49,10 +49,6 @@
     padding-left: var(--wa-space-2xl);
   }
 
-  .event-sheet-code {
-    font-family: var(--wa-font-family-code);
-  }
-
   .event-sheet-note {
     font-style: italic;
   }

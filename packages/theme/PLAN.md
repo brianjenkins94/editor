@@ -574,6 +574,31 @@ Recipes first; a custom element only where a structure keeps coming back.
 
 ### 7.4 `known-classes`
 
+Done 2026-10-20, as an error. As built:
+
+- `webawesome/known-classes` reads the class names code sets as literals: JSX `class` / `className`, an object's
+  `class` / `className` where the object goes straight to a call (`Object.assign(el, {…})`, `html(tag, {…})`; in plain
+  data the key can mean something else), `el.className = …`, `classList` calls, `setAttribute("class", …)`, and the
+  `element(tag, className)` helpers. Of a template literal it reads the whole words only (`tone-${tone}` is skipped).
+- A name is known when something styles it: Web Awesome's own CSS (all of `dist/styles`: utilities, themes, native
+  styles, layers), with its prefix families (`[class*='wa-stack']`); every class `packages/theme/src/**/*.css`
+  declares (recipes, exception sheets); or a Stitches selector key in the editor's `css({…})` / `globalCss({…})`
+  (`"&.open"`). `eslint.config.js` builds the lists from those files, so they follow the CSS.
+- Measured first, in warn mode: 77 findings in 18 files. After narrowing object properties to call arguments and reading
+  all of Web Awesome's styles, 16 were left, and every one was a real case:
+  - **Dead classes, fixed:** `wa-font-family-code` (10 uses in admin: there's no such utility, so ids, releases and
+    traces weren't monospace; §2 above wrongly listed it as one) is the new recipe `app-code`, which the event sheet's
+    `.event-sheet-code` was too; `wa-color-danger-on-quiet` (a token's name, not a class) is admin's `.problem`.
+  - **Classes nothing styles or reads, removed:** `maintenance`, `event-sheet`, `arch-toolbar`, `status-declared`,
+    `is-collapsed`, `rule-editor-button`, `rule-editor-check`, `rule-editor-head`.
+  - **Allowed, named in `eslint.config.js`:** VS Code's `codicon-*`, and the hooks the tours and the code query
+    (`rule-panel-choice`, `rule-editor`, `rule-editor-then`, `live-values-split`, `live-values-menu-item`, `more`,
+    `gp-expand`). A new hook is a new line there, visible in review.
+- Exempt: the theme and the lint plugin (its messages say `class`). The other open question, Monaco's and codehike's DOM,
+  needed no entries: our code sets none of their classes as literals, it only styles them, which the rule doesn't read.
+- Checked: planted unknown classes are caught (utilities, recipes, prefix families, Stitches classes and data objects
+  aren't); ESLint 0 errors; tsc as before; the architecture suites pass (97); admin builds.
+
 §4.4: a `class` / `className` literal must be a Web Awesome utility (generated from the installed `utilities.css`)
 or a class `theme` declares (in a recipe or an exception sheet). It's the class side of the contract that 7.2 is for
 elements: code uses what `theme` exports and nothing else.
@@ -631,7 +656,7 @@ Each needs either `theme` as a dependency or a declared exemption:
 1. ~~The CSS rules into ESLint, in lib, with the no-CSS-outside-`theme` rule (7.1).~~ Done 2026-10-20.
 2. ~~Web Awesome only through `theme`, and the tag allowlist (7.2).~~ Done 2026-10-20.
 3. ~~Recipes, from the duplication above (7.3).~~ Done 2026-10-20 (the fragment waits for a second use).
-4. `known-classes` (7.4).
+4. ~~`known-classes` (7.4).~~ Done 2026-10-20.
 5. Stitches through `theme` (7.5): the spike on layers and auxiliary windows, then `theme` exports the instance and
    the shell imports it from there.
 6. The budget (7.6).
@@ -644,5 +669,5 @@ Each needs either `theme` as a dependency or a declared exemption:
   it (2026-10-19): one bridge, declared on a webview's `body` as well as `.monaco-workbench`, rather than a second
   setup for webviews. The event sheet's and the insights monitor's do (§6). A webview's page has to allow
   `connect-src data:` if it shows Web Awesome's icons.
-- Is `known-classes` too strict for third-party DOM, such as Monaco and codehike? It probably needs a per-file
-  allowlist for vendored markup.
+- ~~Is `known-classes` too strict for third-party DOM, such as Monaco and codehike?~~ No (7.4): our code sets none of
+  their classes as literals; VS Code's `codicon-*` is the one allowed family.

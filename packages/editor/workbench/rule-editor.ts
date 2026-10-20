@@ -120,7 +120,7 @@ function icon(name: keyof typeof ICONS): SVGSVGElement {
 
 /** An icon button. */
 function iconButton(name: keyof typeof ICONS, title: string, clicked: (event: MouseEvent) => void): WaButton {
-	const each = element("wa-button", "rule-editor-button", { "title": title, "size": "s", "appearance": "plain" });
+	const each = element("wa-button", "", { "title": title, "size": "s", "appearance": "plain" });
 
 	each.append(icon(name));
 	each.addEventListener("click", clicked);
@@ -241,7 +241,7 @@ export function schemaInput(schema: Schema | undefined, value: unknown, changed:
 	}
 
 	if (type === "boolean") {
-		const box = element("wa-checkbox", "rule-editor-check", { "size": "s", "checked": value === true });
+		const box = element("wa-checkbox", "", { "size": "s", "checked": value === true });
 
 		box.addEventListener("change", () => {
 			changed(box.checked);
@@ -379,7 +379,7 @@ export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): Rule
 
 	const renderCompound = (compound: Compound, siblings: Predicate[] | undefined, index: number): HTMLElement => {
 		const group = element("div", `rule-editor-group${siblings === undefined ? " top" : ""}`);
-		const head = element("div", "rule-editor-row rule-editor-head wa-cluster wa-gap-2xs");
+		const head = element("div", "rule-editor-row wa-cluster wa-gap-2xs");
 		const rows = element("div", "rule-editor-rows wa-stack wa-gap-3xs");
 		const lead = siblings === undefined ? "When" : "";
 

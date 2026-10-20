@@ -617,7 +617,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	root.append(html(
 		"div",
-		{ "class": "arch-toolbar app-toolbar wa-split wa-gap-s" },
+		{ "class": "app-toolbar wa-split wa-gap-s" },
 		html(
 			"div",
 			{ "class": "wa-cluster wa-gap-s" },
@@ -817,7 +817,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 		const id = `component:${channel.id}:${endA}:${endB}`;
 		const pathData = edgePath(from, to);
-		const path = svgElement("path", { "d": pathData, "class": "arch-edge type-component status-declared" });
+		const path = svgElement("path", { "d": pathData, "class": "arch-edge type-component" });
 		const hit = svgElement("path", { "d": pathData, "class": "arch-edge-hit" });
 		const group = svgElement("g", { "data-edge": id });
 
@@ -940,7 +940,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		if (collapsible) {
 			const isCollapsed = collapsed.has(container.id);
 
-			group.classList.toggle("is-collapsed", isCollapsed);
 			group.append(svgElement("path", { "d": isCollapsed ? `M ${rect.x + 9} ${rect.y + 8} l 4 4 l -4 4` : `M ${rect.x + 7} ${rect.y + 10} l 4 4 l 4 -4`, "class": "arch-container-chevron" }));
 
 			if (isCollapsed) {

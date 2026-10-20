@@ -21,6 +21,11 @@
     border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
   }
 
+  /* Code, in the code's font: an id, a release, a route, a trace. */
+  .app-code {
+    font-family: var(--wa-font-family-code);
+  }
+
   /* A section's or a card's label: small, quiet, uppercase. */
   .app-caption {
     color: var(--wa-color-text-quiet);

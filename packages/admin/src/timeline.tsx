@@ -22,12 +22,12 @@ interface Timeline {
 /** What a row of the timeline says, in the What and Detail columns. */
 function describe(item: Item) {
 	if (item.kind === "request") {
-		return [<span key="what" class="wa-font-family-code">{item.route}</span>, <span key="detail"><wa-badge variant={item.status >= 500 ? "danger" : item.status >= 400 ? "warning" : "success"}>{item.status}</wa-badge> {item.ms} ms</span>];
+		return [<span key="what" class="app-code">{item.route}</span>, <span key="detail"><wa-badge variant={item.status >= 500 ? "danger" : item.status >= 400 ? "warning" : "success"}>{item.status}</wa-badge> {item.ms} ms</span>];
 	}
 
 	// What the editor said: a fixed vocabulary; a repo as the audit log's keyed tag, an error by its id.
 	if (item.kind === "editor") {
-		return [<span key="what" class="wa-cluster wa-gap-2xs"><wa-badge variant="brand" appearance="outlined">editor</wa-badge>{item.name}</span>, item.name === "error" && item.detail !== null ? <a key="detail" href={`#/errors/${item.detail}`}>{item.detail}</a> : <span key="detail" class="wa-font-family-code wa-color-text-quiet">{item.detail ?? ""}</span>];
+		return [<span key="what" class="wa-cluster wa-gap-2xs"><wa-badge variant="brand" appearance="outlined">editor</wa-badge>{item.name}</span>, item.name === "error" && item.detail !== null ? <a key="detail" href={`#/errors/${item.detail}`}>{item.detail}</a> : <span key="detail" class="app-code wa-color-text-quiet">{item.detail ?? ""}</span>];
 	}
 
 	if (item.kind === "audit") {
@@ -62,7 +62,7 @@ export function TimelinePage({ id }: { "id": string }) {
 	return (
 		<section class="wa-stack wa-gap-l">
 			<div><a href="#/sessions">Sign-ins</a> · <a href={`#/users/${session.user_id}`}>its user</a></div>
-			<h1 class="wa-heading-xl">Sign-in <span class="wa-font-family-code">{session.id.slice(0, 8)}…</span></h1>
+			<h1 class="wa-heading-xl">Sign-in <span class="app-code">{session.id.slice(0, 8)}…</span></h1>
 			<p class="wa-color-text-quiet">
 				{session.client}, {session.label ?? "an unknown device"}, signed in by {session.method ?? "an unknown method"}; started <When at={session.created_at} />, last used <When at={session.last_used_at} />{session.revoked_at === null ? ", live" : <>, ended <When at={session.revoked_at} /></>}.
 			</p>
@@ -92,7 +92,7 @@ export function TimelinePage({ id }: { "id": string }) {
 								<td title={new Date(item.at).toISOString()}>{new Date(item.at).toLocaleString()}</td>
 								<td>{what}</td>
 								<td>{detail}</td>
-								<td class="wa-font-family-code wa-caption-s">{item.trace ?? ""}</td>
+								<td class="app-code wa-caption-s">{item.trace ?? ""}</td>
 							</tr>
 						);
 					})}

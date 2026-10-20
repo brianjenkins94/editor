@@ -32,6 +32,8 @@
  * And Web Awesome through the theme package (packages/theme/PLAN.md §7.2):
  *   • through-theme    — importing Web Awesome itself, not the theme's re-export (theme/components/<name>, theme, …).
  *   • known-components — a `wa-*` component the theme doesn't export, in JSX or given to a create call.
+ *   • known-classes    — a class name nothing styles or declares: not a Web Awesome utility, nor declared in the
+ *     theme's stylesheets.
  * Layers and `!important` are the CSS language's own rules (css/use-layers, css/no-important).
  */
 
@@ -932,6 +934,99 @@ const knownComponents = {
 	}
 };
 
+// --- Class names: a closed set (packages/theme/PLAN.md §7.4) — Web Awesome's utilities and the classes the theme's
+//     stylesheets declare. ---
+
+/** The words of a class string (a template literal's static text only, without the words an expression touches). */
+function classWords(node) {
+	if (node.type === "Literal" && typeof node.value === "string") {
+		return node.value.split(/\s+/u).filter(Boolean);
+	}
+
+	if (node.type === "TemplateLiteral") {
+		return node.quasis.flatMap((quasi, index) => {
+			const text = quasi.value.cooked ?? quasi.value.raw;
+			const words = text.split(/\s+/u);
+
+			// (a word against `${…}` is only part of a class: `tone-${tone}`)
+			return words.filter((word, at) => word !== "" && !(at === 0 && index > 0 && !/^\s/u.test(text)) && !(at === words.length - 1 && index < node.expressions.length && !/\s$/u.test(text)));
+		});
+	}
+
+	return [];
+}
+
+const knownClasses = {
+	"meta": {
+		"type": "problem",
+		"docs": { "description": "Use only class names something styles or declares: a Web Awesome utility, or a class the theme package's stylesheets declare (its recipes, a surface's exception sheet). A bespoke class needs its sheet in the theme, which shows in review." },
+		"messages": { "unknown": "`{{name}}` is no Web Awesome utility and no class the theme's stylesheets declare — use a utility or a recipe (app-*), or declare it in the surface's sheet in packages/theme/src/exceptions/." },
+		"schema": [{
+			"type": "object",
+			"properties": {
+				"known": { "type": "array", "items": { "type": "string" } },
+				"prefixes": { "type": "array", "items": { "type": "string" } },
+				"allow": { "type": "array", "items": { "type": "string" } },
+				"wrappers": { "type": "object", "additionalProperties": { "type": "integer" } }
+			},
+			"additionalProperties": false
+		}]
+	},
+	"create": function(context) {
+		// `known`: every class name a stylesheet declares; `prefixes`: Web Awesome's families it matches by prefix
+		// (`[class*='wa-stack']`); `allow`: patterns for classes styled by someone else's CSS (VS Code's, a library's) or used
+		// only as hooks; `wrappers`: local helpers taking a class string, by name → its argument's index.
+		const options = context.options[0] ?? {};
+		const known = new Set(options.known ?? []);
+		const prefixes = options.prefixes ?? [];
+		const allow = (options.allow ?? []).map((pattern) => new RegExp(pattern, "u"));
+		const wrappers = options.wrappers ?? {};
+
+		function check(node) {
+			for (const name of classWords(node)) {
+				if (!known.has(name) && !prefixes.some((prefix) => name.startsWith(prefix)) && !allow.some((pattern) => pattern.test(name))) {
+					context.report({ "node": node, "messageId": "unknown", "data": { "name": name } });
+				}
+			}
+		}
+
+		const isClassKey = (key) => (key.type === "Identifier" && ["class", "className"].includes(key.name)) || (key.type === "Literal" && ["class", "className"].includes(key.value));
+
+		return {
+			"JSXAttribute": function(node) {
+				if (node.name.type === "JSXIdentifier" && ["class", "className"].includes(node.name.name) && node.value !== null) {
+					check(node.value.type === "JSXExpressionContainer" ? node.value.expression : node.value);
+				}
+			},
+			// (an object's `class` / `className` only where the object goes straight to a call — `Object.assign(el, {…})`,
+			// `html(tag, {…})` — not in data, where the key can mean something else: a Durable Object's class)
+			"Property": function(node) {
+				if (!node.computed && isClassKey(node.key) && node.parent.type === "ObjectExpression" && node.parent.parent.type === "CallExpression" && node.parent.parent.arguments.includes(node.parent)) {
+					check(node.value);
+				}
+			},
+			"AssignmentExpression": function(node) {
+				if (node.left.type === "MemberExpression" && !node.left.computed && node.left.property.name === "className") {
+					check(node.right);
+				}
+			},
+			"CallExpression": function(node) {
+				const callee = node.callee;
+
+				if (callee.type === "MemberExpression" && !callee.computed && callee.object.type === "MemberExpression" && callee.object.property.name === "classList" && ["add", "remove", "toggle", "contains", "replace"].includes(callee.property.name)) {
+					for (const argument of callee.property.name === "toggle" ? node.arguments.slice(0, 1) : node.arguments) {
+						check(argument);
+					}
+				} else if (callee.type === "MemberExpression" && !callee.computed && callee.property.name === "setAttribute" && node.arguments[0]?.type === "Literal" && node.arguments[0].value === "class" && node.arguments[1] !== undefined) {
+					check(node.arguments[1]);
+				} else if (callee.type === "Identifier" && Object.hasOwn(wrappers, callee.name) && node.arguments[wrappers[callee.name]] !== undefined) {
+					check(node.arguments[wrappers[callee.name]]);
+				}
+			}
+		};
+	}
+};
+
 export default {
 	"meta": { "name": "eslint-plugin-webawesome", "version": "0.0.0" },
 	"rules": {
@@ -947,6 +1042,7 @@ export default {
 		"css-no-wa-selectors": cssNoWebAwesomeSelectors,
 		"css-only-in-theme": cssOnlyInTheme,
 		"through-theme": throughTheme,
-		"known-components": knownComponents
+		"known-components": knownComponents,
+		"known-classes": knownClasses
 	}
 };

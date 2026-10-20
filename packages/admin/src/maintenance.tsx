@@ -58,7 +58,7 @@ export function MaintenanceBanner({ maintenance, canSwitch }: { "maintenance": M
 	}
 
 	return (
-		<wa-callout variant="danger" class="maintenance">
+		<wa-callout variant="danger">
 			<div class="wa-split">
 				<span>
 					<strong>The API is down for maintenance.</strong> {maintenance.reason ?? "No reason given"}; turned on by {who(maintenance.by)}{maintenance.at === null ? "" : `, ${new Date(maintenance.at).toLocaleString()}`}. Everyone but you gets "Down for maintenance".

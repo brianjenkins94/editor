@@ -1,6 +1,7 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
+import * as url from "node:url";
 import config from "@brianjenkins94/util/eslint";
 import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
 
@@ -9,6 +10,29 @@ import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
 // from a utility class. (Web Awesome resolved as the editor's code resolves it.)
 const THEME_COMPONENTS = readdirSync(new URL("packages/theme/src/components", import.meta.url)).filter((file) => file.endsWith(".js")).map((file) => file.slice(0, -".js".length));
 const WEB_AWESOME_COMPONENTS = readdirSync(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js"))));
+
+// The class names something styles (PLAN.md §7.4, webawesome/known-classes): Web Awesome's utilities (and the families it
+// matches by prefix, `[class*='wa-stack']`) from its installed CSS, and every class the theme package's stylesheets declare
+// (its recipes, the exception sheets).
+const WEB_AWESOME_STYLES = path.join(path.dirname(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js")))), "styles");
+const cssFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((file) => String(file).endsWith(".css")).map((file) => readFileSync(path.join(folder, String(file)), "utf8"));
+const classesIn = (text) => [...text.replaceAll(/\/\*[\s\S]*?\*\//gu, "").matchAll(/\.(-?[_a-zA-Z][\w-]*)/gu)].map((match) => match[1]);
+// And the classes Stitches styles: a selector key in a `css({…})` / `globalCss({…})` object (`"&.open"`).
+const sourceFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((file) => /\.tsx?$/u.test(String(file)) && !String(file).includes("node_modules")).map((file) => readFileSync(path.join(folder, String(file)), "utf8"));
+const stitchesClasses = (text) => (/\b(?:css|globalCss)\(\{/u.test(text) ? [...text.matchAll(/"([^"\n]*?[&\s>~+,]?\.[_a-zA-Z][\w-]*[^"\n]*)":\s*\{/gu)].flatMap((match) => classesIn(match[1])) : []);
+const KNOWN_CLASSES = [...new Set([
+	...cssFiles(WEB_AWESOME_STYLES),
+	...cssFiles(url.fileURLToPath(new URL("packages/theme/src", import.meta.url)))
+].flatMap(classesIn).concat(sourceFiles(url.fileURLToPath(new URL("packages/editor", import.meta.url))).flatMap(stitchesClasses)))];
+// The classes no stylesheet of ours declares that are still meant: VS Code's own (its codicons, styled by VS Code), and
+// hooks the tours and the code query (each named, so a new one shows in review).
+const KNOWN_ELSEWHERE = [
+	"^codicon(?:-|$)",
+	"^(?:rule-panel-choice|rule-editor|rule-editor-then)$", // the tours drive the rule editor and the Rule view by these
+	"^(?:live-values-split|live-values-menu-item|more)$", // the tours read an ask's split buttons by these; pane-native.ts reads `more`
+	"^gp-expand$" // git-panel.tsx finds a row's expander by it
+];
+const WEB_AWESOME_PREFIXES = [...new Set(cssFiles(path.join(WEB_AWESOME_STYLES, "utilities")).flatMap((text) => [...text.matchAll(/\[class\*=['"](wa-[a-z-]+)['"]\]/gu)].map((match) => match[1])))];
 
 // The editor's folders are its realms (packages/editor/ARCHITECTURE.md): a realm imports another realm's code only
 // through shared/. A relative import that climbs out of its folder and into another realm's is an error. The
@@ -64,7 +88,8 @@ export default [
 			"webawesome/no-css-imports": "error",
 			"webawesome/css-in-js-tokens": "error",
 			"webawesome/through-theme": "error",
-			"webawesome/known-components": ["error", { "allowed": THEME_COMPONENTS, "catalog": WEB_AWESOME_COMPONENTS }]
+			"webawesome/known-components": ["error", { "allowed": THEME_COMPONENTS, "catalog": WEB_AWESOME_COMPONENTS }],
+			"webawesome/known-classes": ["error", { "known": KNOWN_CLASSES, "prefixes": WEB_AWESOME_PREFIXES, "allow": KNOWN_ELSEWHERE, "wrappers": { "element": 1 } }]
 		}
 	},
 	{
@@ -72,7 +97,7 @@ export default [
 		// bundle Web Awesome themselves (the api doesn't depend on theme: PLAN.md §7.7); and this plugin, whose maps name
 		// Web Awesome's components as data.
 		"files": ["packages/theme/**", "packages/api/scripts/webawesome.ts", "packages/eslint-plugin-webawesome/**"],
-		"rules": { "webawesome/through-theme": "off", "webawesome/known-components": "off" }
+		"rules": { "webawesome/through-theme": "off", "webawesome/known-components": "off", "webawesome/known-classes": "off" }
 	},
 	{
 		// The theme package is where the stylesheets live: it adopts its own and Web Awesome's.
