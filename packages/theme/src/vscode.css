@@ -2,12 +2,14 @@
  * theme/vscode — Web Awesome's tokens, mapped onto the active VS Code color theme.
  *
  * The one place a --vscode-* variable may appear (stylelint enforces it). VS Code declares its theme's variables on
- * `.monaco-workbench`, so the mapping is declared there too: a custom property has to be resolved where the value it
- * reads is defined. vscode.js puts Web Awesome's `wa-dark` / `wa-light` class on the same element, from VS Code's
- * theme type, so every token not mapped here comes from Web Awesome's own ramp for that mode.
+ * `.monaco-workbench` in its own document, and on a webview's `html` (marking its `body` with the theme's kind), so the
+ * mapping is declared on `.monaco-workbench` and on a webview's `body`: a custom property has to be resolved where the
+ * value it reads is defined, or below it. vscode.js puts Web Awesome's `wa-dark` / `wa-light` class on the same
+ * element, from VS Code's theme type, so every token not mapped here comes from Web Awesome's own ramp for that mode.
  */
 
-.monaco-workbench {
+.monaco-workbench,
+body[data-vscode-theme-kind] {
 	/* Type and density: VS Code's UI font at its 13px size, and spacing to match. */
 	--wa-font-family-body: var(--vscode-font-family);
 	--wa-font-family-heading: var(--vscode-font-family);

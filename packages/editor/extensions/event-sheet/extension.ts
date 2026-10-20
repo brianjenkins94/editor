@@ -226,11 +226,13 @@ async function sheetBeside(uri: string, modelOf: (root: string) => Promise<GameM
 	};
 }
 
-/** The webview's page: the view's script inline (a webview here can't load its resources by URL), behind a strict policy. */
+/** The webview's page: the view's script inline (a webview here can't load its resources by URL), behind a strict policy.
+ *  `connect-src data:` because Web Awesome fetches its own icons (a tag's ✕) as `data:` SVGs; a `data:` URL reaches no
+ *  server. */
 async function page(context: vscode.ExtensionContext, webview: vscode.Webview): Promise<string> {
 	const script = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, "view.js")));
 	const nonce = crypto.randomUUID().replaceAll("-", "");
-	const policy = `default-src 'none'; img-src data: ${webview.cspSource}; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`;
+	const policy = `default-src 'none'; img-src data: ${webview.cspSource}; style-src 'unsafe-inline'; connect-src data:; script-src 'nonce-${nonce}'`;
 
 	// eslint-disable-next-line webawesome/no-html-in-strings -- a webview is given its page as a string
 	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body><script nonce="${nonce}">${script.replaceAll("</script", "<\\/script")}</script></body></html>`;

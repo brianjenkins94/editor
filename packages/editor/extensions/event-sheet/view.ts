@@ -11,10 +11,11 @@
  * worker), opening a file at a line, writing generated files, and the prompts. The host says when to refresh: the active
  * editor changed, or a file was saved.
  */
-/* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings -- a plain structural map in a webview; intrinsic layout, not themeable chrome */
 import type { AuthoredGame } from "./generator";
 import type { Behavior, Composite, GameModel, GameObject, Rule } from "./recognizer";
-import { button, renderAuthoring } from "./authoring";
+import css from "theme/exceptions/event-sheet.css?raw";
+import { followVsCodeTheme } from "theme/vscode";
+import { button, chip, element, heading, renderAuthoring } from "./authoring";
 import { authoredFromModel, blankGame, generateGame } from "./generator";
 
 /** What the view asks of the extension: everything outside the webview. */
@@ -41,49 +42,39 @@ interface VsCodeWebviewApi { "postMessage": (message: unknown) => void }
 export interface ViewMessage { "call": true; "id": number; "method": keyof EventSheetHost; "args": unknown[] }
 export type HostMessage = { "answer": true; "id": number; "result"?: unknown; "error"?: string } | { "refresh": "editor" | "save" };
 
-const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
-
 // Two faces of one model: Build (author) and Map (read). The authored block model is kept per game root, so edits
 // persist (and don't re-project on every keystroke).
 type ViewMode = "build" | "map";
 let viewMode: ViewMode = "build";
 const authoredByRoot = new Map<string, AuthoredGame>();
 
-/** A muted section heading. */
-function heading(text: string): HTMLElement {
-	const element = document.createElement("div");
+/** A row that opens code (`nested`: under a rule); `build` fills its content. */
+function clickableRow(onClick: () => void, build: (row: HTMLElement) => void, nested = false): HTMLElement {
+	const row = element("div", `event-sheet-row${nested ? " event-sheet-nested" : ""} wa-stack wa-gap-3xs`);
 
-	element.textContent = text;
-	element.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.6";
-
-	return element;
-}
-
-/** A clickable row that deep-links; `build` fills its content. */
-function clickableRow(onClick: () => void, build: (row: HTMLElement) => void): HTMLElement {
-	const row = document.createElement("div");
-
-	row.style.cssText = "padding:5px 10px;cursor:pointer;border-bottom:" + BORDER;
-	row.addEventListener("mouseenter", () => {
-		row.style.background = "var(--vscode-list-hoverBackground,#2a2d2e)";
-	});
-	row.addEventListener("mouseleave", () => {
-		row.style.background = "transparent";
-	});
 	row.addEventListener("click", onClick);
 	build(row);
 
 	return row;
 }
 
-/** A small behavior chip. */
-function chip(text: string): HTMLElement {
-	const element = document.createElement("span");
+/** A row's name, bold. */
+function nameOf(text: string): HTMLElement {
+	return element("span", "wa-font-weight-semibold", { "textContent": text });
+}
 
-	element.textContent = text;
-	element.style.cssText = "display:inline-block;margin:1px 3px 1px 0;padding:0 6px;border-radius:8px;font-size:11px;background:var(--vscode-badge-background,#4d4d4d);color:var(--vscode-badge-foreground,#fff)";
+/** Small, quiet text: what a row is, beside or under its name (`code`: in the code's type). */
+function aside(text: string, code = false): HTMLElement {
+	return element("span", `wa-caption-xs wa-color-text-quiet${code ? " event-sheet-code" : ""}`, { "textContent": text });
+}
 
-	return element;
+/** Tags, in a row. */
+function chips(texts: string[]): HTMLElement {
+	const row = element("div", "wa-cluster wa-gap-2xs");
+
+	row.append(...texts.map((text) => chip(text)));
+
+	return row;
 }
 
 function renderObjects(container: HTMLElement, host: EventSheetHost, root: string, objects: GameObject[]): void {
@@ -93,29 +84,10 @@ function renderObjects(container: HTMLElement, host: EventSheetHost, root: strin
 		container.append(clickableRow(() => {
 			host.open(root + "/" + object.defPath, object.defLine);
 		}, (row) => {
-			const name = document.createElement("span");
+			const header = element("div", "wa-split");
 
-			name.textContent = object.name;
-			name.style.cssText = "font-weight:600";
-			row.append(name);
-
-			if (object.depth !== undefined) {
-				const depth = document.createElement("span");
-
-				depth.textContent = "depth " + object.depth;
-				depth.style.cssText = "float:right;font-size:11px;opacity:0.5";
-				row.append(depth);
-			}
-
-			const chips = document.createElement("div");
-
-			chips.style.cssText = "margin-top:3px";
-
-			for (const behavior of object.behaviors) {
-				chips.append(chip(behavior));
-			}
-
-			row.append(chips);
+			header.append(nameOf(object.name), ...object.depth === undefined ? [] : [aside("depth " + object.depth)]);
+			row.append(header, chips(object.behaviors));
 		}));
 	}
 }
@@ -128,37 +100,28 @@ function renderRules(container: HTMLElement, host: EventSheetHost, root: string,
 		container.append(clickableRow(() => {
 			host.open(root + "/" + rule.defPath, rule.defLine);
 		}, (row) => {
-			const name = document.createElement("span");
+			row.append(nameOf(rule.name));
 
-			name.textContent = rule.name;
-			name.style.cssText = "font-weight:600";
-			row.append(name);
+			if (rule.queries.length > 0) {
+				row.append(aside("for each " + rule.queries.map((set) => set.join(" + ")).join(", ")));
+			}
 
-			const subject = document.createElement("div");
-
-			subject.textContent = rule.queries.length === 0 ? "" : "for each " + rule.queries.map((set) => set.join(" + ")).join(", ");
-			subject.style.cssText = "font-size:11px;opacity:0.6;margin-top:2px";
-			row.append(subject);
-
-			// The behaviors this rule composes — clickable chips that jump to the behavior's definition.
+			// The behaviors this rule composes — clickable tags that jump to the behavior's definition.
 			if (rule.composes.length > 0) {
-				const uses = document.createElement("div");
-
-				uses.style.cssText = "margin-top:3px";
+				const uses = element("div", "wa-cluster wa-gap-2xs");
 
 				for (const composedName of rule.composes) {
-					const element = chip("→ " + composedName);
+					const tag = chip("→ " + composedName);
 					const composite = composites.get(composedName);
 
 					if (composite !== undefined) {
-						element.style.cursor = "pointer";
-						element.addEventListener("click", (event) => {
+						tag.addEventListener("click", (event) => {
 							event.stopPropagation();
 							host.open(root + "/" + composite.defPath, composite.defLine);
 						});
 					}
 
-					uses.append(element);
+					uses.append(tag);
 				}
 
 				row.append(uses);
@@ -169,34 +132,16 @@ function renderRules(container: HTMLElement, host: EventSheetHost, root: string,
 		for (const eventRow of rule.rows) {
 			container.append(clickableRow(() => {
 				host.open(root + "/" + rule.defPath, eventRow.line);
-			}, (element) => {
-				element.style.paddingLeft = "22px";
+			}, (row) => {
+				const when = element("div", "wa-font-size-s");
 
-				const when = document.createElement("span");
-
-				when.textContent = "when ";
-				when.style.cssText = "opacity:0.5;font-size:12px";
-
-				const cond = document.createElement("span");
-
-				cond.textContent = eventRow.event;
-				cond.style.cssText = "font-family:var(--monaco-monospace-font,monospace);font-size:12px";
-				element.append(when, cond);
-
-				const does = document.createElement("div");
-
-				does.textContent = "→ " + eventRow.actions.join("; ");
-				does.style.cssText = "font-family:var(--monaco-monospace-font,monospace);font-size:12px;opacity:0.8;margin-top:2px";
-				element.append(does);
-			}));
+				when.append(element("span", "wa-color-text-quiet", { "textContent": "when " }), element("span", "event-sheet-code", { "textContent": eventRow.event }));
+				row.append(when, element("div", "event-sheet-code wa-font-size-s", { "textContent": "→ " + eventRow.actions.join("; ") }));
+			}, true));
 		}
 
 		if (rule.rows.length === 0 && rule.composes.length === 0) {
-			const note = document.createElement("div");
-
-			note.textContent = "opaque — custom code / runtime glue";
-			note.style.cssText = "padding:2px 10px 6px 22px;font-size:11px;font-style:italic;opacity:0.45";
-			container.append(note);
+			container.append(element("div", "event-sheet-section event-sheet-nested event-sheet-note wa-caption-xs wa-color-text-quiet", { "textContent": "opaque — custom code / runtime glue" }));
 		}
 	}
 }
@@ -213,25 +158,7 @@ function renderComposites(container: HTMLElement, host: EventSheetHost, root: st
 		container.append(clickableRow(() => {
 			host.open(root + "/" + composite.defPath, composite.defLine);
 		}, (row) => {
-			const name = document.createElement("span");
-
-			name.textContent = composite.name;
-			name.style.cssText = "font-weight:600";
-			row.append(name);
-
-			const chips = document.createElement("div");
-
-			chips.style.cssText = "margin-top:3px";
-
-			for (const use of composite.uses) {
-				chips.append(chip(use));
-			}
-
-			for (const sub of composite.composes) {
-				chips.append(chip("→ " + sub));
-			}
-
-			row.append(chips);
+			row.append(nameOf(composite.name), chips([...composite.uses, ...composite.composes.map((sub) => "→ " + sub)]));
 		}));
 	}
 }
@@ -244,18 +171,17 @@ function renderComponents(container: HTMLElement, host: EventSheetHost, root: st
 		container.append(clickableRow(() => {
 			host.open(root + "/" + behavior.defPath, behavior.defLine);
 		}, (row) => {
-			const name = document.createElement("span");
+			const header = element("div", "wa-split");
 
-			name.textContent = behavior.name;
-			row.append(name);
-
-			const kind = document.createElement("span");
-
-			kind.textContent = behavior.kind === "data" ? "data (" + behavior.fields.join(", ") + ")" : "tag";
-			kind.style.cssText = "float:right;font-size:11px;opacity:0.5;font-family:var(--monaco-monospace-font,monospace)";
-			row.append(kind);
+			header.append(element("span", "", { "textContent": behavior.name }), aside(behavior.kind === "data" ? "data (" + behavior.fields.join(", ") + ")" : "tag", true));
+			row.append(header);
 		}));
 	}
+}
+
+/** A message in place of the view's content. */
+function message(text: string): HTMLElement {
+	return element("div", "event-sheet-message wa-color-text-quiet", { "textContent": text });
 }
 
 /** Render the whole model into the container. */
@@ -263,11 +189,7 @@ function paint(container: HTMLElement, host: EventSheetHost, root: string, model
 	container.replaceChildren();
 
 	if (model.objects.length === 0 && model.rules.length === 0 && model.behaviors.length === 0 && model.composites.length === 0) {
-		const note = document.createElement("div");
-
-		note.textContent = "No game recognized in " + (root.split("/").pop() ?? root) + ".";
-		note.style.cssText = "padding:12px;font-size:13px;opacity:0.6";
-		container.append(note);
+		container.append(message("No game recognized in " + (root.split("/").pop() ?? root) + "."));
 
 		return;
 	}
@@ -322,24 +244,21 @@ function connect(vscode: VsCodeWebviewApi, onRefresh: (why: "editor" | "save") =
 }
 
 function start(): void {
-	const container = document.body;
-	const bar = document.createElement("div");
-	const body = document.createElement("div");
+	const view = element("div", "event-sheet");
+	const bar = element("div", "event-sheet-bar wa-cluster wa-gap-2xs");
+	const body = element("div", "event-sheet-body");
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let rebuilding = 0;
 
+	// Web Awesome on the VS Code theme (theme/vscode, as in the workbench), then what it doesn't cover.
+	document.head.append(element("style", "", { "textContent": css }));
+	followVsCodeTheme(document.body);
 	// Fixed toggle bar on top; the body swaps between Build (author) and Map (read).
-	container.style.cssText = "margin:0;padding:0;height:100vh;display:flex;flex-direction:column;overflow:hidden;font:13px var(--vscode-font-family);color:var(--vscode-foreground)";
-	bar.style.cssText = "display:flex;gap:4px;padding:6px 10px;border-bottom:" + BORDER + ";flex:none";
-	body.style.cssText = "flex:1;overflow:auto;min-height:0";
-	container.replaceChildren(bar, body);
+	view.append(bar, body);
+	document.body.replaceChildren(view);
 
 	const showMessage = (text: string): void => {
-		const note = document.createElement("div");
-
-		note.textContent = text;
-		note.style.cssText = "padding:12px;font-size:13px;opacity:0.6";
-		body.replaceChildren(note);
+		body.replaceChildren(message(text));
 	};
 
 	const host = connect(acquireVsCodeApi(), (why) => {

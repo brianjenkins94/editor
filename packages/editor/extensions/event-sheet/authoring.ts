@@ -5,12 +5,14 @@
  * VENDORS the whole game into the game dir (the user owns every file); the Map face re-projects it and, if a dev server is
  * running, HMR shows it run. The model + generator underneath are the real foundation; this is the tactile surface.
  */
-/* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings, webawesome/prefer-components -- a prototype authoring surface in a webview; intrinsic layout + custom sprite/label paint-tool tiles, not themeable chrome */
+import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
 import type { AuthoredGame } from "./generator";
 import type { Rule } from "./rules";
 import type { EventSheetHost } from "./view";
 import { generateGame, libraryComponents, objectPresets, spriteDataUrls } from "./generator";
 import { builtinBehaviors } from "./rules";
+import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/tag/tag.js";
 
 /** Capitalize the first letter (for auto-naming generated rules). */
 function capitalize(text: string): string {
@@ -34,8 +36,6 @@ function uniqueName(rules: Rule[], base: string): string {
 	return base + index;
 }
 
-const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
-
 /** The active paint tool: "floor" carves walkable area, "erase" clears a cell, or an object preset's type to place it. */
 type Tool = string;
 // The active tool persists across re-renders (module-level, like the Build/Map mode).
@@ -47,51 +47,51 @@ export interface AuthoringHooks {
 	"createGame": (name: string) => Promise<void>;
 }
 
-/** A small labelled button, in VS Code's colors (`primary`: the main action). */
-export function button(label: string, onClick: () => void, primary = false): HTMLButtonElement {
-	const element = document.createElement("button");
-
-	element.type = "button";
-	element.textContent = label;
-	element.style.cssText = "font:inherit;font-size:12px;padding:2px 10px;border-radius:2px;cursor:pointer;border:1px solid var(--vscode-button-border,transparent);"
-		+ (primary ? "background:var(--vscode-button-background);color:var(--vscode-button-foreground)" : "background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)");
-	element.addEventListener("click", onClick);
-
-	return element;
+/** An element of `tag` with `className` and `properties`. */
+export function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, properties: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
+	return Object.assign(document.createElement(tag), { "className": className, ...properties });
 }
 
-/** A removable chip (behavior / system). */
-function chip(text: string, onRemove: () => void): HTMLElement {
-	const element = document.createElement("span");
+/** A small labelled button, in VS Code's colors (`primary`: the main action, VS Code's primary button). */
+export function button(label: string, onClick: () => void, primary = false): WaButton {
+	const made = element("wa-button", "", { "size": "s", "variant": primary ? "brand" : "neutral", "textContent": label });
 
-	element.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;padding:1px 4px 1px 8px;border-radius:9px;font-size:11px;background:var(--vscode-badge-background,#4d4d4d);color:var(--vscode-badge-foreground,#fff)";
+	made.addEventListener("click", onClick);
 
-	const label = document.createElement("span");
-
-	label.textContent = text;
-
-	const close = document.createElement("span");
-
-	close.textContent = "×";
-	close.style.cssText = "cursor:pointer;opacity:0.7;font-weight:600";
-	close.addEventListener("click", (event) => {
-		event.stopPropagation();
-		onRemove();
-	});
-
-	element.append(label, close);
-
-	return element;
+	return made;
 }
 
-/** A section heading. */
-function heading(text: string): HTMLElement {
-	const element = document.createElement("div");
+/** A borderless button: a small action beside what it acts on (× to remove, ＋ to add). */
+function plainButton(label: string, title: string, onClick: () => void): WaButton {
+	const made = element("wa-button", "", { "size": "s", "appearance": "plain", "textContent": label, "title": title });
 
-	element.textContent = text;
-	element.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;opacity:0.6";
+	made.addEventListener("click", onClick);
 
-	return element;
+	return made;
+}
+
+/** A behavior or system, as a tag — removable, with `onRemove`. */
+export function chip(text: string, onRemove?: () => void): HTMLElement {
+	const made = element("wa-tag", "", { "size": "s", "pill": true, "textContent": text, "withRemove": onRemove !== undefined });
+
+	if (onRemove !== undefined) {
+		made.addEventListener("wa-remove", (event) => {
+			event.stopPropagation();
+			onRemove();
+		});
+	}
+
+	return made;
+}
+
+/** A section heading; `divided`, ruled off from the section above. */
+export function heading(text: string, divided = false): HTMLElement {
+	return element("div", `event-sheet-heading${divided ? " divided" : ""} wa-caption-xs wa-font-weight-semibold wa-text-uppercase wa-color-text-quiet`, { "textContent": text });
+}
+
+/** A quiet note: what's empty, or what a section is. */
+function note(text: string): HTMLElement {
+	return element("div", "event-sheet-section wa-caption-xs wa-color-text-quiet", { "textContent": text });
 }
 
 /**
@@ -148,9 +148,7 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 	};
 
 	// ── tool palette ───────────────────────────────────────────────────────────
-	const palette = document.createElement("div");
-
-	palette.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;padding:4px 10px 8px";
+	const palette = element("div", "event-sheet-section wa-cluster wa-gap-2xs");
 
 	const tools: { "tool": Tool; "label": string; "sprite"?: string }[] = [
 		{ "tool": "floor", "label": "Floor", "sprite": "gray_square" },
@@ -164,24 +162,13 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 	};
 
 	for (const entry of tools) {
-		const item = document.createElement("button");
-		const selected = activeTool === entry.tool;
-
-		item.type = "button";
-		item.style.cssText = "display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;font-size:11px;cursor:pointer;border:" + (selected ? "1px solid var(--vscode-focusBorder,#0a84ff)" : BORDER) + ";background:" + (selected ? "var(--vscode-list-activeSelectionBackground,#094771)" : "transparent") + ";color:inherit";
+		// (the tool in hand is the brand's; the rest, outlined)
+		const item = element("wa-button", "", { "size": "s", ...activeTool === entry.tool ? { "variant": "brand" } : { "appearance": "outlined" }, "textContent": entry.label });
 
 		if (entry.sprite !== undefined && sprites[entry.sprite] !== undefined) {
-			const icon = document.createElement("img");
-
-			icon.src = sprites[entry.sprite];
-			icon.style.cssText = "width:14px;height:14px;image-rendering:pixelated";
-			item.append(icon);
+			item.prepend(element("img", "event-sheet-sprite", { "src": sprites[entry.sprite], "slot": "start", "alt": "" }));
 		}
 
-		const text = document.createElement("span");
-
-		text.textContent = entry.label;
-		item.append(text);
 		item.addEventListener("click", () => {
 			selectTool(entry.tool);
 		});
@@ -191,32 +178,27 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 	container.append(palette);
 
 	// ── the grid ───────────────────────────────────────────────────────────────
-	const scroll = document.createElement("div");
+	const scroll = element("div", "event-sheet-section event-sheet-scroll");
+	const grid = element("div", "event-sheet-grid");
 
-	scroll.style.cssText = "overflow:auto;padding:0 10px 8px";
-
-	const grid = document.createElement("div");
-
-	grid.style.cssText = "display:grid;grid-template-columns:repeat(" + map.width + "," + cell + "px);grid-template-rows:repeat(" + map.height + "," + cell + "px);width:max-content;background:#000;border:" + BORDER;
+	// The level's size and its two tiles (event-sheet.css draws the grid from them).
+	grid.style.setProperty("--columns", String(map.width));
+	grid.style.setProperty("--rows", String(map.height));
+	grid.style.setProperty("--cell", `${cell}px`);
+	grid.style.setProperty("--floor", `url(${sprites.gray_square})`);
+	grid.style.setProperty("--wall", `url(${sprites.wall_block})`);
 
 	for (let y = 0; y < map.height; y++) {
 		for (let x = 0; x < map.width; x++) {
-			const box = document.createElement("div");
-			const floor = hasFloor(x, y);
+			const box = element("div", hasFloor(x, y) ? "floor" : "");
 
 			box.dataset.x = String(x);
 			box.dataset.y = String(y);
-			box.style.cssText = "width:" + cell + "px;height:" + cell + "px;box-sizing:border-box;background-size:cover;image-rendering:pixelated;background-image:url(" + (floor ? sprites.gray_square : sprites.wall_block) + ")";
 
 			const object = objectAt(x, y);
 
 			if (object !== undefined && sprites[presets.get(object.type)?.sprite ?? object.type] !== undefined) {
-				const img = document.createElement("img");
-
-				img.src = sprites[presets.get(object.type)?.sprite ?? object.type];
-				img.draggable = false;
-				img.style.cssText = "width:100%;height:100%;image-rendering:pixelated;pointer-events:none";
-				box.append(img);
+				box.append(element("img", "", { "src": sprites[presets.get(object.type)?.sprite ?? object.type], "draggable": false, "alt": object.type }));
 			}
 
 			grid.append(box);
@@ -277,12 +259,9 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 	const { rerender } = hooks;
 
 	container.replaceChildren();
-	container.style.cssText = "height:100%;overflow:auto;padding-bottom:12px";
 
 	// ── toolbar ──────────────────────────────────────────────────────────────────
-	const toolbar = document.createElement("div");
-
-	toolbar.style.cssText = "display:flex;gap:6px;align-items:center;padding:8px 10px;border-bottom:" + BORDER;
+	const toolbar = element("div", "event-sheet-bar wa-cluster wa-gap-xs");
 
 	const generate = button("Generate", () => {
 		void (async (): Promise<void> => {
@@ -313,39 +292,16 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 	}
 
 	// ── objects (entity types + their behaviors) ─────────────────────────────────────
-	const objectsHeading = document.createElement("div");
-
-	objectsHeading.textContent = "OBJECTS";
-	objectsHeading.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;opacity:0.6;border-top:" + BORDER;
-	container.append(objectsHeading);
+	container.append(heading("OBJECTS", true));
 
 	if (model.entities.length === 0) {
-		const empty = document.createElement("div");
-
-		empty.textContent = "Pick an object tool above and paint it onto the grid.";
-		empty.style.cssText = "padding:2px 10px 6px;font-size:11px;opacity:0.5";
-		container.append(empty);
+		container.append(note("Pick an object tool above and paint it onto the grid."));
 	}
 
 	for (const entity of model.entities) {
-		const card = document.createElement("div");
-
-		card.style.cssText = "padding:6px 10px;border-bottom:" + BORDER;
-
-		const header = document.createElement("div");
-
-		header.style.cssText = "display:flex;align-items:center;gap:6px";
-
-		const name = document.createElement("span");
-
-		name.textContent = entity.name;
-		name.style.cssText = "font-weight:600";
-
-		const remove = document.createElement("span");
-
-		remove.textContent = "×";
-		remove.style.cssText = "cursor:pointer;opacity:0.5;margin-left:auto";
-		remove.addEventListener("click", () => {
+		const card = element("div", "event-sheet-card wa-stack wa-gap-2xs");
+		const header = element("div", "wa-split");
+		const remove = plainButton("×", `Remove ${entity.name}`, () => {
 			model.entities = model.entities.filter((other) => other !== entity);
 
 			if (model.map !== undefined) {
@@ -355,12 +311,10 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 			rerender();
 		});
 
-		header.append(name, remove);
+		header.append(element("span", "wa-font-weight-semibold", { "textContent": entity.name }), remove);
 		card.append(header);
 
-		const chips = document.createElement("div");
-
-		chips.style.cssText = "margin-top:4px";
+		const chips = element("div", "wa-cluster wa-gap-2xs");
 
 		for (const behavior of entity.components) {
 			chips.append(chip(behavior, () => {
@@ -369,11 +323,7 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 			}));
 		}
 
-		const addBehavior = document.createElement("span");
-
-		addBehavior.textContent = "＋ behavior";
-		addBehavior.style.cssText = "cursor:pointer;font-size:11px;opacity:0.6;margin-left:2px";
-		addBehavior.addEventListener("click", () => {
+		const addBehavior = plainButton("＋ behavior", `Add a behavior to ${entity.name}`, () => {
 			void (async (): Promise<void> => {
 				const options = libraryComponents().filter((component) => component !== "Position" && !entity.components.includes(component));
 				const picked = await host.pick(options, { "title": "Add behavior to " + entity.name });
@@ -402,28 +352,15 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 	const entityNames = model.entities.map((entity) => entity.name);
 	const subjectOf = (name: string): string | undefined => model.entities.find((entity) => entity.name === name)?.components[0];
 
-	const rulesHeading = document.createElement("div");
-
-	rulesHeading.textContent = "RULES";
-	rulesHeading.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;opacity:0.6;border-top:" + BORDER;
-	container.append(rulesHeading);
+	container.append(heading("RULES", true));
 
 	if (rules.length === 0) {
-		const empty = document.createElement("div");
-
-		empty.textContent = entityNames.length === 0 ? "Paint some objects first, then add rules." : "Add a rule: pick when it happens and what it does.";
-		empty.style.cssText = "padding:2px 10px 6px;font-size:11px;opacity:0.5";
-		container.append(empty);
+		container.append(note(entityNames.length === 0 ? "Paint some objects first, then add rules." : "Add a rule: pick when it happens and what it does."));
 	}
 
 	for (const rule of rules) {
-		const card = document.createElement("div");
-
-		card.style.cssText = "padding:6px 10px;border-bottom:" + BORDER + ";display:flex;align-items:center;gap:6px";
-
-		const text = document.createElement("span");
-
-		text.style.cssText = "font-size:12px";
+		const card = element("div", "event-sheet-card wa-split");
+		const text = element("span", "wa-font-size-s");
 
 		if (rule.kind === "aggregate") {
 			text.textContent = "Win when every " + rule.allOn + " is on a " + rule.goal;
@@ -433,11 +370,7 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 			text.textContent = "When " + (rule.on === "keyDirection" ? "a key is pressed" : "every tick") + " · for each " + rule.subject + (uses.length > 0 ? " → " + uses.join(", ") : "");
 		}
 
-		const remove = document.createElement("span");
-
-		remove.textContent = "×";
-		remove.style.cssText = "cursor:pointer;opacity:0.5;margin-left:auto";
-		remove.addEventListener("click", () => {
+		const remove = plainButton("×", `Remove ${rule.name}`, () => {
 			model.rules = rules.filter((other) => other !== rule);
 			rerender();
 		});
@@ -446,9 +379,8 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 		container.append(card);
 	}
 
-	const addRule = document.createElement("div");
+	const addRule = element("div", "event-sheet-section");
 
-	addRule.style.cssText = "padding:6px 10px";
 	addRule.append(button("＋ Rule", () => {
 		void (async (): Promise<void> => {
 			const when = await host.pick(["When a key is pressed", "Every tick", "Win when…"], { "title": "Add a rule" });
@@ -487,28 +419,10 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 	container.append(addRule);
 
 	// ── behaviors (the reusable library rules compose) ─────────────────────────────────
-	const behaviorsHeading = document.createElement("div");
+	container.append(heading("BEHAVIORS", true));
 
-	behaviorsHeading.textContent = "BEHAVIORS";
-	behaviorsHeading.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;opacity:0.6;border-top:" + BORDER;
-	container.append(behaviorsHeading);
+	const behaviorList = element("div", "event-sheet-section wa-cluster wa-gap-2xs");
 
-	const behaviorList = document.createElement("div");
-
-	behaviorList.style.cssText = "padding:2px 10px 8px";
-
-	for (const behavior of builtinBehaviors()) {
-		const badge = document.createElement("span");
-
-		badge.textContent = behavior.name;
-		badge.style.cssText = "display:inline-block;margin:2px 4px 2px 0;padding:1px 8px;border-radius:9px;font-size:11px;background:var(--vscode-badge-background,#4d4d4d);color:var(--vscode-badge-foreground,#fff)";
-		behaviorList.append(badge);
-	}
-
-	const behaviorNote = document.createElement("div");
-
-	behaviorNote.textContent = "Reusable behaviors built from primitives — composed by rules. After Generate, open one to see there's no magic.";
-	behaviorNote.style.cssText = "padding:4px 10px 0;font-size:11px;opacity:0.5";
-	behaviorList.append(behaviorNote);
-	container.append(behaviorList);
+	behaviorList.append(...builtinBehaviors().map((behavior) => chip(behavior.name)));
+	container.append(behaviorList, note("Reusable behaviors built from primitives — composed by rules. After Generate, open one to see there's no magic."));
 }

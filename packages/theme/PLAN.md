@@ -13,7 +13,8 @@ Status (2026-10-19):
   See [§6](#6-counts) for the counts.
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry (§3) is built: admin takes `theme`, the shell `theme/chrome` (no native styles), and the
-  shell's Stitches `css({…})` is on `--wa-*` tokens (§1). The budget (4.5) isn't built yet.
+  shell's Stitches `css({…})` is on `--wa-*` tokens (§1). The event sheet's webview takes `theme/vscode` too, and its
+  inline styles are gone (§5 step 4). The budget (4.5) isn't built yet.
 
 ## 1. bamboocss: borrow the ideas, don't adopt the library
 
@@ -125,19 +126,20 @@ package has to make Web Awesome usable there.
   - Not moved: the API's sign-in pages bundle Web Awesome's own `webawesome.css` with esbuild
     (`api/scripts/webawesome.ts`), since the api doesn't depend on `theme`. Moving them means adding that dependency,
     and they'd follow the system's mode too.
-- **`theme/vscode`** (the workbench document; built): `followVsCodeTheme(workbench)` in `src/vscode.js`. The
-  workbench build emits no stylesheet to link, so the module imports the styles as text and adopts them into the
-  document: Web Awesome's layers, default theme and utility classes, our brand tokens, then the bridge in
+- **`theme/vscode`** (the workbench document, and a webview's; built): `followVsCodeTheme(element)` in
+  `src/vscode.js`, given `.monaco-workbench` or a webview's `body`. Neither document has a stylesheet to link, so the
+  module imports the styles as text and adopts them into the document: Web Awesome's layers, default theme and utility classes, our brand tokens, then the bridge in
   `src/vscode.css`. Web Awesome's native styles are left out, because VS Code's own native elements would pick them
   up.
   - The bridge maps `--wa-*` onto `--vscode-*`: surfaces, text, links, focus, brand and neutral fills (VS Code's
     primary and secondary buttons), and form controls (VS Code's inputs). It also sets VS Code's fonts and density
     (`--wa-font-size-scale: 0.8125`, `--wa-space-scale`, tighter form-control padding, so buttons are 23px).
   - VS Code declares its variables on `.monaco-workbench`, so the bridge is declared there too. A custom property
-    has to be resolved where the value it reads is defined.
+    has to be resolved where the value it reads is defined. In a webview they're on `html`, and VS Code marks `body`
+    with the theme's kind (`data-vscode-theme-kind`), so the bridge is also declared on `body[data-vscode-theme-kind]`.
   - A `MutationObserver` on that one element mirrors VS Code's theme type (`vs` / `vs-dark` / `hc-black` /
-    `hc-light`) onto Web Awesome's `wa-light` / `wa-dark`. Every token the bridge doesn't map comes from Web
-    Awesome's ramp for that mode.
+    `hc-light` on `.monaco-workbench`, `vscode-dark` / `vscode-high-contrast` and the light kinds in a webview) onto Web
+    Awesome's `wa-light` / `wa-dark`. Every token the bridge doesn't map comes from Web Awesome's ramp for that mode.
   - `src/vscode.css` is the **only** place a `--vscode-*` variable may appear.
 - **`theme/exceptions/*`** (built): the custom CSS that's left, one file per surface. These are the only
   stylesheets code may import besides Web Awesome's and the theme's own (4.1). A new file here is the visible "this
@@ -193,7 +195,8 @@ In priority order. Each step closes one of the gaps above.
    stylelint errors in `src/exceptions/` (735), shrinking each file by replacing what Web Awesome covers.~~ Done
    2026-10-19: every file is at zero (§6). Left: wiring stylelint into CI, a lib change (§6).
 3. ~~Convert the biggest file first: `architecture-view`, then `rule-editor`, then admin.~~ Done 2026-10-19 (§6).
-4. Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.
+4. ~~Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.~~ Done
+   2026-10-19 (§6). The webview takes `theme/vscode` rather than staying a declared exception (§3).
 5. Add the budget (4.5) once the approach that replaces it is settled.
 
 Rough expectation, not measured: most of `architecture-view`, `rule-editor`, `rule-view`, `admin` and the event-sheet
@@ -332,6 +335,28 @@ Re-run with `npx eslint .` and `npm run lint:css`.
   Skip ▾ / Deny ▾ and Rule…; Allow's caret opened this call / this run / always over the pane (not clipped by the
   frame), and choosing this run let the write happen.
 
+**Cleared (the event sheet's inline styles, 56 → 0; §5 step 4):**
+
+- The webview takes `theme/vscode` (§3): `view.ts` calls `followVsCodeTheme(document.body)` and puts in its exception
+  sheet, `src/exceptions/event-sheet.css`. Its 25 inline-style writes in `view.ts` and 31 in `authoring.ts` are gone,
+  with both files' blanket `no-inline-styles` / `no-css-in-strings` / `prefer-components` disables and their
+  `--vscode-*` literals with hex fallbacks.
+- Buttons are `wa-button`s: Build / Map and Generate in VS Code's primary and secondary colours (`brand` /
+  `neutral`), a paint tool's button `brand` while it's in hand and outlined otherwise, with its sprite in the `start`
+  slot, and × / ＋ behavior plain. Behaviors are `wa-tag`s, an object's removable (`with-remove`). Rows, cards and
+  headers are `wa-stack` / `wa-split` / `wa-cluster`, their type the text utilities (`wa-caption-xs`,
+  `wa-font-weight-semibold`, `wa-text-uppercase`, `wa-color-text-quiet`, `wa-font-size-s`). A Map row's hover is CSS
+  now, not two listeners per row.
+- What's left (43 declarations): the view's frame, rows and cards ruled off, section padding, the code font, the
+  opaque note's italic, and the sprite grid. The frame is `position: fixed` rather than styling `body`: VS Code's
+  default webview styles give `body` padding, unlayered, so no layered rule can take it back. The grid's size and its
+  floor and wall tiles are the level's, set as custom properties on it (`--columns`, `--rows`, `--cell`, `--floor`,
+  `--wall`), and black off the map is `--wa-color-gray-05`.
+- The page's policy allows `connect-src data:`: Web Awesome fetches its system icons (a tag's ✕) as `data:` SVGs, as
+  on the sign-in pages. A `data:` URL reaches no server.
+- Not checked in the running editor (no dev server to hand); the architecture suites build the webview's script and
+  pass. The game files `library.ts` emits keep their own CSS: they're the game's, not the editor's.
+
 **Before clearing** (the baseline):
 
 **ESLint** (`webawesome/*`, in `.ts`/`.tsx`/`.js`):
@@ -380,7 +405,10 @@ measure the real work. The ESLint errors fail CI's `lint` (lib's `util-lint`). S
 
 - Is the per-document cost of loading Web Awesome components in the workbench iframe acceptable for initial load?
   Components are imported individually, so it is probably small. Measure it with the performance budgets.
-- Should webviews (event sheet, insights monitor) get `theme/vscode` too, or stay as declared exceptions? They are
-  separate documents with their own CSP, and VS Code's variables reach them on `html`, not `.monaco-workbench`.
+- ~~Should webviews (event sheet, insights monitor) get `theme/vscode` too, or stay as declared exceptions?~~ They get
+  it (2026-10-19): one bridge, declared on a webview's `body` as well as `.monaco-workbench`, rather than a second
+  setup for webviews. The event sheet's does; the insights monitor's (`extensions/insights/monitor.ts`, a page of its
+  own CSS on `--vscode-*`) hasn't moved yet. A webview's page has to allow `connect-src data:` for Web Awesome's
+  icons.
 - Is `known-classes` too strict for third-party DOM, such as Monaco and codehike? It probably needs a per-file
   allowlist for vendored markup.
