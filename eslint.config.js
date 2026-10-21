@@ -23,7 +23,7 @@ const stitchesClasses = (text) => (/\b(?:css|globalCss|unlayeredGlobalCss)\(\{/u
 const KNOWN_CLASSES = [...new Set([
 	...cssFiles(WEB_AWESOME_STYLES),
 	...cssFiles(url.fileURLToPath(new URL("packages/theme/src", import.meta.url)))
-].flatMap(classesIn).concat(sourceFiles(url.fileURLToPath(new URL("packages/editor", import.meta.url))).flatMap(stitchesClasses)))];
+].flatMap(classesIn).concat(["packages/editor", "packages/theme/src"].flatMap((folder) => sourceFiles(url.fileURLToPath(new URL(folder, import.meta.url)))).flatMap(stitchesClasses)))];
 // The classes no stylesheet of ours declares that are still meant: VS Code's own (its codicons, styled by VS Code), and
 // hooks the tours and the code query (each named, so a new one shows in review).
 const KNOWN_ELSEWHERE = [
@@ -77,7 +77,8 @@ export default [
 		// generated paths are already dropped by the global `ignores` above.)
 		"files": ["**/*.{ts,tsx,mjs,cjs,js}"],
 		// contrib/ is the editor-contrib template: someone else's extension, drawing its own webview however it likes.
-		"ignores": ["packages/editor/demo/**", "packages/editor/workbench/Workbench.tsx", "contrib/**"],
+		// theme/styles/workbench is VS Code's baseline: overrides of VS Code's own CSS, on --vscode-* (PLAN.md §7.7).
+		"ignores": ["packages/editor/demo/**", "packages/theme/src/styles/workbench.ts", "contrib/**"],
 		"plugins": { "webawesome": webawesome },
 		"rules": {
 			"webawesome/prefer-components": "error",

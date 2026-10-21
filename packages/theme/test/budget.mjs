@@ -2,9 +2,10 @@
  * The styling budget (PLAN.md §7.6): what's left outside Web Awesome and the theme, counted, and held to budget.json.
  *
  * - exceptionDeclarations: the declarations in the exception sheets (src/exceptions/*.css), the custom CSS that's left.
- * - stitchesDeclarations: the declarations in every Stitches call on theme/stitches' instance outside the theme, so a
- *   style moved out of a sheet into a `css({…})` still counts, and in every use-site override (a theme/recipes recipe
- *   called with `css`). The theme's own recipes and components aren't counted: they're the vocabulary.
+ * - stitchesDeclarations: the declarations in every surface's styles (theme/styles/*, the theme's Stitches calls made
+ *   for one surface), and anywhere a Stitches call is still made outside the theme, so a style moved out of a sheet
+ *   into a `css({…})` still counts; and in every use-site override (a theme/recipes recipe called with `css`). The
+ *   theme's own recipes and components aren't counted: they're the vocabulary.
  * - webawesomeDisables: the `eslint-disable…` comments that turn a webawesome/* rule off.
  *
  * Each may only go down. Over its budget fails, and a raise means editing budget.json, which shows in the diff; under it
@@ -51,7 +52,8 @@ function stitchesDeclarations(file) {
 	let count = 0;
 
 	for (const statement of source.statements) {
-		if (ts.isImportDeclaration(statement) && statement.moduleSpecifier.text === "theme/stitches") {
+		// (theme/stitches from outside the theme; ../stitches from a surface's styles, theme/styles/*)
+		if (ts.isImportDeclaration(statement) && (statement.moduleSpecifier.text === "theme/stitches" || (file.startsWith("packages/theme/src/styles/") && statement.moduleSpecifier.text === "../stitches"))) {
 			for (const element of statement.importClause?.namedBindings?.elements ?? []) {
 				if (["css", "globalCss", "unlayeredGlobalCss", "keyframes"].includes((element.propertyName ?? element.name).text)) {
 					names.add(element.name.text);

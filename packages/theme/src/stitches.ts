@@ -1,10 +1,10 @@
 /**
- * theme/stitches — the app's one Stitches instance (PLAN.md §7.5): CSS-in-JS on Web Awesome's tokens, for anywhere it
- * helps (variants, token scales, nested selectors, keyframes, global styles). Nothing else imports `@stitches/core`
- * (webawesome/through-theme), so every `css()` in the repo shares this token map; webawesome/css-in-js-tokens holds
- * their values to the `--wa-*` tokens, as css-tokens holds the stylesheets'.
+ * theme/stitches — the app's one Stitches instance (PLAN.md §7.5), the theme's own (§8): its styles are made here, in
+ * the theme — the recipes (theme/recipes), the composed components (theme/app-window) and each surface's styles
+ * (theme/styles/<surface>) — and the app imports those, never this (webawesome/through-theme fails it outside the
+ * theme, as it does `@stitches/core`). webawesome/css-in-js-tokens holds their values to the `--wa-*` tokens.
  *
- *     import { css, globalCss } from "theme/stitches";
+ *     import { css, globalCss } from "../stitches";   // in packages/theme/src/styles/<surface>.ts
  *
  * Its output is layered, the way Panda layers its own, in the `app` layer after Web Awesome's (theme/sheet's layer
  * order, which this puts first in the document's head): `globalCss()` in `app.base`; `recipe()`, the theme's

@@ -824,7 +824,13 @@ Override and extend, from the least to the most reach:
      allowed"), so the architecture view's buttons are missing there. Not the spike's; fixed in §9.2.4.
    - `css-in-js-tokens` reads the theme's own `recipe()` / `css()` calls (`./stitches`) and a use-site override's `css`
      (a call on `theme/recipes`); the budget counts the overrides with the Stitches declarations.
-1. The shell's Stitches (227 declarations) into `theme/styles/shell*`; then the rule restricting `theme/stitches`.
+1. ~~The shell's Stitches (227 declarations) into `theme/styles/shell*`; then the rule restricting `theme/stitches`.~~
+   Done 2026-10-21: every Stitches definition the editor made (the shell's, the dock's, the preview's and DevTools',
+   and Workbench.tsx's over VS Code) is in `theme/styles/shell`, `dock`, `preview` and `workbench`, the editor
+   importing their names; `webawesome/through-theme` fails a `theme/stitches` import outside the theme (checked on a
+   planted one); `theme/styles/workbench` keeps the exemption Workbench.tsx had (VS Code's baseline, §7.7);
+   `known-classes` reads the theme's Stitches selector keys too; the budget counts `theme/styles/*` as the surfaces'
+   declarations (227, unchanged by the move).
 2. `recipes.css` into recipes.
 3. The exception sheets, one surface per commit, smallest first: rule-view, account, insights-monitor (webview),
    rule-editor, window (as `<app-window>`), event-sheet (webview), admin, margin, architecture-view, pane-views,

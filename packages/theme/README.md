@@ -76,10 +76,16 @@ override, `toolbar({ "css": { … } })`, which wins by layer; or a new recipe co
 `theme/app-window` is `<app-window>`, a movable, collapsible window in light DOM: give it a `label`, `closable`,
 `storage-key`, a `slot="header-actions"` child and a body (PLAN.md §8).
 
+## Surface styles: `theme/styles/*`
+
+What a surface draws with beyond Web Awesome and the recipes, made here with Stitches, one module per surface:
+`theme/styles/shell`, `dock`, `preview`, `workbench` (VS Code's baseline, its overrides on `--vscode-*`). The app
+imports their named styles; it doesn't call Stitches itself.
+
 ## CSS-in-JS: `theme/stitches`
 
-The app's one Stitches instance (`css`, `globalCss`, `keyframes`, `theme`, and the `palette` of tokens under the shell's
-names); nothing else imports `@stitches/core` (`webawesome/through-theme`). Its values are `--wa-*` tokens
+The app's one Stitches instance (`css`, `recipe`, `globalCss`, `keyframes`, `theme`, and the `palette` of tokens under the
+shell's names), the theme's own: nothing outside the theme imports it or `@stitches/core` (`webawesome/through-theme`). Its values are `--wa-*` tokens
 (`webawesome/css-in-js-tokens`). Its output is layered: `css()` in `app.styles`, `globalCss()` in `app.base`. Only
 `unlayeredGlobalCss` isn't, for what overrides CSS that isn't layered (VS Code's, in Workbench.tsx). In VS Code's document, `mirrorStyles` from `theme/sheet` copies it, and the exception
 sheets, into a docked window, which VS Code doesn't.

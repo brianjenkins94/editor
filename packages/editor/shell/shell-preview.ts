@@ -26,41 +26,20 @@ import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTranspor
 import { installWindowMessageProbe, scopedTransport } from "@brianjenkins94/observability";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight } from "lucide";
 import { installAutoProfiler, installPreviewProfiler } from "../shared/preview-profile";
-import { css } from "theme/stitches";
 import { iconSvg } from "../shared/theme";
 import { PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "../shared/virtual-path";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { createPaneWindow } from "./window";
 import "theme/components/dialog";
+import { bodyRelative, bodySplit, poppedLayer, promptNote, promptScope, promptWhy } from "theme/styles/preview";
 
 /** The default preview port, used when an event omits one (single-preview back-compat). */
 const DEFAULT_PORT = 5173;
 
-// A preview window's body anchors what covers its app (the popped-out note).
-const bodyRelative = css({ "position": "relative" });
-// With DevTools open, the body splits: the app on top, DevTools docked below it (preview-devtools.ts).
-const bodySplit = css({ "display": "flex", "flexDirection": "column", "& > iframe": { "flex": "1 1 0", "height": "auto", "minHeight": 0 } });
 /** How much taller a preview window gets while DevTools is docked in it, so the app keeps its room. */
 const DEVTOOLS_HEIGHT = 340;
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
 const CASCADE = 32;
-// What a preview window shows while its page is popped out into a browser window of its own.
-const poppedLayer = css({
-	"position": "absolute",
-	"inset": 0,
-	"zIndex": 4,
-	"display": "flex",
-	"flexDirection": "column",
-	"alignItems": "center",
-	"justifyContent": "center",
-	"gap": "var(--wa-space-s)",
-	"backgroundColor": "var(--wa-color-surface-default)",
-	"color": "var(--wa-color-text-quiet)",
-	"&[hidden]": { "display": "none" }
-});
-const promptScope = css({ "display": "block", "fontFamily": "var(--wa-font-family-code)", "fontSize": "var(--wa-font-size-xs)", "wordBreak": "break-all", "color": "var(--wa-color-text-quiet)", "marginBlockEnd": "var(--wa-space-s)" });
-const promptWhy = css({ "display": "block", "fontSize": "var(--wa-font-size-xs)", "marginBlockEnd": "var(--wa-space-s)" });
-const promptNote = css({ "display": "block", "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "textAlign": "end", "marginBlockStart": "var(--wa-space-2xs)" });
 
 /** What the prompt overlay reports back (mirrors the ext-host decider's expectations). */
 type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize" | "rule";

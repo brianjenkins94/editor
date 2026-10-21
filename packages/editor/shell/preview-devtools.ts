@@ -22,7 +22,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { css } from "theme/stitches";
+import { panelClass } from "theme/styles/preview";
 
 const CHOBITSU_URL = "https://cdn.jsdelivr.net/npm/chobitsu@1.8.6/dist/chobitsu.js";
 const FRONTEND_URL = "https://cdn.jsdelivr.net/npm/chii@1.15.5/public/front_end";
@@ -31,8 +31,6 @@ const FRONTEND_URL = "https://cdn.jsdelivr.net/npm/chii@1.15.5/public/front_end"
 export const PREVIEW_CDP = "preview.cdp";
 /** Event subject prefix: `preview.cdp.event.<key>` carries each raw event of that preview window's page. */
 export const PREVIEW_CDP_EVENT = "preview.cdp.event.";
-
-const panelClass = css({ "flex": "0 0 45%", "minHeight": 0, "borderBlockStart": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)", "& > iframe": { "display": "block", "border": 0, "width": "100%", "height": "100%" } });
 
 interface Chobitsu {
 	"setOnMessage": (onMessage: (message: string) => void) => void;
