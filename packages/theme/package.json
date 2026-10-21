@@ -45,7 +45,6 @@
     "@awesome.me/webawesome": ">=3"
   },
   "devDependencies": {
-    "@eslint/css-tree": "^4.1.1",
     "typescript": "^5.9.3"
   }
 }

@@ -59,12 +59,12 @@ The Web Awesome components the app may use, one module each: importing `theme/co
 through this package (`webawesome/through-theme`), and uses only the components here (`webawesome/known-components`):
 to allow another, add `src/components/<name>.js` and `.d.ts`, each a one-line re-export.
 
-## Sheets: `theme/sheet`
+## The layer order and docked windows: `theme/sheet`
 
-Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, the theme's, or Stitches'. A surface's
-exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from `theme/sheet`, which puts the shared
-layer order first in the document once: `vendor` (dockview's sheet), Web Awesome's, then `app` (`app.base`,
-`app.recipes`, `app.styles`, `app.overrides`, then the sheets' own rules).
+Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, or one the theme styles. Every style
+is in a layer, in the order `layerOrder()` puts first in a document once: `vendor` (dockview's sheet), Web Awesome's,
+then `app` (`app.base`, `app.recipes`, `app.styles`, `app.overrides`). `mirrorStyles()` copies the app's styles into a
+docked window, and the rules Stitches adds to them later.
 
 ## Recipes and composed components: `theme/recipes`, `theme/app-window`
 
@@ -77,27 +77,26 @@ override, `toolbar({ "css": { … } })`, which wins by layer; or a new recipe co
 
 ## Surface styles: `theme/styles/*`
 
-What a surface draws with beyond Web Awesome and the recipes, made here with Stitches, one module per surface:
-`theme/styles/shell`, `dock`, `preview`, `workbench` (VS Code's baseline, its overrides on `--vscode-*`). The app
-imports their named styles; it doesn't call Stitches itself.
+What a surface draws with beyond Web Awesome and the recipes, made here with Stitches, one module per surface: the
+shell, its dock, the preview, VS Code's document (`workbench`: VS Code's baseline, its overrides on `--vscode-*`), and
+each view's (architecture-view, pane-views, margin, rule-view, rule-editor, git-panel, event-sheet, insights-monitor,
+admin, account). The app imports their named styles, or calls a surface's `stylesheet()` once; it doesn't call
+Stitches itself, and it has no stylesheets of its own (`webawesome/css-only-in-theme`, `no-css-imports`).
 
 ## CSS-in-JS: `theme/stitches`
 
 The app's one Stitches instance (`css`, `recipe`, `globalCss`, `keyframes`, `theme`, and the `palette` of tokens under the
 shell's names), the theme's own: nothing outside the theme imports it or `@stitches/core` (`webawesome/through-theme`). Its values are `--wa-*` tokens
 (`webawesome/css-in-js-tokens`). Its output is layered: `css()` in `app.styles`, `globalCss()` in `app.base`. Only
-`unlayeredGlobalCss` isn't, for what overrides CSS that isn't layered (VS Code's, in Workbench.tsx). In VS Code's document, `mirrorStyles` from `theme/sheet` copies it, and the exception
-sheets, into a docked window, which VS Code doesn't.
+`unlayeredGlobalCss` isn't, for what overrides CSS that isn't layered (VS Code's, in Workbench.tsx). `stylesheet()` is a surface's styles by selector, in
+`app.styles`. In VS Code's document, `mirrorStyles` from `theme/sheet` copies them into a docked window, which VS
+Code doesn't.
 
-## What's left: `theme/exceptions/*`
+## What's left
 
-The custom CSS that Web Awesome doesn't cover yet, one file per surface: the only stylesheets code may import
-besides Web Awesome's and the theme's (`webawesome/no-css-imports`). A new file there is the review signal that
-something needs CSS of its own, and every file in it is held to the stylesheet rules in the repo's `eslint.config.js`
-(`webawesome/css-*`, `css/use-layers`, and the CSS language's own, which util's ESLint preset registers).
-
-What's left is budgeted (`budget.json`, checked by `test/budget.mjs`): the exception sheets' declarations, the
-declarations in Stitches calls wherever they are, and the comments that turn a `webawesome/*` rule off. Each may only
+What's left is budgeted (`budget.json`, checked by `test/budget.mjs`): the surfaces' declarations (`theme/styles/*`,
+and a use-site `css` override wherever it is), and the comments that turn a `webawesome/*` rule off. The recipes,
+components and tokens aren't: they're the vocabulary. Each may only
 go down; a raise means editing `budget.json`, and a drop means lowering it.
 
 ## This starter

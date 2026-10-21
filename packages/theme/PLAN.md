@@ -834,11 +834,21 @@ Override and extend, from the least to the most reach:
 2. ~~`recipes.css` into recipes.~~ Done 2026-10-21: `frame` and `code` join `toolbar` and `caption` in theme/recipes;
    their callers (admin's ids and traces, the event sheet's webview, the insights monitor's, the diff overlay's title)
    call them; recipes.css is gone, and theme/chrome and theme/vscode no longer load it.
-3. The exception sheets, one surface per commit, smallest first: rule-view, account, insights-monitor (webview),
+3. ~~The exception sheets, one surface per commit, smallest first: rule-view, account, insights-monitor (webview),
    rule-editor, window (as `<app-window>`), event-sheet (webview), admin, margin, architecture-view, pane-views,
-   git-panel.
-4. The token files into `globalCss`.
-5. The rules and the budget's new shape (8.3).
+   git-panel.~~ Done 2026-10-21: each sheet is `theme/styles/<surface>`, its rules by selector through
+   theme/stitches' `stylesheet()` (in `app.styles`, the markup's class names unchanged), converted with its comments,
+   and called once where the sheet was appended or imported; `theme/exceptions/` and `styleSheet()` are gone.
+   `mirrorStyles` now follows what Stitches inserts after the copy (into its sheet and the groups it keeps), since a
+   style's rules are made on its first use. One sheet declared a selector twice (pane-views' `.live-values-mock`):
+   merged.
+4. ~~The token files into `globalCss`.~~ Done 2026-10-21: `theme/tokens` (`brandTokens`, `vscodeTokens`), unlayered;
+   theme/chrome, theme/vscode and theme/vscode-colors call them. The only stylesheet left is the API's sign-in pages'
+   (8.1).
+5. ~~The rules and the budget's new shape (8.3).~~ Done 2026-10-21: `css-only-in-theme` fails any stylesheet but the
+   one exempted by name (sign-in.css); the budget is two numbers, Stitches declarations (801: the surfaces' and the
+   use-site overrides') and `webawesome/*` disables (15), the exception sheets' count gone with them (and the CSS parser
+   the budget needed). @eslint/css's `use-baseline` and `no-invalid-properties` now check only sign-in.css: accepted.
 
 Risks: everything rides on Stitches, which is finished, not maintained (1.2.8, May 2023). It's small and has no
 dependencies, so vendoring it into the theme is the fallback if it ever breaks. Everything styles after its script

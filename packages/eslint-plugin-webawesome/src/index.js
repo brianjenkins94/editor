@@ -881,8 +881,8 @@ const cssOnlyInTheme = {
 	"meta": {
 		"type": "problem",
 		"languages": ["css/css"],
-		"docs": { "description": "Keep stylesheets in the theme package (packages/theme/PLAN.md §7): a surface's custom CSS is a named exception in theme/exceptions/, and other packages import what the theme exports." },
-		"messages": { "outside": "A stylesheet outside the theme package — put it in packages/theme/src/exceptions/ (a named exception) and import it from theme/exceptions/." },
+		"docs": { "description": "No stylesheets (packages/theme/PLAN.md §8): the app's styles are Stitches in the theme — a surface's in theme/styles/<surface>, imported from there. A stylesheet that can't be (a page styled before any script of ours runs) is exempted by name in eslint.config.js." },
+		"messages": { "outside": "A stylesheet — the app's styles are Stitches in the theme: make it a surface's styles, packages/theme/src/styles/<surface>.ts, and import them from theme/styles/<surface>." },
 		"schema": []
 	},
 	"create": function(context) {
@@ -1002,8 +1002,8 @@ function classWords(node) {
 const knownClasses = {
 	"meta": {
 		"type": "problem",
-		"docs": { "description": "Use only class names something styles or declares: a Web Awesome utility, or a class the theme package's stylesheets declare (its recipes, a surface's exception sheet). A bespoke class needs its sheet in the theme, which shows in review." },
-		"messages": { "unknown": "`{{name}}` is no Web Awesome utility and no class the theme's stylesheets declare — use a utility or a recipe (app-*), or declare it in the surface's sheet in packages/theme/src/exceptions/." },
+		"docs": { "description": "Use only class names something styles or declares: a Web Awesome utility, or a class the theme styles (a surface's styles in theme/styles/*). A bespoke class needs its style in the theme, which shows in review." },
+		"messages": { "unknown": "`{{name}}` is no Web Awesome utility and no class the theme styles — use a utility or a recipe (theme/recipes), or style it in its surface's styles, packages/theme/src/styles/<surface>.ts." },
 		"schema": [{
 			"type": "object",
 			"properties": {

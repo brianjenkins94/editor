@@ -1,7 +1,6 @@
 /**
  * The styling budget (PLAN.md §7.6): what's left outside Web Awesome and the theme, counted, and held to budget.json.
  *
- * - exceptionDeclarations: the declarations in the exception sheets (src/exceptions/*.css), the custom CSS that's left.
  * - stitchesDeclarations: the declarations in every surface's styles (theme/styles/*, the theme's Stitches calls made
  *   for one surface), and anywhere a Stitches call is still made outside the theme, so a style moved out of a sheet
  *   into a `css({…})` still counts; and in every use-site override (a theme/recipes recipe called with `css`). The
@@ -18,7 +17,6 @@ import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import { test } from "node:test";
 import * as url from "node:url";
-import { parse, walk } from "@eslint/css-tree";
 import ts from "typescript";
 
 const budget = JSON.parse(fs.readFileSync(new URL("../budget.json", import.meta.url)));
@@ -28,19 +26,6 @@ const root = url.fileURLToPath(new URL("../../../", import.meta.url));
 const files = childProcess.execFileSync("git", ["ls-files", "-z"], { "cwd": root, "encoding": "utf8" }).split("\0").filter((file) => file !== "" && !file.startsWith("components/") && fs.existsSync(root + file));
 const read = (file) => fs.readFileSync(root + file, "utf8");
 const sources = files.filter((file) => /\.[cm]?[jt]sx?$/u.test(file));
-
-/** The declarations in a stylesheet. */
-function cssDeclarations(text) {
-	let count = 0;
-
-	walk(parse(text, { "parseValue": false }), (node) => {
-		if (node.type === "Declaration") {
-			count += 1;
-		}
-	});
-
-	return count;
-}
 
 /** The declarations in a file's calls on theme/stitches' css, globalCss, unlayeredGlobalCss and keyframes, and in the
  *  `css` of its recipe calls: every property whose value isn't an object (an object is a nested selector, an at-rule,
@@ -119,7 +104,6 @@ function tally(list, count) {
 }
 
 const counts = {
-	"exceptionDeclarations": tally(files.filter((file) => file.startsWith("packages/theme/src/exceptions/") && file.endsWith(".css")), (file) => cssDeclarations(read(file))),
 	"stitchesDeclarations": tally(sources, stitchesDeclarations),
 	"webawesomeDisables": tally(files.filter((file) => /\.(?:css|[cm]?[jt]sx?)$/u.test(file)), (file) => disables(read(file)))
 };
