@@ -59,6 +59,8 @@ const classicLook = unlayeredGlobalCss({
 	[`${MODERN} .pane-header`]: { "margin": "0 !important", "paddingLeft": "0 !important", "borderRadius": "0 !important", "backgroundColor": "transparent !important" },
 	[`${MODERN} .pane-header .title`]: { "fontSize": "11px !important", "fontWeight": "700 !important", "textTransform": "uppercase !important" },
 	[`${MODERN} .monaco-list-row`]: { "borderRadius": "0 !important" },
+	// The panel's (and the secondary side bar's) view tabs — Problems, Output, Terminal…: classic type (Modern UI's is 13px).
+	[`${MODERN} :is(.part.panel, .part.auxiliarybar) > .title .composite-bar .action-item .action-label`]: { "fontSize": "11px !important" },
 	// The status bar: edge to edge, its items square.
 	[`${MODERN} .part.statusbar`]: { "padding": "0 !important", "boxShadow": "none !important" },
 	[`${MODERN} .part.statusbar .statusbar-item`]: { "paddingLeft": "2px !important", "borderRadius": "0 !important" },
