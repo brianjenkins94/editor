@@ -14,7 +14,7 @@
 import type { AuthoredGame } from "./generator";
 import type { Behavior, Composite, GameModel, GameObject, Rule } from "./recognizer";
 import css from "theme/exceptions/event-sheet.css?raw";
-import { toolbar } from "theme/recipes";
+import { code as codeFont, frame, toolbar } from "theme/recipes";
 import { styleSheet } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import { button, chip, element, heading, renderAuthoring } from "./authoring";
@@ -67,7 +67,7 @@ function nameOf(text: string): HTMLElement {
 
 /** Small, quiet text: what a row is, beside or under its name (`code`: in the code's type). */
 function aside(text: string, code = false): HTMLElement {
-	return element("span", `wa-caption-xs wa-color-text-quiet${code ? " app-code" : ""}`, { "textContent": text });
+	return element("span", `wa-caption-xs wa-color-text-quiet${code ? " " + codeFont() : ""}`, { "textContent": text });
 }
 
 /** Tags, in a row. */
@@ -137,8 +137,8 @@ function renderRules(container: HTMLElement, host: EventSheetHost, root: string,
 			}, (row) => {
 				const when = element("div", "wa-font-size-s");
 
-				when.append(element("span", "wa-color-text-quiet", { "textContent": "when " }), element("span", "app-code", { "textContent": eventRow.event }));
-				row.append(when, element("div", "app-code wa-font-size-s", { "textContent": "→ " + eventRow.actions.join("; ") }));
+				when.append(element("span", "wa-color-text-quiet", { "textContent": "when " }), element("span", codeFont(), { "textContent": eventRow.event }));
+				row.append(when, element("div", codeFont() + " wa-font-size-s", { "textContent": "→ " + eventRow.actions.join("; ") }));
 			}, true));
 		}
 
@@ -246,7 +246,7 @@ function connect(vscode: VsCodeWebviewApi, onRefresh: (why: "editor" | "save") =
 }
 
 function start(): void {
-	const view = element("div", "app-frame wa-stack wa-gap-0");
+	const view = element("div", frame() + " wa-stack wa-gap-0");
 	const bar = element("div", toolbar() + " wa-cluster wa-gap-2xs");
 	const body = element("div", "event-sheet-body");
 	let timer: ReturnType<typeof setTimeout> | undefined;

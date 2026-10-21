@@ -4,7 +4,7 @@
  * polylines, one per series, in the palette's colours (theme/exceptions/insights-monitor.css).
  */
 import css from "theme/exceptions/insights-monitor.css?raw";
-import { caption } from "theme/recipes";
+import { caption, frame } from "theme/recipes";
 import { styleSheet } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import "theme/components/card";
@@ -141,7 +141,7 @@ function waiting(): HTMLElement {
 }
 
 function start(): void {
-	const container = element("div", "monitor app-frame wa-stack wa-gap-s");
+	const container = element("div", "monitor " + frame() + " wa-stack wa-gap-s");
 
 	// Web Awesome on the VS Code theme (theme/vscode, as in the workbench), then what it doesn't cover.
 	document.head.append(styleSheet(css));

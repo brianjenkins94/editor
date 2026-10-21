@@ -27,7 +27,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
 import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
-import { caption, toolbar } from "theme/recipes";
+import { caption, code, toolbar } from "theme/recipes";
 import { applyVsCodeColors } from "theme/vscode-colors";
 import { iconSvg } from "../shared/theme";
 import { envRepo, showRepo, site } from "./address";
@@ -1270,7 +1270,7 @@ function Shell() {
 
 				<div ref={overlayRef} class={overlay()}>
 					<div class={toolbar({ "density": "compact", "css": { "height": "34px" } }) + " wa-cluster wa-flex-nowrap wa-gap-2xs"}>
-						<span ref={overlayTitleRef} class={"app-code wa-font-size-xs wa-text-truncate " + overlayTitle()} />
+						<span ref={overlayTitleRef} class={code() + " wa-font-size-xs wa-text-truncate " + overlayTitle()} />
 
 						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>
 					</div>

@@ -1,7 +1,7 @@
 /*
  * The event sheet's webview (extensions/event-sheet: view.ts and authoring.ts): what Web Awesome's components and
  * utility classes don't cover. Its buttons, tags, stacks and clusters are theirs, and its frame, toolbar and headings'
- * type are recipes (theme/recipes.css); what's left is its rows, its sections' padding, and the level's sprite grid, all on --wa-* tokens (theme/vscode maps them onto the VS Code theme
+ * type are recipes (theme/recipes); what's left is its rows, its sections' padding, and the level's sprite grid, all on --wa-* tokens (theme/vscode maps them onto the VS Code theme
  * in a webview too).
  */
 

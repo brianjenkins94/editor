@@ -831,7 +831,9 @@ Override and extend, from the least to the most reach:
    planted one); `theme/styles/workbench` keeps the exemption Workbench.tsx had (VS Code's baseline, §7.7);
    `known-classes` reads the theme's Stitches selector keys too; the budget counts `theme/styles/*` as the surfaces'
    declarations (227, unchanged by the move).
-2. `recipes.css` into recipes.
+2. ~~`recipes.css` into recipes.~~ Done 2026-10-21: `frame` and `code` join `toolbar` and `caption` in theme/recipes;
+   their callers (admin's ids and traces, the event sheet's webview, the insights monitor's, the diff overlay's title)
+   call them; recipes.css is gone, and theme/chrome and theme/vscode no longer load it.
 3. The exception sheets, one surface per commit, smallest first: rule-view, account, insights-monitor (webview),
    rule-editor, window (as `<app-window>`), event-sheet (webview), admin, margin, architecture-view, pane-views,
    git-panel.

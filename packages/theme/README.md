@@ -59,13 +59,12 @@ The Web Awesome components the app may use, one module each: importing `theme/co
 through this package (`webawesome/through-theme`), and uses only the components here (`webawesome/known-components`):
 to allow another, add `src/components/<name>.js` and `.d.ts`, each a one-line re-export.
 
-## Recipes and sheets: `recipes.css`, `theme/sheet`
+## Sheets: `theme/sheet`
 
-The two shapes still a class in every theme entry: `app-frame` (a view fixed to the viewport) and `app-code` (the code's
-font); the rest are recipes (below). Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, the theme's, or Stitches'. Compose them with Web
-Awesome's utilities. A surface's exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from
-`theme/sheet`, which puts the shared layer order first in the document once: `vendor` (dockview's sheet), Web Awesome's,
-then `app` (`app.base`, `app.recipes`, `app.styles`, `app.overrides`, then the sheets' own rules).
+Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, the theme's, or Stitches'. A surface's
+exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from `theme/sheet`, which puts the shared
+layer order first in the document once: `vendor` (dockview's sheet), Web Awesome's, then `app` (`app.base`,
+`app.recipes`, `app.styles`, `app.overrides`, then the sheets' own rules).
 
 ## Recipes and composed components: `theme/recipes`, `theme/app-window`
 

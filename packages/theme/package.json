@@ -24,7 +24,6 @@
       "types": "./src/sheet.d.ts",
       "default": "./src/sheet.js"
     },
-    "./recipes.css": "./src/recipes.css",
     "./recipes": "./src/recipes.ts",
     "./styles/*": "./src/styles/*.ts",
     "./app-window": "./src/app-window.ts",

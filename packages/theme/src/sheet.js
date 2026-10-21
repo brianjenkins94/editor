@@ -9,8 +9,7 @@
  * A sheet's rules are in the `app` layer, which has to come after Web Awesome's. Where Web Awesome's own sheets are
  * adopted (theme/vscode), they come after every `<style>` in the document, so the order is declared first in the
  * document's head, once (`layerOrder`): `vendor` (the DOM we host that isn't ours: dockview's sheet), Web Awesome's own
- * order (its layers.css), then `app`, and in it `app.base` (theme/stitches' globalCss), `app.recipes` (recipes.css and
- * theme/recipes), `app.styles` (theme/stitches' css) and `app.overrides` (a use-site `css`). A sheet's own rules are in
+ * order (its layers.css), then `app`, and in it `app.base` (theme/stitches' globalCss), `app.recipes` (theme/recipes), `app.styles` (theme/stitches' css) and `app.overrides` (a use-site `css`). A sheet's own rules are in
  * `app` itself, so they come after those four.
  */
 import layers from "@awesome.me/webawesome/dist/styles/layers.css?inline";

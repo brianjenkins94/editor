@@ -5,7 +5,7 @@
  */
 
 @layer app {
-  /* The view's room inside its frame (app-frame, a recipe). */
+  /* The view's room inside its frame (theme/recipes' frame). */
   .monitor {
     padding: var(--wa-space-s);
   }

@@ -46,3 +46,10 @@ export const caption = recipe({
 		}
 	}
 });
+
+/** A document's whole view, fixed to the viewport: a webview's is clear of the padding VS Code's default webview styles
+ *  give the body, which is unlayered, so no layered rule could take it back. */
+export const frame = recipe({ "position": "fixed", "inset": 0, "overflow": "auto" });
+
+/** Code, in the code's font: an id, a release, a route, a trace. */
+export const code = recipe({ "fontFamily": "var(--wa-font-family-code)" });
