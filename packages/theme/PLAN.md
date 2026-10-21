@@ -897,6 +897,31 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
    dropdown (as the context menu), select, checkbox, badge and tag, dialog and popover, callout, progress bar.
 4. Admin and the account pages (9.2.5).
 
+## 10. Publishing the components (later)
+
+The user's direction (2026-10-21): the recipes and composed components should eventually publish themselves as
+components from `components/`, as monaco-vscode-api does (a package built to `dist`, released by the same pipeline as
+`packages/*`, registry-less). Not now: what it opens up is below, each with where it leans.
+
+- **How we keep using them.** monaco-vscode-api is consumed internally as its build, which goes stale until rebuilt.
+  For UI that's edited all the time, internal use should stay on the source (Vite builds the theme's TypeScript
+  already) and the build should be for others: one package, `exports` with a source condition for us and `dist` by
+  default.
+- **How others would use them.** The two forms already framework-free: recipes (a class from a call) and light-DOM
+  custom elements (`<app-window>`), which register themselves. Others also need tokens: VS Code's mapping if they're
+  in VS Code (a webview, an extension), a fixed theme if not (the question §9.2.5 asks of admin).
+- **Compile them into functions that take arguments?** They are functions with arguments already (a recipe is
+  `toolbar({ "density": "compact" })`), run by Stitches at the call. Compiling them, a static stylesheet plus a small
+  function that only joins class names (as Panda's recipes are), drops Stitches from what others load, but also drops
+  the use-site `css` override, which needs the runtime. It's the compile step declined for Bamboo, at publish time
+  rather than in development. Leaning: not unless someone outside needs it.
+- **Peer dependencies.** Web Awesome: a peer. Two copies on one page register the same custom elements twice, so the
+  page has to own the one version. Stitches: not a peer. It's an implementation detail (the user's framing in §7.5) and
+  bundled with the package, pinned at its last release, with vendoring it as the fallback.
+- **What moves.** Whether `components/` gets the recipes and composed components alone, with `theme` keeping the
+  tokens, the VS Code mapping and the rules, or the theme package as a whole. Leaning: components alone, depending on
+  the theme for tokens.
+
 ## Open questions
 
 - ~~Is the per-document cost of loading Web Awesome components in the workbench iframe acceptable for initial load?~~
