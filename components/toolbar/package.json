@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/toolbar",
+  "version": "0.0.0",
+  "description": "A bar of controls along the top of a view, ruled off from what's under it: the theme's toolbar recipe (a class from a call), with its density and ruled variants and its component tokens.",
+  "type": "module",
+  "exports": {
+    ".": "./src/toolbar.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stitches/core": "1.2.8"
+  },
+  "peerDependencies": {
+    "@awesome.me/webawesome": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@awesome.me/webawesome": {
+      "optional": true
+    }
+  }
+}

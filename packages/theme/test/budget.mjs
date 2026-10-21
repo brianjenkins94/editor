@@ -22,8 +22,8 @@ import ts from "typescript";
 const budget = JSON.parse(fs.readFileSync(new URL("../budget.json", import.meta.url)));
 const root = url.fileURLToPath(new URL("../../../", import.meta.url));
 
-/** The repo's own files (tracked, not the vendored components), relative to its root. */
-const files = childProcess.execFileSync("git", ["ls-files", "-z"], { "cwd": root, "encoding": "utf8" }).split("\0").filter((file) => file !== "" && !file.startsWith("components/") && fs.existsSync(root + file));
+/** The repo's own files (tracked, not the vendored monaco-vscode-api), relative to its root. */
+const files = childProcess.execFileSync("git", ["ls-files", "-z"], { "cwd": root, "encoding": "utf8" }).split("\0").filter((file) => file !== "" && !file.startsWith("components/monaco-vscode-api/") && fs.existsSync(root + file));
 const read = (file) => fs.readFileSync(root + file, "utf8");
 const sources = files.filter((file) => /\.[cm]?[jt]sx?$/u.test(file));
 

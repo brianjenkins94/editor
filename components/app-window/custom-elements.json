@@ -1,0 +1,161 @@
+{
+  "schemaVersion": "1.0.0",
+  "modules": [
+    {
+      "kind": "javascript-module",
+      "path": "src/app-window.js",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "AppWindow",
+          "tagName": "app-window",
+          "customElement": true,
+          "attributes": [
+            {
+              "name": "label",
+              "description": "Its title."
+            },
+            {
+              "name": "closable",
+              "description": "Shows a close control, which fires app-close."
+            },
+            {
+              "name": "collapsed",
+              "description": "Only its title bar shows (reflected)."
+            },
+            {
+              "name": "width",
+              "description": "Its width, in px."
+            },
+            {
+              "name": "body-height",
+              "description": "Its body's height, in px."
+            },
+            {
+              "name": "storage-key",
+              "description": "Keeps its place, and whether it's collapsed, under this key."
+            },
+            {
+              "name": "initial-left",
+              "description": "Where it opens with no place saved: px from the left (default: centred)."
+            },
+            {
+              "name": "initial-top",
+              "description": "Where it opens with no place saved: px from the top (default: centred)."
+            }
+          ],
+          "slots": [
+            {
+              "name": "header-actions",
+              "description": "Controls in its title bar, before its own."
+            },
+            {
+              "name": "",
+              "description": "Its body."
+            }
+          ],
+          "events": [
+            {
+              "name": "app-close",
+              "description": "Its close control was clicked."
+            },
+            {
+              "name": "app-collapse",
+              "description": "It was collapsed or expanded."
+            }
+          ],
+          "cssProperties": [
+            {
+              "name": "--app-window-body-height"
+            },
+            {
+              "name": "--app-window-padding"
+            },
+            {
+              "name": "--app-window-z"
+            },
+            {
+              "name": "--wa-border-radius-s",
+              "default": "calc(1 * 0.1875rem)"
+            },
+            {
+              "name": "--wa-border-style",
+              "default": "solid"
+            },
+            {
+              "name": "--wa-border-width-s",
+              "default": "calc(1 * 0.0625rem)"
+            },
+            {
+              "name": "--wa-color-surface-border",
+              "default": "#e4e5e9"
+            },
+            {
+              "name": "--wa-color-surface-raised",
+              "default": "white"
+            },
+            {
+              "name": "--wa-font-weight-semibold",
+              "default": "500"
+            },
+            {
+              "name": "--wa-panel-border-radius",
+              "default": "calc(1 * 0.75rem)"
+            },
+            {
+              "name": "--wa-panel-border-style",
+              "default": "solid"
+            },
+            {
+              "name": "--wa-panel-border-width",
+              "default": "calc(1 * 0.0625rem)"
+            },
+            {
+              "name": "--wa-shadow-l",
+              "default": "calc(0 * 0.5rem) calc(1 * 0.5rem) calc(1 * 0.5rem) calc(-0.5 * 0.5rem) color-mix( in oklab, #101219 calc(1 * 4% + 8%), transparent )"
+            },
+            {
+              "name": "--wa-space-2xs",
+              "default": "calc(1 * 0.25rem)"
+            },
+            {
+              "name": "--wa-space-3xs",
+              "default": "calc(1 * 0.125rem)"
+            },
+            {
+              "name": "--wa-space-m",
+              "default": "calc(1 * 1rem)"
+            },
+            {
+              "name": "--wa-space-s",
+              "default": "calc(1 * 0.75rem)"
+            }
+          ],
+          "dependencies": [
+            "wa-button",
+            "wa-icon",
+            "wa-spinner"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "AppWindow",
+          "declaration": {
+            "name": "AppWindow",
+            "module": "src/app-window.js"
+          }
+        },
+        {
+          "kind": "custom-element-definition",
+          "name": "app-window",
+          "declaration": {
+            "name": "AppWindow",
+            "module": "src/app-window.js"
+          }
+        }
+      ]
+    }
+  ]
+}

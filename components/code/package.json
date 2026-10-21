@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/code",
+  "version": "0.0.0",
+  "description": "Code, in the code's font: the theme's code recipe (a class from a call).",
+  "type": "module",
+  "exports": {
+    ".": "./src/code.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stitches/core": "1.2.8"
+  },
+  "peerDependencies": {
+    "@awesome.me/webawesome": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@awesome.me/webawesome": {
+      "optional": true
+    }
+  }
+}

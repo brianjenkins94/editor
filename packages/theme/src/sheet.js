@@ -1,21 +1,18 @@
 /**
- * theme/sheet — a surface's exception sheet (theme/exceptions/*.css, imported `?raw`) as a `<style>` for its document,
- * after the layer order every such sheet shares.
+ * theme/sheet — the layer order every document of the app shares, and a docked window's copy of the app's styles.
  *
- *     import css from "theme/exceptions/rule-view.css?raw";
- *     import { styleSheet } from "theme/sheet";
- *     document.head.append(styleSheet(css));
- *
- * A sheet's rules are in the `app` layer, which has to come after Web Awesome's. Where Web Awesome's own sheets are
- * adopted (theme/vscode), they come after every `<style>` in the document, so the order is declared first in the
- * document's head, once (`layerOrder`): `vendor` (the DOM we host that isn't ours: dockview's sheet), Web Awesome's own
- * order (its layers.css), then `app`, and in it `app.base` (theme/stitches' globalCss), `app.recipes` (theme/recipes), `app.styles` (theme/stitches' css) and `app.overrides` (a use-site `css`). A sheet's own rules are in
- * `app` itself, so they come after those four.
+ * Every style is in a layer (theme/stitches puts each in its own): Web Awesome's, then `app`. Where Web Awesome's own
+ * sheets are adopted (theme/vscode), they come after every `<style>` in the document, so the order is declared first
+ * in the document's head, once (`layerOrder`, which theme/stitches calls as it loads): `vendor` (the DOM we host that
+ * isn't ours: dockview's sheet), Web Awesome's own order, then `app`, and in it `app.base`
+ * (theme/stitches' globalCss), `app.recipes` (theme/recipes), `app.styles` (a surface's styles, theme/styles/*) and
+ * `app.overrides` (a use-site `css`).
  */
-import layers from "@awesome.me/webawesome/dist/styles/layers.css?inline";
+import { layers } from "./web-awesome";
 
-/** The layers, lowest first: vendors', Web Awesome's in its order, then the app's. */
-const ORDER = ["@layer vendor;", layers.match(/@layer [^;{]+;/u)[0], "@layer app;", "@layer app.base, app.recipes, app.styles, app.overrides;"].join("\n");
+/** The layers, lowest first: vendors', Web Awesome's in its order (theme/web-awesome's, derived from its layers.css, so
+ *  this needn't load Web Awesome), then the app's. */
+const ORDER = ["@layer vendor;", layers, "@layer app;", "@layer app.base, app.recipes, app.styles, app.overrides;"].join("\n");
 
 /** Put the layer order first in `document`'s head, once. */
 export function layerOrder(document = globalThis.document) {
@@ -28,18 +25,11 @@ export function layerOrder(document = globalThis.document) {
 	}
 }
 
-/** A `<style>` holding `css`, for `document`, whose head has the layer order first. */
-export function styleSheet(css, document = globalThis.document) {
-	layerOrder(document);
-
-	return Object.assign(document.createElement("style"), { "textContent": css });
-}
-
 /**
  * Copy the app's own `<style>`s from `source` into `target` — the document of a window VS Code opened, as a docked
  * editor's frame — and keep copying the ones added after; returns a function that stops. VS Code copies its own
- * stylesheets into such a window itself, and marks each `data-vscode`, but none of ours: the layer order, the exception
- * sheets `styleSheet` made, and Stitches' (whose rules it inserts, so its text is empty: rules are copied, not text).
+ * stylesheets into such a window itself, and marks each `data-vscode`, but none of ours: the layer order, and Stitches'
+ * (whose rules it inserts, so its text is empty: rules are copied, not text).
  * A rule inserted after the copy — Stitches makes a style's rules when it's first used, so a view first drawn after the
  * window opened adds them then — is inserted into the copy too (`follow`).
  */

@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/frame",
+  "version": "0.0.0",
+  "description": "A document's whole view, fixed to the viewport: the theme's frame recipe (a class from a call).",
+  "type": "module",
+  "exports": {
+    ".": "./src/frame.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stitches/core": "1.2.8"
+  },
+  "peerDependencies": {
+    "@awesome.me/webawesome": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@awesome.me/webawesome": {
+      "optional": true
+    }
+  }
+}

@@ -39,8 +39,9 @@
  */
 
 /** Native tag → the Web Awesome component to use instead. Only CLEAR complements (from the WA 3.13 catalog); layout
- *  elements (div/span/main/aside/section) intentionally stay native — WA has no 1:1 complement for them. */
-const NATIVE_TO_WA = {
+ *  elements (div/span/main/aside/section) intentionally stay native — WA has no 1:1 complement for them. The theme reads
+ *  it the other way round, for a component's native fallbacks (packages/theme/scripts/web-awesome.mjs). */
+export const NATIVE_TO_WA = {
 	"button": "wa-button",
 	"input": "wa-input",
 	"textarea": "wa-textarea",

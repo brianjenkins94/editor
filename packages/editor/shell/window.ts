@@ -11,7 +11,7 @@
  * The theme tokens the `--wa-*` vars resolve against must be loaded once in this document — import
  * "theme/chrome" there (the shell does).
  */
-import "theme/app-window";
+import { appWindow } from "theme/app-window";
 
 export interface PaneWindow {
 	readonly "element": HTMLElement;
@@ -48,26 +48,25 @@ export interface PaneWindowOptions {
 }
 
 export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
-	const win = document.createElement("app-window");
+	// Caller-owned header actions (e.g. the debug toolbar), left of the window's own controls.
 	const extras = document.createElement("div");
 	const body = document.createElement("div");
 
-	win.label = options.title;
-	win.storageKey = options.storageKey;
+	extras.className = "wa-cluster wa-gap-3xs wa-flex-nowrap";
+
+	const win = appWindow({
+		"label": options.title,
+		"storageKey": options.storageKey,
+		"closable": options.onClose !== undefined,
+		"width": options.width ?? 960,
+		"bodyHeight": options.height ?? 640,
+		"headerActions": [extras],
+		"children": [body],
+		"onClose": options.onClose
+	});
+
 	win.initialLeft = options.left;
 	win.initialTop = options.top;
-
-	if (options.onClose !== undefined) {
-		win.toggleAttribute("closable", true);
-		win.addEventListener("app-close", options.onClose);
-	}
-
-	// Caller-owned header actions (e.g. the debug toolbar), left of the window's own controls.
-	extras.slot = "header-actions";
-	extras.className = "wa-cluster wa-gap-3xs wa-flex-nowrap";
-	win.setAttribute("width", String(options.width ?? 960));
-	win.setAttribute("body-height", String(options.height ?? 640));
-	win.append(extras, body);
 
 	return {
 		"element": win,

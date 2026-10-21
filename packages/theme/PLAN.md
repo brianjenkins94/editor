@@ -934,7 +934,7 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
    and tags (they carry meaning by variant), the progress bar (VS Code's is a 2px strip), callouts (VS Code has none).
 4. ~~Admin and the account pages (9.2.5).~~ Done 2026-10-21: the theme is VS Code's look everywhere (9.2.5).
 
-## 10. Publishing the components (later)
+## 10. Publishing the components
 
 The user's direction (2026-10-21): the recipes and composed components should eventually publish themselves as
 components from `components/`, as monaco-vscode-api does (a package built to `dist`, released by the same pipeline as
@@ -975,6 +975,42 @@ components from `components/`, as monaco-vscode-api does (a package built to `di
 - **What moves.** Whether `components/` gets the recipes and composed components alone, with `theme` keeping the
   tokens, the VS Code mapping and the rules, or the theme package as a whole. Leaning: components alone, depending on
   the theme for tokens.
+
+### 10.1 Done (2026-10-21)
+
+- **Flat, one package per component** (the user's call): `components/app-window`, `components/toolbar`,
+  `components/caption`, `components/frame`, `components/code`, each `@brianjenkins94/<name>`, released by cd.yml's
+  `components/*` like any package (a draft until its version is bumped). The theme keeps the look (theme/tokens, the
+  VS Code bridge, the skin), the surfaces' styles, the rules and the budget.
+- **Internal use is on the source**: theme/recipes and theme/app-window re-export them by relative path, so no
+  consumer changed. What they share (theme/stitches, theme/sheet, theme/component, theme/web-awesome) they import
+  relatively too, and util-publish bundles it into each package: each published one has its own Stitches instance,
+  the layer order shared.
+- **The function form** is theme/component: a component's `definition` (attributes, slots, events) gives
+  `appWindow()` its typed options (camelCased attributes, slots as arrays, `children` for the default one, `on*`
+  handlers with the `app-`/`wa-` prefix dropped) and gives the package its custom-elements.json. shell/window.ts uses it.
+- **Derived from Web Awesome**: scripts/web-awesome.mjs writes src/web-awesome.ts (Web Awesome's layer order, so
+  theme/sheet no longer imports its layers.css; the resolved default of each `--wa-*` token a component reads; each
+  element's native counterpart, the reverse of `prefer-components`' map) and each element's custom-elements.json (its
+  definition, its tokens with their defaults, the Web Awesome elements it makes, transitively). test/web-awesome.mjs
+  fails when they're stale.
+- **Web Awesome optional**: `recipe()` gives each `var(--wa-…)` its default as the fallback; `webAwesomeOr(tag)` makes
+  the native counterpart when the Web Awesome element isn't registered; app-window uses plain rules where it used Web
+  Awesome's utility classes; each package's Web Awesome peer is optional. Checked in Brave with the published tarballs
+  (util-publish, locally): a page without Web Awesome (native buttons, the defaults' corners and spacing, the handlers
+  firing) and one with its CDN build (its buttons and font).
+
+Left, each small:
+
+- custom-elements.json isn't in the tarball: util-publish ships a source package's built modules and declarations
+  only (a `files` list would make it a prebuilt one). A lib change.
+- The published declarations import the theme's by the repo's relative path (`../../../packages/theme/src/component`),
+  which is wrong inside the tarball, so the options' types are lost there (debug-mcp's are the same). A lib change too.
+- The look for others: a published component reads `--wa-*`, so a page gets VS Code's look only with the theme's
+  tokens, and the theme ships its source as it is (TypeScript, Vite's `?inline`). Publishing the look as built CSS is
+  the next step if others are to use it.
+- `natives` maps tags only (`wa-checkbox` would need `<input type="checkbox">`): enough for `wa-button`, the one a
+  component makes now.
 
 ## Open questions
 

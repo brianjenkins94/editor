@@ -8,48 +8,11 @@
  * Each is overridable, least reach first: its variants; its component tokens, read with Web Awesome's as the fallback,
  * so a subtree, a document or a brand retunes it by setting them on an ancestor (`--app-toolbar-padding-block: 0`);
  * a use-site override, `toolbar({ "css": { … } })`, which wins by layer (`app.overrides`); and a new recipe composed
- * from it, made here (`recipe(toolbar, { … })`).
+ * from it (`recipe(toolbar, { … })`).
+ *
+ * Each is published as a package of its own from components/ (PLAN.md §10); this is the theme's one way in to them.
  */
-import { recipe } from "./stitches";
-
-/** A bar of controls along the top of a view, ruled off from what's under it.
- *  Tokens: `--app-toolbar-padding-block`, `--app-toolbar-padding-inline`, `--app-toolbar-rule`. */
-export const toolbar = recipe({
-	"flex": "none",
-	"boxSizing": "border-box",
-	"padding": "var(--app-toolbar-padding-block, var(--wa-space-xs)) var(--app-toolbar-padding-inline, var(--wa-space-s))",
-	"borderBottom": "var(--app-toolbar-rule, var(--wa-border-width-s) solid var(--wa-color-surface-border))",
-	"variants": {
-		"density": {
-			"compact": { "--app-toolbar-padding-block": "var(--wa-space-3xs)", "--app-toolbar-padding-inline": "var(--wa-space-xs)" },
-			"normal": {}
-		},
-		"ruled": {
-			"false": { "--app-toolbar-rule": "none" },
-			"true": {}
-		}
-	}
-});
-
-/** A section's or a card's label: small, quiet, uppercase.
- *  Tokens: `--app-caption-color`, `--app-caption-size`. */
-export const caption = recipe({
-	"color": "var(--app-caption-color, var(--wa-color-text-quiet))",
-	"fontSize": "var(--app-caption-size, var(--wa-font-size-xs))",
-	"fontWeight": "var(--wa-font-weight-semibold)",
-	"letterSpacing": "0.04em",
-	"textTransform": "uppercase",
-	"variants": {
-		"size": {
-			"xs": {},
-			"2xs": { "--app-caption-size": "var(--wa-font-size-2xs)" }
-		}
-	}
-});
-
-/** A document's whole view, fixed to the viewport: a webview's is clear of the padding VS Code's default webview styles
- *  give the body, which is unlayered, so no layered rule could take it back. */
-export const frame = recipe({ "position": "fixed", "inset": 0, "overflow": "auto" });
-
-/** Code, in the code's font: an id, a release, a route, a trace. */
-export const code = recipe({ "fontFamily": "var(--wa-font-family-code)" });
+export { caption } from "../../../components/caption/src/caption";
+export { code } from "../../../components/code/src/code";
+export { frame } from "../../../components/frame/src/frame";
+export { toolbar } from "../../../components/toolbar/src/toolbar";

@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/app-window",
+  "version": "0.0.0",
+  "description": "<app-window>, a movable, collapsible window in light DOM, and appWindow(), the same as a function taking its slots as arrays and its handlers; Web Awesome's buttons when Web Awesome is there, native ones when it isn't.",
+  "type": "module",
+  "exports": {
+    ".": "./src/app-window.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stitches/core": "1.2.8"
+  },
+  "peerDependencies": {
+    "@awesome.me/webawesome": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@awesome.me/webawesome": {
+      "optional": true
+    }
+  }
+}

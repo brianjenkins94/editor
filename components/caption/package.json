@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/caption",
+  "version": "0.0.0",
+  "description": "A section's or a card's label, small, quiet and uppercase: the theme's caption recipe (a class from a call).",
+  "type": "module",
+  "exports": {
+    ".": "./src/caption.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stitches/core": "1.2.8"
+  },
+  "peerDependencies": {
+    "@awesome.me/webawesome": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@awesome.me/webawesome": {
+      "optional": true
+    }
+  }
+}

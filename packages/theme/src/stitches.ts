@@ -1,6 +1,6 @@
 /**
  * theme/stitches — the app's one Stitches instance (PLAN.md §7.5), the theme's own (§8): its styles are made here, in
- * the theme — the recipes (theme/recipes), the composed components (theme/app-window) and each surface's styles
+ * the theme — the recipes and composed components (components/*, through theme/recipes and theme/app-window) and each surface's styles
  * (theme/styles/<surface>) — and the app imports those, never this (webawesome/through-theme fails it outside the
  * theme, as it does `@stitches/core`). webawesome/css-in-js-tokens holds their values to the `--wa-*` tokens.
  *
@@ -25,6 +25,7 @@
 import { createStitches } from "@stitches/core";
 
 import { layerOrder } from "./sheet.js";
+import { tokens } from "./web-awesome";
 
 /** The palette: Web Awesome's tokens under the shell's names, for code that styles plain DOM or a library's widget, and
  *  as the instance's `$colors` scale. */
@@ -73,6 +74,20 @@ const layered = (layer: string) => (style: any) => {
 	};
 };
 
+/** `style` with each `var(--wa-…)` given Web Awesome's default as its fallback (theme/web-awesome), so a recipe, and a
+ *  component made of one, lays out on a page without Web Awesome's theme (PLAN.md §10). */
+const withDefaults = (style: any): any => {
+	if (typeof style === "string") {
+		return style.replaceAll(/var\((--wa-[\w-]+)\)/gu, (whole, name: string) => (tokens[name] === undefined ? whole : `var(${name}, ${tokens[name]})`));
+	}
+
+	if (Array.isArray(style)) {
+		return style.map(withDefaults);
+	}
+
+	return style !== null && typeof style === "object" ? mapValues(style, withDefaults) : style;
+};
+
 /** A component whose use-site `css` goes in `app.overrides`. Still Stitches' own component (its descriptors copied,
  *  the internal one with them), so it composes: `css(toolbar, { … })`. */
 function overridable<Component extends (...arguments_: any[]) => any>(component: Component): Component {
@@ -83,8 +98,9 @@ function overridable<Component extends (...arguments_: any[]) => any>(component:
 
 export const css = ((...arguments_: any[]) => overridable(stitches.css(...arguments_.map(layered("app.styles"))))) as typeof stitches.css;
 
-/** A recipe: the theme's own vocabulary (theme/recipes), under every surface's styles. */
-export const recipe = ((...arguments_: any[]) => overridable(stitches.css(...arguments_.map(layered("app.recipes"))))) as typeof stitches.css;
+/** A recipe: the theme's own vocabulary (theme/recipes, the components), under every surface's styles; Web Awesome's
+ *  tokens in it fall back to their defaults. */
+export const recipe = ((...arguments_: any[]) => overridable(stitches.css(...arguments_.map(withDefaults).map(layered("app.recipes"))))) as typeof stitches.css;
 
 export const globalCss = ((...arguments_: any[]) => stitches.globalCss(...arguments_.map((style) => inLayer("app.base", style)))) as typeof stitches.globalCss;
 
