@@ -43,6 +43,12 @@ export type Options<Shape extends Definition> =
 const camel = (name: string) => name.replaceAll(/-(\w)/gu, (_, letter: string) => letter.toUpperCase());
 const handler = (name: string) => "on" + camel(name.replace(/^(?:app|wa)-/u, "")).replace(/^\w/u, (letter) => letter.toUpperCase());
 
+/** A recipe as its callers see it (theme/stitches' `recipe`): called with its variants, and a use-site `css`, it's its
+ *  class. Named, so a published recipe's declaration can be written (Stitches' own inferred type can't be, outside it). */
+export type Recipe<Variants extends Record<string, string | boolean> = Record<string, never>> =
+	((props?: { [Name in keyof Variants]?: Variants[Name] } & { "css"?: Record<string, unknown> }) => string & { "className": string; "selector": string })
+	& { "className": string; "selector": string };
+
 /** The element a tag makes: its class, where it's declared in `HTMLElementTagNameMap`. */
 type Made<Tag extends string> = Tag extends keyof HTMLElementTagNameMap ? HTMLElementTagNameMap[Tag] : HTMLElement;
 

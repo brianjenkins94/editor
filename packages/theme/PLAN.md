@@ -1000,12 +1000,22 @@ components from `components/`, as monaco-vscode-api does (a package built to `di
   (util-publish, locally): a page without Web Awesome (native buttons, the defaults' corners and spacing, the handlers
   firing) and one with its CDN build (its buttons and font).
 
-Left, each small:
+Then util-publish (lib, the user's go-ahead 2026-10-21), so the tarballs carry what the package says:
 
-- custom-elements.json isn't in the tarball: util-publish ships a source package's built modules and declarations
-  only (a `files` list would make it a prebuilt one). A lib change.
-- The published declarations import the theme's by the repo's relative path (`../../../packages/theme/src/component`),
-  which is wrong inside the tarball, so the options' types are lost there (debug-mcp's are the same). A lib change too.
+- it ships the file a package's `customElements` names (the field tools find a Custom Elements Manifest by), exported
+  at its own path, so app-window's custom-elements.json is in its tarball;
+- it re-aims a declaration's relative imports from where its source is in the repo to where the declaration is in the
+  tarball (app-window's `../../../packages/theme/src/component` became `../packages/theme/src/component`; debug-mcp's
+  imports of observability were wrong the same way, checked, and are fixed with it), and ships a sibling's declaration
+  that a shipped one imports, though the build has no module for it (a type-only import);
+- and the recipes have a type their declarations can name (theme/component's `Recipe`): Stitches' inferred one can't be
+  written outside its package, so tsc emitted none for them.
+
+Checked by typechecking a project against the unpacked tarballs (strict, the libraries' declarations checked too): the
+options, the element, and the recipes' variants are typed, and a misspelt attribute, handler or variant is an error.
+
+Left:
+
 - The look for others: a published component reads `--wa-*`, so a page gets VS Code's look only with the theme's
   tokens, and the theme ships its source as it is (TypeScript, Vite's `?inline`). Publishing the look as built CSS is
   the next step if others are to use it.

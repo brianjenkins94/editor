@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/app-window.ts"
   },
+  "customElements": "custom-elements.json",
   "license": "MIT",
   "dependencies": {
     "@stitches/core": "1.2.8"

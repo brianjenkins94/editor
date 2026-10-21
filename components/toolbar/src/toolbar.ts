@@ -2,11 +2,12 @@
  * toolbar — the theme's `toolbar` recipe as a package of its own (PLAN.md §10); theme/recipes re-exports it, and says how
  * a recipe is overridden.
  */
+import type { Recipe } from "../../../packages/theme/src/component";
 import { recipe } from "../../../packages/theme/src/stitches";
 
 /** A bar of controls along the top of a view, ruled off from what's under it.
  *  Tokens: `--app-toolbar-padding-block`, `--app-toolbar-padding-inline`, `--app-toolbar-rule`. */
-export const toolbar = recipe({
+export const toolbar: Recipe<{ "density": "compact" | "normal"; "ruled": boolean }> = recipe({
 	"flex": "none",
 	"boxSizing": "border-box",
 	"padding": "var(--app-toolbar-padding-block, var(--wa-space-xs)) var(--app-toolbar-padding-inline, var(--wa-space-s))",
