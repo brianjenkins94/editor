@@ -821,7 +821,7 @@ Override and extend, from the least to the most reach:
      both drag, collapse (193 → 49px), expand and close, their events fired.
    - Found: a Web Awesome component in a docked window doesn't render (Lit adopts one constructed stylesheet in every
      document, which a second document refuses: "Sharing constructed stylesheets in multiple documents is not
-     allowed"), so the architecture view's buttons are missing there. Not the spike's; open.
+     allowed"), so the architecture view's buttons are missing there. Not the spike's; fixed in §9.2.4.
    - `css-in-js-tokens` reads the theme's own `recipe()` / `css()` calls (`./stitches`) and a use-site override's `css`
      (a call on `theme/recipes`); the budget counts the overrides with the Stitches declarations.
 1. The shell's Stitches (227 declarations) into `theme/styles/shell*`; then the rule restricting `theme/stitches`.
@@ -865,15 +865,24 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
 3. **The rest of VS Code's palette**: hover and selection (`list.*`), menus (`menu.*`), badges, tooltips
    (`editorHoverWidget.*`), dialogs (`editorWidget.*`), errors and warnings (`errorForeground`, `editorWarning.*`),
    scrollbars, and high-contrast themes' borders (`contrastBorder`, `contrastActiveBorder`).
-4. **Docked windows.** Web Awesome components don't render in a docked editor window (Lit adopts one constructed
+4. ~~**Docked windows.** Web Awesome components don't render in a docked editor window (Lit adopts one constructed
    stylesheet per component class, and a second document refuses it), so a view moved out of the editor area loses
-   its controls. With Web Awesome everywhere this has to be fixed first.
+   its controls. With Web Awesome everywhere this has to be fixed first.~~ Fixed 2026-10-21: a docked window is an
+   `about:blank` frame, a realm of its own, and a component rendered in VS Code's document lost all its sheets when
+   moved there (4 → 0), and one rendered there threw. `theme/documents`, imported first in the workbench, has Lit
+   take its other way (a `<style>` in each shadow root, which goes wherever its component goes) by saying, before Lit
+   loads, that `ShadyCSS` shadow DOM isn't native: the one thing Lit decides that by, and nothing else in the
+   workbench's bundle or VS Code's reads it. Checked in Brave: the architecture view docked keeps its buttons and
+   select (VS Code's colours, full size), no errors; a button rendered in VS Code's document keeps its look moved into
+   the docked window and back. Cost, the performance suite run with and without it locally: the workbench realm
+   237.4 vs 233.9 MB, boot 1154 vs 1142 ms, total memory the same (the browser shares identical `<style>`s' parsed
+   contents).
 5. **Documents without VS Code**: admin and the account pages. Either a fixed VS Code theme (Dark Modern / Light
    Modern's colours, following the system's mode) or Web Awesome's own look; to decide.
 
 ### 9.3 Order
 
-1. Docked windows (9.2.4).
+1. ~~Docked windows (9.2.4).~~ Done 2026-10-21.
 2. The shell follows the active VS Code theme (9.2.1), so one mapping applies everywhere.
 3. The components, one at a time, each checked beside VS Code's own (9.2.2, 9.2.3): button, input and textarea,
    dropdown (as the context menu), select, checkbox, badge and tag, dialog and popover, callout, progress bar.

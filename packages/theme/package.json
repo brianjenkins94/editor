@@ -23,6 +23,10 @@
     "./recipes.css": "./src/recipes.css",
     "./recipes": "./src/recipes.ts",
     "./app-window": "./src/app-window.ts",
+    "./documents": {
+      "types": "./src/documents.d.ts",
+      "default": "./src/documents.js"
+    },
     "./components/*": {
       "types": "./src/components/*.d.ts",
       "default": "./src/components/*.js"
