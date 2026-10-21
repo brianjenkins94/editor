@@ -12,13 +12,15 @@
  * moves the ones it's given, so Preact's or React's nodes stay where they put them. A grid places everything: the
  * chrome and `slot="header-actions"` children in the header row, the rest in the body, one over another.
  *
- * Attributes: `label`, `closable`, `collapsed` (reflected), `storage-key` (keeps its place and whether it's collapsed),
+ * Attributes: `label`, `closable`, `collapsed` (reflected), `width` and `body-height` (px), `storage-key` (keeps its
+ * place and whether it's collapsed),
  * `initial-left` / `initial-top` (where it opens with no place saved; also properties, for code that sets them before
  * it's connected).
- * Events: `app-close` (its close control), `app-collapse`. Tokens: `--app-window-z`, `--app-window-padding`.
+ * Events: `app-close` (its close control), `app-collapse`. Tokens: `--app-window-z`, `--app-window-padding`,
+ * `--app-window-body-height` (what `body-height` sets).
  */
-import "./components/button.js";
 import { recipe } from "./stitches";
+import "./components/button.js";
 
 const frame = recipe({
 	"position": "fixed",
@@ -27,7 +29,7 @@ const frame = recipe({
 	"maxHeight": "calc(100vh - var(--wa-space-m))",
 	"display": "grid",
 	"gridTemplateColumns": "minmax(0, 1fr) auto auto",
-	"gridTemplateRows": "auto minmax(0, 1fr)",
+	"gridTemplateRows": "auto var(--app-window-body-height, minmax(0, 1fr))",
 	"gridTemplateAreas": "\"title actions controls\" \"body body body\"",
 	"boxSizing": "border-box",
 	"overflow": "hidden",
@@ -71,11 +73,11 @@ function saveState(key: string | null, patch: Persisted): void {
 }
 
 export class AppWindow extends HTMLElement {
-	static observedAttributes = ["label", "closable", "collapsed"];
+	public static observedAttributes = ["label", "closable", "collapsed", "width", "body-height"];
 
 	/** Where it opens when it has no place of its own saved. Default: centred. */
-	"initialLeft"?: number;
-	"initialTop"?: number;
+	public "initialLeft"?: number;
+	public "initialTop"?: number;
 
 	readonly #title = document.createElement("span");
 	readonly #controls = document.createElement("div");
@@ -83,7 +85,7 @@ export class AppWindow extends HTMLElement {
 	readonly #close = document.createElement("wa-button");
 	#placed = false;
 
-	constructor() {
+	public constructor() {
 		super();
 		this.#title.className = "app-window-title wa-text-truncate wa-font-weight-semibold";
 		this.#controls.className = "app-window-controls wa-cluster wa-gap-3xs wa-flex-nowrap";
@@ -108,31 +110,31 @@ export class AppWindow extends HTMLElement {
 		this.#controls.append(this.#collapse, this.#close);
 	}
 
-	get "label"(): string {
+	public get "label"(): string {
 		return this.getAttribute("label") ?? "";
 	}
 
-	set "label"(value: string) {
+	public set "label"(value: string) {
 		this.setAttribute("label", value);
 	}
 
-	get "collapsed"(): boolean {
+	public get "collapsed"(): boolean {
 		return this.hasAttribute("collapsed");
 	}
 
-	set "collapsed"(value: boolean) {
+	public set "collapsed"(value: boolean) {
 		this.toggleAttribute("collapsed", value);
 	}
 
-	get "storageKey"(): string | null {
+	public get "storageKey"(): string | null {
 		return this.getAttribute("storage-key");
 	}
 
-	set "storageKey"(value: string) {
+	public set "storageKey"(value: string) {
 		this.setAttribute("storage-key", value);
 	}
 
-	connectedCallback(): void {
+	public connectedCallback(): void {
 		this.classList.add(frame());
 
 		if (this.#title.parentNode !== this) {
@@ -150,12 +152,14 @@ export class AppWindow extends HTMLElement {
 		}
 	}
 
-	attributeChangedCallback(name: string): void {
+	public attributeChangedCallback(name: string): void {
 		if (name === "label") {
 			this.#title.textContent = this.label;
 			this.#title.title = this.label;
 		} else if (name === "closable") {
 			this.#close.hidden = !this.hasAttribute("closable");
+		} else if (name === "width" || name === "body-height") {
+			this.#size();
 		} else {
 			this.#collapse.textContent = this.collapsed ? "+" : "–";
 			this.#collapse.title = this.collapsed ? "Expand" : "Collapse";
@@ -167,13 +171,20 @@ export class AppWindow extends HTMLElement {
 		}
 	}
 
+	/* eslint-disable webawesome/no-inline-styles -- a window's place and size: per-instance geometry, dragged, saved or given */
 	/** Put it at `left`, `top`, kept on screen. */
-	moveTo(left: number, top: number): void {
-		/* eslint-disable webawesome/no-inline-styles -- a window's place: dynamic geometry, dragged and saved */
+	public moveTo(left: number, top: number): void {
 		this.style.left = Math.max(4, Math.min(left, window.innerWidth - this.offsetWidth - 4)) + "px";
 		this.style.top = Math.max(4, Math.min(top, window.innerHeight - 40)) + "px";
-		/* eslint-enable webawesome/no-inline-styles */
 	}
+
+	// Its `width` and its body's height (`body-height`), in px: the body's row is that tall, so what's in it has a definite
+	// height to measure (an iframe does, at boot).
+	#size(): void {
+		this.style.width = this.hasAttribute("width") ? this.getAttribute("width") + "px" : "";
+		this.style.setProperty("--app-window-body-height", this.hasAttribute("body-height") ? this.getAttribute("body-height") + "px" : null);
+	}
+	/* eslint-enable webawesome/no-inline-styles */
 
 	// Drag by the title. Pointer capture keeps the gesture even when the cursor outruns it.
 	#drag(event: PointerEvent): void {
@@ -210,5 +221,6 @@ if (customElements.get("app-window") === undefined) {
 }
 
 declare global {
+	// eslint-disable-next-line ts/naming-convention -- a custom element's tag is hyphenated by spec
 	interface HTMLElementTagNameMap { "app-window": AppWindow }
 }

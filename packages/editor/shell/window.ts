@@ -65,14 +65,8 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 	// Caller-owned header actions (e.g. the debug toolbar), left of the window's own controls.
 	extras.slot = "header-actions";
 	extras.className = "wa-cluster wa-gap-3xs wa-flex-nowrap";
-	/* eslint-disable webawesome/no-inline-styles -- a window's size: per-instance geometry, set by its caller */
-	const setBodyHeight = (next: number): void => {
-		body.style.height = next + "px";
-	};
-
-	win.style.width = (options.width ?? 960) + "px";
-	/* eslint-enable webawesome/no-inline-styles */
-	setBodyHeight(options.height ?? 640);
+	win.setAttribute("width", String(options.width ?? 960));
+	win.setAttribute("body-height", String(options.height ?? 640));
 	win.append(extras, body);
 
 	return {
@@ -82,7 +76,9 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 		"setCollapsed": (collapsed: boolean) => {
 			win.collapsed = collapsed;
 		},
-		"setBodyHeight": setBodyHeight,
+		"setBodyHeight": (next: number) => {
+			win.setAttribute("body-height", String(next));
+		},
 		"show": () => {
 			if (!win.isConnected) {
 				document.body.appendChild(win);
