@@ -905,7 +905,10 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
    237.4 vs 233.9 MB, boot 1154 vs 1142 ms, total memory the same (the browser shares identical `<style>`s' parsed
    contents).
 5. **Documents without VS Code**: admin and the account pages. Either a fixed VS Code theme (Dark Modern / Light
-   Modern's colours, following the system's mode) or Web Awesome's own look; to decide.
+   Modern's colours, following the system's mode) or Web Awesome's own look; to decide. Decided 2026-10-21 (the
+   user): they keep Web Awesome's own look, the brand's tokens on its default theme (`theme`), following the system's
+   mode. The VS Code look is for what's in or around VS Code; `theme/vscode-skin` and the bridge apply only where the
+   VS Code theme is, so nothing changes for them.
 
 ### 9.3 Order
 
@@ -922,7 +925,7 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
    Checked in Brave, light and dark: a brand button and the select at 26px / 4px / normal weight on VS Code's colours,
    the Run menu and the Changes checkboxes as VS Code's. Not done, left as Web Awesome's on VS Code's colours: badges
    and tags (they carry meaning by variant), the progress bar (VS Code's is a 2px strip), callouts (VS Code has none).
-4. Admin and the account pages (9.2.5).
+4. ~~Admin and the account pages (9.2.5).~~ Decided 2026-10-21: Web Awesome's own look; nothing to do.
 
 ## 10. Publishing the components (later)
 
