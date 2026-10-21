@@ -3,7 +3,7 @@
  *
  * Neither document has a stylesheet of its own to link (the workbench's build emits JavaScript only, and a webview is
  * given its page as a string), so the styles come in as text and are adopted: Web Awesome's layers, default theme and
- * utility classes, our brand tokens, then the bridge (vscode.css) that maps Web Awesome's tokens onto VS Code's. Not
+ * utility classes; then our brand tokens and the bridge that maps Web Awesome's tokens onto (theme/tokens, Stitches) VS Code's. Not
  * Web Awesome's native styles: VS Code's own native elements, and a webview's default styles, would meet them.
  *
  *     import { followVsCodeTheme } from "theme/vscode";
@@ -13,8 +13,7 @@
 import layers from "@awesome.me/webawesome/dist/styles/layers.css?inline";
 import webAwesomeTheme from "@awesome.me/webawesome/dist/styles/themes/default.css?inline";
 import utilities from "@awesome.me/webawesome/dist/styles/utilities.css?inline";
-import brand from "./theme.css?inline";
-import bridge from "./vscode.css?inline";
+import { brandTokens, vscodeTokens } from "./tokens";
 
 /** VS Code's theme types that are dark: the class it puts on `.monaco-workbench`, or a webview body's
  *  `data-vscode-theme-kind`. */
@@ -36,9 +35,13 @@ export function followVsCodeTheme(element) {
 
 		const sheet = new document.defaultView.CSSStyleSheet();
 
-		sheet.replaceSync([layers, webAwesomeTheme, utilities, brand, bridge].join("\n"));
+		sheet.replaceSync([layers, webAwesomeTheme, utilities].join("\n"));
 		document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 	}
+
+	// (Stitches puts them in its own document's head; a docked window gets them from there, by mirrorStyles)
+	brandTokens();
+	vscodeTokens();
 
 	// VS Code defines --vscode-font-family only in webviews. In its own document the UI font is the workbench element's
 	// (set by platform), so the bridge's font tokens read that.

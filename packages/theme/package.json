@@ -1,7 +1,7 @@
 {
   "name": "theme",
   "version": "0.0.0",
-  "description": "The app's theme: (theme, and theme/chrome without Web Awesome's native styles) Web Awesome set up with its --wa-* design tokens retoned for the brand, following the system's light/dark mode, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, (theme/components/*) the Web Awesome components the app may use, the only way in to them, and (theme/exceptions/*) the custom CSS that's left, each file a named exception (PLAN.md).",
+  "description": "The app's theme: (theme, and theme/chrome without Web Awesome's native styles) Web Awesome set up with its --wa-* design tokens retoned for the brand, following the system's light/dark mode, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, (theme/components/*) the Web Awesome components the app may use, the only way in to them, (theme/recipes, theme/app-window) the app's shapes and composed components, and (theme/styles/*) each surface's own styles, all Stitches (PLAN.md).",
   "type": "module",
   "scripts": {
     "test": "node --test test/budget.mjs"
@@ -9,12 +9,10 @@
   "exports": {
     ".": "./src/index.js",
     "./chrome": "./src/chrome.js",
-    "./theme.css": "./src/theme.css",
     "./vscode": {
       "types": "./src/vscode.d.ts",
       "default": "./src/vscode.js"
     },
-    "./vscode.css": "./src/vscode.css",
     "./vscode-colors": {
       "types": "./src/vscode-colors.d.ts",
       "default": "./src/vscode-colors.js"
@@ -34,8 +32,7 @@
     "./components/*": {
       "types": "./src/components/*.d.ts",
       "default": "./src/components/*.js"
-    },
-    "./exceptions/*": "./src/exceptions/*"
+    }
   },
   "files": [
     "src"

@@ -127,14 +127,10 @@ export default [
 		}
 	},
 	{
-		"files": ["packages/theme/**/*.css"],
-		"rules": { "webawesome/css-only-in-theme": "off" }
-	},
-	{
-		// The theme's tokens: unlayered on purpose so they win over Web Awesome's layers, and token definitions, not uses —
-		// vscode.css the one place --vscode-* is read. (Its exceptions/ are custom CSS like any other, held to every rule.)
-		"files": ["packages/theme/src/theme.css", "packages/theme/src/vscode.css"],
-		"rules": { "css/use-layers": "off", "webawesome/css-tokens": "off", "webawesome/css-no-vscode-variables": "off" }
+		// The theme's tokens (theme/tokens): token definitions, not uses — the brand's literal ramp, and the bridge, the one
+		// place --vscode-* is read for a token.
+		"files": ["packages/theme/src/tokens.ts"],
+		"rules": { "webawesome/css-in-js-tokens": "off" }
 	},
 	{
 		// The API's sign-in pages bundle Web Awesome themselves (the api doesn't depend on theme): their one sheet centres the

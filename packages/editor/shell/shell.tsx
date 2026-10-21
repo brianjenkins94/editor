@@ -48,7 +48,6 @@ import "theme/components/dropdown-item";
 import "theme/components/input";
 import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
-import "theme/vscode.css"; // and, once the editor publishes them, VS Code's colours on the body (theme/vscode-colors)
 import { asidePane, dockHostCss, errorNotice, ghError, ghOk, injectGlobals, mainWrap, navPane, overlay, overlayBody, overlayTitle, picker, popoverBody, projectCard, railRegion, resizer, resizerLeft, resizerRight, sideBody, sideCol, sideHost, spacer, topBar } from "theme/styles/shell";
 
 // The GitHub data plane's logger — spans + records federate to the `$sys.log.>` observability plane (debug-mcp).
