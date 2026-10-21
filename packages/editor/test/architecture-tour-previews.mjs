@@ -59,7 +59,6 @@ test("evidence: a preview run, across a hot update", async () => {
 
 	await write({
 		"package.json": JSON.stringify({ "name": "evapp", "private": true, "type": "module", "scripts": { "dev": "vite" } }),
-		// eslint-disable-next-line webawesome/no-html-in-strings -- the test app's own page, written to the workspace as a file
 		"index.html": "<!doctype html><html><head><meta charset=\"UTF-8\"></head><body><div id=\"out\"></div><script type=\"module\" src=\"./src/main.tsx\"></script></body></html>",
 		"src/main.tsx": main("none")
 	});
@@ -139,7 +138,6 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 
 	await write({
 		"package.json": JSON.stringify({ "name": "stopsapp", "private": true, "type": "module", "scripts": { "dev": "vite" } }),
-		// eslint-disable-next-line webawesome/no-html-in-strings -- the test app's own page, written to the workspace as a file
 		"index.html": "<!doctype html><html><head><meta charset=\"UTF-8\"></head><body><script type=\"module\" src=\"./src/main.ts\"></script></body></html>",
 		"src/main.ts": [
 			"const button = document.createElement(\"button\");",
@@ -189,7 +187,6 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 		assert.deepEqual([at("step", 0), at("step", 1)], ["2", "2"]);
 		assert.equal(at("during", 0), "click", "the event the page was handling");
 		assert.match(at("event", 0), /^(?:Pointer|Mouse)Event click$/u, "a DOM event, by what it is");
-		// eslint-disable-next-line webawesome/no-html-in-strings -- how a stop previews a DOM node, not markup
 		assert.equal(at("button", 1), "<button#add>", "a DOM node, by what it is");
 		assert.ok(values.every((row) => row.line === 7), "on the breakpoint's line");
 		assert.equal(at("next", 0), undefined, "not yet set: its own statement");

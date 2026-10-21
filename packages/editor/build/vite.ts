@@ -49,7 +49,7 @@ function hostHtml(componentDist: string): string {
 	// eslint-disable-next-line webawesome/no-html-in-strings -- one preload line of the host document (below)
 	const preloads = componentStaticChunks(componentDist).map((chunk) => `\t<link rel="modulepreload" href="./${chunk}" />\n`).join("");
 
-	// eslint-disable-next-line webawesome/no-html-in-strings, webawesome/no-css-in-strings -- the iframe HOST DOCUMENT served to bootstrap the workbench (a full HTML page + its reset CSS, as text), not app chrome
+	// eslint-disable-next-line webawesome/no-css-in-strings -- the iframe HOST DOCUMENT served to bootstrap the workbench (a full HTML page + its reset CSS, as text), not app chrome
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>

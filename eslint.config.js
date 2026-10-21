@@ -100,6 +100,11 @@ export default [
 		"rules": { "webawesome/through-theme": "off", "webawesome/known-components": "off", "webawesome/known-classes": "off" }
 	},
 	{
+		// Tests write the HTML of the apps and pages they run as fixtures, and compare markup as text.
+		"files": ["**/test/**", "**/*.test.{ts,mjs,js}"],
+		"rules": { "webawesome/no-html-in-strings": "off" }
+	},
+	{
 		// The theme package is where the stylesheets live: it adopts its own and Web Awesome's.
 		"files": ["packages/theme/**"],
 		"rules": { "webawesome/no-css-imports": "off" }

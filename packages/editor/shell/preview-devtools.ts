@@ -150,7 +150,6 @@ export function installPreviewCdp(hub: Hub, frameOf: (key: string) => HTMLIFrame
 
 /** chii's CDN-mode host page, as a blob: URL (so it has this page's origin, and so its COEP). */
 function frontendUrl(): string {
-	// eslint-disable-next-line webawesome/no-html-in-strings -- the frontend's own host document (a blob:), not app chrome
 	const html = `<!DOCTYPE html>
 <html lang="en">
 <meta charset="utf-8">

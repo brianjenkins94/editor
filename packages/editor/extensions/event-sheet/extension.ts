@@ -234,7 +234,6 @@ async function page(context: vscode.ExtensionContext, webview: vscode.Webview): 
 	const nonce = crypto.randomUUID().replaceAll("-", "");
 	const policy = `default-src 'none'; img-src data: ${webview.cspSource}; style-src 'unsafe-inline'; connect-src data:; script-src 'nonce-${nonce}'`;
 
-	// eslint-disable-next-line webawesome/no-html-in-strings -- a webview is given its page as a string
 	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body><script nonce="${nonce}">${script.replaceAll("</script", "<\\/script")}</script></body></html>`;
 }
 

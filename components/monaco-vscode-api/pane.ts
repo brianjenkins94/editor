@@ -454,6 +454,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 		this.reserveFirstLine(lineHeight);
 		this.wrapAt(Math.max(20, Math.floor((left - layout.contentLeft) / font.typicalHalfwidthCharacterWidth) - 2));
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: the frame beside the code, as the editor lays out
 		Object.assign(this.element.style, { "left": `${left}px`, "width": `${right - left}px`, "height": `${layout.height}px`, "lineHeight": `${lineHeight}px` });
 		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: the reserved first line, as tall as the editor's lines
 		this.tabs.style.height = `${lineHeight}px`;
@@ -464,6 +465,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.element.style.setProperty("--notes-margin-line-height", `${lineHeight}px`);
 
 		// The gutter column: the line-decorations lane's left end, right of the line numbers (where the change bars were).
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: the lane's place and the editor's height
 		Object.assign(this.gutter.style, { "left": `${layout.decorationsLeft}px`, "width": `${GUTTER_WIDTH}px`, "height": `${layout.height}px` });
 
 		for (const mark of this.marks) {

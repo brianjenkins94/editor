@@ -1,7 +1,7 @@
 /**
  * The maker's owned runtime library — the reusable schemas + systems + infra it vendors into every generated game.
  */
-/* eslint-disable webawesome/no-html-in-strings, webawesome/no-css-in-strings -- these are game runtime FILE CONTENTS (real index.html/CSS the maker emits as data), not app chrome */
+/* eslint-disable webawesome/no-css-in-strings -- these are game runtime FILE CONTENTS (real index.html/CSS the maker emits as data), not app chrome */
 
 const LIBRARY_FILES: Record<string, string> = {
 	"index.html": `<!DOCTYPE html>

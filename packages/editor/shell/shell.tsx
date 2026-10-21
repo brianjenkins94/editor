@@ -81,30 +81,21 @@ const injectGlobals = globalCss({
 });
 
 // The top bar: branding + icon actions, spread across the header. wa-button (plain) for every control.
-const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "0 var(--wa-space-s)", "height": "40px", "borderBottom": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)" });
-const brand = css({ "fontWeight": "var(--wa-font-weight-semibold)", "marginInlineEnd": "var(--wa-space-s)", "color": "var(--wa-color-text-quiet)" });
+const topBar = css({ "height": "40px", "padding": "0 var(--wa-space-s)", "borderBottom": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)" });
 const spacer = css({ "flex": "1 1 auto" });
 
 // The top bar's popovers (Run's menu is a wa-dropdown; Commit, Share and GitHub are wa-popovers anchored to their
 // buttons): Web Awesome positions them in the top layer, over the editor's iframe, and closes them on an outside click
 // or Escape. A popover's content is a column this wide, to hold a token or a link.
 const popoverBody = css({ "width": "300px", "maxWidth": "80vw" });
-const ghTitle = css({ "fontWeight": "var(--wa-font-weight-semibold)", "fontSize": "var(--wa-font-size-s)" });
-const ghHint = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "lineHeight": 1.45 });
-const ghLink = css({ "color": "var(--wa-color-brand-fill-loud)", "textDecoration": "none", "whiteSpace": "nowrap", "&:hover": { "textDecoration": "underline" } });
-const ghInput = css({ "width": "100%", "&::part(input)": { "fontFamily": "var(--wa-font-family-code)" } });
-const ghError = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-danger-fill-loud)", "lineHeight": 1.4 });
+const ghError = css({ "color": "var(--wa-color-danger-on-quiet)" });
 // An uncaught error's id (shell/reporting.ts), to quote: over everything, bottom right, until dismissed or a minute on.
 const errorNotice = css({ "position": "fixed", "insetInlineEnd": "var(--wa-space-m)", "insetBlockEnd": "var(--wa-space-m)", "zIndex": 2147483000, "maxWidth": "360px", "fontSize": "var(--wa-font-size-xs)" });
-const ghOk = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-success-fill-loud)", "lineHeight": 1.4 });
-const ghConnected = css({ "fontSize": "var(--wa-font-size-xs)", "color": "var(--wa-color-text-normal)" });
-const ghActions = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-xs)", "marginBlockStart": "var(--wa-space-2xs)" });
-const ghSession = css({ "display": "flex", "alignItems": "center", "justifyContent": "space-between", "gap": "var(--wa-space-xs)" });
-const ghSessionText = css({ "display": "flex", "flexDirection": "column", "minWidth": 0 });
+const ghOk = css({ "color": "var(--wa-color-success-on-quiet)" });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
 // list and the git panel each fill their side and scroll internally. `--header-height` is published by wa-page.
-const sideCol = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "minHeight": 0 });
+const sideCol = css({ "height": "calc(100dvh - var(--header-height, 40px))", "minHeight": 0 });
 // The panes flanking the editor get a border on the edge that meets it: the LHS project pane on its right, the RHS
 // changes pane on its left. `position: relative` anchors the absolute resize grip on that inner edge.
 const navPane = css({ "position": "relative", "borderInlineEnd": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)" });
@@ -157,31 +148,23 @@ function loadPaneWidth(key: string, fallback: number): number {
 const RAIL_WIDTH = 68;
 // A bare vertical column of icon-buttons, top-aligned and centered in the rail — no card, no region padding (the
 // wa-page menu/aside parts already have none), just the stack.
-const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-m)", "paddingBlockStart": "var(--wa-space-2xs)", "overflow": "hidden" });
+const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "paddingBlockStart": "var(--wa-space-2xs)", "overflow": "hidden" });
 // Caption hugs its icon (tight) while the gap BETWEEN items (railRegion, above) is larger — so each icon+caption
 // reads as one unit.
-const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-3xs)" });
-const railCaption = css({ "fontSize": "var(--wa-font-size-3xs)", "lineHeight": 1.1, "color": "var(--wa-color-text-quiet)", "textAlign": "center", "maxWidth": "100%", "overflowWrap": "anywhere" });
 // Keeps an imperatively-mounted region (the git panel) in the DOM but out of view while its pane is collapsed.
-const hiddenBox = css({ "display": "none" });
 const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
 const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
 
 // Navigation (projects) region.
-const navHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "var(--wa-space-2xs) var(--wa-space-xs)", "textTransform": "uppercase", "fontSize": "var(--wa-font-size-2xs)", "letterSpacing": "0.06em", "color": "var(--wa-color-text-quiet)", "flex": "0 0 auto" });
-const navHeadLabel = css({ "flex": "1 1 auto" });
-const picker = css({ "display": "flex", "flexDirection": "column", "gap": "var(--wa-space-2xs)", "padding": "var(--wa-space-xs)" });
+const navHead = css({ "flex": "none", "padding": "var(--wa-space-2xs) var(--wa-space-xs)" });
+const picker = css({ "padding": "var(--wa-space-xs)" });
 const projectCard = css({
 	"cursor": "pointer",
 	"--spacing": "var(--wa-space-xs)",
-	"&::part(body)": { "display": "block" },
-	"&:hover::part(body)": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
 	"&:focus-visible": { "outline": "var(--wa-focus-ring)", "outlineOffset": "var(--wa-focus-ring-offset)" },
 	"&.selected::part(body)": { "backgroundColor": "var(--wa-color-brand-fill-quiet)" },
 	"&.selected": { "borderInlineStart": "var(--wa-border-width-m) var(--wa-border-style) var(--wa-color-brand-fill-loud)" }
 });
-const projectName = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)" });
-const projectDesc = css({ "display": "block", "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "marginBlockStart": "var(--wa-space-3xs)", "whiteSpace": "normal" });
 
 // The dock fills the `main` region (the editor iframe is its fixed panel); the diff overlay covers it when a file is opened.
 const dockHostCss = css({ "position": "absolute", "inset": 0 });
@@ -195,8 +178,8 @@ const overlay = css({
 	"backgroundColor": "var(--wa-color-surface-default)",
 	"&.open": { "display": "flex" }
 });
-const overlayHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "height": "34px", "padding": "0 var(--wa-space-2xs) 0 var(--wa-space-s)", "borderBottom": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)", "flex": "0 0 auto" });
-const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-font-family-code)", "fontSize": "var(--wa-font-size-xs)", "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis" });
+const overlayHead = css({ "height": "34px" });
+const overlayTitle = css({ "flex": "1 1 auto" });
 const overlayBody = css({ "flex": "1 1 auto", "overflow": "auto", "minHeight": 0 });
 
 /** A lucide icon rendered into a Web Awesome button. */
@@ -208,15 +191,15 @@ function Icon({ node }: { "node": Parameters<typeof iconSvg>[0] }) {
  *  the app answers `project.list`; an empty answer is a real state (no bundled samples), not "still connecting". */
 function Picker({ samples, currentId, onOpen }: { "samples"?: SampleInfo[]; "currentId"?: string; "onOpen": (id: string) => void }) {
 	if (samples === undefined) {
-		return <div class={picker()}>Connecting to editor…</div>;
+		return <div class={"wa-stack wa-gap-2xs " + picker()}>Connecting to editor…</div>;
 	}
 
 	if (samples.length === 0) {
-		return <div class={picker()}>No bundled projects. Load a GitHub repo from the top bar.</div>;
+		return <div class={"wa-stack wa-gap-2xs " + picker()}>No bundled projects. Load a GitHub repo from the top bar.</div>;
 	}
 
 	return (
-		<div class={picker()}>
+		<div class={"wa-stack wa-gap-2xs " + picker()}>
 			{samples.map((sample) => (
 				<wa-card
 					key={sample.id}
@@ -232,9 +215,9 @@ function Picker({ samples, currentId, onOpen }: { "samples"?: SampleInfo[]; "cur
 						}
 					}}
 				>
-					<span class={projectName()}>{sample.name}</span>
+					<div class="wa-font-weight-semibold">{sample.name}</div>
 
-					<span class={projectDesc()}>{sample.description}</span>
+					<div class="wa-caption-2xs">{sample.description}</div>
 				</wa-card>
 			))}
 		</div>
@@ -255,10 +238,10 @@ function RailContent({ items }: { "items": RailItem[] }) {
 	return (
 		<>
 			{items.map((item) => (
-				<span key={item.label} class={railItem()}>
+				<span key={item.label} class="wa-stack wa-gap-3xs wa-align-items-center">
 					<wa-button appearance="plain" variant="neutral" size="small" pill title={item.title} aria-label={item.title} onClick={item.onClick}><Icon node={item.node} /></wa-button>
 
-					<span class={railCaption()}>{item.label}</span>
+					<span class="wa-caption-3xs wa-text-center">{item.label}</span>
 				</span>
 			))}
 		</>
@@ -930,16 +913,16 @@ function Shell() {
 	// The Commit popover's body: what it needs first, until it has it — then the repo it pushes to, and the message.
 	const commitBody = (): ComponentChildren => {
 		if (githubUser === undefined) {
-			return <span class={ghHint()}>Sign in with GitHub first.</span>;
+			return <span class="wa-caption-2xs">Sign in with GitHub first.</span>;
 		}
 
 		if (boundRepo === undefined) {
-			return <span class={ghHint()}>Load a repo first — commits push back to the repo the workspace came from.</span>;
+			return <span class="wa-caption-2xs">Load a repo first — commits push back to the repo the workspace came from.</span>;
 		}
 
 		return (
 			<>
-				<span class={ghHint()}>
+				<span class="wa-caption-2xs">
 					To
 					{" "}
 
@@ -959,7 +942,6 @@ function Shell() {
 				</span>
 
 				<wa-input
-					class={ghInput()}
 					size="small"
 					placeholder="Commit message"
 					value={commitMessage}
@@ -973,15 +955,15 @@ function Shell() {
 					}}
 				/>
 
-				{commitError !== undefined && <span class={ghError()}>{commitError}</span>}
+				{commitError !== undefined && <span class={"wa-caption-2xs " + ghError()}>{commitError}</span>}
 
 				{commitResult !== undefined && (
-					<span class={ghOk()}>
+					<span class={"wa-caption-2xs " + ghOk()}>
 						{`Committed ${commitResult}`}
 					</span>
 				)}
 
-				<div class={ghActions()}>
+				<div class="wa-cluster wa-gap-xs">
 					<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit"}</wa-button>
 				</div>
 			</>
@@ -991,25 +973,25 @@ function Shell() {
 	// The Share popover's body: the link being made, why it couldn't be — or the link, its size, and what it left out.
 	const shareBody = (): ComponentChildren => {
 		if (share === undefined) {
-			return <span class={ghHint()}>Making a link…</span>;
+			return <span class="wa-caption-2xs">Making a link…</span>;
 		}
 
 		if (share.error !== undefined) {
-			return <span class={ghError()}>{share.error}</span>;
+			return <span class={"wa-caption-2xs " + ghError()}>{share.error}</span>;
 		}
 
 		return (
 			<>
-				<span class={share.copied === true ? ghOk() : ghHint()}>
+				<span class={"wa-caption-2xs " + (share.copied === true ? ghOk() : "wa-color-text-quiet")}>
 					{share.copied === true ? "Link copied." : "Copy this link."}
 
 					{" "}
 					It opens this project here, or in the TypeScript Playground.
 				</span>
 
-				<wa-input class={ghInput()} size="small" readonly value={share.url} aria-label="Share link" />
+				<wa-input size="small" readonly value={share.url} aria-label="Share link" />
 
-				<span class={ghHint()}>
+				<span class="wa-caption-2xs">
 					{(share.url.length / 1024).toFixed(1)}
 
 					{" "}
@@ -1020,7 +1002,7 @@ function Shell() {
 					{share.skipped.length > 0 && ` · ${share.skipped.length} binary ${share.skipped.length === 1 ? "file" : "files"} left out`}
 				</span>
 
-				<div class={ghActions()}>
+				<div class="wa-cluster wa-gap-xs">
 					<wa-button
 						size="small"
 						appearance="outlined"
@@ -1040,12 +1022,11 @@ function Shell() {
 	// Loading a repo, signed in or out: signed out, only a public one.
 	const loadSection = (): ComponentChildren => (
 		<>
-			<span class={ghTitle()}>{githubUser === undefined ? "Load a public repo" : "Load a repo"}</span>
+			<span class="wa-font-weight-semibold wa-font-size-s">{githubUser === undefined ? "Load a public repo" : "Load a repo"}</span>
 
-			<span class={ghHint()}>Its files open in the workspace.</span>
+			<span class="wa-caption-2xs">Its files open in the workspace.</span>
 
 			<wa-input
-				class={ghInput()}
 				size="small"
 				placeholder="owner/repo"
 				value={repoInput}
@@ -1062,9 +1043,9 @@ function Shell() {
 				}}
 			/>
 
-			{loadError !== undefined && <span class={ghError()}>{loadError}</span>}
+			{loadError !== undefined && <span class={"wa-caption-2xs " + ghError()}>{loadError}</span>}
 
-			<div class={ghActions()}>
+			<div class="wa-cluster wa-gap-xs">
 				<wa-button variant="brand" size="small" disabled={loadingRepo || repoInput.trim() === ""} onClick={() => { void loadRepo(); }}>{loadingRepo ? "Loading…" : "Load"}</wa-button>
 			</div>
 		</>
@@ -1080,12 +1061,12 @@ function Shell() {
 	// The GitHub popover's body: who's signed in (and signing out), or signing in, which is optional; then a repo to load.
 	const githubBody = (): ComponentChildren => (
 		<>
-			<span class={ghTitle()}>GitHub</span>
+			<span class="wa-font-weight-semibold wa-font-size-s">GitHub</span>
 
 			{signedInAs !== undefined
 				? (
 					<>
-						<span class={ghConnected()}>
+						<span class="wa-font-size-xs">
 							Signed in as
 							{" "}
 
@@ -1094,34 +1075,34 @@ function Shell() {
 
 						{githubUser !== undefined
 							? (
-								<span class={ghHint()}>
+								<span class="wa-caption-2xs">
 									A private repo needs the editor's GitHub App on it.
 									{" "}
 
-									<a class={ghLink()} href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
+									<a class="wa-link wa-text-nowrap" href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
 								</span>
 							)
-							: <span class={ghHint()}>Public repos load as signed out. Private repos and commits need a sign-in with GitHub.</span>}
+							: <span class="wa-caption-2xs">Public repos load as signed out. Private repos and commits need a sign-in with GitHub.</span>}
 
-						<div class={ghActions()}>
+						<div class="wa-cluster wa-gap-xs">
 							<wa-button appearance="outlined" size="small" onClick={() => { void openAccount(); }}>Your account…</wa-button>
 						</div>
 
 						<wa-divider />
 
-						<span class={ghTitle()}>Where you're signed in</span>
+						<span class="wa-font-weight-semibold wa-font-size-s">Where you're signed in</span>
 
 						{mySessions === undefined
-							? <span class={ghHint()}>Loading…</span>
+							? <span class="wa-caption-2xs">Loading…</span>
 							: mySessions.map((session) => (
-								<div class={ghSession()} key={session.id}>
-									<span class={ghSessionText()}>
-										<span class={ghConnected()}>
+								<div class="wa-split wa-gap-xs" key={session.id}>
+									<span class="wa-stack wa-gap-0">
+										<span class="wa-font-size-xs">
 											{session.label ?? "A browser"}
 											{session.current ? " · this browser" : ""}
 										</span>
 
-										<span class={ghHint()}>
+										<span class="wa-caption-2xs">
 											last used
 											{" "}
 
@@ -1133,9 +1114,9 @@ function Shell() {
 								</div>
 							))}
 
-						{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
+						{githubError !== undefined && <span class={"wa-caption-2xs " + ghError()}>{githubError}</span>}
 
-						<div class={ghActions()}>
+						<div class="wa-cluster wa-gap-xs">
 							<wa-button appearance="outlined" size="small" disabled={githubBusy} onClick={() => { void signOutGithub(); }}>
 								<Icon node={LogOut} />
 
@@ -1149,9 +1130,9 @@ function Shell() {
 						{confirmingDelete
 							? (
 								<>
-									<span class={ghError()}>{githubUser !== undefined ? "Deleting your account ends every session at once and takes away the editor's GitHub App's access. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you. Your repositories on GitHub aren't touched." : "Deleting your account ends every session at once. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you."}</span>
+									<span class={"wa-caption-2xs " + ghError()}>{githubUser !== undefined ? "Deleting your account ends every session at once and takes away the editor's GitHub App's access. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you. Your repositories on GitHub aren't touched." : "Deleting your account ends every session at once. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you."}</span>
 
-									<div class={ghActions()}>
+									<div class="wa-cluster wa-gap-xs">
 										<wa-button variant="danger" size="small" disabled={githubBusy} onClick={() => { void deleteAccount(); }}>Delete my account</wa-button>
 										<wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(false); }}>Cancel</wa-button>
 									</div>
@@ -1161,22 +1142,22 @@ function Shell() {
 					</>
 				)
 				: signInHere && apiDown
-					? <span class={ghHint()}>Signing in is down for maintenance. Everything else works as signed out, and public repos load.</span>
+					? <span class="wa-caption-2xs">Signing in is down for maintenance. Everything else works as signed out, and public repos load.</span>
 					: signInHere
 					? (
 						<>
-							<span class={ghHint()}>Optional: everything here works without an account. Sign in with GitHub for private repos and commits (GitHub's token stays on the editor's server: this browser never holds it), or with your email.</span>
+							<span class="wa-caption-2xs">Optional: everything here works without an account. Sign in with GitHub for private repos and commits (GitHub's token stays on the editor's server: this browser never holds it), or with your email.</span>
 
-							{githubNotice !== undefined && <span class={ghOk()}>{githubNotice}</span>}
+							{githubNotice !== undefined && <span class={"wa-caption-2xs " + ghOk()}>{githubNotice}</span>}
 
-							{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
+							{githubError !== undefined && <span class={"wa-caption-2xs " + ghError()}>{githubError}</span>}
 
-							<div class={ghActions()}>
+							<div class="wa-cluster wa-gap-xs">
 								<wa-button variant="brand" size="small" disabled={githubBusy} onClick={() => { void signInGithub(); }}>{githubBusy ? "Signing in…" : "Sign in"}</wa-button>
 							</div>
 						</>
 					)
-					: <span class={ghHint()}>Signing in isn't available on this copy of the editor.</span>}
+					: <span class="wa-caption-2xs">Signing in isn't available on this copy of the editor.</span>}
 
 			<wa-divider />
 
@@ -1188,8 +1169,8 @@ function Shell() {
 
 	return (
 		<wa-page ref={pageRef} class={shellClass} mobile-breakpoint="0" disable-navigation-toggle>
-			<div slot="header" class={topBar()}>
-				<span class={brand()}>editor</span>
+			<div slot="header" class={"wa-cluster wa-flex-nowrap wa-gap-2xs " + topBar()}>
+				<span class="wa-font-weight-semibold wa-color-text-quiet">editor</span>
 
 				<wa-button appearance="plain" size="small" title="Toggle project panel" aria-label="Toggle project panel" onClick={() => { setLhsCollapsed((value) => !value); }}><Icon node={PanelLeft} /></wa-button>
 
@@ -1270,7 +1251,7 @@ function Shell() {
 					}}
 				>
 					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="Commit to GitHub">
-						<span class={ghTitle()}>Commit</span>
+						<span class="wa-font-weight-semibold wa-font-size-s">Commit</span>
 
 						{commitBody()}
 					</div>
@@ -1294,7 +1275,7 @@ function Shell() {
 					}}
 				>
 					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="Share">
-						<span class={ghTitle()}>Share</span>
+						<span class="wa-font-weight-semibold wa-font-size-s">Share</span>
 
 						{shareBody()}
 					</div>
@@ -1329,7 +1310,7 @@ function Shell() {
 				<wa-button appearance="plain" size="small" title="Toggle history panel" aria-label="Toggle history panel" onClick={() => { setRhsCollapsed((value) => !value); }}><Icon node={PanelRight} /></wa-button>
 			</div>
 
-			<div slot="navigation" class={lhsCollapsed ? railRegion() : sideCol() + " " + navPane()}>
+			<div slot="navigation" class={lhsCollapsed ? "wa-stack wa-gap-m wa-align-items-center " + railRegion() : "wa-stack wa-gap-0 " + sideCol() + " " + navPane()}>
 				{lhsCollapsed ? (
 					<RailContent items={[
 						{ "node": PanelLeft, "label": "Projects", "title": "Expand project panel", "onClick": () => { setLhsCollapsed(false); } },
@@ -1340,8 +1321,8 @@ function Shell() {
 					/>
 				) : (
 					<>
-						<div class={navHead()}>
-							<span class={navHeadLabel()}>Projects</span>
+						<div class={"app-caption wa-split wa-flex-nowrap " + navHead()}>
+							<span>Projects</span>
 
 							<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
 						</div>
@@ -1367,8 +1348,8 @@ function Shell() {
 				<div ref={dockHostRef} class={dockHostCss()} />
 
 				<div ref={overlayRef} class={overlay()}>
-					<div class={overlayHead()}>
-						<span ref={overlayTitleRef} class={overlayTitle()} />
+					<div class={"app-toolbar wa-cluster wa-flex-nowrap wa-gap-2xs " + overlayHead()}>
+						<span ref={overlayTitleRef} class={"app-code wa-font-size-xs wa-text-truncate " + overlayTitle()} />
 
 						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>
 					</div>
@@ -1382,7 +1363,7 @@ function Shell() {
 			    button, passed in above) is the panel's own. The children are KEYED: unkeyed, a sibling swapping in
 			    or out can make preact reuse the git panel's host <div> for another element, stamping that element's
 			    class and children onto it — the panel then renders inside it. */}
-			<div slot="aside" class={rhsCollapsed ? railRegion() : sideCol() + " " + asidePane()}>
+			<div slot="aside" class={rhsCollapsed ? "wa-stack wa-gap-m wa-align-items-center " + railRegion() : "wa-stack wa-gap-0 " + sideCol() + " " + asidePane()}>
 				{rhsCollapsed && (
 					<RailContent
 						key="rail"
@@ -1395,7 +1376,7 @@ function Shell() {
 					/>
 				)}
 
-				<div key="git-panel" ref={gitPanelRef} class={rhsCollapsed ? hiddenBox() : sideHost()} />
+				<div key="git-panel" ref={gitPanelRef} class={sideHost()} hidden={rhsCollapsed} />
 
 				{!rhsCollapsed && (
 					<div

@@ -181,13 +181,23 @@ const KNOWN_HTML = new Set([
 /** Does `text` contain an HTML/custom-element tag? Requires a closing `>` so `a < b` never matches, and the tag name
  *  must be a known HTML element or hyphenated (a custom element) so generics/comparisons in strings don't false-fire. */
 function containsMarkup(text) {
-	const tag = /<\/?([a-z][a-z0-9-]*)\b[^<>]*>/gu;
+	// A whole document (`<!doctype html>…`) is what a webview, an iframe's srcdoc or a served page is given, and only as
+	// a string: no component can be it.
+	if (/^\s*<!doctype html/iu.test(text)) {
+		return false;
+	}
+
+	const tag = /<(\/?)([a-z][a-z0-9-]*)\b([^<>]*)>/gu;
 	let match = tag.exec(text);
 
 	while (match !== null) {
-		const name = match[1];
+		const [, closing, name, rest] = match;
 
-		if (name.includes("-") || KNOWN_HTML.has(name)) {
+		// A tag is markup when it closes, has attributes, closes itself or is closed later; a bare `<name>` is a
+		// placeholder (`node <file>`, "<non-string>", `<button#add>`).
+		const markup = closing === "/" || /^\s+\S/u.test(rest) || rest.endsWith("/") || text.includes("</" + name, match.index);
+
+		if (markup && (name.includes("-") || KNOWN_HTML.has(name))) {
 			return true;
 		}
 
@@ -470,14 +480,19 @@ const noInlineStyles = {
 			"CallExpression": function(node) {
 				const callee = node.callee;
 
-				if (callee.type !== "MemberExpression" || callee.property.type !== "Identifier" || callee.property.name !== "setAttribute") {
+				if (callee.type !== "MemberExpression" || callee.property.type !== "Identifier") {
 					return;
 				}
 
 				const arg = node.arguments[0];
 
-				if (arg !== undefined && arg.type === "Literal" && arg.value === "style") {
+				if (callee.property.name === "setAttribute" && arg !== undefined && arg.type === "Literal" && arg.value === "style") {
 					context.report({ "node": node, "messageId": "setAttrStyle" });
+				}
+
+				// Object.assign(element.style, { … }): setting `.style`, several properties at once.
+				if (callee.object.type === "Identifier" && callee.object.name === "Object" && callee.property.name === "assign" && arg?.type === "MemberExpression" && arg.property.type === "Identifier" && arg.property.name === "style") {
+					context.report({ "node": node, "messageId": "domStyle" });
 				}
 			}
 		};

@@ -50,7 +50,6 @@ test("a compiled position maps back to where it was written, though the types ar
 });
 
 test("a .tsx module's map still lines up after React Refresh puts its setup in front", () => {
-	// eslint-disable-next-line webawesome/no-html-in-strings -- false positive: the TSX source being compiled, not markup we render
 	const source = "export function App() {\n\tconst label: string = \"hi\";\n\n\treturn <p>{label}</p>;\n}\n";
 	const code = addReactRefresh(compile(source, "/workspace/src/App.tsx"), "/src/App.tsx");
 	const generated = find(code, "const label");

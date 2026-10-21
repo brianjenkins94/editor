@@ -704,6 +704,12 @@ Done 2026-10-20. As built:
   (`theme/components/popover` added), and the diff's right-click menu a `wa-dropdown` opened at the click. Web
   Awesome puts them in the top layer, over the editor's iframe, with no z-index, and closes them on an outside click
   or Escape; the Run menu's keyboard navigation is its own now.
+- Lowered 2026-10-20 to 600 / 227 / 15: the shell's Stitches mostly utilities now (wa-stack, wa-cluster, wa-split,
+  wa-gap-*, wa-caption-*, wa-link, wa-text-truncate, the app-* recipes), only what's its own left in Stitches (a
+  height, a padding, a border, a position) — close, not exact, by choice; and no-html-in-strings knows a placeholder
+  (a bare `<name>`: `node <file>`, "<non-string>") and a whole document (`<!doctype html>…`, what a webview or an
+  iframe takes, only as a string) from markup, and is off in tests (their fixtures' HTML), so 12 of its disables went.
+  no-inline-styles sees `Object.assign(element.style, …)` too, which it missed (the margin's geometry, disabled now).
 - Lowered 2026-10-20 to 600 / 309 / 27: the capability prompt is a `wa-dialog` over the shell, not a scrim and card
   over one preview window's app. Modal, so prompts are asked one at a time; closing it (Escape, its close button)
   denies, as an unanswered prompt does; the window whose app asked is still brought into view behind it; and the pane
@@ -730,8 +736,11 @@ Each needs either `theme` as a dependency or a declared exemption:
 
 ## Open questions
 
-- Is the per-document cost of loading Web Awesome components in the workbench iframe acceptable for initial load?
-  Components are imported individually, so it is probably small. Measure it with the performance budgets.
+- ~~Is the per-document cost of loading Web Awesome components in the workbench iframe acceptable for initial load?~~
+  Yes (measured 2026-10-20). Web Awesome with what it brings (lit, floating-ui) is 222 KB of the 3.9 MB workbench.js
+  (by its source map), 54 KB of its 930 KB gzipped: about 6%. The workbench's eleven components bundled alone (265 KB,
+  67 KB gzipped) take about 16 ms to parse, run and define, cold, and 2 ms with the code cache, beside a warm boot of
+  about 545 ms. Not worth a budget of its own; the boot budget covers it.
 - ~~Should webviews (event sheet, insights monitor) get `theme/vscode` too, or stay as declared exceptions?~~ They get
   it (2026-10-19): one bridge, declared on a webview's `body` as well as `.monaco-workbench`, rather than a second
   setup for webviews. The event sheet's and the insights monitor's do (§6). A webview's page has to allow

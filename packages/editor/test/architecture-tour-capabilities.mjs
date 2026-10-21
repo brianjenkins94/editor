@@ -1017,7 +1017,6 @@ test("debugger: a program's server answers the preview, and keeps the run alive"
 			"const server = http.createServer((request, response) => {",
 			"\tif (request.url === \"/page\") {",
 			"\t\tresponse.writeHead(200, { \"content-type\": \"text/html\" });",
-			// eslint-disable-next-line webawesome/no-html-in-strings -- the served program's own page, as source text
 			"\t\tresponse.end(\"<html><head><title>p</title></head><body>hi</body></html>\");",
 			"\t\treturn;",
 			"\t}",

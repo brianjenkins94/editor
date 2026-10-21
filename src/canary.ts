@@ -424,7 +424,6 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 
 	// --- eval ---
 	const evalShim = (code: unknown) => {
-		// eslint-disable-next-line webawesome/no-html-in-strings -- false positive: "<non-string>" is a placeholder value, not markup
 		recorder.record({ "capability": "eval", "value": typeof code === "string" ? code : "<non-string>", "callee": "eval", "safe": false });
 
 		return undefined;

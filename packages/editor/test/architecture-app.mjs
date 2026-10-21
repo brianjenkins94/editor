@@ -1,4 +1,3 @@
-/* eslint-disable webawesome/no-html-in-strings -- the fixture app's own HTML files, written into the workspace for the dev server to serve; not editor chrome */
 /**
  * An app shaped like the games the editor runs (netsim, war2): its dependency is a published TARBALL (a URL in
  * package.json, no registry), and it runs across a module WORKER that imports it and a nested IFRAME that talks to
