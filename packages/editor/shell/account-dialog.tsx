@@ -6,9 +6,11 @@
 import "theme/components/dialog";
 import "theme/components/callout";
 import "theme/components/spinner";
-import "theme/exceptions/account.css";
+import { accountStyles } from "theme/styles/account";
 import { AccountPage } from "account";
 import { accountApi } from "./session";
+
+accountStyles();
 
 export function AccountDialog({ onClose }: { "onClose": () => void }) {
 	return (

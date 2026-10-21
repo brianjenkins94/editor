@@ -18,7 +18,7 @@ import "theme/components/relative-time";
 import "theme/components/dialog";
 import "theme/components/divider";
 import "theme/components/progress-bar";
-import "theme/exceptions/account.css";
+import { accountStyles } from "theme/styles/account";
 import "theme/exceptions/admin.css";
 import { AccountPage } from "account";
 import { render } from "preact";
@@ -32,6 +32,8 @@ import type { Maintenance, SwitchState } from "./maintenance";
 import { KillSwitch, MaintenanceBanner, PausedBanner, Switches } from "./maintenance";
 import { get, session, SIGNED_OUT, submit } from "./session";
 import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
+
+accountStyles();
 
 /** Your account (packages/account), through the admin API. */
 const ACCOUNT = { "get": get, "submit": submit, "loginOf": loginOf };
