@@ -17,8 +17,7 @@ import type { Rule } from "@brianjenkins94/util/silo/policy";
 import type * as vscodeApi from "vscode";
 import { catalogOf, describeRule, startingRule, verdictOf, withVariables } from "@brianjenkins94/editor-api/rules";
 import { registerCustomView, ViewContainerLocation, viewContainerRegistry } from "@brianjenkins94/monaco-vscode-api/main";
-import css from "theme/exceptions/rule-view.css?raw";
-import { styleSheet } from "theme/sheet";
+import { ruleViewStyles } from "theme/styles/rule-view";
 import { ruleEditor } from "./rule-editor";
 import "theme/components/button";
 import "theme/components/card";
@@ -126,7 +125,7 @@ export function registerRuleView(vscode: typeof vscodeApi): void {
 		// Shown while a rule's edited in it, gone again when it's done.
 		"hideByDefault": true,
 		"renderBody": (container) => {
-			document.head.append(styleSheet(css));
+			ruleViewStyles();
 			root = element("div", "rule-view");
 			container.append(root);
 			render();

@@ -768,7 +768,7 @@ const cssInJsTokens = {
 				}
 
 				for (const specifier of node.specifiers) {
-					if (specifier.type === "ImportSpecifier" && sources.some((source) => source.test(node.source.value)) && ["css", "globalCss", "unlayeredGlobalCss", "keyframes", "recipe"].includes(specifier.imported.name)) {
+					if (specifier.type === "ImportSpecifier" && sources.some((source) => source.test(node.source.value)) && ["css", "globalCss", "unlayeredGlobalCss", "keyframes", "recipe", "stylesheet"].includes(specifier.imported.name)) {
 						stitches.add(specifier.local.name);
 					}
 

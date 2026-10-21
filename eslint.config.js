@@ -19,7 +19,7 @@ const cssFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((
 const classesIn = (text) => [...text.replaceAll(/\/\*[\s\S]*?\*\//gu, "").matchAll(/\.(-?[_a-zA-Z][\w-]*)/gu)].map((match) => match[1]);
 // And the classes Stitches styles: a selector key in a `css({…})` / `globalCss({…})` object (`"&.open"`).
 const sourceFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((file) => /\.tsx?$/u.test(String(file)) && !String(file).includes("node_modules")).map((file) => readFileSync(path.join(folder, String(file)), "utf8"));
-const stitchesClasses = (text) => (/\b(?:css|globalCss|unlayeredGlobalCss)\(\{/u.test(text) ? [...text.matchAll(/"([^"\n]*?[&\s>~+,]?\.[_a-zA-Z][\w-]*[^"\n]*)":\s*\{/gu)].flatMap((match) => classesIn(match[1])) : []);
+const stitchesClasses = (text) => (/\b(?:css|globalCss|unlayeredGlobalCss|stylesheet|recipe)\(\{/u.test(text) ? [...text.matchAll(/"([^"\n]*?[&\s>~+,]?\.[_a-zA-Z][\w-]*[^"\n]*)":\s*\{/gu)].flatMap((match) => classesIn(match[1])) : []);
 const KNOWN_CLASSES = [...new Set([
 	...cssFiles(WEB_AWESOME_STYLES),
 	...cssFiles(url.fileURLToPath(new URL("packages/theme/src", import.meta.url)))

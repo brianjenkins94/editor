@@ -55,7 +55,7 @@ function stitchesDeclarations(file) {
 		// (theme/stitches from outside the theme; ../stitches from a surface's styles, theme/styles/*)
 		if (ts.isImportDeclaration(statement) && (statement.moduleSpecifier.text === "theme/stitches" || (file.startsWith("packages/theme/src/styles/") && statement.moduleSpecifier.text === "../stitches"))) {
 			for (const element of statement.importClause?.namedBindings?.elements ?? []) {
-				if (["css", "globalCss", "unlayeredGlobalCss", "keyframes"].includes((element.propertyName ?? element.name).text)) {
+				if (["css", "globalCss", "unlayeredGlobalCss", "keyframes", "stylesheet"].includes((element.propertyName ?? element.name).text)) {
 					names.add(element.name.text);
 				}
 			}

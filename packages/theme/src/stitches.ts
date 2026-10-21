@@ -88,6 +88,10 @@ export const recipe = ((...arguments_: any[]) => overridable(stitches.css(...arg
 
 export const globalCss = ((...arguments_: any[]) => stitches.globalCss(...arguments_.map((style) => inLayer("app.base", style)))) as typeof stitches.globalCss;
 
+/** A surface's styles by selector (theme/styles/<surface>: what an exception sheet was), in `app.styles` with its other
+ *  styles, where its rules adjust a recipe without outranking it by specificity. */
+export const stylesheet = ((...arguments_: any[]) => stitches.globalCss(...arguments_.map((style) => inLayer("app.styles", style)))) as typeof stitches.globalCss;
+
 /** Global styles outside every layer, over CSS that isn't layered and can't be (VS Code's). */
 export const unlayeredGlobalCss = stitches.globalCss;
 
