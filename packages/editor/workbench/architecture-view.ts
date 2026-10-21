@@ -6,7 +6,7 @@
  *
  * Plain DOM/SVG in the workbench realm (hosted by the component's editor pane): Web Awesome components and utility
  * classes, whose tokens theme/vscode maps onto the VS Code theme; only the diagram, the canvas layout and a few table
- * and log details are our own CSS (theme/exceptions/architecture-view.css).
+ * and log details are our own CSS (theme/styles/architecture-view).
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
@@ -14,9 +14,8 @@ import type WaButton from "theme/components/button";
 import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture-model";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
-import css from "theme/exceptions/architecture-view.css?raw";
+import { architectureViewStyles } from "theme/styles/architecture-view";
 import { toolbar } from "theme/recipes";
-import { styleSheet } from "theme/sheet";
 import { appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, DYNAMIC_PREFIXES, dynamicContainer, hubLinks, nodeSpec, subjectOfLabel } from "../shared/architecture-model";
 import { windowTitle } from "../shared/virtual-path";
 import "theme/components/badge";
@@ -560,7 +559,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	let hovered: string | undefined;
 
 	root.classList.add("arch-root", "wa-stack", "wa-gap-0", "wa-body-s", "wa-color-text-normal");
-	root.replaceChildren(styleSheet(css));
+	root.replaceChildren();
+	architectureViewStyles();
 
 	// ── toolbar
 	const summary = html("span", { "class": "wa-color-text-quiet" });
