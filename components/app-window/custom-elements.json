@@ -3,7 +3,7 @@
   "modules": [
     {
       "kind": "javascript-module",
-      "path": "src/app-window.js",
+      "path": "index.js",
       "declarations": [
         {
           "kind": "class",
@@ -144,7 +144,7 @@
           "name": "AppWindow",
           "declaration": {
             "name": "AppWindow",
-            "module": "src/app-window.js"
+            "module": "index.js"
           }
         },
         {
@@ -152,7 +152,7 @@
           "name": "app-window",
           "declaration": {
             "name": "AppWindow",
-            "module": "src/app-window.js"
+            "module": "index.js"
           }
         }
       ]

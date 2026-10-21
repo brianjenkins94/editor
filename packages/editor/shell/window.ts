@@ -11,6 +11,8 @@
  * The theme tokens the `--wa-*` vars resolve against must be loaded once in this document — import
  * "theme/chrome" there (the shell does).
  */
+// Web Awesome's button first, so the window's controls are its (theme/app-window doesn't register it).
+import "theme/components/button";
 import { appWindow } from "theme/app-window";
 
 export interface PaneWindow {

@@ -1,9 +1,5 @@
 /**
- * code — the theme's `code` recipe as a package of its own (PLAN.md §10); theme/recipes re-exports it, and says how
- * a recipe is overridden.
+ * @brianjenkins94/code — the theme's `code` (packages/theme/src/recipes.ts), published (PLAN.md §10): this
+ * re-exports it, and util-publish bundles it from there.
  */
-import type { Recipe } from "../../../packages/theme/src/component";
-import { recipe } from "../../../packages/theme/src/stitches";
-
-/** Code, in the code's font: an id, a release, a route, a trace. */
-export const code: Recipe = recipe({ "fontFamily": "var(--wa-font-family-code)" });
+export { code } from "../../../packages/theme/src/recipes";

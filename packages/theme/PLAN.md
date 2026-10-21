@@ -982,13 +982,17 @@ components from `components/`, as monaco-vscode-api does (a package built to `di
   `components/caption`, `components/frame`, `components/code`, each `@brianjenkins94/<name>`, released by cd.yml's
   `components/*` like any package (a draft until its version is bumped). The theme keeps the look (theme/tokens, the
   VS Code bridge, the skin), the surfaces' styles, the rules and the budget.
-- **Internal use is on the source**: theme/recipes and theme/app-window re-export them by relative path, so no
-  consumer changed. What they share (theme/stitches, theme/sheet, theme/component, theme/web-awesome) they import
-  relatively too, and util-publish bundles it into each package: each published one has its own Stitches instance,
-  the layer order shared.
+- **Internal use is on the source**, which stays in the theme (theme/recipes, theme/app-window), and each
+  `components/<name>` is the package that publishes one: its entry re-exports it by relative path, and util-publish
+  bundles it, with what it uses (theme/stitches, theme/sheet, theme/component, theme/web-awesome): each published one
+  has its own Stitches instance, the layer order shared. (The sources first moved into components/, the theme
+  re-exporting them by relative path; CI's pnpm copies the theme into its store as a `file:` dependency, where a path
+  out of it doesn't resolve, so the editor's build failed there and not here, where it's a symlink. The theme imports
+  nothing outside itself.)
 - **The function form** is theme/component: a component's `definition` (attributes, slots, events) gives
   `appWindow()` its typed options (camelCased attributes, slots as arrays, `children` for the default one, `on*`
-  handlers with the `app-`/`wa-` prefix dropped) and gives the package its custom-elements.json. shell/window.ts uses it.
+  handlers with the `app-`/`wa-` prefix dropped) and gives the package its custom-elements.json. shell/window.ts uses
+  it, and registers Web Awesome's button first (theme/app-window doesn't, so the published one needn't have it).
 - **Derived from Web Awesome**: scripts/web-awesome.mjs writes src/web-awesome.ts (Web Awesome's layer order, so
   theme/sheet no longer imports its layers.css; the resolved default of each `--wa-*` token a component reads; each
   element's native counterpart, the reverse of `prefer-components`' map) and each element's custom-elements.json (its

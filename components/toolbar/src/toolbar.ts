@@ -1,25 +1,5 @@
 /**
- * toolbar — the theme's `toolbar` recipe as a package of its own (PLAN.md §10); theme/recipes re-exports it, and says how
- * a recipe is overridden.
+ * @brianjenkins94/toolbar — the theme's `toolbar` (packages/theme/src/recipes.ts), published (PLAN.md §10): this
+ * re-exports it, and util-publish bundles it from there.
  */
-import type { Recipe } from "../../../packages/theme/src/component";
-import { recipe } from "../../../packages/theme/src/stitches";
-
-/** A bar of controls along the top of a view, ruled off from what's under it.
- *  Tokens: `--app-toolbar-padding-block`, `--app-toolbar-padding-inline`, `--app-toolbar-rule`. */
-export const toolbar: Recipe<{ "density": "compact" | "normal"; "ruled": boolean }> = recipe({
-	"flex": "none",
-	"boxSizing": "border-box",
-	"padding": "var(--app-toolbar-padding-block, var(--wa-space-xs)) var(--app-toolbar-padding-inline, var(--wa-space-s))",
-	"borderBottom": "var(--app-toolbar-rule, var(--wa-border-width-s) solid var(--wa-color-surface-border))",
-	"variants": {
-		"density": {
-			"compact": { "--app-toolbar-padding-block": "var(--wa-space-3xs)", "--app-toolbar-padding-inline": "var(--wa-space-xs)" },
-			"normal": {}
-		},
-		"ruled": {
-			"false": { "--app-toolbar-rule": "none" },
-			"true": {}
-		}
-	}
-});
+export { toolbar } from "../../../packages/theme/src/recipes";

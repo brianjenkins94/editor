@@ -26,9 +26,14 @@ const dist = path.dirname(path.dirname(path.dirname(createRequire(path.join(root
 const styles = path.join(dist, "styles");
 const read = (file) => fs.readFileSync(file, "utf8");
 
-/** The components and their sources. */
+/** The components, and the theme's sources each publishes (its entry re-exports them, by relative path). */
 const components = fs.readdirSync(path.join(root, "components")).filter((name) => fs.existsSync(path.join(root, "components", name, "src", name + ".ts")));
-const sources = Object.fromEntries(components.map((name) => [name, read(path.join(root, "components", name, "src", name + ".ts"))]));
+const sourceOf = (name) => {
+	const entry = path.join(root, "components", name, "src", name + ".ts");
+
+	return [...read(entry).matchAll(/from "(\.\.?\/[^"]+)"/gu)].map((match) => read(path.resolve(path.dirname(entry), match[1]) + ".ts")).join("\n");
+};
+const sources = Object.fromEntries(components.map((name) => [name, sourceOf(name)]));
 
 // --- Web Awesome's tokens at the root, light: its palette, its colour variants (each default), then its theme.
 const blocks = (css) => [...css.replaceAll(/\/\*[\s\S]*?\*\//gu, "").matchAll(/([^{}]*)\{([^{}]*)\}/gu)];
@@ -128,7 +133,7 @@ for (const name of components.filter((component) => definitionIn(component, sour
 		"schemaVersion": "1.0.0",
 		"modules": [{
 			"kind": "javascript-module",
-			"path": `src/${name}.js`,
+			"path": "index.js",
 			"declarations": [{
 				"kind": "class",
 				"name": className,
@@ -142,8 +147,8 @@ for (const name of components.filter((component) => definitionIn(component, sour
 				"dependencies": needs(sources[name])
 			}],
 			"exports": [
-				{ "kind": "js", "name": className, "declaration": { "name": className, "module": `src/${name}.js` } },
-				{ "kind": "custom-element-definition", "name": definition.tag, "declaration": { "name": className, "module": `src/${name}.js` } }
+				{ "kind": "js", "name": className, "declaration": { "name": className, "module": "index.js" } },
+				{ "kind": "custom-element-definition", "name": definition.tag, "declaration": { "name": className, "module": "index.js" } }
 			]
 		}]
 	}, undefined, 2) + "\n";

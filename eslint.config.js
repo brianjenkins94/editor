@@ -23,7 +23,7 @@ const stitchesClasses = (text) => (/\b(?:css|globalCss|unlayeredGlobalCss|styles
 const KNOWN_CLASSES = [...new Set([
 	...cssFiles(WEB_AWESOME_STYLES),
 	...cssFiles(url.fileURLToPath(new URL("packages/theme/src", import.meta.url)))
-].flatMap(classesIn).concat(["packages/editor", "packages/theme/src", "components"].flatMap((folder) => sourceFiles(url.fileURLToPath(new URL(folder, import.meta.url)))).flatMap(stitchesClasses)))];
+].flatMap(classesIn).concat(["packages/editor", "packages/theme/src"].flatMap((folder) => sourceFiles(url.fileURLToPath(new URL(folder, import.meta.url)))).flatMap(stitchesClasses)))];
 // The classes no stylesheet of ours declares that are still meant: VS Code's own (its codicons, styled by VS Code), and
 // hooks the tours and the code query (each named, so a new one shows in review).
 const KNOWN_ELSEWHERE = [
