@@ -21,6 +21,8 @@
       "default": "./src/sheet.js"
     },
     "./recipes.css": "./src/recipes.css",
+    "./recipes": "./src/recipes.ts",
+    "./app-window": "./src/app-window.ts",
     "./components/*": {
       "types": "./src/components/*.d.ts",
       "default": "./src/components/*.js"

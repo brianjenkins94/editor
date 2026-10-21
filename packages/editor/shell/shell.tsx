@@ -26,6 +26,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
 import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
+import { caption, toolbar } from "theme/recipes";
 import { css, globalCss } from "theme/stitches";
 import { iconSvg } from "../shared/theme";
 import { envRepo, showRepo, site } from "./address";
@@ -156,7 +157,6 @@ const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
 const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
 
 // Navigation (projects) region.
-const navHead = css({ "flex": "none", "padding": "var(--wa-space-2xs) var(--wa-space-xs)" });
 const picker = css({ "padding": "var(--wa-space-xs)" });
 const projectCard = css({
 	"cursor": "pointer",
@@ -178,7 +178,6 @@ const overlay = css({
 	"backgroundColor": "var(--wa-color-surface-default)",
 	"&.open": { "display": "flex" }
 });
-const overlayHead = css({ "height": "34px" });
 const overlayTitle = css({ "flex": "1 1 auto" });
 const overlayBody = css({ "flex": "1 1 auto", "overflow": "auto", "minHeight": 0 });
 
@@ -1321,7 +1320,7 @@ function Shell() {
 					/>
 				) : (
 					<>
-						<div class={"app-caption wa-split wa-flex-nowrap " + navHead()}>
+						<div class={caption({ "size": "2xs", "css": { "flex": "none", "padding": "var(--wa-space-2xs) var(--wa-space-xs)" } }) + " wa-split wa-flex-nowrap"}>
 							<span>Projects</span>
 
 							<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
@@ -1348,7 +1347,7 @@ function Shell() {
 				<div ref={dockHostRef} class={dockHostCss()} />
 
 				<div ref={overlayRef} class={overlay()}>
-					<div class={"app-toolbar wa-cluster wa-flex-nowrap wa-gap-2xs " + overlayHead()}>
+					<div class={toolbar({ "density": "compact", "css": { "height": "34px" } }) + " wa-cluster wa-flex-nowrap wa-gap-2xs"}>
 						<span ref={overlayTitleRef} class={"app-code wa-font-size-xs wa-text-truncate " + overlayTitle()} />
 
 						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>

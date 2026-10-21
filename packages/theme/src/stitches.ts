@@ -6,9 +6,11 @@
  *
  *     import { css, globalCss } from "theme/stitches";
  *
- * Its output is layered, the way Panda layers its own: `css()` (with its variants and compound variants) in
- * `app.styles`, `globalCss()` in `app.base`, both in the `app` layer after Web Awesome's (theme/sheet's layer order,
- * which this puts first in the document's head). So which rule wins follows the layers, not specificity or which sheet
+ * Its output is layered, the way Panda layers its own, in the `app` layer after Web Awesome's (theme/sheet's layer
+ * order, which this puts first in the document's head): `globalCss()` in `app.base`; `recipe()`, the theme's
+ * vocabulary (theme/recipes), in `app.recipes`; `css()`, a surface's own styles, in `app.styles`; and a use-site
+ * override — `toolbar({ "css": { … } })`, Stitches' one-off on any of them — in `app.overrides`, above them all, so
+ * it wins wherever it's inserted (PLAN.md §8.2). So which rule wins follows the layers, not specificity or which sheet
  * was inserted last: a Stitches class wins over Web Awesome's utilities and the recipes (`app.recipes`), and over the
  * DOM it styles that isn't ours when that DOM's sheet is in the `vendor` layer, under everything (dockview's; codehike
  * styles inline). Stitches has no layers of its own (it predates them); it emits an `"@layer name"` key as that layer's
@@ -54,9 +56,9 @@ const inLayer = (layer: string, style: object): any => ({ [`@layer ${layer}`]: s
 
 const mapValues = (object: object, map: (value: any) => unknown) => Object.fromEntries(Object.entries(object).map(([key, value]) => [key, map(value)]));
 
-/** A `css()` argument in `app.styles`: its own rules, each variant's and each compound variant's (a composed component
- *  is already layered). */
-function styles(style: any) {
+/** A `css()` argument in `layer`: its own rules, each variant's and each compound variant's (a composed component is
+ *  already layered). */
+const layered = (layer: string) => (style: any) => {
 	if (style === null || typeof style !== "object") {
 		return style;
 	}
@@ -64,14 +66,25 @@ function styles(style: any) {
 	const { variants, compoundVariants, defaultVariants, ...rules } = style;
 
 	return {
-		...inLayer("app.styles", rules),
-		...(variants === undefined ? {} : { "variants": mapValues(variants, (options) => mapValues(options, (option) => inLayer("app.styles", option))) }),
-		...(compoundVariants === undefined ? {} : { "compoundVariants": compoundVariants.map(({ css, ...when }) => ({ ...when, "css": inLayer("app.styles", css) })) }),
+		...inLayer(layer, rules),
+		...(variants === undefined ? {} : { "variants": mapValues(variants, (options) => mapValues(options, (option) => inLayer(layer, option))) }),
+		...(compoundVariants === undefined ? {} : { "compoundVariants": compoundVariants.map(({ css, ...when }) => ({ ...when, "css": inLayer(layer, css) })) }),
 		...(defaultVariants === undefined ? {} : { defaultVariants })
 	};
+};
+
+/** A component whose use-site `css` goes in `app.overrides`. Still Stitches' own component (its descriptors copied,
+ *  the internal one with them), so it composes: `css(toolbar, { … })`. */
+function overridable<Component extends (...arguments_: any[]) => any>(component: Component): Component {
+	const call = (props?: any) => component(props?.css === undefined ? props : { ...props, "css": inLayer("app.overrides", props.css) });
+
+	return Object.defineProperties(call, Object.getOwnPropertyDescriptors(component)) as unknown as Component;
 }
 
-export const css = ((...arguments_: any[]) => stitches.css(...arguments_.map(styles))) as typeof stitches.css;
+export const css = ((...arguments_: any[]) => overridable(stitches.css(...arguments_.map(layered("app.styles"))))) as typeof stitches.css;
+
+/** A recipe: the theme's own vocabulary (theme/recipes), under every surface's styles. */
+export const recipe = ((...arguments_: any[]) => overridable(stitches.css(...arguments_.map(layered("app.recipes"))))) as typeof stitches.css;
 
 export const globalCss = ((...arguments_: any[]) => stitches.globalCss(...arguments_.map((style) => inLayer("app.base", style)))) as typeof stitches.globalCss;
 

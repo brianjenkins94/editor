@@ -14,6 +14,7 @@
 import type { AuthoredGame } from "./generator";
 import type { Behavior, Composite, GameModel, GameObject, Rule } from "./recognizer";
 import css from "theme/exceptions/event-sheet.css?raw";
+import { toolbar } from "theme/recipes";
 import { styleSheet } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import { button, chip, element, heading, renderAuthoring } from "./authoring";
@@ -246,7 +247,7 @@ function connect(vscode: VsCodeWebviewApi, onRefresh: (why: "editor" | "save") =
 
 function start(): void {
 	const view = element("div", "app-frame wa-stack wa-gap-0");
-	const bar = element("div", "app-toolbar wa-cluster wa-gap-2xs");
+	const bar = element("div", toolbar() + " wa-cluster wa-gap-2xs");
 	const body = element("div", "event-sheet-body");
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let rebuilding = 0;

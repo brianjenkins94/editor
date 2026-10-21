@@ -15,6 +15,7 @@ import type { DiffRowInfo } from "./git-codehike";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { Fragment, render } from "preact";
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
+import { caption } from "theme/recipes";
 import "theme/components/checkbox";
 import "theme/components/textarea";
 import "theme/components/button";
@@ -716,7 +717,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 
 	return (
 		<div class="gp wa-stack wa-gap-0 wa-font-size-s">
-			<div class="gp-head app-caption wa-split wa-flex-nowrap wa-gap-xs">
+			<div class={"gp-head wa-split wa-flex-nowrap wa-gap-xs " + caption()}>
 				<span class="wa-cluster wa-flex-nowrap wa-gap-xs">
 					<wa-checkbox checked={allChecked} indeterminate={someChecked} title="Select all changes" aria-label="Select all changes" onChange={(event: Event) => { toggleAll((event.target as HTMLInputElement).checked); }} />
 

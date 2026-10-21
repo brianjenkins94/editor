@@ -711,14 +711,18 @@ const cssInJsTokens = {
 		"messages": TOKEN_MESSAGES,
 		"schema": [{
 			"type": "object",
-			"properties": { "sources": { "type": "array", "items": { "type": "string" } } },
+			"properties": { "sources": { "type": "array", "items": { "type": "string" } }, "recipes": { "type": "array", "items": { "type": "string" } } },
 			"additionalProperties": false
 		}]
 	},
 	"create": function(context) {
-		// The modules whose `css` / `globalCss` / `keyframes` are Stitches': the theme's one instance by default.
-		const sources = (context.options[0]?.sources ?? ["^theme/stitches$"]).map((source) => new RegExp(source, "u"));
+		// The modules whose `css` / `globalCss` / `keyframes` / `recipe` are Stitches': the theme's one instance by default
+		// (`theme/stitches` from outside, `./stitches` inside the theme); and the modules of recipes, whose calls' `css` is
+		// a use-site override (PLAN.md §8.2), held to the tokens the same way.
+		const sources = (context.options[0]?.sources ?? ["^theme/stitches$", "^\\./stitches(?:\\.ts)?$"]).map((source) => new RegExp(source, "u"));
+		const recipeSources = (context.options[0]?.recipes ?? ["^theme/recipes$", "^\\./recipes(?:\\.ts)?$"]).map((source) => new RegExp(source, "u"));
 		const stitches = new Set();
+		const recipes = new Set();
 
 		function checkValue(property, node) {
 			let text;
@@ -759,13 +763,17 @@ const cssInJsTokens = {
 
 		return {
 			"ImportDeclaration": function(node) {
-				if (typeof node.source.value !== "string" || !sources.some((source) => source.test(node.source.value))) {
+				if (typeof node.source.value !== "string" || ![...sources, ...recipeSources].some((source) => source.test(node.source.value))) {
 					return;
 				}
 
 				for (const specifier of node.specifiers) {
-					if (specifier.type === "ImportSpecifier" && ["css", "globalCss", "unlayeredGlobalCss", "keyframes"].includes(specifier.imported.name)) {
+					if (specifier.type === "ImportSpecifier" && sources.some((source) => source.test(node.source.value)) && ["css", "globalCss", "unlayeredGlobalCss", "keyframes", "recipe"].includes(specifier.imported.name)) {
 						stitches.add(specifier.local.name);
+					}
+
+					if (specifier.type === "ImportSpecifier" && recipeSources.some((source) => source.test(node.source.value))) {
+						recipes.add(specifier.local.name);
 					}
 				}
 			},
@@ -775,6 +783,15 @@ const cssInJsTokens = {
 						if (argument.type === "ObjectExpression") {
 							checkStyles(argument);
 						}
+					}
+				}
+
+				// A recipe's call: its `css`, if any, is a use-site override.
+				if (node.callee.type === "Identifier" && recipes.has(node.callee.name) && node.arguments[0]?.type === "ObjectExpression") {
+					const override = node.arguments[0].properties.find((property) => property.type === "Property" && (property.key.name ?? property.key.value) === "css");
+
+					if (override?.value.type === "ObjectExpression") {
+						checkStyles(override.value);
 					}
 				}
 			}

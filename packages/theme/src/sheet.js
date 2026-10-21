@@ -9,13 +9,14 @@
  * A sheet's rules are in the `app` layer, which has to come after Web Awesome's. Where Web Awesome's own sheets are
  * adopted (theme/vscode), they come after every `<style>` in the document, so the order is declared first in the
  * document's head, once (`layerOrder`): `vendor` (the DOM we host that isn't ours: dockview's sheet), Web Awesome's own
- * order (its layers.css), then `app`, and in it `app.base` (theme/stitches' globalCss), `app.recipes` (recipes.css),
- * `app.styles` (theme/stitches' css). A sheet's own rules are in `app` itself, so they come after those three.
+ * order (its layers.css), then `app`, and in it `app.base` (theme/stitches' globalCss), `app.recipes` (recipes.css and
+ * theme/recipes), `app.styles` (theme/stitches' css) and `app.overrides` (a use-site `css`). A sheet's own rules are in
+ * `app` itself, so they come after those four.
  */
 import layers from "@awesome.me/webawesome/dist/styles/layers.css?inline";
 
 /** The layers, lowest first: vendors', Web Awesome's in its order, then the app's. */
-const ORDER = ["@layer vendor;", layers.match(/@layer [^;{]+;/u)[0], "@layer app;", "@layer app.base, app.recipes, app.styles;"].join("\n");
+const ORDER = ["@layer vendor;", layers.match(/@layer [^;{]+;/u)[0], "@layer app;", "@layer app.base, app.recipes, app.styles, app.overrides;"].join("\n");
 
 /** Put the layer order first in `document`'s head, once. */
 export function layerOrder(document = globalThis.document) {

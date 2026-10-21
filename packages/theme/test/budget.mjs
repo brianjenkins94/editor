@@ -2,8 +2,9 @@
  * The styling budget (PLAN.md §7.6): what's left outside Web Awesome and the theme, counted, and held to budget.json.
  *
  * - exceptionDeclarations: the declarations in the exception sheets (src/exceptions/*.css), the custom CSS that's left.
- * - stitchesDeclarations: the declarations in every Stitches call on theme/stitches' instance, wherever it is, so a style
- *   moved out of a sheet into a `css({…})` still counts.
+ * - stitchesDeclarations: the declarations in every Stitches call on theme/stitches' instance outside the theme, so a
+ *   style moved out of a sheet into a `css({…})` still counts, and in every use-site override (a theme/recipes recipe
+ *   called with `css`). The theme's own recipes and components aren't counted: they're the vocabulary.
  * - webawesomeDisables: the `eslint-disable…` comments that turn a webawesome/* rule off.
  *
  * Each may only go down. Over its budget fails, and a raise means editing budget.json, which shows in the diff; under it
@@ -40,11 +41,13 @@ function cssDeclarations(text) {
 	return count;
 }
 
-/** The declarations in a file's calls on theme/stitches' css, globalCss, unlayeredGlobalCss and keyframes: every
- *  property whose value isn't an object (an object is a nested selector, an at-rule, a variant or a keyframe). */
+/** The declarations in a file's calls on theme/stitches' css, globalCss, unlayeredGlobalCss and keyframes, and in the
+ *  `css` of its recipe calls: every property whose value isn't an object (an object is a nested selector, an at-rule,
+ *  a variant or a keyframe). */
 function stitchesDeclarations(file) {
 	const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
 	const names = new Set();
+	const recipes = new Set();
 	let count = 0;
 
 	for (const statement of source.statements) {
@@ -53,6 +56,12 @@ function stitchesDeclarations(file) {
 				if (["css", "globalCss", "unlayeredGlobalCss", "keyframes"].includes((element.propertyName ?? element.name).text)) {
 					names.add(element.name.text);
 				}
+			}
+		}
+
+		if (ts.isImportDeclaration(statement) && statement.moduleSpecifier.text === "theme/recipes") {
+			for (const element of statement.importClause?.namedBindings?.elements ?? []) {
+				recipes.add(element.name.text);
 			}
 		}
 	}
@@ -79,10 +88,18 @@ function stitchesDeclarations(file) {
 			}
 		}
 
+		if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && recipes.has(node.expression.text) && node.arguments[0] !== undefined && ts.isObjectLiteralExpression(node.arguments[0])) {
+			const override = node.arguments[0].properties.find((property) => ts.isPropertyAssignment(property) && property.name.getText(source).replaceAll("\"", "") === "css");
+
+			if (override !== undefined && ts.isObjectLiteralExpression(override.initializer)) {
+				styles(override.initializer);
+			}
+		}
+
 		ts.forEachChild(node, visit);
 	};
 
-	if (names.size > 0) {
+	if (names.size > 0 || recipes.size > 0) {
 		visit(source);
 	}
 

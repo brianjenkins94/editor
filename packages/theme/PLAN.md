@@ -795,9 +795,35 @@ Override and extend, from the least to the most reach:
 
 ### 8.4 Order
 
-0. **Spike the shape** on two cases, used from Preact and from vanilla DOM: a recipe with variants, component tokens
+0. ~~**Spike the shape** on two cases, used from Preact and from vanilla DOM: a recipe with variants, component tokens
    and a use-site override (the toolbar / caption family), and a composed component (the pane window). Check that the
-   override wins by layer, tokens retune it, a docked window mirrors it, and a webview gets it.
+   override wins by layer, tokens retune it, a docked window mirrors it, and a webview gets it.~~ Done 2026-10-21:
+   - `theme/stitches` has `recipe()` (into `app.recipes`) beside `css()` (`app.styles`), and every component it makes
+     is wrapped so a use-site `css` goes into `app.overrides`, the last of the order; the wrapper keeps Stitches'
+     descriptors (its internal symbol among them), so `css(recipe, { … })` still composes.
+   - `theme/recipes`: `toolbar` (variants `density`, `ruled`; tokens `--app-toolbar-padding-block`, `-padding-inline`,
+     `-rule`) and `caption` (variant `size`; tokens `--app-caption-color`, `-size`). A token is read with Web Awesome's
+     as its fallback and set only by a variant, so an ancestor retunes it and a variant still wins on its element.
+     `.app-toolbar` / `.app-caption` are gone from recipes.css; their callers take the recipes: the shell and the git
+     panel (Preact), the architecture view (vanilla, VS Code's document), the event sheet and the insights monitor
+     (webviews). Two of the shell's `css()` became use-site overrides (`toolbar({ "density": "compact", "css": … })`).
+   - `theme/app-window`: `<app-window>`, light DOM. It adds its chrome (a title, its drag handle; collapse and close)
+     as children and never moves the ones it's given; a grid places them (`slot="header-actions"` beside the title, the
+     rest in the body), and collapsing is the body's row at 0, clipped by the frame, so it holds whatever display the
+     body's content is given. Its place and whether it's collapsed are kept under `storage-key` (the key the old window
+     used). `shell/window.ts` is a thin factory over it (the `PaneWindow` the previews and the dock share), and
+     window.css is gone.
+   - Checked in Brave: the order ends `app.overrides`, and a more specific rule in `app.styles` loses to a use-site
+     override; variants apply (compact padding, the 2xs caption); setting `--app-caption-color` on the git panel and
+     `--app-toolbar-padding-inline` on the architecture view's host retunes them; a docked window (the architecture view
+     moved into one) has the toolbar recipe, mirrored; the insights monitor's webview has the caption recipe and the
+     layer order. `<app-window>` made by hand and rendered by Preact (then re-rendered, its children replaced in place)
+     both drag, collapse (193 → 49px), expand and close, their events fired.
+   - Found: a Web Awesome component in a docked window doesn't render (Lit adopts one constructed stylesheet in every
+     document, which a second document refuses: "Sharing constructed stylesheets in multiple documents is not
+     allowed"), so the architecture view's buttons are missing there. Not the spike's; open.
+   - `css-in-js-tokens` reads the theme's own `recipe()` / `css()` calls (`./stitches`) and a use-site override's `css`
+     (a call on `theme/recipes`); the budget counts the overrides with the Stitches declarations.
 1. The shell's Stitches (227 declarations) into `theme/styles/shell*`; then the rule restricting `theme/stitches`.
 2. `recipes.css` into recipes.
 3. The exception sheets, one surface per commit, smallest first: rule-view, account, insights-monitor (webview),

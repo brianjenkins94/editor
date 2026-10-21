@@ -4,6 +4,7 @@
  * polylines, one per series, in the palette's colours (theme/exceptions/insights-monitor.css).
  */
 import css from "theme/exceptions/insights-monitor.css?raw";
+import { caption } from "theme/recipes";
 import { styleSheet } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import "theme/components/card";
@@ -55,7 +56,7 @@ function drawCard(title: string, lines: Line[], from: number, fixed?: number): H
 
 	const max = fixed ?? Math.max(1, ...lines.flatMap((line) => line.points.map((point) => point[1]))) * 1.1;
 	const card = element("wa-card", "monitor-card", { "appearance": "outlined" });
-	const head = element("div", "wa-split app-caption");
+	const head = element("div", "wa-split " + caption());
 	const chart = document.createElementNS(SVG, "svg");
 	const legend = element("div", "wa-cluster wa-gap-xs wa-font-size-s");
 

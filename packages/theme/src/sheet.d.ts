@@ -1,5 +1,5 @@
 /** Put the layer order first in `document`'s head, once: `vendor`, Web Awesome's, then `app` (`app.base`, `app.recipes`,
- *  `app.styles`, then its own rules). */
+ *  `app.styles`, `app.overrides`, then its own rules). */
 export function layerOrder(document?: Document): void;
 
 /** A `<style>` holding `css` (an exception sheet, imported `?raw`), for `document`, whose head has the layer order first:

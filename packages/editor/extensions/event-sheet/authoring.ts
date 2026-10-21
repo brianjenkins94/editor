@@ -9,6 +9,7 @@ import type WaButton from "theme/components/button";
 import type { AuthoredGame } from "./generator";
 import type { Rule } from "./rules";
 import type { EventSheetHost } from "./view";
+import { caption, toolbar as toolbarRecipe } from "theme/recipes";
 import { generateGame, libraryComponents, objectPresets, spriteDataUrls } from "./generator";
 import { builtinBehaviors } from "./rules";
 import "theme/components/button";
@@ -86,7 +87,7 @@ export function chip(text: string, onRemove?: () => void): HTMLElement {
 
 /** A section heading; `divided`, ruled off from the section above. */
 export function heading(text: string, divided = false): HTMLElement {
-	return element("div", `event-sheet-heading${divided ? " divided" : ""} app-caption`, { "textContent": text });
+	return element("div", `event-sheet-heading${divided ? " divided" : ""} ${caption()}`, { "textContent": text });
 }
 
 /** A quiet note: what's empty, or what a section is. */
@@ -261,7 +262,7 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 	container.replaceChildren();
 
 	// ── toolbar ──────────────────────────────────────────────────────────────────
-	const toolbar = element("div", "app-toolbar wa-cluster wa-gap-xs");
+	const toolbar = element("div", toolbarRecipe() + " wa-cluster wa-gap-xs");
 
 	const generate = button("Generate", () => {
 		void (async (): Promise<void> => {

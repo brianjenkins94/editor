@@ -1,7 +1,6 @@
 /**
- * A movable, collapsible window — WebAwesome chrome (`wa-card` with its header / header-actions slots and
- * `wa-button` controls), with only what WA has no primitive for hand-rolled: fixed positioning, pointer-drag
- * geometry, and the collapse toggle. Position + collapsed state persist per `storageKey` in localStorage.
+ * A movable, collapsible window: the theme's `<app-window>` (theme/app-window: its chrome, drag, collapse, and its place
+ * and state kept per `storageKey`), with a body of the given size and a row for the caller's header actions.
  *
  * Adapted from sms-reference-app/app/src/window.ts's floating gauge, but sized to HOST A PANE: the body is a
  * definite-height box the caller fills with the workbench iframe (an iframe needs a laid-out ancestor to
@@ -12,10 +11,7 @@
  * The theme tokens the `--wa-*` vars resolve against must be loaded once in this document — import
  * "theme/chrome" there (the shell does).
  */
-/* eslint-disable webawesome/no-inline-styles -- a draggable, fixed-position window primitive: left/top/width/height are per-instance geometry set imperatively (drag + persisted position), not themeable chrome */
-import "theme/components/card";
-import "theme/components/button";
-import "theme/exceptions/window.css";
+import "theme/app-window";
 
 export interface PaneWindow {
 	readonly "element": HTMLElement;
@@ -38,24 +34,6 @@ export interface PaneWindow {
 /** Makes a window — a floating one (createPaneWindow) or a panel of the shell's dock (shell-dock.ts). */
 export type PaneWindowFactory = (options: PaneWindowOptions) => PaneWindow;
 
-interface Persisted { "left"?: number; "top"?: number; "collapsed"?: boolean }
-
-function loadState(key: string): Persisted {
-	try {
-		return JSON.parse(localStorage.getItem("wa-win:" + key) ?? "{}") as Persisted;
-	} catch {
-		return {};
-	}
-}
-
-function saveState(key: string, patch: Persisted): void {
-	try {
-		localStorage.setItem("wa-win:" + key, JSON.stringify({ ...loadState(key), ...patch }));
-	} catch {
-		/* private mode / disabled */
-	}
-}
-
 export interface PaneWindowOptions {
 	"title": string;
 	"storageKey": string;
@@ -70,132 +48,48 @@ export interface PaneWindowOptions {
 }
 
 export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
-	const width = options.width ?? 960;
-	const height = options.height ?? 640;
-	const state = loadState(options.storageKey);
-
-	const win = document.createElement("div");
-
-	win.className = "pane-window";
-	win.style.width = width + "px";
-
-	const card = document.createElement("wa-card");
-
-	card.className = "pane-window-card";
-	card.setAttribute("with-header", "");
-	card.setAttribute("with-header-actions", "");
-
-	const bar = document.createElement("div");
-
-	bar.className = "pane-window-bar wa-cluster wa-gap-2xs wa-flex-nowrap";
-	bar.setAttribute("slot", "header");
-
-	const titleEl = document.createElement("span");
-
-	titleEl.className = "pane-window-title wa-text-truncate wa-font-weight-semibold";
-	titleEl.textContent = options.title;
-	titleEl.title = options.title;
-	bar.appendChild(titleEl);
-
-	const actions = document.createElement("div");
-
-	actions.className = "pane-window-actions wa-cluster wa-gap-3xs wa-flex-nowrap";
-	actions.setAttribute("slot", "header-actions");
-
-	// Caller-owned header actions (e.g. the debug toolbar), left of the built-in collapse/close controls.
-	const headerExtras = document.createElement("div");
-
-	headerExtras.className = "pane-window-extras wa-cluster wa-gap-3xs wa-flex-nowrap";
-	actions.appendChild(headerExtras);
-
-	const collapseBtn = document.createElement("wa-button");
-
-	collapseBtn.setAttribute("appearance", "plain");
-	collapseBtn.setAttribute("size", "s");
-	actions.appendChild(collapseBtn);
-
-	if (options.onClose !== undefined) {
-		const closeBtn = document.createElement("wa-button");
-
-		closeBtn.setAttribute("appearance", "plain");
-		closeBtn.setAttribute("size", "s");
-		closeBtn.title = "Close";
-		closeBtn.textContent = "✕";
-		closeBtn.addEventListener("click", options.onClose);
-		actions.appendChild(closeBtn);
-	}
-
+	const win = document.createElement("app-window");
+	const extras = document.createElement("div");
 	const body = document.createElement("div");
 
-	body.className = "pane-window-body";
-	body.style.height = height + "px";
+	win.label = options.title;
+	win.storageKey = options.storageKey;
+	win.initialLeft = options.left;
+	win.initialTop = options.top;
 
-	card.append(bar, actions, body);
-	win.appendChild(card);
-
-	const clampLeft = (left: number): number => Math.max(4, Math.min(left, window.innerWidth - win.offsetWidth - 4));
-	const clampTop = (top: number): number => Math.max(4, Math.min(top, window.innerHeight - 40));
-
-	win.style.left = clampLeft(state.left ?? options.left ?? Math.max(8, (window.innerWidth - width) / 2)) + "px";
-	win.style.top = clampTop(state.top ?? options.top ?? Math.max(8, (window.innerHeight - height) / 2 - 24)) + "px";
-
-	function setCollapsed(collapsed: boolean): void {
-		win.toggleAttribute("data-collapsed", collapsed);
-		// The card has no padding of its own (window.css), so without its body it's just the title bar.
-		body.hidden = collapsed;
-		collapseBtn.textContent = collapsed ? "+" : "–";
-		collapseBtn.title = collapsed ? "Expand" : "Collapse";
-		saveState(options.storageKey, { "collapsed": collapsed });
+	if (options.onClose !== undefined) {
+		win.toggleAttribute("closable", true);
+		win.addEventListener("app-close", options.onClose);
 	}
 
-	collapseBtn.addEventListener("click", () => {
-		setCollapsed(!win.hasAttribute("data-collapsed"));
-	});
-	// The editor is the primary content, so default to open (unlike the sms gauge, which hid itself).
-	setCollapsed(state.collapsed ?? false);
+	// Caller-owned header actions (e.g. the debug toolbar), left of the window's own controls.
+	extras.slot = "header-actions";
+	extras.className = "wa-cluster wa-gap-3xs wa-flex-nowrap";
+	/* eslint-disable webawesome/no-inline-styles -- a window's size: per-instance geometry, set by its caller */
+	const setBodyHeight = (next: number): void => {
+		body.style.height = next + "px";
+	};
 
-	// Drag by the title bar. Pointer capture keeps the gesture even when the cursor outruns it.
-	bar.addEventListener("pointerdown", function(event: PointerEvent) {
-		if (event.button !== 0) {
-			return;
-		}
-
-		const rect = win.getBoundingClientRect();
-		const offX = event.clientX - rect.left;
-		const offY = event.clientY - rect.top;
-
-		bar.setPointerCapture(event.pointerId);
-		bar.classList.add("dragging");
-
-		const move = (moveEvent: PointerEvent): void => {
-			win.style.left = clampLeft(moveEvent.clientX - offX) + "px";
-			win.style.top = clampTop(moveEvent.clientY - offY) + "px";
-		};
-
-		const up = (): void => {
-			bar.classList.remove("dragging");
-			bar.removeEventListener("pointermove", move);
-			bar.removeEventListener("pointerup", up);
-			saveState(options.storageKey, { "left": parseInt(win.style.left, 10), "top": parseInt(win.style.top, 10) });
-		};
-
-		bar.addEventListener("pointermove", move);
-		bar.addEventListener("pointerup", up);
-	});
-
-	function show(): void {
-		if (!win.isConnected) {
-			document.body.appendChild(win);
-		}
-	}
+	win.style.width = (options.width ?? 960) + "px";
+	/* eslint-enable webawesome/no-inline-styles */
+	setBodyHeight(options.height ?? 640);
+	win.append(extras, body);
 
 	return {
 		"element": win,
 		"body": body,
-		"headerActions": headerExtras,
-		"setCollapsed": setCollapsed,
-		"setBodyHeight": (next: number) => { body.style.height = next + "px"; },
-		"show": show,
-		"close": () => { win.remove(); }
+		"headerActions": extras,
+		"setCollapsed": (collapsed: boolean) => {
+			win.collapsed = collapsed;
+		},
+		"setBodyHeight": setBodyHeight,
+		"show": () => {
+			if (!win.isConnected) {
+				document.body.appendChild(win);
+			}
+		},
+		"close": () => {
+			win.remove();
+		}
 	};
 }

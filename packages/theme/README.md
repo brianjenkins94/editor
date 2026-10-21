@@ -61,12 +61,20 @@ to allow another, add `src/components/<name>.js` and `.d.ts`, each a one-line re
 
 ## Recipes and sheets: `recipes.css`, `theme/sheet`
 
-The shapes the app kept rebuilding, one class each, in every theme entry: `app-frame` (a view fixed to the viewport),
-`app-toolbar` (a bar ruled off from what's under it), `app-code` (the code's font) and `app-caption` (a quiet uppercase
-label). Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, the theme's, or Stitches'. Compose them with Web
+The two shapes still a class in every theme entry: `app-frame` (a view fixed to the viewport) and `app-code` (the code's
+font); the rest are recipes (below). Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, the theme's, or Stitches'. Compose them with Web
 Awesome's utilities. A surface's exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from
 `theme/sheet`, which puts the shared layer order first in the document once: `vendor` (dockview's sheet), Web Awesome's,
-then `app` (`app.base`, `app.recipes`, `app.styles`, then the sheets' own rules).
+then `app` (`app.base`, `app.recipes`, `app.styles`, `app.overrides`, then the sheets' own rules).
+
+## Recipes and composed components: `theme/recipes`, `theme/app-window`
+
+`theme/recipes` is the app's shapes as Stitches recipes, a class for any element, from any framework:
+`toolbar({ "density": "compact" })`, `caption({ "size": "2xs" })`. Overridable, least reach first: their variants;
+their component tokens (`--app-toolbar-padding-inline`, `--app-caption-color`, …) set on an ancestor; a use-site
+override, `toolbar({ "css": { … } })`, which wins by layer; or a new recipe composed from one, made here.
+`theme/app-window` is `<app-window>`, a movable, collapsible window in light DOM: give it a `label`, `closable`,
+`storage-key`, a `slot="header-actions"` child and a body (PLAN.md §8).
 
 ## CSS-in-JS: `theme/stitches`
 
