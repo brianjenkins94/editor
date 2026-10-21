@@ -54,8 +54,13 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 		return box === null ? undefined : { "what": box.querySelector(".pane-markdown").textContent.trim(), "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
 	});
+	// (The tour's first run pays for the run's cold start: in CI 40–50s, and past 60s on a slow runner, where it had failed
+	// three times in nine; the runs after it are warm.)
+	let cold = true;
 	const start = async () => {
-		const stopped = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
+		const stopped = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, cold ? 180_000 : 60_000);
+
+		cold = false;
 
 		assert.equal(stopped.reason, "capability", "stopped by the policy, not a breakpoint");
 		assert.equal(stopped.line, 5);
