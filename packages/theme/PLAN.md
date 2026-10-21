@@ -907,17 +907,34 @@ components from `components/`, as monaco-vscode-api does (a package built to `di
   For UI that's edited all the time, internal use should stay on the source (Vite builds the theme's TypeScript
   already) and the build should be for others: one package, `exports` with a source condition for us and `dist` by
   default.
-- **How others would use them.** The two forms already framework-free: recipes (a class from a call) and light-DOM
-  custom elements (`<app-window>`), which register themselves. Others also need tokens: VS Code's mapping if they're
+- **How others would use them.** Framework-free forms: recipes (a class from a call), and components as functions or
+  as the light-DOM custom elements they make (`<app-window>`), which register themselves. Others also need tokens: VS Code's mapping if they're
   in VS Code (a webview, an extension), a fixed theme if not (the question §9.2.5 asks of admin).
-- **Compile them into functions that take arguments?** They are functions with arguments already (a recipe is
-  `toolbar({ "density": "compact" })`), run by Stitches at the call. Compiling them, a static stylesheet plus a small
-  function that only joins class names (as Panda's recipes are), drops Stitches from what others load, but also drops
-  the use-site `css` override, which needs the runtime. It's the compile step declined for Bamboo, at publish time
-  rather than in development. Leaning: not unless someone outside needs it.
-- **Peer dependencies.** Web Awesome: a peer. Two copies on one page register the same custom elements twice, so the
-  page has to own the one version. Stitches: not a peer. It's an implementation detail (the user's framing in §7.5) and
-  bundled with the package, pinned at its last release, with vendoring it as the fallback.
+- **A component as a function: slots and wiring.** The canonical form a function that takes the component's options,
+  its slots as arrays (of nodes, strings or other components' results) and its handlers, and returns the element:
+  `appWindow({ "label": "Preview", "actions": [toolbar], "body": [frame], "onClose": close })`. Slots are named arrays
+  the function places (into a light-DOM custom element's slots, or a Web Awesome element's); interactivity is `on*`
+  handlers for the component's own events, normalized (one `onSelect` whichever element fired it), plus the returned
+  element's properties for imperative control. Preact and React use the same element in JSX (children with `slot=`),
+  or a thin wrapper over the function. Recipes stay as they are (a function returning a class).
+- **Web Awesome an optional peer, by deriving what it provides.** Web Awesome's manifest
+  (`dist/custom-elements.json`, 73 components) says for each one its slots, attributes, events, parts, states and the
+  components it needs (`wa-button` needs `wa-icon` and `wa-spinner`); its default theme defines its 237 tokens. A
+  theme build step reads them with our components and writes our own manifest: for each component, the Web Awesome
+  elements it needs (transitively), the slots, events and attributes it exposes, and the tokens it reads. From that:
+  - types for a component's slots and handlers, and its docs;
+  - tokens that degrade: every `var(--wa-…)` a recipe reads gets Web Awesome's default as its fallback, inlined
+    (`var(--wa-space-xs, 0.75rem)`), so a page without Web Awesome's theme still lays out;
+  - a native fallback for each Web Awesome element a component needs, used when it isn't registered
+    (`customElements.get(tag) === undefined`): `<button>`, `<input>`, `<dialog>`, a `<details>` or the popover API for
+    a dropdown, a checkbox. That's the reverse of `prefer-components`' native-to-Web-Awesome map, which already
+    exists. Styled by the same tokens; the component's events stay the same, so handlers don't care which rendered.
+  - then Web Awesome is `peerDependenciesMeta: { optional: true }`: with it, the full components; without it, the
+    native fallbacks, plainer but working (a dropdown without its keyboard navigation, say).
+  Cost: two renderings for each component published, so only for those, and checked both ways (a page with Web
+  Awesome and one without).
+- **Stitches** is not a peer: an implementation detail (the user's framing in §7.5), bundled and pinned at its last
+  release, with vendoring it as the fallback.
 - **What moves.** Whether `components/` gets the recipes and composed components alone, with `theme` keeping the
   tokens, the VS Code mapping and the rules, or the theme package as a whole. Leaning: components alone, depending on
   the theme for tokens.
