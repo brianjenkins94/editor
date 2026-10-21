@@ -568,6 +568,7 @@ flowchart LR
 | Shell | git | `git.changed` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
 | Shell | session | `session.event` |
+| Shell | theme | `theme.colors` |
 | Workbench | annotations | `annotations.classify()`, `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
 | Workbench | architecture | `architecture.violations()` |
 | Workbench | debug | `debug.declined.*` |
