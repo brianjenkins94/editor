@@ -19,7 +19,7 @@ import "theme/components/dialog";
 import "theme/components/divider";
 import "theme/components/progress-bar";
 import { accountStyles } from "theme/styles/account";
-import "theme/exceptions/admin.css";
+import { adminStyles } from "theme/styles/admin";
 import { AccountPage } from "account";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -32,6 +32,8 @@ import type { Maintenance, SwitchState } from "./maintenance";
 import { KillSwitch, MaintenanceBanner, PausedBanner, Switches } from "./maintenance";
 import { get, session, SIGNED_OUT, submit } from "./session";
 import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
+
+adminStyles();
 
 accountStyles();
 
