@@ -836,6 +836,49 @@ Risks: everything rides on Stitches, which is finished, not maintained (1.2.8, M
 dependencies, so vendoring it into the theme is the fallback if it ever breaks. Everything styles after its script
 runs, which is already so for everything but the sign-in pages and the first paint.
 
+## 9. Web Awesome as VS Code
+
+Decided 2026-10-21 (the user's direction): the end state is Web Awesome themed as VS Code. Whatever the app draws with
+Web Awesome looks like VS Code's own UI in the active VS Code theme, wherever it is: the shell around the editor, the
+workbench's views, the webviews, docked windows. §8 is how (the theme's components and recipes are where the look
+lives); this is what they look like.
+
+### 9.1 What's there
+
+`theme/vscode` maps 26 of Web Awesome's tokens onto `--vscode-*` in VS Code's document and in webviews: type (VS
+Code's UI font, a 13px scale), density (space ×0.75, radii ×0.5), surfaces and text, the brand fill (VS Code's button
+blue), focus, and form controls (input background, border, value, placeholder). It follows a theme switch live, and
+picks `wa-dark` / `wa-light` from VS Code's theme type.
+
+### 9.2 What's missing
+
+1. **The shell doesn't follow VS Code.** It's `theme/chrome`: Web Awesome's default theme retoned for the brand,
+   following the system's light/dark mode, not VS Code's theme. VS Code's `--vscode-*` variables exist only in the
+   workbench's document. The shell would mirror them: the workbench publishes the active theme's variables (on start
+   and on every theme change) and the shell sets them on its root, so `theme/vscode`'s mapping applies there too, and
+   to the dock, the popovers and the dialogs.
+2. **Shapes, not only colours.** Tokens give VS Code's colours and density, but Web Awesome's controls still look like
+   Web Awesome: a button's height, weight and radius; a dropdown that should read as VS Code's context menu (tight
+   rows, the list's active-selection colours, separators); a select, checkbox, badge, tag, dialog, tooltip and progress
+   bar as VS Code draws them. Each becomes a theme component (§8.2): the Web Awesome element plus the theme's Stitches
+   for its parts (`wa-button::part(base)`), on `--vscode-*` through the tokens, in one place per component.
+3. **The rest of VS Code's palette**: hover and selection (`list.*`), menus (`menu.*`), badges, tooltips
+   (`editorHoverWidget.*`), dialogs (`editorWidget.*`), errors and warnings (`errorForeground`, `editorWarning.*`),
+   scrollbars, and high-contrast themes' borders (`contrastBorder`, `contrastActiveBorder`).
+4. **Docked windows.** Web Awesome components don't render in a docked editor window (Lit adopts one constructed
+   stylesheet per component class, and a second document refuses it), so a view moved out of the editor area loses
+   its controls. With Web Awesome everywhere this has to be fixed first.
+5. **Documents without VS Code**: admin and the account pages. Either a fixed VS Code theme (Dark Modern / Light
+   Modern's colours, following the system's mode) or Web Awesome's own look; to decide.
+
+### 9.3 Order
+
+1. Docked windows (9.2.4).
+2. The shell follows the active VS Code theme (9.2.1), so one mapping applies everywhere.
+3. The components, one at a time, each checked beside VS Code's own (9.2.2, 9.2.3): button, input and textarea,
+   dropdown (as the context menu), select, checkbox, badge and tag, dialog and popover, callout, progress bar.
+4. Admin and the account pages (9.2.5).
+
 ## Open questions
 
 - ~~Is the per-document cost of loading Web Awesome components in the workbench iframe acceptable for initial load?~~
