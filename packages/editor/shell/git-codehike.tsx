@@ -30,6 +30,8 @@ import type { Root } from "react-dom/client";
 import { highlight, InnerLine, Pre } from "codehike/code";
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import "theme/components/dropdown";
+import "theme/components/dropdown-item";
 
 /** One React root per host element, reused across diff switches (root.render updates in place). */
 const roots = new WeakMap<HTMLElement, Root>();
@@ -505,6 +507,7 @@ function Diff(props: {
 	const [changedLines, setChangedLines] = useState<ReadonlySet<number>>(() => new Set());
 	const [menu, setMenu] = useState<{ "x": number; "y": number; "rows": number[] } | null>(null);
 	const [highlight, setHighlight] = useState<HighlightRange>(currentHighlight);
+	const menuRef = useRef<HTMLElement | null>(null);
 
 	// Subscribe to the external highlight store (driven by chunk-row hover in the changes pane).
 	useEffect(() => subscribeHighlight(setHighlight), []);
@@ -669,24 +672,37 @@ function Diff(props: {
 		"onClick": () => { expand(gap.id); }
 	}, "⋯ " + gap.count + " unchanged lines")), createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, fadedRows, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }), createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, fadedRows, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }));
 
-	// Right-click discard menu (a hunk at a time).
-	const menuEl = menu === null ? null : createElement("div", {
-		"className": "sxs-menu-backdrop",
-		"onClick": () => { setMenu(null); },
-		"onContextMenu": (event: { "preventDefault": () => void }) => {
-			event.preventDefault();
-			setMenu(null);
+	// Right-click discard menu (a hunk at a time): a wa-dropdown opened where the click was, on a fixed point as its
+	// trigger (keyed by it, so a second right-click moves it). Web Awesome closes it on an outside click or Escape. React
+	// 18 passes a custom element's props as attributes and its events not at all, so they're listened for here.
+	useEffect(() => {
+		const dropdown = menuRef.current;
+
+		if (dropdown === null || menu === null) {
+			return undefined;
 		}
-	}, createElement("wa-button", {
-		"class": "sxs-menu", // React 18 sets `className` on a custom element as a literal `classname` attribute
-		"variant": "danger",
-		"size": "small",
-		"style": { "left": menu.x, "top": menu.y },
-		"onClick": () => {
+
+		const select = (): void => {
 			props.onDiscardRows?.(menu.rows);
-			setMenu(null);
-		}
-	}, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")"));
+		};
+		const hide = (event: Event): void => {
+			if (event.target === dropdown) {
+				setMenu(null);
+			}
+		};
+
+		dropdown.addEventListener("wa-select", select);
+		dropdown.addEventListener("wa-after-hide", hide);
+
+		return () => {
+			dropdown.removeEventListener("wa-select", select);
+			dropdown.removeEventListener("wa-after-hide", hide);
+		};
+	}, [menu]);
+
+	const menuEl = menu === null ? null : createElement("wa-dropdown", { "key": menu.x + "," + menu.y, "ref": menuRef, "open": true, "size": "small", "placement": "bottom-start" },
+		createElement("span", { "slot": "trigger", "className": "sxs-menu", "style": { "left": menu.x, "top": menu.y } }),
+		createElement("wa-dropdown-item", { "variant": "danger" }, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")"));
 
 	return createElement("div", { "className": "sxs-wrap wa-stack wa-gap-0" }, banner(verdict), grid, menuEl);
 }

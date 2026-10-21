@@ -29,6 +29,9 @@ declare module "preact" {
 			"wa-callout": WaAttributes;
 			"wa-spinner": WaAttributes;
 			"wa-dialog": WaAttributes;
+			"wa-dropdown": WaAttributes;
+			"wa-dropdown-item": WaAttributes;
+			"wa-popover": WaAttributes;
 			"wa-relative-time": WaAttributes;
 		}
 	}

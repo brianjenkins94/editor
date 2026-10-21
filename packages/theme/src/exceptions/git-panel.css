@@ -94,7 +94,7 @@
 		background: var(--wa-color-neutral-fill-quiet); color: var(--wa-color-text-quiet); }
 	.sxs-gap:hover { background: var(--wa-color-neutral-fill-normal); color: var(--wa-color-text-normal); }
 	/* The right-click discard menu: its one action (a wa-button) at the pointer, over a backdrop that dismisses it. */
-	.sxs-menu-backdrop { position: fixed; inset: 0; z-index: 50; }
+	/* The right-click menu's trigger: the point that was clicked (its left and top set where it opens). */
 	.sxs-menu { position: fixed; }
 
 	/* Plain-diff fallback, rendered into the overlay body when the codehike island can't load. */

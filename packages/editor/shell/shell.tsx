@@ -36,10 +36,13 @@ import type { Session } from "./session";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
 import "theme/components/page";
+import "theme/components/popover";
 import "theme/components/button";
 import "theme/components/callout";
 import "theme/components/card";
 import "theme/components/divider";
+import "theme/components/dropdown";
+import "theme/components/dropdown-item";
 import "theme/components/input";
 import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
@@ -82,67 +85,10 @@ const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa
 const brand = css({ "fontWeight": "var(--wa-font-weight-semibold)", "marginInlineEnd": "var(--wa-space-s)", "color": "var(--wa-color-text-quiet)" });
 const spacer = css({ "flex": "1 1 auto" });
 
-// Run picker: the top-bar Run button opens a small popover listing what there is to run (VS Code's tasks). A fixed,
-// transparent backdrop closes it on an outside click; the menu sits above it.
-const runWrap = css({ "position": "relative", "display": "inline-flex" });
-// High z-indexes so the popover clears the editor iframe (which sits in a separate app-shell region).
-const runBackdrop = css({ "position": "fixed", "inset": 0, "zIndex": 2147482000 });
-const runMenu = css({
-	"position": "absolute",
-	"top": "calc(100% + var(--wa-space-2xs))",
-	"insetInlineStart": 0,
-	"zIndex": 2147482001,
-	"minWidth": "240px",
-	"maxHeight": "60vh",
-	"overflowY": "auto",
-	"backgroundColor": "var(--wa-color-surface-raised)",
-	"border": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)",
-	"borderRadius": "var(--wa-border-radius-m)",
-	"boxShadow": "var(--wa-shadow-l)",
-	"padding": "var(--wa-space-2xs)"
-});
-const runItem = css({
-	"display": "flex",
-	"alignItems": "baseline",
-	"gap": "var(--wa-space-s)",
-	// border-box: at content-box, 100% + padding overflows the menu, whose overflowY:auto then clips the row's end.
-	"boxSizing": "border-box",
-	"width": "100%",
-	"padding": "var(--wa-space-2xs) var(--wa-space-xs)",
-	"borderRadius": "var(--wa-border-radius-s)",
-	"cursor": "pointer",
-	"textAlign": "start",
-	"background": "transparent",
-	"border": 0,
-	"color": "inherit",
-	"font": "inherit",
-	"&:hover": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
-	"&:focus-visible": { "outline": "var(--wa-focus-ring)", "outlineOffset": "calc(-1 * var(--wa-focus-ring-width))" }
-});
-const runItemName = css({ "fontWeight": "var(--wa-font-weight-semibold)" });
-const runItemMeta = css({ "marginInlineStart": "auto", "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)" });
-const runGroup = css({ "padding": "var(--wa-space-2xs) var(--wa-space-xs) 0", "fontSize": "var(--wa-font-size-2xs)", "fontWeight": "var(--wa-font-weight-semibold)", "color": "var(--wa-color-text-quiet)", "textTransform": "uppercase", "letterSpacing": "0.04em" });
-const runItemLive = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-success-on-quiet)" });
-const runEmpty = css({ "padding": "var(--wa-space-xs)", "fontSize": "var(--wa-font-size-xs)", "color": "var(--wa-color-text-quiet)" });
-
-// GitHub connect popover — same anchored-popover pattern as the run picker, but right-aligned (the button sits on the
-// right of the header) and wider to hold the token field. The PAT is entered here, in the SHELL, and stays here.
-const githubMenu = css({
-	"position": "absolute",
-	"top": "calc(100% + var(--wa-space-2xs))",
-	"insetInlineEnd": 0,
-	"zIndex": 2147482001,
-	"width": "300px",
-	"maxWidth": "80vw",
-	"backgroundColor": "var(--wa-color-surface-raised)",
-	"border": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)",
-	"borderRadius": "var(--wa-border-radius-m)",
-	"boxShadow": "var(--wa-shadow-l)",
-	"padding": "var(--wa-space-s)",
-	"display": "flex",
-	"flexDirection": "column",
-	"gap": "var(--wa-space-xs)"
-});
+// The top bar's popovers (Run's menu is a wa-dropdown; Commit, Share and GitHub are wa-popovers anchored to their
+// buttons): Web Awesome positions them in the top layer, over the editor's iframe, and closes them on an outside click
+// or Escape. A popover's content is a column this wide, to hold a token or a link.
+const popoverBody = css({ "width": "300px", "maxWidth": "80vw" });
 const ghTitle = css({ "fontWeight": "var(--wa-font-weight-semibold)", "fontSize": "var(--wa-font-size-s)" });
 const ghHint = css({ "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "lineHeight": 1.45 });
 const ghLink = css({ "color": "var(--wa-color-brand-fill-loud)", "textDecoration": "none", "whiteSpace": "nowrap", "&:hover": { "textDecoration": "underline" } });
@@ -338,7 +284,6 @@ function Shell() {
 	const [currentId, setCurrentId] = useState<string | undefined>(undefined);
 	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
-	const [runOpen, setRunOpen] = useState(false);
 	const [targets, setTargets] = useState<LaunchTarget[]>([]);
 	const [runs, setRuns] = useState<RunInfo[]>([]);
 	// Signing in (session.ts), optional: `signedInAs` says who (GitHub's login, or the account's email; undefined = signed
@@ -581,31 +526,25 @@ function Shell() {
 		}
 	};
 
-	// The run picker: toggle the popover; on open, ask what there is to run — VS Code's tasks, through the pod
-	// (`tasks.list`: the workspace's package.json scripts and its own tasks). Picking one runs it as a task (`tasks.run`).
-	const toggleRun = (): void => {
-		const willOpen = !runOpen;
+	// The run picker: as its menu opens, ask what there is to run — VS Code's tasks, through the pod (`tasks.list`: the
+	// workspace's package.json scripts and its own tasks). Picking one runs it as a task (`tasks.run`).
+	const loadRunTargets = (): void => {
+		void (async () => {
+			try {
+				const result = await rpcRef.current?.request("tasks.list", undefined, { "timeoutMs": 4000 });
 
-		setRunOpen(willOpen);
+				setTargets(Array.isArray(result) ? result as LaunchTarget[] : []);
+			} catch {
+				setTargets([]);
+			}
+		})();
 
-		if (willOpen) {
-			void (async () => {
-				try {
-					const result = await rpcRef.current?.request("tasks.list", undefined, { "timeoutMs": 4000 });
-
-					setTargets(Array.isArray(result) ? result as LaunchTarget[] : []);
-				} catch {
-					setTargets([]);
-				}
-			})();
-
-			// What's already running, so a running service is offered as itself rather than as a second copy.
-			void rpcRef.current?.request("runs.list", undefined, { "timeoutMs": 4000 }).then((list) => {
-				setRuns(Array.isArray(list) ? list as RunInfo[] : []);
-			}, () => {
-				setRuns([]);
-			});
-		}
+		// What's already running, so a running service is offered as itself rather than as a second copy.
+		void rpcRef.current?.request("runs.list", undefined, { "timeoutMs": 4000 }).then((list) => {
+			setRuns(Array.isArray(list) ? list as RunInfo[] : []);
+		}, () => {
+			setRuns([]);
+		});
 	};
 
 	// A target's run, if it's running now (the registry titles a run as it was typed: `npm run dev`, in its directory).
@@ -621,8 +560,6 @@ function Shell() {
 		} else {
 			void rpcRef.current?.request("tasks.run", { "id": target.id }, { "timeoutMs": 10000 }).catch(() => undefined);
 		}
-
-		setRunOpen(false);
 	};
 
 	// Run (RUNNING.md): the file in the editor, as every way in runs it — stopping at breakpoints, its process.argv from
@@ -630,7 +567,6 @@ function Shell() {
 	// workbench (the pod shows it).
 	const runThisFile = (): void => {
 		void rpcRef.current?.request("debug.start", {}, { "timeoutMs": 24 * 60 * 60_000 }).catch(() => undefined);
-		setRunOpen(false);
 	};
 
 	// On load: finish a sign-in this page is the end of, and if signed in, show who as (GitHub's login, fetched live through
@@ -1259,148 +1195,133 @@ function Shell() {
 
 				<wa-button appearance="plain" size="small" title="Open project" aria-label="Open project"><Icon node={FolderOpen} /></wa-button>
 
-				<span class={runWrap()}>
-					<wa-button appearance="plain" size="small" title="Run" aria-label="Run" aria-expanded={runOpen} onClick={toggleRun}><Icon node={Play} /></wa-button>
+				<wa-dropdown
+					size="small"
+					placement="bottom-start"
+					onwa-show={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							loadRunTargets();
+						}
+					}}
+					onwa-select={(event: CustomEvent<{ "item": HTMLElement & { "value": string } }>) => {
+						const { value } = event.detail.item;
+						const target = targets.find((each) => each.id === value);
 
-					{runOpen && (
-						<>
-							<div class={runBackdrop()} onClick={() => { setRunOpen(false); }} />
+						if (target === undefined) {
+							runThisFile();
+						} else {
+							runTarget(target);
+						}
+					}}
+				>
+					<wa-button slot="trigger" appearance="plain" size="small" title="Run" aria-label="Run"><Icon node={Play} /></wa-button>
 
-							<div class={runMenu()} role="menu">
-								<div
-									class={runItem()}
-									role="menuitem"
-									tabIndex={0}
-									title="Run the file in the editor"
-									onClick={runThisFile}
-									onKeyDown={(event: KeyboardEvent) => {
-										if (event.key === "Enter" || event.key === " ") {
-											event.preventDefault();
-											runThisFile();
-										}
-									}}
-								>
-									<span class={runItemName()}>The file in the editor</span>
-								</div>
+					<wa-dropdown-item value="" title="Run the file in the editor">The file in the editor</wa-dropdown-item>
 
-								{targets.length === 0 ? (
-									<div class={runEmpty()}>No package.json scripts or tasks</div>
-								) : (["service", "task"] as const).map((lifecycle) => {
-									const group = targets.filter((target) => target.lifecycle === lifecycle);
+					{targets.length === 0 ? (
+						<wa-dropdown-item disabled>No package.json scripts or tasks</wa-dropdown-item>
+					) : (["service", "task"] as const).map((lifecycle) => {
+						const group = targets.filter((target) => target.lifecycle === lifecycle);
 
-									return group.length === 0 ? null : (
-										<div key={lifecycle} role="group" aria-label={lifecycle === "service" ? "Services" : "Tasks"}>
-											<div class={runGroup()}>{lifecycle === "service" ? "Services" : "Tasks"}</div>
+						return group.length === 0 ? null : [
+							<h3 key={lifecycle}>{lifecycle === "service" ? "Services" : "Tasks"}</h3>,
+							...group.map((target) => {
+								const running = runOf(target);
+								const state = running === undefined ? "" : running.port === undefined ? "running · " : `running · :${running.port} · `;
 
-											{group.map((target) => {
-												const running = runOf(target);
+								return (
+									<wa-dropdown-item key={target.id} value={target.id} title={`${target.command} — in ${target.cwd}`}>
+										{target.name}
 
-												return (
-													<div
-														key={target.id}
-														class={runItem()}
-														role="menuitem"
-														tabIndex={0}
-														title={`${target.command} — in ${target.cwd}`}
-														onClick={() => { runTarget(target); }}
-														onKeyDown={(event: KeyboardEvent) => {
-															if (event.key === "Enter" || event.key === " ") {
-																event.preventDefault();
-																runTarget(target);
-															}
-														}}
-													>
-														<span class={runItemName()}>{target.name}</span>
+										<span slot="details">{state + targetKind(target)}</span>
+									</wa-dropdown-item>
+								);
+							})
+						];
+					})}
+				</wa-dropdown>
 
-														{running !== undefined && <span class={runItemLive()}>{running.port === undefined ? "running" : `running · :${running.port}`}</span>}
+				<wa-button
+					id="shell-commit"
+					appearance="plain"
+					size="small"
+					title={boundRepo !== undefined ? "Commit to " + boundRepo.owner + "/" + boundRepo.repo : "Commit"}
+					aria-label="Commit"
+				>
+					<Icon node={GitCommit} />
+				</wa-button>
 
-														<span class={runItemMeta()}>{targetKind(target)}</span>
-													</div>
-												);
-											})}
-										</div>
-									);
-								})}
-							</div>
-						</>
-					)}
-				</span>
-
-				<span class={runWrap()}>
-					<wa-button
-						appearance="plain"
-						size="small"
-						title={boundRepo !== undefined ? "Commit to " + boundRepo.owner + "/" + boundRepo.repo : "Commit"}
-						aria-label="Commit"
-						aria-expanded={commitOpen}
-						onClick={() => {
+				<wa-popover
+					for="shell-commit"
+					placement="bottom-start"
+					open={commitOpen}
+					onwa-show={(event: Event) => {
+						if (event.target === event.currentTarget) {
 							setCommitError(undefined);
 							setCommitResult(undefined);
-							setCommitOpen((value) => !value);
-						}}
-					>
-						<Icon node={GitCommit} />
-					</wa-button>
+							setCommitOpen(true);
+						}
+					}}
+					onwa-hide={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							setCommitOpen(false);
+						}
+					}}
+				>
+					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="Commit to GitHub">
+						<span class={ghTitle()}>Commit</span>
 
-					{commitOpen && (
-						<>
-							<div class={runBackdrop()} onClick={() => { setCommitOpen(false); }} />
+						{commitBody()}
+					</div>
+				</wa-popover>
 
-							<div class={githubMenu()} role="dialog" aria-label="Commit to GitHub">
-								<span class={ghTitle()}>Commit</span>
+				<wa-button id="shell-share" appearance="plain" size="small" title="Share as a link" aria-label="Share"><Icon node={Share2} /></wa-button>
 
-								{commitBody()}
-							</div>
-						</>
-					)}
-				</span>
+				<wa-popover
+					for="shell-share"
+					placement="bottom-start"
+					open={shareOpen}
+					onwa-show={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							void openShare();
+						}
+					}}
+					onwa-hide={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							setShareOpen(false);
+						}
+					}}
+				>
+					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="Share">
+						<span class={ghTitle()}>Share</span>
 
-				<span class={runWrap()}>
-					<wa-button
-						appearance="plain"
-						size="small"
-						title="Share as a link"
-						aria-label="Share"
-						aria-expanded={shareOpen}
-						onClick={() => {
-							if (shareOpen) {
-								setShareOpen(false);
-							} else {
-								void openShare();
-							}
-						}}
-					>
-						<Icon node={Share2} />
-					</wa-button>
-
-					{shareOpen && (
-						<>
-							<div class={runBackdrop()} onClick={() => { setShareOpen(false); }} />
-
-							<div class={githubMenu()} role="dialog" aria-label="Share">
-								<span class={ghTitle()}>Share</span>
-
-								{shareBody()}
-							</div>
-						</>
-					)}
-				</span>
+						{shareBody()}
+					</div>
+				</wa-popover>
 
 				<span class={spacer()} />
 
-				<span class={runWrap()}>
-					<wa-button appearance="plain" size="small" title={githubUser !== undefined ? "GitHub · " + githubUser : "GitHub"} aria-label="GitHub" aria-expanded={githubOpen} onClick={() => { setGithubOpen((value) => !value); }}><Icon node={GitBranch} /></wa-button>
+				<wa-button id="shell-github" appearance="plain" size="small" title={githubUser !== undefined ? "GitHub · " + githubUser : "GitHub"} aria-label="GitHub"><Icon node={GitBranch} /></wa-button>
 
-					{githubOpen && (
-						<>
-							<div class={runBackdrop()} onClick={() => { setGithubOpen(false); }} />
-
-							<div class={githubMenu()} role="dialog" aria-label="GitHub connection">
-								{githubBody()}
-							</div>
-						</>
-					)}
-				</span>
+				<wa-popover
+					for="shell-github"
+					placement="bottom-end"
+					open={githubOpen}
+					onwa-show={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							setGithubOpen(true);
+						}
+					}}
+					onwa-hide={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							setGithubOpen(false);
+						}
+					}}
+				>
+					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="GitHub connection">
+						{githubBody()}
+					</div>
+				</wa-popover>
 
 				<wa-button appearance="plain" size="small" title="History" aria-label="History"><Icon node={History} /></wa-button>
 

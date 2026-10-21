@@ -699,6 +699,11 @@ Done 2026-10-20. As built:
   diff shows it; under one fails too, until `budget.json` is lowered, so the room a removal made isn't spent unseen.
 - Checked: a declaration planted in an exception sheet fails (604, budget 603), a loosened budget fails ("went down
   to 27, from 28"), and the counts as they are pass.
+- Lowered 2026-10-20 to 600 / 328 / 27: the shell's four top-bar popovers (Run, Commit, Share, GitHub: each a
+  backdrop, a positioned panel and hand-written menu rows) are a `wa-dropdown` and three `wa-popover`s
+  (`theme/components/popover` added), and the diff's right-click menu a `wa-dropdown` opened at the click. Web
+  Awesome puts them in the top layer, over the editor's iframe, with no z-index, and closes them on an outside click
+  or Escape; the Run menu's keyboard navigation is its own now.
 
 ### 7.7 Documents outside the rule
 
