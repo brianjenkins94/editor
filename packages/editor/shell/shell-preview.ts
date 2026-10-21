@@ -31,13 +31,12 @@ import { iconSvg } from "../shared/theme";
 import { PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "../shared/virtual-path";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { createPaneWindow } from "./window";
+import "theme/components/dialog";
 
 /** The default preview port, used when an event omits one (single-preview back-compat). */
 const DEFAULT_PORT = 5173;
 
-// The capability-prompt overlay — a WebAwesome-styled scrim + card that fills a PREVIEW WINDOW body (not the whole
-// shell): a TOFU decision clearly interrupts just the running app. Shown on `capability.prompt` (served below),
-// resolved by the user's click.
+// A preview window's body anchors what covers its app (the popped-out note).
 const bodyRelative = css({ "position": "relative" });
 // With DevTools open, the body splits: the app on top, DevTools docked below it (preview-devtools.ts).
 const bodySplit = css({ "display": "flex", "flexDirection": "column", "& > iframe": { "flex": "1 1 0", "height": "auto", "minHeight": 0 } });
@@ -45,19 +44,6 @@ const bodySplit = css({ "display": "flex", "flexDirection": "column", "& > ifram
 const DEVTOOLS_HEIGHT = 340;
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
 const CASCADE = 32;
-const promptLayer = css({
-	"position": "absolute",
-	"inset": 0,
-	"zIndex": 5,
-	"display": "none",
-	"alignItems": "center",
-	"justifyContent": "center",
-	"padding": "var(--wa-space-l)",
-	"background": "color-mix(in srgb, var(--wa-color-surface-default) 74%, transparent)",
-	"backdropFilter": "blur(2px)",
-	"&.open": { "display": "flex" }
-});
-const promptCard = css({ "width": "min(420px, 100%)", "boxShadow": "var(--wa-shadow-l)" });
 // What a preview window shows while its page is popped out into a browser window of its own.
 const poppedLayer = css({
 	"position": "absolute",
@@ -72,10 +58,8 @@ const poppedLayer = css({
 	"color": "var(--wa-color-text-quiet)",
 	"&[hidden]": { "display": "none" }
 });
-const promptTitle = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)", "marginBlockEnd": "var(--wa-space-2xs)" });
 const promptScope = css({ "display": "block", "fontFamily": "var(--wa-font-family-code)", "fontSize": "var(--wa-font-size-xs)", "wordBreak": "break-all", "color": "var(--wa-color-text-quiet)", "marginBlockEnd": "var(--wa-space-s)" });
 const promptWhy = css({ "display": "block", "fontSize": "var(--wa-font-size-xs)", "marginBlockEnd": "var(--wa-space-s)" });
-const promptActions = css({ "display": "flex", "flexWrap": "wrap", "gap": "var(--wa-space-2xs)", "justifyContent": "flex-end" });
 const promptNote = css({ "display": "block", "fontSize": "var(--wa-font-size-2xs)", "color": "var(--wa-color-text-quiet)", "textAlign": "end", "marginBlockStart": "var(--wa-space-2xs)" });
 
 /** What the prompt overlay reports back (mirrors the ext-host decider's expectations). */
@@ -142,7 +126,6 @@ interface PreviewSurface {
 	"usedAt": number;
 	"paneWindow": PaneWindow;
 	"frame": HTMLIFrameElement;
-	"promptEl": HTMLDivElement;
 	/** The link the window's hubs join the editor's tree through (see previewAppPermissions). */
 	"unlinkApp": () => void;
 	/** The (scoped) ids of the app's contexts that have reported through this window: ended when it closes. */
@@ -151,9 +134,6 @@ interface PreviewSurface {
 	"height": number;
 	/** Chrome DevTools, docked under the app while open. */
 	"devtools"?: DevtoolsPanel;
-	/** Serializes THIS window's capability prompts through its overlay, one at a time (another window's prompt can
-	 *  show concurrently on its own overlay). */
-	"promptChain": Promise<unknown>;
 	/** Its page, popped out into a browser window of its own (named as this window, so the page's tap still knows
 	 *  which it is; it links to its opener — this shell — instead of a parent). The frame shows `poppedEl` meanwhile. */
 	"popup"?: { "window": Window; "url": string; "watch": ReturnType<typeof setInterval> };
@@ -479,11 +459,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		paneWindow.body.appendChild(frame);
 		paneWindow.body.classList.add(bodyRelative());
 
-		const promptEl = document.createElement("div");
-
-		promptEl.className = promptLayer();
-		paneWindow.body.appendChild(promptEl);
-
 		const poppedEl = document.createElement("div");
 		const poppedNote = document.createElement("span");
 		const poppedBack = document.createElement("wa-button");
@@ -535,7 +510,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			hub.publish("page_tools.changed", { "preview": port, "window": id });
 		});
 
-		const surface: PreviewSurface = { "id": id, "key": id.slice(PREVIEW_WINDOW_PREFIX.length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "promptChain": Promise.resolve(), "poppedEl": poppedEl };
+		const surface: PreviewSurface = { "id": id, "key": id.slice(PREVIEW_WINDOW_PREFIX.length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "poppedEl": poppedEl };
 
 		// The window last touched is the port's for prompts and the debug toolbar.
 		paneWindow.element.addEventListener("pointerdown", () => {
@@ -625,23 +600,28 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	});
 	installAutoProfiler(hub, () => [...surfaces.values()].map((surface) => ({ "key": surface.key, "port": surface.port, "page": pageOf(surface) ?? undefined })));
 
-	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
-	 *  the running app is dimmed behind it. */
-	const runOnePrompt = (surface: Pick<PreviewSurface, "paneWindow" | "promptEl">, request: PromptRequest): Promise<PromptChoice> => {
-		// A window shown in a VS Code editor comes back into the dock first: the prompt is this page's own overlay.
-		surface.paneWindow.dock?.();
-		surface.paneWindow.show();
+	/** Show ONE capability prompt, a dialog over the shell, and resolve with the user's choice. The preview window whose
+	 *  app asked, when there is one, is brought into view behind it. Closing it (Escape, its close button) denies. */
+	const runOnePrompt = (surface: PreviewSurface | undefined, request: PromptRequest): Promise<PromptChoice> => {
+		// A window shown in a VS Code editor comes back into the dock first, so what asked is in view.
+		surface?.paneWindow.dock?.();
+		surface?.paneWindow.show();
 
 		return new Promise<PromptChoice>((resolve) => {
-			const layer = surface.promptEl;
-			// Auto-deny if the prompt is ignored — matches the decider's RPC timeout so the overlay never stalls the
-			// queue (an unanswered prompt fails closed on both ends).
+			const dialog = document.createElement("wa-dialog") as HTMLElement & { "open": boolean };
+			// Auto-deny if the prompt is ignored — matches the decider's RPC timeout so the dialog never stalls the queue
+			// (an unanswered prompt fails closed on both ends).
 			let timer: ReturnType<typeof setTimeout>;
+			let answered = false;
 
 			const finish = (choice: PromptChoice): void => {
+				if (answered) {
+					return;
+				}
+
+				answered = true;
 				clearTimeout(timer);
-				layer.classList.remove("open");
-				layer.replaceChildren();
+				dialog.open = false;
 				resolve(choice);
 			};
 
@@ -649,20 +629,24 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 				finish("deny");
 			}, 300000);
 
-			const card = document.createElement("wa-card");
-
-			card.className = promptCard();
-
-			const title = document.createElement("span");
-
-			title.className = promptTitle();
 			if (request.redline === true) {
-				title.textContent = "⛔ Redline capability";
+				dialog.setAttribute("label", "⛔ Redline capability");
 			} else if (request.dangerous === true) {
-				title.textContent = "Review capability";
+				dialog.setAttribute("label", "Review capability");
 			} else {
-				title.textContent = "Allow capability?";
+				dialog.setAttribute("label", "Allow capability?");
 			}
+
+			dialog.addEventListener("wa-hide", (event) => {
+				if (event.target === dialog) {
+					finish("deny");
+				}
+			});
+			dialog.addEventListener("wa-after-hide", (event) => {
+				if (event.target === dialog) {
+					dialog.remove();
+				}
+			});
 
 			const scope = document.createElement("span");
 			// (a package's call: whose it is, and why it's asked about)
@@ -676,13 +660,10 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			why.className = promptWhy();
 			why.textContent = asker === undefined || request.why === undefined ? "" : whyText(asker.name, request.why);
 
-			const actions = document.createElement("div");
-
-			actions.className = promptActions();
-
 			const button = (label: string, variant: string, choice: PromptChoice): HTMLElement => {
 				const element = document.createElement("wa-button");
 
+				element.slot = "footer";
 				element.setAttribute("size", "small");
 				element.setAttribute("variant", variant);
 				element.textContent = label;
@@ -693,79 +674,40 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 				return element;
 			};
 
-			if (request.redline === true) {
-				// Catastrophic scope — a deliberate, one-time authorization only (never persisted; see decide.ts).
-				actions.append(button("Deny", "neutral", "deny"), button("Authorize once", "danger", "authorize"));
-			} else {
-				// Rule…: a rule made in the editor's Rules view, prefilled with this call — wider or narrower than it.
-				actions.append(button("Rule…", "neutral", "rule"), button("Deny", "neutral", "deny"), button("Allow once", "brand", "allow-once"), button("Allow always", "brand", "allow-always"));
-			}
-
 			// (what Allow always keeps: a rule in your policy — for a package's call, about that package's calls only)
 			const note = document.createElement("span");
 
 			note.className = promptNote();
 			note.textContent = request.redline === true ? "" : `Allow always keeps a rule in your policy${asker === undefined ? "" : `, for ${asker.name}'s calls only`}.`;
 
-			card.append(title, scope, ...why.textContent === "" ? [] : [why], actions, note);
-			layer.replaceChildren(card);
-			layer.classList.add("open");
+			dialog.append(scope, ...why.textContent === "" ? [] : [why], note);
+
+			if (request.redline === true) {
+				// Catastrophic scope — a deliberate, one-time authorization only (never persisted; see decide.ts).
+				dialog.append(button("Deny", "neutral", "deny"), button("Authorize once", "danger", "authorize"));
+			} else {
+				// Rule…: a rule made in the editor's Rules view, prefilled with this call — wider or narrower than it.
+				dialog.append(button("Rule…", "neutral", "rule"), button("Deny", "neutral", "deny"), button("Allow once", "brand", "allow-once"), button("Allow always", "brand", "allow-always"));
+			}
+
+			document.body.append(dialog);
+			dialog.open = true;
 		});
 	};
 
 	// The ext-host decider (extensions/bridge/capabilities/decide.ts) round-trips here for every TOFU decision — the prompt
-	// is OUR WebAwesome overlay, never a VS Code notification. It shows on the window whose app triggered it: the
+	// is OUR Web Awesome dialog, never a VS Code notification. The window whose app triggered it is brought into view: the
 	// request's `window` when known (the WS/WebRTC shim's requests come from one), else a window of its `port` (the SW
 	// net gate sees only the address, the same in every window of a server — so that port's last used window), else
-	// the last used window of all (a decision not bound to a preview: a node/fs run). Serialized PER WINDOW so held
-	// requests queue on their own overlay without blocking another window's.
-	// With no preview window at all (a node script's decision, nothing previewed): a window of its own, holding just the
-	// prompt — not a preview window onto a server nobody started.
-	let promptOnly: { "paneWindow": PaneWindow; "promptEl": HTMLDivElement; "promptChain": Promise<unknown>; "waiting": number } | undefined;
-	const promptWindow = (): NonNullable<typeof promptOnly> => {
-		if (promptOnly === undefined) {
-			const paneWindow = createPaneWindow({
-				"title": "Capability request",
-				"storageKey": "capability-prompt",
-				"width": Math.min(460, window.innerWidth - 80),
-				"height": 220,
-				"onClose": () => {
-					paneWindow.close();
-					promptOnly = undefined;
-				}
-			});
-			const promptEl = document.createElement("div");
-
-			promptEl.className = promptLayer();
-			paneWindow.body.classList.add(bodyRelative());
-			paneWindow.body.appendChild(promptEl);
-			promptOnly = { "paneWindow": paneWindow, "promptEl": promptEl, "promptChain": Promise.resolve(), "waiting": 0 };
-		}
-
-		return promptOnly;
-	};
+	// none (a decision not bound to a preview: a node/fs run). The dialog is modal, so prompts are asked one at a time.
+	let promptChain: Promise<unknown> = Promise.resolve();
 
 	serve(hub, "capability.prompt", (request) => {
 		const { port, "window": named } = request as { "port"?: number; "window"?: string };
-		const surface = (typeof named === "string" ? surfaces.get(named) : undefined) ?? windowFor(typeof port === "number" ? port : undefined) ?? windowFor(undefined) ?? promptWindow();
-		const result = surface.promptChain.then(() => runOnePrompt(surface, request as PromptRequest));
+		const surface = (typeof named === "string" ? surfaces.get(named) : undefined) ?? windowFor(typeof port === "number" ? port : undefined);
+		const result = promptChain.then(() => runOnePrompt(surface, request as PromptRequest));
 
-		surface.promptChain = result.catch(() => undefined);
-
-		// A window of its own, holding just the prompt: closed once nothing is waiting in it — not left open, empty.
-		if (surface === promptOnly) {
-			const only = promptOnly;
-
-			only.waiting += 1;
-			void surface.promptChain.then(() => {
-				only.waiting -= 1;
-
-				if (only.waiting === 0 && promptOnly === only) {
-					only.paneWindow.close();
-					promptOnly = undefined;
-				}
-			});
-		}
+		promptChain = result.catch(() => undefined);
 
 		return result;
 	});

@@ -685,6 +685,7 @@ function Diff(props: {
 		const select = (): void => {
 			props.onDiscardRows?.(menu.rows);
 		};
+
 		const hide = (event: Event): void => {
 			if (event.target === dropdown) {
 				setMenu(null);
@@ -700,9 +701,10 @@ function Diff(props: {
 		};
 	}, [menu]);
 
-	const menuEl = menu === null ? null : createElement("wa-dropdown", { "key": menu.x + "," + menu.y, "ref": menuRef, "open": true, "size": "small", "placement": "bottom-start" },
-		createElement("span", { "slot": "trigger", "className": "sxs-menu", "style": { "left": menu.x, "top": menu.y } }),
-		createElement("wa-dropdown-item", { "variant": "danger" }, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")"));
+	const menuTrigger = menu === null ? null : createElement("span", { "slot": "trigger", "className": "sxs-menu", "style": { "left": menu.x, "top": menu.y } });
+	const menuItem = menu === null ? null : createElement("wa-dropdown-item", { "variant": "danger" }, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")");
+
+	const menuEl = menu === null ? null : createElement("wa-dropdown", { "key": menu.x + "," + menu.y, "ref": menuRef, "open": true, "size": "small", "placement": "bottom-start" }, menuTrigger, menuItem);
 
 	return createElement("div", { "className": "sxs-wrap wa-stack wa-gap-0" }, banner(verdict), grid, menuEl);
 }

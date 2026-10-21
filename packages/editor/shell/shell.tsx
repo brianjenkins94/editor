@@ -1227,7 +1227,8 @@ function Shell() {
 							<h3 key={lifecycle}>{lifecycle === "service" ? "Services" : "Tasks"}</h3>,
 							...group.map((target) => {
 								const running = runOf(target);
-								const state = running === undefined ? "" : running.port === undefined ? "running · " : `running · :${running.port} · `;
+								const port = running?.port === undefined ? "" : ` · :${running.port}`;
+								const state = running === undefined ? "" : `running${port} · `;
 
 								return (
 									<wa-dropdown-item key={target.id} value={target.id} title={`${target.command} — in ${target.cwd}`}>

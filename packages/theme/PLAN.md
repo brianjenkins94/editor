@@ -704,6 +704,11 @@ Done 2026-10-20. As built:
   (`theme/components/popover` added), and the diff's right-click menu a `wa-dropdown` opened at the click. Web
   Awesome puts them in the top layer, over the editor's iframe, with no z-index, and closes them on an outside click
   or Escape; the Run menu's keyboard navigation is its own now.
+- Lowered 2026-10-20 to 600 / 309 / 27: the capability prompt is a `wa-dialog` over the shell, not a scrim and card
+  over one preview window's app. Modal, so prompts are asked one at a time; closing it (Escape, its close button)
+  denies, as an unanswered prompt does; the window whose app asked is still brought into view behind it; and the pane
+  window that existed only to hold a prompt (no preview open) is gone. The diff overlay stays: it isn't a modal but a
+  view over the editor, with the changes pane beside it live (picking files, a chunk's hover lighting its lines).
 
 ### 7.7 Documents outside the rule
 
