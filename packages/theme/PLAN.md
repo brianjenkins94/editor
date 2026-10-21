@@ -912,7 +912,16 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
 1. ~~Docked windows (9.2.4).~~ Done 2026-10-21.
 2. ~~The shell follows the active VS Code theme (9.2.1), so one mapping applies everywhere.~~ Done 2026-10-21.
 3. The components, one at a time, each checked beside VS Code's own (9.2.2, 9.2.3): button, input and textarea,
-   dropdown (as the context menu), select, checkbox, badge and tag, dialog and popover, callout, progress bar.
+   dropdown (as the context menu), select, checkbox, badge and tag, dialog and popover, callout, progress bar. Done 2026-10-21,
+   close rather than exact (the user's preference), mostly by tokens: VS Code 1.142 defines its own shape tokens, so
+   Web Awesome's radii map onto `--vscode-cornerRadius-*` and its shadows onto `--vscode-shadow-*`, and a control is
+   VS Code's text button's (26px, 8px in, a 4px corner, normal weight; an 18px checkbox) — which reaches buttons,
+   inputs, textareas, selects, dialogs and popovers at once. `theme/vscode-skin` styles the parts no token reaches, only
+   where the VS Code theme is (admin keeps Web Awesome's look): a dropdown is VS Code's context menu (`menu.*`: its
+   background, border, corner, depth and selection colours), a checkbox VS Code's own box and check, not a filled square.
+   Checked in Brave, light and dark: a brand button and the select at 26px / 4px / normal weight on VS Code's colours,
+   the Run menu and the Changes checkboxes as VS Code's. Not done, left as Web Awesome's on VS Code's colours: badges
+   and tags (they carry meaning by variant), the progress bar (VS Code's is a 2px strip), callouts (VS Code has none).
 4. Admin and the account pages (9.2.5).
 
 ## 10. Publishing the components (later)

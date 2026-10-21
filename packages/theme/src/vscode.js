@@ -14,6 +14,7 @@ import layers from "@awesome.me/webawesome/dist/styles/layers.css?inline";
 import webAwesomeTheme from "@awesome.me/webawesome/dist/styles/themes/default.css?inline";
 import utilities from "@awesome.me/webawesome/dist/styles/utilities.css?inline";
 import { brandTokens, vscodeTokens } from "./tokens";
+import { vscodeSkin } from "./vscode-skin";
 
 /** VS Code's theme types that are dark: the class it puts on `.monaco-workbench`, or a webview body's
  *  `data-vscode-theme-kind`. */
@@ -42,6 +43,7 @@ export function followVsCodeTheme(element) {
 	// (Stitches puts them in its own document's head; a docked window gets them from there, by mirrorStyles)
 	brandTokens();
 	vscodeTokens();
+	vscodeSkin();
 
 	// VS Code defines --vscode-font-family only in webviews. In its own document the UI font is the workbench element's
 	// (set by platform), so the bridge's font tokens read that.

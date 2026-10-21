@@ -53,7 +53,14 @@ export const vscodeTokens = unlayeredGlobalCss({
 		"--wa-font-family-code": "var(--vscode-editor-font-family, ui-monospace, monospace)",
 		"--wa-font-size-scale": "0.8125",
 		"--wa-space-scale": "0.75",
-		"--wa-border-radius-scale": "0.5",
+		// Shapes: VS Code's own corner radii and shadows (1.142 defines them; the fallbacks are its values), so a control's
+		// corners and a popup's depth are VS Code's.
+		"--wa-border-radius-s": "var(--vscode-cornerRadius-xSmall, 2px)",
+		"--wa-border-radius-m": "var(--vscode-cornerRadius-small, 4px)",
+		"--wa-border-radius-l": "var(--vscode-cornerRadius-medium, 6px)",
+		"--wa-shadow-s": "var(--vscode-shadow-sm, none)",
+		"--wa-shadow-m": "var(--vscode-shadow-md, 0 0 6px var(--vscode-widget-shadow))",
+		"--wa-shadow-l": "var(--vscode-shadow-lg, 0 0 12px var(--vscode-widget-shadow))",
 		// Surfaces and text.
 		"--wa-color-surface-default": "var(--vscode-editor-background)",
 		"--wa-color-surface-raised": "var(--vscode-editorWidget-background)",
@@ -68,9 +75,14 @@ export const vscodeTokens = unlayeredGlobalCss({
 		"--wa-color-brand-on-loud": "var(--vscode-button-foreground)",
 		"--wa-color-neutral-fill-loud": "var(--vscode-button-secondaryBackground)",
 		"--wa-color-neutral-on-loud": "var(--vscode-button-secondaryForeground)",
-		// Form controls (buttons included) are VS Code's height: Web Awesome's em-based padding, tightened from 0.75em/1em.
-		"--wa-form-control-padding-block": "0.35em",
-		"--wa-form-control-padding-inline": "0.75em",
+		// Form controls (buttons included) are VS Code's: 26px tall (a text button's 4px + 16px line + 4px, and its border),
+		// 8px in from the side, a 4px corner, its normal weight for a button's label, and an 18px checkbox.
+		"--wa-form-control-height": "26px",
+		"--wa-form-control-padding-block": "4px",
+		"--wa-form-control-padding-inline": "8px",
+		"--wa-form-control-border-radius": "var(--vscode-cornerRadius-small, 4px)",
+		"--wa-form-control-toggle-size": "18px",
+		"--wa-font-weight-action": "var(--wa-font-weight-normal)",
 		// Form controls are VS Code's inputs.
 		"--wa-form-control-background-color": "var(--vscode-input-background)",
 		"--wa-form-control-border-color": "var(--vscode-input-border, var(--vscode-editorWidget-border))",

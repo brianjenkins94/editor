@@ -8,6 +8,7 @@
  *     hub.subscribe("theme.colors", (colors) => applyVsCodeColors(document.body, colors));  // the shell
  */
 import { vscodeTokens } from "./tokens";
+import { vscodeSkin } from "./vscode-skin";
 
 /** VS Code's theme types, as the class it puts on `.monaco-workbench`, and as a webview's `data-vscode-theme-kind`. */
 const KINDS = { "vs": "vscode-light", "vs-dark": "vscode-dark", "hc-black": "vscode-high-contrast", "hc-light": "vscode-high-contrast-light" };
@@ -39,7 +40,8 @@ const applied = new WeakMap();
 /** Set `colors` on `element` (the shell's body), dropping any the previous theme had that this one hasn't, and mark it
  *  with the theme's kind and Web Awesome's mode for it. */
 export function applyVsCodeColors(element, colors) {
-	vscodeTokens(); // (the mapping that reads them: once, the first time)
+	vscodeTokens(); // (the mapping that reads them, and the components as VS Code draws its own: once, the first time)
+	vscodeSkin();
 
 	for (const name of applied.get(element) ?? []) {
 		if (!(name in colors.vars)) {
