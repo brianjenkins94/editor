@@ -15,8 +15,8 @@ Status (2026-10-19):
 - `theme/vscode` (§3) is built, and the go/no-go step ([§5](#5-migration-order) step 1) is a **go**.
 - The `theme` entry (§3) is built: admin takes `theme`, the shell `theme/chrome` (no native styles), and the
   shell's Stitches `css({…})` is on `--wa-*` tokens (§1). The event sheet's webview takes `theme/vscode` too, and its
-  inline styles are gone (§5 step 4), and so is the insights monitor's page CSS (§6). The budget (4.5) isn't built
-  yet.
+  inline styles are gone (§5 step 4), and so is the insights monitor's page CSS (§6). The budget (4.5) is built
+  (7.6).
 - Next (2026-10-20): confinement, all styling in this package and Web Awesome only through it ([§7](#7-confinement-all-styling-in-this-package)).
 
 ## 1. bamboocss: borrow the ideas, don't adopt the library
@@ -202,8 +202,8 @@ In priority order. Each step closes one of the gaps above.
 3. ~~Convert the biggest file first: `architecture-view`, then `rule-editor`, then admin.~~ Done 2026-10-19 (§6).
 4. ~~Event sheet inline styles → components plus utilities, keeping the sprite grid as an exception.~~ Done
    2026-10-19 (§6). The webview takes `theme/vscode` rather than staying a declared exception (§3).
-5. Add the budget (4.5) once the approach that replaces it is settled: that's confinement (§7), with the budget its
-   last step (7.6).
+5. ~~Add the budget (4.5) once the approach that replaces it is settled: that's confinement (§7), with the budget its
+   last step (7.6).~~ Done 2026-10-20 (7.6).
 
 Rough expectation, not measured: most of `architecture-view`, `rule-editor`, `rule-view`, `admin` and the event-sheet
 inline styles go away. `pane-views`, the margin (`margin.css`) and the graph canvas mostly stay, as named
@@ -681,6 +681,22 @@ and `webawesome/*` disables (39 lines today), both allowed only to go down, held
 counts with the sheets, wherever it is (`css-in-js-tokens` already reads them): moving a style from a sheet into
 Stitches can't hide it.
 
+Done 2026-10-20. As built:
+
+- `packages/theme/budget.json` holds three numbers, and `test/budget.mjs` (the package's `test`, so CI's recursive
+  `pnpm test` runs it) counts them over the repo's tracked files, the vendored components left out:
+  - `exceptionDeclarations`, the declarations in `src/exceptions/*.css` (parsed with `@eslint/css-tree`, the
+    parser ESLint's CSS language uses): 603. More than the 518 above, which was counted before admin's and
+    account's sheets moved in (§7.1) and by stylelint's count;
+  - `stitchesDeclarations`, every property in a `css` / `globalCss` / `unlayeredGlobalCss` / `keyframes` call on
+    `theme/stitches`, wherever it is, its variants, compound variants and nested selectors included (parsed with
+    TypeScript): 388, most of it the shell's (`shell.tsx` 219);
+  - `webawesomeDisables`, the `eslint-disable…` comments that turn a `webawesome/*` rule off: 27, down from 39.
+- It's a ratchet: over a budget fails, naming the files by count, and a raise means editing `budget.json`, where the
+  diff shows it; under one fails too, until `budget.json` is lowered, so the room a removal made isn't spent unseen.
+- Checked: a declaration planted in an exception sheet fails (604, budget 603), a loosened budget fails ("went down
+  to 27, from 28"), and the counts as they are pass.
+
 ### 7.7 Documents outside the rule
 
 Each needs either `theme` as a dependency or a declared exemption:
@@ -696,8 +712,8 @@ Each needs either `theme` as a dependency or a declared exemption:
 3. ~~Recipes, from the duplication above (7.3).~~ Done 2026-10-20 (the fragment waits for a second use).
 4. ~~`known-classes` (7.4).~~ Done 2026-10-20.
 5. ~~Stitches through `theme` (7.5): the spike on layers and auxiliary windows, then `theme` exports the instance and
-   the shell imports it from there.~~ Done 2026-10-20; whether to layer it is open (7.5).
-6. The budget (7.6).
+   the shell imports it from there.~~ Done 2026-10-20, and layered (7.5).
+6. ~~The budget (7.6).~~ Done 2026-10-20.
 
 ## Open questions
 

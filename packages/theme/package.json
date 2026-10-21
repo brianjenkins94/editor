@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "description": "The app's theme: (theme, and theme/chrome without Web Awesome's native styles) Web Awesome set up with its --wa-* design tokens retoned for the brand, following the system's light/dark mode, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, (theme/components/*) the Web Awesome components the app may use, the only way in to them, and (theme/exceptions/*) the custom CSS that's left, each file a named exception (PLAN.md).",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/budget.mjs"
+  },
   "exports": {
     ".": "./src/index.js",
     "./chrome": "./src/chrome.js",
@@ -33,5 +36,9 @@
   },
   "peerDependencies": {
     "@awesome.me/webawesome": ">=3"
+  },
+  "devDependencies": {
+    "@eslint/css-tree": "^4.1.1",
+    "typescript": "^5.9.3"
   }
 }

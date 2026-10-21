@@ -83,6 +83,10 @@ besides Web Awesome's and the theme's (`webawesome/no-css-imports`). A new file 
 something needs CSS of its own, and every file in it is held to the stylesheet rules in the repo's `eslint.config.js`
 (`webawesome/css-*`, `css/use-layers`, and the CSS language's own, which util's ESLint preset registers).
 
+What's left is budgeted (`budget.json`, checked by `test/budget.mjs`): the exception sheets' declarations, the
+declarations in Stitches calls wherever they are, and the comments that turn a `webawesome/*` rule off. Each may only
+go down; a raise means editing `budget.json`, and a drop means lowering it.
+
 ## This starter
 
 Light and dark alike, following the system, with the brand ramp set to the editor's blue accent (`#3794ff` at the
