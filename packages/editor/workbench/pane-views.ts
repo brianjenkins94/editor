@@ -5,7 +5,7 @@
  * it changes (or the provider says so: `editor.pane.refresh`). Its content is data (@brianjenkins94/editor-api/pane):
  * drawn here, in the Margin's look, each item on the lines its `at` is on now — lines as given, a span reference
  * resolved by the editor's BABLR, or a range in a text that ran followed from it (editor-api's anchors). A view declared
- * `into` another adds its items to that one's. The pane's look is pane-views.css.
+ * `into` another adds its items to that one's. The pane's look is theme/styles/pane-views.
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
@@ -18,9 +18,8 @@ import type { NativeDrawing } from "./pane-native";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
-import marginCss from "theme/exceptions/margin.css?raw";
-import css from "theme/exceptions/pane-views.css?raw";
-import { styleSheet } from "theme/sheet";
+import { marginStyles } from "theme/styles/margin";
+import { paneViewsStyles } from "theme/styles/pane-views";
 import { installNativeFace } from "./pane-native";
 import "theme/components/button";
 import "theme/components/button-group";
@@ -31,7 +30,7 @@ import "theme/components/input";
 /** The Margin (the margin extension's): the view shown first, and the one shown until another is chosen. */
 const MARGIN = "margin";
 
-/** How a mark's kind is styled in the pane's gutter column (pane-views.css). */
+/** How a mark's kind is styled in the pane's gutter column (theme/styles/pane-views). */
 const MARK_CLASSES: Record<string, string> = { "ran": "coverage-ran", "partial": "coverage-partial", "missed": "coverage-missed", "crashed": "run-crashed", "stopped": "run-stopped", "rule": "rule-placed", "rule-uncertain": "rule-placed uncertain" };
 
 /** How a group's state reads on its card. */
@@ -479,7 +478,8 @@ function refreshView(view: string, uri?: string): void {
 export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable[] {
 	api = vscode;
 	// (and the Margin's frame around each editor, which the component draws: pane.ts)
-	document.head.append(styleSheet(marginCss + "\n" + css));
+	marginStyles();
+	paneViewsStyles();
 
 	const read = async (): Promise<void> => {
 		declared = (await extensionContributions("paneViews")).flatMap(({ value }) => (Array.isArray(value) ? value.filter((view): view is PaneViewDeclaration => typeof view?.id === "string") : []));

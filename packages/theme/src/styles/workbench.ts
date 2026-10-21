@@ -67,7 +67,7 @@ export const injectGlobals = unlayeredGlobalCss({
 	".monaco-workbench.mac": { "fontFamily": "-apple-system, BlinkMacSystemFont, sans-serif" },
 	".monaco-workbench.windows": { "fontFamily": "\"Segoe WPC\", \"Segoe UI\", sans-serif" },
 	".monaco-workbench.linux": { "fontFamily": "system-ui, \"Ubuntu\", \"Droid Sans\", sans-serif" },
-	// Safe root defaults from the reference host (monaco-vscode-api demo's style.css) that our minimal host.html omits.
+	// Safe root defaults from the reference host (monaco-vscode-api demo's theme/styles/style) that our minimal host.html omits.
 	// NB: we deliberately do NOT force `-webkit-font-smoothing: antialiased` / `text-rendering: optimizeLegibility`
 	// here — those render text thin/pale; letting the OS default (subpixel) apply matches the real editor's weight
 	// better. Keep only the harmless ones: no faux-bold synthesis, and no mobile text-size inflation.

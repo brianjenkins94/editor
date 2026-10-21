@@ -1,6 +1,6 @@
 /**
  * theme/styles/rule-view — The Rule view (editor/workbench/rule-view.ts, under the Rules tree): a wa-card holding the rule editor
- * (rule-editor.css), what the rule as edited would do, then its wa-buttons. Left here: the view's room in the sidebar,
+ * (theme/styles/rule-editor), what the rule as edited would do, then its wa-buttons. Left here: the view's room in the sidebar,
  * the card's spacing, and a refused verdict's colour — on --wa-* tokens.
  *
  * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
