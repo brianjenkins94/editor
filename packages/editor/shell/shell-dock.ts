@@ -359,6 +359,21 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 	editorPanel.group.header.hidden = true;
 	editorPanel.group.locked = true;
 
+	// A floating window holding one of VS Code's windows and nothing else has no tab bar: its title bar holds the traffic
+	// lights, and VS Code's own tabs are just under it, so a tab saying "Editors" says nothing. Docked into the layout (its
+	// lights are in the tab bar there), or with a panel dropped in beside it, it has one again.
+	const bareWindow = (group: DockviewGroupPanel): boolean => group.api.location.type === "floating" && group.panels.length === 1 && group.panels[0].id.startsWith(WINDOW_PREFIX);
+
+	api.onDidLayoutChange(() => {
+		for (const group of api.groups) {
+			const hidden = group === editorPanel.group || bareWindow(group);
+
+			if (group.header.hidden !== hidden) {
+				group.header.hidden = hidden;
+			}
+		}
+	});
+
 	const rpc = createRpcClient(hub);
 	const hostable = (panelId: string | null | undefined): boolean => panelId !== null && panelId !== undefined && (panes.get(panelId)?.body.querySelector(":scope > iframe") ?? null) !== null;
 	const dropHint = document.createElement("div");
