@@ -1,7 +1,8 @@
 /**
  * theme/tokens — the theme's tokens, as Stitches (PLAN.md §8.4 step 4): the brand's, over Web Awesome's defaults, and
  * the bridge that maps Web Awesome's onto the active VS Code theme. Unlayered, on purpose: token definitions that have
- * to win over Web Awesome's own, which are layered. theme/chrome and theme/vscode call them; nothing else needs to.
+ * to win over Web Awesome's own, which are layered. theme/chrome and theme/vscode call them; nothing else needs to. Together they're a Web Awesome theme with VS Code's look
+ * (PLAN.md §9.2.5).
  */
 import { unlayeredGlobalCss } from "./stitches";
 
@@ -36,6 +37,98 @@ export const brandTokens = unlayeredGlobalCss({
 	}
 });
 
+/**
+ * VS Code's look where VS Code isn't (PLAN.md §9.2.5): a fixed copy of the editor's default themes' colours (Default
+ * Light+ and Default Dark+, the ones the editor itself takes from the system's mode), read from VS Code 1.142 and
+ * declared as VS Code declares them, so the bridge below applies to them as it does to the live ones. On the document's
+ * root only: where VS Code's own are (on `.monaco-workbench`, a webview's root, the shell's body), they're lower in the
+ * tree or inline, so they win, and the active theme is followed there. Admin and the account pages, with no VS Code,
+ * get these. Light unless the root is `wa-dark` (theme/chrome keeps it in step with the system).
+ */
+export const vscodePalette = unlayeredGlobalCss({
+	":root": {
+		// VS Code's own fonts (its UI's stack, and its editor's), as it sets them per platform.
+		"--vscode-font-family": "-apple-system, BlinkMacSystemFont, \"Segoe WPC\", \"Segoe UI\", system-ui, \"Ubuntu\", \"Droid Sans\", sans-serif",
+		"--vscode-editor-font-family": "Menlo, Monaco, Consolas, \"Droid Sans Mono\", \"Courier New\", monospace",
+		"--vscode-cornerRadius-medium": "6px",
+		"--vscode-cornerRadius-small": "4px",
+		"--vscode-cornerRadius-xSmall": "2px",
+		"--vscode-shadow-lg": "0 0 12px rgba(0, 0, 0, 0.14)",
+		"--vscode-shadow-md": "0 0 6px rgba(0, 0, 0, 0.08)",
+		"--vscode-shadow-sm": "0 0 0 0 transparent",
+		"--vscode-button-background": "#007acc",
+		"--vscode-button-foreground": "#ffffff",
+		"--vscode-button-secondaryBackground": "#e8e8e8",
+		"--vscode-button-secondaryForeground": "#616161",
+		"--vscode-checkbox-background": "#ffffff",
+		"--vscode-checkbox-border": "#919191",
+		"--vscode-checkbox-foreground": "#616161",
+		"--vscode-debugTokenExpression-boolean": "#0000ff",
+		"--vscode-debugTokenExpression-name": "#9b46b0",
+		"--vscode-debugTokenExpression-number": "#098658",
+		"--vscode-debugTokenExpression-string": "#a31515",
+		"--vscode-descriptionForeground": "#717171",
+		"--vscode-editor-background": "#ffffff",
+		"--vscode-editorGroup-border": "#e7e7e7",
+		"--vscode-editorWidget-background": "#f3f3f3",
+		"--vscode-editorWidget-border": "rgba(97, 97, 97, 0.2)",
+		"--vscode-focusBorder": "#0090f1",
+		"--vscode-foreground": "#616161",
+		"--vscode-input-background": "#ffffff",
+		"--vscode-input-foreground": "#616161",
+		"--vscode-input-placeholderForeground": "#767676",
+		"--vscode-menu-background": "#ffffff",
+		"--vscode-menu-border": "#d4d4d4",
+		"--vscode-menu-foreground": "#616161",
+		"--vscode-menu-selectionBackground": "#0060c0",
+		"--vscode-menu-selectionForeground": "#ffffff",
+		"--vscode-sideBar-background": "#f3f3f3",
+		"--vscode-textLink-foreground": "#006ab1",
+		"--vscode-titleBar-activeBackground": "#dddddd",
+		"--vscode-titleBar-activeForeground": "#333333",
+		"--vscode-titleBar-inactiveBackground": "#e5e5e5",
+		"--vscode-titleBar-inactiveForeground": "rgba(51, 51, 51, 0.6)",
+		"--vscode-widget-border": "#d4d4d4",
+		"--vscode-widget-shadow": "rgba(0, 0, 0, 0.16)"
+	},
+	":root.wa-dark": {
+		"--vscode-button-background": "#0e639c",
+		"--vscode-button-foreground": "#ffffff",
+		"--vscode-button-secondaryBackground": "#2a2d2e",
+		"--vscode-button-secondaryForeground": "#cccccc",
+		"--vscode-checkbox-background": "#3c3c3c",
+		"--vscode-checkbox-border": "#6b6b6b",
+		"--vscode-checkbox-foreground": "#f0f0f0",
+		"--vscode-debugTokenExpression-boolean": "#4e94ce",
+		"--vscode-debugTokenExpression-name": "#c586c0",
+		"--vscode-debugTokenExpression-number": "#b5cea8",
+		"--vscode-debugTokenExpression-string": "#ce9178",
+		"--vscode-descriptionForeground": "rgba(204, 204, 204, 0.7)",
+		"--vscode-editor-background": "#1e1e1e",
+		"--vscode-editorGroup-border": "#444444",
+		"--vscode-editorWidget-background": "#252526",
+		"--vscode-editorWidget-border": "rgba(204, 204, 204, 0.2)",
+		"--vscode-focusBorder": "#007fd4",
+		"--vscode-foreground": "#cccccc",
+		"--vscode-input-background": "#3c3c3c",
+		"--vscode-input-foreground": "#cccccc",
+		"--vscode-input-placeholderForeground": "#a6a6a6",
+		"--vscode-menu-background": "#252526",
+		"--vscode-menu-border": "#454545",
+		"--vscode-menu-foreground": "#cccccc",
+		"--vscode-menu-selectionBackground": "#0078d4",
+		"--vscode-menu-selectionForeground": "#ffffff",
+		"--vscode-sideBar-background": "#252526",
+		"--vscode-textLink-foreground": "#3794ff",
+		"--vscode-titleBar-activeBackground": "#3c3c3c",
+		"--vscode-titleBar-activeForeground": "#cccccc",
+		"--vscode-titleBar-inactiveBackground": "#323233",
+		"--vscode-titleBar-inactiveForeground": "rgba(204, 204, 204, 0.6)",
+		"--vscode-widget-border": "#303031",
+		"--vscode-widget-shadow": "rgba(0, 0, 0, 0.36)"
+	}
+});
+
 /** The bridge (theme/vscode's): Web Awesome's tokens, mapped onto the active VS Code color theme.
  * The one place a --vscode-* variable is read for a token. VS Code declares
  * its theme's variables on `.monaco-workbench` in its own document, and on a webview's `html` (marking its `body` with
@@ -45,7 +138,7 @@ export const brandTokens = unlayeredGlobalCss({
  * ramp for that mode.
  */
 export const vscodeTokens = unlayeredGlobalCss({
-	".monaco-workbench, body[data-vscode-theme-kind]": {
+	":root, .monaco-workbench, body[data-vscode-theme-kind]": {
 		// Type and density: VS Code's UI font at its 13px size, and spacing to match.
 		"--wa-font-family-body": "var(--vscode-font-family)",
 		"--wa-font-family-heading": "var(--vscode-font-family)",
@@ -100,7 +193,7 @@ export const vscodeTokens = unlayeredGlobalCss({
 	// VS Code's title bar, so a docked editor's window reads as one of VS Code's own, its title in the bar and the editor's
 	// tabs and status bar inside; groups and separators are VS Code's editor groups'. On dockview's theme class, which
 	// declares its own values there.
-	"body[data-vscode-theme-kind] :is(.dockview-theme-light, .dockview-theme-dark)": {
+	":is(.dockview-theme-light, .dockview-theme-dark)": {
 		"--dv-group-view-background-color": "var(--vscode-editor-background)",
 		"--dv-tabs-and-actions-container-background-color": "var(--vscode-titleBar-activeBackground)",
 		"--dv-floating-titlebar-background-color": "var(--vscode-titleBar-activeBackground)",

@@ -905,10 +905,17 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
    237.4 vs 233.9 MB, boot 1154 vs 1142 ms, total memory the same (the browser shares identical `<style>`s' parsed
    contents).
 5. **Documents without VS Code**: admin and the account pages. Either a fixed VS Code theme (Dark Modern / Light
-   Modern's colours, following the system's mode) or Web Awesome's own look; to decide. Decided 2026-10-21 (the
-   user): they keep Web Awesome's own look, the brand's tokens on its default theme (`theme`), following the system's
-   mode. The VS Code look is for what's in or around VS Code; `theme/vscode-skin` and the bridge apply only where the
-   VS Code theme is, so nothing changes for them.
+   Modern's colours, following the system's mode) or Web Awesome's own look; to decide. Decided 2026-10-21, and
+   corrected the same day: a first reading ("keep Web Awesome's own look") misunderstood the user, who wants the theme
+   itself to be a Web Awesome theme with VS Code's look, on every page it's on. Built: `theme/tokens`' `vscodePalette`,
+   a fixed copy of the editor's default themes' colours (Default Light+ / Default Dark+, the ones the editor takes from
+   the system's mode, read from VS Code 1.142: the 42 the bridge and skin read, plus VS Code's font stacks), declared
+   as VS Code declares them, on the document's root, dark when it's `wa-dark`; the bridge and `theme/vscode-skin` apply
+   everywhere now, not only where VS Code is. Where VS Code's live colours are (`.monaco-workbench`, a webview's root,
+   the shell's body), they're lower in the tree or inline, so they win and the active theme is followed. theme/chrome
+   (so `theme`, admin's) sets it all up. Checked in Brave: admin is VS Code's look in light and dark (Light+'s and
+   Dark+'s surfaces, text and button, VS Code's font, 26px buttons with 4px corners); with the system light and VS Code
+   on Dark Modern, the shell's body and VS Code's document are dark (live) over the root's fixed light copy.
 
 ### 9.3 Order
 
@@ -925,7 +932,7 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
    Checked in Brave, light and dark: a brand button and the select at 26px / 4px / normal weight on VS Code's colours,
    the Run menu and the Changes checkboxes as VS Code's. Not done, left as Web Awesome's on VS Code's colours: badges
    and tags (they carry meaning by variant), the progress bar (VS Code's is a 2px strip), callouts (VS Code has none).
-4. ~~Admin and the account pages (9.2.5).~~ Decided 2026-10-21: Web Awesome's own look; nothing to do.
+4. ~~Admin and the account pages (9.2.5).~~ Done 2026-10-21: the theme is VS Code's look everywhere (9.2.5).
 
 ## 10. Publishing the components (later)
 

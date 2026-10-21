@@ -16,9 +16,15 @@
 import "@awesome.me/webawesome/dist/styles/layers.css";
 import "@awesome.me/webawesome/dist/styles/themes/default.css";
 import "@awesome.me/webawesome/dist/styles/utilities.css";
-import { brandTokens } from "./tokens";
+import { brandTokens, vscodePalette, vscodeTokens } from "./tokens";
+import { vscodeSkin } from "./vscode-skin";
 
+// The theme: Web Awesome with VS Code's look (PLAN.md §9.2.5) — the brand, VS Code's palette (a fixed copy of the
+// editor's default themes, until the editor sends the live one), the bridge onto it, and the components as VS Code's.
 brandTokens();
+vscodePalette();
+vscodeTokens();
+vscodeSkin();
 
 const dark = window.matchMedia("(prefers-color-scheme: dark)");
 

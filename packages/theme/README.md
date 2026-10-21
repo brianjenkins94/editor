@@ -15,6 +15,13 @@ Web Awesome derives every component's appearance from tokens, in two layers:
 `src/theme.css` overrides those tokens. Because it's only tokens, it re-skins every current and future `<wa-*>`
 component at once.
 
+## The look: Web Awesome as VS Code
+
+The theme is a Web Awesome theme with VS Code's look (PLAN.md §9): Web Awesome's tokens map onto VS Code's colours and
+shapes, and the components it can't reach by tokens are drawn as VS Code's (`theme/vscode-skin`). Where VS Code is (its
+document, a webview, the shell once the editor sends its colours) the live theme is followed; anywhere else (admin, the
+account pages) it's a fixed copy of the editor's default themes, Default Light+ and Dark+, by the system's mode.
+
 ## Usage
 
 One import sets a document up: Web Awesome's layers, native styles, utility classes and default theme, then these
