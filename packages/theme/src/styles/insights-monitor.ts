@@ -1,0 +1,51 @@
+/**
+ * theme/styles/insights-monitor — The insights monitor's webview (extensions/insights: monitor-view.ts): what Web Awesome's cards and utility classes
+ * don't cover — the view's frame and the cards' sparklines, a line per series in the palette's colours. On --wa-*
+ * tokens (theme/vscode maps them onto the VS Code theme in a webview too).
+ *
+ * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
+ */
+import { stylesheet } from "../stitches";
+
+export const insightsMonitorStyles = stylesheet({
+	// The view's room inside its frame (theme/recipes' frame).
+	".monitor": {
+		"padding": "var(--wa-space-s)"
+	},
+	".monitor-card": {
+		"--spacing": "var(--wa-space-xs)"
+	},
+	".monitor-chart": {
+		"display": "block",
+		"width": "100%",
+		"height": "56px"
+	},
+	".monitor-chart polyline": {
+		"fill": "none",
+		"stroke": "var(--line)",
+		"strokeWidth": "1.5px",
+		"vectorEffect": "non-scaling-stroke"
+	},
+	// A series' colour, its line's and its legend's.
+	".monitor-line-0": {
+		"--line": "var(--wa-color-blue-60)"
+	},
+	".monitor-line-1": {
+		"--line": "var(--wa-color-orange-60)"
+	},
+	".monitor-line-2": {
+		"--line": "var(--wa-color-green-60)"
+	},
+	".monitor-line-3": {
+		"--line": "var(--wa-color-purple-60)"
+	},
+	".monitor-line-4": {
+		"--line": "var(--wa-color-red-60)"
+	},
+	".monitor-line-5": {
+		"--line": "var(--wa-color-yellow-60)"
+	},
+	"span[class^=\"monitor-line-\"]": {
+		"color": "var(--line)"
+	}
+});

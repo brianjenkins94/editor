@@ -1,11 +1,10 @@
 /**
  * The monitor's view — the script of its webview (monitor.ts serves it): the metrics plane as sparkline cards, the last
  * two minutes of each series. Web Awesome on the VS Code theme (theme/vscode); the cards' charts are plain SVG
- * polylines, one per series, in the palette's colours (theme/exceptions/insights-monitor.css).
+ * polylines, one per series, in the palette's colours (theme/styles/insights-monitor).
  */
-import css from "theme/exceptions/insights-monitor.css?raw";
+import { insightsMonitorStyles } from "theme/styles/insights-monitor";
 import { caption, frame } from "theme/recipes";
-import { styleSheet } from "theme/sheet";
 import { followVsCodeTheme } from "theme/vscode";
 import "theme/components/card";
 
@@ -144,7 +143,7 @@ function start(): void {
 	const container = element("div", "monitor " + frame() + " wa-stack wa-gap-s");
 
 	// Web Awesome on the VS Code theme (theme/vscode, as in the workbench), then what it doesn't cover.
-	document.head.append(styleSheet(css));
+	insightsMonitorStyles();
 	followVsCodeTheme(document.body);
 	container.append(waiting());
 	document.body.replaceChildren(container);
