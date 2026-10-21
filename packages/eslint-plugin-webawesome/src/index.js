@@ -321,13 +321,19 @@ function waForInputJsx(node) {
 	return "wa-input";
 }
 
+/** A message's data for a native tag and the Web Awesome component to use instead: the component's theme import name
+ *  too (theme/components/<name>, the only way in to it: through-theme). */
+function suggestion(tag, wa) {
+	return { "tag": tag, "wa": wa, "name": wa.replace(/^wa-/u, "") };
+}
+
 const preferComponents = {
 	"meta": {
 		"type": "problem",
 		"docs": { "description": "Use a Web Awesome component instead of the native HTML element that has a complement." },
 		"messages": {
-			"useComponent": "Use <{{wa}}> instead of the native <{{tag}}> — Web Awesome has a complement. Keep hand-rolled markup to a minimum.",
-			"createElement": "Use document.createElement(\"{{wa}}\") instead of \"{{tag}}\" — Web Awesome has a complement."
+			"useComponent": "Use <{{wa}}> (import \"theme/components/{{name}}\") instead of the native <{{tag}}> — Web Awesome has a complement. Keep hand-rolled markup to a minimum.",
+			"createElement": "Use document.createElement(\"{{wa}}\") (import \"theme/components/{{name}}\") instead of \"{{tag}}\" — Web Awesome has a complement."
 		},
 		"schema": []
 	},
@@ -345,7 +351,7 @@ const preferComponents = {
 					return;
 				}
 
-				context.report({ "node": node.name, "messageId": "useComponent", "data": { "tag": tag, "wa": tag === "input" ? waForInputJsx(node) : wa } });
+				context.report({ "node": node.name, "messageId": "useComponent", "data": suggestion(tag, tag === "input" ? waForInputJsx(node) : wa) });
 			},
 			"CallExpression": function(node) {
 				const callee = node.callee;
@@ -363,7 +369,7 @@ const preferComponents = {
 				const wa = NATIVE_TO_WA[arg.value];
 
 				if (wa !== undefined) {
-					context.report({ "node": arg, "messageId": "createElement", "data": { "tag": arg.value, "wa": wa } });
+					context.report({ "node": arg, "messageId": "createElement", "data": suggestion(arg.value, wa) });
 				}
 			}
 		};
@@ -526,7 +532,7 @@ const preferComponentsWrapped = {
 		"type": "problem",
 		"docs": { "description": "Use a Web Awesome component instead of a native element created through a local wrapper (`html(\"button\")`, `element(\"select\")`)." },
 		"messages": {
-			"wrapped": "{{wrapper}}(\"{{tag}}\") creates a native <{{tag}}> — use \"{{wa}}\". Web Awesome has a complement; a wrapper around createElement doesn't change that."
+			"wrapped": "{{wrapper}}(\"{{tag}}\") creates a native <{{tag}}> — use \"{{wa}}\" (import \"theme/components/{{name}}\"). Web Awesome has a complement; a wrapper around createElement doesn't change that."
 		},
 		"schema": []
 	},
@@ -562,7 +568,7 @@ const preferComponentsWrapped = {
 					const wa = arg?.type === "Literal" && typeof arg.value === "string" ? NATIVE_TO_WA[arg.value] : undefined;
 
 					if (wa !== undefined) {
-						context.report({ "node": arg, "messageId": "wrapped", "data": { "wrapper": node.callee.name, "tag": arg.value, "wa": wa } });
+						context.report({ "node": arg, "messageId": "wrapped", "data": { "wrapper": node.callee.name, ...suggestion(arg.value, wa) } });
 					}
 				}
 			}

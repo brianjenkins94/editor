@@ -183,6 +183,9 @@ In priority order. Each step closes one of the gaps above.
 6. **Tell agents the vocabulary.** Add a short `CLAUDE.md` section that points at the Web Awesome component list and
    this file. Lint messages should name the component to use, not only what's wrong. (Bamboo ships an MCP server for
    this. A lint message that names the component is the cheaper version of the same idea.)
+   Done 2026-10-20: the repo's `CLAUDE.md` has a Styling section (components from `theme/components/*`, utilities
+   and recipes, tokens, `theme/stitches`, the exception sheets and their budget), and `prefer-components` names the
+   import too: "Use <wa-button> (import "theme/components/button") instead of the native <button>".
 
 ## 5. Migration order
 
