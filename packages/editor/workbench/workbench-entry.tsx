@@ -41,7 +41,8 @@ import { render } from "preact";
 import runningExtension from "running:extension";
 import sourceControlExtension from "source-control:extension";
 import { mirrorStyles } from "theme/sheet";
-import { followVsCodeTheme } from "theme/vscode";
+import { followVsCodeTheme, followVsCodeThemeIn } from "theme/vscode";
+import { readVsCodeColors } from "theme/vscode-colors";
 import tsvalExtension from "tsval:extension";
 import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
@@ -201,6 +202,8 @@ function errText(error: unknown): string {
 let workbenchContainer: HTMLElement | undefined;
 let init: Init | undefined;
 let booted = false;
+/** Tells the shell VS Code's colours (set once the workbench is up). */
+let publishColors: (() => void) | undefined;
 
 // Core's VS Code API — the bridge's (the bridge's), once it resolves. `runCommand` drives the workbench
 // through it and reads the latest api, so a command issued early still runs once it's captured.
@@ -533,6 +536,12 @@ function maybeBoot(): void {
 
 			if (workbench !== null) {
 				followVsCodeTheme(workbench);
+				// And its colours to the shell, which draws with Web Awesome too (theme/vscode-colors): now, and on each theme
+				// change (below, once the vscode api is here).
+				publishColors = () => {
+					workbenchHub.publish("theme.colors", readVsCodeColors(workbench));
+				};
+				publishColors();
 			}
 
 			// The writable workspace: a zen-fs-backed FileSystemProvider the type-checker reads through (priority 2,
@@ -653,6 +662,11 @@ function maybeBoot(): void {
 
 				const themeMq = window.matchMedia("(prefers-color-scheme: dark)");
 
+				// (VS Code has swapped its theme's style when it says so; a frame later, its colours read as the new theme's)
+				themeApi.window.onDidChangeActiveColorTheme(() => {
+					requestAnimationFrame(() => publishColors?.());
+				});
+
 				workbenchHub.subscribe("theme.colorScheme", (data) => {
 					applyEditorTheme((data as { "dark"?: boolean } | null)?.dark ?? themeMq.matches);
 				});
@@ -717,11 +731,13 @@ async function openDockedWindow(request: AuxiliaryWindowRequest): Promise<Window
 
 		if (docked !== undefined) {
 			// (VS Code copies its own stylesheets into the window; ours — Workbench.tsx's Stitches, the exception sheets —
-			// theme/sheet copies)
+			// theme/sheet copies; and Web Awesome on the VS Code theme, theme/vscode adopts there itself)
 			const stopMirroring = mirrorStyles(docked.document);
+			const stopTheme = followVsCodeThemeIn(docked.document);
 
 			docked.close = () => {
 				stopMirroring();
+				stopTheme();
 				workbenchHub.publish("dock.closeWindow", { "name": name });
 			};
 		}

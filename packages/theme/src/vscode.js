@@ -66,3 +66,43 @@ export function followVsCodeTheme(element) {
 		observer.disconnect();
 	};
 }
+
+/**
+ * Follow the VS Code theme in a document VS Code opens a window into (a docked editor window), whose `.monaco-workbench`
+ * VS Code makes after handing it the window: the styles adopted there now, and its mode followed once that element is
+ * in. Returns a function that stops. (The styles must be this document's own: a window VS Code restores at boot exists
+ * before the editor's document has them, so it has no copy of them to take.)
+ */
+export function followVsCodeThemeIn(document) {
+	let stop = () => undefined;
+	const start = () => {
+		const workbench = document.querySelector(".monaco-workbench");
+
+		if (workbench === null) {
+			return false;
+		}
+
+		stop = followVsCodeTheme(workbench);
+
+		return true;
+	};
+
+	if (start()) {
+		return () => {
+			stop();
+		};
+	}
+
+	const waiting = new document.defaultView.MutationObserver(() => {
+		if (start()) {
+			waiting.disconnect();
+		}
+	});
+
+	waiting.observe(document.documentElement, { "childList": true, "subtree": true });
+
+	return () => {
+		waiting.disconnect();
+		stop();
+	};
+}

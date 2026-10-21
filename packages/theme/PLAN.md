@@ -856,7 +856,16 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
    following the system's light/dark mode, not VS Code's theme. VS Code's `--vscode-*` variables exist only in the
    workbench's document. The shell would mirror them: the workbench publishes the active theme's variables (on start
    and on every theme change) and the shell sets them on its root, so `theme/vscode`'s mapping applies there too, and
-   to the dock, the popovers and the dialogs.
+   to the dock, the popovers and the dialogs. Done 2026-10-21: `theme/vscode-colors` reads the active theme's
+   `--vscode-*` (825, not the icons') and its kind from `.monaco-workbench`; the workbench publishes them on
+   `theme.colors` at boot and on each theme change, and the shell sets them on its body with `data-vscode-theme-kind`
+   and Web Awesome's mode, so `vscode.css` maps the shell's tokens as it does VS Code's. `vscode.css` maps dockview's
+   too: a window's bar is VS Code's title bar (`titleBar.*`), groups and separators its editor groups'. Seen from the
+   docked window (the user's report: its top bar, the dock's, and its status bar, VS Code's, looked like two apps):
+   now one, light and dark (Dark Modern set in VS Code, the shell, its rails and the dock's bar went with it). Also
+   found: a docked window VS Code restores at boot had none of theme/vscode's styles (it's made before the editor's
+   document adopts them), so its Web Awesome had no tokens; `followVsCodeThemeIn(document)` adopts them into each docked
+   document, and follows its `.monaco-workbench` once VS Code makes it.
 2. **Shapes, not only colours.** Tokens give VS Code's colours and density, but Web Awesome's controls still look like
    Web Awesome: a button's height, weight and radius; a dropdown that should read as VS Code's context menu (tight
    rows, the list's active-selection colours, separators); a select, checkbox, badge, tag, dialog, tooltip and progress
@@ -883,7 +892,7 @@ picks `wa-dark` / `wa-light` from VS Code's theme type.
 ### 9.3 Order
 
 1. ~~Docked windows (9.2.4).~~ Done 2026-10-21.
-2. The shell follows the active VS Code theme (9.2.1), so one mapping applies everywhere.
+2. ~~The shell follows the active VS Code theme (9.2.1), so one mapping applies everywhere.~~ Done 2026-10-21.
 3. The components, one at a time, each checked beside VS Code's own (9.2.2, 9.2.3): button, input and textarea,
    dropdown (as the context menu), select, checkbox, badge and tag, dialog and popover, callout, progress bar.
 4. Admin and the account pages (9.2.5).

@@ -15,6 +15,10 @@
       "default": "./src/vscode.js"
     },
     "./vscode.css": "./src/vscode.css",
+    "./vscode-colors": {
+      "types": "./src/vscode-colors.d.ts",
+      "default": "./src/vscode-colors.js"
+    },
     "./stitches": "./src/stitches.ts",
     "./sheet": {
       "types": "./src/sheet.d.ts",

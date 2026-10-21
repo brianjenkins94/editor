@@ -15,6 +15,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
+import type { VsCodeColors } from "theme/vscode-colors";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { LaunchTarget, RunInfo } from "../shared/runs";
 import type { RepoBinding } from "./github-auth";
@@ -28,6 +29,7 @@ import { reportShellMetrics } from "../shared/editor-metrics";
 import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
 import { caption, toolbar } from "theme/recipes";
 import { css, globalCss } from "theme/stitches";
+import { applyVsCodeColors } from "theme/vscode-colors";
 import { iconSvg } from "../shared/theme";
 import { envRepo, showRepo, site } from "./address";
 import { renderGitPanel } from "./git-panel";
@@ -47,6 +49,7 @@ import "theme/components/dropdown-item";
 import "theme/components/input";
 import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
+import "theme/vscode.css"; // and, once the editor publishes them, VS Code's colours on the body (theme/vscode-colors)
 
 // The GitHub data plane's logger — spans + records federate to the `$sys.log.>` observability plane (debug-mcp).
 // The shell owns the token and the network calls, so this is where load/commit/connect are traced.
@@ -374,6 +377,11 @@ function Shell() {
 
 		publishScheme();
 		scheme.addEventListener("change", publishScheme);
+		// And the shell draws in VS Code's colours, as the editor publishes them (theme/vscode-colors): the dock's windows,
+		// the top bar, the panels and their popovers read as VS Code's.
+		shellHub.subscribe("theme.colors", (colors) => {
+			applyVsCodeColors(document.body, colors as VsCodeColors);
+		});
 
 		// The RHS review panel — GitHub-Desktop-style changes + commit; the diff opens in the overlay over the editor.
 		renderGitPanel(gitPanelRef.current, {

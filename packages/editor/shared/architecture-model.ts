@@ -204,6 +204,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "run.effects", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "runs.begin", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "theme.colors", "from": ["workbench"], "to": ["shell"] },
 	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"] },
 	{ "pattern": "dock.closeWindow", "from": ["workbench"], "to": ["shell"] },
 	{ "pattern": "dock.hostEditor", "from": ["shell"], "to": ["workbench"] },

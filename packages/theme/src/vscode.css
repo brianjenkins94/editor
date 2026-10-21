@@ -54,3 +54,26 @@ body[data-vscode-theme-kind] {
 	--code-value-number: var(--vscode-debugTokenExpression-number);
 	--code-value-boolean: var(--vscode-debugTokenExpression-boolean);
 }
+
+/* The shell's dock (dockview), in the shell once it carries VS Code's colours (theme/vscode-colors): a window's bar is
+ * VS Code's title bar, so a docked editor's window reads as one of VS Code's own, its title in the bar and the editor's
+ * tabs and status bar inside; groups and separators are VS Code's editor groups'. On dockview's theme class, which
+ * declares its own values there. */
+body[data-vscode-theme-kind] :is(.dockview-theme-light, .dockview-theme-dark) {
+	--dv-group-view-background-color: var(--vscode-editor-background);
+	--dv-tabs-and-actions-container-background-color: var(--vscode-titleBar-activeBackground);
+	--dv-floating-titlebar-background-color: var(--vscode-titleBar-activeBackground);
+	--dv-activegroup-visiblepanel-tab-background-color: var(--vscode-titleBar-activeBackground);
+	--dv-inactivegroup-visiblepanel-tab-background-color: var(--vscode-titleBar-inactiveBackground);
+	--dv-activegroup-hiddenpanel-tab-background-color: var(--vscode-titleBar-activeBackground);
+	--dv-inactivegroup-hiddenpanel-tab-background-color: var(--vscode-titleBar-inactiveBackground);
+	--dv-activegroup-visiblepanel-tab-color: var(--vscode-titleBar-activeForeground);
+	--dv-inactivegroup-visiblepanel-tab-color: var(--vscode-titleBar-inactiveForeground);
+	--dv-activegroup-hiddenpanel-tab-color: var(--vscode-titleBar-inactiveForeground);
+	--dv-inactivegroup-hiddenpanel-tab-color: var(--vscode-titleBar-inactiveForeground);
+	--dv-tab-divider-color: var(--vscode-titleBar-activeBackground);
+	--dv-separator-border: var(--vscode-editorGroup-border);
+	--dv-floating-border: var(--wa-border-width-s) solid var(--vscode-titleBar-border, var(--vscode-editorGroup-border));
+	--dv-floating-box-shadow: 0 0 8px 2px var(--vscode-widget-shadow);
+	--dv-tabs-and-actions-container-font-size: var(--wa-font-size-s);
+}
