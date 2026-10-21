@@ -2,7 +2,7 @@
 /**
  * Git review panel — a GitHub-Desktop-style changed-files + diff + commit surface, rendered in the SHELL's RHS chrome
  * (not the vscode SCM viewlet). Built on Web Awesome components (wa-checkbox / wa-textarea / wa-button / wa-badge) and
- * utility classes in a preact tree; what's left in theme/exceptions/git-panel.css is the rows' hover/current states and
+ * utility classes in a preact tree; what's left in theme/styles/git-panel is the rows' hover/current states and
  * the side-by-side diff renderer's grid. It's a pure hub consumer: it calls
  * `git.status` / `git.file` / `git.commit` (served by git-service.ts in the workbench realm) over the shell hub, and
  * refreshes on `git.changed`. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
@@ -23,7 +23,9 @@ import "theme/components/badge";
 // The theme (Web Awesome's layer order among it) first, so git-panel.css's `@layer app` is declared after it (the shell
 // imports this module before it imports the theme itself).
 import "theme/chrome";
-import "theme/exceptions/git-panel.css";
+import { gitPanelStyles } from "theme/styles/git-panel";
+
+gitPanelStyles();
 
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
 
