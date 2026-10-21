@@ -734,6 +734,82 @@ Each needs either `theme` as a dependency or a declared exemption:
    the shell imports it from there.~~ Done 2026-10-20, and layered (7.5).
 6. ~~The budget (7.6).~~ Done 2026-10-20.
 
+## 8. Stitches only, in this package, as components
+
+Decided 2026-10-21 (the user's direction): all of the app's CSS is Stitches unless it can't be, all of it lives in
+`packages/theme`, and the theme exports components (compositions of Web Awesome and Stitches) that a consumer can
+override and extend, instead of a consumer styling things itself. §7 confined the CSS; this changes what the theme
+hands out: no stylesheets and no `css()`, only components, recipes and tokens.
+
+### 8.1 What can't be Stitches
+
+Checked 2026-10-21. Stitches inserts its rules from JavaScript, into the document it runs in, so what it can't style
+is what has no JavaScript of ours, or isn't ours:
+
+- **Web Awesome's own stylesheets** and **dockview's** (vendors': loaded or adopted as CSS, in their layers).
+- **`index.html`'s first-paint rule** (the shell's background before any script runs): one rule.
+- **The game files the event sheet emits**: the game's CSS, written out as data (`extensions/event-sheet/library.ts`).
+- **The API's sign-in pages** (`packages/api/public/sign-in.css`) could be (they load a script) but would paint
+  unstyled until it runs. Left as the one declared CSS file unless a flash is acceptable there.
+
+Everything else can: the shell and admin (Preact), the workbench's views (vanilla DOM, in VS Code's document; a docked
+window gets them through `mirrorStyles`), the webviews (their policies allow `style-src 'unsafe-inline'`), the
+codehike diff (React 18), and the theme's own token files (`theme.css`, `vscode.css`: `globalCss` of custom
+properties, unlayered as now). Shadow parts are reachable the same way (`"&::part(input)"`).
+
+### 8.2 Shape: what the theme exports
+
+Consumers are three kinds of code: vanilla DOM (the workbench's views, the webviews), Preact (the shell, admin) and
+React (the diff). So a component can't be one framework's. Two kinds, by need:
+
+- **Recipes** (most of it): a named Stitches style with variants, for a Web Awesome element or plain markup, called
+  for a class name: `toolbar({ "density": "compact" })`. Framework-free (a class string fits `class=`, `className=`
+  and `element(tag, className)` alike). The markup stays the consumer's. Today's `app-*` classes become these, and so
+  does what's in each exception sheet, per surface (`theme/styles/<surface>`).
+- **Composed components** (where markup and behaviour repeat): a light-DOM custom element (`<app-window>`,
+  `<app-popover-panel>`) the theme defines from Web Awesome elements and recipes. Light DOM, not a shadow root, so
+  utilities, recipes and a consumer's override still cascade into it, and it works the same from every framework.
+  The pane window (`shell/window.ts` + `window.css`) is the first candidate; a split button the second.
+
+Override and extend, from the least to the most reach:
+
+1. **Variants**: the options a component offers (`size`, `tone`, `density`), defined in the theme.
+2. **Component tokens**: a recipe reads its values from its own custom properties, defaulting to Web Awesome's
+   (`--app-toolbar-padding: var(--wa-space-xs)`), so a subtree, a document or a brand retunes one without CSS:
+   Web Awesome's own pattern, and it reaches vanilla DOM and webviews too.
+3. **A use-site override**: `toolbar({ "css": { … } })`, Stitches' own one-off. It goes in a layer above every recipe
+   (`app.overrides`), so it wins by layer wherever it's inserted; `css-in-js-tokens` holds it to the tokens and the
+   budget counts it.
+4. **Extension**: a new recipe composed from one (`css(toolbar, { … })`), made in the theme, where it's reviewed.
+
+### 8.3 Rules
+
+- `theme/stitches` (`css`, `globalCss`, `keyframes`) is the theme's own: importing it outside `packages/theme` fails
+  (`webawesome/through-theme`, widened). Consumers import `theme/styles/*`, `theme/components/*` and the recipes.
+- A `.css` file anywhere but the declared few (8.1) fails; `theme/exceptions/` and `theme/sheet`'s `styleSheet` go
+  once the last sheet is converted.
+- The budget becomes two numbers: Stitches declarations (the theme's surface styles plus use-site overrides) and
+  `webawesome/*` disables. Recipes and components aren't budgeted: they're the vocabulary, not exceptions.
+- Lost in the move: `@eslint/css`'s checks (`use-baseline`, `no-invalid-properties`) apply to `.css` only. Extend
+  `css-in-js-tokens` to the property-validity half, or accept it.
+
+### 8.4 Order
+
+0. **Spike the shape** on two cases, used from Preact and from vanilla DOM: a recipe with variants, component tokens
+   and a use-site override (the toolbar / caption family), and a composed component (the pane window). Check that the
+   override wins by layer, tokens retune it, a docked window mirrors it, and a webview gets it.
+1. The shell's Stitches (227 declarations) into `theme/styles/shell*`; then the rule restricting `theme/stitches`.
+2. `recipes.css` into recipes.
+3. The exception sheets, one surface per commit, smallest first: rule-view, account, insights-monitor (webview),
+   rule-editor, window (as `<app-window>`), event-sheet (webview), admin, margin, architecture-view, pane-views,
+   git-panel.
+4. The token files into `globalCss`.
+5. The rules and the budget's new shape (8.3).
+
+Risks: everything rides on Stitches, which is finished, not maintained (1.2.8, May 2023). It's small and has no
+dependencies, so vendoring it into the theme is the fallback if it ever breaks. Everything styles after its script
+runs, which is already so for everything but the sign-in pages and the first paint.
+
 ## Open questions
 
 - ~~Is the per-document cost of loading Web Awesome components in the workbench iframe acceptable for initial load?~~
