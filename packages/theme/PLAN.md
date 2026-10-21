@@ -612,7 +612,7 @@ elements: code uses what `theme` exports and nothing else.
 
 ### 7.5 Stitches, repo-wide, through `theme`
 
-Done 2026-10-20, but for the layering decision below. As built:
+Done 2026-10-20, layered as Panda layers its own. As built:
 
 - `theme/stitches` (`src/stitches.ts`, TypeScript so the instance keeps its types; Vite builds it from source, as it does
   the theme's other files) is the one instance: the palette and `css`, `globalCss`, `keyframes`, `theme`. The theme
@@ -631,11 +631,23 @@ Done 2026-10-20, but for the layering decision below. As built:
   `openDockedWindow` calls it, and stops it when the window closes. Checked in Brave: a docked editor's tabs are square
   now, its window holding the eight styles. A rule Stitches inserts later isn't followed (in VS Code's document its
   styles are global ones made at boot).
-- **Open: layer it?** Stitches is unlayered today, the top of the cascade: that's how the shell's styles beat
-  dockview's CSS and Workbench.tsx's beat VS Code's. Layering it the Panda way costs: dockview's sheet (the shell
-  adopts it itself, `shell-dock.ts`) into a low `vendor` layer, one line; Workbench.tsx's VS Code overrides through a
-  named unlayered escape, since VS Code's CSS can't be layered; codehike styles inline, so nothing; and a visual pass
-  over the shell. In return precedence stops depending on specificity and insertion order.
+- **Layered** (decided 2026-10-20, as the spike above suggested). The order, lowest first, is theme/sheet's
+  `layerOrder()`, which `theme/stitches` puts first in its document's head: `vendor`, Web Awesome's layers, then `app`,
+  and in it `app.base` (`globalCss`), `app.recipes` (recipes.css), `app.styles` (`css()`, its variants and compound
+  variants), then the exception sheets' own rules (in `app` itself). So precedence follows the layers, not
+  specificity or insertion order: a Stitches class wins over a recipe and Web Awesome's utilities wherever it's
+  inserted.
+  - dockview's sheet (the shell adopts it, `shell-dock.ts`) is in `vendor`, so the shell's styles win over it by
+    layer. It used to win ties, its adopted sheet coming last; checked in Brave that no rule of the shell's lost to it
+    then (none of dockview's normal rules matches a shell element on a shared property at equal or higher specificity),
+    and the shell has no `!important` for dockview's 43 to outrank now that they're layered.
+  - VS Code's CSS isn't ours to layer, and unlayered CSS outranks every layer, so Workbench.tsx's two global styles
+    over it are `unlayeredGlobalCss`, the instance's one way out (css-in-js-tokens reads it too). Its mount class is
+    layered.
+  - index.html's first-paint rule (`html, body`: a dark background until the shell's styles come) was unlayered and
+    so outranked the shell's `globalCss` once that was layered: the body stayed #1e1e1e in light mode. It's in
+    `app.base` now, before the shell's, so theirs win.
+  - codehike styles inline, so nothing changes there.
 - Checked: ESLint 0 errors; tsc as before; the architecture suites pass (97).
 
 Decided 2026-10-20: Stitches is adopted repo-wide, wherever it helps (its variants, compound variants, token scales,

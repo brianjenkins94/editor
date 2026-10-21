@@ -743,7 +743,7 @@ const cssInJsTokens = {
 				}
 
 				for (const specifier of node.specifiers) {
-					if (specifier.type === "ImportSpecifier" && ["css", "globalCss", "keyframes"].includes(specifier.imported.name)) {
+					if (specifier.type === "ImportSpecifier" && ["css", "globalCss", "unlayeredGlobalCss", "keyframes"].includes(specifier.imported.name)) {
 						stitches.add(specifier.local.name);
 					}
 				}

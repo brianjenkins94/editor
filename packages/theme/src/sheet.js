@@ -8,15 +8,17 @@
  *
  * A sheet's rules are in the `app` layer, which has to come after Web Awesome's. Where Web Awesome's own sheets are
  * adopted (theme/vscode), they come after every `<style>` in the document, so the order is declared first in the
- * document's head, once: Web Awesome's own order (its layers.css), then `app`.
+ * document's head, once (`layerOrder`): `vendor` (the DOM we host that isn't ours: dockview's sheet), Web Awesome's own
+ * order (its layers.css), then `app`, and in it `app.base` (theme/stitches' globalCss), `app.recipes` (recipes.css),
+ * `app.styles` (theme/stitches' css). A sheet's own rules are in `app` itself, so they come after those three.
  */
 import layers from "@awesome.me/webawesome/dist/styles/layers.css?inline";
 
-/** Web Awesome's layers, in its order, then the app's. */
-const ORDER = layers.match(/@layer [^;{]+;/u)[0] + "\n@layer app;";
+/** The layers, lowest first: vendors', Web Awesome's in its order, then the app's. */
+const ORDER = ["@layer vendor;", layers.match(/@layer [^;{]+;/u)[0], "@layer app;", "@layer app.base, app.recipes, app.styles;"].join("\n");
 
-/** A `<style>` holding `css`, for `document`, whose head has the layer order first. */
-export function styleSheet(css, document = globalThis.document) {
+/** Put the layer order first in `document`'s head, once. */
+export function layerOrder(document = globalThis.document) {
 	if (document.head.querySelector("style[data-layer-order]") === null) {
 		const order = document.createElement("style");
 
@@ -24,6 +26,11 @@ export function styleSheet(css, document = globalThis.document) {
 		order.textContent = ORDER;
 		document.head.prepend(order);
 	}
+}
+
+/** A `<style>` holding `css`, for `document`, whose head has the layer order first. */
+export function styleSheet(css, document = globalThis.document) {
+	layerOrder(document);
 
 	return Object.assign(document.createElement("style"), { "textContent": css });
 }

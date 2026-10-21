@@ -18,7 +18,8 @@
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>editor</title>
-  <style>html, body { height: 100%; margin: 0; background: #1e1e1e; color: #d4d4d4; }</style>
+  <!-- The first paint, until the shell's global styles (theme/stitches' globalCss, in the same layer, after it) take over. -->
+  <style>@layer app.base { html, body { height: 100%; margin: 0; background: #1e1e1e; color: #d4d4d4; } }</style>
 </head>
 <body>
   <div id="app"></div>

@@ -65,13 +65,15 @@ The shapes the app kept rebuilding, one class each, in every theme entry: `app-f
 `app-toolbar` (a bar ruled off from what's under it), `app-code` (the code's font) and `app-caption` (a quiet uppercase
 label). Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, the theme's, or Stitches'. Compose them with Web
 Awesome's utilities. A surface's exception sheet imported as text (`?raw`) goes in through `styleSheet(css)` from
-`theme/sheet`, which puts the shared layer order (Web Awesome's, then `app`) first in the document once.
+`theme/sheet`, which puts the shared layer order first in the document once: `vendor` (dockview's sheet), Web Awesome's,
+then `app` (`app.base`, `app.recipes`, `app.styles`, then the sheets' own rules).
 
 ## CSS-in-JS: `theme/stitches`
 
 The app's one Stitches instance (`css`, `globalCss`, `keyframes`, `theme`, and the `palette` of tokens under the shell's
 names); nothing else imports `@stitches/core` (`webawesome/through-theme`). Its values are `--wa-*` tokens
-(`webawesome/css-in-js-tokens`). In VS Code's document, `mirrorStyles` from `theme/sheet` copies it, and the exception
+(`webawesome/css-in-js-tokens`). Its output is layered: `css()` in `app.styles`, `globalCss()` in `app.base`. Only
+`unlayeredGlobalCss` isn't, for what overrides CSS that isn't layered (VS Code's, in Workbench.tsx). In VS Code's document, `mirrorStyles` from `theme/sheet` copies it, and the exception
 sheets, into a docked window, which VS Code doesn't.
 
 ## What's left: `theme/exceptions/*`

@@ -153,7 +153,8 @@ function frameContent(frame: HTMLIFrameElement, onDispose?: () => void): IConten
 export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 	const sheet = new CSSStyleSheet();
 
-	sheet.replaceSync(dockviewCss);
+	// In the lowest layer (theme/sheet's order), so the shell's Stitches styles adjust dockview's by layer, not specificity.
+	sheet.replaceSync(`@layer vendor {\n${dockviewCss}\n}`);
 	document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 	injectDockGlobals();
 

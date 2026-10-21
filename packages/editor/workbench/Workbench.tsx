@@ -7,9 +7,10 @@
  * mounts into and hands it to `boot()` (via `onReady`), plus the few document-level styles our minimal host.html lacks.
  *
  * Styling is stitches (`theme`), which injects into this document's head — this whole tree is rendered *inside the
- * iframe* by `workbench-entry.tsx`.
+ * iframe* by `workbench-entry.tsx`. Its global styles here are over VS Code's CSS, which isn't layered and outranks every
+ * layer, so they're `unlayeredGlobalCss`: theme/stitches' one way out of the layers.
  */
-import { css, globalCss } from "theme/stitches";
+import { css, unlayeredGlobalCss } from "theme/stitches";
 
 const mountCss = css({ "position": "absolute", "inset": 0 });
 
@@ -26,7 +27,7 @@ const TITLE = `${MODERN} .part.editor > .content .editor-group-container > .titl
  * are. What the layout sizes in code stays as Modern UI has it: the tab bar's height, the activity bar's width, the status
  * bar's and the pane headers' heights.
  */
-const classicLook = globalCss({
+const classicLook = unlayeredGlobalCss({
 	// Tabs: Modern UI draws the active one as a filled, outlined card joined to the editor ("connected"); classic tabs are
 	// plain boxes with a border between them.
 	[`${TITLE}, ${TITLE} .tabs-and-actions-container`]: { "backgroundColor": "var(--vscode-editorGroupHeader-tabsBackground) !important" },
@@ -64,7 +65,7 @@ const classicLook = globalCss({
 	[`${MODERN} .part.statusbar .statusbar-item > a`]: { "padding": "0 8px !important", "borderRadius": "0 !important" }
 });
 
-const injectGlobals = globalCss({
+const injectGlobals = unlayeredGlobalCss({
 	// VS Code scopes the UI font to `.monaco-workbench-part` descendants only, so body-level
 	// overlays (context menus, the command palette) — which render in a bare `.context-view`
 	// appended to the body — miss it and fall back to the browser's serif default. Set the
