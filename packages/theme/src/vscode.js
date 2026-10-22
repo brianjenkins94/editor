@@ -13,13 +13,8 @@
 import layers from "@awesome.me/webawesome/dist/styles/layers.css?inline";
 import webAwesomeTheme from "@awesome.me/webawesome/dist/styles/themes/default.css?inline";
 import utilities from "@awesome.me/webawesome/dist/styles/utilities.css?inline";
-import { brandTokens, vscodePalette, vscodeTokens } from "./tokens";
-import { vscodeSkin } from "./vscode-skin";
-
-/** VS Code's theme types that are dark: the class it puts on `.monaco-workbench`, or a webview body's
- *  `data-vscode-theme-kind`. */
-const DARK = ["vs-dark", "hc-black"];
-const DARK_KINDS = ["vscode-dark", "vscode-high-contrast"];
+import { brandTokens } from "./tokens";
+import { vscodeTheme } from "./vscode-theme";
 
 const adopted = new WeakSet();
 
@@ -42,34 +37,8 @@ export function followVsCodeTheme(element) {
 
 	// (Stitches puts them in its own document's head; a docked window gets them from there, by mirrorStyles)
 	brandTokens();
-	vscodePalette();
-	vscodeTokens();
-	vscodeSkin();
 
-	// VS Code defines --vscode-font-family only in webviews. In its own document the UI font is the workbench element's
-	// (set by platform), so the bridge's font tokens read that.
-	const style = document.defaultView.getComputedStyle(element);
-
-	if (style.getPropertyValue("--vscode-font-family") === "") {
-		element.style.setProperty("--vscode-font-family", style.fontFamily);
-	}
-
-	function sync() {
-		const dark = DARK.some((type) => element.classList.contains(type)) || DARK_KINDS.includes(element.dataset.vscodeThemeKind);
-
-		element.classList.toggle("wa-dark", dark);
-		element.classList.toggle("wa-light", !dark);
-	}
-
-	sync();
-
-	const observer = new MutationObserver(sync);
-
-	observer.observe(element, { "attributes": true, "attributeFilter": ["class", "data-vscode-theme-kind"] });
-
-	return () => {
-		observer.disconnect();
-	};
+	return vscodeTheme(element);
 }
 
 /**

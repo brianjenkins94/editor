@@ -1018,11 +1018,18 @@ Then util-publish (lib, the user's go-ahead 2026-10-21), so the tarballs carry w
 Checked by typechecking a project against the unpacked tarballs (strict, the libraries' declarations checked too): the
 options, the element, and the recipes' variants are typed, and a misspelt attribute, handler or variant is an error.
 
+And the look (2026-10-21): theme/vscode-theme is the theme's look in one call, `vscodeTheme(element?)`: VS Code's palette
+(the fixed Default Light+/Dark+ copy), the bridge onto it, the skin, and Web Awesome's mode kept in step, with VS
+Code's theme kind inside VS Code (`.monaco-workbench`, a webview's marked `body`, where the live colours win) and with
+the system's mode anywhere else, where it also gives the root its font, text and background from the tokens (what Web
+Awesome's own theme would). It loads none of Web Awesome. theme/chrome and theme/vscode call it (each adding the brand
+and Web Awesome's sheets), and components/vscode-theme publishes it: importing it applies it where the page is.
+Checked in Brave with the published tarballs: a page without Web Awesome and one with it (VS Code's font and colours,
+the brand button VS Code's #007acc at 26px with a 4px corner, VS Code's checkbox), and a stand-in dark webview (the body
+`wa-dark`, the live editor background over the fixed copy); and the editor's shell and the admin app as before.
+
 Left:
 
-- The look for others: a published component reads `--wa-*`, so a page gets VS Code's look only with the theme's
-  tokens, and the theme ships its source as it is (TypeScript, Vite's `?inline`). Publishing the look as built CSS is
-  the next step if others are to use it.
 - `natives` maps tags only (`wa-checkbox` would need `<input type="checkbox">`): enough for `wa-button`, the one a
   component makes now.
 

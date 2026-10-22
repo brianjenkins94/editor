@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/vscode-theme",
+  "version": "0.0.0",
+  "description": "Web Awesome with VS Code's look: VS Code's default themes' colours (a fixed copy of Default Light+ and Dark+), Web Awesome's tokens mapped onto them, and its components drawn as VS Code's; inside VS Code or a webview it follows the live colour theme, anywhere else the system's mode. Web Awesome itself is optional: without it, the look's tokens still style the published components.",
+  "type": "module",
+  "exports": {
+    ".": "./src/vscode-theme.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stitches/core": "1.2.8"
+  },
+  "peerDependencies": {
+    "@awesome.me/webawesome": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "@awesome.me/webawesome": {
+      "optional": true
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "name": "theme",
   "version": "0.0.0",
-  "description": "The app's theme: (theme, and theme/chrome without Web Awesome's native styles) Web Awesome set up with its --wa-* design tokens retoned for the brand, following the system's light/dark mode, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, (theme/components/*) the Web Awesome components the app may use, the only way in to them, (theme/recipes, theme/app-window) the app's shapes and composed components, published from components/, and (theme/styles/*) each surface's own styles, all Stitches (PLAN.md).",
+  "description": "The app's theme: (theme, and theme/chrome without Web Awesome's native styles) Web Awesome set up with its --wa-* design tokens retoned for the brand, following the system's light/dark mode, (theme/vscode) mapped onto the active VS Code color theme in the workbench document, (theme/vscode-theme) the look alone, published from components/vscode-theme, (theme/components/*) the Web Awesome components the app may use, the only way in to them, (theme/recipes, theme/app-window) the app's shapes and composed components, published from components/, and (theme/styles/*) each surface's own styles, all Stitches (PLAN.md).",
   "type": "module",
   "scripts": {
     "test": "node --test test/budget.mjs test/web-awesome.mjs"
@@ -17,6 +17,7 @@
       "types": "./src/vscode-colors.d.ts",
       "default": "./src/vscode-colors.js"
     },
+    "./vscode-theme": "./src/vscode-theme.ts",
     "./stitches": "./src/stitches.ts",
     "./sheet": {
       "types": "./src/sheet.d.ts",
