@@ -717,6 +717,6 @@ export { OPEN_ARCHITECTURE_COMMAND, registerLiveArchitecture } from "./architect
 
 // Editor tabs whose content is the consumer's own DOM, by slot — a panel of the page around the workbench, dropped in.
 export type { HostedEditorOptions } from "./hosted-editor";
-export type { PaneEntry, PaneMark, PaneRender, PaneView } from "./pane";
-export { renderMarkdown, showPane, showPaneViews } from "./pane";
+export type { PaneEntry, PaneMark, PaneRender, PaneRunBall, PaneView } from "./pane";
+export { renderMarkdown, rollPaneBall, showPane, showPaneRuns, showPaneViews } from "./pane";
 export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

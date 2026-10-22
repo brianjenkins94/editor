@@ -122,7 +122,10 @@ rule*) — the same two buttons wherever the editor opens.
   the code. Moving a place keeps the rule's `added`. Each step is asked of BABLR once (2026-10-13): the bridge keeps
   each answer by the text, the texts before it and the place, so listing the rules again — the Rules tree, the margin,
   a save — asks only about a new burst, and the walk back to the latest text it's found in asks by its id alone.
-- **Who's watching: the `trigger` target** (designed 2026-10-22, not built; RUNNING.md, *Unattended runs*). Who
+- **Who's watching: the `trigger` target** (2026-10-22; RUNNING.md, *Unattended runs*). Built: the target in silo's
+  catalog (lib), every call's subject carrying it (`edit` in a live run, `you` otherwise), and *Rule…* on a line a live
+  run skipped or replayed, prefilled *trigger is edit*. Not built: halting, which needs runs nobody is looking at (a
+  live run skips). As designed: Who
   started a run is one of the facts a rule matches: `you` (any way in a person uses), `edit` (the editor, after an edit
   settles) or `ci`. A rule can then say what happens to a call when nobody's watching (*trigger is edit*, …, *then give
   result*), and one without the row applies to every run as before. No new action: when nobody can be asked, `ask`

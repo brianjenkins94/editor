@@ -160,5 +160,52 @@ export const marginStyles = stylesheet({
 	".notes-margin-tab:focus-visible": {
 		"outline": "var(--wa-border-width-s) solid var(--wa-color-focus)",
 		"outlineOffset": "calc(-1 * var(--wa-border-width-s))"
+	},
+	// A run's ball, rolling down the gutter column through the lines it ran (RUNNING.md, unattended runs): centred on its
+	// line, gliding line to line, fading as it settles.
+	".notes-margin-ball": {
+		"position": "absolute",
+		"left": "2px",
+		"width": "9px",
+		"height": "9px",
+		"borderRadius": "var(--wa-border-radius-circle)",
+		"background": "var(--margin-accent)",
+		"transition": "top var(--wa-transition-fast) linear, opacity var(--wa-transition-slow) ease",
+		"pointerEvents": "none"
+	},
+	".notes-margin-ball.placing": {
+		"transition": "none"
+	},
+	".notes-margin-ball.settled": {
+		"opacity": "0"
+	},
+	// The file's runs at the strip's end, a ball each, the one shown held: how it ended is its colour.
+	".notes-margin-runs": {
+		"display": "flex",
+		"alignItems": "center",
+		"gap": "var(--wa-space-3xs)",
+		"marginLeft": "auto"
+	},
+	".notes-margin-run": {
+		"width": "9px",
+		"height": "9px",
+		"padding": "0",
+		"border": "0",
+		"borderRadius": "var(--wa-border-radius-circle)",
+		"background": "var(--wa-color-neutral-fill-loud)",
+		"cursor": "pointer"
+	},
+	".notes-margin-run.ran": {
+		"background": "var(--margin-accent)"
+	},
+	".notes-margin-run.crashed": {
+		"background": "var(--wa-color-danger-fill-loud)"
+	},
+	".notes-margin-run.stopped": {
+		"background": "var(--wa-color-warning-fill-loud)"
+	},
+	".notes-margin-run[aria-pressed=\"true\"]": {
+		"outline": "var(--wa-border-width-m) solid var(--wa-color-focus)",
+		"outlineOffset": "var(--wa-border-width-s)"
 	}
 });

@@ -466,6 +466,14 @@ async function recordNow(capability: string, resource: string, value: unknown): 
 	await writeText(recordedUri(root), JSON.stringify(recorded, null, "\t") + "\n");
 }
 
+/** Every call's recorded result, by `<capability> <resource>`: what a run nobody's watching (a live run) gives a call
+ *  back in its place (RUNNING.md, unattended runs). */
+export async function recordedResults(): Promise<Record<string, unknown>> {
+	const root = siloRoot();
+
+	return root === undefined ? {} : Object.fromEntries(Object.entries((await loadRecorded(root)).results).map(([key, { value }]) => [key, value]));
+}
+
 /** What a call returned the last time it ran for real, and when — undefined if it's never been recorded. */
 export async function recordedResult(capability: string, resource: string): Promise<{ "value": unknown; "at": string } | undefined> {
 	const root = siloRoot();

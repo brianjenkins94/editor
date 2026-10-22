@@ -28,6 +28,10 @@
  * back when the pane goes), and the pane puts a strip of tabs there — the views the consumer gives (`showPaneViews`): the
  * margin as it is, and the program's other projections (PROJECTIONS.md). The strip is pinned: it stays at the top as the
  * code scrolls, the pane's rows passing under it.
+ *
+ * Runs (RUNNING.md, unattended runs): the strip ends with a ball for each run of the file the consumer keeps
+ * (`showPaneRuns`), the one shown held, a click picking another; and a run rolls a ball down the gutter column along the
+ * lines it went through (`rollPaneBall`), once, before it settles.
  */
 import { getService, ICodeEditorService } from "@codingame/monaco-vscode-api";
 import { CommandsRegistry } from "@codingame/monaco-vscode-api/monaco";
@@ -48,6 +52,20 @@ export interface PaneMark { "line": number; "kind": string; "title"?: string }
  *  `title` says what it will be). */
 export interface PaneView { "id": string; "label": string; "title"?: string; "disabled"?: boolean }
 
+/** A run of a file, a ball at the end of the strip: `title` on hover, `state` how it ended (its class: `ran`, `crashed`,
+ *  `stopped`), `picked` the one shown. */
+export interface PaneRunBall { "id": string; "title": string; "state"?: string; "picked"?: boolean }
+
+/** Each file's runs, and what to do when one's picked, by URI. */
+const runsOf = new Map<string, { "runs": PaneRunBall[]; "pick": (id: string) => void }>();
+
+/** The run each file's ball last rolled for, by URI: a draw of the same run doesn't roll it again. */
+const rolled = new Map<string, string>();
+
+/** A ball's roll: at most this long however many lines a run went through, and at most this long a line. */
+const ROLL_MS = 1600;
+const STEP_MS = 110;
+
 /** The views every pane's strip offers, the one shown, and what to do when another's chosen. */
 let views: { "list": PaneView[]; "active": string; "select": (id: string) => void } = { "list": [], "active": "", "select": () => undefined };
 
@@ -62,6 +80,8 @@ const frames = new Map<monaco.editor.ICodeEditor, Frame>();
 let started: Promise<void> | undefined;
 
 const DIVIDER_KEY = "pane.divider";
+/** The code's room by default (the divider not dragged), however short its lines: this many columns, or 40% of the way. */
+const CODE_COLUMNS = 60;
 /** Where the divider is, as a share of the width past the line numbers (undefined: past the longest line). */
 let divider = ((): number | undefined => {
 	try {
@@ -113,6 +133,12 @@ class Frame implements monaco.editor.IOverlayWidget {
 	private readonly gutter = document.createElement("div");
 	private readonly gutterWidget: monaco.editor.IOverlayWidget = { "getId": () => "notes-margin-gutter", "getDomNode": () => this.gutter, "getPosition": () => null };
 	private marks: { "line": number; "element": HTMLElement }[] = [];
+	/** A run's ball in the gutter column, the line it's on (none: hidden), and the step it takes next. */
+	private readonly ball = document.createElement("div");
+	private ballLine: number | undefined;
+	private rolling: ReturnType<typeof setTimeout> | undefined;
+	/** The file's runs, at the strip's end. */
+	private readonly runs = document.createElement("div");
 	private cells: Cell[] = [];
 	/** The cards drawn around groups of lines, behind the cells. */
 	private groups: { "fromLine": number; "toLine": number; "element": HTMLElement }[] = [];
@@ -129,6 +155,10 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.sash.className = "notes-margin-sash";
 		this.sash.title = "Drag to move the divider";
 		this.gutter.className = "notes-margin-gutter";
+		this.ball.className = "notes-margin-ball";
+		this.ball.hidden = true;
+		this.gutter.append(this.ball);
+		this.runs.className = "notes-margin-runs";
 		this.tabs.className = "notes-margin-tabs";
 		this.tabs.setAttribute("role", "tablist");
 		this.element.append(this.sash, this.tabs);
@@ -176,7 +206,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 	/** The strip's tabs, as `views` has them now. */
 	public renderTabs(): void {
 		this.tabs.hidden = views.list.length === 0;
-		this.tabs.replaceChildren(...views.list.map((view) => {
+		this.tabs.replaceChildren(this.runs);
+		this.tabs.prepend(...views.list.map((view) => {
 			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
 			const tab = document.createElement("button");
 
@@ -199,6 +230,63 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 			return tab;
 		}));
+	}
+
+	/** The file's runs at the strip's end, a ball each (oldest first), `pick` called with another's id when it's clicked. */
+	public renderRuns(list: PaneRunBall[], pick: (id: string) => void): void {
+		this.runs.replaceChildren(...list.map((run) => {
+			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+			const ball = document.createElement("button");
+
+			ball.className = `notes-margin-run${run.state === undefined ? "" : ` ${run.state}`}`;
+			ball.type = "button";
+			ball.title = run.title;
+			ball.setAttribute("aria-label", run.title);
+			ball.setAttribute("aria-pressed", String(run.picked === true));
+			ball.addEventListener("click", () => {
+				if (run.picked !== true) {
+					pick(run.id);
+				}
+			});
+
+			return ball;
+		}));
+	}
+
+	/** Roll the ball down the gutter column through `lines` (0-based, in the order a run went), then let it settle. */
+	public roll(lines: number[]): void {
+		clearTimeout(this.rolling);
+
+		if (lines.length === 0) {
+			return;
+		}
+
+		const step = Math.max(16, Math.min(STEP_MS, Math.floor(ROLL_MS / lines.length)));
+		let index = 0;
+		const next = (): void => {
+			if (index < lines.length) {
+				this.ballLine = lines[index];
+				index += 1;
+				this.placeBall();
+				this.rolling = setTimeout(next, step);
+			} else {
+				this.ball.classList.add("settled");
+				this.rolling = setTimeout(() => {
+					this.ball.hidden = true;
+					this.ballLine = undefined;
+				}, 600);
+			}
+		};
+
+		// (from its first line, without gliding there from wherever it last settled)
+		this.ball.classList.remove("settled");
+		this.ball.classList.add("placing");
+		this.ballLine = lines[0];
+		this.ball.hidden = false;
+		this.placeBall();
+		void this.ball.offsetTop;
+		this.ball.classList.remove("placing");
+		next();
 	}
 
 	/** Every frame laid out again (the divider moved). */
@@ -282,6 +370,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 	}
 
 	public dispose(): void {
+		clearTimeout(this.rolling);
 		this.clear();
 		this.resize.disconnect();
 
@@ -387,11 +476,24 @@ class Frame implements monaco.editor.IOverlayWidget {
 		}
 
 		this.cells = [];
-		this.gutter.replaceChildren();
+		this.gutter.replaceChildren(this.ball);
 		this.groups = [];
 		this.marks = [];
 		this.element.replaceChildren(this.sash, this.tabs);
 		this.mark(undefined);
+	}
+
+	/** The ball beside its line's first row, as the editor scrolls. */
+	private placeBall(): void {
+		if (this.ballLine === undefined || this.ballLine >= (this.editor.getModel()?.getLineCount() ?? 0)) {
+			return;
+		}
+
+		const lineHeight = this.editor.getOption(monaco.editor.EditorOption.lineHeight);
+
+		// (centred on the line's first row: the ball's own height is the theme's)
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside the line the run is on, as the editor scrolls
+		this.ball.style.top = `${this.editor.getTopForLineNumber(this.ballLine + 1) - this.editor.getScrollTop() + (lineHeight - this.ball.offsetHeight) / 2}px`;
 	}
 
 	/** Mark `entry`'s span in the editor (or none). */
@@ -422,7 +524,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 	}
 
 	/** Where everything goes now: the frame at the divider (by default past the longest line, but no further than 60% of
-	 *  the way), the code wrapping there if it wraps, each cell beside its span as the editor scrolls, the cursor's lit. */
+	 *  the way, and no nearer than CODE_COLUMNS), the code wrapping there if it wraps, each cell beside its span as the editor scrolls, the cursor's lit. */
 	/** Where line `line` (0-based) ends: its last wrapped row's bottom, not counting a zone after it. */
 	private bottomOf(line: number): number {
 		const editor = this.editor as unknown as { "getBottomForLineNumber"?: (line: number, includeViewZones?: boolean) => number };
@@ -447,7 +549,9 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 		const right = layout.width - layout.minimap.minimapWidth - layout.verticalScrollbarWidth;
 		const span = right - layout.contentLeft;
-		const left = layout.contentLeft + (divider === undefined ? Math.min((longest + 3) * font.typicalHalfwidthCharacterWidth, span * 0.6) : span * divider);
+		// (but never less than room to write in — a blank file's longest line is none — of CODE_COLUMNS, or 40% of the way)
+		const room = Math.min(CODE_COLUMNS * font.typicalHalfwidthCharacterWidth, span * 0.4);
+		const left = layout.contentLeft + (divider === undefined ? Math.min(Math.max((longest + 3) * font.typicalHalfwidthCharacterWidth, room), span * 0.6) : span * divider);
 		const cursor = (this.editor.getPosition()?.lineNumber ?? 0) - 1;
 
 		const lineHeight = this.editor.getOption(monaco.editor.EditorOption.lineHeight);
@@ -474,6 +578,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside its line, as tall as it wraps to
 			Object.assign(mark.element.style, { "top": `${top - this.editor.getScrollTop()}px`, "height": `${this.bottomOf(mark.line) - top}px` });
 		}
+
+		this.placeBall();
 
 		for (const cell of this.cells) {
 			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside its span, as the editor scrolls
@@ -553,6 +659,39 @@ function sync(editor: monaco.editor.ICodeEditor): void {
 	}
 
 	frame.show(pane.entries, pane.render, pane.marks, pane.groups);
+
+	const runs = runsOf.get(editor.getModel()?.uri.toString() ?? "");
+
+	frame.renderRuns(runs?.runs ?? [], runs?.pick ?? (() => undefined));
+}
+
+/** The frames of every editor showing `uri`. */
+function framesOf(uri: string): Frame[] {
+	return [...frames].filter(([editor]) => editor.getModel()?.uri.toString() === uri).map(([, frame]) => frame);
+}
+
+/** The runs of `uri` (a file URI's string) the pane's strip ends with, a ball each (oldest first) — `pick` called with
+ *  another's id when it's clicked — now and when an editor opens it. */
+export function showPaneRuns(uri: string, runs: PaneRunBall[], pick: (id: string) => void): void {
+	runsOf.set(uri, { "runs": runs, "pick": pick });
+
+	for (const frame of framesOf(uri)) {
+		frame.renderRuns(runs, pick);
+	}
+}
+
+/** Roll a ball down the gutter column of every editor showing `uri`, through `lines` (0-based, the order a run went) —
+ *  once for each run `id`: a draw of the same run doesn't roll it again. */
+export function rollPaneBall(uri: string, id: string, lines: number[]): void {
+	if (rolled.get(uri) === id) {
+		return;
+	}
+
+	rolled.set(uri, id);
+
+	for (const frame of framesOf(uri)) {
+		frame.roll(lines);
+	}
 }
 
 /** Show `entries` beside every editor showing `uri` (a file URI's string), each rendered by `render` — now and when one

@@ -40,8 +40,11 @@ A debugger is a runtime: what it reports goes in the margin, the evidence and th
   (waiting, nothing to step from).
 - **Requests:** `decide` (a capability stop's answer, with the policy from now on), `stdin`, `getCoverage`, and `pace`
   for a debugger with a virtual clock.
-- **Configuration:** `__policy` (the policy its gated calls are decided by), `__runId` (its run), `__live` (a live run:
-  no effects), `__startedBy: "terminal"` (its output printed there, its stdin read from there).
+- **Configuration:** `__policy` (the policy its gated calls are decided by — a call's subject carries `trigger`: `edit`
+  in a live run, else `you`), `__runId` (its run), `__live` (a live run: no effects, nobody asked), `__recorded` (a live
+  run's: what calls returned when they last ran for real, by `<capability> <resource>` — given back where it would skip
+  the call, the value told as `given`, the effect decided `recorded`), `__startedBy: "terminal"` (its output printed
+  there, its stdin read from there).
 
 **Dogfooded:** tsval tells all of it through the contract; the bridge's debug-events.ts reads every debugger's the one
 way, capability-stops.ts says what each answer at a capability stop means, and debug-control.ts drives any session for
@@ -211,7 +214,11 @@ interface PaneContent {
 	items: PaneItem[];        // beside the code, each level with its lines
 	groups?: PaneGroup[];     // cards drawn around spans of lines (the steps)
 	marks?: PaneMark[];       // the gutter column, left of the code (coverage, a run's end, placed rules)
+	runs?: PaneRun[];         // the runs kept of the file: a ball each at the strip's end, the one shown held
+	path?: PanePath;          // where the shown run went: a ball rolls down the gutter along it, once per id
 }
+interface PaneRun { id: string; title: string; state?: "ran" | "crashed" | "stopped"; picked?: boolean; command: PaneCommand }   // a click picks it
+interface PanePath { id: string; at: PaneAt[] }   // a statement's place each, in the order the run went
 ```
 
 A provider tells core its content changed with the command `editor.pane.refresh(view, uri?)` — commands cross extension

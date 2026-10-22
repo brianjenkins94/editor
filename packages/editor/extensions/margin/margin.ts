@@ -48,7 +48,7 @@
  */
 import type { AskEvent, CapabilityChoice, EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
-import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem } from "@brianjenkins94/editor-api/pane";
+import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
@@ -67,7 +67,7 @@ import { parseInputs } from "./inputs";
 type CapabilityAsk = Omit<AskEvent, "file" | "source">;
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
-interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean }
+interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean; "unmade"?: string }
 
 /** What a rule gives a file's process.argv: the rule, and its values, each a run's arguments. */
 interface Given { "rule": Rule; "values": string[][] }
@@ -80,7 +80,7 @@ interface Cell { "text": string; "kind": string }
 
 /** A session's values, and what's picked in them: a function's call (by `function:line`; none, its latest) and a held
  *  column. */
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors }
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at"?: number; "done"?: boolean; "end"?: RunEnd & { "anchors"?: Anchors }; "live"?: boolean }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
@@ -104,8 +104,18 @@ const margins = new Map<string, MarginState>();
 /** When each file's latest batch of values came (inline values wait for a stop's to come in). */
 const batchedAt = new Map<string, number>();
 
-/** The latest session's values, per file URI — kept once it ends, until the next session of the file tells its own. */
+/** The session shown, per file URI: the latest, or one picked from those kept — its values kept once it ends, until the
+ *  next session of the file tells its own. */
 const sessions = new Map<string, Session>();
+/** Each file's runs kept, oldest first, a ball each at the Margin's top (RUNNING.md, unattended runs): their values, and
+ *  how each ended — the record of what things were in that run. */
+const kept = new Map<string, Session[]>();
+/** How many runs of a file are kept. */
+const KEPT = 8;
+/** The live runs going (LIVE-VALUES.md): nobody's watching them, so what they didn't make has *Rule…* for such runs. */
+const liveSessions = new Set<string>();
+/** How many of a run's steps its ball rolls through, at most. */
+const MAX_PATH = 400;
 /** Each file's marks for the margin's gutter column (coverage), per file URI. */
 const marked = new Map<string, PaneMark[]>();
 /** Where each file's last run's work went (coverage.ts: tsval's profile), on the lines its statements are on now. */
@@ -148,7 +158,7 @@ function kindOf(value: LiveValue): string {
 		return "argv";
 	}
 
-	if (value.kind === "branch" || value.kind === "set" || value.kind === "skip") {
+	if (value.kind === "branch" || value.kind === "set" || value.kind === "skip" || value.kind === "given") {
 		return value.kind;
 	}
 
@@ -247,9 +257,12 @@ function rowOfLine(line: number, lineValues: LiveValue[], ordered: Map<string, s
 	const binds = !named && (only.kind === "bind" || only.kind === "set" || only.kind === "input");
 	const label = labelOf(only, named, binds);
 	const group = `${call}/${depth}`;
+	// A call the run didn't make there — skipped, or given its recording: `<capability> <resource>`.
+	const unmade = lineValues.findLast((value) => value.kind === "skip" || value.kind === "given")?.value;
+	const notMade = unmade === undefined ? {} : { "unmade": unmade };
 
 	if (depth === 0) {
-		return { "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth), ...only.kind === "input" ? { "input": true } : {} };
+		return { "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth), ...only.kind === "input" ? { "input": true } : {}, ...notMade };
 	}
 
 	const turns = ordered.get(group) ?? [];
@@ -265,7 +278,8 @@ function rowOfLine(line: number, lineValues: LiveValue[], ordered: Map<string, s
 		}),
 		"group": group,
 		"widths": [],
-		...anchorOf(inDepth)
+		...anchorOf(inDepth),
+		...notMade
 	};
 }
 
@@ -398,7 +412,7 @@ async function ruleAtStop(session: string, ask: CapabilityAsk): Promise<void> {
 				"then": [{ "action_id": "give", "target_id": "result", "argument": recorded.value }]
 			}
 		},
-		"judge": { "kind": "call", "capability": ask.capability, "resource": ask.resource, "resolved": ask.resolved, "canGive": true, ...recorded === null ? {} : { "recorded": recorded } },
+		"judge": { "kind": "call", "trigger": "you", "capability": ask.capability, "resource": ask.resource, "resolved": ask.resolved, "canGive": true, ...recorded === null ? {} : { "recorded": recorded } },
 		"buttons": [
 			{ "id": "once", "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time" },
 			{ "id": "save", "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it" },
@@ -412,6 +426,30 @@ async function ruleAtStop(session: string, ask: CapabilityAsk): Promise<void> {
 		await (given === undefined ? choose(session, onceChoice(decisionOf(answer.rule))) : choose(session, "give-once", undefined, given.value));
 	} else if (answer?.button === "save") {
 		await choose(session, "rule", answer.rule);
+	}
+}
+
+/** Rule… on a call a live run skipped or replayed — a run after an edit, which nobody is watching (RUNNING.md, unattended
+ *  runs): a rule about such runs' calls like it — *trigger is edit*, its capability and resource, then give what it
+ *  returned when it last ran for real (when that's recorded), else skip — then *Save as rule* (in my policy; the file runs
+ *  again by it), *Cancel*. */
+async function ruleUnattended(uri: string, capability: string, resource: string): Promise<void> {
+	const recorded = await recordedOf(capability, resource).catch(() => null) ?? null;
+	const answer = await edit(`${uri}#unattended:${capability} ${resource}`, {
+		"rule": {
+			"when": { "logicalType_id": "all", "predicates": [{ "target_id": "trigger", "operator_id": "is", "argument": "edit" }, { "target_id": "capability", "operator_id": "is", "argument": capability }, { "target_id": "resource", "operator_id": "is", "argument": resource }] },
+			"then": recorded === null ? [{ "action_id": "skip" }] : [{ "action_id": "give", "target_id": "result", "argument": recorded.value }]
+		},
+		"judge": { "kind": "call", "trigger": "edit", "capability": capability, "resource": resource, "resolved": true, "canGive": true, ...recorded === null ? {} : { "recorded": recorded } },
+		"buttons": [
+			{ "id": "save", "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json): runs after an edit decide this call by it" },
+			CANCEL
+		]
+	});
+
+	if (answer?.button === "save") {
+		await rulesSet(undefined, answer.rule);
+		await Promise.resolve(vscode.commands.executeCommand("run.live.again", uri)).catch(() => undefined);
 	}
 }
 
@@ -737,6 +775,23 @@ function mockOf(uri: string, row: Row, session: Session | undefined): PaneAction
 	return { "title": "Mock…", "command": "margin.mockVariable", "arguments": [uri, row.name, row.at ?? null, (row.inline ?? row.cells.findLast((each) => each !== undefined))?.text ?? "", (row.inline ?? row.cells.findLast((each) => each !== undefined))?.kind ?? ""], "tooltip": "Give it another value: at this stop, or by a rule, each time the program gets here", ...making.has(key) || row.at === undefined || session?.anchors === undefined ? { "disabled": true } : {} };
 }
 
+/** A row's *Rule…* for a call a live run didn't make — skipped, or given its recording (`replayed`): what runs after an
+ *  edit do with it. None for any other row, or a run someone was watching. */
+function unattendedOf(uri: string, row: Row, session: Session | undefined): PaneAction | undefined {
+	// (a run someone was watching skipped a call because they said so, at its stop)
+	const text = session?.live === true ? row.unmade : undefined;
+
+	if (text === undefined || text === "") {
+		return undefined;
+	}
+
+	const [capability, ...rest] = text.split(" ");
+	const resource = rest.join(" ");
+	const key = `${uri}#unattended:${capability} ${resource}`;
+
+	return { "title": "Rule…", "command": "margin.unattended", "arguments": [uri, capability, resource], "tooltip": making.has(key) ? "Its rule is open in the Rule view" : "What runs after an edit, which nobody is watching, do with this call: a rule", ...making.has(key) ? { "disabled": true } : {} };
+}
+
 /** A row a run put on a line, as data: a function's call picker, its label, the line's own value, a column a turn of a
  *  loop (one held lit), and *Mock…* — process.argv's, or a variable's (made in the Rule view). */
 function rowItem(uri: string, row: Row, index: number, session: Session | undefined): PaneItem {
@@ -748,7 +803,7 @@ function rowItem(uri: string, row: Row, index: number, session: Session | undefi
 	};
 
 	const given = row.input === true ? givenArgv.get(uri) : undefined;
-	const mock = mockOf(uri, row, session);
+	const actions = [mockOf(uri, row, session), unattendedOf(uri, row, session)].filter((action) => action !== undefined);
 
 	return {
 		"id": `values:${index}`,
@@ -761,7 +816,7 @@ function rowItem(uri: string, row: Row, index: number, session: Session | undefi
 				? row.cells.map((cell, column) => (cell === undefined ? { "text": "" } : { "text": cell.text, "kind": cellKind(cell.kind), "picked": session?.held === `${row.group}#${column}`, "command": { "title": "Hold", "command": "margin.hold", "arguments": [uri, `${row.group}#${column}`] } }))
 				: [{ "text": given.values.map(commandLine).join("  ·  "), "kind": "given", "title": `Given by a rule in your policy${given.values.length > 1 ? `: ${given.values.length} runs, one after another` : ""}` }]
 		},
-		...mock === undefined ? {} : { "actions": [mock] }
+		...actions.length === 0 ? {} : { "actions": actions }
 	};
 }
 
@@ -903,7 +958,57 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 		return undefined;
 	}
 
-	return { "items": items, "groups": groups, "marks": marks };
+	return { "items": items, "groups": groups, "marks": marks, ...runsShown(uri, session) };
+}
+
+/** The file's runs kept, and where the one shown went once it's finished (its ball rolls along it). */
+function runsShown(uri: string, session: Session | undefined): Pick<PaneContent, "runs" | "path"> {
+	const runs = runsOf(uri, session);
+
+	return { ...runs.length === 0 ? {} : { "runs": runs }, ...session?.done === true ? { "path": pathOf(session) } : {} };
+}
+
+/** How a kept run ended, as its ball's colour: ran to its end, crashed, stopped short — none while it's running. */
+function stateOf(run: Session): PaneRun["state"] {
+	if (run.done !== true) {
+		return undefined;
+	}
+
+	if (run.end === undefined) {
+		return "ran";
+	}
+
+	return run.end.kind === "crashed" ? "crashed" : "stopped";
+}
+
+/** How a kept run went, in words: as its state says, or still running. */
+const HOW: Record<string, string> = { "ran": "ran to its end", "crashed": "crashed", "stopped": "stopped short" };
+
+/** A file's kept runs, a ball each: when it ran and how it went on hover, the one shown held, a click picking it. */
+function runsOf(uri: string, shown: Session | undefined): PaneRun[] {
+	return (kept.get(uri) ?? []).map((run) => {
+		const state = stateOf(run);
+		const how = state === undefined ? "running" : HOW[state];
+		const when = run.at === undefined ? "" : `${new Date(run.at).toLocaleTimeString()} — `;
+
+		return { "id": run.id, "title": `${when}${run.live === true ? "after an edit, " : ""}${how}, ${run.values.length} value${run.values.length === 1 ? "" : "s"}`, ...state === undefined ? {} : { "state": state }, "picked": run === shown, "command": { "title": "Show this run", "command": "margin.pickRun", "arguments": [uri, run.id] } };
+	});
+}
+
+/** Where a run went, a step a value (in the order they came: the order it ran), each where it was in the text that ran
+ *  — the same line twice running counted once. */
+function pathOf(run: Session): PanePath {
+	const at: PaneAt[] = [];
+	let line: number | undefined;
+
+	for (const value of run.values) {
+		if (value.line !== line && at.length < MAX_PATH) {
+			({ line } = value);
+			at.push(placeOf(run.anchors, value.line, value.at));
+		}
+	}
+
+	return { "id": run.id, "at": at };
 }
 
 /** Where `uri`'s last run's work went (coverage.ts: tsval's profile, on the lines its statements are on now), for the
@@ -964,6 +1069,34 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 		}
 
 		await editing(uri, ruleAtStop(asking.session, asking.ask));
+	});
+	// A run kept, picked (its ball at the Margin's top): its values shown, how it ended, and its ball rolled again.
+	vscode.commands.registerCommand("margin.pickRun", (value: unknown, id: unknown) => {
+		const uri = uriArg(value);
+		const run = kept.get(uri)?.find((each) => each.id === id);
+
+		if (run === undefined) {
+			throw new Error("that run isn't kept any more");
+		}
+
+		sessions.set(uri, run);
+
+		if (run.end === undefined) {
+			ends.delete(uri);
+		} else {
+			ends.set(uri, run.end);
+		}
+
+		draw(uri);
+	});
+	vscode.commands.registerCommand("margin.unattended", async (value: unknown, capability: unknown, resource: unknown) => {
+		const uri = uriArg(value);
+
+		if (typeof capability !== "string" || typeof resource !== "string") {
+			throw new TypeError("margin.unattended: a call's capability and resource");
+		}
+
+		await editing(uri, ruleUnattended(uri, capability, resource));
 	});
 	vscode.commands.registerCommand("margin.mockArgv", async (value: unknown, text: unknown) => {
 		const uri = uriArg(value);
@@ -1103,8 +1236,11 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 		// A new session over the file replaces the last one's values, and how the last run ended — as a report of every
 		// value so far (`replace`: a preview's recorded stops) replaces its own last.
 		if (session?.id !== id || replace === true) {
-			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map() };
+			const runs = (kept.get(uri) ?? []).filter((each) => each.id !== id);
+
+			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map(), "at": Date.now(), ...liveSessions.has(id) ? { "live": true } : {} };
 			sessions.set(uri, session);
+			kept.set(uri, [...runs, session].slice(-KEPT));
 			ends.delete(uri);
 		}
 
@@ -1128,16 +1264,24 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 	};
 
 	// The run's end: how it ended goes on its line. Its values stay — the margin shows the file's last run until the next
-	// run of it tells its own (a live run as typing pauses, LIVE-VALUES.md), following its code through edits.
+	// run of it tells its own (a live run on a save or its interval, LIVE-VALUES.md), following its code through edits.
 	const endedCame = (session: string, { file, source, end }: Partial<EndedEvent>): void => {
 		// How it ended — crashed, or stopped on a line — replacing the last run's; a run that finished clears it.
 		if (typeof file === "string") {
 			const ran = sessions.get(uriOf(file));
+			const run = kept.get(uriOf(file))?.find((each) => each.id === session);
+			const ending = end === undefined ? undefined : { ...end, "anchors": anchorsFor(file, source, ran?.id === session ? ran : run) };
 
-			if (end === undefined) {
+			if (ending === undefined) {
 				ends.delete(uriOf(file));
 			} else {
-				ends.set(uriOf(file), { ...end, "anchors": anchorsFor(file, source, ran?.id === session ? ran : undefined) });
+				ends.set(uriOf(file), ending);
+			}
+
+			// (kept with the run: picked again, it says how it ended — and its ball rolls, now that its path is whole)
+			if (run !== undefined) {
+				run.done = true;
+				run.end = ending;
 			}
 
 			redraw(uriOf(file));
@@ -1235,8 +1379,15 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 
 	// A debugger that tells no `ended`: the program's values end with its session. And a question no one answered here
 	// goes with it.
+	vscode.debug.onDidStartDebugSession((session) => {
+		if (session.configuration["__live"] === true) {
+			liveSessions.add(session.id);
+		}
+	});
 	vscode.debug.onDidTerminateDebugSession((session) => {
 		const { program } = session.configuration;
+
+		liveSessions.delete(session.id);
 
 		if (!told.delete(session.id) && session.type !== "production" && typeof program === "string") {
 			endedCame(session.id, { "file": program });

@@ -97,7 +97,16 @@ code, but stepping back needs stopping first, and the page can't stop. Not built
 
 (The browser's DevTools remain for a preview popped out into its own window — the user's, outside the editor.)
 
-## Unattended runs (designed 2026-10-22, not built)
+## Unattended runs (designed 2026-10-22; partly built)
+
+**Built (2026-10-22), on live runs** (LIVE-VALUES.md, *Live runs*), the unattended runs the editor already had: they run
+on a save and on an interval rather than on a typing pause; every gated call's subject carries `trigger` (`edit` in a
+live run, `you` otherwise; silo's catalog lists it); a call a live run would skip is given what it returned when it last
+ran for real, if that's recorded; the line of a call it skipped or replayed has *Rule…* (prefilled *trigger is edit*);
+and each run is kept, a ball you can pick, its route rolled down the gutter. Decided: in a live run — the file in front
+of you, its skipped lines marked — a call with no recording is **skipped**, as before; a run you aren't looking at
+**halts** (below). Not built: those other runs (what an edit reached elsewhere, the tests that reach it), so halting
+isn't either; the per-run file-system layer; recordings keyed by the whole request.
 
 Runs the editor starts on its own after an edit, so you see how a change affects what already ran without pressing
 Run, and without a testing UI. They're runs like any other: the same session, margin, run log and evidence. The
@@ -201,7 +210,7 @@ workspace runtime the bridge exports to any debugger (EXTENSION-POINTS.md, 2), a
 | `npm run x`, a task, a Service in the ▷ menu | The script, through the terminal, so each `node` in it is a run as above; `vite` starts the dev server as a run |
 | An agent's `debug_start` | Run, returning at the first stop |
 | *Explore Orderings* | Run every ordering (as now), then Run the one picked |
-| An edit, once it settles (designed, not built) | Run again what earlier runs and tests reached of it, unattended (*Unattended runs*) |
+| A save (Ctrl+S), or the interval while the file differs from its last run | A live run of the file (LIVE-VALUES.md), unattended; later, what earlier runs and tests reached of it too (*Unattended runs*) |
 
 ## What goes
 

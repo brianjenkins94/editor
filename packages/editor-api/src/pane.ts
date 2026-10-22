@@ -50,8 +50,17 @@ export interface PaneGroup { "id": string; "at": PaneAt; "label": string; "detai
 /** A mark in the gutter column left of the code, on `at`'s first line: `title` on hover. */
 export interface PaneMark { "at": PaneAt; "kind": "ran" | "partial" | "missed" | "crashed" | "stopped" | "rule" | "rule-uncertain"; "title"?: string }
 
-/** What a view shows of a file. */
-export interface PaneContent { "items": PaneItem[]; "groups"?: PaneGroup[]; "marks"?: PaneMark[] }
+/** A run kept of the file (a ball on the pane's first line, oldest first): `title` on hover, `state` how it ended (ran to
+ *  its end, crashed, stopped short), `picked` the one the view shows, `command` run on a click (picks it). */
+export interface PaneRun { "id": string; "title": string; "state"?: "ran" | "crashed" | "stopped"; "picked"?: boolean; "command": PaneCommand }
+
+/** Where a run went, in the order it went (a statement's place each, `at`): the editor rolls a ball down the gutter
+ *  along it once for each `id` it's given — a new run, or one picked — then lets it settle. */
+export interface PanePath { "id": string; "at": PaneAt[] }
+
+/** What a view shows of a file: its items, cards, gutter marks — and, for a view of runs, the runs kept (`runs`) and the
+ *  shown one's `path`. */
+export interface PaneContent { "items": PaneItem[]; "groups"?: PaneGroup[]; "marks"?: PaneMark[]; "runs"?: PaneRun[]; "path"?: PanePath }
 
 /** A view, as a manifest declares it (`contributes.paneViews`). */
 export interface PaneViewDeclaration { "id": string; "label"?: string; "title"?: string; "into"?: string }

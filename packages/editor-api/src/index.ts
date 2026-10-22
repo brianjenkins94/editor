@@ -50,8 +50,9 @@ export interface LiveValue {
 	"value": string;
 	/** `set`: a value set by hand at a stop, not by the program. `input`: what the program read from outside —
 	 *  process.argv, as a command line — on the first line that reads it. `skip`: a call that wasn't made, its capability
-	 *  and resource the value. */
-	"kind": "bind" | "return" | "branch" | "set" | "input" | "skip";
+	 *  and resource the value. `given`: a call a live run gave what it returned when it last ran for real, instead of
+	 *  making it (its capability and resource the value). */
+	"kind": "bind" | "return" | "branch" | "set" | "input" | "skip" | "given";
 	/** The call it happened in (a `LiveCall.id`); 0 for the top level. */
 	"call": number;
 	"turns": number[];
@@ -118,9 +119,10 @@ export interface Effect {
 	"calls": number;
 	/** The package whose code made it, by `name@version`; absent for the program's own. */
 	"package"?: string;
-	/** How it was decided: within what the package's baseline accepts (`baseline`), by the policy (`policy`), or at the
-	 *  call — the person's answer, an exception to the policy: allowed `once`, allowed `always`, or `refused`. */
-	"decided"?: "baseline" | "policy" | "once" | "always" | "refused";
+	/** How it was decided: within what the package's baseline accepts (`baseline`), by the policy (`policy`), at the
+	 *  call — the person's answer, an exception to the policy: allowed `once`, allowed `always`, or `refused` — or, in a
+	 *  run nobody was watching, what it returned when it last ran for real, given back (`recorded`). */
+	"decided"?: "baseline" | "policy" | "once" | "always" | "refused" | "recorded";
 }
 
 /** The `effects` event: the run's effects so far — all of them, each telling; its last is the run's. */

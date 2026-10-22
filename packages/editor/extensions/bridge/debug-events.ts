@@ -24,7 +24,7 @@
  */
 import type { AskEvent, CoverageEvent, EffectsEvent, ListeningEvent, RecordedEvent, StdinRequest } from "@brianjenkins94/editor-api";
 import { setEffects } from "@brianjenkins94/editor-api/effects";
-import { recordResult } from "@brianjenkins94/editor-api/policy";
+import { recordedResults, recordResult } from "@brianjenkins94/editor-api/policy";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { given as givenBy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
@@ -95,7 +95,10 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 				// No `args`: what a rule gives the file's process.argv, if one does. (A live run takes the first alone.)
 				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || given["replay"] !== undefined || program === "" ? undefined : givenBy(policy, { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");
 				const cases = mocked?.values.filter((each): each is string[] => Array.isArray(each));
-				const config = { ...given, "__policy": policy, ...caseArgs(given, cases) };
+				// A live run, which nobody is watching, gives a call what it returned when it last ran for real, where it
+				// would otherwise skip it (the run contract's `__recorded`).
+				const recorded = given["__live"] === true ? await recordedResults().catch(() => ({})) : undefined;
+				const config = { ...given, "__policy": policy, ...caseArgs(given, cases), ...recorded === undefined ? {} : { "__recorded": recorded } };
 
 				if (typeof config["__runId"] === "string" || config["__live"] === true) {
 					return config;

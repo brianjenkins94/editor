@@ -218,7 +218,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 	const resource = request.resource ?? "";
 	// (a package's call: the rules about that package's calls too)
 	const pkg = askerOf(request).package;
-	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability), pkg === undefined ? {} : packageNamed(pkg));
+	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability), { "trigger": "you", ...pkg === undefined ? {} : packageNamed(pkg) });
 
 	if (effective === "allow") {
 		return { "behavior": "allow", "decided": "policy" };

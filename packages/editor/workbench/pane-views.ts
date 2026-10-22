@@ -17,7 +17,7 @@ import type * as vscodeApi from "vscode";
 import type { NativeDrawing } from "./pane-native";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
-import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
+import { extensionContributions, onExtensionsChanged, renderMarkdown, rollPaneBall, showPane, showPaneRuns, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
 import { marginStyles } from "theme/styles/margin";
 import { paneViewsStyles } from "theme/styles/pane-views";
 import { installNativeFace } from "./pane-native";
@@ -375,7 +375,10 @@ async function draw(uri: string): Promise<void> {
 	const items = contents.flatMap((content) => content.items);
 	const groups = contents.flatMap((content) => content.groups ?? []);
 	const marks = contents.flatMap((content) => content.marks ?? []);
-	const places = await placeAll(file, [...items.map((item) => item.at), ...groups.map((group) => group.at), ...marks.map((mark) => mark.at)]);
+	// The runs kept of the file, and where the one shown went (RUNNING.md, unattended runs): the view's that has them.
+	const runs = contents.find((content) => content.runs !== undefined)?.runs ?? [];
+	const path = contents.find((content) => content.path !== undefined)?.path;
+	const places = await placeAll(file, [...items.map((item) => item.at), ...groups.map((group) => group.at), ...marks.map((mark) => mark.at), ...path?.at ?? []]);
 
 	if (drawing.get(uri) !== token) {
 		return; // a newer draw
@@ -433,6 +436,22 @@ async function draw(uri: string): Promise<void> {
 	nativeFace?.show(uri, undefined);
 	// (the pane stays, its tabs with it, whatever the view has: an empty view is still shown)
 	showPane(uri, placed.map(({ item, fromLine, toLine }) => ({ "id": `item:${item.id}`, "fromLine": fromLine, "toLine": toLine })), render, frameMarks, placedGroups.map(({ group, fromLine, toLine }) => ({ "id": `group:${group.id}`, "fromLine": fromLine, "toLine": toLine })));
+	// A ball per run kept, the one shown held — a click picks another, by its command — and the shown run's ball rolled
+	// down the gutter through the lines it went, once.
+	showPaneRuns(uri, runs.map((run) => ({ "id": run.id, "title": run.title, ...run.state === undefined ? {} : { "state": run.state }, ...run.picked === undefined ? {} : { "picked": run.picked } })), (id) => {
+		const command = runs.find((run) => run.id === id)?.command;
+
+		if (command !== undefined) {
+			void Promise.resolve(api?.commands.executeCommand(command.command, ...command.arguments ?? [])).catch(() => undefined);
+		}
+	});
+
+	if (path !== undefined) {
+		const from = items.length + groups.length + marks.length;
+		const lines = path.at.flatMap((_, index) => (places[from + index] === undefined ? [] : [places[from + index][0]])).filter((line, index, all) => index === 0 || line !== all[index - 1]);
+
+		rollPaneBall(uri, path.id, lines);
+	}
 }
 
 /** Every file shown in an editor. */

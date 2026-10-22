@@ -31,7 +31,7 @@ import type { SiteSums } from "./site-sums";
 
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { unpack } from "@brianjenkins94/almostnode/packages";
-import { verdictOf } from "@brianjenkins94/editor-api/gate";
+import { policySkips, triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
 import { revive } from "@brianjenkins94/editor-api/recorded";
 import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 
@@ -127,9 +127,12 @@ let skipNext = false;
 /** How the call at the capability stop was decided — the person's answer there (an exception to the policy, on record in
  *  the run's effects): taken by the next capability call, the one asked about. */
 let answeredNext: "once" | "always" | "refused" | undefined;
-/** A live run (LIVE-VALUES.md, *Live runs, as you type*): the file run again as typing pauses — it stops at nothing,
+/** A live run (LIVE-VALUES.md, *Live runs*): the file run again on a save or its interval — it stops at nothing,
  *  asks nothing (what it can't make it skips), runs its timers at once, ends at its first idle or its step budget. */
 let liveRun = false;
+/** What calls returned when they last ran for real, by `<capability> <resource>` (the run contract's `__recorded`): a live
+ *  run, which nobody is watching, gives a call its recording where it would otherwise skip it. */
+let recordedResults: Record<string, unknown> = {};
 /** The packages whose code the run ran (almostnode tells each as its first module runs), by folder: told with its
  *  coverage, for its envelope (whether anyone ran a version later found compromised). */
 const packagesRan = new Map<string, LoadedPackage>();
@@ -913,7 +916,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			denied("EACCES: permission denied (denied at its capability stop)");
 		}
 
-		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "capability": tagged.capability, "resource": resource }));
+		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "trigger": triggerOf(liveRun), "capability": tagged.capability, "resource": resource }));
 
 		giveNext = undefined;
 
@@ -938,6 +941,13 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		const verdict = verdictOf(policy, tagged.capability, resource, liveRun);
 
 		if (verdict === "skip") {
+			// A live run's skip (not the policy's): what the call returned when it last ran for real, given back, if it did.
+			const key = `${tagged.capability} ${resource}`;
+
+			if (liveRun && Object.hasOwn(recordedResults, key) && !policySkips(policy, tagged.capability, resource, liveRun)) {
+				return replayed(tagged.capability, resource, givenAs(tagged.capability, fn.apply(this, args), recordedResults[key]));
+			}
+
 			return skipped(tagged.capability, resource, fn.apply(this, args), decided);
 		}
 
@@ -1064,6 +1074,23 @@ function skipped(capability: string, resource: string, result: unknown, decided?
 		const { call, turns } = whereNow(evaluating);
 
 		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "name": "skipped", "value": resource === "" ? capability : `${capability} ${resource}`, "kind": "skip", "call": call, "turns": turns, "step": evaluating.statements, "at": rangeOf(node) });
+	}
+
+	return result;
+}
+
+/** A call a live run gave its recording in place of (`result`: the stand-in answering with it) — told on its line, as a
+ *  skip is, so the margin says the value came from the last real run. */
+function replayed(capability: string, resource: string, result: unknown): unknown {
+	const node = evaluating?.currentNode;
+
+	tally(capability, resource, "given", undefined, "recorded");
+
+	if (evaluating !== undefined && node !== null && node !== undefined) {
+		const file = node.getSourceFile();
+		const { call, turns } = whereNow(evaluating);
+
+		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "name": "replayed", "value": resource === "" ? capability : `${capability} ${resource}`, "kind": "given", "call": call, "turns": turns, "step": evaluating.statements, "at": rangeOf(node) });
 	}
 
 	return result;
@@ -2007,7 +2034,7 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 		} catch (error) {
 			// A live run past its budget stops where it got to — saying so, not as a crash.
 			if (liveRun && error instanceof TsvalInternalError && error.message.startsWith("step budget exceeded")) {
-				finish(0, stoppedAt(base, "too long to run as you type — Run to finish"));
+				finish(0, stoppedAt(base, "too long to run live — Run to finish"));
 				done = true;
 
 				return;
@@ -2120,7 +2147,7 @@ function whereOf(message: Extract<Control, { "type": "launch" }>): { "cwd"?: str
 	return { ...message.cwd === undefined ? {} : { "cwd": message.cwd }, ...message.env === undefined ? {} : { "env": message.env } };
 }
 
-/** Whether `file`'s text doesn't parse (yet): typing paused mid-statement. */
+/** Whether `file`'s text doesn't parse (yet): saved, or run on the interval, mid-statement. */
 function unparsed(file: ts.SourceFile): boolean {
 	return ((file as unknown as { "parseDiagnostics"?: readonly unknown[] }).parseDiagnostics?.length ?? 0) > 0;
 }
@@ -2150,6 +2177,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// launch can give one (an ordering explore found: its clock, seed and schedule).
 	// A server it starts keeps it alive: out of work, it idles, serving.
 	liveRun = message.live === true;
+	recordedResults = liveRun && message.recorded !== undefined ? message.recorded : {};
 
 	// (a live run's timers at once — its waits skipped — and nothing keeps it alive past its first idle)
 	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": liveRun ? "fast" as const : "real" as const, "keepAlive": () => !liveRun && (held.size > 0 || readsStdin()) };
@@ -2181,7 +2209,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	evaluating = loaded.vm;
 
-	// A live run of text that doesn't parse yet (typing paused mid-statement) runs nothing and tells nothing: the margin
+	// A live run of text that doesn't parse yet (saved mid-statement) runs nothing and tells nothing: the margin
 	// keeps what the last run that parsed did.
 	if (liveRun && unparsed(loaded.sourceFile)) {
 		post({ "type": "terminated", "exitCode": 0, "quiet": true });

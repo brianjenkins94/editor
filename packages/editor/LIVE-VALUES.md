@@ -264,7 +264,7 @@ characterization, the registry and invariant inference) recorded beside it.
 travel with it; a value recorded from a real run (a real fetch response can hold secrets) in `.silo/local/`, referred
 to by the rule.
 
-## Live runs, as you type
+## Live runs
 
 Decided 2026-10-08 — Victor's immediate connection: the file you're typing in runs again whenever typing pauses, and the
 margin shows what it did, without Run. It was waiting on two things that hold now: every run is a debug run (RUNNING.md),
@@ -304,10 +304,32 @@ building turned up:
 A live run stopped by the next edit tells nothing either: only a run that finished replaces what the margin shows. The
 tour types, pauses and reads the margin (a write skipped, a half-typed edit, an endless loop stopped at its budget).
 
+**Revised 2026-10-22: on a save, and on an interval** (RUNNING.md, *Unattended runs*). Ctrl+S runs the file (the last of
+a burst of saves, 250ms apart; not again if that text started a run in the last second), and so does an interval —
+`run.liveRuns.interval`, 5 seconds by default, 0 for saves only — while the file in front of you differs from what its
+last run ran. Typing no longer starts one; an edit still stops the one going. Nobody is watching a live run (a rule's
+`trigger is edit`), so it still asks nothing, but before skipping a call it gives back what that call returned when it
+last ran for real, if that's recorded (`.silo/local/recorded.json`, the run contract's `__recorded`): a fetch gets its
+real body, and the values after it are real ones. Its line says *replayed* (else *skipped*), with *Rule…*: the Rule view
+prefilled with *trigger is edit*, the call, and its recording to give (else *skip*), so what runs after an edit do with
+it can be kept. A save reformats first when the workspace fixes on save (ESLint's), so the tour finds rows by what they
+say, not their line.
+
+**Runs kept, as balls** (Jack Rusher's *Stop Writing Dead Programs*, Strange Loop 2022). Each run of the file is kept,
+the last eight, with its values and how it ended — the record of what things were in that run. At the Margin's top, at
+the end of its tabs line, a ball for each: the latest held, the colour how it ended (ran, crashed, stopped short), when it
+ran and how on hover. A finished run rolls a ball down the gutter column through the lines it went, in the order it went
+(its values', the same line twice running once, at most 400 steps, the roll at most 1.6s), then the ball settles. Picking
+an older ball shows its values again — where its code can still be found in the text as it is — and rolls its ball. The
+margin's run log and coverage marks are still the latest run's, not the one picked (open).
+
 ## Open
 
 - **The bounds**, and how many calls the panel lets you pick between.
 - **Previews.** A preview's code runs instrumented in the page, not under tsval: none of this, for now.
+- **A picked run's coverage and run log**: they're the latest run's; kept with each run, picking one could show its own.
+- **The ball while a run is going**: a run takes a fraction of a second, so the ball rolls once it's finished, through
+  where it went; a long run could roll as it goes.
 
 ## Building it
 
@@ -346,7 +368,7 @@ tour types, pauses and reads the margin (a write skipped, a half-typed edit, an 
    note is exactly its line. Hovering an entry marks its span (a whole-line decoration); the cursor's cell is lit.
    The pane is an overlay inside the editor, not an editor group of its own: one scroll, nothing to synchronize. Its
    left edge is a divider you drag (remembered, the same for every editor; by default past the longest line, at most
-   60% of the way). Wrapping wraps at the divider: while a pane shows, the editor wraps `"bounded"` at the divider's
+   60% of the way — and since 2026-10-22 at least 60 columns or 40% of the way, so a blank file isn't all pane). Wrapping wraps at the divider: while a pane shows, the editor wraps `"bounded"` at the divider's
    column, and Alt+Z (whose override knows only "wrap at the full width", which would put code under the pane) is
    taken over for an editor with a pane to toggle wrapping at the divider; elsewhere it is VS Code's. A cell's span is
    measured to its last line's bottom, so wrapped rows count.

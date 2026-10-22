@@ -10,7 +10,7 @@
  * and what it decides, or the result it gives); a program's `process.argv` (`argv`: the runs it gives); a variable at a
  * place (`place`: what it sets each time the program gets there).
  */
-import type { Compound, Predicate, Rule, Schema, Target } from "@brianjenkins94/util/silo/policy";
+import type { Compound, Predicate, Rule, Schema, Target, Trigger } from "@brianjenkins94/util/silo/policy";
 
 /** What rows and actions can say. */
 export interface RuleCatalog {
@@ -93,7 +93,7 @@ export interface Verdict { "text": string; "ok": boolean; "refused"?: boolean }
 /** What the rule is judged against. */
 export type Judge =
 	| { "kind": "rule" }
-	| { "kind": "call"; "capability": string; "resource"?: string; "package"?: string; "resolved"?: boolean; "canGive"?: boolean; "recorded"?: { "value": unknown; "at": string } }
+	| { "kind": "call"; "capability": string; "resource"?: string; "package"?: string; "resolved"?: boolean; "canGive"?: boolean; "recorded"?: { "value": unknown; "at": string }; "trigger"?: Trigger }
 	| { "kind": "argv"; "program": string }
 	| { "kind": "place"; "program": string; "place": unknown; "variables": Record<string, unknown> };
 
@@ -210,7 +210,7 @@ function coversText(gives: boolean, canGive: boolean, decision: string | undefin
 /** What a rule as edited would do to a call: whether it covers it (`resolved`: what it reaches is known) and what it
  *  decides — ok when it allows, denies or skips it, or gives it a result where one can be given. */
 function callVerdict(policy: PolicyModule, rule: Rule, judge: Extract<Judge, { "kind": "call" }>): Verdict {
-	const subject = { "capability": judge.capability, ...judge.resolved === false ? {} : { "resource": judge.resource }, ...judge.package === undefined ? {} : { "package": judge.package } };
+	const subject = { "trigger": judge.trigger ?? "you", "capability": judge.capability, ...judge.resolved === false ? {} : { "resource": judge.resource }, ...judge.package === undefined ? {} : { "package": judge.package } };
 	const problem = policy.problemOf(rule);
 	const covers = problem === undefined && policy.ruleMatches(rule, subject);
 	const decision = decisionOf(rule);

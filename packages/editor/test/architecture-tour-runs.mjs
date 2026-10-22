@@ -582,20 +582,25 @@ test("inline values: at a stop, each line's latest value at its end, as VS Code 
 // Live runs (LIVE-VALUES.md, *Live runs, as you type*): the file in the editor runs again as typing pauses — no Run — its
 // values in the margin; a write it can't make is skipped (nothing written, the line saying so); half-typed, the last run's
 // values stay; a loop that never ends stops at its budget, saying so on its line; none of them is in the running list.
-test("live runs: typing paused, the file runs again — writes skipped, half-typed kept, an endless loop stopped", async () => {
+test("live runs: saved, the file runs again — writes skipped, half-typed kept, an endless loop stopped", async () => {
 	const workbench = session.workbench();
 	const file = "/workspace/live.js";
 	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].filter((child) => !child.classList.contains("live-values-mock")).map((child) => child.textContent.trim())])));
-	const edit = (from, to) => workbench.evaluate(async ([find, replace]) => {
-		const { api } = globalThis.__editor;
-		const editor = api.window.activeTextEditor;
-		const text = editor.document.getText();
-		const at = text.indexOf(find);
+	// An edit, then Ctrl+S: a save runs it. (The editor focused first, as typing there would leave it.)
+	const edit = async (from, to) => {
+		await workbench.evaluate(async ([find, replace]) => {
+			const { api } = globalThis.__editor;
+			const editor = api.window.activeTextEditor;
+			const text = editor.document.getText();
+			const at = text.indexOf(find);
 
-		await editor.edit((builder) => {
-			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + find.length)), replace);
-		});
-	}, [from, to]);
+			await editor.edit((builder) => {
+				builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + find.length)), replace);
+			});
+			await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+		}, [from, to]);
+		await session.page.keyboard.press("ControlOrMeta+s");
+	};
 
 	await workbench.evaluate(async (path) => {
 		const { api } = globalThis.__editor;
@@ -606,14 +611,16 @@ test("live runs: typing paused, the file runs again — writes skipped, half-typ
 	}, file);
 	await edit("[3, 4, 5]", "[3, 4, 5, 6]");
 
+	// (rows by what they say, not their line: a save may fix the code — ESLint's fix on save — moving it down)
+	const loopTotal = (all) => Object.values(all).find((row) => row[0] === "total =" && row.length === 5);
 	const ran = await eventually("the edit's run, in the margin", async () => {
 		const all = await rows();
 
-		return all["3"]?.length === 5 ? all : undefined;
+		return loopTotal(all) === undefined ? undefined : all;
 	});
 
-	assert.deepEqual(ran["3"], ["total =", "3", "7", "12", "18"]);
-	assert.deepEqual(ran["5"].filter((cell) => cell !== ""), ["skipped", "fs:write out-live.txt"], "the write, skipped");
+	assert.deepEqual(loopTotal(ran), ["total =", "3", "7", "12", "18"]);
+	assert.ok(Object.values(ran).some((row) => JSON.stringify(row.filter((cell) => cell !== "")) === JSON.stringify(["skipped", "fs:write out-live.txt"])), "the write, skipped");
 	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/out-live.txt")).then(() => true, () => false)), false, "nothing written");
 	assert.equal((await session.request("runs.list", undefined, 5000)).some((run) => /\(live\)/u.test(run.title)), false, "not in the running list");
 
@@ -622,18 +629,18 @@ test("live runs: typing paused, the file runs again — writes skipped, half-typ
 	await new Promise((resolve) => {
 		setTimeout(resolve, 2000);
 	});
-	assert.deepEqual((await rows())["3"], ["total =", "3", "7", "12", "18"], "kept");
+	assert.deepEqual(loopTotal(await rows()), ["total =", "3", "7", "12", "18"], "kept");
 
 	await edit("total += p *", "total += p * 2;");
 	assert.deepEqual(await eventually("the finished edit's run", async () => {
-		const total = (await rows())["3"];
+		const total = loopTotal(await rows());
 
 		return total?.[4] === "36" ? total : undefined;
 	}), ["total =", "6", "14", "24", "36"]);
 
 	// A loop that never ends: stopped at its budget, on its line.
 	await edit("for (const p of [3, 4, 5, 6]) {", "while (true) {\n\tconst p = 1;");
-	assert.match(await eventually("stopped at its budget", () => workbench.evaluate(() => document.querySelector(".notes-margin-mark.run-stopped")?.title)), /too long to run as you type/u);
+	assert.match(await eventually("stopped at its budget", () => workbench.evaluate(() => document.querySelector(".notes-margin-mark.run-stopped")?.title)), /too long to run live/u);
 
 	await workbench.evaluate(async (path) => {
 		const { api } = globalThis.__editor;

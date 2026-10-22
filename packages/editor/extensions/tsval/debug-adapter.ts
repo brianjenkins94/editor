@@ -95,8 +95,10 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
 	 *  the policy gate, not a debugging aid. */
 	private noDebug = false;
-	/** A live run (LIVE-VALUES.md, *Live runs, as you type*): launched quiet on a typing pause, stopping at nothing. */
+	/** A live run (LIVE-VALUES.md, *Live runs*): launched quiet on a save or its interval, stopping at nothing. */
 	private live = false;
+	/** What calls returned when they last ran for real (`__recorded`): a live run gives them back where it would skip. */
+	private recorded: Record<string, unknown> | undefined;
 	/** The latest coverage the worker reported, and whether the final one has gone out as the `coverage` event. */
 	private coverage: CoverageReport | undefined;
 	private coverageSent = false;
@@ -207,8 +209,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.eventLoop = loopStartOf(args["eventLoop"]);
 		this.noDebug = args["noDebug"] === true;
 		this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
-		// A live run (LIVE-VALUES.md): the file run again as typing pauses — it stops at nothing.
+		// A live run (LIVE-VALUES.md): the file run again on a save or its interval — it stops at nothing.
 		this.live = args["__live"] === true;
+		this.recorded = typeof args["__recorded"] === "object" && args["__recorded"] !== null ? args["__recorded"] as Record<string, unknown> : undefined;
 		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
 		this.respond(request);
 		void this.loadSource();
@@ -537,7 +540,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.live ? { "live": true } : {} }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.live ? { "live": true } : {}, ...this.recorded === undefined ? {} : { "recorded": this.recorded } }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */
