@@ -45,19 +45,19 @@
       # After cd has published the components (util-publish, above), tell brianjenkins94/example-consumer: it installs
       # them from their tarballs as anyone would, checks them, and publishes its pages (its ci, on a `published`
       # repository_dispatch carrying the commit). GITHUB_TOKEN reaches only this repo, so it takes a PAT that may
-      # dispatch there: EXAMPLE_CONSUMER_TOKEN, fine-grained, example-consumer only, Contents read and write. Without
-      # it, a notice.
+      # dispatch there: contrib's, EDITOR_CONTRIB_TOKEN, which has to reach example-consumer too (Contents read and
+      # write). Without it, a notice.
       "needs": "cd",
       "runs-on": "ubuntu-latest",
       "permissions": {},
       "env": {
-        "TOKENED": "${{ secrets.EXAMPLE_CONSUMER_TOKEN != '' }}"
+        "TOKENED": "${{ secrets.EDITOR_CONTRIB_TOKEN != '' }}"
       },
       "steps": [
-        { "if": "${{ env.TOKENED != 'true' }}", "run": "echo \"::notice::No EXAMPLE_CONSUMER_TOKEN secret yet: example-consumer not told\"" },
+        { "if": "${{ env.TOKENED != 'true' }}", "run": "echo \"::notice::No EDITOR_CONTRIB_TOKEN secret: example-consumer not told\"" },
         {
           "if": "${{ env.TOKENED == 'true' }}",
-          "env": { "GH_TOKEN": "${{ secrets.EXAMPLE_CONSUMER_TOKEN }}", "SHA": "${{ github.event.workflow_run.head_sha || github.sha }}" },
+          "env": { "GH_TOKEN": "${{ secrets.EDITOR_CONTRIB_TOKEN }}", "SHA": "${{ github.event.workflow_run.head_sha || github.sha }}" },
           "run": "gh api repos/brianjenkins94/example-consumer/dispatches -f event_type=published -f \"client_payload[sha]=$SHA\""
         }
       ],
