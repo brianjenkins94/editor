@@ -1,11 +1,10 @@
-import { hashRaw } from "@hallaxius/argon2w";
+import { argon2id } from "@noble/hashes/argon2.js";
 
 /**
  * Passwords' rules and hashing (SIGN-IN.md, "Passwords"; src/password.ts uses them): Pilcrow's rules, and Argon2id at
- * OWASP's baseline through @hallaxius/argon2w (Argon2's reference implementation as WebAssembly, built for Workers: its
- * module is imported, which the runtime allows, rather than compiled at runtime, which it doesn't; src/password.ts hands
- * it over; in Node it reads it from disk). Only its raw Argon2id is used: the PHC string and the constant-time comparison
- * are ours. Nothing here touches the Workers runtime, so the tests check it against Node's own Argon2id.
+ * OWASP's baseline through @noble/hashes (audited, plain JavaScript, so nothing for the Workers runtime to compile; about
+ * 82 ms a hash). Only its raw Argon2id is used: the PHC string and the constant-time comparison are ours. Nothing here
+ * touches the Workers runtime, so the tests check it against Node's own Argon2id.
  */
 
 /** Argon2id, OWASP's baseline: memory in KiB, passes, lanes, and the hash's length in bytes. */
@@ -35,7 +34,7 @@ function same(a: Uint8Array, b: Uint8Array): boolean {
 	return difference === 0;
 }
 
-const derive = async (password: string, salt: Uint8Array, costs: typeof ARGON2): Promise<Uint8Array> => hashRaw(password, { "salt": salt, ...costs });
+const derive = async (password: string, salt: Uint8Array, costs: typeof ARGON2): Promise<Uint8Array> => Promise.resolve(argon2id(password, salt, { "m": costs.memoryCost, "t": costs.timeCost, "p": costs.parallelism, "dkLen": costs.hashLength }));
 
 /** A password's hash, as a PHC string: `$argon2id$v=19$m=…,t=…,p=…$salt$hash`. */
 export async function hashPassword(password: string): Promise<string> {

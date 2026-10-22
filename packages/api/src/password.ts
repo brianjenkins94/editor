@@ -5,11 +5,6 @@ import { audit, origin } from "./audit.ts";
 import { ADDRESS } from "./email.ts";
 import { hashPassword, passwordProblem, verifyPassword } from "./password-hash.ts";
 import { breaches } from "@brianjenkins94/util/auth/pwned";
-import { configureWasm } from "@hallaxius/argon2w";
-import argon2Wasm from "@hallaxius/argon2w/wasm";
-
-// Argon2's WebAssembly, as a module Wrangler compiles at deploy: the runtime won't compile any at runtime.
-configureWasm(argon2Wasm);
 import { emailOf, githubIdOf, identityOf } from "./identities.ts";
 import { passkeysOf } from "./passkeys.ts";
 import { emailMfaState, hasEmailMfa, hasMfa, mfaState } from "./mfa-state.ts";
@@ -35,7 +30,7 @@ import { methodsOf } from "./clients.ts";
  * is what signs in with the password. The rules are Pilcrow's (printable ASCII, 10 to 100 characters, no space at either
  * end, nothing changed), and a password in a known breach is refused (Have I Been Pwned's range API: only the first 5
  * characters of its SHA-1 leave us). Hashed with Argon2id at OWASP's baseline (19 MiB, 2 passes, 1 lane, a 16-byte salt,
- * a 32-byte hash): src/password-hash.ts, through @hallaxius/argon2w (about 13 ms a hash in workerd).
+ * a 32-byte hash): src/password-hash.ts, through @noble/hashes (about 82 ms a hash).
  *
  * Tries are a bucket per user, 5 and one back a minute, and per IP the sign-in limit; no lockouts. Errors say what's
  * wrong (SIGN-IN.md): the time a hash takes tells anyone who asks whether an account exists anyway.

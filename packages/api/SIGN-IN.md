@@ -235,16 +235,16 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
     The `login` row says "password".
   - **Hashing:** Argon2id at OWASP's baseline (19 MiB, 2 passes, 1 lane, a 16-byte salt, a 32-byte hash) as a PHC
     string, so stronger costs later still verify the old; compared in constant time by us. The Argon2 itself is
-    **@hallaxius/argon2w** (0.0.2, pinned exactly): Argon2's reference code as WebAssembly, its module imported (the
-    runtime refuses to compile any at runtime, which is why hash-wasm can't be used as published), about 13 ms a hash
-    in workerd. **Watch it** (chosen 2026-10-17 knowing it was two weeks old, one maintainer): read the diff before any
-    upgrade; test/password.test.ts checks its output against Node's own Argon2id. Tested alternatives, should it need
-    replacing: argon2-wasm-edge (hash-wasm's Argon2 for Workers, ~21 ms; its own verify compares with ===) and
-    @noble/hashes' pure-JavaScript Argon2id (~82 ms).
-  - 6 tests in test/password.test.ts (the hash against Node's, the rules, setting and signing in, breached and rule-
-    breaking passwords and the breach check failing, the tries). Tried with the harness against the real Have I Been
-    Pwned: an email account set a password ("password1234" refused: in 443,397 breaches), signed out, and signed in
-    with it.
+    **@noble/hashes**' Argon2id (2.4.0, pinned exactly): audited, maintained, plain JavaScript (nothing for the
+    runtime to compile), about 82 ms a hash. It replaced @hallaxius/argon2w (2026-10-21), Argon2's reference code as
+    WebAssembly (about 13 ms), chosen 2026-10-17 knowing it was two weeks old with one maintainer: it was then removed
+    from npm (its author's GitHub account gone too), which broke every install. Hashes it made verify unchanged (Argon2id
+    is Argon2id): test/password.test.ts checks one, and checks a new hash against Node's own Argon2id. Should speed
+    matter, the tested faster one is argon2-wasm-edge (hash-wasm's Argon2 for Workers, ~21 ms; unmaintained since 2024).
+  - 7 tests in test/password.test.ts (the hash against Node's, a hash argon2w stored, the rules, setting and signing
+    in, breached and rule-breaking passwords and the breach check failing, the tries). Tried with the harness against
+    the real Have I Been Pwned: an email account set a password ("password1234" refused: in 443,397 breaches), signed
+    out, and signed in with it.
 - **C4 · password reset.** *Built 2026-10-17* (src/password.ts): from the sign-in page, "Forgot your password?" in
   password mode. `POST /auth/reset` (`address`) emails a code ("to reset your password"), its HMAC bound to this
   browser's attempt, the account and the action, so it works only where it was asked for; `POST /auth/reset/password`
@@ -347,14 +347,15 @@ Each lands green, tested in workerd, and is tried on the admin app before the ne
   answers browsers from are those pages'. It replaced `ALLOWED_ORIGINS`, `REDIRECT_URIS` and `SIGN_IN_METHODS` in each
   of wrangler.jsonc's three environments and the page's own list of names: a new project is one edit. What isn't ours went to lib (util/auth): TOTP and recovery
   codes (`totp`), typed codes and their keyed hashes (`codes`), and Have I Been Pwned's range check (`pwned`), each
-  with its own tests there; the Argon2id wrapper stays here (src/password-hash.ts), being tied to argon2w's
-  Workers-imported WebAssembly.
+  with its own tests there; the Argon2id wrapper stays here (src/password-hash.ts), which was tied to argon2w's
+  Workers-imported WebAssembly (now @noble/hashes, which needn't be: it could move to lib too).
 - **Later:** a passkey as a second step after a password; naming passkeys; conditional UI (passkeys offered in the
   email field's autofill).
 
 ## Open questions
 
-- ~~Argon2id's implementation.~~ Decided 2026-10-17: @hallaxius/argon2w (C3).
+- ~~Argon2id's implementation.~~ Decided 2026-10-17: @hallaxius/argon2w (C3); replaced by @noble/hashes 2026-10-21, argon2w
+  having been removed from npm.
 - ~~Email MFA as specified, or authenticator app only.~~ Decided 2026-10-17: as specified, with the caveat shown (C6).
 - ~~The owner's MFA policy.~~ Decided 2026-10-17: not for now; optional for owners, GitHub's 2FA covering GitHub
   sign-ins (C5).
