@@ -51,7 +51,7 @@
             },
             {
               "name": "",
-              "description": "Its body."
+              "description": "Its body: one element (the window gives it its size; more than one are laid one over another)."
             }
           ],
           "events": [

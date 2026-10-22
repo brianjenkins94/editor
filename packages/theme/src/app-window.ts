@@ -38,7 +38,7 @@ export const definition = {
 	},
 	"slots": {
 		"header-actions": "Controls in its title bar, before its own.",
-		"": "Its body."
+		"": "Its body: one element (the window gives it its size; more than one are laid one over another)."
 	},
 	"events": {
 		"app-close": "Its close control was clicked.",
