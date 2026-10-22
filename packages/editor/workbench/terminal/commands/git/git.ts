@@ -225,11 +225,12 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 				return fail("nothing added to commit (use \"git add\" to stage, or git commit -a)");
 			}
 
-			const oid = await engine.commitIndex(message);
+			const { oid, unshared } = await engine.commitIndex(message);
 
 			changed();
 
-			return ok(`[${(await engine.branches()).current ?? "HEAD"} ${oid.slice(0, 7)}] ${message.split("\n")[0]}\n ${staged.length} file${staged.length === 1 ? "" : "s"} changed\n`);
+			// (committed all the same; said, not silent, when its runs couldn't be shared with it)
+			return ok(`[${(await engine.branches()).current ?? "HEAD"} ${oid.slice(0, 7)}] ${message.split("\n")[0]}\n ${staged.length} file${staged.length === 1 ? "" : "s"} changed\n${unshared === undefined ? "" : `warning: runs not shared with this commit (.silo/traces): ${unshared}\n`}`);
 		},
 		"branch": async (config) => {
 			const name = config.get("name") as string;

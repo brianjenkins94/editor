@@ -1,6 +1,6 @@
 /**
  * Live runs (LIVE-VALUES.md, *Live runs*): the program file you're editing runs again on each save, and on an interval
- * while its text differs from what its last run ran — a debug session like any other (tsval's, or `run.debugger`'s), so
+ * once it's been edited, while its text differs from what its last run ran — a debug session like any other (tsval's, or `run.debugger`'s), so
  * the margin shows what it did, but quiet (no toolbar, status bar, view or console; stopping at nothing; not in the
  * running list) and harmless (nobody is watching, so it asks nothing: what it can't make it gives back as it was
  * recorded, else skips — the debug worker's `live`; another debugger is told `__live` and `__recorded`, and should do the
@@ -33,6 +33,8 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	const starting = new Set<string>();
 	/** What each file's last live run ran, and when it started. */
 	const last = new Map<string, { "text": string; "at": number }>();
+	/** The files edited since their last live run: what the interval runs (opening a file doesn't run it). */
+	const edited = new Set<string>();
 	/** Every debug session going. */
 	const sessions = new Set<vscode.DebugSession>();
 	const enabled = (): boolean => vscode.workspace.getConfiguration("run").get<boolean>("liveRuns", true);
@@ -59,6 +61,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		}
 
 		starting.add(path);
+		edited.delete(path);
 		last.set(path, { "text": document.getText(), "at": Date.now() });
 
 		try {
@@ -80,7 +83,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			ticking = setInterval(() => {
 				const document = vscode.window.activeTextEditor?.document;
 
-				if (document !== undefined && isProgram(document) && enabled() && document.getText() !== last.get(document.uri.path)?.text) {
+				if (document !== undefined && isProgram(document) && enabled() && edited.has(document.uri.path) && document.getText() !== last.get(document.uri.path)?.text) {
 					void start(document);
 				}
 			}, seconds * 1000);
@@ -114,6 +117,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			}
 
 			// The edit makes the run going stale: stop it. The next save, or the interval, runs it again.
+			edited.add(document.uri.path);
 			stop(document.uri.path);
 		}),
 		// A save runs it: the last of a burst of saves, unless that text started a run just now.

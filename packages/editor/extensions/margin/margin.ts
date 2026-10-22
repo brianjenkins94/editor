@@ -46,12 +46,13 @@
  * A preview's recorded stops come the same way: `values` on its run's `production` session (the bridge's), each report
  * every hit so far (`replace`).
  */
-import type { AskEvent, CapabilityChoice, EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, EffectsEvent, EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
+import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import type { LineMark as PaneMark, ProfiledLine } from "./coverage";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
@@ -60,8 +61,10 @@ import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { recordedResult } from "@brianjenkins94/editor-api/policy";
 import { argvRunsOf, decisionOf, resultOf } from "@brianjenkins94/editor-api/rules";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
+import { inputOf, traceKey } from "@brianjenkins94/util/silo/traces";
 import * as vscode from "vscode";
 import { parseInputs } from "./inputs";
+import { blobOid, keepRun, keptRuns } from "./runs";
 
 /** A capability stop's question, as the margin shows it on its line (the run contract's `ask`, its file and text apart). */
 type CapabilityAsk = Omit<AskEvent, "file" | "source">;
@@ -80,7 +83,7 @@ interface Cell { "text": string; "kind": string }
 
 /** A session's values, and what's picked in them: a function's call (by `function:line`; none, its latest) and a held
  *  column. */
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at"?: number; "done"?: boolean; "end"?: RunEnd & { "anchors"?: Anchors }; "live"?: boolean }
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at"?: number; "done"?: boolean; "end"?: RunEnd & { "anchors"?: Anchors }; "live"?: boolean; "count"?: number; "key"?: string }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
@@ -114,6 +117,8 @@ const kept = new Map<string, Session[]>();
 const KEPT = 8;
 /** The live runs going (LIVE-VALUES.md): nobody's watching them, so what they didn't make has *Rule…* for such runs. */
 const liveSessions = new Set<string>();
+/** What each session read from outside, from its effects (a call made, or given a result): its values may hold a secret. */
+const inputsOf = new Map<string, string[]>();
 /** How many of a run's steps its ball rolls through, at most. */
 const MAX_PATH = 400;
 /** Each file's marks for the margin's gutter column (coverage), per file URI. */
@@ -991,8 +996,105 @@ function runsOf(uri: string, shown: Session | undefined): PaneRun[] {
 		const how = state === undefined ? "running" : HOW[state];
 		const when = run.at === undefined ? "" : `${new Date(run.at).toLocaleTimeString()} — `;
 
-		return { "id": run.id, "title": `${when}${run.live === true ? "after an edit, " : ""}${how}, ${run.values.length} value${run.values.length === 1 ? "" : "s"}`, ...state === undefined ? {} : { "state": state }, "picked": run === shown, "command": { "title": "Show this run", "command": "margin.pickRun", "arguments": [uri, run.id] } };
+		const times = (run.count ?? 1) > 1 ? ` (${run.count} runs alike)` : "";
+
+		return { "id": run.id, "title": `${when}${run.live === true ? "after an edit, " : ""}${how}, ${run.values.length} value${run.values.length === 1 ? "" : "s"}${times}`, ...state === undefined ? {} : { "state": state }, "picked": run === shown, "command": { "title": "Show this run", "command": "margin.pickRun", "arguments": [uri, run.id] } };
 	});
+}
+
+/** A finished run, kept (runs.ts): the same run as one kept already is that one, counted again (its ball, not a new
+ *  one); else a trace of it, on this machine — a commit shares those of the text it commits (git-engine.ts). */
+async function keepSession(id: string): Promise<void> {
+	const inputs = inputsOf.get(id) ?? [];
+
+	inputsOf.delete(id);
+
+	for (const [uri, runs] of kept) {
+		const run = runs.find((each) => each.id === id);
+
+		if (run?.done !== true || run.anchors === undefined) {
+			continue;
+		}
+
+		const source = run.anchors.text;
+		const trace: RunTrace = {
+			"id": run.id,
+			"file": vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false),
+			"oid": await blobOid(source),
+			"trigger": run.live === true ? "edit" : "you",
+			"at": new Date(run.at ?? Date.now()).toISOString(),
+			"count": 1,
+			...run.end === undefined ? {} : { "end": { "kind": run.end.kind, "line": run.end.line, ...run.end.at === undefined ? {} : { "at": run.end.at }, ...run.end.message === undefined ? {} : { "message": run.end.message } } },
+			"inputs": [...new Set(inputs)].toSorted(),
+			"values": run.values.map((value) => ({ "line": value.line, "name": value.name, "kind": value.kind, "call": value.call, "turns": value.turns, "value": value.value, ...value.at === undefined ? {} : { "at": value.at } })),
+			"calls": [...run.calls.values()],
+			"source": source
+		};
+		const key = traceKey(trace);
+		const same = runs.find((each) => each !== run && each.key === key);
+
+		if (same === undefined) {
+			run.key = key;
+			run.count = 1;
+		} else {
+			// The same run again: one ball, counted — shown, as the latest.
+			same.count = (same.count ?? 1) + 1;
+			same.at = run.at;
+			kept.set(uri, [...runs.filter((each) => each !== run && each !== same), same]);
+
+			if (sessions.get(uri) === run) {
+				sessions.set(uri, same);
+			}
+		}
+
+		draw(uri);
+		await keepRun(trace, KEPT);
+	}
+}
+
+/** A file's runs kept on this machine (runs.ts), its balls again — as a file is first shown, before any run of it here. */
+async function restoreRuns(uri: string): Promise<void> {
+	if ((kept.get(uri) ?? []).length > 0) {
+		return;
+	}
+
+	const { path } = vscode.Uri.parse(uri);
+	const traces = await keptRuns(vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false));
+	const runs = traces.filter((trace) => trace.source !== undefined).map((trace): Session => {
+		const anchors = new Anchors(vscode, path, trace.source ?? "");
+
+		return {
+			"id": trace.id,
+			"values": trace.values.map((value) => ({ "line": value.line, "name": value.name, "value": value.value ?? `‹${value.type ?? "value"}›`, "kind": value.kind as LiveValue["kind"], "call": value.call, "turns": value.turns, ...value.at === undefined ? {} : { "at": value.at } })),
+			"calls": new Map(trace.calls.map((call) => [call.id, call])),
+			"dropped": 0,
+			"picked": new Map(),
+			"anchors": anchors,
+			"at": Date.parse(trace.at),
+			"done": true,
+			...trace.end === undefined ? {} : { "end": { ...trace.end, "anchors": anchors } },
+			...trace.trigger === "edit" ? { "live": true } : {},
+			"count": trace.count,
+			"key": traceKey(trace)
+		};
+	});
+
+	// (a run that came meanwhile is newer: it stays shown)
+	if (runs.length === 0 || (kept.get(uri) ?? []).length > 0) {
+		return;
+	}
+
+	kept.set(uri, runs);
+
+	const last = runs.at(-1);
+
+	sessions.set(uri, last);
+
+	if (last.end === undefined) {
+		ends.delete(uri);
+	} else {
+		ends.set(uri, last.end);
+	}
 }
 
 /** Where a run went, a step a value (in the order they came: the order it ran), each where it was in the text that ran
@@ -1183,12 +1285,16 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 			if (CODE.has(editor.document.languageId) && !open.has(uri)) {
 				open.add(uri);
 				draw(uri);
+				void restoreRuns(uri).then(() => {
+					draw(uri);
+				}, () => undefined);
 			}
 		}
 	};
 
 	follow(vscode.window.visibleTextEditors);
 	vscode.window.onDidChangeVisibleTextEditors(follow);
+
 	// Edited: what a run put on lines moves with its code — drawn again once typing pauses (BABLR re-reads the file).
 	const typing = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -1365,6 +1471,10 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 				told.add(session.id);
 				endedCame(session.id, body as EndedEvent);
 				break;
+			case "effects":
+				// (what came in: a call made, or given a result — not one skipped or denied)
+				inputsOf.set(session.id, (body as EffectsEvent).effects.filter((effect) => effect.how === "made" || effect.how === "given").map((effect) => inputOf(effect.capability, effect.resource)));
+				break;
 			case "ask": {
 				const { file, source, ...question } = body as AskEvent;
 
@@ -1388,6 +1498,10 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 		const { program } = session.configuration;
 
 		liveSessions.delete(session.id);
+		// (after every event it told: its values, end and effects)
+		void keepSession(session.id).catch((error: unknown) => {
+			log?.warn("a run couldn't be kept", { "error": failureText(error) });
+		});
 
 		if (!told.delete(session.id) && session.type !== "production" && typeof program === "string") {
 			endedCame(session.id, { "file": program });

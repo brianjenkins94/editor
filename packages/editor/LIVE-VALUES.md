@@ -306,7 +306,7 @@ tour types, pauses and reads the margin (a write skipped, a half-typed edit, an 
 
 **Revised 2026-10-22: on a save, and on an interval** (RUNNING.md, *Unattended runs*). Ctrl+S runs the file (the last of
 a burst of saves, 250ms apart; not again if that text started a run in the last second), and so does an interval —
-`run.liveRuns.interval`, 5 seconds by default, 0 for saves only — while the file in front of you differs from what its
+`run.liveRuns.interval`, 5 seconds by default, 0 for saves only — while the file in front of you, edited, differs from what its
 last run ran. Typing no longer starts one; an edit still stops the one going. Nobody is watching a live run (a rule's
 `trigger is edit`), so it still asks nothing, but before skipping a call it gives back what that call returned when it
 last ran for real, if that's recorded (`.silo/local/recorded.json`, the run contract's `__recorded`): a fetch gets its
@@ -322,6 +322,22 @@ ran and how on hover. A finished run rolls a ball down the gutter column through
 (its values', the same line twice running once, at most 400 steps, the roll at most 1.6s), then the ball settles. Picking
 an older ball shows its values again — where its code can still be found in the text as it is — and rolls its ball. The
 margin's run log and coverage marks are still the latest run's, not the one picked (open).
+
+**Kept across reloads, deduped, and shared as they're committed** (2026-10-22; lib util/silo/traces, the margin's
+runs.ts, git-engine.ts `shareRuns`). A finished run is kept as a trace — its values, calls, how it ended, what it read,
+the text it ran (by its git blob oid) — and the same run again (the same text, inputs, values and end) is the ball it was,
+counted (*3 runs alike*), not a new one. Every run kept stays on this machine, `.silo/local/traces/<file>.jsonl`, values
+and text, so a file's balls come back when it's shown again. What git gets is worked out as a commit is made — the
+editor makes every commit, so the step is its own, a pre-commit hook in all but name: for each program file committed,
+the runs of the very text committed (its staged blob) go in `.silo/traces/<you>/<file>.jsonl`, staged with it; a file
+committed with none, or deleted, takes its shared runs out. So what's committed is always the runs of the code beside
+it, and nothing's written to share in between. A value can hold a secret, so a shared run carries its values only when
+it surely read nothing: no input the runtime saw (a call made or given a result), no process.argv, and code that can't
+read from outside at all (no import or require, nothing of process, fetch, sockets, storage or the page) — its code, in
+git already, decides them. Any other run is shared by its values' types, the inputs it read (a URL without its query),
+and how it ended without the message; its values stay local. (A runtime doesn't tell every read: the editor answers a
+program's workspace reads itself, outside the run's effects — which is why the code decides too. Next: tsval tracking
+which values came from an input, so a run that read one can share the values that didn't.)
 
 ## Open
 

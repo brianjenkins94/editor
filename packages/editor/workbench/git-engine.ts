@@ -12,7 +12,10 @@
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
-import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
+import { userSlug } from "@brianjenkins94/util/silo/evidence";
+import { localTracesPath, SILO_DIR, tracesPath } from "@brianjenkins94/util/silo/layout";
+import { committable, current, parseTraces, tracesText } from "@brianjenkins94/util/silo/traces";
+import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, updateIndex, walk, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
 // read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
@@ -25,6 +28,11 @@ import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, 
 const DIR = "/workspace";
 /** Placeholder identity for local commits (a real signed-in identity arrives with the auth milestone). */
 const AUTHOR = { "name": "editor", "email": "editor@localhost" };
+
+/** The files whose runs the Margin keeps (live runs' programs): the ones a commit shares runs of. */
+const PROGRAM = /\.(?:m|c)?[jt]sx?$/u;
+/** At most this many runs of a file shared. */
+const SHARED_RUNS = 8;
 
 export interface GitChange { "path": string; "status": "A" | "M" | "D" }
 export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
@@ -139,9 +147,95 @@ export async function stagePaths(paths: string[]): Promise<void> {
 	}
 }
 
-/** Commit what's staged, and only that (`git commit`). Returns the new commit oid. */
-export async function commitIndex(message: string): Promise<string> {
-	return commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
+async function readText(path: string): Promise<string | undefined> {
+	try {
+		return await fs.promises.readFile(`${DIR}/${path}`, "utf8");
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The editor's pre-commit step (it makes every commit: the Source Control view's, Commit All, the terminal's `git
+ * commit`): what `.silo/` shares of runs is worked out for what's being committed (LIVE-VALUES.md, *Runs kept*). For
+ * each program file staged, the runs kept on this machine of the very text staged (by its blob oid) — each as it may be
+ * shared (lib traces' `committable`: never its text, a run that could have read inputs by its values' types) — go in
+ * `.silo/traces/<you>/<file>.jsonl`, staged with it; a file staged with no such runs, or deleted, takes its shared runs
+ * out. So what's committed is always the runs of the code beside it. A failure here shares nothing and doesn't stop
+ * the commit, but isn't silent: it's what this returns (why), and the commit says so (`Committed`'s `unshared`).
+ */
+async function shareRuns(): Promise<string | undefined> {
+	try {
+		const programs = (await status()).staged.filter((change) => PROGRAM.test(change.path) && !change.path.startsWith(`${SILO_DIR}/`));
+
+		if (programs.length === 0) {
+			return undefined;
+		}
+
+		const wanted = new Set(programs.map((change) => change.path));
+		const staged = new Map<string, string>();
+
+		await walk({
+			"fs": fs,
+			"dir": DIR,
+			"trees": [STAGE()],
+			"map": async (path, [entry]) => {
+				if (entry !== null && wanted.has(path) && await entry.type() === "blob") {
+					staged.set(path, await entry.oid());
+				}
+
+				return undefined;
+			}
+		});
+
+		const config = await readText(".git/config");
+		const user = (config === undefined ? undefined : userSlug(config)) ?? "local";
+
+		for (const path of wanted) {
+			const oid = staged.get(path);
+			const shared = tracesPath(user, path);
+			const before = await readText(shared);
+			// This machine's runs of the text staged; else what's shared of it already (kept on another machine).
+			const kept = oid === undefined ? [] : current(parseTraces(await readText(localTracesPath(path)) ?? ""), oid);
+			const runs = kept.length > 0 ? kept.map(committable).slice(-SHARED_RUNS) : current(parseTraces(before ?? ""), oid ?? "");
+
+			if (runs.length > 0) {
+				await fs.promises.mkdir(`${DIR}/${shared.slice(0, shared.lastIndexOf("/"))}`, { "recursive": true });
+				await fs.promises.writeFile(`${DIR}/${shared}`, tracesText(runs));
+				await add({ "fs": fs, "dir": DIR, "filepath": shared });
+			} else if (before !== undefined) {
+				await fs.promises.unlink(`${DIR}/${shared}`);
+				await remove({ "fs": fs, "dir": DIR, "filepath": shared });
+			}
+		}
+
+		// (what keeps this machine's runs out of git, with them: `/local/`)
+		for (const seed of [`${SILO_DIR}/.gitignore`, `${SILO_DIR}/.gitattributes`]) {
+			if (await readText(seed) !== undefined) {
+				await add({ "fs": fs, "dir": DIR, "filepath": seed });
+			}
+		}
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
+
+	return undefined;
+}
+
+/** A commit made: its oid — and, when its runs couldn't be shared with it (`shareRuns`), why: said where it was made. */
+export interface Committed { "oid": string; "unshared"?: string }
+
+/** The commit, once `.silo/`'s share of it is staged (`shareRuns`), whether or not that could be. */
+async function committed(message: string): Promise<Committed> {
+	const unshared = await shareRuns();
+	const oid = await commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
+
+	return { "oid": oid, ...unshared === undefined ? {} : { "unshared": unshared } };
+}
+
+/** Commit what's staged, and only that (`git commit`): the new commit (`Committed`). */
+export async function commitIndex(message: string): Promise<Committed> {
+	return committed(message);
 }
 
 /** One commit, as `git log` shows it. */
@@ -166,11 +260,11 @@ export async function createBranch(name: string): Promise<void> {
 	await branch({ "fs": fs, "dir": DIR, "ref": name });
 }
 
-/** Stage all changes, then commit. Returns the new commit oid. */
-export async function commitAll(message: string): Promise<string> {
+/** Stage all changes, then commit: the new commit (`Committed`). */
+export async function commitAll(message: string): Promise<Committed> {
 	await stageAll();
 
-	return commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
+	return committed(message);
 }
 
 /** One file's contribution to a selective commit. */
@@ -188,7 +282,7 @@ export interface CommitFile {
  * is staged — a `content` blob for a PARTIAL selection (written via writeBlob + updateIndex so the working tree keeps
  * the unselected changes), a removal for a deletion, or the working file otherwise — and the index is committed.
  */
-export async function commitSelection(message: string, files: CommitFile[]): Promise<string> {
+export async function commitSelection(message: string, files: CommitFile[]): Promise<Committed> {
 	const { staged, unstaged } = await status();
 
 	for (const path of new Set([...staged, ...unstaged].map((change) => change.path))) {
@@ -210,7 +304,7 @@ export async function commitSelection(message: string, files: CommitFile[]): Pro
 		}
 	}
 
-	return commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
+	return committed(message);
 }
 
 /** The commit HEAD points at, or undefined before the first commit (or with no repository). */
