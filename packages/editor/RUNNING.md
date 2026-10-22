@@ -97,6 +97,60 @@ code, but stepping back needs stopping first, and the page can't stop. Not built
 
 (The browser's DevTools remain for a preview popped out into its own window — the user's, outside the editor.)
 
+## Unattended runs (designed 2026-10-22, not built)
+
+Runs the editor starts on its own after an edit, so you see how a change affects what already ran without pressing
+Run, and without a testing UI. They're runs like any other: the same session, margin, run log and evidence. The
+difference is that nobody is watching, so nothing can stop and ask, and nothing may happen in the world that the
+developer wouldn't have let happen.
+
+**What runs.** What was run before, run again. A run's envelope keeps its entry, arguments and directory. Its evidence,
+and the tests' reach (packages/silo/README.md, "Which tests reach what"), say which earlier runs reached the
+declarations an edit changed. Those runs, and the tests that reach those declarations, run again once the edit
+settles: one at a time, each new edit cancelling what's running. Code that no run reached starts nothing.
+
+**Nobody is asked.** The policy decides every call, and who started the run is one of the facts a rule matches
+(RULES.md: `trigger`). Where the policy would ask, the run halts instead: it ends before the call, without making it.
+The question waits on that line in the margin until you're back. It says what the run reached, and offers what to do
+when you're not watching: give what the call returned last time, skip it, allow it, or stop here. Your answer is a rule
+like any other. So questions come only from runs that got that far, one per call, and nothing is set up front.
+
+**Defaults, before any answer** (the stance a policy starts from for `trigger is edit`):
+
+| Effect | Unattended |
+|---|---|
+| fs | Reads are real. Writes go to a writable layer of the run's own over the workspace's, discarded when it ends, so a write needs no rule |
+| net, a read (`reach`'s `safe`: GET, HEAD) | The recorded response to the same request; with none, halt |
+| net, anything else | Never made: the recorded response, else halt |
+| A database | It arrives as net (an HTTP driver), a WebSocket (held, as a preview's are), or in memory (sqlite or PGlite as wasm, IndexedDB). In memory it's the run's own and runs; the rest is the net case, matched on the request's body |
+| exec | Skipped (almostnode's `child_process` is a stub anyway) |
+| env | The recorded value, else halt |
+| Clock, random | Deterministic already (*The model*) |
+
+**Skip or give.** Skipping a call is safe only where nothing reads what it returns, such as an `await fetch(…)` as a
+statement of its own, which tsval can tell. Where the result is used, the run needs a recorded or given value, or it
+halts.
+
+**What it shows.** Nothing, when it runs as it did before. A difference is marked where it happens: a value at a site, a
+throw, a failed test. So is a changed effect: a request that no longer matches its recording (*your edit changed the
+body `checkout.ts` posts to /orders*), shown with the difference. Effects are compared, not asserted, so what a program
+sends out is checked without anyone writing that check. A function observed pure (packages/silo/README.md, "Purity")
+that returns something else for the same arguments is marked the same way.
+
+**Shared, and in CI.** Recordings are this machine's (`.silo/local/recorded.json`: a response can hold secrets), so a
+collaborator's unattended run halts where yours replays. Sharing one is explicit: *Save as rule* turns a recording into
+a `give` in your policy file, choosing what to leave out, and the commit is where it's reviewed. CI is a trigger too
+(`trigger is ci`): the same rules apply, and a halt fails the run, as everywhere nobody can be asked.
+
+What it needs that isn't there:
+
+- **Recordings keyed by the request** (method, URL, a hash of the body), not the latest response of each call:
+  replaying needs to know a request is the same one.
+- **`give result` for a preview's calls.** Today it applies only where the debugger stands in for a call; a preview's
+  fetches are decided at the service worker, and are either real or denied (RULES.md, "A call's result").
+- **A writable layer per run**, over the workspace's.
+- **A home for runs nobody started.** The run log holds them; they don't take the Debug view's focus.
+
 ## What can't run this way
 
 The hope is none; the plan is as few as possible, each a named case with a reason, kept on a list here and shrunk.
@@ -147,6 +201,7 @@ workspace runtime the bridge exports to any debugger (EXTENSION-POINTS.md, 2), a
 | `npm run x`, a task, a Service in the ▷ menu | The script, through the terminal, so each `node` in it is a run as above; `vite` starts the dev server as a run |
 | An agent's `debug_start` | Run, returning at the first stop |
 | *Explore Orderings* | Run every ordering (as now), then Run the one picked |
+| An edit, once it settles (designed, not built) | Run again what earlier runs and tests reached of it, unattended (*Unattended runs*) |
 
 ## What goes
 
@@ -251,3 +306,13 @@ that can't start says why). And the two run ledgers become one: every run in `ru
   stepping back past one is visible.
 - What a recorded stop keeps of an object (a preview, a depth, how many of a line's stops), and how one stop is told
   from another (the event, the render, the turn).
+- Unattended runs (*Unattended runs*):
+  - **Halt or skip**, for a call that isn't safe and has no recording, with nobody watching. Halt is proposed: a
+    skipped call that mattered makes a wrong run that looks right.
+  - **A writable layer per run.** Whether the workspace's overlay stack can take one; its layers were designed without
+    copy-up.
+  - **An app's unattended run.** The preview already reloads on an edit (HMR). Is that reload the unattended run, with
+    its fetches replayed at the service worker?
+  - **How much runs after an edit.** Everything selection picks, or a budget (time, CPU) with the rest left for later.
+  - **A database client's calls as the boundary**, if replaying at the wire proves brittle: the members your code calls
+    (from the baseline's join), not the requests they make.

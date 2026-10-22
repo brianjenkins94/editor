@@ -107,6 +107,9 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
    `features` and `history` rest on the parked feature layer.
 6. **The leftovers.** Whether `packages` and `deobfuscate` get wired into the baseline (see 1), and whether `guard`
    stays. (`provenance` and `review`, the dropped AI-approval purpose's, are removed.)
+7. **Tests and purity have no job yet.** Which tests reach which code, and which functions are pure (both designed
+   below, neither built), are facts about your own code, not about packages or calls. Keeping what runs observed is
+   Remember; choosing which tests to run, and deciding purity statically, fit none of the four as they're written.
 
 ## Design: one silo, two front ends
 
@@ -338,6 +341,88 @@ reported, with types. The engine bundled into tsserver, its plugin and the prese
 the config): its code runs in the worker, whose network is shut once the toolchain is fetched, over a read-only
 workspace; its imports resolve to the toolchain for the packages it carries, the workspace's node_modules for the rest.
 
+### Which tests reach what (designed 2026-10-22, not built)
+
+Two uses for one record. **Selection:** run the tests a change could break, not all of them. **Features:** a test is a
+way in every repository already has, and its file and title name what it's for. That's what the feature layer lacked:
+its ways in are a list written for this repository (CHANGE-HISTORY.md, "Ways in beyond this repo").
+
+A spike (2026-10-22, scripts not kept) measured both. Coverage came from our own instrumentation, never V8's, because
+it has to run in the browser. Each module went through almostnode's `frameworks/instrument.ts`, the transformer the
+preview dev server uses, and was counted per test:
+- **Unit tests:** in a Node load hook standing in for almostnode's compile.
+- **Architecture suites:** in an editor built with every pass instrumented, with `previews/page-evidence.ts`'s runtime
+  in each realm (the shell, the workbench, the extension host, the LSP workers, the service worker), read by the
+  harness around each test.
+
+What it found:
+- **Clusters.** Grouping the editor's 140 unit tests by the declarations they reach (581, a top-level name or
+  `Class.member`), with no test names as input, mostly gives features. Some span several test files (the event sheet's
+  game model across three; durable anchors across four), and 82% of tests land with their own file's majority.
+- **Architecture tests.** Each reaches about 340 declarations, most of them ambient: hub traffic, logging, file reads,
+  the type loader. Their clusters are weak, and async work one test starts can land in the next.
+- **Selection.** Of 258 commits that changed source, unit tests reach the declarations of 98, and both suites together
+  of 178. 80 change nothing any test reaches. Selecting every test that was running when a changed declaration ran
+  picks a median 49 of 97 architecture tests, and 7 of the 8 suite files for 102 commits. Treating code reached at boot
+  or by at least 30% of architecture tests as covered by any session (so it selects only the smoke suite) leaves 82
+  commits needing the smoke suite alone and 7 needing all of them.
+- **Not checked:** whether a selection would have skipped a test that went on to fail.
+
+The design:
+- **It's evidence.** A new observation kind, `tested`, in the files that exist: `evidence/<user>/<env>/<file>.jsonl`.
+  One line per declaration span says which tests reached it
+  (`{"kind":"tested","span":…,"tests":{"test/git.test.mjs › diff, then restore undoes it":…}}`). Keyed by the code's
+  file, it's what selection reads: a diff names files, their evidence names the tests. Per user and per environment
+  (Node's unit tests, Chromium's architecture suites), `merge=union`, duplicates folded by the reader: union is also the
+  safe merge for selection, since it only ever adds a test. BABLR span ids follow a declaration through moves and
+  reformatting. An edited declaration gets a new id, so selection looks a change up by the base version's ids.
+- **Sets, not counters.** A test's reach is written when the set changes, so a run that reaches what it did before
+  changes nothing in git. A declaration joins a test's set at once and leaves after N runs in a row without it. The
+  count of misses is kept under `local/`. Architecture tests' ambient reach flickers with timing, and this keeps it from
+  churning.
+- **Outcomes in the run.** A test run is a run envelope with `tests` (each test's id: pass, fail or skip). Local runs
+  stay local (they're frequent); CI's are shared. The failures over time are what checking a selection's safety needs.
+- **Selecting.** A change's declarations (by the base version's spans) select the tests that reached them. Ambient and
+  boot code select the smoke suite. A test with no record runs, with its static import reach as the floor. Ambient is
+  relative to a suite's other tests, so it's worked out when read, not kept. So are clusters.
+- **Trust.** Once CI gates on selection, a pull request could edit the records so its own tests are skipped. So CI
+  selects with the records at the merge base, and counts only CI's own evidence (`evidence/ci/…`).
+
+### Purity: decided statically, checked by runs (designed 2026-10-22, not built)
+
+Which functions are pure, to show later (memoizing, replaying a call safely, explaining a function). Mostly decidable
+statically, under assumptions that are written down:
+- **Getters and setters:** no hidden side effects; accessors declared in the program are treated as calls.
+- **Proxies:** none flow in.
+- **Built-ins:** not monkey-patched. A table classifies them: `Math.*`, non-mutating string and array methods and `JSON`
+  are pure; `push` and `sort` write to their receiver.
+- **Types:** honest enough to resolve calls; a call through `any` comes out unknown.
+- **Throwing and allocating** aren't effects.
+
+A fixpoint over the call graph gives each declaration one verdict:
+
+| Verdict | Meaning |
+|---|---|
+| pure | No writes outside its own allocations, no I/O, no nondeterministic reads (`Date`, `Math.random`, `crypto`) |
+| reads-state | Pure, but reads mutable state from outside (memoizable only with invalidation) |
+| mutates-args | Writes only to objects it was passed |
+| pure-if | Pure if the callbacks it's given are; resolved where the callback is known |
+| effectful | Anything else |
+| unknown | Dispatch through an interface with many implementations, dynamic property access, `any` |
+
+The I/O half is `reach`'s already (fs, net, exec, env); the rest goes beside it in lib's analysis, behind the
+TypeScript seam. Static verdicts are recomputed, not kept: they say nothing the code doesn't.
+
+Runs check it. tsval can observe purity, because it makes every assignment: it can tag what a call allocates and record
+a write that escapes it, an effect, or a nondeterministic read. instrument.ts sees statements and values, not writes, so
+code that runs in previews and the architecture suites gets the static verdict only. Observed purity is another
+evidence kind at function spans, sharing the same files, merges and fading:
+`{"kind":"purity","span":…,"calls":…,"impure":{"write":…,"effect":…,"nondeterministic":…},"first":{"kind":"write","at":…}}`.
+Runs add three things:
+- **Answers for unknowns.**
+- **Counterexamples.** A write from a function judged pure means an assumption broke, which is a finding.
+- **Confidence.** Phrased as insights' suggestions are: "seen 4,000 times, never impure", not "pure".
+
 ### Decided
 
 - **Analysis: wanted, in both front ends.** Both sides of each dependency and their join, checked against the runs, as
@@ -359,5 +444,27 @@ workspace; its imports resolve to the toolchain for the packages it carries, the
 
 ### Decisions to make
 
-(The questions above, "What doesn't fit", are otherwise answered by this design.)
+(The questions above, "What doesn't fit", are otherwise answered by this design, except 7.)
+
+From tests and purity (both above):
+
+1. **Which job they are**, or whether there's a fifth ("What doesn't fit", 7).
+2. **How CI's evidence gets into git.** A commit by CI when its reach sets change (rare once they settle), or git notes
+   (`refs/notes/silo`, merged with git's own `cat_sort_uniq`), which stay out of main's history but outside the model
+   where history is the committed `.silo/`.
+3. **What runs the unit tests.** The spike's Node hook fought tsx's CommonJS loading at every step. tsval could run
+   them as a command line, from the host `silo run` needs anyway: the same span ids as runs in the editor, and the only
+   way unit tests could observe purity. It's slower (an interpreter), and it depends on packages such as `typescript`
+   running natively rather than interpreted, which hasn't been checked.
+4. **The architecture suites' shared session.** Tests run in order in one session, so one test's async work lands in
+   the next. Waiting for quiet between tests, or a session per test, would make their reach their own; or accept it, and
+   let ambient code select the smoke suite.
+5. **The ambient line.** 30% of a suite's tests was one setting in the spike.
+6. **Size.** Architecture tests reach about 340 declarations each: across 97 tests, tens of thousands of `tested`
+   entries in the evidence files.
+7. **Test identity.** A test is its file and full title; renaming one orphans its record until it runs again.
+8. **A selection's safety**, which needs the failure history first.
+9. **A subcommand, or not.** Selection could be `silo run`'s (`--changed`), or its own command, once it has a job.
+10. **How much purity static analysis decides.** Unmeasured. The share of this repository's declarations that come out
+    pure, effectful and unknown, and why the unknowns are unknown, says how much runs have to add.
 

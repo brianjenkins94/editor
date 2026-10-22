@@ -46,6 +46,7 @@ Rules add the other half — **actions**, each with its argument type too — so
 | a process.argv stub | program *is* `tax.js`, reads *process.argv* | give: cases `CA SPRING10` · `FR` |
 | (slice 2) a mocked call | capability *is* `net`, resource *matches* `https://api.example.com/*` | give: a recorded response |
 | a variable mocked at a stop | at the stop, *high* | set: `3` (once) |
+| (designed) a call nobody's watching | trigger *is* `edit`, capability *is* `net`, resource *matches* `https://api.example.com/*` | give: the recorded response |
 
 The targets, operators, argument types and actions are a **catalog**: adding a seam is adding catalog entries (a
 target, its type's operators, an argument type with its input), not a form.
@@ -121,6 +122,16 @@ rule*) — the same two buttons wherever the editor opens.
   the code. Moving a place keeps the rule's `added`. Each step is asked of BABLR once (2026-10-13): the bridge keeps
   each answer by the text, the texts before it and the place, so listing the rules again — the Rules tree, the margin,
   a save — asks only about a new burst, and the walk back to the latest text it's found in asks by its id alone.
+- **Who's watching: the `trigger` target** (designed 2026-10-22, not built; RUNNING.md, *Unattended runs*). Who
+  started a run is one of the facts a rule matches: `you` (any way in a person uses), `edit` (the editor, after an edit
+  settles) or `ci`. A rule can then say what happens to a call when nobody's watching (*trigger is edit*, …, *then give
+  result*), and one without the row applies to every run as before. No new action: when nobody can be asked, `ask`
+  (and `stop`) **halt** the run. It ends before the call, without making it, and the question waits in the margin on
+  that line until someone's back: *Rule…* prefilled with the call, *trigger is edit* among its rows, and the actions
+  people pick most offered as buttons (give what it returned last time, skip, allow, stop here). *Just this once*
+  re-runs it with the answer; *Save as rule* keeps the answer. Under *ci*, a halt fails the run. Where a rule has no
+  answer, unattended runs start from defaults of their own: fs writes kept in a layer of the run's own, a request
+  replayed from its recording, nothing unsafe made for real (RUNNING.md's table).
 - **A node service's reads are recorded** (2026-10-06), as a preview's fetches are: what a run read of the workspace
   for real (an allowed `fs:read`), by the path as the program wrote it — `fs:read` and that path, what the debugger's
   stand-in asks — so *Rule…* is prefilled with it and a rule can give it to a later run (the debug worker's gated call →
@@ -166,3 +177,13 @@ enough to own, and it has no notion of actions. Revisit if its core grows action
   carries many.
 - Recording commands, once a node service can run one (almostnode's `child_process` is a stub).
 - How the margin shows that a rule applies on a line (a mark in the gutter column, beside coverage?).
+- The `trigger` target (designed):
+  - **One target or a flag.** `trigger` with three values, or `attended` (yes or no), with CI an unattended run whose
+    halts fail.
+  - **Whether halting deserves its own action.** One a rule could choose while someone's watching too, for a call that
+    should never run unattended or attended without a fresh look.
+  - **Where defaults live.** Unattended defaults as rules in a contract silo seeds (visible, editable), or as the
+    evaluator's fallback when no rule matches.
+  - **Matching a recording.** A `give` of a recorded response matches today by capability and resource. Replaying a
+    request needs its method and body too: a target for them (`request.method`, `request.body`), or a recording keyed
+    by all three.
