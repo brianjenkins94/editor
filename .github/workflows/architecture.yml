@@ -54,7 +54,23 @@
         # The dev server the suites start (dev.ts) needs the monaco-vscode-api component's dist and the built sibling
         # packages; it prebuilds packages/editor itself (whose full build would need the component first anyway).
         { "run": "pnpm --recursive --if-present --filter '!./packages/editor' run build" },
-        { "run": "pnpm --filter ./packages/editor exec playwright install --with-deps chromium" },
+        # Chromium, kept between runs (by the Playwright version that fetches it); and the system packages it needs only
+        # when it lacks a library it links — the runner image has Chrome's. `--with-deps` installed them every time,
+        # fonts and xvfb too, from an apt mirror that sometimes crawls: 20s on most runs, 11–12 minutes on a few shards on
+        # 2026-10-22 (b72ada8, c716cd6), which ran their tests out of the job's 15.
+        {
+          "id": "playwright",
+          "run": "echo \"version=$(pnpm --filter ./packages/editor exec playwright --version | awk '{print $2}')\" >> \"$GITHUB_OUTPUT\""
+        },
+        {
+          "uses": "actions/cache@v4",
+          "with": { "path": "~/.cache/ms-playwright", "key": "playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium" }
+        },
+        { "run": "pnpm --filter ./packages/editor exec playwright install chromium" },
+        {
+          "run": "binaries=$(find ~/.cache/ms-playwright -type f \\( -name chrome -o -name headless_shell -o -name chrome-headless-shell \\) -perm -u+x)\nmissing=$(for binary in $binaries; do ldd \"$binary\"; done | grep 'not found' | sort -u || true)\nif [ -z \"$binaries\" ] || [ -n \"$missing\" ]; then echo \"Chromium lacks: ${missing:-(no binary found to check)}\"; pnpm --filter ./packages/editor exec playwright install-deps chromium; else echo \"Chromium has every library it links: $binaries\"; fi",
+          "timeout-minutes": 6
+        },
         # The baseline the performance suite compares against: the last green run on main's results (none on a first run).
         {
           "if": "${{ matrix.shard == 'performance' }}",
