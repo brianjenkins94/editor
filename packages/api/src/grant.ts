@@ -19,12 +19,12 @@ import { userWith } from "./identities.ts";
  *   - the authorization code (its hash, its PKCE challenge, 60 seconds to live) until it's redeemed;
  *   - the current refresh token's hash, and every earlier one's, for reuse detection;
  *   - the jtis of proofs it has seen, until they'd be too old anyway;
- *   - its client's fingerprint (BEHAVIOR.md: which headers it sent, keyed hashes of them), from the code's redemption,
+ *   - its client's fingerprint (README.md, "Behavior": which headers it sent, keyed hashes of them), from the code's redemption,
  *     and how often each header has differed since, and how;
- *   - its last action and the transitions since its last flush (BEHAVIOR.md, B8), added to the shared model hourly;
+ *   - its last action and the transitions since its last flush (README.md, B8), added to the shared model hourly;
  *   - GitHub's answer to connecting GitHub to the account (src/link.ts), sealed, for 2 minutes, until the app finishes it;
  *   - a passkey being added (src/passkeys.ts): its challenge, then the checked credential, until the app finishes it;
- *   - its timeline (OPERATIONS.md, "Session timelines"; O5, O6): each request made through it (route, status, duration,
+ *   - its timeline (README.md, O5, O6): each request made through it (route, status, duration,
  *     trace id) and what the editor said happened (an event's name and detail, src/session-events.ts), at most EVENTS
  *     of each, none older than RETAIN, and none RETAIN after it ended.
  * A sign-in whose code is never redeemed (the browser closed, the redirect lost) ends when the code would have expired:
@@ -292,7 +292,7 @@ export class Grant extends DurableObject<Bindings> {
 
 	/**
 	 * Record a proof's jti (until `expires`), and say whether it was seen already, and whether the sign-in is live. Every
-	 * request's proof comes here, so its client's `print` is compared here too (BEHAVIOR.md): each way a header differs
+	 * request's proof comes here, so its client's `print` is compared here too (README.md, "Behavior"): each way a header differs
 	 * from how the sign-in's client is known is counted (by how much it matters, so a tolerated change doesn't hide a later
 	 * one that matters), and the ones that matter are handed back the first time, for the Worker to record.
 	 */

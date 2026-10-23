@@ -1,5 +1,5 @@
 /**
- * theme/vscode-skin — Web Awesome's components as VS Code draws its own (PLAN.md §9.2.2), where no token reaches: their
+ * theme/vscode-skin — Web Awesome's components as VS Code draws its own (README.md, *VS Code's look everywhere*), where no token reaches: their
  * parts, on every page the theme is on (VS Code's colours there are the live ones, or the theme's fixed copy). The tokens
  * do the rest (theme/tokens' vscodeTokens: VS Code's corner radii and shadows, a
  * control's height, padding and weight). theme/chrome, theme/vscode and theme/vscode-colors call it with the tokens.

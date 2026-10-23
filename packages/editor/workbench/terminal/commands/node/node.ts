@@ -1,8 +1,8 @@
 /**
  * The terminal's `node` command — a thin just-bash custom command that resolves the target script against the shell's
- * cwd and runs it as every Run does (RUNNING.md, step 3): in the debugger, its output and stdin this terminal, with the
- * command line's arguments, the shell's directory and its environment. just-bash owns the shell. When the debugger can't
- * take it, it says so and fails (exit 1) — there's no plain-runtime fallback.
+ * cwd and runs it as every Run does (RUNNING.md, *Output goes where it was started*): in the debugger, its output and
+ * stdin this terminal, with the command line's arguments, the shell's directory and its environment. just-bash owns the
+ * shell. When the debugger can't take it, it says so and fails (exit 1) — there's no plain-runtime fallback.
  *
  * Node's other forms, as people type them: `-e <code>` runs the code and `-p <expression>` prints it (the debugger
  * runs files, so the code goes in one under `.silo/local/`, which stays out of git, removed after); `-v` asks the runtime

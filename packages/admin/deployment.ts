@@ -8,7 +8,7 @@ import * as url from "node:url";
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 
 /**
- * The deployment as configured (README.md, the architecture page): every Worker, read from its wrangler config at build
+ * The deployment as configured (packages/api/README.md, "The architecture page"): every Worker, read from its wrangler config at build
  * time, so the architecture page is drawn from what's deployed rather than by hand. A Worker's environments are its
  * config's top level (`local`) and its `env` sections, each over the top level; a static site's config has none, and is
  * production's (its custom domain). The page imports it as `virtual:deployment`.

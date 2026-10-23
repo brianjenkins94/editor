@@ -4,8 +4,6 @@
  * in Web Awesome lines up with the code's lines and characters: the rows and their columns, a value's colour by its
  * kind, the marks in the gutter column and a step card's label. All on --wa-* tokens (theme/vscode maps them onto the
  * VS Code theme), plus the bridge's --code-value-* for what the debugger shows; the Margin's accent is theme/styles/margin's.
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 
@@ -78,7 +76,7 @@ export const paneViewsStyles = stylesheet({
 		"color": "var(--wa-color-orange-60)",
 		"fontWeight": "var(--wa-font-weight-bold)"
 	},
-	// A call that wasn't made — skipped at its stop, or by a live run (LIVE-VALUES.md): what didn't happen, muted.
+	// A call that wasn't made — skipped at its stop, or by a live run (packages/editor/RUNTIME-EVIDENCE.md, *Live runs*): what didn't happen, muted.
 	".live-values-skip": {
 		"color": "var(--wa-color-text-quiet)",
 		"fontStyle": "italic"
@@ -144,8 +142,8 @@ export const paneViewsStyles = stylesheet({
 	},
 	// How the last run ended short, in the gutter column: a near-square badge, centred on where its bar would be (6.5px
 	// in: theme/styles/margin) and on the line, clear of the line number — beside the line it crashed on or was stopped at. The
-	// mark spans the line; the badge is drawn inside it. A placed rule (RULES.md: *at*) is a small diamond there, over
-	// coverage's bar, so a mocked variable or a given result isn't invisible.
+	// mark spans the line; the badge is drawn inside it. A placed rule (packages/editor/RUNNING.md, *A rule placed in the
+	// code*) is a small diamond there, over coverage's bar, so a mocked variable or a given result isn't invisible.
 	".notes-margin-mark.run-crashed, .notes-margin-mark.run-stopped, .notes-margin-mark.rule-placed": {
 		"left": "2px",
 		"width": "9px",

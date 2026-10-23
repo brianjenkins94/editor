@@ -1,5 +1,5 @@
 /**
- * theme/app-window — `<app-window>`, a movable, collapsible window (PLAN.md §8.2, §10): Web Awesome's buttons in a frame
+ * theme/app-window — `<app-window>`, a movable, collapsible window (README.md, *Overriding a recipe*, *Published components*): Web Awesome's buttons in a frame
  * of the theme's, and `appWindow()`, the same as a function. Published as components/app-window.
  *
  *     <app-window label="Preview" storage-key="preview" closable>

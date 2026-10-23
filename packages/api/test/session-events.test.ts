@@ -6,7 +6,7 @@ import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
 import { someone, testBrowser } from "./helpers.ts";
 
-// What the editor reports (OPERATIONS.md, O6) in workerd: a signed-in session's events onto its timeline, in the fixed
+// What the editor reports (README.md, O6) in workerd: a signed-in session's events onto its timeline, in the fixed
 // vocabulary only, a repository by its keyed tag; its uncaught errors, signed in (on the timeline, with the user) or
 // not (nothing of who but a daily IP hash), each under the id the editor shows.
 

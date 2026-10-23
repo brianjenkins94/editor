@@ -1,5 +1,5 @@
 /**
- * Live runs (LIVE-VALUES.md, *Live runs*): the program file you're editing runs again on each save, and on an interval
+ * Live runs (RUNTIME-EVIDENCE.md, *Live runs*): the program file you're editing runs again on each save, and on an interval
  * once it's been edited, while its text differs from what its last run ran — a debug session like any other (tsval's, or `run.debugger`'s), so
  * the margin shows what it did, but quiet (no toolbar, status bar, view or console; stopping at nothing; not in the
  * running list) and harmless (nobody is watching, so it asks nothing: what it can't make it gives back as it was
@@ -55,7 +55,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	const start = async (document: vscode.TextDocument): Promise<void> => {
 		const { path } = document.uri;
 
-		// (an app's file runs in its page, not here — RUNNING.md, step 4)
+		// (an app's file runs in its page, not here — RUNNING.md, *Apps*)
 		if (!enabled() || yours(path) || running.has(path) || starting.has(path) || await appRootOf(path, readText) !== undefined) {
 			return;
 		}

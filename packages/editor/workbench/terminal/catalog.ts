@@ -5,7 +5,9 @@
  * `<name>.ts` (the implementation, loaded the first time the command runs) and its tests. Adding a command is adding a
  * folder; everything that enumerates commands derives from here — tab completion, which commands make a line run a
  * statement at a time (session.ts), and the agent's `terminal_run` tool's description (tools/) — so none of them is a
- * list to keep up by hand. (COMMANDS-AND-TOOLS.md has the layout and what's expected next.)
+ * list to keep up by hand. What we don't provide is a folder too (vim, python, docker…), a `missing` message saying what
+ * to do instead, so "known, and here's how" never reads as "broken". Text in and text out belongs here; what needs
+ * structure or the editor's state is a tool (app/tools/host.ts).
  *
  * Only `command.ts` is read here, eagerly — it's a few lines and imports nothing — so anything can ask what the
  * commands are without loading a command (index.ts loads the implementations, lazily).

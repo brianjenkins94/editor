@@ -5,7 +5,7 @@ import { audit, NOWHERE } from "./audit.ts";
 import { tellOwner } from "./mail.ts";
 
 /**
- * The kill switch (OPERATIONS.md, "The kill switch"): one D1 row, read at most every 10 seconds per isolate, so turning
+ * The kill switch (README.md, O1): one D1 row, read at most every 10 seconds per isolate, so turning
  * it on reaches every request within seconds, costs one read per isolate per 10 seconds, and needs no deploy. On, the
  * API answers "Down for maintenance" before doing anything else, except what the owner needs to look and turn it off:
  * the admin app's sign-in by GitHub or a passkey, and /admin/* for the owner role (src/admin.ts).
@@ -85,7 +85,7 @@ export async function setMaintenance(env: Bindings, on: boolean, reason: string 
 	return maintenance(env);
 }
 
-// ── The narrower switches (OPERATIONS.md O8) ────────────────────────────────────────────────────────────────────────
+// ── The narrower switches (README.md O8) ────────────────────────────────────────────────────────────────────────
 // One part of the API paused, not all of it: the same mechanism as the kill switch (a D1 row each, read at most every
 // 10 seconds per isolate, every flip audited and emailed however it was made, open when unreadable), for the likeliest
 // bad days. No row is on.

@@ -3,4 +3,4 @@
 {{text}}
 
 The admin app: {{admin}}
-Sent to ALERT_EMAIL by editor-api ({{environment}}). OPERATIONS.md says what each alert means.
+Sent to ALERT_EMAIL by editor-api ({{environment}}). packages/api/README.md ("Operations") says what each alert means.

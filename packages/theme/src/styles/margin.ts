@@ -3,8 +3,6 @@
  * Awesome is laid out line for line with the code: the frame, its sash, the gutter column, the cards around a step's
  * lines and the tab strip on the pane's first line. All on --wa-* tokens (theme/vscode maps them onto the VS Code
  * theme); the Margin's accent is the palette's purple, as the architecture view's hub links are.
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

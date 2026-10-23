@@ -7,7 +7,7 @@ import { createTestHarness } from "wrangler";
 import { recorded } from "../harness/state.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
-// C2 in workerd (SIGN-IN.md, "Email"): the admin app pushes its request, the browser opens the attempt, asks for a code
+// C2 in workerd (README.md, C2): the admin app pushes its request, the browser opens the attempt, asks for a code
 // by email (sent to an outbox of the test's own), and types it or follows the link, in that same browser; a match finds
 // or makes the address's user and starts the sign-in, with a code the app redeems.
 

@@ -1,4 +1,4 @@
-# The admin app (README.md, "Its own origin"): our own scripts and styles only, the API and GitHub's public API (logins,
+# The admin app (packages/api/README.md, "Its own origin"): our own scripts and styles only, the API and GitHub's public API (logins,
 # looked up live) the only places it talks to, never framed, nothing referred or cached. Cloudflare's Web Analytics, which
 # Cloudflare injects zone-wide, is allowed: its beacon script and where it reports.
 /*

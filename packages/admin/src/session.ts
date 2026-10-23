@@ -1,5 +1,5 @@
 /**
- * The admin app's sign-in (README.md, "Admin sessions are separate from editor sessions"): util/auth/client as the
+ * The admin app's sign-in (packages/api/README.md, "Admin sessions are separate from editor sessions"): util/auth/client as the
  * `admin` OAuth client, pushing its request first (PAR) and signing in through the API's own sign-in page. Its tokens
  * reach only /admin/*.
  */

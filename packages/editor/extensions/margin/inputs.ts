@@ -1,5 +1,5 @@
 /**
- * How a mocked process.argv is read (the notes margin's Mock, LIVE-VALUES.md): as a command line, a run's arguments
+ * How a mocked process.argv is read (the Margin's Mock, RUNTIME-EVIDENCE.md, *Mocking a value*): as a command line, a run's arguments
  * separated by spaces, quotes keeping a space in one; `|` separates runs.
  */
 

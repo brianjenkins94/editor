@@ -5,7 +5,7 @@ import ALERT_HTML from "./owner-alert.html";
 import ALERT_TEXT from "./owner-alert.txt";
 
 /**
- * Sending email (SIGN-IN.md, C2): through Cloudflare Email Service's `send_email` binding (`EMAIL`), from our own
+ * Sending email (README.md, C2): through Cloudflare Email Service's `send_email` binding (`EMAIL`), from our own
  * address on the zone (its SPF, DKIM and DMARC records are Email Service's to keep). In the harness and the tests,
  * through an outbox stand-in instead (`EMAIL_OUTBOX`, a URL the message is POSTed to as JSON), so nothing leaves the
  * machine and a test can read what was sent; and mail to one of our own addresses (INBOX) goes to our inbox too, as
@@ -57,7 +57,7 @@ async function logAlert(env: Bindings, subject: string, text: string, sent: { "o
 }
 
 /**
- * Tell the owner, now, by email (OPERATIONS.md): the kill switch flipped, spend past its budget, the tripwire, errors.
+ * Tell the owner, now, by email (README.md, "Operations"): the kill switch flipped, spend past its budget, the tripwire, errors.
  * To ALERT_EMAIL (a secret); without it, or without a way to send here, not sent. Either way it's logged, with Email
  * Service's message id when sent, so the admin app shows each alert and Cloudflare's delivery status for it. Best
  * effort: never fails its caller.

@@ -4,7 +4,7 @@ import { routePath } from "hono/route";
 import { audit, origin } from "./audit.ts";
 
 /**
- * The tripwire (OPERATIONS.md, "The tripwire"): no one reads another person's data, and if they find a way, it's an
+ * The tripwire (README.md, O3): no one reads another person's data, and if they find a way, it's an
  * incident. Every request made through a user's sign-in gets a watched D1 binding (`watch`, from the session middleware,
  * src/tokens.ts): every row a query returns is looked at, and a row naming another user (its `user_id`), or any value
  * that is the canary account's, is a breach. Admin routes that read across users by a permission lift the watch

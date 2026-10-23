@@ -240,7 +240,7 @@ function historyTsPlugin(): Plugin {
  *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
  *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
 /** `editor:release`: the commit being built (`git rev-parse --short HEAD`), or "dev" without git: the editor's error
- *  reports say which release they came from (shell/reporting.ts; packages/api OPERATIONS.md O6). */
+ *  reports say which release they came from (shell/reporting.ts; packages/api/README.md O6). */
 function releasePlugin(): Plugin {
 	const id = "editor:release";
 	let release = "dev";

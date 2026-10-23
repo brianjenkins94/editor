@@ -1,5 +1,5 @@
 /**
- * Signing in — the shell's side of packages/api (its README.md and SIGN-IN.md have the design). Optional: the editor is
+ * Signing in — the shell's side of packages/api (its README.md has the design). Optional: the editor is
  * whole signed out (public repos, samples, everything local), and no account is made until someone signs in. Signing in
  * goes through the API's sign-in page (PAR, C7): GitHub, an emailed code, or a password, two-factor if they've set it
  * up. The browser never holds a GitHub token: it holds OUR tokens, DPoP-bound to a key it can't export, and reaches
@@ -63,7 +63,7 @@ export async function signOut(): Promise<void> {
 	await client.signOut();
 }
 
-/** The API's switches (packages/api/OPERATIONS.md: the kill switch, and the parts paused), from GET /status; as all on
+/** The API's switches (packages/api/README.md, *The kill switch (O1) and narrower switches (O8)*), from GET /status; as all on
  *  when it can't be read. */
 async function status(): Promise<{ "maintenance": boolean; "paused": string[] }> {
 	const answer = await fetch(`${API}/status`).catch(() => undefined);

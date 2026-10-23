@@ -1,11 +1,11 @@
 /**
- * Recorded stops (RUNNING.md, step 5): a breakpoint in a page's code records what's in scope each time its line runs —
- * a page can't stop, so it's a recorded stop, not a live one — and the notes margin shows it as it shows live values, a
- * column per time it ran. The editor's breakpoints go to every dev server (`preview.stops`: each re-instruments a file
- * whose stops changed, and hot-updates it); what a page reports (`stops.preview`) becomes the run contract's `values`
- * for the file, told by the preview's own run — its `production` session (production-adapter.ts) — each report every
- * hit so far (`replace`), anchored in the text of the version that ran (`preview.version`). The Margin shows them as
- * it shows any run's.
+ * Recorded stops (RUNNING.md, *A breakpoint in a page is a recorded stop*): a breakpoint in a page's code records
+ * what's in scope each time its line runs — a page can't stop, so it's a recorded stop, not a live one — and the notes
+ * margin shows it as it shows live values, a column per time it ran. The editor's breakpoints go to every dev server
+ * (`preview.stops`: each re-instruments a file whose stops changed, and hot-updates it); what a page reports
+ * (`stops.preview`) becomes the run contract's `values` for the file, told by the preview's own run — its `production`
+ * session (production-adapter.ts) — each report every hit so far (`replace`), anchored in the text of the version that
+ * ran (`preview.version`). The Margin shows them as it shows any run's.
  *
  * The bridge's: a crossing, from the previews' hub to a debug session's events.
  */

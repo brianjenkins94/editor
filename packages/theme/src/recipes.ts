@@ -1,5 +1,5 @@
 /**
- * theme/recipes — the app's shapes as Stitches recipes (PLAN.md §8.2): a class for a Web Awesome element or plain
+ * theme/recipes — the app's shapes as Stitches recipes (README.md, *Overriding a recipe*): a class for a Web Awesome element or plain
  * markup, framework-free, so `class=`, `className=` and `element(tag, className)` all take it.
  *
  *     import { caption, toolbar } from "theme/recipes";
@@ -10,7 +10,7 @@
  * a use-site override, `toolbar({ "css": { … } })`, which wins by layer (`app.overrides`); and a new recipe composed
  * from it (`recipe(toolbar, { … })`).
  *
- * Each is published as a package of its own, components/<name> (PLAN.md §10).
+ * Each is published as a package of its own, components/<name> (README.md, *Published components*).
  */
 import type { Recipe } from "./component";
 import { recipe } from "./stitches";

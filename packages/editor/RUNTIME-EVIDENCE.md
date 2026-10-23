@@ -11,71 +11,25 @@ world.onWin?.();
 > Across the last 41 runs on two machines, `world.onWin` was a function every time it was reached (1,206 times), never
 > `undefined`. **Quick fix: remove the `?.`**
 
-Coverage and profiling are the first two kinds of evidence, and both already work in a limited form. This lays out the
-model they and everything after them share, where it lives, how it surfaces, and the decisions that shape it (at the end).
-
-## What exists today
-
-Three kinds of evidence are captured, each with its own store and its own idea of what a run is. None of them survives
-in git.
-
-| Evidence | Captured by | Stored | Keyed by | Shown |
-|---|---|---|---|---|
-| Coverage | tsval `coverage: true` (statement hit counts); the debug adapter's `coverage` event | An in-memory map in the insights extension; gone on reload | File path and statement range | Gutter bars and hover counts |
-| CPU profiles | The shell profiles a preview that keeps running slow | `.silo/profiles/<port>-<time>.cpuprofile`, source-mapped | Port and time; tied to no run | A notification, then a hotspot picker |
-| Capabilities | almostnode shims and the preview's gated fetches, via `decide` | `.silo/runs/<user>.jsonl` (one line per run; since 2026-10-08 each run's envelope's `effects`) and a day-coarsened rollup | Entry file and its whole-file sha | The capabilities panel |
-
-- **Four run identities.** The core registry's `run-N` (terminal `node` and `vite`, last 10 in memory), the runner's
-  UUID (`node.start`, `debug.launch`), the VS Code debug session, and a preview's port.
-- **`.silo/` is excluded from git** (`git-engine.ts` writes it into `.git/info/exclude`), and silo's own run ledger was
-  designed as local, per-clone trust. Committing evidence reverses both.
-- **tsval sees values only at host calls.** `beforeCall` is how the capability canary resolves real arguments.
-  Observing values at `?.`, `??`, branches and bindings needs a new hook.
-- **The identity spine exists.** `spanAnchors` (bablr-language-ts) gives every CST span a content-addressed,
-  move-stable id. The adopted annotation model also has `reidentify(baseline → current)`. They differ, and evidence
-  needs one canonical key (D1).
+This lays out the model every kind of evidence shares, where it lives, how it surfaces, and the decisions that shape it
+(at the end). What one run shows beside its code, as it runs, is *Live values*, below.
 
 ## The model
 
-A run is evidence about one version of the code in one environment. Each run has an envelope that says whose, where
-and what, and produces observations, each attached to a span.
+A run is evidence about one version of the code in one environment. Each run has an envelope that says whose (the user,
+as git knows them), where (a coarse environment class plus a machine name you choose), what (the commit, plus the blob
+sha of each file the run touched, so a run on uncommitted code is pinned exactly), its outcome, and one id from start to
+end, the core registry's. It lists each package whose code it ran, by `name@version` with its integrity when the
+lockfile has it, so "did anyone run a version later found compromised?" is a question the committed runs answer (silo's
+`queryRuns({ package })`); a package's own `fs` and `child_process` calls are among the run's effects as that
+package's, recorded, not decided (the editor runs it sandboxed already).
 
-**The run envelope**
-
-- **Run**: one id from start to end, the core registry's, carried by the runner, the debug session and the preview.
-- **Who**: the user, as git knows them.
-- **Where**: an environment class (runtime: tsval, almostnode, preview in Chromium 140; OS family; cores; memory bucket)
-  plus a machine name you choose.
-- **What**: the commit, plus the blob sha of each file the run touched, so a run on uncommitted code is pinned exactly.
-- **Packages**: each package whose code it ran, by `name@version`, with its install's integrity when the project's
-  package-lock.json has it, so "did anyone run a version later found compromised?" is a question the committed runs
-  answer (silo's `queryRuns({ package })`). Reported by almostnode as each package's first module runs (`onPackage`);
-  a preview's packages aren't recorded yet. And what each did: a package's own `fs` and `child_process` calls are among
-  the run's effects as that package's (`package`: its name@version) — its reads made, its writes refused, its commands
-  not possible here — recorded, not decided (the editor runs it sandboxed already). Its `fetch`, a global, isn't told
-  apart from the program's yet.
-- **Outcome**: target, entry, mode, started, ended, exit code.
-
-**An observation** is a kind, a span, and a summary that stays the same size however many runs feed it:
-
-```json
-{ "span": "9f3a…c2", "file": "src/world.ts", "kind": "value", "node": "OptionalCall",
-  "seen": 1206, "nullish": 0, "types": { "function": 1206 }, "w": 38.4, "lastRun": 41 }
-```
-
-**Kinds of evidence**
-
-| Kind | What it records | Source |
-|---|---|---|
-| `reached` | How often a statement ran | tsval coverage, today |
-| `time` | Self and total time of a function | Preview profiles, today; mapped to spans |
-| `capability` | Which scope a call site exercised, allowed or denied | `decide`, today; mapped to call sites |
-| `value` | What passed through: type tags, nullish count, a few distinct primitives | Needs a tsval observe hook |
-| `type` | Declared type against the observed values | tsval's typed call sites plus the hook |
-| `branch` | How often each arm of an `if`, ternary, `&&`, `\|\|`, `??` was taken | Needs the hook |
-| `error` | Throws and rejections at a span | Logs already carry them; not yet anchored |
-
-New kinds are new rows with the same envelope and the same span key. Nothing about the store changes when one is added.
+**An observation** is a kind, a span, and a summary that stays the same size however many runs feed it. Three kinds are
+kept: `reached` (how often a statement ran), `value` (what passed through: type tags, nullish count) and `branch` (how
+often each arm was taken). `type` (the declared type against the observed values) is computed when it's shown (V3).
+`time` (a function's self and total time, from profiles), `capability` (which scope a call site exercised) and `error`
+(throws and rejections at a span) are kinds the model has room for; none is kept as evidence yet. New kinds are new
+lines with the same envelope and the same span key. Nothing about the store changes when one is added.
 
 ## Recency
 
@@ -86,8 +40,8 @@ The code changes constantly, so evidence has to fade. Two mechanisms do most of 
   catch is that every enclosing span changes too: edit one line and its function's id changes, so the function's
   profile would start over unless history is carried across (D1, D2).
 - **Each run weighs less as newer runs arrive.** Every counter is stored decayed: on each run of its target,
-  `w = w × 2^(−1/H) + new`, with a half-life `H` in runs. It's one multiply per update, the summary stays a fixed size
-  forever, and no raw history is needed to know what recent runs said.
+  `w = w × 2^(−1/H) + new`, with a half-life `H` in runs (20). It's one multiply per update, the summary stays a fixed
+  size forever, and no raw history is needed to know what recent runs said. (D2's time floor isn't built.)
 
 A suggestion that edits your code needs a strict claim, not just a weighted one: "remove the `?.`" fires only if the
 span was reached in enough recent runs and was never nullish since the span last changed. The decayed weight decides
@@ -95,194 +49,73 @@ how confident the hover sounds; the strict count decides whether a quick fix app
 
 ## Storage in git
 
-Evidence is committed beside the code, so it travels with the repo, shows in review and survives a fresh clone. That
-means designing for merges and for size.
+Evidence is committed beside the code, so it travels with the repo, shows in review and survives a fresh clone. The
+layout is silo's (lib `util/silo/layout.ts`): runs in `.silo/runs/<user>.jsonl`, an envelope a line; evidence in
+`.silo/evidence/<user>/<env>/<file>.jsonl`, a line per (span, kind); `.silo/local/` (raw profiles, value samples, every
+run's trace) stays on the machine.
 
-```
-.silo/
-  policy.json                      decisions · shared      (as today)
-  policy/<user>.json               decisions · mine        (as today)
-  capabilities.json                facts · static          (as today)
-  capabilities/<user>.json         facts · observed rollup (as today)
-  runs/<user>.jsonl                one envelope per run · append-only · merge=union
-  evidence/<user>/<env>/<path>.jsonl
-                                   one line per (span, kind) · sorted · merge=union
-  .gitattributes                   *.jsonl merge=union
-  local/                           raw profiles, full per-run detail · gitignored
-```
-
-- **Conflict-free by partition.** Each user and environment writes only its own files, so two people never touch the
-  same lines.
-- **Branch merges by line.** One user on two branches does touch the same files. With one sorted line per span, git's
-  built-in `merge=union` keeps both sides without any setup, and the reader folds duplicate lines for a span (largest
-  `lastRun` wins, counts combine). isomorphic-git can apply the same rule as a merge driver.
+- **Conflict-free by partition.** Each user and environment writes only its own files. One user on two branches does
+  touch the same files; with one sorted line per span, git's built-in `merge=union` keeps both sides without any setup,
+  and the reader folds duplicate lines for a span (largest `lastRun` wins, counts combine).
 - **Bounded size.** Decayed summaries don't grow with run count. Only spans that produced evidence get a line: about
-  150 statements for a 300-line file, roughly 6 KB of coverage per environment. Raw `.cpuprofile`s (megabytes) stay
-  local; their hotspots fold into `time` lines.
-- **Diffs a reviewer can read.** Evidence for `src/world.ts` sits in a file named after it, so a PR shows which code
-  gained or lost evidence.
-- **A machine name, not a fingerprint.** The environment class is coarse and the name is yours; nothing identifying the
-  hardware is committed.
+  150 statements for a 300-line file, roughly 6 KB of coverage per environment.
+- **Diffs a reviewer can read**, a file per source file; and **a machine name, not a fingerprint**: nothing
+  identifying the hardware is committed.
 
-## Capture
+Evidence is captured inside the runtimes, which only the editor's core can reach, and when the run ends the registry
+hands the whole record to silo to write (D10). tsval sees everything exactly; almostnode's services and a preview's pages
+run real JavaScript, so they're instrumented as the dev server serves their modules (*Third slice*). Determinism is what
+makes "across all runs" a claim worth acting on: a lockstep game replays the same inputs to the same values, so evidence
+from a replay counts as much as a live run.
 
-Evidence is captured inside the runtimes, which only the editor's core can reach. Each capture point attaches what it
-saw to the run by id, and when the run ends the registry hands the whole record to silo to write. One writer replaces
-today's three.
-
-| Runtime | What it runs | Evidence it can give |
-|---|---|---|
-| tsval | Terminal tasks, F5, the canary | Everything, exactly: every statement and expression passes through the interpreter. Values, types and branches need an `observe` option beside `coverage`, called at chosen node kinds. |
-| almostnode | Services (dev servers, watchers) | Capabilities today. Coverage and values only with source instrumentation. |
-| Preview | The app in the browser | Profiles and capabilities today. Coverage and values only by instrumenting modules as the dev server serves them, using the same span ids. |
-
-Determinism is what makes "across all runs" a claim worth acting on: a lockstep game replays the same inputs to the
-same values, so evidence from a replay counts as much as a live run.
-
-## In VS Code
-
-Every surface is an extension on VS Code's public API, so the same extension could read a repo's evidence on the
-desktop.
-
-- **Gutter**: coverage bars (today) and heat for time, colored by the decayed weight so stale evidence looks faint.
-- **Hover**: everything known about the span under the cursor: runs, machines, values seen, types, branches,
-  capabilities, how recent.
-- **Diagnostics and quick fixes**: an unnecessary `?.` or `??`, a branch never taken, a declared type wider than
-  anything observed. Hint severity, with the evidence in the message.
-- **Inlay hints**: observed values or types inline, toggled on when you want to see what flowed through.
-- **Changes since**: in a diff or the Source Control view: newly uncovered code, a function that got slower on one
-  machine, a call site that gained network access.
-- **Runs view**: a timeline of runs with their envelopes; picking one shows the evidence it added.
-
-debug-mcp can answer the same questions for an agent: what ran, what was slow, what a span saw.
-
-## Who owns what
-
-- **silo** (`lib/util/silo`): the model and the files: envelope and observation types, decayed merge, the
-  duplicate-line fold, reading and writing the layout through an fs it's given. Pure, so a CLI, CI or a desktop
-  extension can use it too. Its whole-file confidence ratchet becomes per-span.
-- **Editor core** (`packages/editor`): capture and identity: the run registry's id carried everywhere, tsval's observe
-  hook, mapping profiles and capability calls to spans, handing the finished record to silo.
-- **The extension** (`extensions/insights`): what you see: reads the evidence files through `vscode.workspace.fs`,
-  re-derives span ids for the open document, and draws the surfaces. Public API only.
-
-## First slice: coverage, end to end
-
-One kind of evidence through every layer, shaped so values and types can join without changing the store.
-
-1. One run id: the registry's id reaches `node.start`, `debug.launch` and the debug session.
-2. The envelope: user, environment class and name, commit and touched blob shas, written to `.silo/runs/<user>.jsonl`.
-3. Coverage keyed by span: each statement's range mapped to its `spanAnchors` id when the run ends.
-4. silo writes decayed `reached` lines to `.silo/evidence/<user>/<env>/<path>.jsonl`, with `merge=union` set up.
-5. `.silo/` comes out of `.git/info/exclude`; `local/` is ignored instead.
-6. The insights extension reads the files back: coverage survives a reload, stays put when a nearby line is edited,
-   and clears for the statement you changed.
+Every surface is an extension on VS Code's public API, so it could read a repo's evidence on the desktop. Built:
+coverage in the Margin's gutter column (*The margin, always open*), the hover, and hints with fixes (*Fourth slice*). Not
+built: heat for time in the gutter, faint where the evidence is stale; inlay hints of observed values or types; changes
+since a commit (newly uncovered code, a function that got slower on one machine, a call site that gained network
+access); a runs view, a timeline of envelopes.
 
 ## Second slice: values, branches and types
 
-The first slice records whether code ran. The second records what went through it, which way it went, and whether the
-types held. Annotations can then use the same facts to re-place themselves when shape alone can't settle it
-(*Durable annotations on spans*, below: the typed strategy).
+The first slice recorded whether code ran. The second records what went through it, which way it went, and whether the
+types held. Annotations can then use the same facts to re-place themselves when shape alone can't settle it (*The
+typed strategy*, below).
 
 ### What a run observes
 
-tsval gets an `observe` option beside `coverage`. It's called at a few chosen sites, not at every expression, and the
-debug worker sums what it reports while the run goes on. Nothing is kept per event.
+tsval's `observe` option is called at a few chosen sites, not at every expression, and the debug worker sums what it
+reports while the run goes on (site-sums.ts). Nothing is kept per event. `a?.b`, `a?.()` and `a ?? b` sum the `value` of
+`a` (seen, nullish, type tags); `if`, `?:`, `&&` and `||` a `branch` (how often each arm ran); a parameter and a
+`return` their `value`.
 
-| Site | Kind | What's summed |
-|---|---|---|
-| `a?.b`, `a?.()` | `value` of `a` | seen, nullish (the chain stopped), type tags |
-| `a ?? b` | `value` of `a` | seen, nullish (the right side ran), type tags |
-| `if`, `c ? x : y` | `branch` | how often each arm ran |
-| `a && b`, `a \|\| b` | `branch` | how often the right side ran, and how often it didn't |
-| a parameter | `value` | seen, nullish, type tags |
-| a `return` | `value` | seen, nullish, type tags |
-
-A **type tag** is what a value was at runtime: `undefined`, `null`, `boolean`, `number`, `string`, `bigint`, `symbol`,
-`function`, `array`, or an object's class name (`Map`, `Player`; `object` for a plain one). Each site keeps at most
-8 tags; anything past that counts as `other`.
+A **type tag** is what a value was at runtime: a primitive's type, `function`, `array`, or an object's class name (`Map`,
+`Player`; `object` for a plain one), at most 8 a site, the rest `other`. Tagging never runs a getter.
 
 ### What's committed
-
-Same files, new lines: `value` and `branch` observations join `reached` in
-`.silo/evidence/<user>/<env>/<file>.jsonl`, one line per (kind, span), folded and faded the same way.
-
-```json
-{ "span": "9f3a…c2", "key": "bablr1", "kind": "value", "w": 38.4, "runs": 19.1,
-  "seen": 1206, "nullish": 0, "tags": { "function": 1206 }, "lastRun": "…", "lastAt": "…" }
-{ "span": "51c0…9a", "key": "bablr1", "kind": "branch", "w": 12.0, "runs": 19.1,
-  "arms": [1180, 26], "lastRun": "…", "lastAt": "…" }
-```
 
 - **Strict counts for quick fixes.** `seen`, `nullish`, `tags` and `arms` count since the span last changed and are
   never faded. The span's id changes when its code does, so these reset by themselves. "Remove the `?.`" needs
   `nullish: 0` and enough `seen`. `w` and `runs` fade, and they say how recent and how strong the evidence is.
 - **No values in git.** Tags and counts are committed. The values themselves stay out of git, because strings can be
   tokens, emails or anything else. A few distinct primitives per site (for "this was only ever `"left"` or
-  `"right"`") are kept in `.silo/local/` on the machine that saw them.
-- **Declared types aren't stored.** They're the code's, and TypeScript can say what they are at any time. "Did the types
-  hold" is computed when it's shown: the declared type at the span against the tags its evidence saw.
-- **Exact spans only.** A site is recorded under the BABLR span whose range is exactly the site's node: the `a?.b`
-  member expression, the `??` expression, the `if` statement. A site without an exact span isn't recorded. The
-  fallback statements use (pickAnchor's nearest enclosing span) would pool unrelated sites into one line.
+  `"right"`") are kept in `.silo/local/samples/` on the machine that saw them.
+- **Declared types aren't stored.** They're the code's: "did the types hold" is computed when it's shown (V3).
+- **Exact spans only.** A site is recorded under the BABLR span whose range is exactly the site's node. A site without
+  an exact span isn't recorded. The fallback statements use (pickAnchor's nearest enclosing span) would pool unrelated
+  sites into one line.
 - **Size.** One line per site that ran. A 300-line file has around 100 such sites, so about 15 KB per environment.
-
-### How it flows
-
-The path is coverage's, with nothing new: the debug worker's end-of-run report gains `sites` beside `statements`.
-The adapter publishes both on `evidence.observed` (formerly `evidence.coverage`) — the entry's, and (`files`) each other
-of the program's files that ran, with its own source (packages/tsval/README.md, *Modules*). `evidence.ts` maps each site's
-range to its exact span, and silo folds `value` and `branch` beside `reached`. The insights extension reads them back.
 
 ### The typed strategy
 
 Two facts help when shape alone is ambiguous: what TypeScript says a span's type is, and which types actually went
-through it.
+through it. A `SpanRef` records both at reference time (`inferred`, `observed`), optionally.
 
-- **Recorded at reference time.** A `SpanRef` gains `inferred` (TypeScript's type for the span, as text) and
-  `observed` (the span's type tags from evidence, when it has any). Both are optional; a reference without them
-  resolves exactly as today.
 - **A re-scorer, not a finder.** `typed` takes the same-shape strategy's candidates and adjusts their scores. A
   candidate whose inferred type matches, and whose observed tags overlap, is lifted; one whose types disagree is
   lowered. It can turn an *uncertain* match into a *re-placed* one, or push a wrong one below `askAt`. It never finds
-  a span the shape didn't. Weights are a `TypedWeights` like the others, scored by the same corpus.
-- **Where types come from.** The capabilities tsserver plugin already holds the project's real checker. It answers
-  "the types at these ranges" as a plugin command, the way eslint's `_eslint.fixAll` is reached
-  (`typescript.tsserverRequest`). The BABLR worker never loads TypeScript. tsval's own checker only knows its one file
-  and the default libs, so it can't stand in.
-
-### In VS Code
-
-- **Hover** on a span shows its values (seen, how often nullish, its tags as a bar), its branches (each arm's share)
-  and, for a declaration, the declared type against what was observed.
-- **Then quick fixes**, hint severity, on request (D8): an unnecessary `?.` or `??` (never nullish since the span last
-  changed, seen at least N times across at least M runs), and a branch never taken.
-
-### Building it
-
-1. **tsval**: `observe(node, site, value)` at the sites above, one `undefined` check when off, tested on its own.
-   Done, with `typeTag(value)`: a value's tag read from property descriptors only, so tagging never runs a getter.
-2. **The debug worker** sums each site's observations, and the report carries `sites`. Done (site-sums.ts): a fork
-   goes on from a copy of its stop's sums, as its coverage does, so stepping back and forward doesn't count twice.
-3. **silo**: `value` and `branch` observations, `foldValues` and `foldBranches`, the parser taking every kind.
-   Done: every kind keeps `ever` (runs that observed it since its span changed), and each fold leaves the others alone.
-4. **evidence.ts**: exact spans for sites, folded and written beside `reached`. Done: a site's span is the innermost
-   one without an ordinal whose range is its node's (a statement's trailing `;` aside); samples go to
-   `.silo/local/samples/<file>.jsonl`, kept only for sites the evidence still knows.
-5. **Insights**: the hover. Done (extensions/insights/hover.ts, over evidence.ts, the store the gutter marks share):
-   values, nullish, kinds and this machine's samples, or each arm's share, for the innermost span under the cursor,
-   labelled by its node type. Declared against observed waits for step 7's types at ranges: TypeScript's own hover
-   shows the declared type beside it until then.
-6. **Quick fixes**: `?.` and `??`, then branches. Done (extensions/insights/fixes.ts): hints, with the evidence in the
-   message, past `silo.evidence.minRuns` (3) and `silo.evidence.minSeen` (10); `?.` and `??` get a fix that removes
-   them, a branch never taken only the hint — deleting code on evidence alone is for you to decide. (Since revised: the
-   fourth slice draws them in purple and gives a branch never taken, and a statement never reached, a fix too.)
-7. **The typed strategy**: types at ranges from the tsserver plugin, `inferred` and `observed` on references,
-   `typed` in the pipeline, cases in the corpus. Done: `_types.at` (capabilities tsserver plugin) types each range as
-   its site observes; `typed` re-scores same-shape candidates and treats `any` and `unknown` as saying nothing; notes
-   keep `inferred` and, when a note is only matched by shape, look again with its candidates' types; the hover shows
-   the declared type beside the observed kinds; notes keep `observed` too (the kinds of value runs saw at their span,
-   read from the evidence), and give each candidate its own.
+  a span the shape didn't. `any` and `unknown` say nothing.
+- **Where types come from.** The capabilities tsserver plugin already holds the project's real checker; it answers
+  `_types.at` through `typescript.tsserverRequest`. The BABLR worker never loads TypeScript. tsval's own checker only
+  knows its one file and the default libs, so it can't stand in.
 
 ### Decisions for this slice
 
@@ -303,95 +136,44 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
 
 ## Third slice: previews, under HMR
 
-The second slice records what tsval runs observe. A preview, though, runs as real JavaScript in the browser (D9), and
-it can stay open for hours while modules are swapped underneath it. This slice records the same evidence there: the
-same kinds, the same sites, the same files.
+A preview runs as real JavaScript in the browser (D9), and it can stay open for hours while modules are swapped
+underneath it. This slice records the same evidence there: the same kinds, the same sites, the same files.
 
-### What's there to work with
+**Capture: a TypeScript transformer in the dev server.** The preview's dev server is almostnode's, not Vite: it compiles
+each workspace module with `ts.transpileModule`. Instrumenting is a `before` transformer in that compile
+(frameworks/instrument.ts). It works on the original source's syntax tree, so every range it records is in the original
+file's lines, and the source map the compile emits stays right; no source maps need composing. Its sites are tsval's,
+and a differential test runs the same programs in both and expects the same evidence (test/preview-instrument.test.mjs).
+**Parameters with a default or a pattern aren't observed**, in either (P8): a transform can't see the argument a default
+replaced (arrow functions have no `arguments`), and evidence from tsval, which does see it, must mean the same thing.
 
-- **The preview's dev server is ours.** It's almostnode's `ViteDevServer`, not Vite: it compiles each workspace
-  module with `ts.transpileModule` (`transformCode`), with an inline source map. Dependencies come from the CDN and
-  never pass through it.
-- **HMR is ours too.** A change goes out on `preview.hmr.<port>`, and the injected client re-imports the module as a
-  new instance (`?t=`). Only `.tsx`/`.jsx` modules get `import.meta.hot`; a `.ts` edit reloads the page.
-- **The page already talks to the editor.** The page tap is a hub client in every preview page; the shell decides what
-  it may publish.
-- **A preview is a run.** `npm run dev` registers a service run with an id and its port (`runs.runningService(port)`).
-  It ends on Ctrl-C, Stop, or when the last window closes, and the windows close before the run ends.
+**Counting: a page runtime that outlives hot updates** (previews/page-evidence.ts). It's page-global, keyed by file and
+version (the source's git blob oid), so a module re-imported after an edit counts into its new version, and one
+re-imported unchanged counts on into its old one. A module's own scope would lose its counts on every update.
 
-### Capture: a TypeScript transformer in the dev server
+**Reporting: often, and before the page goes.** Each page reports what it has counted since it loaded, as totals rather
+than increments, so a lost report costs nothing. It reports every 10 seconds while something changed, on each hot
+update, on `pagehide`, and when the editor asks before the preview closes (`evidence.flush`): a preview's windows close
+before its run ends.
 
-The dev server compiles a workspace module with one more step: a `before` transformer that instruments it. It works
-on the original source's syntax tree, so every range it records is in the original file's lines and characters, and
-the source map the compile emits stays right. No source maps need to be composed.
+**Recording: core folds a preview run like any other.** A report carries the page's port, and core finds the run there,
+so the page never needs to know a run id (P6).
 
-- **Sites as tsval's.** Statements count as they start; `?.` and `??` observe the value tested; `if`, `?:`, `&&`, `||`
-  record the arm that ran; parameters and returns observe their values. Each wrapper returns what it was given and
-  reads each value once, so the program does what it did before. A member callee (`obj.m?.()`) keeps its `this`.
-- **Parameters with a default or a pattern aren't observed.** A transform can't see the argument a default replaced
-  (arrow functions have no `arguments`), and evidence from tsval, which does see it, must mean the same thing.
-- **Workspace files only.** Not `node_modules`, not `/@pkg/` files. The transform cache keys on the setting too.
-
-### Counting: a page runtime that outlives hot updates
-
-A small runtime, served like the page tap (`/@editor/…`) and injected into every preview page, keeps the counts. It's
-page-global, keyed by file and version (the source's git blob oid), so a module re-imported after an edit counts into
-its new version, and one re-imported unchanged counts on into its old one. A module's own scope would lose its counts
-on every update. In a worker, the same runtime keeps its counts and reports through the worker tap.
-
-### Reporting: often, and before the page goes
-
-Each window reports what it has counted since it loaded, as totals rather than increments, so a lost report costs
-nothing. It reports every 10 seconds while something changed, on each hot update, on `pagehide`, and when the editor
-asks before the preview closes. That last one closes a gap: today the windows close before the run ends. Reports go
-out on a new subject, `evidence.preview`, which the shell's link permissions let the page publish.
-
-### Recording: core folds a preview run like any other
-
-- **The run is found by port.** A report carries the page's port, and core finds the running service there. The page
-  never needs to know a run id.
-- **Versions, then spans.** Core keeps each window's latest totals per (file, version) until the run ends. Then it maps
-  each version's ranges to spans through BABLR, adds up what every window and version saw under each span, and folds
-  each file once. Code an HMR edit didn't touch has the same span ids in every version, so its counts add up across
+- **Versions, then spans.** Core keeps each page's latest totals per (file, version) until the run ends. Then it maps
+  each version's ranges to spans through BABLR, adds up what every page and version saw under each span, and folds each
+  file once. Code an HMR edit didn't touch has the same span ids in every version, so its counts add up across
   versions. Code that was edited has new ids, and its old counts stay with the old spans and fade.
-- **Past versions' sources.** Mapping a version's ranges needs that version's text, which the file may no longer
-  have. The dev server keeps each version it instrumented, by blob oid, for as long as it runs, and core asks it for
-  the ones it needs.
-- **The envelope says which versions ran.** `files` keeps each path's last version, and `versions` lists every oid of
-  a path that more than one version of ran.
+- **Past versions' sources.** Mapping a version's ranges needs that version's text, which the file may no longer have.
+  The dev server keeps each version it instrumented, by blob oid, for as long as it runs (`preview.version`).
 - **Fast Refresh keeps state across an edit**, so new code can see values that old code made. They're still values that
   went through the new code, so they count.
 
-### Cost
-
-Wrappers run on the app's hot paths, and a game's frame budget is tight. Statement counters are an increment; value
-sites tag every value. The setting `silo.evidence.previews` (`full`, `coverage`, `off`) scales it back. The performance
-budgets (test/performance.mjs) measure an instrumented preview before the default is chosen for good.
-
-### Building it
-
-1. **The transformer**, in almostnode beside its other code transforms, tested on its own: sites and ranges as tsval's,
-   semantics unchanged. Done (frameworks/instrument.ts): a differential test runs the same programs in tsval and
-   instrumented and finds the same evidence (test/preview-instrument.test.mjs); a later link of an optional chain names
-   the one before it, so it goes untold when that one stopped the chain, as in tsval; tsval no longer observes
-   parameters with a default or a pattern (P8).
-2. **The page runtime** and its reports: counts by file and version, flushed as above, `evidence.preview` allowed
-   through the link. Done (previews/page-evidence.ts, carried by the page tap; the dev server instruments
-   workspace modules once a preview starts, `full` until step 4's setting): each page — a frame, a load — reports as
-   its own (`page`), and `evidence.flush` asks them all.
-3. **Core**: reports gathered by run (by port), past versions' sources from the dev server, a last pull before the
-   preview closes, folding at run end, `versions` in the envelope (silo). Done: evidence.ts keeps each page's latest
-   totals and asks the dev server for a version's source (`preview.version`) as soon as a page reports it; the `vite`
-   command asks the pages to report (`evidence.flush`) before their windows close; at the end, pages' totals for a
-   version are added, each version is read against its own source, and each file is folded once.
-4. **The setting and a performance check.** Done: `silo.evidence.previews` (insights), asked by each starting dev
-   server (`evidence.level`). test/preview-instrument-cost.mjs times a game-like hot loop (vector math, property reads,
-   `?.`, `??`, branches, small calls), pure JavaScript and so the worst case: `coverage` ×1.4, `full` ×2.9 (the
-   wrapper calls alone are ×1.9; the page runtime counts in typed arrays, with a fast path for a site's usual kind, and
-   `typeTag` reads a prototype's class once). An app that spends its frames in the DOM or a canvas pays less. `full`
-   stays the default; a preview with a tight frame budget drops to `coverage`.
-5. **A tour test**: `npm run dev`, use the app, edit a module (a hot update), use it again, stop; evidence for both
-   versions, the untouched code's counts added across them. Done ("evidence: a preview run, across a hot update").
+**Cost.** Wrappers run on the app's hot paths, and a game's frame budget is tight. test/preview-instrument-cost.mjs times
+a game-like hot loop (vector math, property reads, `?.`, `??`, branches, small calls), pure JavaScript and so the worst
+case: `coverage` ×1.4, `full` ×2.9 (the wrapper calls alone are ×1.9; the page runtime counts in typed arrays, with a
+fast path for a site's usual kind, and `typeTag` reads a prototype's class once). An app that spends its frames in the
+DOM or a canvas pays less. `silo.evidence.previews` (`full`, `coverage`, `off`) scales it back; `full` stays the
+default, and a preview with a tight frame budget drops to `coverage`.
 
 ### Decisions for this slice
 
@@ -419,31 +201,18 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
 
 The point of running a program many times: what none of the runs needed is code that could go. Decided 2026-10-05.
 
-- **Purple is the evidence's color.** Everything runs suggest is drawn in it (extensions/insights/fixes.ts): an
-  operator that could go (`?.`, the right side of `??` or `&&`/`||`) with a wavy underline; code that never ran — a
-  branch's arm never taken, a statement never reached — with a tint. Each stays a Hint diagnostic too, so the lightbulb
-  offers its fix. Coverage keeps its bars — now in the notes margin's strip, not the gutter, which VS Code keeps for
-  breakpoints (LIVE-VALUES.md); its line background went, so a line that never ran isn't red and purple at once.
-- **A Suggestions view, beside Problems** (extensions/insights/suggestions-view.ts): VS Code's Problems view doesn't
-  list hints, and raising them to Information would put VS Code's own squiggle under the purple. It lists every file
-  with evidence, open or not (read from disk, not opened as a document, so tsserver isn't handed it): each suggestion
-  short (`if's then never ran`), its line and its evidence (`12 times in 4 runs · at most 1 in 4`), the whole message on
-  hover; a click goes to it, a fix is on its row, and the count is the view's badge.
-- **Every suggestion has a fix**, including the arm and the statement: the `?:` or `if` replaced by the arm that always
-  ran (a block unwrapped), an `if` whose then never ran removed, a statement removed with its line. Nothing is applied
-  for you: the evidence suggests, you decide.
-- **Never isn't proof.** Each message says how rare it could still be, by the rule of three — with none in n tries, at
-  most 3/n of the time, 95% sure ("at most 1 in 4, 95% sure"), or too few tries yet under six — and the purple grows
-  stronger with the tries (under 30, under 300, more). The thresholds stay `silo.evidence.minRuns` and `minSeen`.
-- **Runs take inputs.** A tsval run's launch config takes `args`, which the program reads as `process.argv` (with an
-  `env` and a `cwd()`; nothing it can do with them); `debug.start` passes them through. The first way to give them,
-  *Evidence: Run with Inputs…*, was removed (2026-10-06, RULES.md): a rule now gives `process.argv`, and a run of
-  several cases runs the file once per set — runs separated by `|`, a run's arguments by spaces, quotes keeping a space
-  (workbench/inputs.ts). What none of the inputs reached is what turns purple. A stopgap: where inputs live, sets kept and reused (and shared, in `.silo/`?),
-  inputs beyond arguments (stdin, files, a function's own arguments), generated ones — that wants a design of its own.
-
-The logic is pure and tested in node (extensions/insights/suggestions.ts, workbench/inputs.ts); fixes.ts and
-suggestions-view.ts are the VS Code wiring.
+- **Purple is the evidence's color**: a wavy underline for an operator that could go, a tint for code that never ran.
+  Each is a Hint diagnostic too, with a fix; nothing is applied for you. Coverage has no line background, so a line that
+  never ran isn't red and purple at once.
+- **A Suggestions view, beside Problems**: VS Code's Problems view doesn't list hints, and raising them to Information
+  would put VS Code's own squiggle under the purple. It reads files from disk rather than opening them as documents, so
+  tsserver isn't handed every file with evidence.
+- **Never isn't proof.** Each message says how rare it could still be, by the rule of three: with none in n tries, at
+  most 3/n of the time, 95% sure ("at most 1 in 4, 95% sure"), or too few tries yet under six. The purple grows
+  stronger with the tries (under 30, under 300, more). The thresholds are `silo.evidence.minRuns` (3) and `minSeen` (10).
+- **Runs take inputs.** A rule gives `process.argv` (*Mocking a value*, below), and a run of several cases runs the
+  file once per set (extensions/margin/inputs.ts). What none of the inputs reached is what turns purple. Inputs beyond
+  arguments (stdin, files, a function's own arguments) and generated ones want a design of their own.
 
 ## Durable annotations on spans
 
@@ -487,7 +256,7 @@ tried in a listed order, stopping at a certain match:
 4. **Same shape** — spans of its type, scored by shared tokens, neighbours still beside it, and nearness.
    `fn(foo, bar, baz)` → `fn(foo, bar, baz2)`: a new id, 7 of 8 tokens and both neighbours, so it re-places on its own.
 5. **The typed strategy** — the span's inferred type and the kinds of value runs saw there re-score same-shape
-   candidates (*Second slice*, below).
+   candidates (*Second slice*, above).
 
 *A policy* turns the best score into what happens: at or above `autoAt` (with no close second) it re-places on its own;
 at or above `askAt` it's *uncertain*, shown with confirm and re-place; below, *orphaned*, kept with its last file and
@@ -511,11 +280,189 @@ is flagged in Problems. Core reads baselines from git; notes (extensions/notes),
 users. A note whose code moved to another file follows once that file is saved (a tombstone in the old file's notes);
 a move that arrives committed (pulled) isn't a changed file, so that note is asked about.
 
+## Live values
+
+What one run did, beside the code: for each line, the values it computed, a column per time it ran — the right-hand
+side of Bret Victor's *Inventing on Principle* binary search. You read the code on the left and see, line by line, what
+it was in this run: `mid = 2 | 4 | 3`, `value = 'c' | 'e' | 'd'`, `return 3`. It's the Margin (extensions/margin), the
+file's runtime column, open beside every JavaScript or TypeScript file. Decided 2026-10-05:
+
+- **Its values come from a debug session.** The debug worker records each statement's values as it runs them (tsval's
+  `trace`, beside `observe`), and the debugger's adapter passes them on as the run contract's custom events (`values`,
+  `ended`, `ask`), so any debugger can feed it. No new store: runtime evidence keeps runs; this is what the last run
+  showed, in memory. (Since 2026-10-22 runs are kept too: *Runs kept, as balls*.)
+- **Bounded**, because a session can run forever: a value as the debugger's Variables view shows it, a loop's first
+  50 turns, 2000 values a call and 200 calls, the rest counted and said ("… 20 more values not kept"; `LiveRecord`,
+  packages/editor-api/src/values.ts).
+- **Inputs are pipe-delimited, for now**: runs by `|`, a run's arguments by spaces, read as `process.argv`.
+- **A preview's page can't stop**, so a breakpoint in its code is a recorded stop: what's in scope each time its line
+  runs, shown the same way (extensions/bridge/recorded-stops.ts; RUNNING.md).
+
+### Spike: Code Hike inside Monaco
+
+Code Hike (the review panel's diff renderer: shell/git-codehike.tsx) can render inside Monaco. A spike showed it
+(2026-10-06, since removed): `<Pre>` in an overlay widget over the editor's text area, in its font, line height and tab
+size, moved with its scroll; Monaco's own glyphs transparent, so what's seen is Code Hike's rendering while Monaco keeps
+editing, the cursor, the selection and bracket matching, all aligned. A handler that adds height (a callout under a line)
+got a Monaco view zone as tall, so every line below stayed aligned. What it showed: **annotations must be given, not
+written** (Code Hike strips `// !` comments, which would put its lines out of step with Monaco's); **columns are drawn,
+not counted** (Code Hike counts a tab as one column); **anything Monaco inserts into a line breaks alignment there**
+(inlay hints, inline suggestions, injected text, word wrap, folding), so each wants turning off or bringing into Code
+Hike; **use Monaco's tokens, not shiki's** (the theme's colors, nothing fetched from lighter.codehike.org, re-rendering
+synchronous); **render what's visible**; and **a handler that adds height says how much**, so its view zone can be made
+first.
+
+### The right-hand side, not an overlay
+
+Decided 2026-10-05, after the spike: not drawn over Monaco's text, but a pane beside it — literate programming,
+explanatory prose beside the code it explains — and Victor's values are the same thing. One pane, one kind of anchor.
+The pane is an overlay inside the editor, not an editor group of its own: one scroll, nothing to synchronize. Monaco is
+the row sizer: a cell taller than its span gets a view zone after the span's last line for the difference, so the pane
+and the code can't drift. Notes in the pane were dropped (2026-10-12): notes are the notes extension's comment threads.
+The pane's tabs are pane views (EXTENSION-POINTS.md, 4); the Margin's content is data that core's pane-views.ts draws.
+
+### The margin, always open
+
+- **Coverage moved into the margin's gutter column.** Gutter icons cost breakpoints: VS Code won't set one on a line
+  whose glyph margin holds another extension's icon (`marginFreeFromNonDebugDecorations`, which lets through only
+  codicons and its own test coverage's class, a class an extension's decoration can't choose). So the margin draws it
+  (extensions/margin/coverage.ts) in a column at the left end of the line-decorations lane, where VS Code's change bars
+  went (`scm.diffDecorations: none`; the shell's Changes panel is the git UI), each mark as VS Code draws a change bar:
+  VS Code's coverage colours are tints for a whole line-number cell, too faint for a 3px bar. (Tried and dropped:
+  tinting the line numbers; a column left of them; one widening the lane just left of the code.) How the last run ended
+  short is in that column too: ✕ where it crashed (tsval's `throwSite`: by the time an uncaught error reaches the host
+  its frames have unwound), ■ where a stopped session was paused.
+- **Everything a run put on a line follows its code through cosmetic changes** and through edits elsewhere: each item
+  carries its node's range in the text that ran, anchored once to BABLR's span and drawn where that span is found now.
+  **A statement with a body is anchored by its head** — an `if`'s condition, a loop's header, a function's name —
+  because a body's span changes with any token in it (a semicolon dropped inside orphans the whole `if`; the
+  condition's survives). Half-typed text that doesn't parse follows the lines around the edit instead, until it parses.
+- **At a stop, its values are VS Code's own inline values too** (EXTENSION-POINTS.md, 6), so they'd show with no pane
+  beside the editor (a desktop build). A value can be set at a stop from its row, as a literal, never run.
+
+### Capability decisions, on the line
+
+A call the policy hasn't decided (a write, a fetch, a spawn) stops the run at its line. The question goes there, on the
+line that provoked it, with what the call would do from the run's own values (`writeFileSync '/workspace/out.txt'
+fs:write`): *Allow ▾*, *Skip ▾*, *Deny ▾*, each for this call, this run or always (my policy, for the resource the call
+reaches), and *Rule…* for anything finer. *Skip*: the call isn't made, the run goes on with the debugger's inert
+stand-in's result. Where there's no stand-in (the preview's network gate) a skip is refused. A capability line is armed
+from the source alone, so a stop checks the call's actual resource against the policy and goes on when it's allowed.
+
+### Mocking a value — and one way to run
+
+Decided 2026-10-06. There were three ways to run a file, and they didn't agree: F5, the editor's ▷ (*Run with
+Inputs…*, `noDebug` runs that never stop) and the top bar's ▷ (the project's scripts and tasks). Run with Inputs existed
+only to give a program different `process.argv`s, and a launch without `args` already took the first set it
+remembered, a hidden stub. So **what a program reads from outside is mocked in the margin, and there's one way to run
+it**: a debug session (*Run*); the top bar's ▷ offers this file first.
+
+`process.argv`'s row is on the first line that reads it, shown before any run, so the inputs can be written first; its
+*Mock…* opens the rule editor (RUNNING.md, *Rules*). A variable's row has *Mock…* too (*at* <this statement>, *then set* it). The
+seams come in two slices: `process.argv`, then a capability call's result (*give* it, by a rule whose *when* is the
+call, with the *record-at-seams* corpus of silo's design/fail-loud.md recorded beside it). Rules are kept in the policy files (`.silo/policy/<you>.json`, committed, so a repo's inputs travel with it); a value
+recorded from a real run (a real fetch response can hold secrets) in `.silo/local/`, referred to by the rule.
+
+### Live runs
+
+Decided 2026-10-08, Victor's immediate connection: the file runs again and the margin shows what it did, without Run.
+It waited on two things: every run is a debug run (RUNNING.md), and tsval is fast enough: a small file's run, session
+and worker included, takes 170–330 ms from the workbench.
+
+- **Quiet.** A tsval debug session with no debug toolbar or Debug Console, not in the running list, stopping at nothing
+  (breakpoints are yours to hit with F5). A rule still applies.
+- **What it does to the world: nothing it wasn't allowed.** Nobody is watching (a rule's `trigger is edit`), so it asks
+  nothing: a rule's given result first; a read the policy allows made for real; else what the call returned when it
+  last ran for real, if recorded (`.silo/local/recorded.json`; its line says *replayed*); else **skipped**. *Rule…* on
+  such a line keeps what runs after an edit do with that call.
+- **How long.** It ends at its first idle (a server waiting for requests opens no preview), or at a budget of steps,
+  saying so where it stopped (*Run to finish*). Only a finished run replaces what the margin shows.
+
+**Revised 2026-10-22: on a save, and on an interval** (RUNNING.md, *Unattended runs*), not as typing pauses. Ctrl+S runs
+the file (the last of a burst of saves, 250 ms apart; not again if that text started a run in the last second), and so
+does `run.liveRuns.interval` (5 seconds by default, 0 for saves only) while the file in front of you, edited, differs
+from what its last run ran. An edit still stops the one going. A save reformats first when the workspace fixes on save
+(ESLint's), so the tour finds rows by what they say, not their line.
+
+### Runs kept, as balls
+
+Jack Rusher's *Stop Writing Dead Programs* (Strange Loop 2022). Each run of the file is kept, the last eight, with its
+values and how it ended: the record of what things were in that run. At the Margin's top, a ball for each, the latest
+held, the colour how it ended (ran, crashed, stopped short). A finished run rolls its ball down the gutter column through
+the lines it went, in the order it went (at most 400 steps), then the ball settles. Picking an older ball shows its
+values again, where its code can still be found, and rolls its ball.
+
+### Kept across reloads, deduped, and shared as they're committed
+
+2026-10-22 (lib util/silo/traces; extensions/margin/runs.ts; git-engine.ts `shareRuns`). A finished run is kept as a
+trace (its values, calls, how it ended, what it read, the text it ran) and identified by its code: the BABLR span ids of
+the top-level declarations it executed, each value by the span around it. Span ids ignore whitespace and comments, so a
+reformat, a comment or an edit to a function the run never called leaves it the same run (*3 runs alike*), and an edit
+inside anything it executed makes another. Every run stays on this machine (`.silo/local/traces/<file>.jsonl`), so a
+file's balls come back when it's shown again.
+
+What git gets is worked out as a commit is made (the editor makes every commit, so the step is its own, a pre-commit
+hook in all but name): for each program file committed, the runs current for the text committed go in
+`.silo/traces/<you>/<file>.jsonl`; a file committed with none, or deleted, takes its shared runs out. So what's
+committed is always the runs of the code beside it.
+
+A value can hold a secret, so a shared run carries its values only when it surely read nothing: no input the runtime
+saw (a call made or given a result), no process.argv, and code that can't read from outside at all (no import or
+require, nothing of process, fetch, sockets, storage or the page). Any other run is shared by its values' types, the
+inputs it read (a URL without its query), and how it ended without the message; its values stay local. (A runtime
+doesn't tell every read: the editor answers a program's workspace reads itself, outside the run's effects, which is why
+the code decides too.) Next: tsval tracking which values came from an input, so a run that read one can share the
+values that didn't.
+
+### Live values, open
+
+- **The bounds**, and how many calls the margin lets you pick between.
+- **A picked run's coverage and run log**: they're the latest run's; kept with each run, picking one could show its own.
+- **The ball while a run is going**: a run takes a fraction of a second, so the ball rolls once it's finished, through
+  where it went; a long run could roll as it goes.
+
+### Projections: cards, and later editing as cards
+
+A program shown as something other than its text, and later edited that way. Written 2026-10-06 from a picture of macOS
+Automator: a workflow as a column of action cards, each with its options and results, typed values flowing between
+them, Step and Run in the toolbar, a log with each action's duration. Almost all of it is already here, made for other
+reasons:
+
+| Automator | here |
+|---|---|
+| The cards, top to bottom | A function's statements, from its BABLR tree, each with a durable identity (*Durable annotations on spans*) |
+| A card's options | A call's arguments; the rule editor already draws an input from a schema (rule-editor.ts) |
+| What flows between cards | The types a run observes at each range |
+| *Results* under a card | The Margin's live values |
+| Step, Stop, Run | The tsval debugger — and back, which Automator can't |
+| Record | Recording what a call returned, at its seam (RUNNING.md, *A call's result*) |
+| The log, a duration per action | Runs, coverage and profiling, on spans |
+| The action library | The rules catalog, and later palette blocks promoted from a project's own functions |
+| A card's settings saved with the workflow | Rules: `{ when, then }`, mocks and decisions, in the policy files |
+
+The model: **the text is the truth, cards a view of it** (reading first, as the event sheet decided; writing back
+after). **Interlocking**: a card shows what it takes and gives, and one dropped in is offered only where its input is
+satisfied; statement order stays the control flow. **One editor for options**, drawn from schemas as rules' are. **No
+black boxes**: a library card is a function in the same material. **Not only games**: the event sheet is this loop with
+a game palette; a script, a server's routes, an app's state are other palettes.
+
+**Built: cards in the Margin**, read-only, around the lines they stand for. A card is a step, not a statement:
+consecutive top-level statements with no blank line between are one step, a `//` comment above starts one and titles
+it, a function or class is its own. Its bottom border says its title, what it is and whether it ran, from coverage's
+marks. They come from the capabilities plugin's `_statements`, grouped into steps by margin.ts. **The run log**, after
+the last card: the last run step by step, each with its share of the run's work and any wait. Work is statements run
+(tsval's `profile`, the statement clock), not wall time, so it's the same every run; waits are on the virtual clock.
+**The pane's tabs line** holds *Margin* and the projections to come (*Cards*, *Event sheet*): a projection is a view in
+that strip, not a third column, since the code and the pane are already a line-for-line grid.
+
+Next: options edited on a card for a call's literal arguments, written back; then a library to drag calls from; then
+interlocking. Open: what a card is inside a longer function (its body's paragraphs as cards, or folded as code); how
+loops and branches look (Automator has none; the event sheet's rows and groups do).
+
 ## Open questions
 
-The three slices were built quickly, to get the architecture together; most of their decisions were taken as
-recommended. These are the ones that deserve another look as real use arrives, roughly in order of how much it would
-cost to change them later.
+The slices were built quickly, their decisions taken as recommended. These deserve another look as real use arrives,
+roughly in order of how much it would cost to change them later.
 
 ### Before more is built on them
 
@@ -525,18 +472,18 @@ cost to change them later.
   (`.silo/local/`) and a rollup committed on request; or committed at a cadence (on commit, daily) rather than per run.
   What would settle it: a week of real use, and how the diffs read in review.
 - **One rule for which span stands for a node.** Evidence takes the innermost span without an ordinal whose range is
-  exactly the node's (bablr.ts, `anchors(…, exact)`); notes take `pickAnchor` over the selection. They agree today
-  (pickAnchor prefers ids without an ordinal, then the larger, and keeps the first of equals, which is the innermost),
-  but nothing holds them together: if either changes, a note and the evidence at its code silently stop meeting. One
-  function both use would.
-- **BABLR as the key for everything.** Notes, evidence, the hover, the hints and the event sheet all ride on
-  `spanAnchors` ids. A file its grammar doesn't take gets no evidence and no notes; a parse costs about 14 ms a line;
+  exactly the node's (workbench/evidence.ts, `anchors(…, exact)`); notes take `pickAnchor` over the selection. They
+  agree today (pickAnchor prefers ids without an ordinal, then the larger, and keeps the first of equals, which is the
+  innermost), but nothing holds them together: if either changes, a note and the evidence at its code silently stop
+  meeting. One function both use would.
+- **BABLR as the key for everything.** Notes, evidence, the hover, the hints, live values and the event sheet all ride
+  on `spanAnchors` ids. A file its grammar doesn't take gets no evidence and no notes; a parse costs about 14 ms a line;
   an id with an ordinal (`#n`) shifts when the same code turns up earlier in its file. Kept by choice (BABLR's
   performance work is coming); worth watching how often each of these bites.
 
 ### Defaults to revisit with real use
 
-- **Previews instrument in `full` by default.** About ×3 on a pure-JavaScript hot loop (×1.45 for `coverage`). For a
+- **Previews instrument in `full` by default.** About ×3 on a pure-JavaScript hot loop (×1.4 for `coverage`). For a
   game at 60 frames a second, `coverage` may be the better default, with `full` on request.
 - **The quick-fix thresholds** (`silo.evidence.minRuns` 3, `minSeen` 10). Evidence covers only the paths runs took:
   "never nullish" can hold for every path that ran and not for one that didn't. Higher thresholds, or the surrounding
@@ -546,14 +493,12 @@ cost to change them later.
 
 ### Bottlenecks to expect
 
-- **One BABLR worker** answers notes, the hover, the hints, every annotation's resolution and, at a preview run's end,
-  the mapping of every version of every file it ran. The pool (deferred) goes behind `Bablr.request` when this queue is
-  what's slow.
-- **More hub channels** — `annotations.*`, `evidence.observed`, `evidence.preview`, `evidence.flush`,
-  `evidence.level`, `preview.version` — against the aim of fewer connections. Some could merge (`evidence.level`
-  could ride on `preview.start`).
-- **`_types.at` lives in the capabilities tsserver plugin**, which is otherwise about capabilities: the expedient home,
-  since it holds the checker. A small types plugin of its own if it grows.
+- **One BABLR worker** answers notes, the hover, the hints, live values, every annotation's resolution and, at a preview
+  run's end, every version of every file it ran. The pool (deferred) goes behind workbench/bablr.ts's `request`.
+- **More hub channels** (`evidence.observed`, `evidence.preview`, `evidence.flush`, `evidence.level`, `preview.version`)
+  against the aim of fewer connections. `evidence.level` could ride on `preview.start`.
+- **`_types.at` lives in the capabilities tsserver plugin**, the expedient home since it holds the checker. A small
+  types plugin of its own if it grows.
 
 ### Not built, worth considering
 
@@ -565,12 +510,6 @@ cost to change them later.
   hover. (Shrike's `compare_actions` diffs two recorded clicks; this diffs a span's history across a code change.)
   Open: what "before" is when recency already blends versions (the last run of the previous version, or everything
   before it), and how few runs after an edit are enough to say something stopped.
-
-### Settled since
-
-- **The node tests run in CI.** The span-annotation corpus, the evidence store, the site sums, the typed strategy and
-  the tsval-against-preview differential test weren't run anywhere but by hand; `packages/editor` now has a `test`
-  script, which CI's test job runs.
 
 ## Decisions
 

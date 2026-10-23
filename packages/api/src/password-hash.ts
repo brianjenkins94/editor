@@ -1,7 +1,7 @@
 import { argon2id } from "@noble/hashes/argon2.js";
 
 /**
- * Passwords' rules and hashing (SIGN-IN.md, "Passwords"; src/password.ts uses them): Pilcrow's rules, and Argon2id at
+ * Passwords' rules and hashing (README.md, C3; src/password.ts uses them): Pilcrow's rules, and Argon2id at
  * OWASP's baseline through @noble/hashes (audited, plain JavaScript, so nothing for the Workers runtime to compile; about
  * 82 ms a hash). Only its raw Argon2id is used: the PHC string and the constant-time comparison are ours. Nothing here
  * touches the Workers runtime, so the tests check it against Node's own Argon2id.

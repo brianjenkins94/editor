@@ -10,9 +10,9 @@ import { copyKey, ROUTINE, ROUTINE_DAYS, SUSPICIOUS_DAYS } from "./audit-copies.
  * - every request refused, and why. The one exception is the routine nonce challenge, which every client meets every
  *   few minutes;
  * - every call made through the proxy, reads as much as writes: what it was (its template, and a keyed hash of its
- *   values, so a repository's name isn't in the log: BEHAVIOR.md), GitHub's answer, and how many bytes it carried back
+ *   values, so a repository's name isn't in the log: README.md, "Behavior"), GitHub's answer, and how many bytes it carried back
  *   — if something gets through, what it read is what matters;
- * - what a sign-in did that the editor doesn't (BEHAVIOR.md): a route that doesn't exist (`probe`), a client that isn't
+ * - what a sign-in did that the editor doesn't (README.md, "Behavior"): a route that doesn't exist (`probe`), a client that isn't
  *   a browser (`client_unusual`), a client whose headers changed (`client_changed`, which headers and how);
  * - where a request came from: Cloudflare's country, and an IP hash that only matches within a day.
  *
@@ -87,7 +87,7 @@ export interface Subject { "userId"?: string | null; "grantId"?: string | null }
 export interface Particulars { "reason"?: string; "detail"?: string }
 
 /** Events that are someone doing what the editor never does, whatever their reason: a call it doesn't make, a route that
- *  doesn't exist, a sign-in that isn't a browser's (BEHAVIOR.md). */
+ *  doesn't exist, a sign-in that isn't a browser's (README.md, "Behavior"). */
 const ALARMING = new Set<AuditEvent>(["refresh_reuse_detected", "proxy_denied", "proxy_abuse", "rate_limited", "probe", "client_unusual", "smoke_test_failed"]);
 
 /** Reasons that mean a token is in hands it shouldn't be: presented with another key's proof, or a proof replayed. */
@@ -102,7 +102,7 @@ export async function audit(env: Bindings, event: AuditEvent, subject: Subject, 
 
 	await copy(env, copyKey(event, meta.last_row_id), { "id": meta.last_row_id, ...row });
 
-	// A sign-in's client changing strongly (BEHAVIOR.md: a browser becoming something else) alerts too; a medium change only shows.
+	// A sign-in's client changing strongly (README.md, "Behavior": a browser becoming something else) alerts too; a medium change only shows.
 	if (ALARMING.has(event) || THEFT.has(particulars.reason ?? "") || (event === "client_changed" && particulars.reason?.startsWith("strong") === true)) {
 		await alert(env, event, subject, from, particulars);
 	}

@@ -1,4 +1,4 @@
--- Every email to the owner (OPERATIONS.md: the kill switch, the cost guard, the tripwire, errors), what it said and
+-- Every email to the owner (README.md, O1: the kill switch, the cost guard, the tripwire, errors), what it said and
 -- whether Email Service took it (`sent`, its `message_id`; or `reason`, why not), so the admin app's Mail page shows each
 -- one with Cloudflare's own delivery status for it: no one has to ask whether an alert arrived. The owner's address
 -- isn't kept: it's ALERT_EMAIL. Kept 90 days (the daily cron).

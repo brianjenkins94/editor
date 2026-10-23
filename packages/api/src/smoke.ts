@@ -7,7 +7,7 @@ import { pagesOf } from "./clients.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
 /**
- * The email smoke test (packages/admin/README.md, the Mail page): a whole sign-in by email, as the admin app and a browser
+ * The email smoke test (README.md, the Email runbook): a whole sign-in by email, as the admin app and a browser
  * would make it, against this Worker's own routes, with the first of our own addresses (INBOX). The code goes out
  * through Email Service and comes back through Email Routing to our inbox (src/inbox.ts), where the test reads it: real
  * delivery, our DNS records, and every step of the flow, with no one's mailbox. Then the sign-in is ended.

@@ -152,7 +152,8 @@ async function gateAndFetch(event, request, requestUrl) {
 
 	const fetched = fetch(request).then(stamp);
 
-	// What an allowed preview fetch returned, recorded (RULES.md, slice 2): a rule can give it back in the debugger.
+	// What an allowed preview fetch returned, recorded (RUNNING.md, *A call's result*): a rule can give it back in the
+	// debugger.
 	if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
 		// (Cloned at once: the page reads its own body as soon as it has it.)
 		void fetched.then((response) => record(event, request.url, response.status === 0 ? undefined : response.clone()), () => undefined);

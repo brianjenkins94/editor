@@ -1,4 +1,4 @@
--- Linked identities (SIGN-IN.md, "Linking accounts"): each way of proving who you are is a row pointing at its user, as
+-- Linked identities (README.md, "Linking accounts, and roles"): each way of proving who you are is a row pointing at its user, as
 -- Auth.js's `accounts` and Supabase's `auth.identities` keep them. `provider` is "github" (`subject`: GitHub's numeric
 -- id, as text, since logins can be renamed) or "email" (`subject`: the address as typed, one account per address
 -- whatever its case). An account has at most one of each, for now. `users.github_id` and `emails` move here; `users`

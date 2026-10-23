@@ -1,4 +1,4 @@
-# The sign-in page (SIGN-IN.md): where credentials will be typed, so nothing runs here but our own files and Cloudflare's
+# The sign-in page (README.md, "Sign-in methods"): where credentials will be typed, so nothing runs here but our own files and Cloudflare's
 # Web Analytics beacon (injected by Cloudflare, which serves this page anyway; it reports to /cdn-cgi/rum or
 # cloudflareinsights.com). No framing, no referrer, nothing cached. connect-src allows data: for Web Awesome's own icons
 # (the checkbox's check is a data: SVG it fetches): a data: URL reaches no server.

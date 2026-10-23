@@ -1,8 +1,8 @@
 /**
- * theme/tokens — the theme's tokens, as Stitches (PLAN.md §8.4 step 4): the brand's, over Web Awesome's defaults, and
+ * theme/tokens — the theme's tokens, as Stitches: the brand's, over Web Awesome's defaults, and
  * the bridge that maps Web Awesome's onto the active VS Code theme. Unlayered, on purpose: token definitions that have
  * to win over Web Awesome's own, which are layered. theme/chrome and theme/vscode call them; nothing else needs to. Together they're a Web Awesome theme with VS Code's look
- * (PLAN.md §9.2.5).
+ * (README.md, *VS Code's look everywhere*).
  */
 import { unlayeredGlobalCss } from "./stitches";
 
@@ -38,7 +38,7 @@ export const brandTokens = unlayeredGlobalCss({
 });
 
 /**
- * VS Code's look where VS Code isn't (PLAN.md §9.2.5): a fixed copy of the editor's default themes' colours (Default
+ * VS Code's look where VS Code isn't (README.md, *VS Code's look everywhere*): a fixed copy of the editor's default themes' colours (Default
  * Light+ and Default Dark+, the ones the editor itself takes from the system's mode), read from VS Code 1.142 and
  * declared as VS Code declares them, so the bridge below applies to them as it does to the live ones. On the document's
  * root only: where VS Code's own are (on `.monaco-workbench`, a webview's root, the shell's body), they're lower in the

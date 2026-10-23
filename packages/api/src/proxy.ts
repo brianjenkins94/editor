@@ -50,7 +50,7 @@ async function deny(context: Context<AppEnv>): Promise<Response> {
 
 /**
  * Every call that went through, read or write, recorded before its answer streams (so a dropped connection still leaves
- * the row): what it was (its template, and a keyed hash of its values: BEHAVIOR.md) and GitHub's status. The bytes it carried back are added once they have (relay). If a session
+ * the row): what it was (its template, and a keyed hash of its values: README.md, "Behavior") and GitHub's status. The bytes it carried back are added once they have (relay). If a session
  * is ever used by something that shouldn't have it, this is the record of what it read and wrote.
  */
 async function called(context: Context<AppEnv>, status: number): Promise<(bytes: number) => Promise<void>> {

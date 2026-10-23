@@ -1,5 +1,5 @@
 /**
- * The runs kept of a file, on this machine (LIVE-VALUES.md, *Runs kept, as balls*; lib util/silo/traces): every run,
+ * The runs kept of a file, on this machine (RUNTIME-EVIDENCE.md, *Runs kept, as balls*; lib util/silo/traces): every run,
  * values and the text it ran, in `.silo/local/traces/<file>.jsonl`. What's shared in git — the runs of the text a commit
  * commits, a run that could have read inputs by its values' types alone — is worked out as the commit is made (the git
  * engine's pre-commit step, git-engine.ts `shareRuns`).

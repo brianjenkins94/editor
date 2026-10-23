@@ -1,5 +1,5 @@
 /**
- * The architecture page (README.md): the system drawn from its code, live. Two halves, each from what's authoritative for
+ * The architecture page (packages/api/README.md, "The architecture page"): the system drawn from its code, live. Two halves, each from what's authoritative for
  * it: the deployment as its wrangler configs say (`virtual:deployment`, read when this app is built: the Workers, their
  * hosts, bindings, crons and redirects), and the API as it runs (GET /admin/architecture: its routes, its stores' tables
  * with their row counts, what it relays and who may call it). Traffic's last hour (GET /admin/traffic) puts requests on

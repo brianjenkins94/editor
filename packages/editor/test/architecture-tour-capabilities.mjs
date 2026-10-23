@@ -17,11 +17,11 @@ import { eventually, inRuleView, openRule, pressInRuleView, ruleRows, ruleStatus
 
 tour("architecture-tour-capabilities");
 
-// Capability decisions on the line (LIVE-VALUES.md, step 8): a call the policy hasn't decided stops the run at its line,
+// Capability decisions on the line (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*): a call the policy hasn't decided stops the run at its line,
 // and asks there, in the notes margin — what it would do, from the run's own values, and Allow once / Allow always / Deny.
 // Deny fails the call as the policy would; Skip doesn't make it, the run going on; Allow once lets it run; Allow always
-// writes my policy override, and the next run goes straight through. Rule… opens the rule editor there (RULES.md),
-// prefilled with the call: widened to a glob and saved, it decides the call, and the next run's.
+// writes my policy override, and the next run goes straight through. Rule… opens the rule editor there (RUNNING.md,
+// *Rules*), prefilled with the call: widened to a glob and saved, it decides the call, and the next run's.
 test("capability decisions: a gated call asks on its line, and the choice resumes the run", async (t) => {
 	const workbench = session.workbench();
 
@@ -112,7 +112,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 	assert.equal(always.state, "terminated");
 	assert.deepEqual(always.output, ["wrote /workspace/out.txt"]);
-	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/out.txt")).then((bytes) => new TextDecoder().decode(bytes), () => undefined)), "hello", "written for real (RUNNING.md, step 2)");
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/out.txt")).then((bytes) => new TextDecoder().decode(bytes), () => undefined)), "hello", "written for real (RUNNING.md, *Effects are real, decided per call*)");
 	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ "when": when, "then": then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "is", "argument": "/workspace/out.txt" }] }, "then": [{ "action_id": "allow" }] }]);
 
 	const again = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
@@ -168,9 +168,9 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	});
 });
 
-// Real effects (RUNNING.md, step 2): a call the policy allows happens for real — a read gets the file, and what it read
-// is recorded (a rule can give it back) — and a call nobody allowed (one the static check can't see, so never asked
-// about) fails as a denied one would, rather than quietly doing nothing.
+// Real effects (RUNNING.md, *Effects are real, decided per call*): a call the policy allows happens for real — a read
+// gets the file, and what it read is recorded (a rule can give it back) — and a call nobody allowed (one the static
+// check can't see, so never asked about) fails as a denied one would, rather than quietly doing nothing.
 test("real effects: an allowed read reads the file, recorded; a call nobody allowed fails", async () => {
 	const workbench = session.workbench();
 	const write = (path, text) => workbench.evaluate(([file, body]) => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file(file), new TextEncoder().encode(body)), [path, text]);
@@ -642,7 +642,7 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 
 	const written = ["/workspace/a.txt", "/workspace/b.txt", "/workspace/c.txt"];
 
-	assert.deepEqual(await workbench.evaluate((paths) => Promise.all(paths.map((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => undefined))), written), ["a", "b", "c"], "written for real (RUNNING.md, step 2)");
+	assert.deepEqual(await workbench.evaluate((paths) => Promise.all(paths.map((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => undefined))), written), ["a", "b", "c"], "written for real (RUNNING.md, *Effects are real, decided per call*)");
 
 	// A new run asks again.
 	const again = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
@@ -724,11 +724,11 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// Where rules apply (RULES.md): a placed rule is marked in the margin's gutter column beside the code it's placed at,
-// its sentence on hover. As that code is edited it's followed — through the edit history's bursts, a small step at a
-// time — so the mark stays on it, sure, through changes that from its stored place alone would be only a weak match;
-// and saving the file keeps the rule's place there (its reference made again), mine and the shared contract's alike,
-// through ESLint's fixes on save too.
+// Where rules apply (RUNNING.md, *A rule placed in the code*): a placed rule is marked in the margin's gutter column
+// beside the code it's placed at, its sentence on hover. As that code is edited it's followed — through the edit
+// history's bursts, a small step at a time — so the mark stays on it, sure, through changes that from its stored place
+// alone would be only a weak match; and saving the file keeps the rule's place there (its reference made again), mine
+// and the shared contract's alike, through ESLint's fixes on save too.
 test("placed rules: marked beside their code, followed through edits, and kept placed on save", async () => {
 	const workbench = session.workbench();
 	const marks = () => workbench.evaluate(() => [...document.querySelectorAll(".notes-margin-mark.rule-placed")].map((mark) => ({ "title": mark.title, "uncertain": mark.classList.contains("uncertain") })));
@@ -823,9 +823,9 @@ test("placed rules: marked beside their code, followed through edits, and kept p
 	});
 });
 
-// A call's result given instead of the call (RULES.md, slice 2): at an async fetch's capability stop (the debugger steps
-// async code — tsval's steppedAsync), Rule… — prefilled with what it returned the last time it ran for real, when
-// that's recorded — Save as rule: the run goes on with that result, and the next run isn't stopped there.
+// A call's result given instead of the call (RUNNING.md, *A call's result*): at an async fetch's capability stop (the
+// debugger steps async code — tsval's steppedAsync), Rule… — prefilled with what it returned the last time it ran for
+// real, when that's recorded — Save as rule: the run goes on with that result, and the next run isn't stopped there.
 test("mock a call's result: given at its capability stop, from what it returned for real", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/rates.js";
@@ -1046,7 +1046,8 @@ test("debugger: a program's server answers the preview, and keeps the run alive"
 	try {
 		assert.equal(started.state, "idle", "serving, not ended");
 
-		// Its preview, opened on its port (RUNNING.md, step 4) — the program's own server answering it, no dev server.
+		// Its preview, opened on its port (RUNNING.md, *A service is one too*) — the program's own server answering it, no
+		// dev server.
 		const preview = await eventually("its preview window", () => session.page.frames().find((frame) => /\/__virtual__\/[^/]+\/4321\//u.test(frame.url())));
 
 		assert.match(await eventually("the page", async () => (await preview.evaluate(() => document.body?.textContent ?? "").catch(() => "")) || undefined), /^hello \/ #\d+$/u);
@@ -1106,9 +1107,10 @@ test("debugger: a program reads its stdin from the Debug Console", async () => {
 	}
 });
 
-// `node` in the terminal is a run like any other (RUNNING.md, step 3): in the debugger, with the command line's arguments,
-// the shell's directory and environment; its output in that terminal, and what's typed there its stdin. (Through a
-// terminal's shell process, driven over the hub — `terminal.run`, as a task's terminal is — rather than typed into one.)
+// `node` in the terminal is a run like any other (RUNNING.md, *Output goes where it was started*): in the debugger,
+// with the command line's arguments, the shell's directory and environment; its output in that terminal, and what's
+// typed there its stdin. (Through a terminal's shell process, driven over the hub — `terminal.run`, as a task's
+// terminal is — rather than typed into one.)
 test("terminal: node runs in the debugger with its args, cwd and env — output and stdin in the terminal", async () => {
 	const workbench = session.workbench();
 	// (A terminal's id as a task's is — one of a kind, so the diagram folds it: `terminal.in.*`.)

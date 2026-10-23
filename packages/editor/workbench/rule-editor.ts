@@ -1,8 +1,9 @@
 /**
- * A rule editor (packages/editor/RULES.md): macOS's predicate editor — Finder's smart folders, Mail's rules — for a rule
- * `{ when, then }`. WHEN is rows of *target / operator / argument*, combined *all*, *any* or *none*, nestable; THEN is a
- * list of actions. Each row has − and +; ⌥-click on + adds a group. The model is ui-predicate's (kept JSON-compatible):
- * a compound `{ logicalType_id, predicates }` of comparisons `{ target_id, operator_id, argument }`.
+ * A rule editor (packages/editor/RUNNING.md, *Rules*): macOS's predicate editor — Finder's smart folders, Mail's rules
+ * — for a rule `{ when, then }`. WHEN is rows of *target / operator / argument*, combined *all*, *any* or *none*,
+ * nestable; THEN is a list of actions. Each row has − and +; ⌥-click on + adds a group. The model is ui-predicate's
+ * (kept JSON-compatible): a compound `{ logicalType_id, predicates }` of comparisons `{ target_id, operator_id,
+ * argument }`.
  *
  * Nothing here knows what the targets are: the consumer passes the catalog — the targets, which operators each type of
  * target offers, the actions, and each argument's JSON Schema — and every argument's input is drawn from its schema: a

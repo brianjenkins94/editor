@@ -102,8 +102,8 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	}) });
 
 	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate — kept so
-	// a rule can give it back in the debugger instead of the call (RULES.md, slice 2); and asked for by the margin's
-	// Rule… at a capability stop, to prefill it.
+	// a rule can give it back in the debugger instead of the call (RUNNING.md, *A call's result*); and asked for by the
+	// margin's Rule… at a capability stop, to prefill it.
 	context.subscriptions.push({ "dispose": serve(bridgeHub, "capability.record", async (data) => {
 		const { capability, resource, value } = (data ?? {}) as { "capability"?: unknown; "resource"?: unknown; "value"?: unknown };
 
@@ -327,9 +327,9 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 
 				void (async () => {
 					// `__startedBy`: the terminal shows this run itself (the running extension leaves the session out), and is its
-					// output and stdin (RUNNING.md, step 3) — with the command line's arguments (none: a rule's, the margin's
-					// Mock), its directory and its environment. Focus stays there: no Run and Debug view, no Debug Console opened
-					// (a breakpoint still stops it, and shows where).
+					// output and stdin (RUNNING.md, *Output goes where it was started*) — with the command line's arguments (none: a
+					// rule's, the margin's Mock), its directory and its environment. Focus stays there: no Run and Debug view, no
+					// Debug Console opened (a breakpoint still stops it, and shows where).
 					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true });
 
 					if (started !== true) {

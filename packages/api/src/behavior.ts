@@ -2,7 +2,7 @@ import { base64url } from "jose";
 import type { Bindings } from "./env.ts";
 
 /**
- * Behavior (BEHAVIOR.md, B7): what a request is, and what a sign-in's client looks like. Zero-knowledge: a request is
+ * Behavior (README.md, B7): what a request is, and what a sign-in's client looks like. Zero-knowledge: a request is
  * kept as its route template with a keyed hash of its values, a client as which headers it sent with a keyed hash of
  * each, never the values themselves.
  */

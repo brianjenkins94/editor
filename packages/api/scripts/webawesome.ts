@@ -1,6 +1,6 @@
 /**
  * Web Awesome for the sign-in pages (public/sign-in.html, public/passkey.html), as two of their own files: the pages load
- * nothing but this origin's (SIGN-IN.md), so the components they use and Web Awesome's stylesheet are bundled into
+ * nothing but this origin's (README.md, "Sign-in methods"), so the components they use and Web Awesome's stylesheet are bundled into
  * public/webawesome.js and public/webawesome.css. wrangler runs this before `dev` and `deploy` (wrangler.jsonc's `build`);
  * both files are build output, not committed.
  *

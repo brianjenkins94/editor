@@ -3,8 +3,6 @@
  * alignment, wa-link-plain, wa-text-truncate) and native table styles. Left here: sizes, the navigation's links, the
  * page's padding, tables' scrolling, monospace text, and the architecture page's diagram — on --wa-* tokens. The app
  * imports Web Awesome's stylesheet first, so `app` is declared after its layers.
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

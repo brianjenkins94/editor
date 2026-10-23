@@ -1,4 +1,4 @@
--- Authenticator-app MFA (SIGN-IN.md, "MFA, optional"; C5). A user's TOTP secret, sealed under TOTP_KEK (a key of its own),
+-- Authenticator-app MFA (README.md, C5). A user's TOTP secret, sealed under TOTP_KEK (a key of its own),
 -- pending until a code from the app confirms it (`enrolled_at`); the newest 30-second step a code was used for (each
 -- step is good once); and the bucket of tries at it (5, one back a minute).
 CREATE TABLE totp (

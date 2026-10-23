@@ -190,7 +190,7 @@ test("every call through the proxy is recorded — reads and writes, as template
 
 	const calls = (await env.DB.prepare("SELECT detail, reason FROM audit WHERE grant_id = ? AND event = 'proxy_call' ORDER BY id").bind(grantId).all<{ "detail": string; "reason": string }>()).results;
 
-	// "Was it octo/hello?" is answered by hashing it the same way; the log itself doesn't say (BEHAVIOR.md).
+	// "Was it octo/hello?" is answered by hashing it the same way; the log itself doesn't say (README.md, "Behavior").
 	const hashed = async (values: string): Promise<string> => keyed({ "AUDIT_KEY": secrets.AUDIT_KEY } as Parameters<typeof keyed>[0], "values", values);
 	const repo = `repo#${await hashed("octo/hello")}`;
 

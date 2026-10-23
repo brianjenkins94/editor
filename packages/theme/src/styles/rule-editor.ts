@@ -3,8 +3,6 @@
  * controls are wa-select / wa-input / wa-checkbox / wa-button, its rows and lists wa-cluster / wa-stack, its words
  * wa-color-text-quiet. Left here: how wide each control is in a row, where a list and a row's − + go, a group's indent,
  * and a place in the code — on --wa-* tokens (theme/vscode maps them onto the VS Code theme).
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

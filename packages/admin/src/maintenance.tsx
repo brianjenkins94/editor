@@ -1,5 +1,5 @@
 /**
- * The kill switch (packages/api/OPERATIONS.md, "The kill switch"): while it's on, a banner says why, by whom and since
+ * The kill switch (packages/api/README.md, O1): while it's on, a banner says why, by whom and since
  * when, on every page; the owner (`maintenance:switch`) turns it off there, or on from the Overview, with a reason. The
  * API audits every flip and emails the owner. Beside it, the narrower switches (O8): one part of the API paused, each
  * shown on every page while it is, paused or resumed by the owner from the Overview.

@@ -6,7 +6,7 @@ import { recordError } from "./errors.ts";
 import { signedIn } from "./tokens.ts";
 
 /**
- * What the editor reports (OPERATIONS.md, "Session timelines" and "Errors"; O6).
+ * What the editor reports (README.md, O6).
  *
  * `POST /session/events` (signed in only; signed out, nothing is recorded): a batch of what happened, in a fixed
  * vocabulary. Anything outside it is dropped, as is a detail of the wrong shape; a repository's name becomes the audit

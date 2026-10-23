@@ -1,5 +1,5 @@
 /**
- * The Mail page (README.md): what our email did, from GET /admin/mail. Ours (the audit log: codes sent, sign-ins by
+ * The Mail page (packages/api/README.md, "The Mail page"): what our email did, from GET /admin/mail. Ours (the audit log: codes sent, sign-ins by
  * email, refusals on the way) beside Cloudflare's (Email Service's analytics: delivered or not, and SPF, DKIM and DMARC).
  * Counts by day and reason; never a user's address. And the smoke test (its last runs, and a run now), our own inbox
  * (GET /admin/inbox: mail to our own addresses, who from and its subject), and the alerts emailed to the owner (GET

@@ -339,7 +339,7 @@ export interface VM {
 	 *  machine's own business (an operand may be read in its parent's step); for a position in the run, `statements`. */
 	readonly "steps": number;
 	/** The statement clock: how many statements have started. The engine-independent reading of where a run is
-	 *  (COMPILE.md) — a trace event's `step`, the profile's. */
+	 *  (README.md, *A compiled tier*) — a trace event's `step`, the profile's. */
 	readonly "statements": number;
 
 	// --- position, breakpoints ---
@@ -2692,7 +2692,7 @@ export interface FileCoverage { readonly "statements": readonly ts.Statement[]; 
 interface StatementTable { "file": ts.SourceFile; "statements": ts.Statement[] }
 
 /** Each statement's place in its file's table, found when the file is first indexed: the AST doesn't change, and a
- *  compiled unit would know it statically (COMPILE.md). */
+ *  compiled unit would know it statically (README.md, *A compiled tier*). */
 const statementPoints = new WeakMap<ts.Node, { "table": StatementTable; "index": number }>();
 
 function statementPoint(node: ts.Node): { "table": StatementTable; "index": number } {

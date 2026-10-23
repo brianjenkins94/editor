@@ -1,5 +1,5 @@
 /**
- * Live values, as notes (LIVE-VALUES.md, step 6): a debug session's values — what each line bound, returned or chose,
+ * Live values, as notes (RUNTIME-EVIDENCE.md, *Live values*): a debug session's values — what each line bound, returned or chose,
  * a column per turn of the loop around it — beside the code in the pane's Margin, Bret Victor's binary search. The
  * Margin is a pane view like any extension's (EXTENSION-POINTS.md, 4): this answers `margin.paneView` with its content
  * as data (marginOf), each thing placed by its range in the text that ran, and core's pane draws it; its buttons and
@@ -13,17 +13,18 @@
  * up, its values whole (the margin's cell lit at the cursor: pane.ts). What the bounds left out is said under the last
  * line.
  *
- * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
+ * A capability stop asks on its line too (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*): what the call would do — `writeFileSync '/workspace/out.txt'` — and
  * Allow once*, *Allow always*, *Deny*, the choice sent back to the session (the bridge's `editor.capability.decide`), which
  * resumes it. *Allow this run* lets every call of the capability through until the run ends (a loop asks once), kept
  * nowhere. *Allow always* needs the resource the call reaches — known even when the line computes it (the worker runs a
  * fork of the stop to the call to see it).
- * Rule…* opens the rule editor in the Rule view (core's `editor.rules.edit`, RULES.md), prefilled with the call — *capability is*, *resource
- * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
- * in my policy, the run going on as it decides. Or *give* the call's *result* instead of it (RULES.md, slice 2) —
- * starting from what it returned the last time it ran for real, when that's recorded (editor-api's `recordedResult`).
+ * Rule…* opens the rule editor in the Rule view (core's `editor.rules.edit`, RUNNING.md, *Rules*), prefilled with the
+ * call — *capability is*, *resource is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it
+ * *Just this once*, or *Save as rule* in my policy, the run going on as it decides. Or *give* the call's *result*
+ * instead of it (RUNNING.md, *A call's result*) — starting from what it returned the last time it ran for real, when
+ * that's recorded (editor-api's `recordedResult`).
  *
- * A variable's row has *Mock…* on hover (LIVE-VALUES.md, "Mocking a value"): the rule editor, in the Rule view, prefilled *program is
+ * A variable's row has *Mock…* on hover (RUNTIME-EVIDENCE.md, *Mocking a value*): the rule editor, in the Rule view, prefilled *program is
  * <this file>*, *at* <this statement> (a span reference, followed through edits), *then set* it to the value the run
  * had; the run's other variables are targets too. *Just this once* sets it at this stop and the run goes on with it
  * (the bridge's `editor.debug.setValue`, as the Variables view's Set Value does); *Save as rule* keeps it, and each run sets it
@@ -110,12 +111,12 @@ const batchedAt = new Map<string, number>();
 /** The session shown, per file URI: the latest, or one picked from those kept — its values kept once it ends, until the
  *  next session of the file tells its own. */
 const sessions = new Map<string, Session>();
-/** Each file's runs kept, oldest first, a ball each at the Margin's top (RUNNING.md, unattended runs): their values, and
- *  how each ended — the record of what things were in that run. */
+/** Each file's runs kept, oldest first, a ball each at the Margin's top (RUNNING.md, unattended runs): their values,
+ *  and how each ended — the record of what things were in that run. */
 const kept = new Map<string, Session[]>();
 /** How many runs of a file are kept. */
 const KEPT = 8;
-/** The live runs going (LIVE-VALUES.md): nobody's watching them, so what they didn't make has *Rule…* for such runs. */
+/** The live runs going (RUNTIME-EVIDENCE.md, *Live runs*): nobody's watching them, so what they didn't make has *Rule…* for such runs. */
 const liveSessions = new Set<string>();
 /** What each session read from outside, from its effects (a call made, or given a result): its values may hold a secret. */
 const inputsOf = new Map<string, string[]>();
@@ -436,10 +437,10 @@ async function ruleAtStop(session: string, ask: CapabilityAsk): Promise<void> {
 	}
 }
 
-/** Rule… on a call a live run skipped or replayed — a run after an edit, which nobody is watching (RUNNING.md, unattended
- *  runs): a rule about such runs' calls like it — *trigger is edit*, its capability and resource, then give what it
- *  returned when it last ran for real (when that's recorded), else skip — then *Save as rule* (in my policy; the file runs
- *  again by it), *Cancel*. */
+/** Rule… on a call a live run skipped or replayed — a run after an edit, which nobody is watching (RUNNING.md,
+ *  unattended runs): a rule about such runs' calls like it — *trigger is edit*, its capability and resource, then give
+ *  what it returned when it last ran for real (when that's recorded), else skip — then *Save as rule* (in my policy;
+ *  the file runs again by it), *Cancel*. */
 async function ruleUnattended(uri: string, capability: string, resource: string): Promise<void> {
 	const recorded = await recordedOf(capability, resource).catch(() => null) ?? null;
 	const answer = await edit(`${uri}#unattended:${capability} ${resource}`, {
@@ -560,7 +561,7 @@ async function mockVariable(uri: string, at: Range, cell: { "text": string; "kin
  *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
 interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[] }
 
-/** A step of the program (LIVE-VALUES.md, *Projections*): statements written together, a card around them in the margin. */
+/** A step of the program (RUNTIME-EVIDENCE.md, *Projections*): statements written together, a card around them in the margin. */
 interface Step { "fromLine": number; "toLine": number; "title": string; "detail": string; "declares": { "name": string; "type": string | null }[]; "body": boolean }
 
 /** Each file's top-level statements, by the document version they were read at. */
@@ -673,7 +674,7 @@ function ranOf(step: Step, marks: PaneMark[]): { "kind": string; "text": string 
 	return covered.every((mark) => mark.kind === "coverage-missed") ? { "kind": "missed", "text": "didn't run" } : { "kind": "partial", "text": "partly ran" };
 }
 
-/** The last run, step by step (LIVE-VALUES.md, *Projections*: the run log): each step that ran, in the order it first did, with its
+/** The last run, step by step (RUNTIME-EVIDENCE.md, *Projections*: the run log): each step that ran, in the order it first did, with its
  *  share of the run's work (the statements run in its code — the same every run) and any time it waited (a timer, on the
  *  event loop's clock) — or undefined, with no profile for these steps. */
 interface RunLog { "rows": { "card": number; "title": string; "statements": number; "waited": number }[]; "statements": number; "waited": number }
@@ -916,7 +917,7 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	const rows = rowsShown(session, text);
 	const asking = asks.get(uri);
 	const ending = ends.get(uri);
-	// The program's steps, a card around each (LIVE-VALUES.md, *Projections*).
+	// The program's steps, a card around each (RUNTIME-EVIDENCE.md, *Projections*).
 	const shown = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
 	const steps = read === undefined || shown?.getText() !== text ? [] : stepsOf(shown, read);
@@ -1402,7 +1403,7 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 	};
 
 	// The run's end: how it ended goes on its line. Its values stay — the margin shows the file's last run until the next
-	// run of it tells its own (a live run on a save or its interval, LIVE-VALUES.md), following its code through edits.
+	// run of it tells its own (a live run on a save or its interval, RUNTIME-EVIDENCE.md, *Live runs*), following its code through edits.
 	const endedCame = (session: string, { file, source, end }: Partial<EndedEvent>): void => {
 		// How it ended — crashed, or stopped on a line — replacing the last run's; a run that finished clears it.
 		if (typeof file === "string") {

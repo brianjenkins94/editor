@@ -1,8 +1,8 @@
 /**
- * Placed rules (RULES.md: *at*, a span reference) and the policy files, for the Rules tree, the Rule view, the Margin and
- * agents: where each placed rule's place is now — followed through the edits made to its file since the last commit
- * (the edit history's bursts) by the editor's BABLR (`editor.annotations.*`) — and kept there as its file's saved, a
- * rule's change written, and what a rule gives a program's `process.argv`. The commands, documented in
+ * Placed rules (RUNNING.md, *A rule placed in the code*) and the policy files, for the Rules tree, the Rule view, the
+ * Margin and agents: where each placed rule's place is now — followed through the edits made to its file since the last
+ * commit (the edit history's bursts) by the editor's BABLR (`editor.annotations.*`) — and kept there as its file's
+ * saved, a rule's change written, and what a rule gives a program's `process.argv`. The commands, documented in
  * EXTENSION-POINTS 5: `silo.rules.files` (each file's rules and their places), `silo.rules.set(previous, rule)`,
  * `silo.rules.given(program, target)`.
  */
@@ -137,11 +137,11 @@ async function follow(place: unknown, texts: string[], file: string): Promise<{ 
 	return found !== undefined && SURE.has(found.status) ? { "at": at, "found": found } : undefined;
 }
 
-/** Where each rule's place is now (RULES.md: *at*, a span reference) — followed through the edits made to its file since
- *  the last commit (the edit history's bursts, `editor.history.texts`) to its text as it is now (unsaved edits included), or as
- *  saved (`saved`: for a place to be kept); looked for in it directly where it can't be followed surely (uncertain, or
- *  lost). Null for a rule with no place. The margin's marks, the Rules view and keeping places on save all see a rule
- *  where this finds it. */
+/** Where each rule's place is now (RUNNING.md, *A rule placed in the code*) — followed through the edits made to its
+ *  file since the last commit (the edit history's bursts, `editor.history.texts`) to its text as it is now (unsaved
+ *  edits included), or as saved (`saved`: for a place to be kept); looked for in it directly where it can't be followed
+ *  surely (uncertain, or lost). Null for a rule with no place. The margin's marks, the Rules view and keeping places on
+ *  save all see a rule where this finds it. */
 async function placesNow(rules: Rule[], saved = false): Promise<(PlaceNow | null)[]> {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
 	/** Each file's texts to follow through, read once for all its rules. */
@@ -217,8 +217,8 @@ export function withPlace(rule: Rule, place: unknown): Rule {
 /** Each rule placed in `file` (workspace-relative) — mine and the shared contract's — followed to the file as saved
  *  (placesNow) and, surely found there somewhere other than its stored place (the statement moved, or changed but was
  *  followed or surely matched), kept at that place: its reference made again there, so it's found by its id from then
- *  on, rather than re-placed by hand (RULES.md). A shared rule's new place is a change to the contract, committed with
- *  the code change that moved its code. */
+ *  on, rather than re-placed by hand (RUNNING.md, *A placed rule keeps its place on its own*). A shared rule's new
+ *  place is a change to the contract, committed with the code change that moved its code. */
 async function keepPlaces(file: string): Promise<void> {
 	const files = await loadPolicyFiles();
 	const placed = (["mine", "shared"] as const).flatMap((whose) => (files?.[whose].rules ?? []).filter((rule) => (placesOf(rule) as { "file"?: string }[]).some((place) => place?.file === file)).map((rule) => ({ "whose": whose, "rule": rule })));

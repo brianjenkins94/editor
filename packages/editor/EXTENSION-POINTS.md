@@ -305,7 +305,7 @@ what makes the second face possible.
    game — each rule a card around its function (what it's for each of), each condition → action on its `if`, each
    object, behavior and composite behavior on its declaration — placed by the span references anchoring gives them; the
    game's projection is cached until one of its files is saved. Its map and builder stay the webview view they are.
-   Core's placeholder tabs (Cards, Event sheet) went; Cards waits for the cards projection (LIVE-VALUES.md, *Projections*). A view with
+   Core's placeholder tabs (Cards, Event sheet) went; Cards waits for the cards projection (RUNTIME-EVIDENCE.md, *Projections*). A view with
    nothing for a file keeps its pane, so its tabs stay to switch back.
 5. ~~**The native face**~~ — done (2026-10-12): pane-native.ts draws the shown view's content with VS Code's own
    contribution points, the pane hidden — a row as an inlay hint (its label and latest value, every cell on hover),
@@ -331,7 +331,7 @@ A command not here is core's own, and an extension that calls one doesn't pass.
 | `editor.capability.decide(session, choice, rule?, give?)` | the bridge (capability-stops.ts) | a capability stop answered: `choice` a `CapabilityChoice` (editor-api) — allow, skip or deny for this call, this run or always; `rule`, a rule made in the Rule view; `give-once`, `give` in the call's place. What a choice means is the bridge's decider's |
 | `editor.debug.setValue(session, name, value)` | the bridge (debug-control.ts) | at a stop, a variable set to `value`, a literal as code writes it; the run goes on with it (the Margin's Mock… of a variable) |
 | `editor.metrics.read(since?)` | the bridge, from the metrics plane | `{ [source]: MetricsSample[] }`, oldest first: every context's samples (`$sys.metrics.<source>`) from the last few minutes, only those newer than `since` when it's given. `MetricsSample` is observability's type. The insights monitor reads it |
-| `typescript.tsserverRequest("_statements", { file })` | the capabilities extension's tsserver plugin | `{ body: { statements } }`: a file's top-level statements — range, the comment above, a title and detail, what each declares and its type — the Margin's cards (LIVE-VALUES.md, *Projections*) |
+| `typescript.tsserverRequest("_statements", { file })` | the capabilities extension's tsserver plugin | `{ body: { statements } }`: a file's top-level statements — range, the comment above, a title and detail, what each declares and its type — the Margin's cards (RUNTIME-EVIDENCE.md, *Projections*) |
 | `typescript.tsserverRequest("_types.at", { file, ranges })` | the capabilities extension's tsserver plugin | `{ body: { types: (string \| null)[] } }`: TypeScript's type of each range (`{ start, end }`, offsets), `null` where no node has it — and every `null`, or no answer, when the capabilities extension isn't there, so a caller degrades. Notes and insights' hovers read it |
 
 **Not for extensions:** `editor.arch.commands` — command-tap's (extensions/command-tap.ts), which core's build puts in

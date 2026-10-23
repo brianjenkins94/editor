@@ -71,7 +71,7 @@ function post(message: WorkerEvent): void {
 }
 
 let sourceFile: ts.SourceFile | undefined;
-/** The session's live values (LIVE-VALUES.md): what each line bound, returned or chose, told to the adapter a few times
+/** The session's live values (RUNTIME-EVIDENCE.md, *Live values*): what each line bound, returned or chose, told to the adapter a few times
  *  a second, and before each stop and the end — by the program file they're in (packages/tsval/README.md, *Modules*), each its own record. */
 const live = new Map<ts.SourceFile, LiveRecord>();
 /** The program's files whose text the adapter has been told (with their first values): the entry's it has. */
@@ -109,8 +109,9 @@ let policy: Policy | undefined;
 let userLines: number[] = [];
 /** The user's breakpoints in the program's other files (packages/tsval/README.md, *Modules*), by file. */
 let fileLines = new Map<string, number[]>();
-/** The statements rules set something after (RULES.md: *set variables.<name>*, *at* a place), by program file and
- *  1-based line: armed as breakpoints that aren't stops — the statement runs, the sets are made, the run goes on. */
+/** The statements rules set something after (RUNNING.md, *A rule placed in the code*: *set variables.<name>*, *at* a
+ *  place), by program file and 1-based line: armed as breakpoints that aren't stops — the statement runs, the sets are
+ *  made, the run goes on. */
 let setHooks = new Map<string, Map<number, SetHook[]>>();
 /** The program, workspace-relative: the subject's `program` at a hook. */
 let programPath = "";
@@ -121,13 +122,13 @@ let giveNext: { "value": unknown } | undefined;
 /** "Allow once" (or this run, or always) at a capability stop: the next capability call the policy doesn't allow happens
  *  for real all the same — the one asked about. Reset at every stop. */
 let allowNext = false;
-/** The call at the capability stop the user skipped (LIVE-VALUES.md): it isn't made, the run goes on with its inert
+/** The call at the capability stop the user skipped (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*): it isn't made, the run goes on with its inert
  *  stand-in's result. */
 let skipNext = false;
 /** How the call at the capability stop was decided — the person's answer there (an exception to the policy, on record in
  *  the run's effects): taken by the next capability call, the one asked about. */
 let answeredNext: "once" | "always" | "refused" | undefined;
-/** A live run (LIVE-VALUES.md, *Live runs*): the file run again on a save or its interval — it stops at nothing,
+/** A live run (RUNTIME-EVIDENCE.md, *Live runs*): the file run again on a save or its interval — it stops at nothing,
  *  asks nothing (what it can't make it skips), runs its timers at once, ends at its first idle or its step budget. */
 let liveRun = false;
 /** What calls returned when they last ran for real, by `<capability> <resource>` (the run contract's `__recorded`): a live
@@ -328,7 +329,7 @@ const stdin = ((): { "on": (event: string, listener: (...args: unknown[]) => voi
 function capabilitySurface(fileName: string, args: string[], real?: Runtime, where: { "cwd"?: string; "env"?: Record<string, string> } = {}): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const standins = gated(capabilityStandins(), real, where.cwd ?? "/workspace");
 	// What a script reads of its process: its arguments (a run's inputs), the directory it was started in and its
-	// environment (a terminal's — RUNNING.md, step 3), and its stdin — nothing it can do.
+	// environment (a terminal's — RUNNING.md, *Output goes where it was started*), and its stdin — nothing it can do.
 	// (Its version is the one almostnode's process reports, packages/almostnode/shims/process.ts, so a run reads the same
 	// version whichever runtime it's in.)
 	const process = { "argv": ["node", fileName, ...args], "env": { ...where.env }, "platform": "browser", "version": "v20.0.0", "versions": { "node": "20.0.0" }, "cwd": () => where.cwd ?? "/workspace", "stdin": stdin };
@@ -872,13 +873,14 @@ function editorKeeps(capability: string, path: unknown): boolean {
 	return capability.startsWith("fs:") && typeof path === "string" && (path === "/workspace" || path.startsWith("/workspace/"));
 }
 
-/** The program's capabilities (RUNNING.md, step 2): its `fs`, `child_process` and `fetch`, each gated call decided as it's
- *  made — a probe's fork gets the stand-in; a call the user denied at its stop (`denyNext`) fails with node's EACCES; a
- *  call a rule gives the result of (RULES.md, slice 2), or the user gave it at the stop (`giveNext`), gets that; a call the
- *  policy allows, or the user allowed at its stop (`allowNext`), happens for real through almostnode (`real`) — what it
- *  read recorded — and any other fails as a denied one would. With no `real` (exploring orderings: a run many times
- *  over), every call is its inert stand-in, as before. A module's other members are almostnode's own. (A module object
- *  shared under several names stays one object.) */
+/** The program's capabilities (RUNNING.md, *Effects are real, decided per call*): its `fs`, `child_process` and
+ *  `fetch`, each gated call decided as it's made — a probe's fork gets the stand-in; a call the user denied at its stop
+ *  (`denyNext`) fails with node's EACCES; a call a rule gives the result of (RUNNING.md, *A call's result*), or the
+ *  user gave it at the stop (`giveNext`), gets that; a call the policy allows, or the user allowed at its stop
+ *  (`allowNext`), happens for real through almostnode (`real`) — what it read recorded — and any other fails as a
+ *  denied one would. With no `real` (exploring orderings: a run many times over), every call is its inert stand-in, as
+ *  before. A module's other members are almostnode's own. (A module object shared under several names stays one
+ *  object.) */
 function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, cwd = "/workspace"): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
 	const programFs = real === undefined ? undefined : programFsFor?.(cwd);
@@ -1016,7 +1018,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value, key)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value, key)])) };
 }
 
-/** The most of a read's result recorded (RULES.md, slice 2: what a call returned, to give back in a debugger). */
+/** The most of a read's result recorded (RUNNING.md, *A call's result*: what a call returned, to give back in a
+ *  debugger). */
 const RECORD_MAX = 256 * 1024;
 
 /** What a read returned, as text: a string, or bytes decoded — else undefined. */
@@ -2194,8 +2197,9 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 		return;
 	}
 
-	// Its capabilities real (RUNNING.md, step 2): each gated call decided as it's made — but for a run of an ordering
-	// exploring found (its schedule given), which replays that run: its calls' results the stand-ins' it had.
+	// Its capabilities real (RUNNING.md, *Effects are real, decided per call*): each gated call decided as it's made — but
+	// for a run of an ordering exploring found (its schedule given), which replays that run: its calls' results the
+	// stand-ins' it had.
 	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined ? loadedRuntime : undefined, whereOf(message));
 
 	programBuiltins = surface.modules;
@@ -2226,8 +2230,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	({ sourceFile } = loaded);
 	record(loaded.vm, new Map());
 	// Capability breakpoints: pre-arm a breakpoint at every capability call the policy won't let pass, so a
-	// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (step 8 of
-	// LIVE-VALUES.md). No policy → every undecided dangerous call breaks (firewall default).
+	// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (RUNTIME-EVIDENCE.md,
+	// *Capability decisions, on the line*). No policy → every undecided dangerous call breaks (firewall default).
 	({ policy } = message);
 	// (a live run stops at nothing: no breakpoints, no capability lines — what it can't make, it skips)
 	userLines = liveRun ? [] : message.lines;

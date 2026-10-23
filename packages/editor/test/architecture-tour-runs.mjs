@@ -33,8 +33,8 @@ test("node script: a task runs under the tsval debugger", async () => {
 });
 
 // A session VS Code starts itself (F5, Run and Debug, debug_start) is a run in the registry too, ended with the session.
-// Run (RUNNING.md): one way in. The shell's ▷ (its "The file in the editor"), its left rail's Run and the editor's ▷ all
-// run the file in the editor, the same way — a run each; a file that isn't a program says why. And a run has Node's
+// Run (RUNNING.md): one way in. The shell's ▷ (its "The file in the editor"), its left rail's Run and the editor's ▷
+// all run the file in the editor, the same way — a run each; a file that isn't a program says why. And a run has Node's
 // globals, not only ECMAScript's.
 test("run: one way in from every button, and a file that isn't a program says why", async () => {
 	const workbench = session.workbench();
@@ -449,7 +449,7 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 
 // What TypeScript makes of a file's ranges, from the capabilities tsserver plugin (`_types.at`): the declared side of
 // runtime evidence, and the typed strategy's signal — the type of what each site observes.
-// Live values (LIVE-VALUES.md): a debug session over the binary search of Bret Victor's *Inventing on Principle*, paused
+// Live values (RUNTIME-EVIDENCE.md, *Live values*): a debug session over the binary search of Bret Victor's *Inventing on Principle*, paused
 // on its return — each line's values in the notes margin beside it, a column per turn of the loop, a prose note beside
 // them — and kept once the session ends (the file's last run), the note staying.
 test("live values: a session's values beside the code, as the talk's binary search", async () => {
@@ -579,7 +579,7 @@ test("inline values: at a stop, each line's latest value at its end, as VS Code 
 	}
 });
 
-// Live runs (LIVE-VALUES.md, *Live runs, as you type*): the file in the editor runs again as typing pauses — no Run — its
+// Live runs (RUNTIME-EVIDENCE.md, *Live runs*): the file in the editor runs again on a save or the interval — no Run — its
 // values in the margin; a write it can't make is skipped (nothing written, the line saying so); half-typed, the last run's
 // values stay; a loop that never ends stops at its budget, saying so on its line; none of them is in the running list.
 test("live runs: saved, the file runs again — writes skipped, half-typed kept, an endless loop stopped", async () => {
@@ -736,9 +736,9 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// Mocking process.argv in the margin (RULES.md): its row is there before any run, with Mock… — the rule editor, prefilled
-// with the file and the run's arguments. Run runs it with them, once, keeping nothing; Save as rule keeps them in my
-// policy — two values, two runs — and a plain run is given them; Remove takes the rule away.
+// Mocking process.argv in the margin (RUNNING.md, *Rules*): its row is there before any run, with Mock… — the rule
+// editor, prefilled with the file and the run's arguments. Run runs it with them, once, keeping nothing; Save as rule
+// keeps them in my policy — two values, two runs — and a plain run is given them; Remove takes the rule away.
 test("mock process.argv: a rule giving it, once or kept, several runs, and a plain run given them", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/tax.js";
@@ -838,7 +838,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// The program's projection (LIVE-VALUES.md, *Projections*): the open file's steps as cards in the notes margin — statements written
+// The program's projection (RUNTIME-EVIDENCE.md, *Projections*): the open file's steps as cards in the notes margin — statements written
 // together (no blank line between) are one, a comment above titles one, a function is its own — each card around its
 // lines, labelled on its bottom border, the types of what it declares on hover; after a run, whether each step ran and
 // how often a function was called.
@@ -886,7 +886,7 @@ test("projection: the margin's cards are the file's steps, each saying whether i
 	assert.deepEqual(after.map(({ ran }) => ran), ["ran", "called 1×", "ran"]);
 });
 
-// The run log (LIVE-VALUES.md, *Projections*), after the last card: each step that ran, in order, with its share of the run's work (the
+// The run log (RUNTIME-EVIDENCE.md, *Projections*), after the last card: each step that ran, in order, with its share of the run's work (the
 // interpreter's steps — a function's card gets its body's, wherever it's called from) and what it waited, on the event
 // loop's clock — and how the run ended.
 test("projection: the run log — each step's share of the work, and its waits", async () => {

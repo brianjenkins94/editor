@@ -1,4 +1,4 @@
--- The likely next action (BEHAVIOR.md, B8). The model: how often each action followed each other one, by the gap between
+-- The likely next action (README.md, B8). The model: how often each action followed each other one, by the gap between
 -- them, across every sign-in. Counts only, no user or sign-in in them; decayed daily, so they follow the product.
 CREATE TABLE transitions (
 	from_action TEXT NOT NULL,

@@ -6,7 +6,7 @@ import { githubIdColumn } from "./identities.ts";
 import { unwatched } from "./tripwire.ts";
 
 /**
- * Roles and permissions (packages/admin/README.md, "Roles and permissions"). Permissions are fixed strings; roles map to
+ * Roles and permissions (README.md, "Roles and permissions"). Permissions are fixed strings; roles map to
  * them here, in code, so what a role can do is reviewed like any other change. Who holds a role is decided per request,
  * never carried in a token, so a role taken away is gone at once.
  */
@@ -29,8 +29,8 @@ export const ROLES = { "owner": PERMISSIONS, "viewer": READS } satisfies Record<
 export type Role = keyof typeof ROLES;
 
 /**
- * Whether a sign-in made by `method` (the `login` row's, kept on its `grants` row) can carry a role (SIGN-IN.md, "Roles
- * follow how you signed in"): GitHub's (its own 2FA), a passkey's (a device and its PIN or face), or any with an
+ * Whether a sign-in made by `method` (the `login` row's, kept on its `grants` row) can carry a role (README.md, "Linking
+ * accounts, and roles"): GitHub's (its own 2FA), a passkey's (a device and its PIN or face), or any with an
  * authenticator app as its second step. Not an emailed
  * code, a password, or a password and an emailed code: with an email linked to an owner's account, each would make the
  * inbox (which can reset the password) a key to it.

@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { deployment } from "./deployment";
 
-// The admin app (README.md): Preact through esbuild's JSX, as the editor's shell; its own origin, 5174 in dev (the
+// The admin app (packages/api/README.md, "Admin app"): Preact through esbuild's JSX, as the editor's shell; its own origin, 5174 in dev (the
 // `admin` client's redirect page in packages/api's wrangler.jsonc). The deployment, as its wrangler configs say, is
 // `virtual:deployment` (deployment.ts), for the architecture page.
 export default defineConfig({

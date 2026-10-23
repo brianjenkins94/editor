@@ -160,8 +160,8 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		reporting.add(previewPortOf(data));
 	});
 
-	// A run's own server, listening: its preview opens (RUNNING.md, step 4) — the window on its port, no dev server started
-	// (`server`) — and closes when the run ends.
+	// A run's own server, listening: its preview opens (RUNNING.md, *A service is one too*) — the window on its port, no
+	// dev server started (`server`) — and closes when the run ends.
 	const serving = new Map<string, number>();
 
 	hub.subscribe("node.listening.*", (data, envelope) => {

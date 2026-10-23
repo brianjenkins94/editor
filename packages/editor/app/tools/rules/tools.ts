@@ -7,7 +7,7 @@ const rules: ToolFamily = ({ request }) => [{
 	"tool": defineTool({
 		"name": "rules_list",
 		"config": {
-			"description": "Every rule, as the Rules view shows it (RULES.md): mine, then the shared contract's — each one's sentence, its JSON, the problem that makes it match nothing if there is one, and for a rule placed in the code where its place is now (its line, or that it's uncertain or lost).",
+			"description": "Every rule, as the Rules view shows it (RUNNING.md, *Rules*): mine, then the shared contract's — each one's sentence, its JSON, the problem that makes it match nothing if there is one, and for a rule placed in the code where its place is now (its line, or that it's uncertain or lost).",
 			"inputSchema": {}
 		},
 		"handler": async (_args, { signal }) => ok(request("rules.state", undefined, signal))

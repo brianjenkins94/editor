@@ -649,7 +649,7 @@ export async function extensionContributions(key: string): Promise<{ "extension"
 const NOISY = /^(?:_|editor\.(?:annotations|metrics|arch|history)\.|editor\.git\.(?:status|file)$|editor\.pane\.refresh$|type$|default:type$|compositionType$|compositionStart$|compositionEnd$|replacePreviousChar$|setContext$|cursor|delete|tab$|outdent$|scroll|undo$|redo$|editor\.action\.(?:trigger|inlineSuggest|wordHighlight|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|clipboard)|acceptSelectedSuggestion|hideSuggestWidget|selectNextSuggestion|selectPrevSuggestion|editor\.action\.internal|notifications\.)/u;
 
 /**
- * What the person does in the workbench, for the editor's session timeline (packages/api OPERATIONS.md, O6): each command
+ * What the person does in the workbench, for the editor's session timeline (packages/api/README.md O6): each command
  * run, by its id (the NOISY ones left out), and each view or panel shown, by its id. Never what was typed, or a file.
  */
 export async function onWorkbenchActivity(listener: (event: { "name": "command.run" | "pane.opened"; "detail": string }) => void): Promise<{ "dispose": () => void }> {

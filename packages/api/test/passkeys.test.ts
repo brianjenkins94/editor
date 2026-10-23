@@ -8,7 +8,7 @@ import { createTestHarness } from "wrangler";
 import type { Answer, App, Client } from "./helpers.ts";
 import { testBrowser, PAGES, someone } from "./helpers.ts";
 
-// Passkeys (SIGN-IN.md, "Passkeys") in workerd, with a software authenticator of the test's own (a P-256 key, and the
+// Passkeys (README.md, "Passkeys") in workerd, with a software authenticator of the test's own (a P-256 key, and the
 // bytes a device would send): added from the account through our passkey page, then signing in with one; bound to our
 // host and origin, to the sign-in that asked, each challenge once; and a passkey sign-in holding the owner's role.
 

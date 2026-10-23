@@ -43,7 +43,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	/** The program's files core has values of, each with the text that ran (sent with its first values): the entry, and
 	 *  any other of the program's files (packages/tsval/README.md, *Modules*). */
 	private readonly told = new Map<string, string>();
-	/** What the capability stop it's at asks (LIVE-VALUES.md, step 8), until the run resumes. */
+	/** What the capability stop it's at asks (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
 	/** Breakpoint lines by source path — VS Code sends them per file, and tsval runs one program. */
 	private readonly breakpointLines = new Map<string, number[]>();
@@ -95,7 +95,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
 	 *  the policy gate, not a debugging aid. */
 	private noDebug = false;
-	/** A live run (LIVE-VALUES.md, *Live runs*): launched quiet on a save or its interval, stopping at nothing. */
+	/** A live run (RUNTIME-EVIDENCE.md, *Live runs*): launched quiet on a save or its interval, stopping at nothing. */
 	private live = false;
 	/** What calls returned when they last ran for real (`__recorded`): a live run gives them back where it would skip. */
 	private recorded: Record<string, unknown> | undefined;
@@ -209,7 +209,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.eventLoop = loopStartOf(args["eventLoop"]);
 		this.noDebug = args["noDebug"] === true;
 		this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
-		// A live run (LIVE-VALUES.md): the file run again on a save or its interval — it stops at nothing.
+		// A live run (RUNTIME-EVIDENCE.md, *Live runs*): the file run again on a save or its interval — it stops at nothing.
 		this.live = args["__live"] === true;
 		this.recorded = typeof args["__recorded"] === "object" && args["__recorded"] !== null ? args["__recorded"] as Record<string, unknown> : undefined;
 		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
@@ -467,10 +467,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		}
 	}
 
-	/** Where the rules placed in this program's code are now (RULES.md: *at*, a span reference): each place found again
-	 *  in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. In the entry, and in
-	 *  any other file a rule is placed in (it hooks there when the program loads that file — packages/tsval/README.md, *Modules*), read as the
-	 *  run reads it. One that's lost, or only uncertainly found, isn't applied (the Rules view says so). */
+	/** Where the rules placed in this program's code are now (RUNNING.md, *A rule placed in the code*): each place found
+	 *  again in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. In the entry,
+	 *  and in any other file a rule is placed in (it hooks there when the program loads that file —
+	 *  packages/tsval/README.md, *Modules*), read as the run reads it. One that's lost, or only uncertainly found, isn't
+	 *  applied (the Rules view says so). */
 	private async placeRules(): Promise<SetHook[]> {
 		// A span reference names its file workspace-relative.
 		const entry = vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false);
@@ -658,12 +659,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.onTerminated(message);
 				break;
 
-			// What a run's allowed call returned, recorded (RULES.md, slice 2): a rule can give it back.
+			// What a run's allowed call returned, recorded (RUNNING.md, *A call's result*): a rule can give it back.
 			case "recorded":
 				this.tell("recorded", { "capability": message.capability, "resource": message.resource, "value": message.value });
 				break;
 
-			// The session's live values (LIVE-VALUES.md), on to core (through debug-events.ts): the file they're of, what's new.
+			// The session's live values (RUNTIME-EVIDENCE.md, *Live values*), on to core (through debug-events.ts): the file they're of, what's new.
 			case "values":
 				this.onValues(message);
 				break;

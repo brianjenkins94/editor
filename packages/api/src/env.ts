@@ -34,14 +34,14 @@ export interface Bindings {
 	/** Where alerts go (audit.ts): a webhook URL, a secret; without one, nothing is sent and the audit log is the record. */
 	"ALERT_WEBHOOK"?: string;
 	/** The owner's address (a secret, so it isn't in the repo): where the kill switch, the cost guard and the tripwire
-	 *  email (src/mail.ts, `tellOwner`; OPERATIONS.md). Without it they're logged only. */
+	 *  email (src/mail.ts, `tellOwner`; README.md, O1). Without it they're logged only. */
 	"ALERT_EMAIL"?: string;
 	/** "enforce" locally and in the tests: the tripwire trips on another user's row from the start (src/tripwire.ts).
 	 *  "by-date" in dev and production: from ENFORCE_FROM. */
 	"TRIPWIRE"?: string;
 	/** The deployed commit (`wrangler deploy --var RELEASE:…`, cd.yml and production.yml): errors say which release. */
 	"RELEASE"?: string;
-	/** Email (src/mail.ts, SIGN-IN.md C2): Cloudflare Email Service's `send_email` binding where it's set up; in the harness
+	/** Email (src/mail.ts, README.md, C2): Cloudflare Email Service's `send_email` binding where it's set up; in the harness
 	 *  and the tests, an outbox stand-in's URL instead. Codes are an HMAC under CODE_KEY (a secret). Without either, or
 	 *  without the key, email sign-in says it isn't set up. */
 	"EMAIL"?: { "send": (message: { "from": string | { "email": string; "name": string }; "to": string; "subject": string; "text": string; "html": string }) => Promise<{ "messageId": string }> };
@@ -66,7 +66,7 @@ export interface Bindings {
 	"DB": D1Database;
 	/** The audit log's write-once copies (audit-copies.ts), in a bucket whose lock rules keep each as long as D1 keeps its row. */
 	"AUDIT_COPIES": R2Bucket;
-	/** The editor's source maps, by release (OPERATIONS.md O7): one bucket for dev and production, a release being a commit. */
+	/** The editor's source maps, by release (README.md O7): one bucket for dev and production, a release being a commit. */
 	"SOURCE_MAPS": R2Bucket;
 	"GRANTS": DurableObjectNamespace<Grant>;
 	/** Sign-ins in progress (src/attempt.ts), one per pushed authorization request. */

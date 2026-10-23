@@ -1,5 +1,5 @@
 /**
- * theme/styles/preview — the preview windows (editor/shell/shell-preview.ts, preview-devtools.ts): a window's body, DevTools docked under it, the popped-out note, the capability prompt's text (PLAN.md §8.4 step 1: Stitches only in the theme).
+ * theme/styles/preview — the preview windows (editor/shell/shell-preview.ts, preview-devtools.ts): a window's body, DevTools docked under it, the popped-out note, the capability prompt's text.
  */
 import { css } from "../stitches";
 

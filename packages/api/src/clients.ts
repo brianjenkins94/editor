@@ -2,7 +2,7 @@ import type { Bindings } from "./env.ts";
 
 /**
  * Our OAuth clients, in one table: each app that signs people in through this API. A new project is one entry here:
- * its name (what the sign-in page says it's signing you in to), the sign-in methods its page offers (SIGN-IN.md), and its
+ * its name (what the sign-in page says it's signing you in to), the sign-in methods its page offers (README.md, "Sign-in methods"), and its
  * pages in each environment (`ENVIRONMENT` in wrangler.jsonc): the exact URLs a sign-in for it may come back to, matched
  * exactly (a link or a new passkey goes back to one of them by prefix, for a deep link or a hash route). The origins the
  * API answers browsers from are these pages' (`allowedOrigins`). In code, not config, as roles are (src/rbac.ts): a

@@ -3,7 +3,7 @@ import type { AppEnv } from "./env.ts";
 import { grantStub } from "./grant.ts";
 
 /**
- * A sign-in's timeline (OPERATIONS.md, "Session timelines"; O5), for drilling into one person's session from the admin
+ * A sign-in's timeline (README.md, O5), for drilling into one person's session from the admin
  * app: every request made through it (held by its Grant: route, status, duration, trace id), what the editor said
  * happened (src/session-events.ts), its audit rows and its errors, in order. Only what signed-in people did; never a screen, code, keystrokes or file contents. Reading it is
  * itself audited (`admin_access`), as every admin read is. `sessions:replay`.

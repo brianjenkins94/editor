@@ -6,7 +6,7 @@ import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
 import { someone, testBrowser } from "./helpers.ts";
 
-// Session timelines (OPERATIONS.md, O5) in workerd: each request through a sign-in is held by its Grant, and the admin
+// Session timelines (README.md, O5) in workerd: each request through a sign-in is held by its Grant, and the admin
 // app reads the sign-in's requests, audit rows and errors in order; a viewer may, an editor token may not; RETAIN after
 // the sign-in ends, its requests go.
 

@@ -1,9 +1,10 @@
 /**
- * Rules as they're read and edited (RULES.md), without the DOM: a rule as a sentence in the catalog's words
- * (describeRule — the Rules tree's rows), the catalog an edit offers (silo's, with a place's variables), and what a rule
- * being edited would do (verdictOf — said under it in the Rule view, and whether its buttons can act on it) — and what an
- * edit asks for (`editor.rules.edit`, EXTENSION-POINTS 5). The rule editor itself (its rows and inputs) is core's, in
- * the Rule view (workbench/rule-view.ts); this is what it and the capabilities extension share.
+ * Rules as they're read and edited (packages/editor/RUNNING.md, *Rules*), without the DOM: a rule as a sentence in the
+ * catalog's words (describeRule — the Rules tree's rows), the catalog an edit offers (silo's, with a place's
+ * variables), and what a rule being edited would do (verdictOf — said under it in the Rule view, and whether its
+ * buttons can act on it) — and what an edit asks for (`editor.rules.edit`, EXTENSION-POINTS 5). The rule editor itself
+ * (its rows and inputs) is core's, in the Rule view (workbench/rule-view.ts); this is what it and the capabilities
+ * extension share.
  *
  * Whoever asks for an edit says what the rule is judged against: a rule of the Rules tree's own (`rule`: described, or
  * why it matches nothing); a capability call (`call`: a preview's prompt, a debugger's stop — whether it covers the call,

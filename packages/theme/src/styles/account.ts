@@ -1,8 +1,6 @@
 /**
  * theme/styles/account — Your account (packages/account/src/account.tsx): the authenticator app's QR code, recovery codes and monospace text —
  * on --wa-* tokens. Its code forms align with wa-align-items-end, its quiet text is wa-color-text-quiet.
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

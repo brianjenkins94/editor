@@ -68,9 +68,9 @@ export function standinCapability(fn: unknown): { "capability": string; "resourc
 	return capability === undefined ? undefined : { "capability": capability, "resourceArg": (fn as Tagged)[RESOURCE_ARG] ?? 0 };
 }
 
-/** A stand-in's result as a rule gives it (RULES.md, slice 2), in the shape the call returns — `real` is what the inert
- *  stand-in returned: a fetch's response with it as its body, a read's contents, a command's output; sync or async as
- *  the call is. A write's result isn't given (nothing reads it). */
+/** A stand-in's result as a rule gives it (RUNNING.md, *A call's result*), in the shape the call returns — `real` is
+ *  what the inert stand-in returned: a fetch's response with it as its body, a read's contents, a command's output;
+ *  sync or async as the call is. A write's result isn't given (nothing reads it). */
 export function givenAs(capability: string, real: unknown, value: unknown): unknown {
 	const text = typeof value === "string" ? value : JSON.stringify(value);
 	const settle = (shaped: unknown): unknown => (real instanceof Promise ? Promise.resolve(shaped) : shaped);

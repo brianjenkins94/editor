@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import type { AppEnv, Bindings } from "./env.ts";
 
 /**
- * Our own inbox (packages/admin/README.md, the Mail page): Email Routing sends mail for a few addresses of ours (INBOX,
+ * Our own inbox (README.md, the Email runbook): Email Routing sends mail for a few addresses of ours (INBOX,
  * in wrangler.jsonc: the smoke test's) to this Worker's `email` handler, and it keeps who sent each, its subject and size;
  * never its body. Anything to another address is rejected. Kept a day: long enough for the smoke test (src/smoke.ts) to
  * read its code, and for a look on the Mail page.

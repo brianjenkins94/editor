@@ -1,5 +1,5 @@
 /**
- * The Errors pages (packages/api/OPERATIONS.md, "Errors"; O4): every uncaught error, grouped, most recently seen first;
+ * The Errors pages (packages/api/README.md, O4): every uncaught error, grouped, most recently seen first;
  * a group's occurrences; one occurrence (by the id a person quoted, `E-ABCD-EFGH`): its stack, release, trace id and,
  * if they were signed in, whose sign-in. Messages and stacks were redacted before they were stored. `errors:read`.
  * An editor stack is mapped through its release's source maps (O7) as it's shown: each frame's file and line in the repo,

@@ -65,7 +65,7 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 			const info: RunInfo = { ...run, "id": id, "state": "running", "startedAt": Date.now() };
 
 			running.set(id, { "info": info, "stop": stop });
-			// The session timeline (packages/api OPERATIONS.md O6): a run's kind, not what it ran.
+			// The session timeline (packages/api/README.md O6): a run's kind, not what it ran.
 			hub.publish("session.event", { "name": "run.started", "detail": info.kind });
 
 			return {

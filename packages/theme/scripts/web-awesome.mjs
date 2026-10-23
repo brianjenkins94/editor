@@ -1,5 +1,5 @@
 /**
- * What the components (components/*) need from Web Awesome, derived from Web Awesome itself (PLAN.md §10), so they work
+ * What the components (components/*) need from Web Awesome, derived from Web Awesome itself (README.md, *Published components*), so they work
  * without it:
  *
  * - src/web-awesome.ts: its layer order (theme/sheet declares it, rather than importing Web Awesome's layers.css); the

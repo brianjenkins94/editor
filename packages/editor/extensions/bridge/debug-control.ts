@@ -516,7 +516,8 @@ export async function runProgram(args: unknown, signal: AbortSignal = new AbortC
 async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcome> {
 	const { program, breakpoints, "args": inputs, cases, eventLoop } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][]; "eventLoop"?: unknown };
 	const path = runnable(resolveProgram(program));
-	// An app's file (RUNNING.md, step 4): its code runs in its page — the app runs, its dev server a run, its preview open.
+	// An app's file (RUNNING.md, *Apps*): its code runs in its page — the app runs, its dev server a run, its preview
+	// open.
 	const app = await appRootOf(path);
 
 	if (app !== undefined) {

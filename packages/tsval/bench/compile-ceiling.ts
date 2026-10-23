@@ -1,5 +1,5 @@
 /**
- * The ceiling of compiling to closures (COMPILE.md) — a feasibility prototype, not a second engine.
+ * The ceiling of compiling to closures (README.md, *A compiled tier*) — a feasibility prototype, not a second engine.
  *
  * A minimal closure compiler over the same TypeScript AST tsval walks: each node compiled once into a JS closure —
  * an expression to `(env) => value`, a statement to `(env) => signal` — with every identifier resolved at compile time

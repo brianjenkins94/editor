@@ -1,5 +1,5 @@
 /**
- * A debug session's live values (LIVE-VALUES.md): what tsval's trace says each line bound, returned or chose, as the
+ * A debug session's live values (packages/editor/RUNTIME-EVIDENCE.md, *Live values*): what tsval's trace says each line bound, returned or chose, as the
  * panel beside the code shows it — each value a short preview, with its call and its loops' turns — kept bounded,
  * handed out a batch at a time. Pure: the debug worker feeds it, node tests it.
  *

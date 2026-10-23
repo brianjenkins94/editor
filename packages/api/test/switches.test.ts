@@ -7,7 +7,7 @@ import { createTestHarness } from "wrangler";
 import type { Answer } from "./helpers.ts";
 import { someone, testBrowser } from "./helpers.ts";
 
-// The narrower switches (OPERATIONS.md, O8) in workerd: the owner pauses one part of the API from the admin app (new
+// The narrower switches (README.md, O8) in workerd: the owner pauses one part of the API from the admin app (new
 // accounts, emailed codes, the GitHub proxy); that part refuses, saying so, while the rest carries on; every flip is
 // audited and emailed to the owner, and /status says what's paused.
 

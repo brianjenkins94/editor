@@ -11,7 +11,7 @@ import { signInAs } from "./signin.ts";
 import { refusal } from "./refusals.ts";
 
 /**
- * Passkeys (SIGN-IN.md, "Passkeys"): WebAuthn, through @simplewebauthn/server. The relying party is the API's own host
+ * Passkeys (README.md, "Passkeys"): WebAuthn, through @simplewebauthn/server. The relying party is the API's own host
  * (api.unusuallygood.dev, the dev worker's, localhost), not the whole site, so only our sign-in page's origin can ask for
  * one: never an app's, nor a preview's. A passkey signs in on its own (it's a device and a PIN or a face, user
  * verification required), and such a sign-in can hold a role (src/rbac.ts).

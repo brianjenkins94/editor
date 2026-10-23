@@ -1,4 +1,4 @@
--- Errors (OPERATIONS.md, "Errors"; O4): every uncaught error, grouped by its fingerprint (its name and top stack frames,
+-- Errors (README.md, O4): every uncaught error, grouped by its fingerprint (its name and top stack frames,
 -- function names only, so a release's new line numbers don't split a group), and each occurrence under the id the
 -- person was shown (`E-ABCD-EFGH`). Messages and stacks are redacted (util/redact, and email addresses) before they're
 -- stored. `source` is "api" now, "editor" when the editor reports its own (O6). Occurrences are kept 30 days, groups

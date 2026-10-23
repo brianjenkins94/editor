@@ -1,4 +1,4 @@
--- Passwords (SIGN-IN.md, "Passwords"; C3). A user's password as its Argon2id hash (a PHC string: the parameters, the
+-- Passwords (README.md, C3). A user's password as its Argon2id hash (a PHC string: the parameters, the
 -- salt and the hash, so stronger parameters later still verify the old), when it was set, and the bucket of tries at
 -- it (5, one back a minute: no lockouts).
 CREATE TABLE passwords (
@@ -9,7 +9,7 @@ CREATE TABLE passwords (
 	tries_at INTEGER NOT NULL
 );
 
--- A code for one action of a signed-in user (setting a password: SIGN-IN.md, an action-specific check), emailed to
+-- A code for one action of a signed-in user (setting a password: README.md, "Sign-in methods": an action-specific check), emailed to
 -- their address: its HMAC, until it's used or its 10 minutes are up, and the tries at it.
 CREATE TABLE action_codes (
 	user_id TEXT NOT NULL REFERENCES users (id),

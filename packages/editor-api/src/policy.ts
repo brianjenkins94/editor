@@ -223,10 +223,11 @@ export async function replaceRule(previous: Rule | undefined, rule: Rule | undef
 	await writeOverride(root, user, { "version": override.version, "rules": rules });
 }
 
-/** Keep a placed rule's place up with its code (RULES.md: a placed rule keeps its place on its own): `previous`, in my
- *  policy or the shared contract (`whose`), replaced in its place by `rule` — the same rule at the place its code was
- *  followed to, its `added` kept (moving a place isn't deciding anything). The one write silo makes to the contract:
- *  not a decision, a re-anchoring — committed with the code change that moved the code, as its reviewers would want. */
+/** Keep a placed rule's place up with its code (packages/editor/RUNNING.md, *A placed rule keeps its place on its
+ *  own*): `previous`, in my policy or the shared contract (`whose`), replaced in its place by `rule` — the same rule at
+ *  the place its code was followed to, its `added` kept (moving a place isn't deciding anything). The one write silo
+ *  makes to the contract: not a decision, a re-anchoring — committed with the code change that moved the code, as its
+ *  reviewers would want. */
 export async function movePlace(whose: "mine" | "shared", previous: Rule, rule: Rule): Promise<void> {
 	const root = siloRoot();
 
@@ -408,7 +409,7 @@ async function ensureGitignore(root: vscode.Uri): Promise<void> {
 	}
 }
 
-// ── recorded results: what calls returned when they ran for real (RULES.md, slice 2) ───────────────────────────────
+// ── recorded results: what calls returned when they ran for real (packages/editor/RUNNING.md, *A call's result*) ─────
 
 interface Recorded { "version": 1; "results": Record<string, { "value": unknown; "at": string }> }
 

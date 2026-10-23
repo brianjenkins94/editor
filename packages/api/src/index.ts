@@ -110,7 +110,7 @@ app.use(cors({
 	"maxAge": 600
 }));
 
-// The kill switch (src/maintenance.ts, OPERATIONS.md): while it's on, everything but the owner's way back in is "Down for
+// The kill switch (src/maintenance.ts, README.md, O1): while it's on, everything but the owner's way back in is "Down for
 // maintenance", before any other work. After CORS, so a browser can read why.
 app.use(maintenanceGate);
 
@@ -140,7 +140,7 @@ app.get("/auth/github/start", rateLimit("SIGN_IN_BY_IP", byIp), startEndpoint);
 
 app.get("/auth/github/callback", rateLimit("SIGN_IN_BY_IP", byIp), callbackEndpoint);
 
-// Signing in through our own page (src/signin.ts, SIGN-IN.md): the client pushes its request, the browser opens it, the
+// Signing in through our own page (src/signin.ts, README.md, "Sign-in methods"): the client pushes its request, the browser opens it, the
 // page offers the client's methods. The sign-in page itself is a static file (public/sign-in.html).
 app.post("/auth/par", rateLimit("SIGN_IN_BY_IP", byIp), parEndpoint);
 
@@ -150,12 +150,12 @@ app.get("/auth/attempt", attemptEndpoint);
 
 app.get("/auth/github", rateLimit("SIGN_IN_BY_IP", byIp), githubEndpoint);
 
-// The page's email choice (src/email.ts, SIGN-IN.md C2): a code sent, then checked.
+// The page's email choice (src/email.ts, README.md, C2): a code sent, then checked.
 app.post("/auth/email", rateLimit("SIGN_IN_BY_IP", byIp), emailEndpoint);
 
 app.post("/auth/email/verify", rateLimit("SIGN_IN_BY_IP", byIp), verifyEndpoint);
 
-// The page's password choice (src/password.ts, SIGN-IN.md C3): an email and its password.
+// The page's password choice (src/password.ts, README.md, C3): an email and its password.
 app.post("/auth/password", rateLimit("SIGN_IN_BY_IP", byIp), passwordSignInEndpoint);
 
 // Resetting it from the sign-in page (src/password.ts, C4): a code to the account's email, then a new password.
@@ -189,7 +189,7 @@ app.post("/sessions/:id/revoke", session, revokeSessionEndpoint);
 
 app.post("/account/delete", session, deleteAccountEndpoint);
 
-// What the editor reports (src/session-events.ts, OPERATIONS.md O6): signed in, its timeline's events; signed in or not,
+// What the editor reports (src/session-events.ts, README.md O6): signed in, its timeline's events; signed in or not,
 // its uncaught errors (ten a minute an IP), under the id it shows.
 app.post("/session/events", session, sessionEventsEndpoint);
 
@@ -214,7 +214,7 @@ ROUTER.app = app;
 ROUTES.push(...[...new Map(app.routes.filter((route) => route.method !== "ALL").map((route) => [`${route.method} ${route.path}`, { "method": route.method, "path": route.path }])).values()]);
 
 /**
- * A route that doesn't exist. Asked for by someone signed in, it's a probe (BEHAVIOR.md): something guessing at what the
+ * A route that doesn't exist. Asked for by someone signed in, it's a probe (README.md, "Behavior"): something guessing at what the
  * API has, which the editor never does (every route it calls is one the router has, whichever release it is). Recorded
  * with its method and a keyed hash of the path (what was guessed), alerted, and counted with the proxy's refusals: a few
  * end the sign-in. A request with credentials is checked as any signed-in request is (a nonce challenge included), so a
@@ -241,7 +241,7 @@ app.notFound(async (context) => {
 	return context.json({ "error": "not_found" }, 404);
 });
 
-// Every uncaught error recorded (src/errors.ts, OPERATIONS.md O4), redacted, under the id the person is shown, so "it
+// Every uncaught error recorded (src/errors.ts, README.md O4), redacted, under the id the person is shown, so "it
 // broke" goes from their words to the stack in one search. The span has the name only: a message can quote whatever
 // input caused it. A tripwire breach answers for itself (src/tripwire.ts).
 app.onError(async (error, context) => {

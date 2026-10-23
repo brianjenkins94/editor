@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 
 /**
- * Traffic (packages/admin/README.md, B4): Cloudflare's own analytics of the zone (unusuallygood.dev: every host, the
+ * Traffic (README.md, B4): Cloudflare's own analytics of the zone (unusuallygood.dev: every host, the
  * static ones included, which no Worker sees) and of the account's Workers, through Cloudflare's GraphQL API with
  * ANALYTICS_TOKEN, a read-only secret (Account Analytics Read; Zone Analytics Read on the zone). The browser never
  * holds a Cloudflare credential: it asks /admin/traffic.

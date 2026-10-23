@@ -1,5 +1,5 @@
 /**
- * theme/component — a composed component as a function (PLAN.md §10): its options, its slots as arrays and its
+ * theme/component — a composed component as a function (README.md, *Published components*): its options, its slots as arrays and its
  * handlers in, the element out, made from the component's definition, the one declaration of what it takes and fires
  * (its custom-elements.json is derived from it, scripts/web-awesome.mjs).
  *

@@ -1,5 +1,5 @@
 /**
- * The admin app (README.md). Signed out, Web Awesome's login card: one button, to the API's sign-in page (PAR, via
+ * The admin app (packages/api/README.md, "Admin app"). Signed out, Web Awesome's login card: one button, to the API's sign-in page (PAR, via
  * util/auth/client). Signed in, `GET /admin/me` says what the user's roles allow: nothing (a page that says so), or the
  * app shell (`<wa-page>`, its navigation in one slot) with the pages in views.tsx, by the address's hash.
  */

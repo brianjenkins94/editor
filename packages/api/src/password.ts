@@ -16,7 +16,7 @@ import { refusal } from "./refusals.ts";
 import { methodsOf } from "./clients.ts";
 
 /**
- * Passwords (SIGN-IN.md, "Passwords"; C3):
+ * Passwords (README.md, C3):
  *
  *   POST /auth/password                   `address`, `password`: sign in with a password, for this browser's attempt
  *   GET  /admin/account                   your sign-in methods: GitHub, your email, whether you have a password
@@ -33,7 +33,7 @@ import { methodsOf } from "./clients.ts";
  * a 32-byte hash): src/password-hash.ts, through @noble/hashes (about 82 ms a hash).
  *
  * Tries are a bucket per user, 5 and one back a minute, and per IP the sign-in limit; no lockouts. Errors say what's
- * wrong (SIGN-IN.md): the time a hash takes tells anyone who asks whether an account exists anyway.
+ * wrong (README.md, C3): the time a hash takes tells anyone who asks whether an account exists anyway.
  */
 
 const TRIES = 5;
@@ -266,7 +266,7 @@ export async function resetCodeEndpoint(context: Context<AppEnv>): Promise<Respo
 
 /**
  * POST /auth/reset/password: `address`, `code`, `password`, and `end` ("true" to end every sign-in of the account: asked,
- * not forced; SIGN-IN.md). The code and the password checked as setting one is, then stored. The attempt is spent, and no
+ * not forced; README.md, C4). The code and the password checked as setting one is, then stored. The attempt is spent, and no
  * session starts: the page sends you back to the app to sign in with the new password. (With MFA, C5, the second factor
  * will be asked for too.)
  */
@@ -291,7 +291,7 @@ export async function resetPasswordEndpoint(context: Context<AppEnv>): Promise<R
 		return refused;
 	}
 
-	// With MFA on, email alone isn't enough to reset (SIGN-IN.md): the second factor too, the app's or a recovery code.
+	// With MFA on, email alone isn't enough to reset (README.md, C4): the second factor too, the app's or a recovery code.
 	if (await hasMfa(context.env, account.user_id)) {
 		if (field("second") === "") {
 			return refuse(context, 400, "second_factor", "two-factor code needed: from your authenticator app, or a recovery code");

@@ -1,5 +1,5 @@
 /**
- * theme/documents — Web Awesome in more than one document (PLAN.md §9.2): import it first, before any component, in a
+ * theme/documents — Web Awesome in more than one document (README.md, *Gotchas*): import it first, before any component, in a
  * realm whose components move into other documents, as VS Code's do into a docked window (an `about:blank` frame).
  *
  *     import "theme/documents";

@@ -13,7 +13,7 @@ import { CLIENTS, isClient, methodsOf, pagesOf } from "./clients.ts";
 import { isPaused, maintenance } from "./maintenance.ts";
 
 /**
- * Signing in through our own page (SIGN-IN.md, "The shape"):
+ * Signing in through our own page (README.md, "Sign-in methods"):
  *
  *   POST /auth/par      the client pushes its authorization request (RFC 9126), proven with a DPoP proof and our nonce:
  *                       an attempt is made, and the client gets an opaque request_uri for it
@@ -25,7 +25,7 @@ import { isPaused, maintenance } from "./maintenance.ts";
  *                       (github.ts) finishes the attempt in the same browser and starts the sign-in (Grant.begin)
  *
  * Every refusal is recorded (`sign_in_refused`, with its reason). The legacy /auth/github/start (front-channel request,
- * straight to GitHub) stays for the editor until it moves over (SIGN-IN.md, C7).
+ * straight to GitHub) stays for the editor until it moves over (README.md, C7).
  */
 
 const REQUEST_URI = "urn:ietf:params:oauth:request_uri:";

@@ -6,7 +6,7 @@ import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
 import { someone, testBrowser } from "./helpers.ts";
 
-// The kill switch (OPERATIONS.md, O1) in workerd: the owner turns it on from the admin app; then the API is "Down for
+// The kill switch (README.md, O1) in workerd: the owner turns it on from the admin app; then the API is "Down for
 // maintenance" to everyone but the owner's way back in; every flip is audited and emailed to the owner, a break-glass
 // flip made straight in D1 too; off again, all is as before.
 

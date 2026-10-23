@@ -6,7 +6,7 @@ import { base64url } from "jose";
 import { DurableObject } from "cloudflare:workers";
 
 /**
- * A sign-in in progress (SIGN-IN.md, "An attempt holds a sign-in in progress"): one Durable Object per attempt, made by
+ * A sign-in in progress (README.md, "Sign-in methods"): one Durable Object per attempt, made by
  * a client's pushed authorization request (/auth/par) and spent when it ends in a code (Grant.begin), or when it
  * expires. It holds the client's request (redirect page, state, PKCE challenge, the DPoP key the push was proven with),
  * so nothing of it rides in a browser redirect.
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS passkey_challenge (
 /** How long a passkey sign-in's challenge is good for: the browser's prompt, and someone choosing a passkey. */
 const CHALLENGE_TTL = 5 * 60_000;
 
-/** An emailed code's life, and the tries at it: a bucket of TRIES, one back each TRY_REFILL (SIGN-IN.md, "Email"). */
+/** An emailed code's life, and the tries at it: a bucket of TRIES, one back each TRY_REFILL (README.md, C2). */
 export const CODE_TTL = 10 * 60_000;
 
 const TRIES = 5;

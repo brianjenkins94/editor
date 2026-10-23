@@ -1,4 +1,4 @@
--- Our own inbox (packages/admin/README.md, the Mail page): email to a few addresses of ours on the zone (INBOX in
+-- Our own inbox (README.md, the Email runbook): email to a few addresses of ours on the zone (INBOX in
 -- wrangler.jsonc: the smoke test's), routed by Email Routing to this Worker's `email` handler. Who sent it, its subject
 -- and size; never its body. Kept a day (the daily cron), long enough for the smoke test and a look.
 CREATE TABLE inbox (

@@ -1,5 +1,5 @@
 /**
- * theme/vscode-colors — VS Code's active colour theme, carried to a document that isn't VS Code's (PLAN.md §9.2.1).
+ * theme/vscode-colors — VS Code's active colour theme, carried to a document that isn't VS Code's (README.md, *VS Code's look everywhere*).
  * VS Code declares its theme's `--vscode-*` variables only in its own document; the shell around it is another, so
  * the workbench reads them and the shell sets them on its body, where theme/vscode's mapping (theme/tokens' vscodeTokens) applies to
  * them as it does in VS Code's document and in a webview.

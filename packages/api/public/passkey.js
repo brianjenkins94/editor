@@ -1,4 +1,4 @@
-// Adding a passkey (SIGN-IN.md, "Passkeys"), on the API's own origin: passkeys belong to its host, so they're made here,
+// Adding a passkey (README.md, "Passkeys"), on the API's own origin: passkeys belong to its host, so they're made here,
 // not on the app's page. The app sent the browser here with a ticket and the registration's options in the fragment
 // (taken out of the address bar at once); the passkey made, POST /passkey/register checks it and answers with the app's
 // page to go back to, where the app finishes adding it.

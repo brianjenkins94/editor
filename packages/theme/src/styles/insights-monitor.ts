@@ -2,8 +2,6 @@
  * theme/styles/insights-monitor — The insights monitor's webview (extensions/insights: monitor-view.ts): what Web Awesome's cards and utility classes
  * don't cover — the view's frame and the cards' sparklines, a line per series in the palette's colours. On --wa-*
  * tokens (theme/vscode maps them onto the VS Code theme in a webview too).
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

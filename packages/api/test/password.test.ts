@@ -10,7 +10,7 @@ import { testBrowser, someone } from "./helpers.ts";
 import { hashPassword, passwordProblem, verifyPassword } from "../src/password-hash.ts";
 import { hotp, stepAt, unbase32 } from "@brianjenkins94/util/auth/totp";
 
-// C3 in workerd (SIGN-IN.md, "Passwords"): someone who signed in by email sets a password from their account (a code to
+// C3 in workerd (README.md, C3): someone who signed in by email sets a password from their account (a code to
 // their email first, then the password, checked against known breaches by a stand-in of Have I Been Pwned), then signs
 // in with it, as the admin app and a browser would.
 

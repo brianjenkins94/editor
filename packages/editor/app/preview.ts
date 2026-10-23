@@ -41,7 +41,7 @@ export interface PreviewOptions {
 	"port"?: number;
 	/** This tab's id: the service worker is shared by every tab, so the URL names the tab whose dev server answers. */
 	"tab": string;
-	/** A program's own server on `port` (RUNNING.md, step 4): its window, no dev server started for it. */
+	/** A program's own server on `port` (RUNNING.md, *A service is one too*): its window, no dev server started for it. */
 	"server"?: boolean;
 }
 

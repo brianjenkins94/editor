@@ -1,4 +1,4 @@
-/** What a browser's fetch from one of our apps sends besides its credentials (BEHAVIOR.md): Origin, Fetch Metadata and its
+/** What a browser's fetch from one of our apps sends besides its credentials (README.md, "Behavior"): Origin, Fetch Metadata and its
  *  User-Agent. The tests' clients are browsers; without these, a sign-in is a script's (`client_unusual`). */
 export const BROWSER: Record<string, string> = {
 	"origin": "http://localhost:5173",

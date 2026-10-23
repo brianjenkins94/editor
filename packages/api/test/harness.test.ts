@@ -6,7 +6,7 @@ import { recorded } from "../harness/state.ts";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
-// C0 (SIGN-IN.md): `recorded` reads everything the API stores, from outside it, and says exactly what an action wrote.
+// C0 (README.md): `recorded` reads everything the API stores, from outside it, and says exactly what an action wrote.
 // Here: what a sign-in writes, all of it, and nothing secret in the reading.
 
 const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };

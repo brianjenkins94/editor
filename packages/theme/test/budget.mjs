@@ -1,5 +1,5 @@
 /**
- * The styling budget (PLAN.md §7.6): what's left outside Web Awesome and the theme, counted, and held to budget.json.
+ * The styling budget (README.md, *The budget*): what's left outside Web Awesome and the theme, counted, and held to budget.json.
  *
  * - stitchesDeclarations: the declarations in every surface's styles (theme/styles/*, the theme's Stitches calls made
  *   for one surface), and anywhere a Stitches call is still made outside the theme, so a style moved out of a sheet

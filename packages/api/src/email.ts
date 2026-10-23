@@ -19,7 +19,7 @@ import { refusal } from "./refusals.ts";
 import { methodsOf } from "./clients.ts";
 
 /**
- * Signing in by email (SIGN-IN.md, "Email"; C2), from the sign-in page, for this browser's attempt (its cookie):
+ * Signing in by email (README.md, C2), from the sign-in page, for this browser's attempt (its cookie):
  *
  *   POST /auth/email          `address`: a code, and a link holding it, sent there; the attempt keeps the code's HMAC
  *   POST /auth/email/verify   `code`: checked against the attempt's (5 tries, one back a minute); a match finds the
@@ -42,7 +42,7 @@ const PER_HOUR = 5;
 
 
 /** What's kept of a code: an HMAC under CODE_KEY, bound to what it's for (an attempt, or a user's action), so a leaked
- *  store can't be guessed at offline and a code works only where it was asked for (SIGN-IN.md, "Departures";
+ *  store can't be guessed at offline and a code works only where it was asked for (README.md, C2;
  *  util/auth/codes). */
 export const codeHash = async (env: Bindings, bound: string, code: string): Promise<string> => hash(env.CODE_KEY as string, bound, code);
 

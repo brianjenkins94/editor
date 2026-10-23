@@ -65,8 +65,8 @@ export async function runApp(root: string): Promise<void> {
 
 export function registerLaunch(context: vscode.ExtensionContext): void {
 	const offList = serve(bridgeHub, "tasks.list", async () => (await vscode.tasks.fetchTasks()).flatMap((task) => targetOf(task) ?? []));
-	// A task run (RUNNING.md: through the terminal, each `node` in it a run). Already running: its terminal shown, not a
-	// second copy. One that can't start says why, in the workbench.
+	// A task run (RUNNING.md, *Everything runs in the debugger*: through the terminal, each `node` in it a run). Already
+	// running: its terminal shown, not a second copy. One that can't start says why, in the workbench.
 	const offRun = serve(bridgeHub, "tasks.run", async (args) => {
 		const { id } = (args ?? {}) as { "id"?: unknown };
 

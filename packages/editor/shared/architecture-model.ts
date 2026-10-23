@@ -171,7 +171,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root", "preview:*"] },
 	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
 	// ── the shell ⇄ the app and the workbench ──
-	// What the session timeline and error reports need (packages/api OPERATIONS.md O6): the root's collected uncaught
+	// What the session timeline and error reports need (packages/api/README.md O6): the root's collected uncaught
 	// errors, the workbench's commands, panes and runs, to the shell, which holds the sign-in that sends them.
 	{ "pattern": "session.event", "from": ["root", "workbench"], "to": ["shell"] },
 	{ "pattern": "project.>", "from": ["shell"], "to": ["root"] },
@@ -320,7 +320,7 @@ export const channels: ChannelSpec[] = [
 	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "reason": "platform", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "reason": "platform", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
 	{ "a": "node", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "The dev servers' own requests (their dependencies), like every controlled context's." },
-	{ "a": "debug-worker", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "A run's fetches the policy allows (RUNNING.md, step 2: decided in the margin, made for real), like every controlled context's requests." },
+	{ "a": "debug-worker", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "A run's fetches the policy allows (RUNNING.md, *Effects are real, decided per call*: decided in the margin, made for real), like every controlled context's requests." },
 	{ "a": "eslint", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "ESLint's worker loading its toolchain (the build's eslint-toolchain.tgz) and its preset's chunks — seen since a runtime link probes its worker's network as the editor's realms do (editor-api's connectRuntime)." },
 	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
 	{ "a": "debug-worker", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "A debug run's own http.createServer, reached from a preview (the dev-server worker hands its port's requests over: virtual.debug.<port>)." },

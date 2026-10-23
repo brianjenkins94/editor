@@ -2,7 +2,7 @@
   "name": "account",
   "version": "0.0.0",
   "private": true,
-  "description": "Your account, for the editor and the admin app alike (README.md): how you sign in, a password, two-factor. Preact components over packages/api's account routes; the app passes how to reach them, and registers the Web Awesome components they use.",
+  "description": "Your account, for the editor and the admin app alike: how you sign in, a password, two-factor. Preact components over packages/api's account routes; the app passes how to reach them, and registers the Web Awesome components they use.",
   "type": "module",
   "exports": {
     ".": "./src/account.tsx"

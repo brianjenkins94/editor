@@ -1,4 +1,4 @@
--- The kill switch (OPERATIONS.md, "The kill switch"): one row. `switched_on` says the API answers "Down for maintenance";
+-- The kill switch (README.md, O1): one row. `switched_on` says the API answers "Down for maintenance";
 -- `reason` and `by` say why and who or what turned it ("user:<id>", "cost guard", "tripwire", "break glass"), `at` when.
 -- `noticed` is 0 until a Worker has seen the change and audited it and emailed the owner: a flip made outside the
 -- Worker (`npm run maintenance`, through wrangler) is recorded the same way as one made through it.

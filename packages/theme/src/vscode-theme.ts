@@ -1,5 +1,5 @@
 /**
- * theme/vscode-theme — the theme's look in one call: Web Awesome with VS Code's (PLAN.md §9.2.5, §10), published as
+ * theme/vscode-theme — the theme's look in one call: Web Awesome with VS Code's (README.md, *VS Code's look everywhere*, *Published components*), published as
  * components/vscode-theme, so a page not built here gets it too.
  *
  *     vscodeTheme();                     // where the page is: VS Code's document, a webview, or anywhere else

@@ -6,7 +6,7 @@ import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT 
 import { createTestHarness } from "wrangler";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
-// C1 in workerd (SIGN-IN.md): the admin app pushes its request (PAR, with DPoP and our nonce), the browser opens the
+// C1 in workerd (README.md, "Sign-in methods"): the admin app pushes its request (PAR, with DPoP and our nonce), the browser opens the
 // attempt (its cookie) and reaches our sign-in page, chooses GitHub, and GitHub's callback finishes the attempt in that
 // same browser with a code the app redeems. Against a GitHub of the test's own.
 

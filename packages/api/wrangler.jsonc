@@ -1,13 +1,10 @@
-// The editor's API Worker (README.md). Secrets are never in this file: `wrangler secret put` (SIGNING_JWK, NONCE_KEY,
-// TOKEN_KEK, AUDIT_KEY, STATE_KEY, GITHUB_CLIENT_SECRET; README.md's A0 says how to make each; and ANALYTICS_TOKEN,
-// Cloudflare's read-only analytics, packages/admin/README.md B4; CODE_KEY, 32 random bytes, emailed codes' HMAC key,
-// SIGN-IN.md C2; TOTP_KEK, 32 random bytes, what authenticator-app secrets are sealed under, C5; ALERT_EMAIL, the owner's address,
-// where the kill switch emails, OPERATIONS.md O1). ANALYTICS_ACCOUNT and ANALYTICS_ZONE (unusuallygood.dev) are ids, not secrets. `send_email` is Cloudflare
-// Email Service, from no-reply@unusuallygood.dev only (the zone is onboarded for Email Sending).
+// The editor's API Worker (README.md). Secrets are never in this file: `wrangler secret put`, each made as README.md's
+// "Secrets" says (SIGNING_JWK, NONCE_KEY, TOKEN_KEK, AUDIT_KEY, STATE_KEY, GITHUB_CLIENT_SECRET, CODE_KEY, TOTP_KEK,
+// ALERT_EMAIL, ANALYTICS_TOKEN). ANALYTICS_ACCOUNT and ANALYTICS_ZONE (unusuallygood.dev) are ids, not secrets.
+// `send_email` is Cloudflare Email Service, from no-reply@unusuallygood.dev only (the zone is onboarded for Email Sending).
 // The top level is local `wrangler dev` and the tests; `--env dev` and `--env production` are the deployments.
 // vars, bindings and observability are repeated per environment on purpose: wrangler doesn't inherit them, and each
-// deployment's settings should be readable where it's declared. Production's D1 id is a placeholder until A7 creates
-// its database.
+// deployment's settings should be readable where it's declared.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "editor-api",
@@ -21,13 +18,13 @@
     "traces": { "enabled": true }
   },
   // Daily at 03:17 UTC: retention, purges, the smoke test (src/index.ts, scheduled). Hourly at :07: the cost guard
-  // (src/spend.ts, OPERATIONS.md O2). Every environment inherits them.
+  // (src/spend.ts, README.md O2). Every environment inherits them.
   "triggers": { "crons": ["17 3 * * *", "7 * * * *"] },
   // One Grant per sign-in (src/grant.ts), on SQLite storage.
   // One Attempt per sign-in in progress (src/attempt.ts), on SQLite storage too.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Grant"] }, { "tag": "v2", "new_sqlite_classes": ["Attempt"] }],
   "durable_objects": { "bindings": [{ "name": "GRANTS", "class_name": "Grant" }, { "name": "ATTEMPTS", "class_name": "Attempt" }] },
-  // The sign-in page (public/sign-in.html, SIGN-IN.md), served beside the Worker; everything else is the Worker's.
+  // The sign-in page (public/sign-in.html, README.md, "Sign-in methods"), served beside the Worker; everything else is the Worker's.
   "assets": { "directory": "public" },
   // Web Awesome for the sign-in pages, bundled into public/ as two of their own files (scripts/webawesome.ts), before
   // every `dev` and `deploy`.
@@ -62,7 +59,7 @@
       "ratelimits": [{ "name": "SIGN_IN_BY_IP", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }, { "name": "TOKEN_BY_IP", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }, { "name": "TOKEN_BY_GRANT", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }, { "name": "PROXY_BY_USER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } }, { "name": "ALERTS", "namespace_id": "1005", "simple": { "limit": 1, "period": 60 } }, { "name": "ERRORS_BY_IP", "namespace_id": "1006", "simple": { "limit": 10, "period": 60 } }],
       "vars": { "ENVIRONMENT": "dev", "TRIPWIRE": "by-date", "INBOX": "smoke-test-dev@unusuallygood.dev", "OWNERS": [9398474], "VIEWERS": [64174526], "ANALYTICS_ACCOUNT": "3ade13ae64e29b20e6b7c61f9ae7b714", "ANALYTICS_ZONE": "54d20cd60d5353f2080a1c8aec6def0d", "GITHUB_CLIENT_ID": "Iv23ligdisoL7OPTVtXm" }
     },
-    // api.unusuallygood.dev (README.md, A7), deployed by .github/workflows/production.yml with your approval. No workers.dev
+    // api.unusuallygood.dev (README.md, A7), deployed by .github/workflows/production.yml after cd. No workers.dev
     // URL: the custom domain is its only address. GitHub App `unusually-good-editor` (App ID 5339846).
     "production": {
       "name": "editor-api",

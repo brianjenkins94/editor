@@ -1,5 +1,5 @@
 /**
- * The kill switch, from your own machine (OPERATIONS.md, "The kill switch"): the break glass for when even the admin app
+ * The kill switch, from your own machine (README.md, O1): the break glass for when even the admin app
  * can't be reached. It writes the switch's one D1 row through wrangler (logged in as you), so there's no secret endpoint
  * to protect; then it asks the API's /status, so a Worker notices the flip at once: audits it and emails the owner, as
  * for a flip made from the admin app.

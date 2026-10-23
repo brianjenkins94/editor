@@ -7,7 +7,7 @@ import { passkeyFinishEndpoint, passkeyRemoveEndpoint, passkeyStartEndpoint } fr
 import { accountEndpoint, passwordCodeEndpoint, setPasswordEndpoint } from "./password.ts";
 
 /**
- * Your account's routes (SIGN-IN.md): how you sign in, a password, two-factor, linking, passkeys. One table, mounted for
+ * Your account's routes (README.md, "Sign-in methods"): how you sign in, a password, two-factor, linking, passkeys. One table, mounted for
  * the editor at /account with its session in front of each route (`signedIn`; src/index.ts, where /account/delete sits
  * beside them with its own) and for the admin app at /admin/account, behind the admin session it applies to everything
  * (src/admin.ts). The handlers read only the signed-in user and sign-in, so they're the same for both. Any token of

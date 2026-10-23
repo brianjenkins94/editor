@@ -3,8 +3,6 @@
  * don't cover. The toolbar is theirs: its badges, buttons, select and cluster. What's left is the canvas's layout and
  * the SVG diagram, all on --wa-* tokens (theme/vscode maps them onto the VS Code theme). What the diagram shows as data
  * (a channel's traffic, what needs review) is debug-mcp's architecture_state.
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

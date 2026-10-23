@@ -1,5 +1,5 @@
 /**
- * `npm run harness` (SIGN-IN.md, C0): the API, run locally in Wrangler's test harness, with a page beside it showing
+ * `npm run harness` (README.md, C0): the API, run locally in Wrangler's test harness, with a page beside it showing
  * everything it stores, live, and what each step of a flow wrote. Modeled on sms-reference-app's debug harness.
  *
  *   http://localhost:8787/__harness              the page: an app in an iframe (?app=, default the admin app on

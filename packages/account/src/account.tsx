@@ -1,9 +1,10 @@
 /** @jsxImportSource preact */
 /**
- * Your account (README.md; packages/api/SIGN-IN.md, C3–C7): how you sign in (GitHub, your email, a password), setting or
+ * Your account (packages/api/README.md, *Sign-in methods*, C3–C7): how you sign in (GitHub, your email, a password), setting or
  * changing your password (a code to your email first, the action's own check), and two-factor. The same for the editor
- * and the admin app: each passes how it reaches the API's account routes (`AccountApi`), and registers the Web Awesome
- * components used here (button, callout, input, spinner).
+ * and the admin app: each passes how it reaches the API's account routes (`AccountApi`), registers the Web Awesome
+ * components used here (button, callout, input, spinner) and calls `accountStyles()` (theme/styles/account) once. It's
+ * linked (`file:`), not published; each app's build dedupes Preact so there's one copy.
  */
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
@@ -83,7 +84,7 @@ function TakenBy({ what, taken, busy, onMerge }: { "what": string; "taken": Take
 	);
 }
 
-/** Connecting GitHub (SIGN-IN.md, "Linking accounts"): GitHub's authorize page, then back to this page with `link`,
+/** Connecting GitHub (packages/api/README.md, *Linking accounts, and roles*): GitHub's authorize page, then back to this page with `link`,
  *  which this sign-in finishes. Needs a sign-in in the last 10 minutes: the API says so if not. */
 function ConnectGitHub({ onChanged }: { "onChanged": () => void }) {
 	const api = useContext(Api) as AccountApi;
@@ -156,7 +157,7 @@ function ConnectGitHub({ onChanged }: { "onChanged": () => void }) {
 	);
 }
 
-/** Passkeys (SIGN-IN.md, "Passkeys"): the account's, each removable; adding one goes to our passkey page (passkeys
+/** Passkeys (packages/api/README.md, *Passkeys*): the account's, each removable; adding one goes to our passkey page (passkeys
  *  belong to the API's host, so they're made there) and back here with `passkey`, which this sign-in finishes. Adding and
  *  removing need a sign-in in the last 10 minutes: the API says so if not. */
 function Passkeys({ account, onChanged }: { "account": Account; "onChanged": () => void }) {

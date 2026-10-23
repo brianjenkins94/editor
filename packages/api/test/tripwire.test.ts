@@ -8,7 +8,7 @@ import { createTestHarness } from "wrangler";
 import { Breach, crossUser, watched } from "../src/tripwire.ts";
 import { someone, testBrowser } from "./helpers.ts";
 
-// The tripwire (OPERATIONS.md, O3): a request made through a user's sign-in that reads the canary account's data, or
+// The tripwire (README.md, O3): a request made through a user's sign-in that reads the canary account's data, or
 // another user's row, is a breach: answered with nothing, the user's sign-ins ended, the kill switch on, the owner told.
 // In workerd for the whole response; against a stand-in D1 for what the watched binding sees.
 

@@ -7,7 +7,7 @@ import { createTestHarness } from "wrangler";
 import type { App } from "./helpers.ts";
 import { testBrowser, PAGES, someone } from "./helpers.ts";
 
-// Linking (SIGN-IN.md, "Linking accounts") in workerd, against stand-ins for GitHub and the outbox: an email account
+// Linking (README.md, "Linking accounts, and roles") in workerd, against stand-ins for GitHub and the outbox: an email account
 // connects GitHub, a GitHub account adds an email, an empty duplicate is merged in, anything more is refused; and roles
 // go by how a sign-in was made.
 

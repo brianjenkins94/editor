@@ -1,5 +1,5 @@
 /**
- * theme/styles/shell — the shell's chrome (editor/shell/shell.tsx): its page, top bar, panes, rails, project list and the diff overlay, besides Web Awesome and the recipes (PLAN.md §8.4 step 1: Stitches only in the theme).
+ * theme/styles/shell — the shell's chrome (editor/shell/shell.tsx): its page, top bar, panes, rails, project list and the diff overlay, besides Web Awesome and the recipes.
  */
 import { css, globalCss } from "../stitches";
 

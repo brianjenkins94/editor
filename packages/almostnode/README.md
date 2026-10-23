@@ -6,17 +6,20 @@ A vendored, trimmed copy of [macaly/almostnode](https://github.com/macaly/almost
 
 Upstream hadn't shipped in ~7 months and its published package drags in a large surface the editor never
 uses — `@ai-sdk/*`, `ai`, `zod`, `@xterm/*`, `comlink`, `brotli-wasm`, and demo/dev-server/agent-workbench
-code. The editor uses exactly one path: the same-origin, main-thread `Runtime` (via `createRuntime`) to run
-bundled node language servers (cspell, eslint) inside a worker. Vendoring lets us keep only that path and
-prune the dependency tree.
+code. The editor uses one kind of runtime: the same-origin `Runtime` (via `createRuntime`), run inside a worker —
+the bundled node language servers (cspell, eslint), the debug worker's program (tsval evaluating its own files,
+packages/tsval/README.md, *Modules*) and a preview's dev server. Vendoring lets us keep only that and prune the
+dependency tree.
 
 ## What's kept vs. dropped
 
 Kept: `runtime.ts`, `create-runtime.ts` (main-thread only), `virtual-fs.ts`, `runtime-interface.ts`,
-`server-bridge.ts`, `frameworks/esm-cjs.ts`, and the `shims/`, `utils/`, `types/`, `config/` trees.
+`server-bridge.ts`, `frameworks/esm-cjs.ts`, and the `shims/`, `utils/`, `types/`, `config/` trees. Back since, for
+previews: `dev-server.ts`, `frameworks/vite-dev-server.ts`, `frameworks/code-transforms.ts`, `frameworks/packages.ts`,
+and our own `frameworks/instrument.ts` (coverage and values in a preview's page).
 
 Dropped from upstream: `worker-runtime.ts` / `sandbox-runtime.ts` (and `comlink`), `worker/`, all demos,
-`dev-server.ts`, framework adapters, `frameworks/code-transforms.ts` (and `css-tree`), `npm/` PackageManager,
+framework adapters but Vite's, `npm/` PackageManager,
 `sandbox-helpers.ts`, `transform.ts`, `agent-workbench-*`, the vite/next plugins, and their deps. The
 `child_process` shim is stubbed (dropping `just-bash`/quickjs); `shims/vfs-adapter.ts` deleted with it.
 

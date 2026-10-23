@@ -2,7 +2,7 @@ import type { Bindings } from "./env.ts";
 import { crossUser } from "./tripwire.ts";
 
 /**
- * Linked identities (migrations/0012; SIGN-IN.md, "Linking accounts"): each way of proving who you are, one row each,
+ * Linked identities (migrations/0012; README.md, "Linking accounts, and roles"): each way of proving who you are, one row each,
  * pointing at its user. GitHub's account by its numeric id (as text), an email by its address as typed; matched
  * whatever the case. Only here reads or writes the table.
  */

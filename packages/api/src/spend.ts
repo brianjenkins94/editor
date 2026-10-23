@@ -5,7 +5,7 @@ import { tellOwner } from "./mail.ts";
 import { maintenance, setMaintenance } from "./maintenance.ts";
 
 /**
- * The cost guard (OPERATIONS.md, "The cost guard"): every hour, the account's usage over the last 24 hours, meter by
+ * The cost guard (README.md, O2): every hour, the account's usage over the last 24 hours, meter by
  * meter, from Cloudflare's GraphQL Analytics (the read-only ANALYTICS_TOKEN src/traffic.ts uses), priced at the Workers
  * Paid plan's overage rates. That ignores what the plan includes, so it overestimates: a runaway shows up early, never
  * late. Half the daily budget emails the owner (once a day); the whole budget turns the kill switch on (src/maintenance.ts),

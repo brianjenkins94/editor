@@ -1,5 +1,5 @@
 /**
- * What the API has stored, read from outside it (SIGN-IN.md, C0): every D1 table, every Durable Object's SQLite storage,
+ * What the API has stored, read from outside it (README.md, C0): every D1 table, every Durable Object's SQLite storage,
  * and the R2 audit copies, through Wrangler's test harness. Nothing here is a route of the Worker, so none of it can be
  * deployed. `npm run harness` shows it live; tests use `recorded` to assert exactly what an action wrote.
  *

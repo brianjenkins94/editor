@@ -1,613 +1,506 @@
-# Log in with GitHub: design
+# The API, and the admin app
 
-Status: **approved 2026-10-15**. A1 (this package's skeleton) is built; A0 (accounts) is pending. This replaces the pasted PAT (`packages/editor/shell/github-auth.ts`) with a
-real sign-in, and lays down the account backbone that paid tiers (Stripe) will hang off later. Stripe is out of
-scope here, but nothing in this design should have to change when it arrives.
+The editor's API Worker: our own OAuth 2.1 authorization server, signing people in (GitHub, an emailed code, a password,
+a passkey) and spending their GitHub token for them through a proxy; and the admin app (packages/admin). What they do is
+in the code. This keeps what isn't: why, what was decided and rejected, what isn't built, and how to run it. Step ids
+(A0–A7 sign-in with GitHub, B1–B9 the admin app and behavior, C0–C7 sign-in methods, O1–O8 operations) are what the code
+cites; each is in the section about it.
 
-This is the part we can't get wrong, so the doc leads with what's at stake and states each guarantee so it can be
-checked.
+## Why: the threat model
 
-## Where we are today, and why it's not OK to keep it
+The editor used to hold a pasted GitHub PAT in `localStorage` on `brianjenkins94.github.io`, an origin every Pages site
+under that account shares; everything in the editor (previews running repo code, `?extension=` code) ran on that origin
+unsandboxed; and clones sent the PAT through `cors.isomorphic-git.org`. So: **the GitHub token never comes to the
+browser**, the browser holds only a credential that's useless if stolen, and whatever runs repo code should move off
+the origin that holds it.
 
-- **The PAT is in `localStorage["shell:githubPat"]` on `brianjenkins94.github.io`.** Every GitHub Pages site under
-  that account shares the origin (`/lib`, `/games`, …), so a bug or third-party script in any of them can read it.
-- **Everything in the editor shares that origin, unsandboxed.** The app iframe, the workbench iframe, preview
-  iframes running *repo code*, and extensions loaded by `?extension=<url>` are all same-origin with the shell
-  (the editor's `ARCHITECTURE.md` already says previews are "not a security boundary"). "The token stays in the shell" is a
-  convention, not a guarantee.
-- **The clone sends the PAT through a third party.** `packages/editor/shell/git-clone.ts` uses `cors.isomorphic-git.org`, which
-  sees the token on every clone.
-
-The design follows from these three facts: **the GitHub token never comes to the browser**, the browser holds only
-a credential that's useless if it's stolen, and anything that runs repo code is moved off the origin that holds it.
-
-## The shape
-
-```
- browser (shell realm)                    Cloudflare Worker (packages/api, Hono)               GitHub
- ─────────────────────                    ──────────────────────────────────────              ──────
- non-extractable ES256 key (IndexedDB)    OAuth 2.1 authorization server (ours)
- DPoP-bound access + refresh token  ───▶  verifies DPoP on every request          ──────▶   OAuth (GitHub App)
-                                          Grant Durable Object (one per sign-in):            api.github.com
-                                            GitHub tokens, encrypted                          github.com git
-                                            our refresh family + jti cache                    smart-HTTP
-                                          D1: users, grants index, audit log
-                                          allowlisting proxy for the GitHub API + git
-```
-
-**Our Worker is an OAuth 2.1 authorization server that federates to GitHub.** GitHub signs the user in, but the
-tokens the browser holds are *ours*: short-lived, DPoP-bound (RFC 9449), and only good at our Worker. The Worker
-keeps the GitHub user token and spends it on the user's behalf through a proxy that allows only the GitHub calls
-the editor makes.
-
-Why not hand the GitHub token to the browser and use the Worker only for the code exchange? Because GitHub doesn't
-do DPoP. Once a GitHub token is in the browser, anything on the origin can copy it out and use it anywhere for 8
-hours. "Full DPoP" only means something if the thing DPoP protects is the only credential the browser has.
-
-### What DPoP does and doesn't buy (be honest about this)
-
-- **It does:** a stolen access or refresh token (logs, a leaked trace, a copied IndexedDB dump, a malicious
-  extension reading storage) is worthless without the private key, and the key is created `extractable: false`, so
-  no script can export it.
-- **It does not:** stop code running *on our origin* from using the key in place, because same-origin script can
-  open the same IndexedDB and sign proofs. That's why the proxy allowlist exists (a hijacked session can only do
-  what the editor does) and why **moving previews and `?extension=` code to a separate origin is a prerequisite
-  for production** (step A6).
+**Federated, because GitHub doesn't do DPoP.** A GitHub token in the browser can be copied out by anything on the origin
+and used anywhere for 8 hours. The browser's tokens are ours: short-lived, DPoP-bound (RFC 9449) to a non-extractable
+key, good only at our Worker, which keeps GitHub's token and spends it through a proxy allowing only the editor's calls.
+- **DPoP does** make a stolen access or refresh token (logs, a trace, a copied IndexedDB) worthless without the key,
+  and no script can export the key.
+- **It doesn't** stop code running *on our origin* from using the key in place. Hence the proxy's allowlist (a hijacked
+  session can only do what the editor does), and why previews and `?extension=` code belong on another origin.
+  *Deferred (2026-10-15):* that isolation isn't built; detection is the mitigation meanwhile.
 
 ## Decisions
 
-### Platform: Cloudflare Workers + Durable Objects + D1, with Hono
+### Platform: Workers, Durable Objects, D1, Hono
 
-Workers is the right call, and not only because it's cheap:
+- **Durable Objects give serialized, strongly consistent state per sign-in,** which the flow needs three times: GitHub
+  refresh tokens are single-use (two refreshes at once log the user out), our refresh rotation needs reuse detection,
+  and DPoP `jti` replay checks need read-then-write without a race. One Grant per sign-in does all three. **KV is
+  eventually consistent and wrong for each,** which is also why not `@cloudflare/workers-oauth-provider` (KV-backed, no
+  DPoP), and why KV is never a counter here.
+- **Hono:** Workers-native, small, with the CORS and secure-headers middleware we'd otherwise write. The sms-reference-app
+  (PartsTech's, unmaintained: read, never depended on) supplied the DPoP verifier, rotation and browser client as logic.
+- Rejected: Deno Deploy (nothing like DOs' per-key serialization), Vercel or Netlify functions (the same, plus cold
+  starts), Fly.io (a real server to run and patch).
+- **Workers Paid since 2026-10-17:** Argon2id's CPU and email to any address need it, and a flood no longer takes the
+  API down for the day at Free's 100k requests.
 
-- **Durable Objects give us serialized, strongly consistent state per sign-in**, which is exactly what this flow
-  needs. GitHub refresh tokens are single-use, so two concurrent refreshes would log the user out; our own refresh
-  rotation needs reuse detection; DPoP `jti` replay checking needs read-then-write without a race. One Grant DO per
-  sign-in handles all three by construction. KV is eventually consistent and wrong for every one of them (this is
-  also why we don't use `@cloudflare/workers-oauth-provider`: it's KV-backed and has no DPoP).
-- **The same platform can host production.** Workers static assets serve the built site and set COOP/COEP as real
-  response headers, so production doesn't need the `coi-serviceworker` reload trick at all.
-- **Cost:** the free plan covers development (100k requests/day, SQLite-backed DOs, D1). Once the git proxy carries
-  clones, the $5/month paid plan (10M requests) is the realistic floor.
-- **Hono** is Workers-native, tiny, and has the CORS/secure-headers middleware we'd otherwise write. The
-  sms-reference-app is Express on Node and doesn't port as a server; its *logic* does (below).
+### A GitHub App, not an OAuth App
 
-Alternatives considered: Deno Deploy (no equivalent of DOs' per-key serialization), Vercel/Netlify functions (same,
-plus cold starts), Fly.io (a real server to run and patch). None beats Workers here.
-
-### GitHub side: a GitHub App, not an OAuth App
-
-- An OAuth App's `repo` scope is read/write on *every* private repo the user can reach. A GitHub App asks for
-  fine-grained permissions and the user picks which repos it's installed on.
-- GitHub App user tokens expire after 8 hours with a 6-month refresh token, so a leaked server-side token has a
-  short life too.
-- GitHub supports PKCE (S256) since 2025-07, but **the token exchange still requires the client secret** and the
-  endpoint has no CORS, so a server is mandatory regardless of what else we decide.
-- Permissions we'd ask for: Metadata (read, mandatory), Contents (read/write, for commit-back), Pages (write, for
-  `enablePages`). **No email permission**: we don't need an email address to run an editor, and not having it is
-  the cheapest privacy measure there is. Repo creation needs Administration (write); decide when we wire it.
-- **Two GitHub Apps**: one for dev (callbacks on `workers.dev` and `localhost`), one for production.
-  Separate secrets, separate blast radius.
-
-### Identity and the data we keep
-
-| Data | Where | Why | Retention |
-|---|---|---|---|
-| GitHub numeric user id, for those who sign in with GitHub | D1 `identities` (provider `github`) | stable identity (logins can be renamed) | until 30 days after account deletion |
-| email address, as typed, for those who sign in with one (SIGN-IN.md, C2) | D1 `identities` (provider `email`) | signing in by emailed code | until 30 days after account deletion |
-| how each sign-in was made (`github`, `email`, `passkey`, `password+totp`…) | D1 `grants.method` | admin roles go by it (src/rbac.ts) | the grant's |
-| each request through a sign-in: its action (route template), status, duration, trace id (OPERATIONS.md O5) | the sign-in's Grant | the admin app's session timeline, for looking into a person's problem | 30 days, and 30 days after the sign-in ends |
-| what the editor says happened in a sign-in: a page shown, a repo loaded (as the audit log's keyed tag, not its name), a command run or pane opened (its id), a run started or ended, an error (its id); never code, keystrokes or file contents (OPERATIONS.md O6) | the sign-in's Grant | the same timeline | the same |
-| errors, the API's and the editor's: name, message and stack (secrets and email addresses masked first), route, release, the editor's last event names; signed in, the sign-in and user; signed out, only the IP as the audit log's daily keyed hash (OPERATIONS.md O4, O6) | D1 `errors`, `error_occurrences` | the id a person quotes finds what went wrong | occurrences 30 days; a group 90 days after it was last seen |
-| passkeys: each one's public key, sign count, transports, AAGUID, whether it syncs (SIGN-IN.md, "Passkeys") | D1 `passkeys` | signing in with one | until removed, or 30 days after account deletion |
-| our user id (random) | D1 `users` | what everything else (grants, later Stripe) keys on | until 30 days after account deletion |
-| GitHub user access + refresh token | Grant DO, **AES-GCM encrypted** with a key from a Worker secret (with a key id, so it can rotate) | to call GitHub for the user | until sign-out, refresh expiry, or deletion |
-| our refresh-token family, hashed | Grant DO | rotation + reuse detection | lifetime of the grant |
-| grants index (grant id, user id, created, last used, coarse device label) | D1 `grants` | "your sessions", sign out everywhere | lifetime of the grant |
-| audit events | D1 `audit` | the security record: what was refused, and what went through | 90 days; refusals and alerts a year |
-
-We **don't** store login name, avatar, raw IPs, or (for GitHub users) an email. Login and avatar are fetched live through
-the proxy. An email is kept only for a user who signs in with one (SIGN-IN.md, C2): their address, and when a code last
-proved it theirs. The codes themselves are kept only as an HMAC, for 10 minutes; the audit log has a keyed hash of the
-address, never the address.
-Audit rows carry country (from Cloudflare) and an IP hash salted per day, which is enough to spot abuse but can't
-be reversed into an address.
-
-**Account deletion** (built 2026-10-15; soft since 2026-10-17, `POST /account/delete`, src/account.ts): everything
-stops at once: the GitHub App's authorization is revoked for the user (`DELETE /applications/{client_id}/grant`) and
-every grant ends. The account is marked deleted (`users.deleted_at`, migrations/0005) and kept **30 days**, when
-signing in again restores it (`account_restored`). After that, the daily cron purges it (`purge`, `account_purged`):
-each grant's storage erased and the user's D1 rows deleted. The audit log keeps its rows with the user's id removed:
-what happened stays on record (it's the security record), but no longer whom it happened to.
-
-Only account deletion is soft. What expires is kept as it is: the audit log's retention (90 days and a year, with its
-locked R2 copies), sign-in attempts (15 minutes), and each grant's short-lived caches (spent proofs, the probe window,
-in-flight leases) are expiry, not anyone deleting something.
-
-### Tokens and the flow
-
-Ported from the sms-reference-app, which already has spec-faithful pieces: `app/auth/dpop.ts` (proof verifier),
-`token.ts` / `resource.ts` (binding checks, rotation), and `app/src/oauth-client.ts` (the oauth4webapi browser
-client with a non-extractable key in IndexedDB, nonce retry, and single-flight refresh). What needs changing: swap
-`Buffer` for `jose`'s base64url, replace the in-memory Maps with the Grant DO, and move the hard-coded HS256 secret
-to asymmetric signing.
-
-(Since C7 the editor pushes its request first and signs in through our own page, SIGN-IN.md, which offers GitHub, email
-and a password; GitHub's leg is as below.)
-
-1. **Start.** The shell makes (or loads) its DPoP key pair and a PKCE verifier, then does a top-level navigation
-   to `GET /auth/github/start?code_challenge=…&dpop_jkt=…&state=…&redirect_uri=…`. The `redirect_uri` must
-   exactly match an allowlisted app origin. The Worker makes its *own* PKCE pair for GitHub and packs everything
-   into an encrypted, 10-minute `state` (JWE) that it sends to GitHub, so this step needs no storage. (Full-page
-   redirect, not a popup: the shell is `COOP: same-origin`, which severs a popup's opener anyway.)
-2. **GitHub callback.** `GET /auth/github/callback` decrypts the state, exchanges GitHub's code (client secret plus
-   GitHub PKCE verifier), reads `GET /user` for the numeric id, upserts the user, and creates a Grant DO holding
-   the encrypted GitHub tokens and a **single-use, 60-second authorization code** bound to the browser's
-   `code_challenge` and `dpop_jkt`. It then redirects to the app's `redirect_uri` with `code` and `state`.
-3. **Token.** The shell checks `state`, strips the query with `history.replaceState`, and `POST /token` with
-   `code` + `code_verifier` + a DPoP proof. The Worker checks PKCE, checks that the proof's key thumbprint equals
-   the `dpop_jkt` from step 1 (so a stolen code is useless to anyone without the key), burns the code, and issues:
-   - **an access token**: a 5-minute ES256 JWT (`typ: at+jwt`) with `cnf.jkt`, `sub` (our user id) and `grant`
-     (the DO id), signed with a key whose public half is published at `/.well-known/jwks.json`;
-   - **a refresh token**: opaque, DPoP-bound, rotated on every use. Presenting an already-used one revokes the
-     whole grant (reuse detection).
-4. **Every API request** carries `Authorization: DPoP <at>` and a `DPoP` proof. The Worker verifies the JWT, then
-   the proof (`typ`, an asymmetric alg from an allowlist, no private key material in the header, `htm`, `htu`,
-   `iat` within 60 s, `ath` = hash of the access token, the server nonce), then routes to the Grant DO. The DO
-   checks the `jti` hasn't been seen, rejects the request if the grant is revoked, and refreshes the GitHub token
-   if it's within a few minutes of expiry, serialized so it happens exactly once.
-5. **Nonces** (`DPoP-Nonce`) are stateless: an HMAC over a 5-minute time window, so issuing and checking them needs
-   no storage, and old proofs can't be pre-computed.
-6. **Sign-out** revokes the grant (DO + D1) and deletes the browser's key. "Sign out everywhere" revokes every grant
-   for the user.
-
-The shell gets a `dpopProvider` that replaces `patProvider`. It's still `typeof fetch`, so `github.ts` and fido
-don't change; only its base URL moves from `api.github.com` to the Worker's `/github/api/`.
-
-### The proxy
-
-- `/github/api/*` → `api.github.com`, **allowlisted** by method + path pattern to what `packages/editor/shell/github.ts` calls
-  (`/user`, repos, git trees/blobs/commits/refs, pages). Anything else gets a 403 and an audit row.
-- `/github/git/*` → `github.com` git smart-HTTP (`info/refs`, `git-upload-pack`) for isomorphic-git, streamed, not
-  buffered. This **retires `cors.isomorphic-git.org`**. Push (`git-receive-pack`) is added only when commit-back
-  moves to git.
-- The proxy never forwards our `Authorization`/`DPoP` headers upstream and never returns GitHub's token-bearing
-  headers.
+- An OAuth App's `repo` scope is read/write on every private repo the user can reach; a GitHub App gets fine-grained
+  permissions on the repos the user picks, and its user tokens expire after 8 hours (6-month refresh token).
+- Its token exchange needs the client secret even with PKCE, and has no CORS: a server was never optional.
+- **No email permission:** an editor doesn't need an address, and not having one is the cheapest privacy measure there
+  is. It's also why accounts are never linked by email. Creating repos would need Administration (write): decide when.
+- **Two Apps,** dev and production: separate secrets, separate blast radius.
 
 ### Hosts and origins
 
-| Environment | App | Worker | GitHub App |
+| | App | API | GitHub App |
 |---|---|---|---|
-| local | `editor.localhost:5173` | `wrangler dev` (`localhost:8787`) | dev |
-| dev | `brianjenkins94.github.io/editor/` (unchanged) | `editor-api-dev.<account>.workers.dev` | dev |
-| production | `editor.unusuallygood.dev`, Workers static assets (`packages/site`) | `api.unusuallygood.dev` | prod |
+| local | `editor.localhost:5173`, admin `localhost:5174` | `localhost:8787` (`npm run harness`, `wrangler dev`) | dev |
+| dev | `brianjenkins94.github.io/editor/` | `editor-api-dev.brianjenkins94.workers.dev` | `unusually-good-editor-dev` |
+| production | `editor.` and `admin.unusuallygood.dev` | `api.unusuallygood.dev` | `unusually-good-editor` (App ID 5339846) |
 
-The dev split is cross-origin, and that's fine *because* of DPoP: the credential is an `Authorization` header, not
-a cookie, so third-party-cookie blocking doesn't affect us and there's no CSRF surface. CORS is an explicit origin
-allowlist, never `*`, never reflected.
+- The credential is a header, not a cookie, so cross-origin is fine: no third-party-cookie blocking, no CSRF surface.
+  CORS is the clients' own origins (src/clients.ts), never `*` or reflected.
+- **unusuallygood.dev** (bought through Cloudflare, 2026-10-15) gets production off the shared `github.io` origin. The
+  API is its own origin rather than under the app's path, so the editor's origin serves only static files and none of
+  its requests count against the Worker. The apex 302s to the editor (browsers keep a 301 forever) until there's a
+  landing page; `/tools/` and `/log/` aren't built.
+- **editor-contrib forks** aren't allowed origins: a fork that wants sign-in brings its own Worker and GitHub App.
 
-**editor-contrib forks** (`<owner>.github.io/<repo>/`) are not on the allowlist. A fork that wants sign-in brings
-its own Worker and GitHub App; the README says so.
+### Building in the open
 
-**Production has its own domain**, `unusuallygood.dev` (bought through Cloudflare, 2026-10-15). It gets the editor off
-the shared `github.io` origin and gives us real COOP/COEP headers. The app and the API are two origins of one site, so
-production keeps dev's CORS allowlist (one origin) rather than putting the API under the app's path: the editor's
-origin serves only static files, never a Worker, so none of its requests count against the daily request budget.
-The build is one for every host; `packages/editor/shell/address.ts` picks production's API and GitHub App by host.
+The code is public, so its security has to hold with the code visible. Secrets live only in Cloudflare (ids and binding
+names in wrangler.jsonc aren't secret); telemetry is private to the account; PRs get tests, never deploys (no
+`pull_request_target`); dependencies are few, pinned exactly, at least a week old. Deploys use scoped Cloudflare tokens
+held as GitHub Environment secrets. *Decided 2026-10-16, while this is early:* production promotes itself after cd, with
+no required reviewer (one run left unapproved blocked every run behind it). Ticking Required reviewers on the
+`production` environment restores the gate.
 
-| Address | What | Served by |
-|---|---|---|
-| `unusuallygood.dev/` | the editor, until there's a landing page (302) | `packages/site` (`wrangler.jsonc`), its `_redirects` |
-| `unusuallygood.dev/env/<owner>/<repo>` | 302 to the editor's `env/<owner>/<repo>` | the same |
-| `unusuallygood.dev/tools/`, `/log/` | marketing per tool, a blog: not yet | the same, when they exist |
-| `editor.unusuallygood.dev/` | the editor: Pages' `docs/` build | `packages/site` (`editor.jsonc`), static assets |
-| `editor.unusuallygood.dev/env/<owner>/<repo>` | the editor, opened to that repo | the same (`_redirects` rewrite; Pages' 404.html does it there) |
-| `api.unusuallygood.dev` | this Worker | `wrangler.jsonc`, `env.production` |
+## Identity and the data we keep
 
-## Hardening: floods, abuse and sizes
+| Data | Where | Why | Retention |
+|---|---|---|---|
+| our user id (random) | D1 `users` | what everything keys on | 30 days after account deletion |
+| GitHub numeric id; email as typed (for those who use one) | D1 `identities` | stable identity; emailed codes | the same |
+| passkeys: public key, sign count, transports, AAGUID, whether it syncs | D1 `passkeys` | signing in | until removed, or the account's |
+| each sign-in: method (`github`, `email`, `passkey`, `password+totp`…), created, last used, a coarse device label | D1 `grants` | roles go by method; your sign-ins | the grant's |
+| GitHub access and refresh token | the Grant, AES-GCM under `TOKEN_KEK` (with a key id, to rotate) | calling GitHub for the user | until sign-out, expiry or deletion |
+| our refresh-token family, hashed | the Grant | rotation, reuse detection | the grant's |
+| each request through a sign-in: action (route template), status, duration, trace id (O5) | the Grant | the admin app's timeline | 30 days, and 30 after the sign-in ends |
+| what the editor reports: page shown, repo loaded (its keyed tag), command or pane (id), run, error id; never code, keystrokes or file contents (O6) | the Grant | the same | the same |
+| errors: name, message and stack (secrets and addresses masked), route, release, the editor's last event names; the sign-in and user, or signed out only the IP's daily keyed hash (O4, O6) | D1 `errors`, `error_occurrences` | the id a person quotes finds the cause | occurrences 30 days; groups 90 after last seen |
+| audit events | D1 `audit`, locked copies in R2 | the security record | 90 days; refusals and alerts a year |
 
-Cloudflare absorbs volumetric DDoS (layers 3, 4 and 7) in front of every Worker, `workers.dev` included. What's left is
-ours: the cost of each request (the paid plan bills per request; the free plan just stops at 100k a day, which costs
-availability instead of money), anyone probing for a weak spot, and anyone sending something huge.
+- **Not stored:** login or avatar (fetched live through the proxy), raw IPs, and for GitHub users any email. Emailed codes
+  only as an HMAC, for 10 minutes; the audit log has an address's keyed hash, never the address. Audit rows carry
+  Cloudflare's country and an IP hash keyed per day: enough to spot abuse, not reversible.
+- **Only account deletion is soft** (2026-10-17): everything stops at once (GitHub's authorization revoked, every grant
+  ended), signing in within 30 days restores it, then the daily cron purges it. The audit log keeps its rows without
+  the user's id: what happened stays on record, not whom it happened to. Everything else expires; nothing else is
+  deleted.
 
-**In place (2026-10-15):**
-- **Sizes**, checked before anything is parsed or verified:
-  - Bodies: 4 KB for `/token` and `/revoke`, 1 MB for a clone's request, 32 MB for the API proxy (a commit's
-    blobs). They're counted as the body streams, so a missing or false `Content-Length` doesn't get past them.
-  - `DPoP` and `Authorization` headers over 8 KB get a 431.
-- **No unauthenticated request creates storage.** A Grant exists only after GitHub has signed someone in, and a
-  code or refresh token is checked against D1 before its Durable Object is addressed.
-- **The proxy allows only the editor's calls.** Each refusal is a `proxy_denied` row in the audit log.
+## Tokens and the flow
 
-**Detection: knowing at once when someone does something abnormal through us (2026-10-15).** Decided as the
-priority: whatever abuse gets past every limit should still be seen, and immediately.
-- **The audit log records every refusal, with its reason.** That covers a refused token or proof (`auth_refused`), a
-  refused code or refresh token (`token_rejected`, saying whether it was expired, unknown, the wrong PKCE verifier,
-  or **another key**), a refused sign-in, a rate-limit trip and an oversized request. The one exception is the
-  routine nonce challenge.
-- **Every call through the proxy is recorded** (`proxy_call`), reads as much as writes: the call as its template
-  (BEHAVIOR.md: the query's names, a `repo#` tag and a keyed hash for its values, never a repository's name), GitHub's
-  status, and the bytes it carried back. If something ever uses a session it shouldn't have, what it read is
-  what matters, and Workers Logs keep requests only 3 days on Free. The row is written before the answer streams, so a
-  dropped connection still leaves it; the bytes are added once they've streamed.
-- **What it's for:** not watching users, but knowing, if something gets through, what it tried and what it did.
-- **Retention**, applied daily by a cron trigger (`expire` in `audit.ts`): routine rows (sign-ins and what they did)
-  are kept 90 days, and refusals and alerts a year.
-- **Reading it:** `npm run audit` prints a timeline, oldest first, each row with its trace id. It can be filtered by
-  `--grant`, `--user`, `--ip <hash>` or `--event`, with `--suspicious` (refusals, limits and alerts only) and
-  `--since 24h`.
-- **It's tamper-evident** (`src/audit-copies.ts`, 2026-10-16). Each row the Worker writes to D1 is also written, once,
-  to R2: `editor-api-audit` (production) and `editor-api-audit-dev`, binding `AUDIT_COPIES`, one object per row under
-  `routine/` or `suspicious/` by its retention class. A proxied call's bytes go in a second `.finished` object, since
-  they're only known later.
-  - **Write-once twice over:** the Worker writes with `if-none-match: *`, so even it can't replace a copy, and each
-    bucket's lock rules (`routine/` 90 days, `suspicious/` 365) refuse any overwrite or delete until the row's own
-    retention ends. Expiry rules delete the copies a day after, so R2 keeps nothing longer than D1 does.
-  - **D1's ids are AUTOINCREMENT,** never reused, so the id sequence is the chain: no hash chain is needed, and no
-    single writer in the request path.
-  - **`npm run audit -- --verify [--env production]`** compares the two and lists every row **edited**, **deleted**
-    before its time, **not copied**, or **missing** (an id with neither). It exits 1 when it finds anything. Rows
-    gone after their retention count as expired; a user id removed by account deletion counts as anonymized. The copy
-    keeps that id, which nothing points at once the account's `users` and `grants` rows are gone.
-  - **What it protects against:** a compromised Worker, or someone with D1 access, rewriting history. **Not:** a
-    compromised Cloudflare account, which can remove lock rules; or a compromised Worker from then on, since it could
-    stop writing copies (that shows as "not copied" for any row it does write to D1).
-  - A copy that can't be written (tried twice) never fails the request; it's logged, and `--verify` reports it.
-  - Made with `wrangler r2 bucket create`, `wrangler r2 bucket lock add <bucket> routine-90d routine/ --retention-days 90`
-    (and `suspicious-365d suspicious/ --retention-days 365`), and `wrangler r2 bucket lifecycle add <bucket>
-    routine-expire routine/ --expire-days 91` (and `suspicious-expire … 366`).
-- **Every row carries its request's trace id**, so it joins to the full logs and spans in Cloudflare's dashboard
-  (`migrations/0002_audit_detail.sql` adds `reason`, `detail` and `trace_id`).
-- **Some events raise an alert at once** (`audit.ts`):
-  - **token theft:** a refresh token reused; a token presented with **another key's** proof; a replayed proof;
-  - **probing:** `proxy_denied`, and a grant ended for it (`proxy_abuse`);
-  - **flooding:** a rate-limit trip.
+Every client pushes its request first and signs in on our page (*Sign-in methods*); GitHub's leg is steps 1–2. What
+isn't evident from the code is why each step is shaped so:
+1. **Start:** the Worker makes its own PKCE pair for GitHub and seals everything into GitHub's 10-minute `state`, so the
+   step needs no storage. A full-page redirect, since the shell's `COOP: same-origin` severs a popup's opener anyway.
+2. **Callback:** only `/user`'s numeric id is read. The Grant's code is single-use, 60 seconds, bound to the client's
+   challenge and key, so a stolen code is useless without the key. A code never redeemed ends its Grant at expiry (the
+   first live run left one holding GitHub's tokens indefinitely).
+3. **Token:** a 5-minute `at+jwt` with `cnf.jkt`, and a refresh token rotated on every use; a used one revokes the grant.
+4. **Every request:** the Grant checks the `jti` once and refreshes GitHub's token once, serialized.
+5. **Nonces** are an HMAC over a 5-minute window: no storage, and proofs can't be pre-computed.
 
-  Alerts go to `ALERT_WEBHOOK` (a secret: ntfy, Discord or Slack), at most one a minute per event and subject. They
-  say what the audit row says (ids, reason, country, IP hash, trace id) and never a token or an address.
-  *Decided 2026-10-15: no alert channel for now.* `ALERT_WEBHOOK` isn't set, so these events are recorded and nothing
-  is sent; `npm run audit -- --suspicious` is where to look. Setting the secret turns alerts on, with no code change.
-- **A sign-in that probes is ended:** 5 `proxy_denied` in 10 minutes revokes the grant.
-- **At most 8 proxied requests in flight per sign-in.** The Grant hands out leases (`lease()`, exact, since it handles
-  one call at a time), returned when GitHub's answer has finished streaming or after 2 minutes if the connection
-  dropped. GitHub's secondary rate limits punish a token's concurrent requests, and a burst of large clones is what a
-  scripted session looks like. Over the cap, the request gets a 429 and a `rate_limited` row with reason
-  `PROXY_CONCURRENCY`, which alerts.
-- **Rate limits** (`src/limits.ts`; the numbers are in `wrangler.jsonc`, per environment):
-  - sign-in at 20 a minute per IP;
-  - `/token` and `/revoke` at 30 a minute per IP **and** 10 a minute per grant named;
-  - the proxy at 300 a minute per user.
+The DPoP verifier, nonces and token signer are `@brianjenkins94/util/auth/dpop` (A2, decided 2026-10-15): RFC 9449 with
+nothing of the editor in it, free of storage and frameworks, the caller supplying `seen` and the nonce.
 
-  A trip is a 429 with `Retry-After: 60`, recorded, and alerted.
-- **Tests** (`test/detection.test.ts`): each limit; a stolen access token and a stolen refresh token, each alerting
-  once (the second within the minute is recorded but not alerted, and neither alert carries the token); writes
-  recorded and reads not; refusals and oversized requests recorded with why. Each of the 12 guards, disabled in
-  turn, fails a test.
+### The proxy
 
-**Decided 2026-10-15:**
-- **Stay on Workers Free for now.** A flood that uses up the 100k daily requests takes the API down until midnight UTC.
-  Workers Paid ($5/month) would keep it up at a small cost; revisit before real users.
-- **Preview isolation is deferred.** Code running on the editor's origin (previews, `?extension=`, almostnode) can use
-  the signed-in session in place. DPoP keeps the token from being used anywhere else, and the allowlist keeps it to
-  the editor's calls, but neither stops code already on our origin; only a separate origin does, which needs our
-  own domain. Detection is the mitigation meanwhile: any such misuse shows up as proxy writes and, past the
-  allowlist, as alerts.
+Exactly the editor's API calls (src/behavior.ts) and a clone's git reads, never a push (`git-receive-pack` waits for
+commit-back to move to git). It retired `cors.isomorphic-git.org` for signed-in clones. It never forwards our
+`Authorization` or `DPoP` upstream, nor GitHub's token-bearing headers back.
 
-**Still to do, in the order to reach for them:**
-1. **A WAF rate-limiting rule, once we have our own domain (A7).** It blocks before the Worker runs, so blocked
-   requests cost nothing, and it's the only layer that protects the daily request budget. The free plan includes one
-   rule. Bot Fight Mode and the managed DDoS rules come with the zone too.
-2. **Durable Object IP bans** (fail2ban semantics) only if repeat offenders get past the limits. KV is never the
-   counter: it's eventually consistent.
-3. **On Paid,** `limits.cpu_ms`. Free already caps CPU at 10 ms a request.
+## Sign-in methods
 
-Turnstile doesn't apply: there's no password or signup form here. GitHub takes the credentials, and has its own
-brute-force protection, and every input our endpoints take is unguessable (a code, a token, a signed proof).
+Built ourselves (C0–C7, 2026-10-17; linking and passkeys 2026-10-18). Better Auth's plugins and Pilcrow's auth book
+(auth.pilcrowonpaper.com) were the references, for their edge cases. Trialed on the admin app first; both clients now
+offer all four methods (src/clients.ts). Every method ends in `Grant.begin`: it only answers "which user is this".
 
-Cloudflare's volumetric DDoS protection catches floods, not low-rate abuse: a few requests a second at an expensive
-route looks like a user. That's what the binding limits are for.
+- **The sign-in page is the API's** (static, CSP-locked): credentials are typed there, never on a client's page, so no
+  app, nor code running on its origin, sees one. The hosted-login pattern; it's why the editor took the methods
+  without changing.
+- **PAR (RFC 9126, C1):** the browser carries only an opaque, single-use `request_uri`, so nothing in the redirect can be
+  read or changed, and the DPoP key is proven at the push rather than named in the URL.
+- **An attempt** (a Durable Object, 15 minutes, single-use) holds a sign-in that takes steps, by a `__Host-` cookie, so a
+  code typed into another browser doesn't complete it (Pilcrow: bind the code to the session that started it).
+- **Sensitive actions after sign-in** need their own check, never the sign-in's. *Departure:* that check is a sign-in in
+  the last 10 minutes, not an emailed code, because a GitHub-only account has no email.
+- **No lockouts anywhere** (an attacker could use them to lock someone out): token buckets instead.
 
-GitHub's own limit (5,000 requests an hour per user) comes back through the proxy's rate-limit headers, and fido backs
-off on them.
+### Email (C2)
 
-## Visibility: tracing the whole flow
+- Addresses kept as typed, not lowercased, nothing stripped (Pilcrow: don't silently change input); matched
+  case-insensitively.
+- The email carries a link with the code, but the link signs in only in the browser that started; elsewhere it shows
+  the code. Mail scanners open links.
+- *Departure:* codes are stored as an HMAC under `CODE_KEY`, not Argon2 as Pilcrow suggests: Argon2 would double every
+  check's CPU, and a key the database never holds means a leaked database can't be brute-forced offline. The HMAC
+  includes the attempt, so checking is limited per attempt only: guessing in another attempt can't reach a code.
 
-There are three separate streams with three different audiences. Keeping them separate is what lets us trace
-everything without leaking anything.
+### Passwords and reset (C3, C4)
 
-1. **Traces (for us, to debug).** Workers' automatic OpenTelemetry tracing (open beta since 2025-11) traces every
-   request, including each `fetch` to GitHub and each DO and D1 call, with no code. We add a few spans of our own
-   around the steps that matter (`auth.start`, `auth.callback`, `auth.token`, `grant.refresh_github`,
-   `proxy.request`). These land in **Cloudflare's own Observability dashboard** (logs, traces, metrics, and a query
-   builder), with no third-party vendor. It's private to the account even though the code is public. Each sign-in
-   gets a `login.id` attribute carried from start to callback to token, so the funnel is one query: how many starts
-   never came back from GitHub, how many callbacks never redeemed, and why.
-   - **Its limits:** retention is 3 days on Free and 7 days on Paid, which is fine for debugging. Anything we need
-     longer is the audit log's job (below), which was always going to be ours. Tracing is still in beta. Logs are
-     included up to 200k events/day on Free and 20M/month on Paid, with pricing moving to "Cloudflare
-     Observability" on 2026-12-01.
-   - **The way out, if we outgrow it:** OTLP export to an outside backend (Honeycomb, Grafana Cloud) is a
-     destination set in the dashboard, not code. Adding one later changes nothing in the Worker.
-   - **Across the browser boundary:** the shell's spans already use W3C-shaped ids (`util/logger`). The
-     `dpopProvider` sends a `traceparent` header so a sign-in is one trace from the shell's click to GitHub and
-     back. Browser spans themselves stay on-device (debug-mcp) for now. Shipping end-user browser telemetry off the
-     device is a privacy decision of its own, and it's deferred.
-   - *To verify on the first deploy (it needs A0):* whether automatic tracing adopts an incoming `traceparent` as
-     the parent, or whether we link it as an attribute, and **what the automatic spans record about a request**.
-     If they keep query strings or `Authorization` headers, the redaction rule needs an answer for traces too.
-2. **The audit log (for security, and for the user).** These are append-only D1 rows: `login`, `token_issued`,
-   `refresh`, `refresh_reuse_detected`, `grant_revoked`, `proxy_denied`, `account_deleted`. It's not sampled and
-   doesn't depend on a vendor, and a user can see their own (their sessions, recent sign-ins).
-3. **Workers Logs (for the operator).** These are structured `console.log` objects, kept by Cloudflare. They're
-   correlated with traces by trace id. Cloudflare's own *invocation logs* are **off** (`invocation_logs: false`):
-   they record each request's URL, the docs don't say what else, and they can't be redacted. The Worker writes its
-   own span per request instead (`src/log.ts`: method, path without the query, status, duration).
+- Pilcrow's rules (printable ASCII, 10 to 100, no space at either end, no complexity rules), and known breaches refused
+  through Have I Been Pwned's range API (k-anonymity; refused if it can't be asked).
+- Errors say what's wrong (Pilcrow argues against "invalid email or password"): a hash's timing already says whether an
+  account exists. A password account starts as an email account.
+- A reset with two-factor on needs the second factor too. Ending other sign-ins is asked, not forced. A reset starts no
+  session.
+- *Departure:* **Argon2id at OWASP's baseline** (19 MiB, 2 passes, 1 lane), not Pilcrow's floor (16 MiB, 3): similar
+  cost, more widely cited. A PHC string, so stronger costs later still verify the old.
+- **The library:** `@noble/hashes` 2.4.0, pinned: audited, plain JavaScript, about 82 ms a hash. It replaced
+  `@hallaxius/argon2w` (WebAssembly, about 13 ms) on 2026-10-21. That was chosen 2026-10-17 knowing it was two weeks old
+  with one maintainer; it was then removed from npm with its author's account, breaking every install. Its hashes still
+  verify (test/password.test.ts keeps one). Should speed matter, the tested faster one is `argon2-wasm-edge` (~21 ms;
+  unmaintained since 2024).
 
-**The redaction rule, enforced in code rather than by convention:** spans, logs and audit rows are built from an
-*allowlist* of attribute names. Nothing ever records tokens, codes, verifiers, DPoP proofs, `Authorization`
-headers, `state`, emails, or raw IPs. A test pushes a full sign-in through the Worker with a capturing exporter and
-fails if any secret value appears anywhere in the output.
+### Two-factor (C5, C6)
 
-## Building it in the open
+- An authenticator app (RFC 6238), or email after a password. A GitHub sign-in isn't asked: it carries GitHub's 2FA.
+- **Email as a second factor has a caveat, shown where it's turned on:** it stops someone with only your password, not
+  someone with your inbox, which can reset the password (Pilcrow: don't use the reset channel as the second factor).
+  The app is offered first, and wins when both are on.
+- *Decided 2026-10-17:* no MFA requirement for owners for now; GitHub's 2FA covers their GitHub sign-ins.
 
-Public code is fine for an auth server. Its security has to hold with the code visible (that's the standard), and
-public code means anyone can review it. The limits are operational:
+### Linking accounts, and roles
 
-- **Secrets live only in Cloudflare** (`wrangler secret put`): `GITHUB_CLIENT_SECRET`, `TOKEN_KEK` (encrypts GitHub
-  tokens), `SIGNING_JWK` (access tokens), `NONCE_KEY`, `AUDIT_KEY` (the audit log's IP hashes), `STATE_KEY`. The
-  account id and binding names in `wrangler.jsonc` aren't secret.
-- **Deploys use a scoped Cloudflare API token** (Workers edit on this account only) stored as a GitHub *Environment*
-  secret. Both `dev` and `production` deploy automatically after CI and cd. *Decided 2026-10-16, while this is
-  early:* production promotes itself, so a merge to main ships. The `production` environment had a required reviewer
-  (you), and each unapproved run blocked the ones behind it. Ticking Required reviewers again restores the gate:
-  every run waits for approval, and a merge to main can't ship an auth change by itself.
-- **No `pull_request_target`**, and nothing that hands secrets to fork PRs. PRs get tests, never deploys.
-- **Telemetry is private.** It lives in the Cloudflare account, not in public view, even though the code that emits it
-  is public.
-- **Dependencies:** `hono`, `jose`, and `oauth4webapi` in the browser. That's all; each is small, widely audited,
-  and has no runtime dependencies. Pin exact versions, at least a week old (CI already enforces that).
+- **Linked identities** (*decided 2026-10-18: the generally accepted shape,* as Auth.js's `accounts` and Supabase's
+  `auth.identities`), one of each kind per account for now (a unique index, easy to drop).
+- **Never linked automatically by email:** the GitHub App has no email permission, and matching by address is how
+  accounts get taken over. A way in is linked only while signed in, finished through the sign-in that asked.
+- Another account's way in merges only if that account holds nothing else (no other way in, password, two-factor,
+  passkey or role), and the page asks first. Unlinking isn't built: it would have to say what happens to sign-ins made
+  with the way removed. *Waiting:* the owner's own duplicate (bc2bc582…, email only): sign in to the admin app with
+  GitHub, add that address from Your account, and merge it.
+- **Roles follow how you signed in** (`canHoldRoles`, src/rbac.ts): GitHub, a passkey, or an authenticator app as the
+  second step. Not an emailed code, a password, or both: with an email linked to the owner's account, each would make
+  the inbox (which can reset the password) a key to it.
+
+### Passkeys
+
+- **The relying party is the API's own host only** (`api.unusuallygood.dev`, the dev worker's, `localhost`), not the
+  site: only our pages can ask for a passkey, never an app's or a preview running someone's code on a subdomain.
+- No second step after one: a passkey is a device and its PIN or face already. Supported, not pushed.
+- **Later:** a passkey as a second step after a password; naming passkeys; conditional UI (passkeys in the email
+  field's autofill).
+
+### The editor (C7)
+
+**Signing in stays optional:** the editor is whole signed out, no account exists until someone signs in, and nothing
+asks them to. Signed in without GitHub, the shell reaches GitHub as signed out (public repos), and the proxy answers
+`403 no_github`, not a 401 that would read as signed out. The legacy `/auth/github/start` stays for tabs left open from
+before C7.
+
+### The local harness (C0)
+
+`npm run harness`, then `http://localhost:8787/__harness`: the API in Wrangler's test harness, an app in an iframe, and
+everything stored, live, with what changed highlighted. It adds no routes, so none of it can deploy. Secrets are made
+fresh each run, but `.dev.vars` (gitignored) can hold `GITHUB_CLIENT_SECRET` (the real dev App; without it, a GitHub
+stand-in asks whom to be) and `ANALYTICS_TOKEN`. **WebKit can't sign in to it:** it drops the `Secure` `__Host-signin`
+cookie over `http://localhost`. Production is https.
+
+## Hardening
+
+Cloudflare absorbs volumetric DDoS. What's left is ours: each request's cost, anyone probing, anyone sending something
+huge, and low-rate abuse at an expensive route, which looks like a user. Hence the limits (src/limits.ts,
+wrangler.jsonc), sizes checked before parsing, and no unauthenticated request creating storage.
+
+### Detection
+
+*Decided 2026-10-15 as the priority:* whatever gets past every limit should still be seen, at once. Not to watch users,
+but to know what something tried and did if it gets through.
+- The audit log has every refusal with its reason, and **every proxied call, reads as much as writes:** if a session is
+  misused, what it read is what matters. The row is written before the answer streams.
+- At most 8 proxied requests in flight per sign-in: GitHub's secondary limits punish concurrent requests, and a burst of
+  clones is what a scripted session looks like.
+- Token theft, probing and flooding raise alerts. *Decided 2026-10-15: no alert channel:* `ALERT_WEBHOOK` (ntfy, Discord
+  or Slack) is unset, so they're only recorded; setting it turns them on. What must reach the owner goes by email (O1).
+- `npm run audit` reads it (`--grant`, `--user`, `--ip <hash>`, `--event`, `--suspicious`, `--since 24h`).
+
+### A tamper-evident audit log
+
+Each D1 row is written once to R2 too (`editor-api-audit`, `editor-api-audit-dev`), under `routine/` or `suspicious/`.
+- **Write-once twice over:** the Worker writes with `if-none-match: *`, and bucket locks refuse overwrites or deletes
+  until the row's retention ends (expiry a day later, so R2 keeps nothing longer than D1).
+- **D1's ids are AUTOINCREMENT, never reused,** so the id sequence is the chain: no hash chain, no single writer.
+- `npm run audit -- --verify [--env production]` lists rows edited, deleted early, not copied, or missing (exit 1). It
+  runs on your machine; the admin app's verify is a convenience, since a compromised Worker could lie about itself.
+- **Protects against** a compromised Worker or someone with D1 access rewriting history. **Not** a compromised
+  Cloudflare account (it can remove locks), nor a compromised Worker from then on (it could stop copying: "not copied").
+
+### Still to do
+
+1. **A WAF rate-limiting rule** on unusuallygood.dev: it blocks before the Worker runs, so blocked requests cost
+   nothing. The zone's Free plan includes one rule.
+2. **Durable Object IP bans** (fail2ban semantics), only if repeat offenders get past the limits.
+3. **`limits.cpu_ms`,** now that we're on Paid.
+
+Turnstile was ruled out when GitHub took every credential. Passwords and codes are typed on our page now, against
+per-IP and per-user buckets; whether that's enough is open.
+
+## Behavior (B7–B9)
+
+What a sign-in usually does, and the ones that don't. **Zero-knowledge:** route templates, header names, counts and keyed
+hashes only, never a path's values, a repository's name, a header's value, an IP in clear, or anything tying a model
+count to a person. A flag points at a grant; the audit log says whose. Rules act at once; statistics refine them.
+
+- **A script can't borrow the editor's sign-in:** DPoP binds it to the browser profile that began it, so a script signs
+  in as its own client. "Signed in, then called the API directly" shows as a sign-in that never looked like the editor.
+- **Actions come from the router and the proxy's allowlist,** so **new features are tolerated by construction:** a route
+  that ships is in the vocabulary from that deploy, never a probe.
+- **The client fingerprint** is taken at the first token and compared on every request. **Node's own `fetch` sends
+  `sec-fetch-mode: cors` too, so `Origin` is what gives a script away.** A client that starts as `other` is recorded and
+  alerted, not refused.
+- **Tolerated:** a header *added* (a new editor or browser release sending something new) and the major version going up
+  (an update). Strong: `origin` or `sec-fetch-*` omitted, browser family or OS changed, the version going down. Medium:
+  `accept-language` or `accept-encoding` changed. A refresh takes tolerated changes in (it needs the sign-in's key).
+- **The model** (B8): an action first seen in the last 7 days scores at most 4 bits, so a feature that just shipped
+  doesn't make everyone look unusual; each flush scores before it learns, so a sign-in never explains itself. The counts
+  start from a prior of the apps' own flows, since few use the editor yet; our end-to-end runs as a second source
+  aren't wired. **Measured:** in tests, the editor's flow about 2.2 bits a step, an order the editor never uses about
+  6.1, the next one alike about 5.2; a real admin sign-in, 3.1 bits over 8 steps.
+- **Open:** how many probes, and how much change, before a sign-in is ended rather than flagged; whether scores alert.
+
+## Visibility, and the redaction rule
+
+1. **Traces, for debugging:** Cloudflare's Observability dashboard (Workers → editor-api → Observability), 7 days on
+   Paid; the way out is an OTLP destination set in the dashboard, not code. Browser telemetry stays on-device
+   (debug-mcp): shipping it off is a privacy decision of its own, deferred. *Still to verify:* whether tracing
+   adopts an incoming `traceparent`, and what automatic spans record (query strings or `Authorization` would need it).
+2. **The audit log, for security and the user:** not sampled, not a vendor's.
+3. **Workers Logs, for the operator.** Cloudflare's invocation logs are off: they record each URL, the docs don't say
+   what else, and they can't be redacted. The Worker writes its own request line.
+
+**The redaction rule is code:** spans, logs and audit rows are built from an allowlist of fields (src/log.ts); anything
+else is dropped, not masked. A test pushes a whole sign-in through and fails if any secret value reaches the output.
+
+## Operations (O1–O8)
+
+**The owner's decisions (2026-10-19):** a **$20 a day** budget; spend priced at **overage rates, ignoring the plan's
+included amounts, so it overestimates** (a runaway shows early, never late); runaway costs email the owner and trip the
+switch automatically; the switch takes down **the API only** (the sites are static and the editor works signed out);
+"session replay" is an **event timeline** (no screen, code, keystrokes or file contents; signed-in people only); and
+every switch **fails open** (one that can't be read mustn't turn every request into an error).
+
+### The kill switch (O1) and narrower switches (O8)
+
+- One D1 row, read at most every 10 seconds per isolate: on everywhere within seconds, no deploy. On, the API answers
+  `503` before other work, except **the owner's way back in:** the admin app's sign-in by GitHub or a passkey (the
+  methods that can hold a role), and `/admin/*` for the owner only.
+- **Break glass,** when even the admin app can't be reached: `npm run maintenance -- off --env production` in
+  packages/api, `wrangler d1 execute` with your own Cloudflare login (no secret endpoint to protect). The first Worker
+  to read any flip audits and emails it, so break-glass flips are recorded like the rest.
+- **Every flip emails the owner** (`ALERT_EMAIL`), reversing "alerts are log-only" for what must reach you: switches,
+  the cost guard, the tripwire, new errors. At most five in fifteen minutes (asked for 2026-10-19); the rest are held
+  and listed on the Mail page, which has **Send a test alert**.
+- **Narrower switches** (O8, on the owner's ask for LaunchDarkly-like ones): `sign-ups` (by email, said only after the
+  code, so asking reveals nothing about whose addresses have accounts), `email-codes` (two-factor by email can't finish
+  meanwhile: the price of the switch), `github-proxy`. Not yet: audiences, editor features behind switches, the cost
+  guard or tripwire pausing a part rather than the whole API.
+
+### The cost guard (O2)
+
+- Hourly, the account's last 24 hours from Cloudflare's GraphQL Analytics, priced from src/spend.ts (Cloudflare's
+  pricing pages on 2026-10-19). The account's, both deployments: it's the account that's billed.
+- Half the budget: an email, once a day. The budget: the switch on. After a person turns it off, the trailing 24 hours
+  stay high, so for a day it trips only at double. Three hours blind: an email; blind isn't a trip.
+- **Backstop:** Cloudflare's own billing notification (dashboard → Notifications → Usage Based Billing), your click, for
+  when our check itself fails. First reading in production: $0.0015 a day.
+
+### The tripwire (O3)
+
+Defence in depth for "should they figure out how": it checks what a request read, not what the handler meant.
+- A row naming a user other than the signed-in one, or the **canary account** (ids derived from `AUDIT_KEY`, so the
+  public repo doesn't name them; no false positives by construction), is a breach: 500, the user's sign-ins ended, the
+  switch on, the owner emailed. Admin permissions lift the watch; a deliberate cross-account read is marked
+  `crossUser(…)` and reviewed like roles (one today, linking's in src/identities.ts).
+- **Report-only for its first week:** another user's row only reports until `ENFORCE_FROM` (2026-10-26), so a missed
+  legitimate read can't take the API down; the canary trips from the start. Tests always enforce and drive every
+  watched route: **a new watched route needs a test.** Reviewed 2026-10-19: no reports, every `user_id` query read.
+- Failed attempts are refused and audited as probes (*Behavior*); the tripwire is for a read that **succeeded**.
+
+### Errors and timelines (O4–O7)
+
+- **Errors get an id the person can quote,** so "it broke" is one click from their words to the cause. Signed-out
+  editor errors are taken too, anonymously: worth knowing from everyone, recording no one. The shell reports (it holds
+  the sign-in), never under automation. The owner is emailed for a new group (at most hourly) and a surge.
+- Trace ids are shown, not linked: the dashboard finds them.
+- **Readable stacks (O7):** production's hidden source maps go to R2 (`editor-source-maps`, one bucket for dev and
+  production, since a release is a commit), never served by the site. About 90 maps and 28 MB a release; with a 45-day
+  lifecycle, ~13 GB at ten deploys a day, cents a month. Not fatal if the step fails.
+
+### Open questions
+
+- The price table's rates, and whether to subtract the plan's included amounts (more accurate, less early).
+- Whether the tripwire should watch the Grant's and Attempt's own reads (by their own id, so a breach there needs a wrong
+  id passed in, which the D1 watch would see first).
+- Error and timeline retention beyond 30 days, if investigations need it.
+- Editor error groups: minified names change each release, so one error can make a new group each time. Mapping the top
+  frames when it's recorded would fix that; worth it if the Errors page gets noisy.
+- Whether signed-out users clone public repos through our proxy (costs requests) or keep going to GitHub directly (no
+  clone without a CORS proxy).
+
+## Runbooks
+
+Commands run in packages/api. Nothing goes into the repo or a chat but ids.
+
+### A0 · dev accounts
+
+Done 2026-10-15; A7 repeats it for production.
+1. **Cloudflare account,** and its `workers.dev` subdomain (the account's, in Workers & Pages' account details). Then
+   `npx wrangler login`.
+2. **D1:** `npx wrangler d1 create editor-api-dev`; its `database_id` goes in `env.dev`.
+3. **The dev GitHub App** (Settings → Developer settings → GitHub Apps → New): made as `editor-dev-brianjenkins94`,
+   renamed `unusually-good-editor-dev` to pair with production's. Homepage `https://brianjenkins94.github.io/editor/`.
+   - Under "Identifying and authorizing users" (General → Edit), "Add redirect URI":
+     `https://editor-api-dev.<subdomain>.workers.dev/auth/github/callback` and `http://localhost:8787/auth/github/callback`.
+   - **Expire user authorization tokens: on** (under "Optional features", on by default; it offers only "Opt-out").
+     Authorization during installation, device flow: off. Setup URL empty. Webhook **Active off**.
+   - Repository permissions: Contents and Pages (read and write), Metadata (read). Account: none, in particular no email
+     addresses. Installable only on this account.
+   - The Client ID (`Iv23…`) goes in wrangler.jsonc's `GITHUB_CLIENT_ID`. Generate a client secret straight into
+     `npx wrangler secret put GITHUB_CLIENT_SECRET --env dev`. No private key: user tokens need none.
+4. **Secrets,** below, each with `--env dev`.
+5. **CI's token:** My Profile → API Tokens, the "Edit Cloudflare Workers" template plus Account → D1 → Edit, this account
+   only. In the repo: environment `dev` (branches `main`) with the secret `CLOUDFLARE_API_TOKEN`, and the Actions
+   variable `CLOUDFLARE_ACCOUNT_ID`, which turns on cd's `dev` job.
+
+### A7 · production
+
+Live since 2026-10-15; `.github/workflows/production.yml` deploys the API, the editor, the admin app and the apex.
+1. **The GitHub App,** as A0's step 3 except: named `Unusually Good Editor` (slug `unusually-good-editor`, which
+   packages/editor/shell/address.ts names; change it there if GitHub gives another); homepage
+   `https://editor.unusuallygood.dev/`; one redirect URI, `https://api.unusuallygood.dev/auth/github/callback`;
+   installable on **any account**.
+2. **D1:** `npx wrangler d1 create editor-api`.
+3. **Secrets:** every one fresh, `--env production`, none shared with dev.
+4. **Its own Cloudflare token:** Account → Workers Scripts, D1 and Workers R2 Storage (O7's maps) → Edit; on the zone
+   unusuallygood.dev, Workers Routes → Edit, DNS → Edit, Zone → Read (custom domains are made on deploy).
+5. **GitHub:** environment `production`, branches `main`, secret `CLOUDFLARE_API_TOKEN`, no required reviewer. Commit the
+   ids, then set the repository variable `PRODUCTION_DEPLOYS` to `on`.
+6. Then the WAF rule (*Still to do*).
+
+### Secrets
+
+Made without being printed, each piped to `npx wrangler secret put <NAME> --env <dev|production>`:
+- `NONCE_KEY`, `TOKEN_KEK` (exactly 32 bytes), `AUDIT_KEY`, `STATE_KEY`, `CODE_KEY` (emailed and recovery codes' HMAC),
+  `TOTP_KEK` (authenticator secrets): `node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))'`
+- `SIGNING_JWK` (access tokens; `/.well-known/jwks.json` publishes its public half):
+
+  ```sh
+  node -e 'import("jose").then(async ({ exportJWK, generateKeyPair }) => { const { privateKey } = await generateKeyPair("ES256", { extractable: true }); process.stdout.write(JSON.stringify({ ...await exportJWK(privateKey), alg: "ES256", kid: new Date().toISOString().slice(0, 10) })); })' | npx wrangler secret put SIGNING_JWK --env dev
+  ```
+
+- `GITHUB_CLIENT_SECRET`, from the GitHub App. `ALERT_EMAIL`, your address, typed by you (without it, owner alerts are
+  only logged). `ALERT_WEBHOOK`, unset by decision.
+- `ANALYTICS_TOKEN`: the `editor-analytics` Account API token, read-only (Account Analytics Read, and Analytics Read on
+  unusuallygood.dev). In dev, production and the harness's `.dev.vars`.
+
+### R2
+
+- Each audit-copies bucket: `npx wrangler r2 bucket create <bucket>`;
+  `npx wrangler r2 bucket lock add <bucket> routine-90d routine/ --retention-days 90` and
+  `… suspicious-365d suspicious/ --retention-days 365`;
+  `npx wrangler r2 bucket lifecycle add <bucket> routine-expire routine/ --expire-days 91` and
+  `… suspicious-expire suspicious/ --expire-days 366`.
+- `editor-source-maps`: a lifecycle rule forgetting objects after 45 days.
+
+### Email
+
+- **Done 2026-10-17:** Workers Paid (email to any address needs it; 3,000 a month included, then $0.35 per 1,000), and
+  unusuallygood.dev onboarded in Compute → Email Service → Email Sending, which adds the SPF, DKIM, DMARC and bounce
+  (`cf-bounce`) records. Mail goes from `no-reply@unusuallygood.dev` only.
+- **Our inbox:** Email Routing sends `smoke-test@unusuallygood.dev` (production) and `smoke-test-dev@` (dev), `INBOX` in
+  wrangler.jsonc, to the Worker's `email` handler. The daily smoke test signs in by email through it: real delivery and
+  our DNS, with no one's mailbox.
+- The suppression list needs an Email Sending Edit token to read, so the Mail page doesn't show it.
 
 ## Steps
 
-Each step lands green and is useful on its own.
+- **A1** the Worker; **A2** DPoP in util; **A3** sign-in, the Grant, the audit log; **A4** the shell's client, the PAT
+  gone; **A5** the proxy: built 2026-10-15.
+- **A6 · before real users:** rate limits and account deletion built; preview isolation deferred (*Why*); still to do: a privacy page
+  of *Identity and the data we keep*, and a security review (RFC 9449 §11, RFC 9700).
+- **Then Stripe:** customers keyed by our user id, webhooks verified by signature and processed idempotently,
+  entitlements read by the Worker, never trusted from the client.
 
-- **A0 · accounts (you).** A Cloudflare account and the dev GitHub App. Nothing in this step is code, and none of
-  the secrets ever go into the repo or this chat. *Done for dev 2026-10-15:* the GitHub App
-  `unusually-good-editor-dev` ("Unusually Good Editor (dev)"; created as `editor-dev-brianjenkins94`, renamed to pair with
-  production's `unusually-good-editor`); the Worker at `https://editor-api-dev.brianjenkins94.workers.dev`, with its D1 database
-  migrated and all six secrets set; CI deploying it through the `dev` environment's scoped account token. Two
-  things GitHub renamed: the callback URL is "Redirect URI" ("Add redirect URI"), and token expiry is under "Optional
-  features" (on by default; the page offers only "Opt-out"). The runbook, in order (production repeats it in A7, with its own
-  app, database and secrets). Commands run in `packages/api`:
-  1. **Cloudflare account**, and its `workers.dev` subdomain. It belongs to the account, not to a Worker, so none has to
-     exist yet: Workers & Pages shows it in the account details beside the list (Subdomain, with Change), and if none
-     is set, that's where to choose one (the first `wrangler deploy` would ask for one too). The dev Worker will be
-     `https://editor-api-dev.<subdomain>.workers.dev`. Then `npx wrangler login`.
-  2. **D1:** `npx wrangler d1 create editor-api-dev`. Its `database_id` isn't secret; it goes in `wrangler.jsonc`'s
-     `env.dev` (binding `DB`, whatever binding name wrangler's snippet suggests). Done for dev, 2026-10-15.
-  3. **The dev GitHub App** (GitHub → Settings → Developer settings → GitHub Apps → New GitHub App):
-     - Name: anything unique, e.g. `editor-dev-<you>`. Homepage: `https://brianjenkins94.github.io/editor/`.
-     - Callback URLs, under "Identifying and authorizing users" on the app's settings page (General → Edit, for an app
-       that already exists): `https://editor-api-dev.<subdomain>.workers.dev/auth/github/callback`, then "Add Callback
-       URL" for `http://localhost:8787/auth/github/callback` (`wrangler dev`). The same section has the token-expiry,
-       authorize-during-installation and device-flow settings.
-     - **Expire user authorization tokens: on.** Request user authorization during installation: off. Device flow:
-       off. Setup URL: empty. Webhook: **Active off**.
-     - Permissions:
-       - Repository: Contents (read and write), Metadata (read; it's required), Pages (read and write).
-       - Account: none. In particular, no email addresses.
-     - Where it can be installed: **only on this account**, while it's the dev app.
-     - After creating it:
-       - Keep the **Client ID** (`Iv23…`). It isn't secret; it goes in `wrangler.jsonc`.
-       - **Generate a client secret** and paste it only into `npx wrangler secret put GITHUB_CLIENT_SECRET --env dev`.
-       - Don't generate a private key: signing in uses user tokens, which need none.
-  4. **Secrets**, made without being printed. Each one goes to `npx wrangler secret put <NAME> --env dev`:
-     - `SIGNING_JWK`: the jose one-liner in A2.
-     - `NONCE_KEY`, `TOKEN_KEK`, `AUDIT_KEY` and `STATE_KEY`:
-       `node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))'`.
-     - `GITHUB_CLIENT_SECRET`: step 3.
-  5. **A Cloudflare API token for CI:** My Profile → API Tokens → Create Token. Start from the "Edit Cloudflare
-     Workers" template, add Account → D1 → Edit, and limit Account Resources to this account. Then, in this repo:
-     - Settings → Environments → New environment `dev`. Limit its deployment branches to `main`, and add
-       the secret `CLOUDFLARE_API_TOKEN`.
-     - Settings → Secrets and variables → Actions → Variables: `CLOUDFLARE_ACCOUNT_ID` (on the Workers overview).
-       It isn't secret, and setting it turns on cd's `dev` job.
-- **A1 · `packages/api` skeleton.** Hono on Workers, `wrangler.jsonc` with `dev`/`production` environments,
-  `/health`, `observability` (logs + traces) on, tests running in workerd, and CI deploying `dev` to workers.dev.
-  Verify the `traceparent` question, and that a request shows up as one trace in the dashboard.
-  *Built 2026-10-15:* `src/index.ts` (Hono, secure headers, JSON 404/500, one span per request), `src/log.ts`
-  (util's logger, with every record gated to an allowlist of fields before any output), and `test/api.test.ts`
-  (wrangler's `createTestHarness`: the Worker in workerd, including a test that a request's query string and
-  `Authorization` never reach the logs). Spans come from `@brianjenkins94/util/logger`. On Workers it logs JSON
-  objects at their own console level, and with `setTracer(tracing)` every span has a counterpart in Cloudflare's
-  traces (the native custom-spans API, `cloudflare:workers`). The request span is opened with a function
-  (`log.span("request", attrs, async (span) => …)`), which makes it the runtime's active span for the whole request,
-  so the runtime's own `fetch`, D1 and Durable Object spans nest under it. The allowlist gates both outputs: log
-  records, and every attribute set on a trace span. A span's util ids ride along as `logger.trace_id` /
-  `logger.span_id`. That's how a trace continued from the browser will be found in the dashboard, since Cloudflare
-  exposes no span context of its own yet. The `dev` job in `.github/workflows/cd.yml` deploys `--env dev` once
-  the repository variable `CLOUDFLARE_ACCOUNT_ID` and the `dev` environment's `CLOUDFLARE_API_TOKEN` secret
-  exist. Until then it's skipped. Still open: both verifications above, which need the first deploy.
-- **A2 · DPoP core.** Port `dpop.ts`, add stateless nonces and the access-token signer with JWKS. Test against
-  RFC 9449's examples, plus a negative test for every check: a wrong `htu`/`htm`, a stale `iat`, a replayed `jti`, a
-  missing or wrong `ath`, a private JWK in the header, `alg: none`/HS256, and a mismatched `cnf.jkt`.
-  - **Where it lives: `lib/util/auth/dpop.ts`** (decided 2026-10-15). Verifying a proof is RFC 9449 with nothing of
-    the editor in it, so it's util's, beside the logger the Worker already uses. The contract keeps it free of
-    storage and frameworks:
-    - It takes the request's method and URL, the `DPoP` header, and the access token if there is one.
-    - The caller supplies two things: whether a `jti` has been seen (the API answers from the Grant DO), and the
-      current nonce.
-    - It returns the key's thumbprint (RFC 7638) or a typed failure that names the check that failed.
-  - The stateless nonce (an HMAC over a time window) goes there too. So, later, may the `at+jwt` access-token
-    signer and verifier with `cnf.jkt`, since they're RFC 9068 plus a binding, also generic.
-  - What stays in `packages/api`: which origins and methods are allowed, where `jti`s are stored, and the HTTP
-    responses (`use_dpop_nonce`, `WWW-Authenticate`).
-  - `jose` does the JWS work (it's audited, and it supports workerd), so it becomes one more util peer. Tests are
-    the module's own `isEntry` self-test, as everywhere in util.
-  - *Built 2026-10-15:* `@brianjenkins94/util/auth/dpop` has the following.
-    - `verifyProof(request, { seen, nonce?, maxAge?, now? })` returns `{ ok, jkt, jti }` or `{ ok: false, error, reason }`.
-      `error` is `invalid_dpop_proof` or `use_dpop_nonce`. `reason` is a fixed string that names the failed check and
-      never quotes the proof.
-    - `thumbprint` (RFC 7638) and `accessTokenHash` (`ath`).
-    - `nonces(secret)` has `issue` and `check`: an HMAC of a 5-minute window, good for that window and the next.
-    - `signAccessToken` and `verifyAccessToken`: `at+jwt`, with `cnf.jkt`, `iss`, `aud`, `exp` and `jti`. `publicKey`
-      gives a key's public half, for the JWKS.
-    - The self-test verifies RFC 9449's own example proofs (Figures 2 and 13). The key's thumbprint equals the RFC's
-      example `cnf.jkt`. The test also fails a proof for each check: missing, malformed, wrong `typ`, private key, HS256,
-      `none`, wrong key, too old, in the future, `htm`, `htu`, `jti`, `ath`, bound key, replay, nonce. A proof that's
-      rejected records no `jti`.
-    - Disabling any one check in turn (8 mutations) makes the self-test fail.
-  - The Worker serves `/.well-known/jwks.json` from the `SIGNING_JWK` secret (tested: the public half, never `d`). To
-    make that key, without it ever being printed:
+## Admin app
 
-    ```sh
-    node -e 'import("jose").then(async ({ exportJWK, generateKeyPair }) => { const { privateKey } = await generateKeyPair("ES256", { extractable: true }); process.stdout.write(JSON.stringify({ ...await exportJWK(privateKey), alg: "ES256", kid: new Date().toISOString().slice(0, 10) })); })' | npx wrangler secret put SIGNING_JWK --env dev
-    ```
+packages/admin, at `admin.unusuallygood.dev` (B5). Today the platform owner looks after users, sign-ins, the audit log,
+traffic, mail and errors there; later, customers' organization admins manage their own members. Part of the product,
+not an ops tool: it signs in with the product's identity, and every permission comes from one role model. `npm run dev`
+there (5174) against `npm run harness` here, or `VITE_API`. Built 2026-10-17: B1 roles and the `admin` client, B2 the
+read endpoints, B3 the app, B4 traffic, B5 production, B6 the first write (ending a sign-in), B7–B9 *Behavior*.
 
-  - Left for A3: the `seen` store (the Grant DO), issuing nonces in `DPoP-Nonce` headers, and the middleware that puts
-    `verifyAccessToken` and `verifyProof` in front of a route.
-- **A3 · sign-in.** The Grant DO, D1 schema and migrations, start/callback/token/refresh/revoke, token encryption,
-  the audit log, and the redaction test. End-to-end against the dev GitHub App.
-  - *Built 2026-10-15, everything but GitHub's round trip (that waits for A0):*
-    - **`migrations/0001_accounts.sql`** (D1): `users` (our id, GitHub's numeric id), `grants` (one row per sign-in)
-      and `audit`.
-    - **`src/grant.ts`**, the Grant Durable Object, one per sign-in.
-      - `begin` is the one call the GitHub callback will make. It creates the user on their first sign-in, seals
-        GitHub's tokens (`src/seal.ts`: AES-GCM under `TOKEN_KEK`, bound to the grant's id), and returns a 60-second
-        code.
-      - `redeem` spends the code on any attempt, and needs the PKCE verifier and the key the sign-in started with.
-      - `rotate` replaces the refresh token. If an old refresh token is presented again, it revokes the grant.
-      - `use` records a proof's `jti` and reports whether the grant is live. `revokeWith` and `revoke` end it.
-      - Codes and refresh tokens are `<grant id>.<secret>`, and only their hashes are stored.
-    - **`src/tokens.ts`**: `POST /token` (authorization_code, refresh_token), `POST /revoke` (RFC 7009), and the
-      `session` middleware.
-      - Every request needs a DPoP proof with a server nonce. A `use_dpop_nonce` answer brings a fresh one.
-      - A code or refresh token is checked against D1's `grants` before its Durable Object is addressed, since
-        addressing one creates it. A token for a revoked grant is still audited.
-      - `session` checks our access token, a proof from its key carrying its hash, a new `jti`, and a live grant.
-        `GET /me` returns the user id behind it.
-    - **`src/audit.ts`**: `login`, `token_issued`, `refreshed`, `token_rejected`, `refresh_reuse_detected` and
-      `grant_revoked`, each with Cloudflare's country and an IP hash (an HMAC keyed by `AUDIT_KEY` and the date).
-    - **CORS:** only our clients' origins (their pages', src/clients.ts; `ALLOWED_ORIGINS` before 2026-10-18). `DPoP-Nonce` and `WWW-Authenticate` are exposed to the browser.
-    - **Tests** (`test/sessions.test.ts`, workerd, 12 of them) cover:
-      - the whole flow, and the same GitHub user signing in twice;
-      - a code used with the wrong verifier, used twice, or with another key;
-      - refresh-token reuse, which revokes the grant;
-      - a refresh with another key's proof, which is refused while the grant lives on;
-      - `/me` refusing a missing token, `Bearer`, another key, a proof without `ath`, a replayed proof, or a token we
-        didn't sign;
-      - revocation;
-      - a forged grant id, which creates no Durable Object;
-      - sealing at rest, and the sealed tokens gone after revocation;
-      - IP hashing, and CORS;
-      - last, a test that none of the 50+ secret values the run handled (codes, verifiers, our tokens, proofs,
-        GitHub's tokens) appears in the logs.
-    - **Mutation check:** disabling each guard in turn (9 mutations) makes a test fail. The first run found the
-      unchecked `ath` gap, now covered.
-    - **Secrets for A0**, made without being printed, each piped to `npx wrangler secret put <NAME> --env dev`:
-      - `NONCE_KEY` and `AUDIT_KEY`: `node -e 'process.stdout.write(crypto.randomBytes(32).toString("base64url"))'`
-      - `TOKEN_KEK`: the same command; it must be exactly 32 bytes.
-      - `SIGNING_JWK`: see A2.
-    - **GitHub's round trip** (`src/github.ts`, built 2026-10-15):
-      - `/auth/github/start` takes the app's `redirect_uri` (an exact match against its client's pages in `REDIRECT_URIS`,
-        which since 2026-10-17 is per client, `editor` and `admin` (packages/admin, B1); otherwise a 400 and no redirect), its S256 challenge, its key's `dpop_jkt` and its `state`. It sends the browser to GitHub
-        with a PKCE pair of our own, and seals the rest into GitHub's `state` under `STATE_KEY` for 10 minutes.
-      - `/auth/github/callback` exchanges GitHub's code (client secret plus our verifier), reads `/user` for the
-        numeric id only, starts the Grant, and returns to the app with our code, its `state`, and `iss` (RFC 9207).
-        A refusal at GitHub comes back as `access_denied`, and a failure as `server_error`.
-      - `/.well-known/oauth-authorization-server` (RFC 8414) lets the shell's client find everything.
-      - **Tests** (`test/github.test.ts`, 10) run against a mock GitHub. They check what GitHub is sent (our secret,
-        the verifier matching the challenge GitHub saw, our callback), and that no login or email is kept. Each of
-        the 9 guards, disabled in turn, fails a test.
-    - **A real sign-in, against the deployed dev Worker (2026-10-15):** start → GitHub (authorized in Chrome) → callback
-      → the app's page with its state and `iss` → `/token` 200 DPoP → `/me` 200 → refresh 200 (new refresh token) →
-      `/me` 200 → `/revoke` 200 → `/me` 401. The live audit log shows one user for three sign-ins. A code that
-      arrived after it expired was refused (`token_rejected`).
-    - **Abandoned sign-ins end.** That first live run showed that a code never redeemed left its Grant holding
-      GitHub's tokens indefinitely. Now `begin` sets an alarm for the code's expiry, and `abandon()` revokes a Grant
-      that never got its first refresh token. Live: `login@+0s grant_revoked@+60s`.
-    - **Sessions and account deletion, built 2026-10-15** (`src/account.ts`, the shell's GitHub popover):
-      - The popover's "Where you're signed in" lists each live sign-in with a coarse label ("Chrome on macOS", from the
-        User-Agent at sign-in, which isn't kept), when it was last used, and a Sign out for each of the others.
-      - Below it: Sign out everywhere, and Delete account… behind a confirmation step.
-      - **Verified against the dev Worker in Chrome:**
-        - The list surfaced two forgotten pre-fix sign-ins and a second one held by a script; signing that one out
-          killed its token (401).
-        - Sign out everywhere ended the rest (0 live grants; the three revocations share one trace id).
-        - Deleting the account revoked the GitHub App's authorization (GitHub answered 204) and left 0 users and 0
-          grants. All 28 audit rows remain, with no user id on any of them.
-- **A4 · the shell.** Port `oauth-client.ts` into `packages/editor/shell/`, add `dpopProvider`, and swap the "Connect GitHub"
-  popover for "Sign in with GitHub" plus a sessions list. **Remove the PAT path** once this works: keeping a token
-  in `localStorage` as a fallback keeps the problem.
-- **A5 · the proxy.** Allowlisted API and git smart-HTTP; retire `cors.isomorphic-git.org`; update
-  `architecture-model.ts` (network nodes) and `ARCHITECTURE.md` (the shell row: it no longer holds a GitHub token).
-  - *A4 and A5 built together, 2026-10-15* (the PAT could only go once GitHub was reachable through the proxy):
-    - **Worker:**
-      - `src/proxy.ts` allows exactly `shell/github.ts`'s calls, plus a clone's git reads, never a push.
-      - `Link` headers are rewritten to point back at the proxy, and rate-limit headers are exposed.
-      - The Grant refreshes GitHub's token one refresh at a time, and revokes it at GitHub on sign-out.
-    - **Shell:**
-      - `shell/session.ts` is the oauth4webapi client: a non-extractable key in IndexedDB, a full-page sign-in, the
-        landing checked for its state and `iss`, a nonce retry, and one refresh at a time.
-      - `dpopFetch` is the AuthProvider. `github.ts` maps fido's GitHub origin onto the proxy, and the clone gets a
-        DPoP `http` client.
-      - The popover reads "Sign in with GitHub", then "Signed in as …" with a "Choose repositories" link to the app's
-        installation page and sign-out.
-      - Signed out, public repos still load, from GitHub directly and through isomorphic-git's proxy, with no
-        credential.
-      - The PAT is gone, and a stored one is deleted on load.
-    - **Verified in Chrome against the dev Worker:** sign-in, "Signed in as brianjenkins94" (GitHub's `/user` through
-      the proxy), two public repos loaded through the proxied API and clone (all 200), then sign-out (`/revoke` 200,
-      `grant_revoked` in the audit log).
-    - **Tests:** 11 proxy tests in workerd (9 guards, each failing a test when disabled), and the shell's GitHub client
-      test. The editor's full architecture suite passes, apart from one test that fails only under 5-way load and passes
-      alone.
-- **A6 · hardening, before any real user.** Previews and `?extension=` code on a separate origin; rate limits on
-  `/auth/*` (Workers rate-limiting binding); account deletion; a privacy page that says what's in the table above;
-  a security review of the whole flow (`/security-review` plus a manual walk through RFC 9449 §11 and the OAuth 2.0
-  Security BCP, RFC 9700).
-- **A7 · production.** The domain, the static-assets deploy with COOP/COEP headers, the prod GitHub App, and the
-  deploy approval gate. *Live since 2026-10-15; the approval gate was dropped 2026-10-16 (production promotes itself).*
-  - `packages/site`: two static-assets-only Workers (no script, so no request runs one): the apex, whose
-    `public/_redirects` sends `/` and `/env/*` to the editor, and the editor's (`editor.jsonc`), whose assets are the
-    same `docs/` build Pages serves. The build writes the host's files beside it (`packages/editor/build.ts`,
-    `staticHostPlugin`): `_headers` (COOP/COEP, `nosniff`), `_redirects` (`/env/*` serves the editor's page),
-    `.assetsignore` (the package tarballs stay Pages') and `404.html` (deep links on Pages). 2,381 files, none near the
-    25 MiB limit.
-  - `env/<owner>/<repo>` opens that repo (`shell/address.ts`): index.html puts a `<base>` at the site's root there, the
-    shell loads the repo once the app listens (after a sign-in completes, so a private one is read signed in), a
-    reload keeps a workspace that's already that repo's, and loading a repo or a project updates the address. The
-    sign-in's redirect URI is the site's root wherever the page is, and `returnTo` brings it back to the deep link.
-  - `env.production` here: the custom domain `api.unusuallygood.dev`, the editor's origin as the only allowed origin
-    and redirect URI.
-  - `.github/workflows/production.yml`: after each successful cd (or by hand, for a commit cd passed): build, migrate,
-    deploy the API, the editor, the apex. Off until `PRODUCTION_DEPLOYS` is `on`.
+### Why not something off the shelf
 
-  The runbook (yours; nothing here goes into the repo or chat but the two ids). Commands run in `packages/api`:
-  1. **The production GitHub App**, as A0's step 3 with these differences:
-     - Name: `Unusually Good Editor`, so its slug is `unusually-good-editor` (`PRODUCTION.app` in
-       `packages/editor/shell/address.ts`; if GitHub gives another, change it there). Homepage:
-       `https://editor.unusuallygood.dev/`.
-     - One callback URL: `https://api.unusuallygood.dev/auth/github/callback`.
-     - Where it can be installed: **any account**.
-     - Its Client ID goes in `env.production`'s `GITHUB_CLIENT_ID`; its client secret only into
-       `npx wrangler secret put GITHUB_CLIENT_SECRET --env production`.
-  2. **D1:** `npx wrangler d1 create editor-api`. Its `database_id` replaces `env.production`'s placeholder.
-  3. **Secrets:** A0's step 4 with `--env production`, all six made fresh (none shared with dev).
-  4. **A Cloudflare API token for production**, separate from dev's: Account → Workers Scripts → Edit and
-     Account → D1 → Edit on this account, plus, on the zone `unusuallygood.dev`, Zone → Workers Routes → Edit,
-     DNS → Edit and Zone → Read (the custom domains are created on the first deploy).
-  5. **GitHub:** Settings → Environments → New environment `production`. Required reviewers: you. Deployment
-     branches: `main`. Secret: `CLOUDFLARE_API_TOKEN` (step 4).
-  6. Commit the two ids, then set the repository variable `PRODUCTION_DEPLOYS` to `on`. The next cd deploys production
-     (it asked for approval until 2026-10-16, when the reviewer was removed).
-  7. After the first deploy: sign in at `https://editor.unusuallygood.dev/`, then add the WAF rate-limiting rule
-     (Hardening, "Still to do").
+- **Cloudflare's dashboard** stays the place for raw infrastructure, but can't show our domain (a user, their sign-ins,
+  the audit timeline, the tamper check), and can never be opened to a customer.
+- **Hosted identity with a console** (Clerk, WorkOS, Auth0, Logto; Better Auth as a library) means giving up DPoP-bound
+  tokens and the audit log, or running two identity systems.
+- **Authorization engines** (OpenFGA, SpiceDB, Cerbos, Oso) answer fine-grained sharing. A role table answers
+  everything now; if permissions grow per repo or team, one replaces src/rbac.ts behind the same `requires()`.
+- **Admin UI frameworks** (react-admin, Refine) earn their keep on many create-and-edit screens, and are React. Web
+  Awesome, already the shell's, has the shapes an admin needs.
 
-Then Stripe: customers keyed by our user id, webhooks verified by signature and processed idempotently (a D1 table
-of seen event ids), and entitlements read by the Worker, never trusted from the client.
+### Roles and permissions
 
-## Open questions
+- Permissions and roles are in code (src/rbac.ts), reviewed like any change; each admin route names its permission
+  (src/admin.ts), so the route table is the access-control table. `viewer` is what only reads; a permission named
+  `…:read` added later is a viewer's too.
+- **Owners and viewers live in config, not the database:** `OWNERS` and `VIEWERS` in wrangler.jsonc, GitHub ids (not
+  addresses, so the public repo names no one's email). Nothing through the API can grant one, so a compromised admin
+  session or a bad database write can't make another; adding one is a reviewed commit. Both need a sign-in that can
+  hold a role (*Linking accounts, and roles*).
+- Checked on every request, never from token claims, so a role taken away is gone at once.
+- Later, organization roles as rows (`organizations`, `memberships`), every change audited.
 
-- Whether signed-out users keep cloning public repos through our proxy (costs requests) or straight from GitHub's
-  API (no auth needed for public repos, but no git clone without a CORS proxy).
+### Admin sessions are separate from editor sessions
+
+The admin app is its own OAuth client, `admin`, beside `editor`, with its own pages. `/admin/*` takes only `admin`
+tokens and `/github/*` only `editor` ones, so code on the editor's origin (the analytics beacon today, previews later)
+can never use an editor session to reach admin data, even the owner's. It signs in as the editor does: PAR through the
+API's sign-in page (`util/auth/client`, shared with the shell; decided 2026-10-17).
+
+### Its own origin
+
+Static assets only (packages/site/admin.jsonc). A CSP of its own files, the API and GitHub's API (logins),
+`frame-ancestors 'none'`, and Cloudflare's Web Analytics beacon, **allowed by choice** (2026-10-17: Cloudflare injects it
+zone-wide and serves the page anyway).
+
+### The admin API
+
+- Every admin request is audited (`admin_access`, 365 days): who looked at a user's data is part of the record.
+- Cloudflare's data comes through `ANALYTICS_TOKEN`; the browser never holds a Cloudflare credential.
+- **GitHub logins are looked up live, never stored** (*decided 2026-10-17*): GitHub allows 60 unauthenticated lookups
+  an hour, so the app looks up what's on screen and keeps the answers for the session.
+
+### The UI
+
+Web Awesome's pattern library is Pro (paid); the free package ships the same shapes as recipes in its design skill
+(`dist/skills/webawesome-design/references/patterns.md`), so the app is built from those (*decided 2026-10-17*). Preact,
+as in the shell.
+
+### The Mail page
+
+Our audit log and Cloudflare's Email Service analytics side by side, counts only, never an address. Cloudflare's
+records are the zone's, dev's and production's together; a local API has none. Writing to users isn't planned.
+
+### The architecture page
+
+Derived from code, each half from what's authoritative for it: the deployment as configured (every wrangler config,
+read at build, deployment.ts) and the API as it runs (`GET /admin/architecture`). Its own renderer, not the editor's.
+Names and counts, never a row. `#/architecture?as=production` draws production's deployment around a local API.
+
+### Open
+
+- **Cloudflare Access in front of the owner's routes,** a second, independent gate: worth it once customers' admins
+  share the app.
+- Later: organizations and their admins in the same app; billing.

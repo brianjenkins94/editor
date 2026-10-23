@@ -7,7 +7,7 @@ import { github } from "./github.ts";
 import { allowedOrigins } from "./clients.ts";
 
 /**
- * The API as it runs, described by itself (packages/admin/README.md, the architecture page): its routes (the router's own
+ * The API as it runs, described by itself (README.md, "The architecture page"): its routes (the router's own
  * table), its stores and their tables (D1's schema; each Durable Object class's, from the SQL that makes it), the GitHub
  * calls it relays (the proxy's templates), who may call it and what it calls. Zero-knowledge: names from the code and
  * counts, never a row. The deployment around it (the Workers, their hosts and bindings) is the admin app's to read from

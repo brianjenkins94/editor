@@ -7,7 +7,7 @@ import { canSend } from "./mail.ts";
 import { refusal } from "./refusals.ts";
 
 /**
- * Codes for one action of a user's (SIGN-IN.md: sensitive actions take a fresh, action-specific check): setting or
+ * Codes for one action of a user's (README.md, "Sign-in methods": sensitive actions take a fresh, action-specific check): setting or
  * resetting a password (src/password.ts), turning two-factor by email on or off (src/mfa.ts). Each is emailed, kept as
  * an HMAC in `action_codes` bound to what it's for, good for 10 minutes, 5 tries a bucket; the caller spends it once the
  * action is done.

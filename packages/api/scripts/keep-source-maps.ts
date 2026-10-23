@@ -1,5 +1,5 @@
 /**
- * The editor's source maps, kept per release (OPERATIONS.md O7). Production's deploy (.github/workflows/production.yml)
+ * The editor's source maps, kept per release (README.md O7). Production's deploy (.github/workflows/production.yml)
  * builds the site with hidden maps (SOURCE_MAPS=hidden: packages/editor/build.ts), then runs this: each map goes into
  * the editor-source-maps bucket as `<release>/<its path in the site>`, its sources rewritten as repo paths and without
  * their text (GitHub has that, at the release), and leaves the site, which never serves them. The admin app maps an

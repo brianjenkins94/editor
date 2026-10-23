@@ -16,9 +16,9 @@
  * And what Run means, whichever debugger it starts — each launch resolved here:
  *
  * - its policy (`__policy`): what its gated calls are decided by;
- * - an app's file runs the app (RUNNING.md, step 4) — its dev server, its preview — not a session;
- * - `process.argv`, when a rule gives it (RULES.md; the margin's Mock): `args`, the first value — the rest each a run after
- *   it (`__cases`), unless one is stopped by hand;
+ * - an app's file runs the app (RUNNING.md, *Apps*) — its dev server, its preview — not a session;
+ * - `process.argv`, when a rule gives it (RUNNING.md, *Rules*; the margin's Mock): `args`, the first value — the rest
+ *   each a run after it (`__cases`), unless one is stopped by hand;
  * - a run in core's registry (`runs.begin`), known by one id from start to end — its end the run's, with its exit code
  *   (DAP's `exited`: extension.ts's `node.exit`).
  */

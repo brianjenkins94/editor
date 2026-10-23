@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./env.ts";
 
 /**
- * What our email did (packages/admin/README.md, the Mail page), from two records, side by side:
+ * What our email did (README.md, the Email runbook), from two records, side by side:
  *
  * - ours, the audit log: codes sent (`email_code_sent`), sign-ins by email (`login`, "email"), every refusal on the
  *   way (`sign_in_refused`, "email: …": the limits, wrong codes, and sends Email Service refused, by its error code),

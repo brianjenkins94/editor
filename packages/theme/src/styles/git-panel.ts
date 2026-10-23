@@ -4,8 +4,6 @@
  * utilities; left here are the panel's sizing, the rows' hover and current states, and the codehike diff renderer
  * (git-codehike.tsx): its side-by-side grid has no Web Awesome component. Everything is on Web Awesome's tokens, so it
  * follows light and dark.
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

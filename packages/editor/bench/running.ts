@@ -1,9 +1,9 @@
 /**
- * RUNNING.md, step 0: what running in the debugger costs. The same programs run three ways, in Node (no browser in the
- * way): natively on almostnode (a real run today), on tsval bare, and on tsval as the debug worker runs it (coverage, the
- * profile, observed sites, the value trace). Workloads: pure computation in the program's code; data shuffled mostly by
- * built-ins; a server answering requests (its handler stepped, called from almostnode's http); and a build-like run
- * whose heavy work is in a package (native under tsval too: packages/tsval/README.md, *Modules*).
+ * RUNNING.md, *What it costs*: what running in the debugger costs. The same programs run three ways, in Node (no
+ * browser in the way): natively on almostnode (a real run today), on tsval bare, and on tsval as the debug worker runs
+ * it (coverage, the profile, observed sites, the value trace). Workloads: pure computation in the program's code; data
+ * shuffled mostly by built-ins; a server answering requests (its handler stepped, called from almostnode's http); and a
+ * build-like run whose heavy work is in a package (native under tsval too: packages/tsval/README.md, *Modules*).
  *
  *   node --experimental-strip-types packages/editor/bench/running.ts [rounds]
  */

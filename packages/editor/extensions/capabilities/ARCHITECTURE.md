@@ -31,7 +31,7 @@ the core at its own call boundary. Hold to that and the seams stay put.
   ├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
   │ run contexts (where ENFORCE lives — plural, because the app runs in different runtimes)                      │
   │   tsval debugger  (tsval: debug-adapter.ts + debug-worker.ts)  → HARD-STOP breakpoint that ASKS on its   │
-  │                   line (allow once / always / deny, in the notes margin: LIVE-VALUES.md step 8)              │
+  │                   line (allow / skip / deny: once, this run or always; in the Margin)                        │
   │   almostnode      (workers/node-worker.ts, "production")        → block / mock at shim  [TODO]           │
   │        both consume capability-breakpoints (classifyCall + shouldBreak) at beforeCall / the shim boundary    │
   └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘

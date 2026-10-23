@@ -1,5 +1,5 @@
 /**
- * theme/styles/dock — the shell's dock (editor/shell/shell-dock.ts): its panels, the drop hint, a window's header actions and traffic lights (PLAN.md §8.4 step 1: Stitches only in the theme).
+ * theme/styles/dock — the shell's dock (editor/shell/shell-dock.ts): its panels, the drop hint, a window's header actions and traffic lights.
  */
 import { css, globalCss } from "../stitches";
 

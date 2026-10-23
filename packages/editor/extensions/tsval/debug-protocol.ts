@@ -61,8 +61,8 @@ export interface Ordering { "output": string[]; "crash"?: string; "schedule": nu
 /** What exploring a program's orderings found: how many runs, whether every ordering was run, and the distinct outcomes. */
 export interface Explored { "runs": number; "complete": boolean; "outcomes": Ordering[]; "eventLoop": LoopStart }
 
-/** A rule placed in the code (RULES.md: at, a span reference), found in the text that runs: the 1-based line its
- *  statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
+/** A rule placed in the code (RUNNING.md, *A rule placed in the code*), found in the text that runs: the 1-based line
+ *  its statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
  *  matches there. */
 /** A rule's hook: the statement it sets after, by 1-based line — in `file` when that's another of the program's files
  *  than the entry. */
@@ -80,7 +80,7 @@ export interface Snapshot {
 	"traveled"?: boolean;
 }
 
-/** What a capability stop asks (LIVE-VALUES.md, step 8): the gated call on the line it stopped at — its capability,
+/** What a capability stop asks (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*): the gated call on the line it stopped at — its capability,
  *  its callee as written, and the resource it would reach, from the run's own values where they're known by then (a
  *  literal, a variable's value), else the argument as written. `line` is 0-based. */
 /** `file`: the program file the call is in, with its text (`source`), when it isn't the entry. */
@@ -99,7 +99,8 @@ export type WorkerEvent =
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
-	/** What an allowed capability call returned (RUNNING.md, step 2), for the adapter to record (RULES.md, slice 2). */
+	/** What an allowed capability call returned (RUNNING.md, *Effects are real, decided per call*), for the adapter to
+	 *  record (RUNNING.md, *A call's result*). */
 	| { "type": "recorded"; "capability": string; "resource": string; "value": string }
 	/** Live values, of the entry — or (`file`) another of the program's files, with its text (`source`) the first time. */
 	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }

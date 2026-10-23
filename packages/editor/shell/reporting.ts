@@ -1,5 +1,5 @@
 /**
- * What the editor reports to its API (packages/api OPERATIONS.md, "Session timelines" and "Errors"; O6), from the shell,
+ * What the editor reports to its API (packages/api/README.md, *Errors and timelines*, O4–O7), from the shell,
  * which holds the sign-in:
  *   - the session timeline's events, signed in only (signed out, nothing), batched every few seconds: the page shown, a
  *     repo loaded, and what the root and the workbench send as `session.event` (commands run, panes shown, runs);

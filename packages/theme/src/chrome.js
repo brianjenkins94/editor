@@ -19,7 +19,7 @@ import "@awesome.me/webawesome/dist/styles/utilities.css";
 import { brandTokens } from "./tokens";
 import { vscodeTheme } from "./vscode-theme";
 
-// The theme: Web Awesome with VS Code's look (PLAN.md §9.2.5) — the brand, and theme/vscode-theme's look (VS Code's
+// The theme: Web Awesome with VS Code's look (README.md, *VS Code's look everywhere*) — the brand, and theme/vscode-theme's look (VS Code's
 // palette, a fixed copy of the editor's default themes until the editor sends the live one; the bridge onto it; the
 // components as VS Code's), on the root, following the system's mode.
 brandTokens();

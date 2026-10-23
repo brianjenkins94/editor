@@ -14,7 +14,7 @@ import { signInAs } from "./signin.ts";
 import { refusal, signedInRecently } from "./refusals.ts";
 
 /**
- * Authenticator-app MFA (SIGN-IN.md, "MFA, optional"; C5), for your own account, from the admin app's Your account page:
+ * Authenticator-app MFA (README.md, C5), for your own account, from the admin app's Your account page:
  *
  *   POST /admin/account/mfa/start      a new secret, pending: the app scans its QR code
  *   POST /admin/account/mfa/confirm    `code`, from the app: it's on, and ten recovery codes, shown this once
@@ -24,7 +24,7 @@ import { refusal, signedInRecently } from "./refusals.ts";
  *   POST /admin/account/mfa/email      `turn`, `code`: two-factor by email on, or off (C6)
  *
  * Each needs a recent sign-in (within 10 minutes, src/refusals.ts): the action's own check, and the one every account can pass, GitHub's
- * included (SIGN-IN.md, "Departures"). Turning it off and new recovery codes need the second factor itself too.
+ * included (README.md, "Sign-in methods"). Turning it off and new recovery codes need the second factor itself too.
  *
  * `secondFactor` is the check at sign-in (after an emailed code or a password, before the session starts: POST
  * /auth/second, `code`) and in a password reset: the app's code (each 30-second step once) or a recovery code (each

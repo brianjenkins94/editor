@@ -25,7 +25,7 @@
         "run.liveRuns": {
           "type": "boolean",
           "default": true,
-          "description": "Run the program file you're editing again on each save, and on an interval while it differs from its last run, so the margin shows what it did (LIVE-VALUES.md). Nobody is watching a live run, so it asks nothing: it makes no call but the reads the policy allows, gives a call what it returned when it last ran for real, and skips the rest."
+          "description": "Run the program file you're editing again on each save, and on an interval while it differs from its last run, so the margin shows what it did (RUNTIME-EVIDENCE.md, *Live runs*). Nobody is watching a live run, so it asks nothing: it makes no call but the reads the policy allows, gives a call what it returned when it last ran for real, and skips the rest."
         },
         "run.liveRuns.interval": {
           "type": "number",

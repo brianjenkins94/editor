@@ -6,14 +6,14 @@ import config from "@brianjenkins94/util/eslint";
 import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
 
 // The Web Awesome components the app may use: what the theme package re-exports (packages/theme/src/components/, its
-// curated catalog, PLAN.md §7.2), and Web Awesome's whole catalog, so webawesome/known-components tells a component's tag
+// curated catalog, packages/theme/README.md, *Only through the theme*), and Web Awesome's whole catalog, so webawesome/known-components tells a component's tag
 // from a utility class. (Web Awesome resolved as the editor's code resolves it.)
 const THEME_COMPONENTS = readdirSync(new URL("packages/theme/src/components", import.meta.url)).filter((file) => file.endsWith(".js")).map((file) => file.slice(0, -".js".length));
 const WEB_AWESOME_COMPONENTS = readdirSync(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js"))));
 
-// The class names something styles (PLAN.md §7.4, webawesome/known-classes): Web Awesome's utilities (and the families it
-// matches by prefix, `[class*='wa-stack']`) from its installed CSS, and every class the theme package's stylesheets declare
-// (its recipes, the exception sheets).
+// The class names something styles (packages/theme/README.md, *Class names, a closed set*; webawesome/known-classes): Web Awesome's utilities (and the families it
+// matches by prefix, `[class*='wa-stack']`) from its installed CSS, and every class the theme's Stitches styles declare
+// (its recipes, its surfaces' styles).
 const WEB_AWESOME_STYLES = path.join(path.dirname(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js")))), "styles");
 const cssFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((file) => String(file).endsWith(".css")).map((file) => readFileSync(path.join(folder, String(file)), "utf8"));
 const classesIn = (text) => [...text.replaceAll(/\/\*[\s\S]*?\*\//gu, "").matchAll(/\.(-?[_a-zA-Z][\w-]*)/gu)].map((match) => match[1]);
@@ -77,7 +77,7 @@ export default [
 		// generated paths are already dropped by the global `ignores` above.)
 		"files": ["**/*.{ts,tsx,mjs,cjs,js}"],
 		// contrib/ is the editor-contrib template: someone else's extension, drawing its own webview however it likes.
-		// theme/styles/workbench is VS Code's baseline: overrides of VS Code's own CSS, on --vscode-* (PLAN.md §7.7).
+		// theme/styles/workbench is VS Code's baseline: overrides of VS Code's own CSS, on --vscode-* (packages/theme/README.md, *Outside the rules*).
 		"ignores": ["packages/editor/demo/**", "packages/theme/src/styles/workbench.ts", "contrib/**"],
 		"plugins": { "webawesome": webawesome },
 		"rules": {
@@ -95,7 +95,7 @@ export default [
 	},
 	{
 		// The ways in to Web Awesome that aren't the theme's re-exports: the theme itself; the API's sign-in pages, which
-		// bundle Web Awesome themselves (the api doesn't depend on theme: PLAN.md §7.7); and this plugin, whose maps name
+		// bundle Web Awesome themselves (the api doesn't depend on theme: packages/theme/README.md, *Outside the rules*); and this plugin, whose maps name
 		// Web Awesome's components as data.
 		"files": ["packages/theme/**", "packages/api/scripts/webawesome.ts", "packages/eslint-plugin-webawesome/**"],
 		"rules": { "webawesome/through-theme": "off", "webawesome/known-components": "off", "webawesome/known-classes": "off" }
@@ -111,7 +111,7 @@ export default [
 		"rules": { "webawesome/no-css-imports": "off" }
 	},
 	{
-		// The CSS half of the guardrails (packages/theme/PLAN.md §4, §7), in ESLint's CSS language (util's preset registers
+		// The CSS half of the guardrails (packages/theme/README.md, *The four lint gaps*), in ESLint's CSS language (util's preset registers
 		// it): every stylesheet on Web Awesome's tokens, in a layer, reading VS Code's theme only through theme/vscode, not
 		// selecting Web Awesome's components, and in the theme package.
 		"files": ["**/*.css"],
@@ -134,7 +134,7 @@ export default [
 	},
 	{
 		// The API's sign-in pages bundle Web Awesome themselves (the api doesn't depend on theme): their one sheet centres the
-		// card (PLAN.md §7.7).
+		// card (packages/theme/README.md, *Outside the rules*).
 		"files": ["packages/api/public/sign-in.css"],
 		"rules": { "webawesome/css-only-in-theme": "off" }
 	},

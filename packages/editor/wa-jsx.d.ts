@@ -7,7 +7,7 @@
  * attributes (`appearance`, `size`, `with-header`, …) and custom-event handlers — kept permissive on purpose so the
  * markup reads naturally without re-deriving Web Awesome's full prop types here.
  *
- * Only the components the theme exports (packages/theme/src/components/, its curated catalog: PLAN.md §7.2), so a tag
+ * Only the components the theme exports (packages/theme/src/components/, its curated catalog: packages/theme/README.md, *Only through the theme*), so a tag
  * it doesn't is a type error here as well as webawesome/known-components' lint error.
  */
 /* eslint-disable ts/naming-convention -- custom-element tag names are hyphenated by spec (wa-button, …), not camelCase */

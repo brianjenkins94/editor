@@ -104,8 +104,8 @@ export function classifyCall(node: ts.CallExpression, args: readonly unknown[]):
  * passes straight through).
  */
 export function shouldBreak(policy: Policy, hit: CapabilityHit): boolean {
-	// A call a rule gives the result of (RULES.md, slice 2) never happens: the debugger's stand-in returns it instead.
-	// (stops are armed only in runs someone is watching: `you`'s)
+	// A call a rule gives the result of (RUNNING.md, *A call's result*) never happens: the debugger's stand-in returns it
+	// instead. (stops are armed only in runs someone is watching: `you`'s)
 	return effectiveDisposition(policy, hit.capability, hit.resource, hit.dangerous, { "trigger": "you" }) === "review" && givenResult(policy, { "trigger": "you", "capability": hit.capability, "resource": hit.resource }) === undefined;
 }
 

@@ -3,8 +3,6 @@
  * utility classes don't cover. Its buttons, tags, stacks and clusters are theirs, and its frame, toolbar and headings'
  * type are recipes (theme/recipes); what's left is its rows, its sections' padding, and the level's sprite grid, all on --wa-* tokens (theme/vscode maps them onto the VS Code theme
  * in a webview too).
- *
- * PLAN.md §8.4 step 3: an exception sheet, now Stitches in the theme (app.styles).
  */
 import { stylesheet } from "../stitches";
 

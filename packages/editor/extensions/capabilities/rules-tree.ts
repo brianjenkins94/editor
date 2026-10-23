@@ -1,8 +1,8 @@
 /**
- * The Rules view (RULES.md), as VS Code's own tree view, in the Explorer beside Capability calls: every rule in the
- * policy files — mine first (`.silo/policy/<you>.json`), then the shared contract's (`.silo/policy.json`) — each a
- * sentence in the catalog's words, in the order they're matched: the first that matches decides. A placed rule says the
- * line its statement is on now; one that can't be matched, or whose place is lost, says why.
+ * The Rules view (RUNNING.md, *Rules*), as VS Code's own tree view, in the Explorer beside Capability calls: every rule
+ * in the policy files — mine first (`.silo/policy/<you>.json`), then the shared contract's (`.silo/policy.json`) — each
+ * a sentence in the catalog's words, in the order they're matched: the first that matches decides. A placed rule says
+ * the line its statement is on now; one that can't be matched, or whose place is lost, says why.
  *
  * Its commands (EXTENSION-POINTS 5): `silo.rules.list` — every rule as it shows them (an agent's `rules_list` too); a rule
  * opens in core's Rule view below (`silo.rules.open`, by `editor.rules.edit`: *Save*, *Re-place at selection* a lost

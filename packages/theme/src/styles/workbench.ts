@@ -1,5 +1,5 @@
 /**
- * theme/styles/workbench — VS Code's document (editor/workbench/Workbench.tsx): the mount, and the overrides over VS Code's own CSS, which isn't layered (so they're unlayeredGlobalCss), its classic look under Modern UI among them. On --vscode-*: VS Code's baseline, outside the token rules (PLAN.md §7.7) (PLAN.md §8.4 step 1: Stitches only in the theme).
+ * theme/styles/workbench — VS Code's document (editor/workbench/Workbench.tsx): the mount, and the overrides over VS Code's own CSS, which isn't layered (so they're unlayeredGlobalCss), its classic look under Modern UI among them. On --vscode-*: VS Code's baseline, outside the token rules (README.md, *Outside the rules*).
  */
 import { css, unlayeredGlobalCss } from "../stitches";
 

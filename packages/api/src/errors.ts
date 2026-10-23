@@ -5,7 +5,7 @@ import { shortHash } from "@brianjenkins94/util/hash";
 import { redactString } from "@brianjenkins94/util/redact";
 
 /**
- * Errors (OPERATIONS.md, "Errors"; O4): every uncaught error gets an id the person can quote (`E-ABCD-EFGH`, in the
+ * Errors (README.md, O4): every uncaught error gets an id the person can quote (`E-ABCD-EFGH`, in the
  * 500 they see), and is recorded: grouped by fingerprint (its source, name and top stack frames by function name, so a
  * release's new line numbers don't split a group; util/hash), each occurrence with its route, release, trace id and,
  * signed in, its sign-in and user. Messages and stacks are redacted first (util/redact, and email addresses). A new

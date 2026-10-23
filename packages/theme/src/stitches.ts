@@ -1,5 +1,5 @@
 /**
- * theme/stitches — the app's one Stitches instance (PLAN.md §7.5), the theme's own (§8): its styles are made here, in
+ * theme/stitches — the app's one Stitches instance (README.md, *Stitches only, in the theme*), the theme's own: its styles are made here, in
  * the theme — the recipes and composed components (components/*, through theme/recipes and theme/app-window) and each surface's styles
  * (theme/styles/<surface>) — and the app imports those, never this (webawesome/through-theme fails it outside the
  * theme, as it does `@stitches/core`). webawesome/css-in-js-tokens holds their values to the `--wa-*` tokens.
@@ -10,7 +10,7 @@
  * order, which this puts first in the document's head): `globalCss()` in `app.base`; `recipe()`, the theme's
  * vocabulary (theme/recipes), in `app.recipes`; `css()`, a surface's own styles, in `app.styles`; and a use-site
  * override — `toolbar({ "css": { … } })`, Stitches' one-off on any of them — in `app.overrides`, above them all, so
- * it wins wherever it's inserted (PLAN.md §8.2). So which rule wins follows the layers, not specificity or which sheet
+ * it wins wherever it's inserted (README.md, *The layers*). So which rule wins follows the layers, not specificity or which sheet
  * was inserted last: a Stitches class wins over Web Awesome's utilities and the recipes (`app.recipes`), and over the
  * DOM it styles that isn't ours when that DOM's sheet is in the `vendor` layer, under everything (dockview's; codehike
  * styles inline). Stitches has no layers of its own (it predates them); it emits an `"@layer name"` key as that layer's
@@ -75,7 +75,7 @@ const layered = (layer: string) => (style: any) => {
 };
 
 /** `style` with each `var(--wa-…)` given Web Awesome's default as its fallback (theme/web-awesome), so a recipe, and a
- *  component made of one, lays out on a page without Web Awesome's theme (PLAN.md §10). */
+ *  component made of one, lays out on a page without Web Awesome's theme (README.md, *Published components*). */
 const withDefaults = (style: any): any => {
 	if (typeof style === "string") {
 		return style.replaceAll(/var\((--wa-[\w-]+)\)/gu, (whole, name: string) => (tokens[name] === undefined ? whole : `var(${name}, ${tokens[name]})`));

@@ -165,7 +165,7 @@ async function readText(path: string): Promise<string | undefined> {
 
 /**
  * The editor's pre-commit step (it makes every commit: the Source Control view's, Commit All, the terminal's `git
- * commit`): what `.silo/` shares of runs is worked out for what's being committed (LIVE-VALUES.md, *Runs kept*). For
+ * commit`): what `.silo/` shares of runs is worked out for what's being committed (RUNTIME-EVIDENCE.md, *Kept across reloads*). For
  * each program file staged, the runs kept on this machine of the very text staged (by its blob oid) — each as it may be
  * shared (lib traces' `committable`: never its text, a run that could have read inputs by its values' types) — go in
  * `.silo/traces/<you>/<file>.jsonl`, staged with it — those of the text staged, or whose every executed declaration is in

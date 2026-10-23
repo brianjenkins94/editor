@@ -29,12 +29,12 @@
  *   • css-no-wa-selectors     — selecting a `wa-*` component, its `::part()`, or a `.wa-*` class of our own.
  *   • css-only-in-theme       — a stylesheet outside the theme package (enabled for the files that aren't in it).
  *
- * And Web Awesome through the theme package (packages/theme/PLAN.md §7.2):
+ * And Web Awesome through the theme package (packages/theme/README.md, *Only through the theme*):
  *   • through-theme    — importing Web Awesome or Stitches itself, not the theme's (theme/components/<name>, theme, …,
  *     theme/stitches).
  *   • known-components — a `wa-*` component the theme doesn't export, in JSX or given to a create call.
  *   • known-classes    — a class name nothing styles or declares: not a Web Awesome utility, nor declared in the
- *     theme's stylesheets.
+ *     theme's Stitches styles.
  * Layers and `!important` are the CSS language's own rules (css/use-layers, css/no-important).
  */
 
@@ -719,7 +719,7 @@ const cssInJsTokens = {
 	"create": function(context) {
 		// The modules whose `css` / `globalCss` / `keyframes` / `recipe` are Stitches': the theme's one instance by default
 		// (`theme/stitches` from outside, `./stitches` inside the theme); and the modules of recipes, whose calls' `css` is
-		// a use-site override (PLAN.md §8.2), held to the tokens the same way.
+		// a use-site override (packages/theme/README.md, *Overriding a recipe*), held to the tokens the same way.
 		const sources = (context.options[0]?.sources ?? ["^theme/stitches$", "^\\./stitches(?:\\.ts)?$"]).map((source) => new RegExp(source, "u"));
 		const recipeSources = (context.options[0]?.recipes ?? ["^theme/recipes$", "^\\./recipes(?:\\.ts)?$"]).map((source) => new RegExp(source, "u"));
 		const stitches = new Set();
@@ -828,8 +828,8 @@ const cssNoVscodeVariables = {
 	"meta": {
 		"type": "problem",
 		"languages": ["css/css"],
-		"docs": { "description": "Read VS Code's theme through Web Awesome's tokens: theme/vscode maps it onto --wa-* in one place (packages/theme/src/vscode.css), the only place a --vscode-* variable may appear." },
-		"messages": { "vscode": "`{{name}}` is a VS Code theme variable — use the Web Awesome token theme/vscode maps it to (packages/theme/src/vscode.css), or add the mapping there." },
+		"docs": { "description": "Read VS Code's theme through Web Awesome's tokens: theme/vscode maps it onto --wa-* in one place (the bridge, packages/theme/src/tokens.ts), where the look reads --vscode-*." },
+		"messages": { "vscode": "`{{name}}` is a VS Code theme variable — use the Web Awesome token theme/vscode maps it to (packages/theme/src/tokens.ts), or add the mapping there." },
 		"schema": []
 	},
 	"create": function(context) {
@@ -882,7 +882,7 @@ const cssOnlyInTheme = {
 	"meta": {
 		"type": "problem",
 		"languages": ["css/css"],
-		"docs": { "description": "No stylesheets (packages/theme/PLAN.md §8): the app's styles are Stitches in the theme — a surface's in theme/styles/<surface>, imported from there. A stylesheet that can't be (a page styled before any script of ours runs) is exempted by name in eslint.config.js." },
+		"docs": { "description": "No stylesheets (packages/theme/README.md, *Stitches only, in the theme*): the app's styles are Stitches in the theme — a surface's in theme/styles/<surface>, imported from there. A stylesheet that can't be (a page styled before any script of ours runs) is exempted by name in eslint.config.js." },
 		"messages": { "outside": "A stylesheet — the app's styles are Stitches in the theme: make it a surface's styles, packages/theme/src/styles/<surface>.ts, and import them from theme/styles/<surface>." },
 		"schema": []
 	},
@@ -895,13 +895,13 @@ const cssOnlyInTheme = {
 	}
 };
 
-// --- Web Awesome through the theme package (packages/theme/PLAN.md §7.2): it re-exports the components the app may
+// --- Web Awesome through the theme package (packages/theme/README.md, *Only through the theme*): it re-exports the components the app may
 //     use (theme/components/<name>) and the styles (theme, theme/chrome, theme/vscode). ---
 
 /** The theme package's way in to `source`, a Web Awesome or Stitches module. */
 function throughThemeFor(source) {
 	if (source.startsWith("@stitches/") || source === "theme/stitches") {
-		return "a style the theme makes with it: theme/styles/<surface>, or a recipe (theme/recipes) — styles are made in the theme (PLAN.md §8)";
+		return "a style the theme makes with it: theme/styles/<surface>, or a recipe (theme/recipes) — styles are made in the theme (packages/theme/README.md, *Stitches only, in the theme*)";
 	}
 
 	const component = /\/dist\/components\/([a-z-]+)\//u.exec(source);
@@ -913,7 +913,7 @@ const throughTheme = {
 	"meta": {
 		"type": "problem",
 		"docs": { "description": "Reach Web Awesome and Stitches only through the theme package, which re-exports what the app may use: theme/components/<name> for a component, theme / theme/chrome / theme/vscode for Web Awesome's styles, and the styles it makes with Stitches (theme/styles/*, theme/recipes); theme/stitches itself is the theme's own." },
-		"messages": { "direct": "`{{source}}` is reached only through the theme package — import {{instead}} instead (packages/theme/PLAN.md §7.2, §8)." },
+		"messages": { "direct": "`{{source}}` is reached only through the theme package — import {{instead}} instead (packages/theme/README.md, *Only through the theme*)." },
 		"schema": []
 	},
 	"create": function(context) {
@@ -978,7 +978,7 @@ const knownComponents = {
 	}
 };
 
-// --- Class names: a closed set (packages/theme/PLAN.md §7.4) — Web Awesome's utilities and the classes the theme's
+// --- Class names: a closed set (packages/theme/README.md, *Class names, a closed set*) — Web Awesome's utilities and the classes the theme's
 //     stylesheets declare. ---
 
 /** The words of a class string (a template literal's static text only, without the words an expression touches). */

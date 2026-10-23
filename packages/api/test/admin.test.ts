@@ -7,7 +7,7 @@ import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
-// B1 in workerd (packages/admin/README.md): the admin client, the Grant remembering its client, /admin/* for admin tokens
+// B1 in workerd (README.md, "Admin app"): the admin client, the Grant remembering its client, /admin/* for admin tokens
 // only, and roles from OWNERS. Sign-ins start as the GitHub callback starts them (Grant.begin), for either client.
 
 const OWNER = 9398474; // OWNERS in wrangler.jsonc's local vars

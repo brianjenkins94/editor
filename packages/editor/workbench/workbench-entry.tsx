@@ -703,7 +703,7 @@ function maybeBoot(): void {
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
 			bootSpan.end();
-			// The session timeline (packages/api OPERATIONS.md O6): commands run and panes shown, by id, to the shell.
+			// The session timeline (packages/api/README.md O6): commands run and panes shown, by id, to the shell.
 			void onWorkbenchActivity((event) => {
 				workbenchHub.publish("session.event", event);
 			});

@@ -1,4 +1,4 @@
-// The sign-in page (SIGN-IN.md): what this browser's attempt may use (GET /auth/attempt). GitHub is a link on; email is
+// The sign-in page (README.md, "Sign-in methods"): what this browser's attempt may use (GET /auth/attempt). GitHub is a link on; email is
 // a form for the address (POST /auth/email), then one for the code (POST /auth/email/verify), which answers with where
 // to go: the app's page, with our code. A password (POST /auth/password) signs in with the same address, and answers
 // the same way. The attempt itself is the cookie /auth/start set; nothing here holds anything.

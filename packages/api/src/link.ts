@@ -10,7 +10,7 @@ import { refusal, signedInRecently } from "./refusals.ts";
 import { pagesOf } from "./clients.ts";
 
 /**
- * Linking (SIGN-IN.md, "Linking accounts"): another way to sign in, added to the signed-in account. GitHub connected to
+ * Linking (README.md, "Linking accounts, and roles"): another way to sign in, added to the signed-in account. GitHub connected to
  * an account made by email; an email added to a GitHub account. Only while signed in, after a sign-in in the last 10
  * minutes (the action's own check: a stolen session can't quietly add its own way in), and each proven by its own check:
  * GitHub's authorize page, a code to the address. Never automatically by a matching address. A way in that's another

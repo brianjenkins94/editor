@@ -7,7 +7,7 @@ import { createTestHarness } from "wrangler";
 import { fingerprintOf, scrub, SURGE } from "../src/errors.ts";
 import { someone, testBrowser } from "./helpers.ts";
 
-// Errors (OPERATIONS.md, O4) in workerd: a request that fails answers with an id the person can quote; the error is
+// Errors (README.md, O4) in workerd: a request that fails answers with an id the person can quote; the error is
 // recorded under it, grouped, redacted, with its route, release and sign-in; the owner hears of a new group and of a
 // surge; the admin app finds it by group or by the quoted id.
 

@@ -64,7 +64,7 @@ if (isolated && window.parent === window) {
 
 		// An uncaught error, from any realm (the error tap's records carry its file and line; a rejection says so; the
 		// workbench logs its own as "uncaught error"): to the shell, which reports it with its sign-in, if any, and shows
-		// its id (shell/reporting.ts; packages/api OPERATIONS.md O6).
+		// its id (shell/reporting.ts; packages/api/README.md O6).
 		const attrs = (record.attrs ?? {}) as { "src"?: unknown; "line"?: unknown; "stack"?: unknown; "message"?: unknown; "reason"?: unknown };
 
 		if (record.level === "error" && ("src" in attrs || record.message === "uncaught error" || record.message === "unhandled rejection" || record.message.startsWith("unhandledrejection: "))) {

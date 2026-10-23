@@ -28,7 +28,7 @@ const signingKey = (env: Bindings): JWK => JSON.parse(env.SIGNING_JWK) as JWK;
 export const nonce = (env: Bindings): ReturnType<typeof nonces> => nonces(env.NONCE_KEY);
 
 /** How a sign-in's client differs from how it's known, the first time each way that matters is seen (Grant.use):
- *  recorded by name and how, never the values (BEHAVIOR.md). */
+ *  recorded by name and how, never the values (README.md, "Behavior"). */
 async function recordChanged(context: Context<AppEnv>, subject: Subject, changed: Difference[]): Promise<void> {
 	for (const difference of changed) {
 		await audit(context.env, "client_changed", subject, await origin(context), { "reason": `${difference.strength}: ${difference.name} ${difference.kind}`, "detail": await described(context.env, context.req.method, new URL(context.req.url)) });
@@ -103,7 +103,7 @@ export async function tokenEndpoint(context: Context<AppEnv>): Promise<Response>
 		return oauthError(context, "invalid_grant", "no such grant");
 	}
 
-	// The client as it is now (BEHAVIOR.md): the sign-in's first redemption remembers it; a refresh is compared with it.
+	// The client as it is now (README.md, "Behavior"): the sign-in's first redemption remembers it; a refresh is compared with it.
 	const print = await fingerprint(context.env, grant.id, context.req.raw.headers);
 	let changed: Difference[] = [];
 	const proof = await verifyProof({ "method": "POST", "url": context.req.url, "proof": context.req.header("dpop") }, {
@@ -184,7 +184,7 @@ async function unauthorized(context: Context<AppEnv>, error: "invalid_token" | "
  * Who's signed in, by DPoP: `Authorization: DPoP <access token>` (ours, unexpired, bound to a key), a proof from that key
  * for this request with the access token's hash and a current nonce, a jti the grant hasn't seen, and a live grant. The
  * sign-in, or the 401 (recorded) that says why not. Its client is compared with how the sign-in's client is known
- * (BEHAVIOR.md), and a difference that matters is recorded the first time it's seen; and what it's doing (its action,
+ * (README.md, "Behavior"), and a difference that matters is recorded the first time it's seen; and what it's doing (its action,
  * the matched route's template) is the next step of the sign-in's chain (B8).
  */
 export async function signedIn(context: Context<AppEnv>): Promise<{ "user": string; "grant": string; "client": unknown } | Response> {
@@ -266,7 +266,7 @@ const sessionFor = (client: string) => createMiddleware<AppEnv>(async (context, 
 
 	await watch(context, next);
 
-	// Its sign-in's timeline (OPERATIONS.md O5): what it was (the action, as the behavior model names it), how it went,
+	// Its sign-in's timeline (README.md O5): what it was (the action, as the behavior model names it), how it went,
 	// how long, its trace. After the answer, not before it.
 	const recorded = context.env.GRANTS.get(context.env.GRANTS.idFromString(signed.grant)).record({
 		"route": actionOf(context.req.method, new URL(context.req.url), routePath(context, -1)),

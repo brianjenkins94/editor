@@ -1,6 +1,6 @@
 /**
  * @brianjenkins94/vscode-theme — the theme's look, Web Awesome as VS Code (packages/theme/src/vscode-theme.ts),
- * published (PLAN.md §10): importing it applies it where the page is (VS Code's document, a webview, or anywhere else,
+ * published (packages/theme/README.md, *Published components*): importing it applies it where the page is (VS Code's document, a webview, or anywhere else,
  * following the system's mode there), and `vscodeTheme(element)` applies it for another. util-publish bundles it from
  * there.
  *

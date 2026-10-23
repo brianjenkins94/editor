@@ -7,7 +7,7 @@ import { actionOf, differences, FLOWS, proxied, START, surprisal } from "../src/
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
-// B7 (BEHAVIOR.md): actions as templates, probes, and a sign-in's client fingerprint, in workerd. Sign-ins start as the
+// B7 (README.md, "Behavior"): actions as templates, probes, and a sign-in's client fingerprint, in workerd. Sign-ins start as the
 // GitHub callback starts them (Grant.begin).
 
 const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };

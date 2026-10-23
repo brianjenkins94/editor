@@ -1,5 +1,5 @@
 /**
- * The admin app's pages (README.md, "The UI"): an overview of cards, then native tables (Web Awesome's native styles) of
+ * The admin app's pages (packages/api/README.md, "The UI"): an overview of cards, then native tables (Web Awesome's native styles) of
  * users, one user, sign-ins and the audit log. Each reads the admin API; what the signed-in user's roles don't allow, the
  * API refuses and the page says so. One write (B6): ending a sign-in, after a confirm.
  */
@@ -25,7 +25,7 @@ function Deleted({ at }: { "at": number | null }) {
 
 interface Session { "id": string; "client": string; "label": string | null; "createdAt": number; "lastUsedAt": number; "revokedAt": number | null; "current": boolean; "userId"?: string; "githubId"?: number | null }
 
-/** A sign-in as /admin/unusual answers it (packages/api/BEHAVIOR.md, B8): its score, and what it did that the editor doesn't. */
+/** A sign-in as /admin/unusual answers it (packages/api/README.md, B8): its score, and what it did that the editor doesn't. */
 interface Unusual extends Session {
 	"score": { "mean": number; "steps": number; "top": { "from": string; "to": string; "gap": number; "bits": number }[]; "updatedAt": number };
 	"flags": Record<string, number>;
@@ -397,7 +397,7 @@ export function UnusualPage() {
 	return (
 		<section class="wa-stack wa-gap-l">
 			<h1 class="wa-heading-xl">Unusual sign-ins</h1>
-			<p class="wa-color-text-quiet">Each sign-in's steps, scored against what sign-ins usually do next (packages/api/BEHAVIOR.md): the mean surprise a step, in bits, highest first. Steps and calls are templates; no values, repositories or contents.</p>
+			<p class="wa-color-text-quiet">Each sign-in's steps, scored against what sign-ins usually do next (packages/api/README.md, "Behavior"): the mean surprise a step, in bits, highest first. Steps and calls are templates; no values, repositories or contents.</p>
 			<Loading read={read}>{() => (read.data!.sessions.length === 0 ? <p class="wa-color-text-quiet">Nothing scored yet: sign-ins are scored an hour after they're used.</p> : <SessionRows sessions={read.data!.sessions} withUser={true} columns={columns} />)}</Loading>
 		</section>
 	);

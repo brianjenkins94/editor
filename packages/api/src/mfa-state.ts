@@ -1,7 +1,7 @@
 import type { Bindings } from "./env.ts";
 
 /**
- * Whether a user has two-factor on, and how (SIGN-IN.md, "MFA, optional"): an authenticator app (C5, `totp`), or a code
+ * Whether a user has two-factor on, and how (README.md, "Two-factor"): an authenticator app (C5, `totp`), or a code
  * by email after a password (C6, `email_mfa`). Read where a sign-in decides whether to ask for a second step (src/email.ts,
  * src/password.ts) and by the account page; changed only in src/mfa.ts.
  */

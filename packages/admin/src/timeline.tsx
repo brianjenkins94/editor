@@ -1,5 +1,5 @@
 /**
- * A sign-in's page (packages/api/OPERATIONS.md, "Session timelines"; O5): who and how, and its timeline: every request
+ * A sign-in's page (packages/api/README.md, O5): who and how, and its timeline: every request
  * made through it, what the editor said happened (O6), its audit rows and its errors, in order, from GET /admin/sessions/:id/timeline. What a signed-in
  * person's session did, for looking into their problem: never a screen, code, keystrokes or file contents.
  * `sessions:replay`; reading it is audited, as every admin read is.

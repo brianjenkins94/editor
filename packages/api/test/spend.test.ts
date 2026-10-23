@@ -6,7 +6,7 @@ import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
 import { testBrowser } from "./helpers.ts";
 
-// The cost guard (OPERATIONS.md, O2) in workerd, against a stand-in for Cloudflare's GraphQL Analytics that reports
+// The cost guard (README.md, O2) in workerd, against a stand-in for Cloudflare's GraphQL Analytics that reports
 // whatever usage the test says: the hourly check prices it, emails the owner past half the budget (once a day), turns
 // the kill switch on at the budget, doesn't fight a person who turned it off (until double), and says when it's blind.
 

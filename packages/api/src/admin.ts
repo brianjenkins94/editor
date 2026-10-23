@@ -19,7 +19,7 @@ import { errorGroupEndpoint, errorOccurrenceEndpoint, errorsEndpoint, sourceMapE
 import { timelineEndpoint } from "./timeline.ts";
 
 /**
- * The admin API (packages/admin/README.md, "The admin API"), mounted at /admin. Only tokens issued to the `admin` client
+ * The admin API (README.md, "The admin API"), mounted at /admin. Only tokens issued to the `admin` client
  * reach it, and each route names the permission it requires (`requires`, src/rbac.ts), so this file is also the
  * access-control table. Every request that's answered is recorded (`admin_access`): who looked at what is itself part of
  * the security record. Refusals are recorded where they happen (`auth_refused`).
@@ -67,7 +67,7 @@ admin.post("/switches", requires("maintenance:switch"), async (context) => {
 	return context.json({ "paused": await setSwitch(context.env, name, turn === "pause", reason, `user:${context.get("user")}`) });
 });
 
-/** The kill switch (OPERATIONS.md): `turn` "on" or "off", with a `reason` (on). The owner's only. */
+/** The kill switch (README.md, O1): `turn` "on" or "off", with a `reason` (on). The owner's only. */
 admin.post("/maintenance", requires("maintenance:switch"), async (context) => {
 	const form = await context.req.parseBody();
 	const turn = form["turn"];
@@ -130,7 +130,7 @@ admin.get("/sessions", requires("sessions:read"), async (context) => {
  * The audit log, newest first, filtered as `npm run audit` filters it: `event`, `user`, `grant`, `ip` (a hash),
  * `suspicious` (everything but the everyday record), `since` (`24h`, `7d`), and `before` (an id, for the next page).
  * And `repo` (`owner/name`): the proxy's calls about that repository, found by hashing its name as the log does
- * (BEHAVIOR.md); the log itself never names one.
+ * (README.md, "Behavior"); the log itself never names one.
  */
 admin.get("/audit", requires("audit:read"), async (context) => {
 	const query = context.req.query();
@@ -178,7 +178,7 @@ admin.route("/account", accountRoutes());
 /** Cloudflare's analytics of the zone and the Workers (src/traffic.ts), through the API's own read-only token. */
 admin.get("/traffic", requires("traffic:read"), trafficEndpoint);
 
-/** The cost guard's estimate (src/spend.ts, OPERATIONS.md O2): the last 24 hours by meter, the budget, 14 days by day. */
+/** The cost guard's estimate (src/spend.ts, README.md O2): the last 24 hours by meter, the budget, 14 days by day. */
 admin.get("/spend", requires("traffic:read"), spendEndpoint);
 
 /** What our email did (src/mail-report.ts): codes sent, delivered and not, sign-ins by email, refusals; counts only. */
@@ -191,7 +191,7 @@ admin.get("/inbox", requires("mail:read"), inboxEndpoint);
  *  It sends a real email, so it's a permission of its own. */
 admin.post("/mail/smoke", requires("mail:test"), async (context) => context.json(await smokeTest(context.env, context.executionCtx)));
 
-/** Errors (src/errors.ts, OPERATIONS.md O4): the groups, a group's occurrences, one occurrence by the id a person quoted. */
+/** Errors (src/errors.ts, README.md O4): the groups, a group's occurrences, one occurrence by the id a person quoted. */
 admin.get("/errors", requires("errors:read"), errorsEndpoint);
 
 admin.get("/errors/occurrence/:id", requires("errors:read"), errorOccurrenceEndpoint);
@@ -213,7 +213,7 @@ admin.get("/architecture", requires("architecture:read"), architectureEndpoint);
 const FLAGS = ["probe", "proxy_denied", "client_unusual", "client_changed"];
 
 /**
- * The sign-ins whose transitions surprised the model most (BEHAVIOR.md, B8 and B9): mean bits a scored step, highest
+ * The sign-ins whose transitions surprised the model most (README.md, B8 and B9): mean bits a scored step, highest
  * first, each with its most surprising transitions (templates only) and how many times it did what the editor doesn't
  * (B7's rows). Only sign-ins with `min` scored steps (default 3): one odd step says little.
  */
@@ -240,7 +240,7 @@ admin.get("/unusual", requires("behavior:read"), async (context) => {
  * user's record), and the admin's (`admin_revoked`, naming the sign-in and whose it was; never routine, so it's kept as
  * long as a refusal is and shows among the suspicious).
  */
-/** A sign-in's timeline (src/timeline.ts, OPERATIONS.md O5): its requests, audit rows and errors, in order. */
+/** A sign-in's timeline (src/timeline.ts, README.md O5): its requests, audit rows and errors, in order. */
 admin.get("/sessions/:id/timeline", requires("sessions:replay"), timelineEndpoint);
 
 admin.post("/sessions/:id/revoke", requires("sessions:revoke"), async (context) => {

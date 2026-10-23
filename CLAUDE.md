@@ -2,12 +2,12 @@
 
 ## Styling
 
-All styling goes through `packages/theme` (its README is the vocabulary; PLAN.md is why). ESLint enforces it, and its
+All styling goes through `packages/theme` (its README is the vocabulary, and the why after it). ESLint enforces it, and its
 messages name what to use instead.
 
 - **Components:** Web Awesome's, imported from `theme/components/<name>` (the allowed set is that folder;
   [Web Awesome's docs](https://webawesome.com/docs/components/) describe each), and the theme's own composed ones
-  (`theme/app-window`), which with the recipes publish as packages from `components/<name>` (PLAN.md §10). Never `@awesome.me/webawesome` directly, and never a native element Web Awesome has a
+  (`theme/app-window`), which with the recipes publish as packages from `components/<name>` (the README's *Published components*). Never `@awesome.me/webawesome` directly, and never a native element Web Awesome has a
   complement for.
 - **Layout and type:** Web Awesome's utility classes (`wa-stack`, `wa-cluster`, `wa-gap-*`, `wa-heading-*`, …), then
   the theme's recipes, functions that return a class: `toolbar()`, `caption()`, `frame()`, `code()` from

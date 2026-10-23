@@ -120,9 +120,10 @@ test("evidence: a preview run, across a hot update", async () => {
 	assert.ok(found.lines.some((line) => line.kind === "branch"), "the if's arms");
 });
 
-// A breakpoint in a page's code is a recorded stop (RUNNING.md, step 5): the page can't stop, so each time the line runs
-// what's in scope is recorded — previewed then — and shown in the margin, a column per time it ran, with the event the
-// page was handling. Set on a running app, its file is re-instrumented and hot-updated; no framework needed.
+// A breakpoint in a page's code is a recorded stop (RUNNING.md, *A breakpoint in a page is a recorded stop*): the page
+// can't stop, so each time the line runs what's in scope is recorded — previewed then — and shown in the margin, a
+// column per time it ran, with the event the page was handling. Set on a running app, its file is re-instrumented and
+// hot-updated; no framework needed.
 test("recorded stops: a breakpoint in a page's handler records its scope each time it runs", async () => {
 	const workbench = session.workbench();
 	const file = "/workspace/stopsapp/src/main.ts";
@@ -191,8 +192,8 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 		assert.ok(values.every((row) => row.line === 7), "on the breakpoint's line");
 		assert.equal(at("next", 0), undefined, "not yet set: its own statement");
 
-		// Stepping a recorded handler (RUNNING.md, step 6): the second click's call, replayed in the debugger — stopped at
-		// the stop on what it read then, and stepped on.
+		// Stepping a recorded handler (RUNNING.md, *Stepping a recorded handler*): the second click's call, replayed in the
+		// debugger — stopped at the stop on what it read then, and stepped on.
 		await eventually("a replay started", async () => (await workbench.evaluate((path) => globalThis.__editor.api.commands.executeCommand("tsval.stepRecordedStop", { "file": path, "n": 2 }), file)) || undefined);
 
 		const replay = await eventually("stopped at the stop", async () => (await session.request("debug.sessions", undefined, 5000)).find((each) => each.name.endsWith("(recorded)") && each.state === "stopped"));
@@ -266,8 +267,8 @@ test("preview prompt: Rule… makes the rule in the Rules view, and the call wai
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// An app's file runs the app (RUNNING.md, step 4): its code runs in its page, so Run starts its dev script — the dev server
-// a run, its preview open — rather than stepping the file here; Run again shows the preview it already has.
+// An app's file runs the app (RUNNING.md, *Apps*): its code runs in its page, so Run starts its dev script — the dev
+// server a run, its preview open — rather than stepping the file here; Run again shows the preview it already has.
 test("run: an app's file runs the app — its dev server and its preview", async () => {
 	const apps = async () => (await session.request("runs.list", undefined, 5000)).filter((run) => run.title === "npm run dev" && run.cwd === "/workspace" && run.state === "running");
 	const app = async () => (await apps())[0];
@@ -295,7 +296,8 @@ test("run: an app's file runs the app — its dev server and its preview", async
 	}
 });
 
-// A service from the terminal runs as every run does (RUNNING.md, step 3): in the debugger, its own timers keeping it going.
+// A service from the terminal runs as every run does (RUNNING.md, *Output goes where it was started*): in the debugger,
+// its own timers keeping it going.
 test("node script: a service runs in the debugger, and stopping it leaves the previews up", async () => {
 	await session.terminal(`echo "setInterval(() => console.log('tick'), 300);" > forever.js && node forever.js`, { "fresh": true });
 	await session.until("its debug run", hasLabel("bridge", "debug-worker", /^bridge\.ready$/u));
@@ -407,8 +409,8 @@ test("localhost: a preview's request for another port reaches its server, stream
 	});
 });
 
-// What a run read of the workspace is recorded (RULES.md, slice 2), as a preview's fetches are: by the path as the script
-// wrote it — what a stand-in asks for — so a rule can give a run what an earlier one read.
+// What a run read of the workspace is recorded (RUNNING.md, *A call's result*), as a preview's fetches are: by the path
+// as the script wrote it — what a stand-in asks for — so a rule can give a run what an earlier one read.
 test("record: a node service's reads of the workspace, kept to be given back", async () => {
 	const workbench = session.workbench();
 	const rates = "{ \"US\": 0.07, \"CA\": 0.13 }\n";

@@ -1,5 +1,5 @@
 /**
- * The right-hand side (packages/editor/LIVE-VALUES.md): a pane beside every editor showing a file, each entry beside
+ * The right-hand side (packages/editor/RUNTIME-EVIDENCE.md, *Live values*): a pane beside every editor showing a file, each entry beside
  * the span of lines it's about. The consumer renders an entry into the element it's handed (`showPane`'s `render`);
  * this frame only places it — and makes Monaco the grid's row sizer: an entry taller than its span gets a view zone
  * after the span's last line as tall as the difference, so the code below moves down by that much and no entry spills
@@ -9,7 +9,7 @@
  *
  * Entries can be grouped (`groups`): a group is a card drawn around the lines it spans — behind its entries, from its
  * first line's top to its last line's bottom, view zones included — with a label its consumer renders (through `render`,
- * handed the group) on its bottom border, in the blank line between steps; the cursor in it lights it. The program's projection (packages/editor/LIVE-VALUES.md, *Projections*): a card per
+ * handed the group) on its bottom border, in the blank line between steps; the cursor in it lights it. The program's projection (packages/editor/RUNTIME-EVIDENCE.md, *Projections*): a card per
  * step, several statements long, Automator's look, its values still level with their lines.
  *
  * The pane has a gutter column of its own too, right of the line numbers: a mark per line the consumer gives (`marks`:
@@ -26,7 +26,7 @@
  *
  * The pane's first line is reserved: while a pane shows, the editor has a line's padding above its first line (given
  * back when the pane goes), and the pane puts a strip of tabs there — the views the consumer gives (`showPaneViews`): the
- * margin as it is, and the program's other projections (packages/editor/LIVE-VALUES.md, *Projections*). The strip is pinned: it stays at the top as the
+ * margin as it is, and the program's other projections (packages/editor/RUNTIME-EVIDENCE.md, *Projections*). The strip is pinned: it stays at the top as the
  * code scrolls, the pane's rows passing under it.
  *
  * Runs (RUNNING.md, unattended runs): the strip ends with a ball for each run of the file the consumer keeps
