@@ -10,7 +10,7 @@
  * Served over the hub, to bablr.ts: `bablr.verdict` and `bablr.editGroups` (cosmetic-classifier.ts); `bablr.spans`,
  * every span of a source, from its cached parse (below); and `bablr.pick`, the span standing for each of a text's
  * ranges, from its spans (the runtime evidence's span ids for a run's statements); and `bablr.follow`, where a span of
- * one version of a text went in another (a span annotation re-placed from its baseline, SPAN-ANNOTATIONS.md); and for
+ * one version of a text went in another (a span annotation re-placed from its baseline, RUNTIME-EVIDENCE.md, *Durable annotations on spans*); and for
  * annotations themselves, `bablr.refer` (references to the spans standing for ranges) and `bablr.resolve` (where
  * references' spans are in a text now — silo's resolver, over the text's span shapes).
  * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so a cancelled call's signal lands

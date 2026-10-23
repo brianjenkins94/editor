@@ -1,5 +1,5 @@
 /**
- * ARCHITECTURE.md's diagram is the tour's (DISCOVERED-ARCHITECTURE.md): rendered from what the tour's shards saw together
+ * ARCHITECTURE.md's diagram is the tour's (ARCHITECTURE.md, *Discovered, not declared*): rendered from what the tour's shards saw together
  * (architecture-tour-*.mjs, each keeping its session's in $TMPDIR/architecture-tour-seen/). Run after them. A local run
  * rewrites the block — a change to the editor shows up as a change to it, to commit with the change; in CI (the
  * architecture workflow, once its shards' are downloaded) a block that differs from a fresh tour's fails.

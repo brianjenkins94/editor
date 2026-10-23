@@ -3,7 +3,7 @@
  * way): natively on almostnode (a real run today), on tsval bare, and on tsval as the debug worker runs it (coverage, the
  * profile, observed sites, the value trace). Workloads: pure computation in the program's code; data shuffled mostly by
  * built-ins; a server answering requests (its handler stepped, called from almostnode's http); and a build-like run
- * whose heavy work is in a package (native under tsval too: MODULES.md).
+ * whose heavy work is in a package (native under tsval too: packages/tsval/README.md, *Modules*).
  *
  *   node --experimental-strip-types packages/editor/bench/running.ts [rounds]
  */

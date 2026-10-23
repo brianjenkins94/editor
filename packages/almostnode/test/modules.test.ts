@@ -1,5 +1,5 @@
 /**
- * The module system a host shares (MODULES.md): almostnode resolves — built-ins, packages, the program's own files — and
+ * The module system a host shares (packages/tsval/README.md, *Modules*): almostnode resolves — built-ins, packages, the program's own files — and
  * a host may evaluate the program's files its own way (`evaluateProgram`), give the program's code built-ins of its own
  * (`builtinFor`), and put a module it evaluated in the cache (`register`).
  */

@@ -388,7 +388,7 @@ export function declaredBetween(first: string, second: string): { "type": "hub" 
 		return { "type": "hub" };
 	}
 
-	// Discovered rather than declared (DISCOVERED-ARCHITECTURE.md): between extensions is VS Code's command surface, and a
+	// Discovered rather than declared (ARCHITECTURE.md, *Discovered, not declared*): between extensions is VS Code's command surface, and a
 	// store is what's written to it and read from it.
 	if (isExtensionNode(first) && isExtensionNode(second)) {
 		return { "type": "discovered", "kind": "commands" };
@@ -695,7 +695,7 @@ export function isExtensionNode(id: string): boolean {
 }
 
 /**
- * A hub's components, discovered (DISCOVERED-ARCHITECTURE.md): its subscriptions grouped by the function that registered
+ * A hub's components, discovered (ARCHITECTURE.md, *Discovered, not declared*): its subscriptions grouped by the function that registered
  * them (the hub's `sites`), or — where no name survived the build — by their subject's namespace. A call reads as
  * `name()`; an RPC client's own reply channel is machinery, not a component's.
  */
@@ -752,7 +752,7 @@ export function isStoreNode(id: string): boolean {
 }
 
 /** What the editor keeps, discovered: each store — a tool's files by shape, or an IndexedDB database — with who wrote it
- *  and who read it, from what was observed (DISCOVERED-ARCHITECTURE.md). */
+ *  and who read it, from what was observed (ARCHITECTURE.md, *Discovered, not declared*). */
 export function discoveredStores(observed: { "channels": { "a": string; "b": string; "labels": Map<string, unknown> | Record<string, unknown> }[] }): { "store": string; "writers": string[]; "readers": string[] }[] {
 	const stores = new Map<string, { "writers": Set<string>; "readers": Set<string> }>();
 	const touch = (store: string, by: string, operation: string): void => {
@@ -839,7 +839,7 @@ function writesStore(operation: string): boolean {
 }
 
 /**
- * ARCHITECTURE.md's diagram, rendered from what a tour observed (DISCOVERED-ARCHITECTURE.md) — nothing declared but where
+ * ARCHITECTURE.md's diagram, rendered from what a tour observed (ARCHITECTURE.md, *Discovered, not declared*) — nothing declared but where
  * things run (the containers): every context, extension and store seen, and what joined them, as a Mermaid flowchart; then
  * the stores, with who writes and who reads each; then each hub's components by namespace (the registering functions'
  * names don't survive a minified build, and the diagram has to be the same from either). Instances read as one of a kind

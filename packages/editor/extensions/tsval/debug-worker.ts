@@ -72,7 +72,7 @@ function post(message: WorkerEvent): void {
 
 let sourceFile: ts.SourceFile | undefined;
 /** The session's live values (LIVE-VALUES.md): what each line bound, returned or chose, told to the adapter a few times
- *  a second, and before each stop and the end — by the program file they're in (MODULES.md), each its own record. */
+ *  a second, and before each stop and the end — by the program file they're in (packages/tsval/README.md, *Modules*), each its own record. */
 const live = new Map<ts.SourceFile, LiveRecord>();
 /** The program's files whose text the adapter has been told (with their first values): the entry's it has. */
 const toldSource = new Set<string>();
@@ -94,7 +94,7 @@ function liveIn(file: ts.SourceFile): LiveRecord {
 
 let liveTimer: ReturnType<typeof setInterval> | undefined;
 
-/** Where the run is: a program file and a 1-based line in it — the entry's, or another of the program's (MODULES.md). */
+/** Where the run is: a program file and a 1-based line in it — the entry's, or another of the program's (packages/tsval/README.md, *Modules*). */
 interface Place { "file": string; "line": number }
 
 /** 1-based lines pre-armed as capability breakpoints (policy said stop), by program file — so a stop there reports
@@ -107,7 +107,7 @@ let programFiles = new Map<string, ts.SourceFile>();
 let policy: Policy | undefined;
 /** The user's breakpoints (1-based lines), armed beside the capability lines. */
 let userLines: number[] = [];
-/** The user's breakpoints in the program's other files (MODULES.md), by file. */
+/** The user's breakpoints in the program's other files (packages/tsval/README.md, *Modules*), by file. */
 let fileLines = new Map<string, number[]>();
 /** The statements rules set something after (RULES.md: *set variables.<name>*, *at* a place), by program file and
  *  1-based line: armed as breakpoints that aren't stops — the statement runs, the sets are made, the run goes on. */
@@ -336,7 +336,7 @@ function capabilitySurface(fileName: string, args: string[], real?: Runtime, whe
 	return { "globals": { ...standins.globals, "console": guestConsole(), "process": process }, "modules": standins.modules };
 }
 
-/** The program's module system (MODULES.md): almostnode on the shared workspace — resolution, the module graph, the
+/** The program's module system (packages/tsval/README.md, *Modules*): almostnode on the shared workspace — resolution, the module graph, the
  *  cache — with tsval evaluating the program's own files (programModules). A package's built-ins are almostnode's, its
  *  writes refused (a library's effects aren't stepped or asked about); the program's are its stand-ins (programBuiltins:
  *  what a capability stop is about). Loaded at a run's start. */
@@ -1647,7 +1647,7 @@ function tracedPlace(node: ts.Node): { "file": ts.SourceFile; "line": number; "a
 	let place = tracedAt.get(node);
 
 	if (place === undefined) {
-		// Each in its own file: the entry's, or another of the program's (MODULES.md).
+		// Each in its own file: the entry's, or another of the program's (packages/tsval/README.md, *Modules*).
 		const file = node.getSourceFile();
 
 		place = { "file": file, "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "at": rangeOf(node) };
@@ -2168,7 +2168,7 @@ function hooksByFile(hooks: readonly SetHook[], entry: string): Map<string, Map<
 	return byFile;
 }
 
-/** A program launched for debugging: its module system ready first (almostnode: MODULES.md), then its machine — the entry
+/** A program launched for debugging: its module system ready first (almostnode: packages/tsval/README.md, *Modules*), then its machine — the entry
  *  a module of the program's, its files tsval's — armed and run to its first stop. */
 async function launchProgram(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): Promise<void> {
 	// tsval's event loop (steppedAsync with timers, a virtual clock and a seeded random): async code and timers run

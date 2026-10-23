@@ -1,5 +1,5 @@
 /**
- * The corpus of edit cases for durable span annotations (SPAN-ANNOTATIONS.md): a span referred to before an edit, the
+ * The corpus of edit cases for durable span annotations (RUNTIME-EVIDENCE.md, *Durable annotations on spans*): a span referred to before an edit, the
  * file after it, and where it should land — scored with silo's resolver (util/silo/annotations) over spans BABLR finds.
  * Add a case when a strategy or the policy changes, or when an annotation lands wrong: the bar is that nothing is ever
  * re-placed on its own onto the wrong span (`wrong` stays empty); asking the user is the safe failure.

@@ -16,7 +16,7 @@ unsaved buffers, the debugger at a stop, the Problems view, a preview's DOM, JSO
 and its help. A registry finds the folders (`import.meta.glob`), so adding one touches nothing else. Every list that
 enumerates commands or tools today (tab completion, the streaming regex, the `terminal_run` tool's description, docs) is
 derived from the registry instead of kept by hand. `silo features` recognizes both definitions, so the inventory and
-the derived history (CHANGE-HISTORY.md) track them for free.
+the derived history (packages/silo/README.md, *Derived history*) track them for free.
 
 ## The terminal
 

@@ -162,7 +162,7 @@ It gets **synchronous files through core** instead, each call answered by the br
 
 ## 3. Span annotations — done (2026-10-10)
 
-Placing something on code that survives edits and reformatting (SPAN-ANNOTATIONS.md): `editor.annotations.refer`,
+Placing something on code that survives edits and reformatting (RUNTIME-EVIDENCE.md, *Durable annotations on spans*): `editor.annotations.refer`,
 `resolve` and `spans`, commands the bridge registers.
 
 **The extension point** (packages/editor-api's `./annotations`): `annotations(vscode.commands)` gives typed `spans`,
@@ -305,7 +305,7 @@ what makes the second face possible.
    game — each rule a card around its function (what it's for each of), each condition → action on its `if`, each
    object, behavior and composite behavior on its declaration — placed by the span references anchoring gives them; the
    game's projection is cached until one of its files is saved. Its map and builder stay the webview view they are.
-   Core's placeholder tabs (Cards, Event sheet) went; Cards waits for the cards projection (PROJECTIONS.md). A view with
+   Core's placeholder tabs (Cards, Event sheet) went; Cards waits for the cards projection (LIVE-VALUES.md, *Projections*). A view with
    nothing for a file keeps its pane, so its tabs stay to switch back.
 5. ~~**The native face**~~ — done (2026-10-12): pane-native.ts draws the shown view's content with VS Code's own
    contribution points, the pane hidden — a row as an inlay hint (its label and latest value, every cell on hover),
@@ -316,7 +316,7 @@ what makes the second face possible.
 
 ## 5. The commands an extension may run (2026-10-14)
 
-Every command core answers that an extension may call — the list FEATURES-AS-EXTENSIONS.md's test holds a feature to.
+Every command core answers that an extension may call — the list *Features as extensions*' test (below) holds a feature to.
 A command not here is core's own, and an extension that calls one doesn't pass.
 
 | Command | Answered by | What it is |
@@ -331,19 +331,19 @@ A command not here is core's own, and an extension that calls one doesn't pass.
 | `editor.capability.decide(session, choice, rule?, give?)` | the bridge (capability-stops.ts) | a capability stop answered: `choice` a `CapabilityChoice` (editor-api) — allow, skip or deny for this call, this run or always; `rule`, a rule made in the Rule view; `give-once`, `give` in the call's place. What a choice means is the bridge's decider's |
 | `editor.debug.setValue(session, name, value)` | the bridge (debug-control.ts) | at a stop, a variable set to `value`, a literal as code writes it; the run goes on with it (the Margin's Mock… of a variable) |
 | `editor.metrics.read(since?)` | the bridge, from the metrics plane | `{ [source]: MetricsSample[] }`, oldest first: every context's samples (`$sys.metrics.<source>`) from the last few minutes, only those newer than `since` when it's given. `MetricsSample` is observability's type. The insights monitor reads it |
-| `typescript.tsserverRequest("_statements", { file })` | the capabilities extension's tsserver plugin | `{ body: { statements } }`: a file's top-level statements — range, the comment above, a title and detail, what each declares and its type — the Margin's cards (PROJECTIONS.md) |
+| `typescript.tsserverRequest("_statements", { file })` | the capabilities extension's tsserver plugin | `{ body: { statements } }`: a file's top-level statements — range, the comment above, a title and detail, what each declares and its type — the Margin's cards (LIVE-VALUES.md, *Projections*) |
 | `typescript.tsserverRequest("_types.at", { file, ranges })` | the capabilities extension's tsserver plugin | `{ body: { types: (string \| null)[] } }`: TypeScript's type of each range (`{ start, end }`, offsets), `null` where no node has it — and every `null`, or no answer, when the capabilities extension isn't there, so a caller degrades. Notes and insights' hovers read it |
 
 **Not for extensions:** `editor.arch.commands` — command-tap's (extensions/command-tap.ts), which core's build puts in
 every extension it bundles, so the architecture view sees which extension registers and calls what. A contributed
-extension isn't tapped, so the view doesn't see it; counting in core's command service instead is FEATURES-AS-EXTENSIONS'
-S8. `editor.pane.native.*` are the native pane face's own buttons.
+extension isn't tapped, so the view doesn't see it; counting in core's command service instead was dropped (*Features as
+extensions*, below). `editor.pane.native.*` are the native pane face's own buttons.
 
 **What agents ask** (debug-mcp's tools, over the hub) of an extension is answered by the bridge with that extension's
 command, from one fixed list (extensions/bridge/answers.ts): `margin.state` by the Margin's `margin.state`, `rules.state` by
 `silo.rules.list`. A hub request names an answer there, never a command.
 
-**Another extension's:** the capabilities extension answers the rules (FEATURES-AS-EXTENSIONS step 5a) — not core's, so
+**Another extension's:** the capabilities extension answers the rules (*Features as extensions*, below) — not core's, so
 not in the table; one that runs them is the capabilities extension's consumer, and degrades without it, as `_types.at`'s
 callers do. (The bridge's preview prompt doesn't: it saves its rule by editor-api's `./policy`, as the rest of the
 decider does.)
@@ -391,6 +391,57 @@ breaks is what the bridge reaches over the hub, because core isn't there:
 - **The browser runtime** — previews and their dev servers, the service worker's gate, just-bash, isomorphic-git →
   dropped for the real thing (Simple Browser, the terminal, git).
 - **Agent tools** → `languageModelTools` or an MCP server.
+
+## Features as extensions (2026-10-13 → 15)
+
+Each feature one folder, written as editor-contrib's template is: against VS Code's API, editor-api and the commands
+§5 documents, nothing else. A count of `packages/editor` (35k lines) had found most features spread over three to five
+folders; the event sheet, one folder, was the shape. Moving files doesn't get there — a feature's code sits in
+`workbench/` or the bridge because something it needs has no public way in — so the work was the missing seams.
+
+**The test.** A feature passes when it could ship in editor-contrib's place: its imports are `vscode`, editor-api and
+util; the commands it runs are VS Code's or §5's; its files load as a contributed extension's do. The shell's chrome,
+previews and the workbench's boot aren't VS Code augmentations and aren't held to it.
+
+**The seams, and where they ended:**
+
+- **S1, the loader** (done): every extension loads from a folder, its entry and each file its manifest's `files` lists
+  (workbench/extensions.ts); the build makes each of ours into `extensions/<name>/` (worker bootstraps, a tsserver plugin
+  with its engine, a webview's script).
+- **S2, core's libraries as packages** (done): what extensions imported from `shared/` is editor-api's (`./evidence`,
+  `./policy`, `./effects`, `./lifecycle`, `./cpuprofile`, `./gated-eval`, `./failures`, `./recorded`, `./probes`,
+  `./runtime-vfs`, `./runtime`, `./anchors`).
+- **S3, document what's used or replace it** (done): §5 lists every command an extension may run.
+- **S4, commands for the hub's services** (done): git as `editor.git.*` commands, so Source Control is
+  `extensions/source-control`; the agents' answers (`margin.state`, `rules.state`) by the owning extension's command
+  (bridge/answers.ts). Running's ~525 bridge lines stay: preview runs as debug sessions, the task provider, the
+  terminal's auto-attach and the run picker translate core's runtime into VS Code's run UI, which is the bridge's job.
+- **S5, the decider** (§7): deferred until a second decider needs it, so capabilities' decision logic (~780 lines:
+  decide.ts, coalesce.ts, stops' meanings, rule places) stays in the bridge.
+- **S6, run events for any extension** (done): VS Code hands every host each session's custom events, so the run
+  contract's `values`, `ended` and `ask` were public already; the Margin became `extensions/margin`, reading them
+  itself, and the bridge's republished subjects went.
+- **S7, a preview page as a runtime** (done for stops): the bridge tells a page's recorded stops as `values` on its
+  preview's `production` session (the contract's `replace`).
+- **Rules** (done, not as planned): a webview can't paint in this workbench (one origin, the coi-serviceworker), so the
+  Rule view is core's real-DOM view and one core command edits any rule (`editor.rules.edit`, §5); the rules, their
+  places and the tree's commands are the capabilities extension's; a rule's sentence is editor-api's `./rules`.
+- **tsval keeps the workspace buffer**, decided: a documented editor-only privilege (§2) — a mailbox call costs
+  ~0.5–0.7 ms and a run's loading makes hundreds. The realm lint lets it import shared/workspace-runtime and
+  shared/zenfs-vfs only. **The architecture view stays in the workbench**, where the raw hub is. **Command counts stay
+  command-tap's**: core's command service can't tell which extension made a call.
+- **Left:** one pane view reading another's (the Margin's cards read coverage's marks by a function call, and coverage
+  calls `refreshView` rather than `editor.pane.refresh`); BABLR beyond annotations (the cosmetic verdict and edit groups
+  as commands, so the classifier and the edit history can become an extension).
+
+**What stays core.** `workbench/`: the boot, zen-fs and its overlays, the CDN `node_modules`, ATA, the git engine and
+service, BABLR's worker, the pane views' frame, the run registry, evidence's ledger, the runner, the terminal. The
+bridge: the uplink, the run contract's reader, runtime-fs, the annotation commands, metrics and parse status, and the
+crossings into core's own UI — about 2k lines, ~2.5k while the decider waits.
+
+**Holding the line.** The realm lint (root `eslint.config.js`) stops an extension reaching another's folder, a realm's,
+or `shared/` (only the bridge, core's, may). A feature that moves takes its tests, and core keeps no fallback for the
+old way.
 
 ## Later
 

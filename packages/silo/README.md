@@ -100,8 +100,7 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
    `capabilities/<user>.json` hold what the code can do and what it was seen doing (the capabilities extension's). How
    they relate isn't written down.
 4. **Two attributions of runs to features.** `coverage` (the command line) and `exercise` (the history extension) both
-   say which features ran. Both rest on the feature list, which is specific to this repo (CHANGE-HISTORY.md, "Ways in
-   beyond this repo").
+   say which features ran. Both rest on the feature list, which is specific to this repo (*Derived history*, below: why it's parked).
 5. **Which subcommands belong.** By the four jobs, all seven do: three for Track, two for Anticipate (with overlap),
    three for Remember, none for Gate. But they aren't grouped that way, the file's own header lists five of them, and
    `features` and `history` rest on the parked feature layer.
@@ -200,7 +199,7 @@ What this asks of the design:
 |---|---|---|---|
 | Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Makes the baseline from the registry as a project opens, and syncs it as dependencies change (the capabilities extension, in a worker of its own; the `silo.baseline` setting turns it off) | One package analysis, given a package's files however they were read (node_modules or a tarball): the slice of each package the code imports (the import surface, tree-shaken), as the prototype's audit did |
 | Track | `silo install` (nothing under a week old; reports what each upgrade added, and what your use of a package reaches more) | The resolver takes nothing under a week old; the Exceptions view shows growth and the runs' exceptions | The resolver's age rule, growth, `beyondBaseline` |
-| Remember | `silo coverage` (what committed runs ran); `features`/`history` stay, parked (CHANGE-HISTORY.md) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
+| Remember | `silo coverage` (what committed runs ran); `features`/`history` stay, parked (*Derived history*, below) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
 | Gate | `silo run <file>` (new): Node with silo's `--import` preload (below), every gated call decided by the policy, the run recorded as the editor does; asks at a terminal, fails where it can't ask (CI) | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |
 
 So the command line becomes: `install`, `run`, `coverage`, with `features` and `history` parked. `init` folds into
@@ -345,7 +344,7 @@ workspace; its imports resolve to the toolchain for the packages it carries, the
 
 Two uses for one record. **Selection:** run the tests a change could break, not all of them. **Features:** a test is a
 way in every repository already has, and its file and title name what it's for. That's what the feature layer lacked:
-its ways in are a list written for this repository (CHANGE-HISTORY.md, "Ways in beyond this repo").
+its ways in are a list written for this repository (*Derived history*, below: why it's parked).
 
 A spike (2026-10-22, scripts not kept) measured both. Coverage came from our own instrumentation, never V8's, because
 it has to run in the browser. Each module went through almostnode's `frameworks/instrument.ts`, the transformer the
@@ -422,6 +421,70 @@ Runs add three things:
 - **Answers for unknowns.**
 - **Counterexamples.** A write from a function judged pure means an assumption broke, which is a finding.
 - **Confidence.** Phrased as insights' suggestions are: "seen 4,000 times, never impure", not "pure".
+
+### Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)
+
+Commits are a poor record of change: they happen when tooling needs one (a push, CI, a deploy), so their messages become
+noise, and keeping a useful history takes discipline. Here **history is derived from what the code is and does, never
+written**, deterministically: fixed rules over computed facts, no model. Commits keep only their mechanical jobs
+(checkpoint, transport, CI trigger); nothing depends on their ids or messages, so it survives rebase, squash and
+force-push.
+
+Three layers, each a pure function of the code's snapshots and the runs against it:
+
+1. **Spans**, with an identity that follows them through moves and reformatting (BABLR; editor RUNTIME-EVIDENCE.md,
+   *Durable annotations on spans*). Snapshots are git commits, or the editor's edit bursts.
+2. **Features**: a way in (a command, view, setting, button, terminal command, URL parameter, agent tool, hub request or
+   subscription, a core module) plus the code it reaches. Introduced when its way in appears, changed when code it
+   reaches changes semantically, exercised when a run reaches it, removed when its way in goes.
+3. **The story**: fixed sentences grouped by feature ("Added command *Rules: New Rule*", "Renamed setting
+   `tsval.liveRuns` → `run.liveRuns`", "Tried the TestController coverage UI: added Oct 1, removed Oct 3").
+
+**The first replay** (2026-10-12): 706 first-parent commits in 12 seconds, each file version parsed once and cached by
+blob, no commit message read; its timeline wasn't kept (`silo history` writes it again). Oct 5–11's 116 commits became
+89 sentences by area; 33 groups of "tried and removed" told this repo's experiments, which no commit message lists
+(Preflight, comment annotations, the TestController coverage UI, the running status bar, Run with Inputs); the
+`packages/vscode` → `packages/editor` rename read as "Moved 111 features".
+
+Built since:
+- **Reach** (`graph.ts`): a declaration graph — top-level declarations, imports and module bodies, each with an AST
+  fingerprint so formatting isn't a change; edges are the names a declaration's code uses, imports resolved through
+  re-exports and the program's own packages' `exports`. A feature's roots are the names its registration uses (a local
+  of the registering function counts as what it's made from); a module body runs what it imports; workers' top-level
+  listeners and hub names built at run time are ways in too. Each snapshot walks changed declarations (not merely moved
+  ones) back to the features reaching them (`changed … via reach (file#name)`); one reaching five or more features is
+  told once ("Changed `createArchReporter`, which 26 features use"). Silent commits over the history went from 457 to
+  335 of ~720. Still to do: a call graph inside a declaration (using any name in a function reaches all of it).
+- **TypeScript 7 reads the code**, behind one seam (`graph.ts`'s `DeclarationGraph` and `Analyzer`): one compiler for a
+  whole replay, each snapshot a filesystem layer over the last, nothing checked out; the checker says what a name is.
+  It found 2,362 feature changes to oxc's 2,081 (oxc is gone since 2026-10-14). Its one blind spot: a method reached
+  through an interface-typed object resolves to the interface's member (the API has no "find implementations").
+- **Live from edits** (`extensions/history`): its tsserver plugin reads the program the in-browser TypeScript server
+  holds, unsaved edits included (`ts-analysis.ts`, `_history.read`), replays it on each pause and tells the History
+  output channel what changed. **Nothing derived from edits is kept** (decided 2026-10-12): once you commit, the commit
+  tells it; tries undone before any commit leave no trace.
+- **What runs say** (`exercise.ts`): **exercised** (a statement of its own code ran: its registration's handler and the
+  declarations it names, not what they reach further, nor the registering call), **dormant** (its file ran, its code
+  never did), **unobserved**. Evidence is on BABLR spans, placed by the editor's resolver; `exercise.ts` compares those
+  ranges with the TypeScript reading's, so analysis never touches BABLR.
+
+Where: lib's `util/silo` — `features.ts`, `graph.ts`, `history.ts`, `exercise.ts`, `ts-analysis.ts`, and in Node
+`typescript.ts` and `git-snapshots.ts`; the command line's `silo features [repo]` and `silo history [repo] [--since]
+[--until]` (`--json`); the editor's `extensions/history`.
+
+Not built: a feature's status and drift (the ledger, below); a history view by feature in place of the commit list;
+the derived sentences as the message of whatever commit the tooling needs.
+
+**Why it's parked: ways in beyond this repo.** A feature is a way in matched against a hand-written list of shapes
+(`features.ts`) that's this repo's — VS Code's APIs, the hub, MCP tools, buttons — and a shape it doesn't know reads
+as a removal (the terminal commands that moved to `command.ts` files show as "tried and removed"). Everything above it
+inherits that gap. Three layers would carry it further: what every package declares (`exports`, `bin`, `scripts`);
+presets switched on by dependencies (`vscode`, `@modelcontextprotocol/sdk`, `express`/`hono`, `commander`,
+`react-router`); a repo's own shapes declared rather than coded (`{ "facet": "hub request", "call": "serve", "name": 1 }`).
+Tests are a fourth: a way in every repository has, named by what it's for (*Which tests reach what*, above; NEXT.md,
+features from tests). Also open: **names** (code says `installLiveValues`, people say "live values"; manifests' labels
+help); **what counts as one feature** (features with the same reach are probably one). Prior art: Jujutsu (a change
+keeps its id across rewrites), Unison (history per definition), Smalltalk's changes log and ENVY, xit.
 
 ### The feature ledger: code keeps its place, or goes (designed 2026-10-12, not built)
 

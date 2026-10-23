@@ -560,7 +560,7 @@ async function mockVariable(uri: string, at: Range, cell: { "text": string; "kin
  *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
 interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[] }
 
-/** A step of the program (PROJECTIONS.md): statements written together, a card around them in the margin. */
+/** A step of the program (LIVE-VALUES.md, *Projections*): statements written together, a card around them in the margin. */
 interface Step { "fromLine": number; "toLine": number; "title": string; "detail": string; "declares": { "name": string; "type": string | null }[]; "body": boolean }
 
 /** Each file's top-level statements, by the document version they were read at. */
@@ -673,7 +673,7 @@ function ranOf(step: Step, marks: PaneMark[]): { "kind": string; "text": string 
 	return covered.every((mark) => mark.kind === "coverage-missed") ? { "kind": "missed", "text": "didn't run" } : { "kind": "partial", "text": "partly ran" };
 }
 
-/** The last run, step by step (PROJECTIONS.md: the run log): each step that ran, in the order it first did, with its
+/** The last run, step by step (LIVE-VALUES.md, *Projections*: the run log): each step that ran, in the order it first did, with its
  *  share of the run's work (the statements run in its code — the same every run) and any time it waited (a timer, on the
  *  event loop's clock) — or undefined, with no profile for these steps. */
 interface RunLog { "rows": { "card": number; "title": string; "statements": number; "waited": number }[]; "statements": number; "waited": number }
@@ -916,7 +916,7 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	const rows = rowsShown(session, text);
 	const asking = asks.get(uri);
 	const ending = ends.get(uri);
-	// The program's steps, a card around each (PROJECTIONS.md).
+	// The program's steps, a card around each (LIVE-VALUES.md, *Projections*).
 	const shown = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
 	const steps = read === undefined || shown?.getText() !== text ? [] : stepsOf(shown, read);

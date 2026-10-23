@@ -1,5 +1,5 @@
 /**
- * almostnode on the shared workspace, as a run has it (MODULES.md, step 4): the debug worker's (extensions/tsval/debug-worker.ts) — the
+ * almostnode on the shared workspace, as a run has it (packages/tsval/README.md, *Modules*): the debug worker's (extensions/tsval/debug-worker.ts) — the
  * workspace's zen-fs, the deploy base, cwd and built-ins, the program's globals; a listening server answered one way
  * (`answerServer`, the dev-server worker's for its dev servers too). What's passed in: the fs policy, where output goes,
  * the evaluator of the program's own files and its stand-ins. tsval's privilege (EXTENSION-POINTS 2: the workspace's

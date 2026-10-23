@@ -1,5 +1,5 @@
 /**
- * History — what your edits change, as you make them. Derived history (CHANGE-HISTORY.md, step 3) live: when you pause,
+ * History — what your edits change, as you make them. Derived history (packages/silo/README.md, *Derived history*: live from edits) live: when you pause,
  * the program as it now stands is read — by this extension's TypeScript server plugin (ts-plugin.js), with the server's
  * own TypeScript, edits not yet saved included — and replayed against the last reading (util/silo's Replayer). What a
  * pause changed (a feature added, removed, changed — through anything it reaches) is told in the History output channel.

@@ -96,7 +96,7 @@ rule*) — the same two buttons wherever the editor opens.
 - **A rule whose place is lost** shows broken in the Rules view (VS Code's own tree, the capabilities extension's);
   *Re-place at selection* — inline, or in the rule editor once it's opened — places it at the code selected in the
   editor (a span reference made from the selection, as the margin makes one).
-- **A rule placed in the code** (lib 20f01cb): *at* is a target whose argument is a span reference (SPAN-ANNOTATIONS.md),
+- **A rule placed in the code** (lib 20f01cb): *at* is a target whose argument is a span reference (RUNTIME-EVIDENCE.md, *Durable annotations on spans*),
   shown as a chip of its code, not typed. Before a run the adapter finds each rule's place in the text that runs
   (`editor.annotations.resolve` — through edits, as an authored annotation is) and hands the worker the lines; the worker
   arms them as breakpoints that aren't stops: the statement runs, then the rule's *set*s (`variables.<name>`) are made

@@ -9,7 +9,7 @@ guard that sees every value and every callable crossing from the host, an `impor
 async-invocation hook, fork, breakpoints, an optional TypeChecker — and takes no position on what a
 host does with them. (The capability canary that originally motivated those seams lives in its own
 repository.) [`COMPILE.md`](./COMPILE.md) is the compiled tier, parked; how the editor hosts tsval is in
-`packages/editor` (MODULES.md, RUNNING.md, LIVE-VALUES.md).
+`packages/editor` (RUNNING.md, LIVE-VALUES.md), and how its modules load is *Modules*, below.
 
 ## Requirements
 
@@ -141,6 +141,46 @@ const found = await explore(async (schedule) => {
 
 Guest→guest calls never touch the host stack, so a guard cannot be bypassed from inside the guest;
 `[].constructor.constructor` reaches the guard like any other read.
+
+## Modules: almostnode resolves, tsval evaluates
+
+How the editor finds and runs a program's modules, the same way whether it's run or debugged (2026-10-07; built). A
+first cut made tsval the host: the debug worker gave the entry its own `require`, and a tsval resolver decided per
+specifier, so there were two module systems that could disagree (on `exports`, extensions, cycles, the cache), and the
+program's other files ran natively, unstepped.
+
+**almostnode is the runtime**: module resolution, the graph and the cache, for a run and a debug run alike. **tsval is
+an evaluator** it hands the program's own files to — files under the workspace, outside `node_modules`. A package is
+never stepped; a program file always is, entry or not. Packages and built-ins are always native.
+
+- **almostnode** (`Runtime`, 0e8c9d8): `resolve(specifier, from) → { kind: "builtin" | "package" | "program", filename }`
+  (Node's algorithm, callable on its own); `loadNative`; an **evaluator hook** for `program` files; and `register
+  (filename, module)`, so a module tsval evaluated is one instance for everyone (a framework reading the user's config
+  gets the program's `exports`). A package requiring a program file calls the hook synchronously, and tsval runs the
+  file in a nested run, stepped only through a breakpoint in it. **Built-ins by who asks**: `require("fs")` from a
+  program file in a debug run is the capability stand-in (inert, gated); from a package, the real shim with writes
+  refused. The stand-ins are almostnode built-in overrides for program files.
+- **tsval** (src/modules.ts): a machine over several files. A frame knows its file (`location()` is `{ file, line,
+  character }`; breakpoints, `coverage`, `profile`, `trace`, `observe` and `throwSite` by file). A module frame's scope
+  holds `module`, `exports`, `require`, `__filename`, `__dirname`. `require` is an intrinsic: a program file not yet
+  cached is registered (its `exports` before it runs, so cycles see the partial one) and its frame pushed **on the main
+  stack** — stepping goes into it and a fork carries it; anything else loads natively. ESM: program-file imports
+  evaluate first, depth-first, each once, then bind; ES exports are getters on `module.exports`. The loader is an
+  interface (`VMOptions.modules`: `resolve`, `loadNative`, `register`), so tsval knows nothing of almostnode; a host
+  with none keeps single-file behaviour.
+- **The editor's debug worker** starts the entry through almostnode with tsval as evaluator (loading almostnode costs a
+  launch ~30 ms); the workspace buffer comes in the launch. Each file's values, cards, run log, coverage and evidence
+  are its own (a live record per file; each file that ran folded into its own `.silo/evidence` file). One runtime setup
+  (`shared/workspace-runtime.ts`) serves every run: one cwd, deploy base and built-ins, a listening server found and
+  answered one way. What stays per run is policy (fs calls asked about, stand-ins) and its event loop.
+
+**The event loop's boundary.** tsval's deterministic loop covers stepped code. A package's own async work (its timers,
+its promises) runs on the host's loop: what a package does between the program's calls into it isn't the program's to
+order. A package's callback into a program function runs as a nested job.
+
+Open: an importer binds a named import when it links, not live as ESM's bindings are (a namespace import reads live);
+a file's run log counts its own steps, so a call's line in the importer doesn't include the work in the file it calls;
+capability stops and placed rules are per file, armed as it loads, but `process.argv`'s row and Mock stay on the entry.
 
 ## TypeScript's own test cases
 

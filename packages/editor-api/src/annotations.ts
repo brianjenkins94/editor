@@ -1,6 +1,6 @@
 /**
  * Span annotations: placing something on code so it stays on that code through edits, reformatting, a branch switch and
- * a move to another file (SPAN-ANNOTATIONS.md in brianjenkins94/editor). The editor's BABLR does the work — one worker,
+ * a move to another file (RUNTIME-EVIDENCE.md's *Durable annotations on spans*, in brianjenkins94/editor). The editor's BABLR does the work — one worker,
  * its parses cached by content — and an extension reaches it through three commands the bridge registers, which these
  * call:
  *

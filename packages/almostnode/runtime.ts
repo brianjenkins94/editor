@@ -1644,7 +1644,7 @@ ${code}
 	/** `specifier` required as a module in `fromDir` would (the runtime's cwd by default), asked for by `requester` (the
 	 *  program, by default: a host asks on its behalf) — a built-in, a package from node_modules, a file on the VFS (a
 	 *  program file through `evaluateProgram`, when there is one). The module system for a host that runs the program's
-	 *  code its own way (the tsval debugger, MODULES.md). */
+	 *  code its own way (the tsval debugger, packages/tsval/README.md, *Modules*). */
 	require(specifier: string, fromDir: string = this.process.cwd(), requester: Requester = "program"): unknown {
 		return createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache, requester)(specifier);
 	}

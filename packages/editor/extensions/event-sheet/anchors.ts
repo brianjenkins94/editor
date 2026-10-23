@@ -2,7 +2,7 @@
  * Durable anchoring — the BABLR half of the projection, and BABLR's actual strength.
  *
  * The recognizer (TS AST) gives each node a source RANGE, but ranges are fragile: any edit above a node shifts them. So
- * each node gets a REFERENCE to the BABLR span standing for its range (SPAN-ANNOTATIONS.md): the span's content-addressed
+ * each node gets a REFERENCE to the BABLR span standing for its range (RUNTIME-EVIDENCE.md, *Durable annotations on spans*): the span's content-addressed
  * id — move-stable, shift-resistant, self-edit-aware — plus what it looked like and where it was, so whatever is attached
  * to the node (an extracted custom-code snippet, a note) is found again the way every span annotation is, and re-placed
  * or orphaned when its code changes. This is what "annotate the CST in place with change-resistant anchors" means: the

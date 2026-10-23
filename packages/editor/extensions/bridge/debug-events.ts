@@ -117,7 +117,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 			const runId = session.configuration["__runId"];
 
 			switch (event) {
-				// A run's evidence is of the text that ran — each of its files with its own (MODULES.md).
+				// A run's evidence is of the text that ran — each of its files with its own (packages/tsval/README.md, *Modules*).
 				case "coverage": {
 					if (typeof runId !== "string") {
 						break;

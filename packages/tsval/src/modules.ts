@@ -1,5 +1,5 @@
 /**
- * A program's modules (VMOptions.modules, MODULES.md): its host's loader resolves — a built-in, a package, or one of the
+ * A program's modules (VMOptions.modules, README.md, *Modules*): its host's loader resolves — a built-in, a package, or one of the
  * program's own files — and loads what isn't the program's natively; the program's files are tsval's to evaluate, each
  * in a module frame of its own on the stack that required or imported it, so stepping goes into them.
  *

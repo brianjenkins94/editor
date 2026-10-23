@@ -58,7 +58,7 @@ shapes one realm serves and another reads (`runs`, `git`); build-time Vite plugi
 imports of core's is editor-api's, not `shared/`'s — the `.silo/` stores (`./evidence`, `./policy`, `./effects`), run
 classification (`./lifecycle`), profiles (`./cpuprofile`), the gated realm (`./gated-eval`), worker failures
 (`./failures`), a preview's reports (`./recorded`), the network probes (`./probes`), almostnode over the runtime's
-files (`./runtime-vfs`) — so an extension passes FEATURES-AS-EXTENSIONS.md's test. One exception, decided: tsval, the
+files (`./runtime-vfs`) — so an extension passes EXTENSION-POINTS.md's test (*Features as extensions*). One exception, decided: tsval, the
 editor's own debugger, mounts the workspace's buffer as core does (`zenfs-vfs`, `workspace-runtime`; EXTENSION-POINTS.md, 2).
 Lint holds the line (`no-restricted-imports`, the root `eslint.config.js`): a relative import that climbs into another
 realm's folder — or, from an extension, another extension's — is an error. Only `workbench-entry` reaches into
@@ -287,12 +287,59 @@ Edge styles: **solid arrows** = live message channels; **thick arrows** = a real
 = frame creation, shared-memory, service-worker serving, and build-time bundling. Nesting = iframe containment
 (shell ▸ app ▸ workbench).
 
+## Discovered, not declared
+
+The live architecture view and the diagram below show the editor as it is, and stay that way without anyone keeping
+them: everything on them is discovered from the running editor, and the only things declared are the rules it's held to.
+(Built 2026-10-04 to 10-19; why: a day's work all inside existing realms changed nothing on a realm-level view, and a
+hand-kept model of 96 subject families had drifted.)
+
+What's discovered, and how, with no source read:
+
+- **Contexts, links, messages, side channels.** Every hub announces itself and its links on `$sys.arch` (observability's
+  reporter), counting each message's subject, direction, size and kind per link; probes report network requests,
+  workers, window messages, `MessagePort`s and each realm's `/workspace` operations, labelled by caller.
+- **Extensions, by their own API.** The build hands every bundled extension a `vscode` whose `commands` are counted
+  (extensions/command-tap.ts, build.ts's `commandTap`); each host sends its totals to the bridge
+  (`editor.arch.commands`), which puts `ext:<name>` nodes and `cmd …` edges on the view. Commands nobody bundled
+  registered belong to `ext:vscode`; an extension installed from the gallery isn't tapped.
+- **Stores, by what's written.** The zen-fs probe records each read, write, create, unlink and rename in a tool's
+  dot-directory, paths of one shape collapsing to one store (`.silo/evidence/<user>/<env>/<file>.jsonl`; a listing or a
+  stat isn't content; shared/architecture-zenfs.ts `storeShape`); the command tap counts `workspace.fs` the same way;
+  the IndexedDB probe names each database. `discoveredStores` reads them back with their writers and readers.
+- **Flows, by causality.** Every hub message has an `id`, and one sent while a hub runs another's handlers names it as
+  its `cause`; an RPC call takes its cause when it's made, a reply names its call, and a call a queue defers names what
+  it was queued for (`handlingMessage`, RpcRequestOptions' `cause`). The browser has no async context, so where the
+  trace is lost, observability's `flowsOf` links a message to the last one its sender received within 50 ms, marked
+  inferred.
+- **Components within a realm.** The hub takes a stack trace once, as a handler subscribes, and keeps the first named
+  function outside the hub (`startBablr`, `installEvidence`); `componentsOf` groups a hub's subscriptions by it, or by
+  namespace where a minified build kept no names (three characters or fewer count as none).
+- **Features, by clustering.** Subjects that share a namespace or keep turning up in the same flows; the view's feature
+  picker lights one and fades the rest.
+
+What can't be: what never ran (a static scan is its later complement: edges no run has seen are untested paths);
+intent (which way a subject may travel — a rule); a component's insides; the file and line.
+
+So `architecture-model.ts` keeps only the rules — containment, the hub tree, each family's direction, each direct
+channel's reason, what a preview window's link allows — with a sentence of intent where a name doesn't say it. The
+family descriptions, the stores table and the declared diagram went. Discovered edges are their own kind
+(`declaredBetween` says `discovered`), drawn green, never red. Since 2026-10-19 the view is the canvas, the feature lens
+and each hub's components as rows in its box (a hub link's messages a thin line to the component subscribed); its side
+panel went, and review is debug-mcp's `architecture_state` (its `violations`, or a channel's traffic with `channel`)
+and observability's `flowsOf`, which the tour checks.
+
+Decided 2026-10-04: components by namespace refined by registering function (not a child hub per component); flows by
+traces where the hub can, timing elsewhere, marked inferred; stores and databases discovered; this file's diagram
+rendered from the tour and checked by the architecture workflow; features by namespace merged by co-occurrence; the
+model reduced to rules; a static scan later.
+
 ## Observed architecture (generated by the tour)
 
 The diagram above is the narrative, and says what can't be seen (what's bundled at build time). This one is what the
 **architecture tour** (its shards, `test/architecture-tour-*.mjs`, together) saw the editor do — every context, extension and store, and what
 joined them; then the stores, with who writes and who reads each; then each hub's components — rendered by
-`tourDiagram()` with nothing declared but where things run (DISCOVERED-ARCHITECTURE.md). Instances read as one of a kind
+`tourDiagram()` with nothing declared but where things run (*Discovered, not declared*, above). Instances read as one of a kind
 (`Preview :*`), and there are no counts, so the same tour renders the same block. A local run of the tour (then
 `test/architecture-diagram.mjs`, which merges what its shards saw) rewrites it; the architecture workflow re-runs it and
 fails when it differs — so a change that adds a part, a channel or a store

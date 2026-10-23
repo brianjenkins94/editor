@@ -181,7 +181,7 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 }
 
 /** Hand extension `name` a `vscode` whose commands and file operations are counted (extensions/command-tap.ts;
- *  DISCOVERED-ARCHITECTURE.md): every `import … from "vscode"` in it resolves to a module that is the real `vscode` but
+ *  ARCHITECTURE.md, *Discovered, not declared*): every `import … from "vscode"` in it resolves to a module that is the real `vscode` but
  *  for `commands` and `workspace.fs`. */
 function commandTap(name: string): Plugin {
 	const tapped = TAPPED_VSCODE;

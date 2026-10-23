@@ -6,7 +6,7 @@
  *  - RECOGNITION (structure: "is this a component / a query / an entity config?") uses the TYPESCRIPT AST — fast, robust
  *    on real-world TS, and type-aware if run inside tsserver. That's THIS module.
  *  - ANCHORING (durable identity: "which node is this, so its attachment survives edits/moves?") uses a reference to
- *    the BABLR span standing for a recognized node's source range (SPAN-ANNOTATIONS.md). That's added at the wiring
+ *    the BABLR span standing for a recognized node's source range (RUNTIME-EVIDENCE.md, *Durable annotations on spans*). That's added at the wiring
  *    step (anchors.ts), not here.
  *
  * IMPORTANT — the `ts` is INJECTED, never imported: the editor already runs one TypeScript (the externalized tsserver

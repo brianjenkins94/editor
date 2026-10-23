@@ -369,7 +369,7 @@ test("a program's read is the editor's: an open editor's unsaved text", async ()
 });
 
 // Allow this run: a call in a loop asks once — every call like it is allowed until the run ends, and nothing is kept.
-// The program's other files are gated and hooked as its entry is (MODULES.md): a capability call in a file it imports
+// The program's other files are gated and hooked as its entry is (packages/tsval/README.md, *Modules*): a capability call in a file it imports
 // stops there and asks in that file's margin; a rule placed in it sets its variable when the program gets there.
 test("capability decisions and placed rules: in a file the program imports, as in its entry", async () => {
 	const workbench = session.workbench();
@@ -900,7 +900,7 @@ test("debugger: a task's timers run on tsval's deterministic event loop", async 
 	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
 });
 
-// A debug run's imports go through almostnode (MODULES.md): built-ins and packages load natively — not stepped, as a
+// A debug run's imports go through almostnode (packages/tsval/README.md, *Modules*): built-ins and packages load natively — not stepped, as a
 // library isn't — and the program's other files are tsval's, where before every import but fs and child_process was inert.
 test("debugger: a program's imports — built-ins and its other files — load", async () => {
 	const workbench = session.workbench();
@@ -935,7 +935,7 @@ test("debugger: a program's imports — built-ins and its other files — load",
 	});
 });
 
-// The program's other files are stepped too (MODULES.md): almostnode resolves an import, tsval evaluates the file — a
+// The program's other files are stepped too (packages/tsval/README.md, *Modules*): almostnode resolves an import, tsval evaluates the file — a
 // breakpoint in it stops there, a frame naming its file and function, its values in its own margin, and stepping in
 // from the importer goes into it.
 test("debugger: a breakpoint in a file the program imports, its values, and stepping into it", async () => {

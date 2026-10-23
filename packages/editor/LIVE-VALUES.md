@@ -351,6 +351,47 @@ which values came from an input, so a run that read one can share the values tha
 - **The ball while a run is going**: a run takes a fraction of a second, so the ball rolls once it's finished, through
   where it went; a long run could roll as it goes.
 
+## Projections: cards, and later editing as cards
+
+A program shown as something other than its text, and later edited that way. Written 2026-10-06 from a picture of macOS
+Automator: a workflow as a column of action cards, each with its options and results, typed values flowing between
+them, Step and Run in the toolbar, a log with each action's duration. Almost all of it is already here, made for other
+reasons:
+
+| Automator | here |
+|---|---|
+| The cards, top to bottom | A function's statements, from its BABLR tree, each with a durable identity (RUNTIME-EVIDENCE.md, *Durable annotations on spans*) |
+| A card's options | A call's arguments; the rule editor already draws an input from a schema (rule-editor.ts) |
+| What flows between cards | The types a run observes at each range |
+| *Results* under a card | The Margin's live values |
+| Step, Stop, Run | The tsval debugger — and back, which Automator can't |
+| Record | Recording what a call returned, at its seam (RULES.md) |
+| The log, a duration per action | Runs, coverage and profiling, on spans (RUNTIME-EVIDENCE.md) |
+| The action library | The rules catalog, and later palette blocks promoted from a project's own functions |
+| A card's settings saved with the workflow | Rules: `{ when, then }`, mocks and decisions, in the policy files |
+
+The model: **the text is the truth, cards a view of it** (reading first, as the event sheet decided; writing back
+after). **Interlocking**: a card shows what it takes and gives, and one dropped in is offered only where its input is
+satisfied; statement order stays the control flow. **One editor for options**, drawn from schemas as rules' are. **No
+black boxes**: a library card is a function in the same material. **Not only games**: the event sheet is this loop with
+a game palette; a script, a server's routes, an app's state are other palettes.
+
+**Built: cards in the Margin**, read-only, around the lines they stand for. A card is a step, not a statement:
+consecutive top-level statements with no blank line between are one step, a `//` comment above starts one and titles
+it, a function or class is its own; untitled, a step is named by its first and last (`country … total`). Its bottom
+border says its title, what it is (`2 statements`, `function`) and whether it ran (`ran`, `partly ran`, `didn't run`,
+`called 3×`, `not called`) from coverage's marks; the types it declares are on hover. They come from the capabilities
+plugin's `_statements` (each top-level statement's range, comment, title and declared types), grouped into steps by
+margin.ts. **The run log**, after the last card: the last run step by step, each with its share of the run's work and
+any wait. Work is statements run (tsval's `profile`, the statement clock: tsval COMPILE.md), not wall time, so it's the
+same every run; waits are on the virtual clock. **The pane's tabs line** holds *Margin* and the projections to come
+(*Cards*, *Event sheet*): a projection is a view in that strip, not a third column, since the code and the pane are
+already a line-for-line grid.
+
+Next: options edited on a card for a call's literal arguments, written back; then a library to drag calls from; then
+interlocking. Open: what a card is inside a longer function (its body's paragraphs as cards, or folded as code); how
+loops and branches look (Automator has none; the event sheet's rows and groups do).
+
 ## Building it
 
 1. **The trace in tsval**: `observe` for declarations, assignments, loop variables and parameters, with step, frame and

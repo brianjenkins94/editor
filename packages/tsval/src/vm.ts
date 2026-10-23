@@ -200,7 +200,7 @@ export interface VMOptions {
 	"coverage"?: boolean;
 	/** Tally where the run's work goes (see `VM.profile`): per top-level statement. Off by default: a count a statement. */
 	"profile"?: boolean;
-	/** The program's modules (modules.ts, MODULES.md): its host's loader — resolution, what isn't the program's loaded
+	/** The program's modules (modules.ts, README.md, *Modules*): its host's loader — resolution, what isn't the program's loaded
 	 *  natively, a program file's source, the module cache. tsval evaluates the program's own files, each in a module
 	 *  frame on the stack that required or imported it, so stepping goes into them; breakpoints and locations are by
 	 *  file. Without one, an import is `resolveModule`'s. */

@@ -44,7 +44,7 @@ const CONTENT = new Set(["read", "write", "create", "unlink", "rename"]);
  * The store a workspace path belongs to, by its shape — or undefined for the project's own files. A store is what a tool
  * keeps in a dot-directory at the workspace's root (`.silo/`, `.vscode/`, `.git/`); its shape is the directory and the
  * first one in it, anything deeper folded, and the file's kind: `.silo/evidence/<user>/<env>/world.ts.jsonl` →
- * `.silo/evidence/…/<file>.jsonl`. Discovered from what's written and read (DISCOVERED-ARCHITECTURE.md), not listed.
+ * `.silo/evidence/…/<file>.jsonl`. Discovered from what's written and read (ARCHITECTURE.md, *Discovered, not declared*), not listed.
  */
 export function storeShape(path: string): string | undefined {
 	const segments = path.split("/").filter((segment) => segment !== "");

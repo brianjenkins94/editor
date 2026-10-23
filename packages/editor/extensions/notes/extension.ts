@@ -1,5 +1,5 @@
 /**
- * Notes on code that stay with it — the first authored kind of durable span annotation (SPAN-ANNOTATIONS.md).
+ * Notes on code that stay with it — the first authored kind of durable span annotation (RUNTIME-EVIDENCE.md, *Durable annotations on spans*).
  *
  * A note is kept on the BABLR span it's about, in `.silo/notes/<author>/<file>.jsonl` (silo's annotations layout, in
  * git, everyone's notes beside everyone else's). Each time a file is shown or changes, each note on it is resolved

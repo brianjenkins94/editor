@@ -45,7 +45,7 @@ export interface DebugOutcome {
 	/** Why it stopped: breakpoint, step, capability (a policy-gated call), … — or `app`: the file is an app's, which runs
 	 *  in its page (its dev server started, its preview open), not stepped here. */
 	"reason"?: string;
-	/** The file it stopped in, when it's another of the program's files than `program` (MODULES.md). */
+	/** The file it stopped in, when it's another of the program's files than `program` (packages/tsval/README.md, *Modules*). */
 	"file"?: string;
 	"line"?: number;
 	"column"?: number;

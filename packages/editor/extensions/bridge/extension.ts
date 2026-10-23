@@ -143,7 +143,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", (uri?: vscode.Uri, options?: { "cases"?: string[][] }) => {
 		void runProgram({ ...uri instanceof vscode.Uri ? { "program": uri.path } : {}, ...Array.isArray(options?.cases) ? { "cases": options.cases } : {} }).catch(() => undefined);
 	}));
-	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
+	// Durable annotations on code spans (RUNTIME-EVIDENCE.md, *Durable annotations on spans*), from core's BABLR (bablr.ts: one worker, its parses cached
 	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
 	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call, through
 	// editor-api's annotations(). Each answers `{ value }`, or `{ unparsable }` — why BABLR's grammar doesn't take the
@@ -173,7 +173,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	);
 
 	// Each extension host's command totals (extensions/command-tap.ts): the extensions, and the commands between them, on
-	// the architecture view — discovered, not declared (DISCOVERED-ARCHITECTURE.md). A host sends its totals; what's new
+	// the architecture view — discovered, not declared (ARCHITECTURE.md, *Discovered, not declared*). A host sends its totals; what's new
 	// since its last is put on the view as that many calls.
 	const seen = new Map<string, Map<string, number>>();
 	const owners = new Map<string, string>();

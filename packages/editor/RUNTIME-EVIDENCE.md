@@ -182,7 +182,7 @@ One kind of evidence through every layer, shaped so values and types can join wi
 
 The first slice records whether code ran. The second records what went through it, which way it went, and whether the
 types held. Annotations can then use the same facts to re-place themselves when shape alone can't settle it
-(SPAN-ANNOTATIONS.md, the typed strategy).
+(*Durable annotations on spans*, below: the typed strategy).
 
 ### What a run observes
 
@@ -231,7 +231,7 @@ Same files, new lines: `value` and `branch` observations join `reached` in
 
 The path is coverage's, with nothing new: the debug worker's end-of-run report gains `sites` beside `statements`.
 The adapter publishes both on `evidence.observed` (formerly `evidence.coverage`) — the entry's, and (`files`) each other
-of the program's files that ran, with its own source (MODULES.md). `evidence.ts` maps each site's
+of the program's files that ran, with its own source (packages/tsval/README.md, *Modules*). `evidence.ts` maps each site's
 range to its exact span, and silo folds `value` and `branch` beside `reached`. The insights extension reads them back.
 
 ### The typed strategy
@@ -444,6 +444,72 @@ The point of running a program many times: what none of the runs needed is code 
 
 The logic is pure and tested in node (extensions/insights/suggestions.ts, workbench/inputs.ts); fixes.ts and
 suggestions-view.ts are the VS Code wiring.
+
+## Durable annotations on spans
+
+One way for anything attached to code — evidence, notes, a dismissed suggestion, a call site's decision, an event-sheet
+part — to stay attached as the code moves and changes, and one way to handle losing its place: the user re-places or
+dismisses it. (Built 2026-10-04 to 10-10. Inline comment notes came first and were removed on 2026-09-17, `49ce737`: "no
+reason for multiple annotation types" — this is that one type.)
+
+BABLR's `spanAnchors` ids are content-addressed: a span keeps its id when code around it moves or changes, even into
+another file, and gets a new one when it's edited itself. `reidentify` (bablr-language-ts identity.ts) maps nodes from
+an older version of a file onto the current one; `pickAnchor` turns a range into the span that best stands for it.
+
+| | Observed | Authored |
+|---|---|---|
+| Examples | coverage, timings, values, capability calls seen | notes, dismissed suggestions, call-site decisions, snippets |
+| Where it comes from | runs, many times over | a person, once |
+| When its place is lost | it fades: new runs make new evidence | it's kept, and the user re-places or dismisses it |
+
+Observed annotations carry only a span id. Authored ones must never vanish silently, so they carry enough to be found
+again:
+
+```json
+{ "span": "9f3a…c2", "key": "bablr1", "file": "src/world.ts",
+  "baseline": { "blob": "3b18e5…", "start": 412, "end": 431 },
+  "shape": { "type": "CallExpression", "atoms": ["world", ".", "onWin", "?.", "(", ")"] },
+  "context": { "before": "51c0…9a", "after": "e2d4…07" } }
+```
+
+`baseline` is the file's git blob when the span was last placed and its offsets there; `shape` its node type and tokens
+(trivia left out); `context` the ids of its neighbours, which usually survive an edit to the span itself.
+
+**Finding its place.** Matching is kept apart from deciding. *Strategies* are pure functions scoring candidates 0–1,
+tried in a listed order, stopping at a certain match:
+
+1. **Same span** — its id is in the file's spans (1).
+2. **Moved** — its id is in another file's spans; the files looked in are those differing from HEAD (0.95).
+3. **Re-identified** — from its baseline in git's objects, follow the node through BABLR's structural diff (`follow`).
+   The diff compares a container by type alone, so it survives edits inside it, and a call replaced by another call is
+   "the same" too: 0.6 for a node the diff kept, plus up to 0.35 for how much of its head (callee and first arguments,
+   name and signature) survived.
+4. **Same shape** — spans of its type, scored by shared tokens, neighbours still beside it, and nearness.
+   `fn(foo, bar, baz)` → `fn(foo, bar, baz2)`: a new id, 7 of 8 tokens and both neighbours, so it re-places on its own.
+5. **The typed strategy** — the span's inferred type and the kinds of value runs saw there re-score same-shape
+   candidates (*Second slice*, below).
+
+*A policy* turns the best score into what happens: at or above `autoAt` (with no close second) it re-places on its own;
+at or above `askAt` it's *uncertain*, shown with confirm and re-place; below, *orphaned*, kept with its last file and
+line, in the Problems view (Information severity: VS Code leaves hints out) with code actions Re-place (select the code;
+`pickAnchor`) and Dismiss (a tombstone line, so a merge can't bring it back). Every resolution records its strategy
+and score; a corpus of edit cases scores pipelines and policies against each other. Observed annotations use 1–2 only.
+An authored annotation found by 2–4 is rewritten by its owner (each person writes only their own files), so the next
+read finds it by 1; others' resolve on read without being rewritten. Baselines come from git's objects only, so this
+works for committed code.
+
+**Storage:** `.silo/<collection>/<user>/<file>.jsonl`, one sorted line per annotation, `merge=union`, folded on read by
+id, the last update winning, tombstones folded the same way; a collection may partition further (evidence by
+environment).
+
+**Who does what:** silo (lib `util/silo`) has the line types, the fold, strategies 1, 2 and 4, the policy and the
+resolver, all pure. The editor's BABLR worker has spans with shapes and neighbours, references for ranges, and strategy
+3, from cached parses, reached through two batched commands typed in `@brianjenkins94/editor-api/annotations`:
+`editor.annotations.refer(text, file, ranges)` and `editor.annotations.resolve(text, file, refs, { observed })`. A text
+BABLR can't parse answers `unparsable`, never a lost annotation: what's placed stays put until it parses, and the file
+is flagged in Problems. Core reads baselines from git; notes (extensions/notes), evidence and the event sheet are its
+users. A note whose code moved to another file follows once that file is saved (a tombstone in the old file's notes);
+a move that arrives committed (pulled) isn't a changed file, so that note is asked about.
 
 ## Open questions
 

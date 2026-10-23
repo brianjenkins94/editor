@@ -185,7 +185,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	// How much a preview's dev server instruments (`silo.evidence.previews`), asked as each preview starts.
 	serve(hub, "evidence.level", () => vscode.workspace.getConfiguration("silo.evidence").get<string>("previews") ?? "full");
 	// Each run's coverage, until the run ends (the session's coverage comes just before its end): its entry's, and each
-	// other of the program's files that ran (MODULES.md).
+	// other of the program's files that ran (packages/tsval/README.md, *Modules*).
 	const coverage = new Map<string, Coverage[]>();
 	const coverageOf = (each: Partial<Coverage>): Coverage[] => (typeof each.file === "string" && typeof each.source === "string" && Array.isArray(each.statements) ? [{ "file": each.file, "source": each.source, "statements": each.statements, "sites": Array.isArray(each.sites) ? each.sites : [] }] : []);
 

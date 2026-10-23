@@ -1,7 +1,7 @@
 {
   "name": "notes",
   "displayName": "Notes",
-  "description": "Notes on code that stay with it: a note is kept on the span it's about (a BABLR span, in .silo/notes/, in git), follows its code as it moves and changes, and — when its code is gone — waits in the Problems view for you to re-place or dismiss it. The first authored kind of durable span annotation (SPAN-ANNOTATIONS.md). Public API only; the editor's BABLR answers through the bridge's editor.annotations.* commands.",
+  "description": "Notes on code that stay with it: a note is kept on the span it's about (a BABLR span, in .silo/notes/, in git), follows its code as it moves and changes, and — when its code is gone — waits in the Problems view for you to re-place or dismiss it. The first authored kind of durable span annotation (RUNTIME-EVIDENCE.md, *Durable annotations on spans*). Public API only; the editor's BABLR answers through the bridge's editor.annotations.* commands.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {

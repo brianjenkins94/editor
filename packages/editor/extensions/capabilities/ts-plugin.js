@@ -13,7 +13,7 @@
  * - `_capabilities.surface` — every source file's import surface across the programs the server holds, for the
  *   baseline's `consumer` (baseline.ts).
  * - `_types.at` — the type of each of a file's ranges (runtime evidence's declared types; RUNTIME-EVIDENCE.md).
- * - `_statements` — a file's top-level statements as a projection's cards (PROJECTIONS.md).
+ * - `_statements` — a file's top-level statements as a projection's cards (LIVE-VALUES.md, *Projections*).
  */
 
 export default function init(modules) {

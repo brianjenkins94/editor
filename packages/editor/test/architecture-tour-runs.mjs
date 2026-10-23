@@ -257,7 +257,7 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 // What went through a run's ?., ??, parameters, returns and branches (RUNTIME-EVIDENCE.md, the second slice): folded
 // into the same evidence file as its coverage, each site under the span that is exactly its node — and the values
 // themselves only on this machine, in .silo/local/samples/.
-// The program's other files that ran are evidence too (MODULES.md): each its own file under .silo/evidence, read
+// The program's other files that ran are evidence too (packages/tsval/README.md, *Modules*): each its own file under .silo/evidence, read
 // against the source that ran, and listed in the run's envelope.
 test("evidence: a file the program imports gets its own", async () => {
 	const workbench = session.workbench();
@@ -838,7 +838,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// The program's projection (PROJECTIONS.md): the open file's steps as cards in the notes margin — statements written
+// The program's projection (LIVE-VALUES.md, *Projections*): the open file's steps as cards in the notes margin — statements written
 // together (no blank line between) are one, a comment above titles one, a function is its own — each card around its
 // lines, labelled on its bottom border, the types of what it declares on hover; after a run, whether each step ran and
 // how often a function was called.
@@ -886,7 +886,7 @@ test("projection: the margin's cards are the file's steps, each saying whether i
 	assert.deepEqual(after.map(({ ran }) => ran), ["ran", "called 1×", "ran"]);
 });
 
-// The run log (PROJECTIONS.md), after the last card: each step that ran, in order, with its share of the run's work (the
+// The run log (LIVE-VALUES.md, *Projections*), after the last card: each step that ran, in order, with its share of the run's work (the
 // interpreter's steps — a function's card gets its body's, wherever it's called from) and what it waited, on the event
 // loop's clock — and how the run ended.
 test("projection: the run log — each step's share of the work, and its waits", async () => {
@@ -994,7 +994,7 @@ test("types: the tsserver plugin types each of a file's ranges as its site obser
 	assert.deepEqual(types, ["number", "number", "{ t: string; }", "number", "number"], "a parameter, ??'s left, what ?. tested, an arrow's return, a return's value");
 });
 
-// A note stays with its code (SPAN-ANNOTATIONS.md): kept on its span in .silo/notes/, followed when its code is edited
+// A note stays with its code (RUNTIME-EVIDENCE.md, *Durable annotations on spans*): kept on its span in .silo/notes/, followed when its code is edited
 // (and rewritten there), asked about in the Problems view when its code goes, and dismissed with a tombstone.
 test("notes: a note follows its code, and waits in Problems when its code is gone", async () => {
 	const workbench = session.workbench();
@@ -1066,7 +1066,7 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	await run("dismiss", id);
 	await eventually("the note's tombstone", async () => (await run("notes")).find((note) => note.id === id && note.dismissed === true));
 
-	// On the architecture view, discovered (DISCOVERED-ARCHITECTURE.md): the notes extension calling the bridge's command,
+	// On the architecture view, discovered (ARCHITECTURE.md, *Discovered, not declared*): the notes extension calling the bridge's command,
 	// and the insights extension asking the TypeScript plugin for types through VS Code.
 	await session.until("notes → the bridge, by command", hasLabel("ext:notes", "ext:bridge", /^cmd editor\.annotations\.resolve$/u));
 
@@ -1207,7 +1207,7 @@ test("defaults: a deleted tsconfig.json falls back to the default, and a new one
 	assert.equal(found.restored, true);
 });
 
-// What the editor keeps, discovered from what was written and read (DISCOVERED-ARCHITECTURE.md): by now the tour has
+// What the editor keeps, discovered from what was written and read (ARCHITECTURE.md, *Discovered, not declared*): by now the tour has
 // run code (evidence, samples, runs), kept notes, and parsed with BABLR.
 test("stores: discovered from what's written and read", async () => {
 	const { discoveredStores } = await import("../shared/architecture-model.ts");
@@ -1222,7 +1222,7 @@ test("stores: discovered from what's written and read", async () => {
 	assert.ok(named("IndexedDB bablr").writers.includes("bablr"), "BABLR's cache of parses");
 });
 
-// The components inside one realm's hub, discovered (DISCOVERED-ARCHITECTURE.md): the workbench's subscriptions, grouped by
+// The components inside one realm's hub, discovered (ARCHITECTURE.md, *Discovered, not declared*): the workbench's subscriptions, grouped by
 // the function that registered them — or, in a minified build, by namespace — so core's BABLR and its runtime evidence
 // come out as two parts of the workbench, not one.
 test("components: a realm's hub, told apart by who subscribed", async () => {

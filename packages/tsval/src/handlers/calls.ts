@@ -165,7 +165,7 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 		const calleeVal = vm.pop();
 		const requiring = requireOf(calleeVal);
 
-		// A program file's require (MODULES.md): the file evaluated here, on this stack — stepped into — its exports the
+		// A program file's require (README.md, *Modules*): the file evaluated here, on this stack — stepped into — its exports the
 		// call's value, as a guest call's return is.
 		if (requiring !== undefined && vm.enterModule(requiring, args[0])) {
 			frame.phase = AFTER_REF + 2;

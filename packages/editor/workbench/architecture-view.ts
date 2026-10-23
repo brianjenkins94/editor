@@ -28,7 +28,7 @@ import "theme/components/tag";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_HEIGHT = 44;
 const NODE_WIDTH = 210;
-/** A hub's component, a row beneath the hub's own in its box (DISCOVERED-ARCHITECTURE.md). */
+/** A hub's component, a row beneath the hub's own in its box (ARCHITECTURE.md, *Discovered, not declared*). */
 const COMPONENT_HEIGHT = 20;
 const GAP = 8;
 const PADDING = 10;
@@ -688,7 +688,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	/** The Stores box's header, its stores, and the contexts with a line to every one of them — whose lines end at the
 	 *  header, as into a collapsed box: one strand, not one a store (as of the last render). */
 	let toStores: { "header": Rect; "stores": Set<string>; "contexts": Set<string> } | undefined;
-	/** The contexts the last render drew, and each hub's components among them (DISCOVERED-ARCHITECTURE.md). */
+	/** The contexts the last render drew, and each hub's components among them (ARCHITECTURE.md, *Discovered, not declared*). */
 	let drawnIds: string[] = [];
 	let components = new Map<string, string[]>();
 	/** Which component line a hub link's message rides (`<channel>\0<label>` → edge), as of the last render. */

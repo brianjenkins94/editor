@@ -28,7 +28,7 @@ function sourceFile(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SourceFile;
 
 	if (frame.phase === 0) {
-		// The program's modules (MODULES.md): the program files it imports from, evaluated first.
+		// The program's modules (README.md, *Modules*): the program files it imports from, evaluated first.
 		if (vm.linkImports(node, frame)) {
 			return;
 		}

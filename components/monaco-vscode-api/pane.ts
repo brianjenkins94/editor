@@ -9,7 +9,7 @@
  *
  * Entries can be grouped (`groups`): a group is a card drawn around the lines it spans — behind its entries, from its
  * first line's top to its last line's bottom, view zones included — with a label its consumer renders (through `render`,
- * handed the group) on its bottom border, in the blank line between steps; the cursor in it lights it. The program's projection (PROJECTIONS.md): a card per
+ * handed the group) on its bottom border, in the blank line between steps; the cursor in it lights it. The program's projection (packages/editor/LIVE-VALUES.md, *Projections*): a card per
  * step, several statements long, Automator's look, its values still level with their lines.
  *
  * The pane has a gutter column of its own too, right of the line numbers: a mark per line the consumer gives (`marks`:
@@ -26,7 +26,7 @@
  *
  * The pane's first line is reserved: while a pane shows, the editor has a line's padding above its first line (given
  * back when the pane goes), and the pane puts a strip of tabs there — the views the consumer gives (`showPaneViews`): the
- * margin as it is, and the program's other projections (PROJECTIONS.md). The strip is pinned: it stays at the top as the
+ * margin as it is, and the program's other projections (packages/editor/LIVE-VALUES.md, *Projections*). The strip is pinned: it stays at the top as the
  * code scrolls, the pane's rows passing under it.
  *
  * Runs (RUNNING.md, unattended runs): the strip ends with a ball for each run of the file the consumer keeps

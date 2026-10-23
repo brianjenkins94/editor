@@ -27,7 +27,7 @@ effects), a real run with effects but no values, and every entry point picking o
 
 **Everything runs in the debugger.** There's one action — *Run* — and every way in (the shell's ▷, the editor's ▷, the
 left rail, the terminal's `node`, a task, the margin, an agent) starts the same session: tsval evaluating the program's
-own files on almostnode (MODULES.md), its event loop deterministic. Live values, cards, coverage and the run log are
+own files on almostnode (packages/tsval/README.md, *Modules*), its event loop deterministic. Live values, cards, coverage and the run log are
 always there; a breakpoint stops it if there is one. There's no *Run* versus *Debug*, no *Run Without Debugging* that
 runs something else.
 
@@ -175,7 +175,7 @@ Known and suspected:
 2. **Too slow to interpret** — measured (step 0): not a build, a bundler or a server (their work is in packages, or
    light per request), but a program whose own code computes heavily — a simulation, a game's update loop. The answer
    is making tsval faster, not keeping a second world.
-3. **Packages** are native already (MODULES.md: a package is never stepped) — inside the run, on almostnode, not a
+3. **Packages** are native already (packages/tsval/README.md, *Modules*: a package is never stepped) — inside the run, on almostnode, not a
    separate mode. Their own async work is on the host's loop, outside the deterministic one.
 4. **What tsval doesn't support yet** — a syntax or a builtin it lacks. Each is a bug to fix, not a mode; the run fails
    loudly where it met it (above). (Step 0 found a debug run's globals were ECMAScript's alone; a run has the globals a
@@ -235,7 +235,7 @@ that can't start says why). And the two run ledgers become one: every run in `ru
 
    Ordinary program code runs 40–70× slower than native, and tight numeric loops — what V8 compiles to machine code —
    thousands of times slower. The debugger's instrumentation adds about 40%. But a package's work is native under tsval
-   (MODULES.md), so a build, a bundler or a type-check — whose work is in packages — costs nothing more; and a request
+   (packages/tsval/README.md, *Modules*), so a build, a bundler or a type-check — whose work is in packages — costs nothing more; and a request
    is a tenth of a millisecond, so a server answers at an interactive pace. Case 2 is narrower than feared: a program
    whose own code computes heavily (a simulation, a game's update loop, an algorithm on big data). Speed isn't the aim;
    this is where the fallback would be felt first, and where making tsval faster pays.

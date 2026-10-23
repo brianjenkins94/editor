@@ -194,7 +194,7 @@ export interface AsyncFrame extends FrameBase {
 	"delivered"?: boolean;
 }
 
-/** A program file evaluated as a module (VMOptions.modules, MODULES.md): its source run in a scope of its own (`module`,
+/** A program file evaluated as a module (VMOptions.modules, README.md, *Modules*): its source run in a scope of its own (`module`,
  *  `exports`, `require`, `__filename`, `__dirname`); when it completes, `module.exports` is left on the value stack —
  *  the result of the `require` (or the import) that loaded it. */
 export interface ModuleFrame extends FrameBase {

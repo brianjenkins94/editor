@@ -41,7 +41,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
 	private ended = false;
 	/** The program's files core has values of, each with the text that ran (sent with its first values): the entry, and
-	 *  any other of the program's files (MODULES.md). */
+	 *  any other of the program's files (packages/tsval/README.md, *Modules*). */
 	private readonly told = new Map<string, string>();
 	/** What the capability stop it's at asks (LIVE-VALUES.md, step 8), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
@@ -185,7 +185,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	private setBreakpointsRequest(request: DapRequest, args: Record<string, unknown>): void {
-		// Per file: the program's entry's, or another file's — one of the program's own when it loads it (MODULES.md).
+		// Per file: the program's entry's, or another file's — one of the program's own when it loads it (packages/tsval/README.md, *Modules*).
 		const points = (args["breakpoints"] as { "line": number }[] | undefined) ?? [];
 		const path = (args["source"] as { "path"?: string } | undefined)?.path ?? "";
 
@@ -469,7 +469,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	/** Where the rules placed in this program's code are now (RULES.md: *at*, a span reference): each place found again
 	 *  in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. In the entry, and in
-	 *  any other file a rule is placed in (it hooks there when the program loads that file — MODULES.md), read as the
+	 *  any other file a rule is placed in (it hooks there when the program loads that file — packages/tsval/README.md, *Modules*), read as the
 	 *  run reads it. One that's lost, or only uncertainly found, isn't applied (the Rules view says so). */
 	private async placeRules(): Promise<SetHook[]> {
 		// A span reference names its file workspace-relative.

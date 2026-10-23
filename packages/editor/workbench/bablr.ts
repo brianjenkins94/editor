@@ -7,7 +7,7 @@
  * Its callers: the cosmetic classifier (verdicts, edit groups), the runtime evidence (evidence.ts: span ids for a run's
  * statements), and — over the hub, `annotations.refer` and `annotations.resolve` — the pod's `editor.annotations.*`
  * commands, for extensions: everything they attach to code (notes, the insights extension's evidence marks, the event
- * sheet's anchors) refers to its span, and finds it again, the one way SPAN-ANNOTATIONS.md sets out. One worker for now;
+ * sheet's anchors) refers to its span, and finds it again, the one way RUNTIME-EVIDENCE.md's *Durable annotations on spans* sets out. One worker for now;
  * if BABLR's cost outgrows it, a pool goes here, behind `request`.
  *
  * A FILE BABLR CAN'T PARSE IS NEVER DROPPED QUIETLY: `spans` and `anchors` throw Unparsable (why it failed); every call
@@ -55,12 +55,12 @@ export interface Bablr {
 	 *  take it. */
 	"spans": (source: string, signal?: AbortSignal) => Promise<Span[]>;
 	/** Where span `span` of `baseline` went in `current`, by the structural diff: the same node (`kept`) or the one that
-	 *  replaced it — or undefined, gone. How a span annotation is re-placed from its baseline (SPAN-ANNOTATIONS.md). */
+	 *  replaced it — or undefined, gone. How a span annotation is re-placed from its baseline (RUNTIME-EVIDENCE.md, *Durable annotations on spans*). */
 	"follow": (baseline: string, current: string, span: string) => Promise<{ "id": string; "how": "kept" | "replaced" } | undefined>;
 	/** A reference to the span standing for each of `ranges` in `source`, the text of `file` — what an annotation keeps;
 	 *  undefined for one BABLR can't place. Throws Unparsable when it can't parse the text. */
 	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<(SpanRef | undefined)[]>;
-	/** Where each of `refs`' spans is in `source`, the text their file has now (SPAN-ANNOTATIONS.md) — and the reference
+	/** Where each of `refs`' spans is in `source`, the text their file has now (RUNTIME-EVIDENCE.md, *Durable annotations on spans*) — and the reference
 	 *  as it would be made there now, for one found other than by its own id. An authored annotation whose id is gone
 	 *  is looked for in the other changed files (moved) and re-identified from its baseline, from git's objects; an
 	 *  `observed` one is looked for by its id, in its own file, alone. Throws Unparsable when BABLR can't parse `source`. */
