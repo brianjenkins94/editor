@@ -325,12 +325,16 @@ margin's run log and coverage marks are still the latest run's, not the one pick
 
 **Kept across reloads, deduped, and shared as they're committed** (2026-10-22; lib util/silo/traces, the margin's
 runs.ts, git-engine.ts `shareRuns`). A finished run is kept as a trace — its values, calls, how it ended, what it read,
-the text it ran (by its git blob oid) — and the same run again (the same text, inputs, values and end) is the ball it was,
-counted (*3 runs alike*), not a new one. Every run kept stays on this machine, `.silo/local/traces/<file>.jsonl`, values
-and text, so a file's balls come back when it's shown again. What git gets is worked out as a commit is made — the
-editor makes every commit, so the step is its own, a pre-commit hook in all but name: for each program file committed,
-the runs of the very text committed (its staged blob) go in `.silo/traces/<you>/<file>.jsonl`, staged with it; a file
-committed with none, or deleted, takes its shared runs out. So what's committed is always the runs of the code beside
+the text it ran (its git blob oid, where it came from) — and identified by its code: the BABLR span ids of the top-level
+declarations it executed (its coverage), each value by the span around it. Span ids are content hashes without the
+whitespace and comments, so a reformat, a comment or an edit to a function the run never called leaves a run the same
+run — the ball it was, counted (*3 runs alike*), not a new one — and an edit inside anything it executed makes it another
+(a text BABLR can't parse: by its blob and lines, as before). Every run kept stays on this machine,
+`.silo/local/traces/<file>.jsonl`, values and text, so a file's balls come back when it's shown again. What git gets is
+worked out as a commit is made — the editor makes every commit, so the step is its own, a pre-commit hook in all but
+name: for each program file committed, the runs current for the text committed (its staged blob: every declaration a run
+executed still in it unchanged, by the staged text's spans) go in `.silo/traces/<you>/<file>.jsonl`, staged with it; a
+file committed with none, or deleted, takes its shared runs out. So what's committed is always the runs of the code beside
 it, and nothing's written to share in between. A value can hold a secret, so a shared run carries its values only when
 it surely read nothing: no input the runtime saw (a call made or given a result), no process.argv, and code that can't
 read from outside at all (no import or require, nothing of process, fetch, sockets, storage or the page) — its code, in

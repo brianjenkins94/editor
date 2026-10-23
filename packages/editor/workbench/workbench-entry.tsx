@@ -619,6 +619,9 @@ function maybeBoot(): void {
 				// The editor's BABLR, in its worker: the classifier's verdicts and the evidence's span ids queue on it (bablr.ts).
 				const bablr = startBablr(workbenchHub);
 
+				// (what a commit shares of runs is what's current for the text committed, by its spans: git-engine.ts)
+				gitEngine.useSpans(async (source) => bablr.spans(source));
+
 				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr);
 				// The pane's views (pane-views.ts): its tabs — the Margin's (extensions/margin) and each extension's — and what
 				// each draws beside the code.

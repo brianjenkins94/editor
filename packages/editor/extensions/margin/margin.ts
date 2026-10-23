@@ -46,7 +46,7 @@
  * A preview's recorded stops come the same way: `values` on its run's `production` session (the bridge's), each report
  * every hit so far (`replace`).
  */
-import type { AskEvent, CapabilityChoice, EffectsEvent, EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
@@ -61,7 +61,7 @@ import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { recordedResult } from "@brianjenkins94/editor-api/policy";
 import { argvRunsOf, decisionOf, resultOf } from "@brianjenkins94/editor-api/rules";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
-import { inputOf, traceKey } from "@brianjenkins94/util/silo/traces";
+import { declarationsHolding, inputOf, spanAround, traceKey } from "@brianjenkins94/util/silo/traces";
 import * as vscode from "vscode";
 import { parseInputs } from "./inputs";
 import { blobOid, keepRun, keptRuns } from "./runs";
@@ -119,6 +119,8 @@ const KEPT = 8;
 const liveSessions = new Set<string>();
 /** What each session read from outside, from its effects (a call made, or given a result): its values may hold a secret. */
 const inputsOf = new Map<string, string[]>();
+/** The statements each session executed, by file (its coverage, [line, character] each): what its code is. */
+const executedOf = new Map<string, Map<string, [[number, number], [number, number]][]>>();
 /** How many of a run's steps its ball rolls through, at most. */
 const MAX_PATH = 400;
 /** Each file's marks for the margin's gutter column (coverage), per file URI. */
@@ -1006,8 +1008,10 @@ function runsOf(uri: string, shown: Session | undefined): PaneRun[] {
  *  one); else a trace of it, on this machine — a commit shares those of the text it commits (git-engine.ts). */
 async function keepSession(id: string): Promise<void> {
 	const inputs = inputsOf.get(id) ?? [];
+	const executed = executedOf.get(id);
 
 	inputsOf.delete(id);
+	executedOf.delete(id);
 
 	for (const [uri, runs] of kept) {
 		const run = runs.find((each) => each.id === id);
@@ -1017,16 +1021,33 @@ async function keepSession(id: string): Promise<void> {
 		}
 
 		const source = run.anchors.text;
+		const { path } = vscode.Uri.parse(uri);
+		// Its code, by BABLR's spans of the text it ran: the top-level declarations it executed (its coverage, else where its
+		// values and calls were) and the span around each value. None when the text can't be parsed: then its text is it.
+		const answer = await annotations(vscode.commands).spans(source).catch(() => undefined);
+		const spans = answer !== undefined && "value" in answer ? answer.value : undefined;
+		const offsetOf = offsetsIn(source);
+		const ran: [number, number][] = [
+			...(executed?.get(path) ?? []).map(([start, end]): [number, number] => [offsetOf(start), offsetOf(end)]),
+			...run.values.flatMap((value) => (value.at === undefined ? [] : [value.at])),
+			...[...run.calls.values()].flatMap((call) => (call.at === undefined ? [] : [call.at]))
+		];
+		const declarations = spans === undefined ? undefined : declarationsHolding(spans, ran);
 		const trace: RunTrace = {
 			"id": run.id,
 			"file": vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false),
 			"oid": await blobOid(source),
+			...declarations === undefined || declarations.length === 0 ? {} : { "declarations": declarations },
 			"trigger": run.live === true ? "edit" : "you",
 			"at": new Date(run.at ?? Date.now()).toISOString(),
 			"count": 1,
 			...run.end === undefined ? {} : { "end": { "kind": run.end.kind, "line": run.end.line, ...run.end.at === undefined ? {} : { "at": run.end.at }, ...run.end.message === undefined ? {} : { "message": run.end.message } } },
 			"inputs": [...new Set(inputs)].toSorted(),
-			"values": run.values.map((value) => ({ "line": value.line, "name": value.name, "kind": value.kind, "call": value.call, "turns": value.turns, "value": value.value, ...value.at === undefined ? {} : { "at": value.at } })),
+			"values": run.values.map((value) => {
+				const span = spans === undefined || value.at === undefined ? undefined : spanAround(spans, value.at[0], value.at[1]);
+
+				return { "line": value.line, "name": value.name, "kind": value.kind, "call": value.call, "turns": value.turns, "value": value.value, ...value.at === undefined ? {} : { "at": value.at }, ...span === undefined ? {} : { "span": span.id } };
+			}),
 			"calls": [...run.calls.values()],
 			"source": source
 		};
@@ -1050,6 +1071,17 @@ async function keepSession(id: string): Promise<void> {
 		draw(uri);
 		await keepRun(trace, KEPT);
 	}
+}
+
+/** The offset of a [line, character] position in `text`. */
+function offsetsIn(text: string): (position: [number, number]) => number {
+	const starts = [0];
+
+	for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) {
+		starts.push(index + 1);
+	}
+
+	return ([line, character]) => (starts[line] ?? text.length) + character;
 }
 
 /** A file's runs kept on this machine (runs.ts), its balls again — as a file is first shown, before any run of it here. */
@@ -1471,6 +1503,18 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 				told.add(session.id);
 				endedCame(session.id, body as EndedEvent);
 				break;
+			case "coverage": {
+				// (the statements it ran, in each file it ran: what a kept run is identified by)
+				const executed = new Map<string, [[number, number], [number, number]][]>();
+
+				for (const report of [body as CoverageEvent, ...(body as CoverageEvent).files ?? []]) {
+					executed.set(report.file, report.statements.filter((statement) => statement.count > 0).map((statement) => [statement.start, statement.end]));
+				}
+
+				executedOf.set(session.id, executed);
+				break;
+			}
+
 			case "effects":
 				// (what came in: a call made, or given a result — not one skipped or denied)
 				inputsOf.set(session.id, (body as EffectsEvent).effects.filter((effect) => effect.how === "made" || effect.how === "given").map((effect) => inputOf(effect.capability, effect.resource)));

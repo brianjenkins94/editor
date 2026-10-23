@@ -14,7 +14,7 @@ import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { localTracesPath, SILO_DIR, tracesPath } from "@brianjenkins94/util/silo/layout";
-import { committable, current, parseTraces, tracesText } from "@brianjenkins94/util/silo/traces";
+import { committable, currentIn, parseTraces, tracesText } from "@brianjenkins94/util/silo/traces";
 import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, updateIndex, walk, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
@@ -33,6 +33,14 @@ const AUTHOR = { "name": "editor", "email": "editor@localhost" };
 const PROGRAM = /\.(?:m|c)?[jt]sx?$/u;
 /** At most this many runs of a file shared. */
 const SHARED_RUNS = 8;
+
+/** A text's BABLR span ids (the editor's BABLR worker, given by `useSpans`): what a run is current for, beyond its very text. */
+let spanIds: ((source: string) => Promise<Set<string>>) | undefined;
+
+/** Where the git engine gets a text's span ids — the editor's BABLR (bablr.ts `spans`), once it's started. */
+export function useSpans(spans: (source: string) => Promise<{ "id": string }[]>): void {
+	spanIds = async (source) => new Set((await spans(source)).map((span) => span.id));
+}
 
 export interface GitChange { "path": string; "status": "A" | "M" | "D" }
 export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
@@ -160,8 +168,9 @@ async function readText(path: string): Promise<string | undefined> {
  * commit`): what `.silo/` shares of runs is worked out for what's being committed (LIVE-VALUES.md, *Runs kept*). For
  * each program file staged, the runs kept on this machine of the very text staged (by its blob oid) — each as it may be
  * shared (lib traces' `committable`: never its text, a run that could have read inputs by its values' types) — go in
- * `.silo/traces/<you>/<file>.jsonl`, staged with it; a file staged with no such runs, or deleted, takes its shared runs
- * out. So what's committed is always the runs of the code beside it. A failure here shares nothing and doesn't stop
+ * `.silo/traces/<you>/<file>.jsonl`, staged with it — those of the text staged, or whose every executed declaration is in
+ * it unchanged (lib traces' `currentIn`, by the staged text's BABLR spans: a reformat or an edit to code a run didn't run
+ * leaves it current); a file staged with no such runs, or deleted, takes its shared runs out. So what's committed is always the runs of the code beside it. A failure here shares nothing and doesn't stop
  * the commit, but isn't silent: it's what this returns (why), and the commit says so (`Committed`'s `unshared`).
  */
 async function shareRuns(): Promise<string | undefined> {
@@ -195,9 +204,11 @@ async function shareRuns(): Promise<string | undefined> {
 			const oid = staged.get(path);
 			const shared = tracesPath(user, path);
 			const before = await readText(shared);
-			// This machine's runs of the text staged; else what's shared of it already (kept on another machine).
-			const kept = oid === undefined ? [] : current(parseTraces(await readText(localTracesPath(path)) ?? ""), oid);
-			const runs = kept.length > 0 ? kept.map(committable).slice(-SHARED_RUNS) : current(parseTraces(before ?? ""), oid ?? "");
+			// The staged text's span ids (none when there's no BABLR, or it can't parse it: then only runs of that very text).
+			const ids = oid === undefined || spanIds === undefined ? undefined : await spanIds(new TextDecoder().decode((await readBlob({ "fs": fs, "dir": DIR, "oid": oid })).blob)).catch(() => undefined);
+			// This machine's runs current for the text staged; else what's shared of it already (kept on another machine).
+			const kept = oid === undefined ? [] : currentIn(parseTraces(await readText(localTracesPath(path)) ?? ""), oid, ids);
+			const runs = kept.length > 0 ? kept.map(committable).slice(-SHARED_RUNS) : currentIn(parseTraces(before ?? ""), oid ?? "", ids);
 
 			if (runs.length > 0) {
 				await fs.promises.mkdir(`${DIR}/${shared.slice(0, shared.lastIndexOf("/"))}`, { "recursive": true });
