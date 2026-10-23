@@ -317,7 +317,7 @@ that can't start says why). And the two run ledgers become one: every run in `ru
   from another (the event, the render, the turn).
 - Unattended runs (*Unattended runs*):
   - (Decided 2026-10-22: a live run — the file in front of you — skips a call with no recording, its line marked; a
-    run nobody's looking at halts there. Halting is NEXT.md item 4.)
+    run nobody's looking at halts there. Halting is queued in NEXT.md.)
   - **A writable layer per run.** Whether the workspace's overlay stack can take one; its layers were designed without
     copy-up.
   - **An app's unattended run.** The preview already reloads on an edit (HMR). Is that reload the unattended run, with
