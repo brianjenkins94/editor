@@ -1215,6 +1215,50 @@ test("tests: node --test keeps a trace of each test on each file it ran", async 
 	assert.equal((await keptOn("calc.test.js")).length, 3);
 });
 
+// Selection (RUNNING.md, *Unattended runs*: "What runs"): a save runs again the test files whose tests executed code it
+// changed — calc.test.js, which ran subtract — and not one whose tests didn't (calc-add.test.js runs add alone).
+test("selection: a save reruns the tests that executed what changed, and only those", async () => {
+	const workbench = session.workbench();
+	const keptOn = (file) => workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => ""), `/workspace/.silo/local/traces/${file}.jsonl`).then((text) => text.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).filter((trace) => trace.test !== undefined));
+	const testOf = (traces, id) => traces.find((trace) => trace.test.id === id);
+
+	await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file("/workspace/calc-add.test.js"), new TextEncoder().encode(["const assert = require(\"node:assert\");", "const { test } = require(\"node:test\");", "const { add } = require(\"./calc.js\");", "", "test(\"adds\", () => {", "\tassert.equal(add(2, 2), 4);", "});", ""].join("\n"))));
+	await session.terminal("node --test calc-add.test.js", { "fresh": true });
+
+	const before = await eventually("calc-add.test.js's test kept on calc.js", async () => {
+		const traces = await keptOn("calc.js");
+
+		return testOf(traces, "calc-add.test.js › adds") === undefined || testOf(traces, "calc.test.js › calc › subtracts") === undefined ? undefined : traces;
+	}, 60_000);
+
+	// subtract edited and saved (the editor focused first, as typing there would leave it).
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/calc.js"));
+		const text = editor.document.getText();
+		const at = text.indexOf("return a - b;");
+
+		await editor.edit((builder) => {
+			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "return a - b;".length)), "return a - b + 0;");
+		});
+		await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+	});
+	await session.page.keyboard.press("ControlOrMeta+s");
+
+	const after = await eventually("calc.test.js run again, after the save", async () => {
+		const traces = await keptOn("calc.js");
+
+		return testOf(traces, "calc.test.js › calc › subtracts")?.trigger === "edit" ? traces : undefined;
+	}, 60_000);
+
+	assert.notDeepEqual(testOf(after, "calc.test.js › calc › subtracts").declarations, testOf(before, "calc.test.js › calc › subtracts").declarations, "it ran the edited subtract");
+	// Its file ran, each of its tests with it: adds ran as before, so it's the same trace, counted again.
+	assert.equal(testOf(after, "calc.test.js › calc › adds").count, testOf(before, "calc.test.js › calc › adds").count + 1);
+	assert.equal(testOf(after, "calc-add.test.js › adds").at, testOf(before, "calc-add.test.js › adds").at, "calc-add.test.js didn't run: nothing of it reached subtract");
+
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

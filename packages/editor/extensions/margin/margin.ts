@@ -1009,7 +1009,7 @@ function runsOf(uri: string, shown: Session | undefined): PaneRun[] {
 
 /** A finished run, kept (runs.ts): the same run as one kept already is that one, counted again (its ball, not a new
  *  one); else a trace of it, on this machine — a commit shares those of the text it commits (git-engine.ts). */
-async function keepSession(id: string): Promise<void> {
+async function keepSession(id: string, live = false): Promise<void> {
 	const inputs = inputsOf.get(id) ?? [];
 	const executed = executedOf.get(id);
 	const tests = testsOf.get(id);
@@ -1019,7 +1019,7 @@ async function keepSession(id: string): Promise<void> {
 	testsOf.delete(id);
 
 	if (tests !== undefined) {
-		await keepTests(tests, inputs);
+		await keepTests(tests, inputs, live ? "edit" : "you");
 	}
 
 	for (const [uri, runs] of kept) {
@@ -1086,7 +1086,7 @@ async function keepSession(id: string): Promise<void> {
  *  that file its statements are in, by BABLR's spans of the file as it is now — so a file's traces say which tests
  *  reach it, by the same declarations its runs are identified by. A file that changed since it ran is placed as it is
  *  (a test file's run is short). */
-async function keepTests({ file, tests }: TestsEvent, inputs: string[]): Promise<void> {
+async function keepTests({ file, tests }: TestsEvent, inputs: string[], trigger: RunTrace["trigger"]): Promise<void> {
 	const testFile = vscode.workspace.asRelativePath(vscode.Uri.file(file), false);
 	const at = new Date().toISOString();
 	const texts = new Map<string, Promise<{ "source": string; "spans"?: Span[] } | undefined>>();
@@ -1128,7 +1128,7 @@ async function keepTests({ file, tests }: TestsEvent, inputs: string[]): Promise
 				"file": vscode.workspace.asRelativePath(vscode.Uri.file(ran.file), false),
 				"oid": await blobOid(text.source),
 				"declarations": declarations,
-				"trigger": "you",
+				"trigger": trigger,
 				"test": { "id": [testFile, ...test.titles].join(" › "), "outcome": test.outcome },
 				"at": at,
 				"count": 1,
@@ -1613,9 +1613,10 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 	vscode.debug.onDidTerminateDebugSession((session) => {
 		const { program } = session.configuration;
 
-		liveSessions.delete(session.id);
+		const live = liveSessions.delete(session.id);
+
 		// (after every event it told: its values, end and effects)
-		void keepSession(session.id).catch((error: unknown) => {
+		void keepSession(session.id, live).catch((error: unknown) => {
 			log?.warn("a run couldn't be kept", { "error": failureText(error) });
 		});
 
