@@ -156,6 +156,13 @@ its outcome) on each file it ran: the top-level declarations it executed there, 
 which tests reach it, the record selection reads (*Unattended runs*: "What runs"). A file keeps each test's latest,
 apart from its runs. Tests' traces are shared at a commit as runs are: those still current for the committed text.
 
+**Features from tests** (Insights' Features view, built 2026-10-23; lib util/silo/test-features): the tests grouped by
+the code they ran — not their own file's, which is test code — leaving out code at least half of ten or more tests
+reach (ambient: setup, helpers), joined while their average Jaccard similarity is at least 0.5. A feature is named by
+the suites its tests share, else their commonest title, and lists its tests (as each last came out) and its code where
+it is now; a click goes to it. `insights.features` answers the same as data. A test file run alone and a whole
+suite give the same grouping, since each test's latest trace counts.
+
 ## What can't run this way
 
 The hope is none; the plan is as few as possible, each a named case with a reason, kept on a list here and shrunk.

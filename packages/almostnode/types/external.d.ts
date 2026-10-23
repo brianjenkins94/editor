@@ -56,3 +56,7 @@ declare module "events/events.js" {
 declare module "string_decoder/lib/string_decoder.js" {
 	export { default } from "node:string_decoder";
 }
+
+declare module "assert/build/assert.js" {
+	export { default } from "node:assert";
+}

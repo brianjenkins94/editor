@@ -53,6 +53,10 @@ export async function keptRuns(file: string): Promise<RunTrace[]> {
 	return root === undefined ? [] : parseTraces(await read(vscode.Uri.joinPath(root, localTracesPath(file))) ?? "");
 }
 
+/** Each file's keeping, in turn: a keep reads the file's runs and writes them back with one more, so two at once (a
+ *  test file's run kept while another's is) would lose one. */
+const keeping = new Map<string, Promise<void>>();
+
 /** Keep `run` on this machine (the last `keep`, the same run counted once). What's shared is worked out as a commit is
  *  made (the git engine's pre-commit step: the runs of the text committed). */
 export async function keepRun(run: RunTrace, keep: number): Promise<void> {
@@ -62,9 +66,19 @@ export async function keepRun(run: RunTrace, keep: number): Promise<void> {
 		return;
 	}
 
-	await seeded(root);
-
 	const local = vscode.Uri.joinPath(root, localTracesPath(run.file));
+	const kept = (keeping.get(local.path) ?? Promise.resolve()).then(async () => {
+		await seeded(root);
+		await write(local, tracesText(withRun(parseTraces(await read(local) ?? ""), run, keep)));
+	});
+	const settled = kept.catch(() => undefined);
 
-	await write(local, tracesText(withRun(parseTraces(await read(local) ?? ""), run, keep)));
+	keeping.set(local.path, settled);
+	void settled.then(() => {
+		if (keeping.get(local.path) === settled) {
+			keeping.delete(local.path);
+		}
+	});
+
+	await kept;
 }

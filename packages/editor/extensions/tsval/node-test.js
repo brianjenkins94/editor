@@ -124,8 +124,16 @@ function print(depth, line) {
 	console.log("  ".repeat(depth) + line);
 }
 
+/** What a test threw: its name and message (an assertion's says what differed), and where in the program's own code —
+ *  never the debugger's frames, which an error thrown by a built-in carries. */
 function errorText(error) {
-	return error instanceof Error ? error.stack ?? String(error) : String(error);
+	if (typeof error !== "object" || error === null || !("message" in error)) {
+		return String(error);
+	}
+
+	const frames = String(error.stack ?? "").split("\n").filter((line) => /^\s+at /u.test(line) && line.includes("/workspace/"));
+
+	return [`${error.name ?? "Error"}: ${error.message}`, ...frames.map((line) => line.trim())].join("\n");
 }
 
 async function runTest(node, titles, suite, depth) {

@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "assert": "2.1.0",
     "events": "3.3.0",
     "pako": "^2.1.0",
     "readable-stream": "4.7.0",

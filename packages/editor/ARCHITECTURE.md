@@ -474,6 +474,7 @@ flowchart LR
   n_ext_bridge <-.->|"commands"| n_ext_insights
   n_ext_bridge <-.->|"commands"| n_ext_margin
   n_ext_bridge <-.->|"commands"| n_ext_notes
+  n_ext_bridge <-.->|"commands"| n_ext_running
   n_ext_bridge <-.->|"commands"| n_ext_tsval
   n_ext_bridge <-.->|"commands"| n_ext_vscode
   n_ext_capabilities -->|"reads"| n_store__git__file_
@@ -507,6 +508,7 @@ flowchart LR
   n_ext_notes -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_notes -->|"reads, writes"| n_store__silo_notes____file__jsonl
   n_ext_notes <-.->|"commands"| n_ext_vscode
+  n_ext_running -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_source_control <-.->|"commands"| n_ext_vscode
   n_ext_tsval -->|"reads"| n_store__git__file_
   n_ext_tsval -->|"reads"| n_store__silo_policy__file__json
@@ -573,7 +575,7 @@ flowchart LR
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, margin, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
-| `.silo/local/…/<file>.jsonl` | Workbench, margin | Workbench, insights, margin |
+| `.silo/local/…/<file>.jsonl` | Workbench, margin | Workbench, insights, margin, running |
 | `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge, margin |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/policy/<file>.json` | Workbench, bridge, capabilities | Workbench, bridge, capabilities, tsval |

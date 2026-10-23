@@ -89,3 +89,14 @@ test("each built-in has at least as much of Node's API as it did", () => {
 
 	assert.deepEqual(short, []);
 });
+
+test("assert is Node's: a failure says what differed, and deep equality looks inside", () => {
+	const runtime = new Runtime(new VirtualFS());
+	const failure = runtime.execute(`try { require("assert").strictEqual(1, 2); } catch (error) { module.exports = { "name": error.name, "message": error.message, "actual": error.actual }; }`, "/probe.js").exports as { "name": string; "message": string; "actual": number };
+
+	assert.equal(failure.name, "AssertionError");
+	assert.match(failure.message, /strictly equal/u);
+	assert.equal(failure.actual, 1);
+	assert.throws(() => runtime.execute(`require("assert/strict").deepEqual(new Map([[1, 2]]), new Map([[1, 3]]));`, "/maps.js"), { "name": "AssertionError" }, "two Maps that differ aren't equal");
+	runtime.execute(`require("assert/strict").deepEqual(new Map([[1, { "a": [2] }]]), new Map([[1, { "a": [2] }]]));`, "/same.js");
+});

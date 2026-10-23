@@ -34,6 +34,11 @@
         "command": "insights.applySuggestion",
         "title": "Apply the Fix",
         "icon": "$(lightbulb-autofix)"
+      },
+      {
+        "command": "insights.features",
+        "title": "Features from Tests, as Data",
+        "category": "Insights"
       }
     ],
     "menus": {
@@ -47,6 +52,10 @@
       "commandPalette": [
         {
           "command": "insights.applySuggestion",
+          "when": "false"
+        },
+        {
+          "command": "insights.features",
           "when": "false"
         }
       ]
@@ -88,6 +97,10 @@
         }
       ],
       "insights": [
+        {
+          "id": "insights.features",
+          "name": "Features"
+        },
         {
           "type": "webview",
           "id": "insights.monitor",

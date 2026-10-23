@@ -481,8 +481,8 @@ as a removal (the terminal commands that moved to `command.ts` files show as "tr
 inherits that gap. Three layers would carry it further: what every package declares (`exports`, `bin`, `scripts`);
 presets switched on by dependencies (`vscode`, `@modelcontextprotocol/sdk`, `express`/`hono`, `commander`,
 `react-router`); a repo's own shapes declared rather than coded (`{ "facet": "hub request", "call": "serve", "name": 1 }`).
-Tests are a fourth: a way in every repository has, named by what it's for (*Which tests reach what*, above; NEXT.md,
-features from tests). Also open: **names** (code says `installLiveValues`, people say "live values"; manifests' labels
+Tests are a fourth: a way in every repository has, named by what it's for — built as features from tests
+(`test-features.ts`, the editor's Features view: editor RUNNING.md, *Tests*). Also open: **names** (code says `installLiveValues`, people say "live values"; manifests' labels
 help); **what counts as one feature** (features with the same reach are probably one). Prior art: Jujutsu (a change
 keeps its id across rewrites), Unison (history per definition), Smalltalk's changes log and ENVY, xit.
 

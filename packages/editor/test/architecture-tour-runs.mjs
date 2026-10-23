@@ -1191,22 +1191,32 @@ test("tests: node --test keeps a trace of each test on each file it ran", async 
 
 		await write("/workspace/calc.js", ["function add(a, b) {", "\treturn a + b;", "}", "", "function subtract(a, b) {", "\treturn a - b;", "}", "", "module.exports = { add, subtract };", ""]);
 		await write("/workspace/calc.test.js", ["const assert = require(\"node:assert\");", "const { describe, test } = require(\"node:test\");", "const { add, subtract } = require(\"./calc.js\");", "", "describe(\"calc\", () => {", "\ttest(\"adds\", () => {", "\t\tassert.equal(add(1, 2), 3);", "\t});", "", "\ttest(\"subtracts\", async () => {", "\t\tawait new Promise((resolve) => setTimeout(resolve, 5));", "\t\tassert.equal(subtract(3, 2), 1);", "\t});", "});", "", "test(\"fails\", () => {", "\tassert.equal(add(1, 1), 3);", "});", ""]);
+		await write("/workspace/calc-add.test.js", ["const assert = require(\"node:assert\");", "const { test } = require(\"node:test\");", "const { add } = require(\"./calc.js\");", "", "test(\"adds\", () => {", "\tassert.equal(add(2, 2), 4);", "});", ""]);
 	});
-	await session.terminal("node --test calc.test.js", { "fresh": true });
+	// (two files, run one after the other and kept as they end: each test's trace on calc.js, none lost to the other's)
+	await session.terminal("node --test calc.test.js calc-add.test.js", { "fresh": true });
 
 	const run = await eventually("the test run's end", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.title === "node --test calc.test.js" && each.state !== "running"), 60_000);
 
 	assert.equal(run.exitCode, 1, "a test failed, so the run did");
 
 	const keptOn = (file) => workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => ""), `/workspace/.silo/local/traces/${file}.jsonl`).then((text) => text.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).filter((trace) => trace.test !== undefined));
+	let seen = [];
 	const kept = await eventually("each test kept on calc.js", async () => {
 		const traces = await keptOn("calc.js");
 
-		return traces.length >= 3 ? traces : undefined;
-	}, 30_000);
+		seen = traces.map((trace) => trace.test.id);
+
+		return traces.length >= 4 ? traces : undefined;
+	}, 60_000).catch((error) => {
+		// (what was kept by then, and what the page said of keeping and of the runs)
+		const said = session.notable().filter((line) => /kept|keep|margin|node --test|debug\.start|tests/iu.test(line)).slice(-30);
+
+		throw new Error(`${error.message}: kept ${JSON.stringify(seen)}\n${said.join("\n")}`, { "cause": error });
+	});
 	const of = (id) => kept.find((trace) => trace.test.id === id);
 
-	assert.deepEqual([of("calc.test.js › calc › adds")?.test.outcome, of("calc.test.js › calc › subtracts")?.test.outcome, of("calc.test.js › fails")?.test.outcome], ["pass", "pass", "fail"]);
+	assert.deepEqual([of("calc.test.js › calc › adds")?.test.outcome, of("calc.test.js › calc › subtracts")?.test.outcome, of("calc.test.js › fails")?.test.outcome, of("calc-add.test.js › adds")?.test.outcome], ["pass", "pass", "fail", "pass"]);
 	// What each executed of calc.js: adds and fails ran add, subtracts ran subtract — one declaration each.
 	assert.equal(of("calc.test.js › calc › adds").declarations.length, 1);
 	assert.deepEqual(of("calc.test.js › fails").declarations, of("calc.test.js › calc › adds").declarations);
@@ -1222,10 +1232,7 @@ test("selection: a save reruns the tests that executed what changed, and only th
 	const keptOn = (file) => workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => ""), `/workspace/.silo/local/traces/${file}.jsonl`).then((text) => text.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).filter((trace) => trace.test !== undefined));
 	const testOf = (traces, id) => traces.find((trace) => trace.test.id === id);
 
-	await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file("/workspace/calc-add.test.js"), new TextEncoder().encode(["const assert = require(\"node:assert\");", "const { test } = require(\"node:test\");", "const { add } = require(\"./calc.js\");", "", "test(\"adds\", () => {", "\tassert.equal(add(2, 2), 4);", "});", ""].join("\n"))));
-	await session.terminal("node --test calc-add.test.js", { "fresh": true });
-
-	const before = await eventually("calc-add.test.js's test kept on calc.js", async () => {
+	const before = await eventually("the tests kept on calc.js", async () => {
 		const traces = await keptOn("calc.js");
 
 		return testOf(traces, "calc-add.test.js › adds") === undefined || testOf(traces, "calc.test.js › calc › subtracts") === undefined ? undefined : traces;
@@ -1257,6 +1264,22 @@ test("selection: a save reruns the tests that executed what changed, and only th
 	assert.equal(testOf(after, "calc-add.test.js › adds").at, testOf(before, "calc-add.test.js › adds").at, "calc-add.test.js didn't run: nothing of it reached subtract");
 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
+});
+
+// Features from tests (the Features view, in Insights): the kept tests grouped by the code they ran — add's tests one
+// feature, subtract's another — each with its code where it is now.
+test("features: the kept tests group into features by the code they ran", async () => {
+	const features = await eventually("the features", async () => {
+		const found = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.features"));
+
+		return found?.length >= 2 ? found : undefined;
+	});
+	const named = (name) => features.find((feature) => feature.name === name);
+
+	assert.deepEqual(named("adds")?.tests.map((test) => test.id).toSorted(), ["calc-add.test.js › adds", "calc.test.js › calc › adds", "calc.test.js › fails"]);
+	assert.equal(named("adds").tests.find((test) => test.id === "calc.test.js › fails").outcome, "fail");
+	assert.deepEqual(named("adds").code.map((code) => [code.file, code.label, code.line]), [["calc.js", "function add(a, b) {", 1]]);
+	assert.deepEqual(named("calc › subtracts")?.code.map((code) => code.label), ["function subtract(a, b) {"]);
 });
 
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {

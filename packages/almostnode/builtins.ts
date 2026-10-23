@@ -9,8 +9,9 @@
  *     http/net bridge, child_process's ENOSYS), or what almostnode implements and unenv stubs (crypto's hashes, zlib,
  *     vm).
  *
- * And where unenv's has none, or isn't Node's, Node's own code from npm: streams (readable-stream — Node's lib/stream.js
- * and its internals), string_decoder, and events' EventEmitter (unenv's is a class, which code written for Node can't
+ * And where unenv's has none, or isn't Node's, Node's own code from npm: assert (unenv's AssertionError has no message
+ * and its deep equality is JSON's, so a test's `deepStrictEqual` of two Maps passed), streams (readable-stream — Node's
+ * lib/stream.js and its internals), string_decoder, and events' EventEmitter (unenv's is a class, which code written for Node can't
  * `EventEmitter.call(this)` — readable-stream's own streams among it), unenv filling in the names it lacks. almostnode's
  * own code builds on these and on unenv's buffer, as a program does: one EventEmitter, one Buffer.
  *
@@ -19,7 +20,6 @@
  * unenv's modules import each other by Node's names (`node:events`), and Node's code on npm imports `buffer`, `events`
  * and `process/`: unenv-resolve.ts makes those unenv's own, in a bundle and in almostnode's tests alike.
  */
-import * as unenvAssert from "unenv/node/assert";
 import * as unenvAsyncHooks from "unenv/node/async_hooks";
 import * as unenvBuffer from "unenv/node/buffer";
 import * as unenvChildProcess from "unenv/node/child_process";
@@ -75,6 +75,7 @@ import * as tlsShim from "./shims/tls";
 import * as utilShim from "./shims/util";
 import * as vmShim from "./shims/vm";
 import * as zlibShim from "./shims/zlib";
+import nodeAssert from "assert/build/assert.js";
 import events from "events/events.js";
 import stream from "readable-stream/lib/stream.js";
 import stringDecoder from "string_decoder/lib/string_decoder.js";
@@ -150,7 +151,6 @@ export function fillIn(target: object, namespace: Namespace, bind = false): void
 export function nodeBuiltins(own: { "console": Namespace }): Record<string, unknown> {
 	const util = unenvWith(unenvUtil, utilShim as unknown as Namespace, ["callbackify", "stripVTControlCharacters"]);
 	const path = unenv(unenvPath);
-	const assert = unenv(unenvAssert);
 
 	return {
 		// unenv's, as they are
@@ -197,11 +197,11 @@ export function nodeBuiltins(own: { "console": Namespace }): Record<string, unkn
 		"buffer": unenv(unenvBuffer),
 		"util": util,
 		"sys": util,
-		"assert": assert,
-		"assert/strict": (assert as unknown as { "strict": unknown }).strict,
 		"async_hooks": oursOver(asyncHooksShim as unknown as Namespace, unenvAsyncHooks),
 		"console": oursOver(own.console, unenvConsole),
 		// Node's own code, from npm
+		"assert": nodeAssert,
+		"assert/strict": (nodeAssert as unknown as { "strict": unknown }).strict,
 		"stream": stream,
 		"stream/promises": stream.promises,
 		"string_decoder": stringDecoder
