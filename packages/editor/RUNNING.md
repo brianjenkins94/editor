@@ -316,8 +316,8 @@ that can't start says why). And the two run ledgers become one: every run in `ru
 - What a recorded stop keeps of an object (a preview, a depth, how many of a line's stops), and how one stop is told
   from another (the event, the render, the turn).
 - Unattended runs (*Unattended runs*):
-  - **Halt or skip**, for a call that isn't safe and has no recording, with nobody watching. Halt is proposed: a
-    skipped call that mattered makes a wrong run that looks right.
+  - (Decided 2026-10-22: a live run — the file in front of you — skips a call with no recording, its line marked; a
+    run nobody's looking at halts there. Halting is NEXT.md item 4.)
   - **A writable layer per run.** Whether the workspace's overlay stack can take one; its layers were designed without
     copy-up.
   - **An app's unattended run.** The preview already reloads on an edit (HMR). Is that reload the unattended run, with
