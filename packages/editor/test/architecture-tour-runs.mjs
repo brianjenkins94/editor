@@ -1262,6 +1262,9 @@ test("selection: a save reruns the tests that executed what changed, and only th
 	// Its file ran, each of its tests with it: adds ran as before, so it's the same trace, counted again.
 	assert.equal(testOf(after, "calc.test.js › calc › adds").count, testOf(before, "calc.test.js › calc › adds").count + 1);
 	assert.equal(testOf(after, "calc-add.test.js › adds").at, testOf(before, "calc-add.test.js › adds").at, "calc-add.test.js didn't run: nothing of it reached subtract");
+	// On the architecture view: selection asked core's BABLR for the saved text's spans, by the bridge's command (its host's
+	// totals go out a moment after; waited for here, so the diagram has it however the tour's timing falls).
+	await session.until("running → the bridge, by command", hasLabel("ext:running", "ext:bridge", /^cmd editor\.annotations\.spans$/u), 30_000);
 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
@@ -1293,6 +1296,11 @@ test("features: a feature's status, set in the editor, goes into the ledger", as
 
 	assert.deepEqual({ ...ledger["calc › subtracts"], "since": "" }, { "status": "parked", "why": "not worked on for now", "since": "", "paths": ["calc.js"] });
 	assert.equal((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.features"))).find((feature) => feature.name === "calc › subtracts")?.status, "parked", "the view shows it");
+
+	// On the architecture view, the ledger is a store Insights reads (waited for: its host's totals go out a moment after).
+	const { discoveredStores } = await import("../shared/architecture-model.ts");
+
+	await session.until("Insights reading the ledger", (snapshot) => discoveredStores(snapshot).find((store) => store.store === ".silo/<file>.json")?.readers.includes("ext:insights"), 30_000);
 });
 
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
