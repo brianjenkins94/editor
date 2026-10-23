@@ -47,13 +47,13 @@
  * A preview's recorded stops come the same way: `values` on its run's `production` session (the bridge's), each report
  * every hit so far (`replace`).
  */
-import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, LiveCall, LiveValue, RunEnd, TestsEvent, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
-import type { RunTrace } from "@brianjenkins94/util/silo/traces";
+import type { RunTrace, Span } from "@brianjenkins94/util/silo/traces";
 import type { LineMark as PaneMark, ProfiledLine } from "./coverage";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
@@ -122,6 +122,8 @@ const liveSessions = new Set<string>();
 const inputsOf = new Map<string, string[]>();
 /** The statements each session executed, by file (its coverage, [line, character] each): what its code is. */
 const executedOf = new Map<string, Map<string, [[number, number], [number, number]][]>>();
+/** Each session's tests, when it ran a test file (the run contract's `tests`): kept with its run. */
+const testsOf = new Map<string, TestsEvent>();
 /** How many of a run's steps its ball rolls through, at most. */
 const MAX_PATH = 400;
 /** Each file's marks for the margin's gutter column (coverage), per file URI. */
@@ -1010,9 +1012,15 @@ function runsOf(uri: string, shown: Session | undefined): PaneRun[] {
 async function keepSession(id: string): Promise<void> {
 	const inputs = inputsOf.get(id) ?? [];
 	const executed = executedOf.get(id);
+	const tests = testsOf.get(id);
 
 	inputsOf.delete(id);
 	executedOf.delete(id);
+	testsOf.delete(id);
+
+	if (tests !== undefined) {
+		await keepTests(tests, inputs);
+	}
 
 	for (const [uri, runs] of kept) {
 		const run = runs.find((each) => each.id === id);
@@ -1071,6 +1079,65 @@ async function keepSession(id: string): Promise<void> {
 
 		draw(uri);
 		await keepRun(trace, KEPT);
+	}
+}
+
+/** A test file's tests, each kept as a trace on every file it ran (lib traces' `test`): the top-level declarations of
+ *  that file its statements are in, by BABLR's spans of the file as it is now — so a file's traces say which tests
+ *  reach it, by the same declarations its runs are identified by. A file that changed since it ran is placed as it is
+ *  (a test file's run is short). */
+async function keepTests({ file, tests }: TestsEvent, inputs: string[]): Promise<void> {
+	const testFile = vscode.workspace.asRelativePath(vscode.Uri.file(file), false);
+	const at = new Date().toISOString();
+	const texts = new Map<string, Promise<{ "source": string; "spans"?: Span[] } | undefined>>();
+	const placed = (path: string) => {
+		if (!texts.has(path)) {
+			texts.set(path, (async () => {
+				const source = await vscode.workspace.fs.readFile(vscode.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
+
+				if (source === undefined) {
+					return undefined;
+				}
+
+				const answer = await annotations(vscode.commands).spans(source).catch(() => undefined);
+
+				return { "source": source, ...answer !== undefined && "value" in answer ? { "spans": answer.value } : {} };
+			})());
+		}
+
+		return texts.get(path);
+	};
+
+	for (const test of tests) {
+		for (const ran of test.files) {
+			const text = await placed(ran.file);
+
+			if (text?.spans === undefined) {
+				continue;
+			}
+
+			const offsetOf = offsetsIn(text.source);
+			const declarations = declarationsHolding(text.spans, ran.statements.map(([start, end]): [number, number] => [offsetOf(start), offsetOf(end)]));
+
+			if (declarations.length === 0) {
+				continue;
+			}
+
+			await keepRun({
+				"id": crypto.randomUUID(),
+				"file": vscode.workspace.asRelativePath(vscode.Uri.file(ran.file), false),
+				"oid": await blobOid(text.source),
+				"declarations": declarations,
+				"trigger": "you",
+				"test": { "id": [testFile, ...test.titles].join(" › "), "outcome": test.outcome },
+				"at": at,
+				"count": 1,
+				"inputs": [...new Set(inputs)].toSorted(),
+				"values": [],
+				"calls": [],
+				"source": text.source
+			}, KEPT);
+		}
 	}
 }
 
@@ -1515,6 +1582,10 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 				executedOf.set(session.id, executed);
 				break;
 			}
+
+			case "tests":
+				testsOf.set(session.id, body as TestsEvent);
+				break;
 
 			case "effects":
 				// (what came in: a call made, or given a result — not one skipped or denied)

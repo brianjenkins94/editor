@@ -6,7 +6,8 @@
  *
  * Node's other forms, as people type them: `-e <code>` runs the code and `-p <expression>` prints it (the debugger
  * runs files, so the code goes in one under `.silo/local/`, which stays out of git, removed after); `-v` asks the runtime
- * itself (`-p process.version`); `--test` and a bare `node` (a REPL) say they aren't here yet rather than misbehave.
+ * itself (`-p process.version`); `--test` runs test files, each in the debugger (node:test is the editor's: RUNNING.md,
+ * *Tests*); and a bare `node` (a REPL) says it isn't here yet rather than misbehave.
  */
 import type { Juvy } from "@brianjenkins94/util/juvy";
 import type { CommandHost, Handler } from "../../catalog";
@@ -41,7 +42,20 @@ const EVAL_DIR = "/workspace/.silo/local/node-eval";
 
 /** How `node`'s arguments (as juvy parsed them) ask to be run: a file and its arguments, code (`-e`, `-p`), or
  *  something not here. */
-export type NodeInvocation = { "file": string; "args": string[] } | { "code": string; "print": boolean; "args": string[] } | { "unsupported": string; "exitCode": number };
+export type NodeInvocation = { "file": string; "args": string[] } | { "code": string; "print": boolean; "args": string[] } | { "tests": string[] } | { "unsupported": string; "exitCode": number };
+
+/** What `node --test` with no files runs, as node finds them: `*.test.*`, `*-test.*`, `*_test.*`, `test-*` and
+ *  `test.*` files, and every file in a `test` folder — scripts only, never under node_modules or a dot folder. */
+export function isTestFile(path: string): boolean {
+	const parts = path.split("/");
+	const name = parts.at(-1) ?? "";
+
+	if (!/\.[cm]?[jt]s$/u.test(name) || parts.some((part) => part === "node_modules" || part.startsWith("."))) {
+		return false;
+	}
+
+	return /(?:^test\.|^test-|[.\-_]test\.[cm]?[jt]s$)/u.test(name) || parts.slice(0, -1).includes("test");
+}
 
 export function invocationOf(config: Juvy): NodeInvocation {
 	const program = config.get("program") as string[];
@@ -57,7 +71,7 @@ export function invocationOf(config: Juvy): NodeInvocation {
 	}
 
 	if (config.get("test") === true) {
-		return { "unsupported": "node: --test isn't here yet — this runtime has no node:test. Run a test file as a program: node <file>", "exitCode": 1 };
+		return { "tests": program };
 	}
 
 	if (program.length === 0) {
@@ -74,6 +88,31 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 
 		if ("unsupported" in invocation) {
 			return { "stdout": "", "stderr": invocation.unsupported + "\n", "exitCode": invocation.exitCode };
+		}
+
+		// Test files, one after another, each a run of its own; failed if any failed, as node --test is.
+		if ("tests" in invocation) {
+			const files = invocation.tests.length > 0 ? invocation.tests : await testFilesUnder(ctx.cwd);
+
+			if (files.length === 0) {
+				return { "stdout": "", "stderr": `node: no test files under ${ctx.cwd}\n`, "exitCode": 1 };
+			}
+
+			let exitCode = 0;
+
+			for (const file of files) {
+				writeLive("out", `▶ ${file}\n`);
+
+				const ran = await runFile(file, [], `node --test ${file}`);
+
+				exitCode ||= ran.exitCode;
+
+				if (ctx.signal?.aborted === true) {
+					break;
+				}
+			}
+
+			return { "stdout": "", "stderr": "", "exitCode": exitCode };
 		}
 
 		// Code runs from a file of its own, removed once it's run.
@@ -94,6 +133,34 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 			if (scratch !== undefined) {
 				await ctx.fs.rm(scratch, { "force": true }).catch(() => undefined);
 			}
+		}
+
+		/** The test files under `dir` (isTestFile), relative to it, in order. */
+		async function testFilesUnder(dir: string): Promise<string[]> {
+			const found: string[] = [];
+			const walk = async (relative: string): Promise<void> => {
+				const names = await ctx.fs.readdir(resolvePosix(dir, relative || ".")).catch((): string[] => []);
+
+				for (const name of names.toSorted()) {
+					const path = relative === "" ? name : `${relative}/${name}`;
+
+					if (name === "node_modules" || name.startsWith(".")) {
+						continue;
+					}
+
+					const stat = await ctx.fs.stat(resolvePosix(dir, path)).catch(() => undefined);
+
+					if (stat?.isDirectory === true) {
+						await walk(path);
+					} else if (isTestFile(path)) {
+						found.push(path);
+					}
+				}
+			};
+
+			await walk("");
+
+			return found;
 		}
 
 		async function runFile(target: string, programArgs: string[], title: string): Promise<{ "stdout": string; "stderr": string; "exitCode": number }> {

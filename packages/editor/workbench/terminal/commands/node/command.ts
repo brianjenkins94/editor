@@ -10,7 +10,7 @@ export default {
 		"eval": { "format": String, "default": "", "short": "e", "doc": "Run this code." },
 		"print": { "format": String, "default": "", "short": "p", "doc": "Run this code and print its value." },
 		"version": { "format": Boolean, "default": false, "short": "v", "doc": "The runtime's version." },
-		"test": { "format": Boolean, "default": false, "doc": "Not here yet: this runtime has no node:test." },
+		"test": { "format": Boolean, "default": false, "doc": "Run test files (node:test), one after another in the debugger: those given, else the ones under this directory." },
 		"inspect": { "format": Boolean, "default": false, "doc": "Accepted: every run is in the debugger." },
 		"inspectBrk": { "format": Boolean, "default": false, "doc": "Accepted: set a breakpoint to stop at." },
 		"enableSourceMaps": { "format": Boolean, "default": false, "doc": "Accepted." },

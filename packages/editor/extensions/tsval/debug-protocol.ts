@@ -9,7 +9,7 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { CoverageEvent, Effect, LiveBatch } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, LiveBatch, TestReport } from "@brianjenkins94/editor-api";
 import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 
@@ -98,6 +98,8 @@ export type WorkerEvent =
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
+	/** A test file's tests (node:test, node-test.js), each with the statements it ran — just before the final coverage. */
+	| { "type": "tests"; "tests": TestReport[] }
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
 	/** What an allowed capability call returned (RUNNING.md, *Effects are real, decided per call*), for the adapter to
 	 *  record (RUNNING.md, *A call's result*). */

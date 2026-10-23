@@ -19,7 +19,7 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import type { FsShim } from "@brianjenkins94/almostnode";
-import type { Effect, LoadedPackage } from "@brianjenkins94/editor-api";
+import type { Effect, LoadedPackage, TestReport } from "@brianjenkins94/editor-api";
 import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/editor-api/runtime";
 import type { Told, Traced } from "@brianjenkins94/editor-api/values";
 import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
@@ -44,6 +44,7 @@ import { capabilityStandins, givenAs, standinCapability } from "./canary";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "./capability-calls";
 import { replayGuard, replayProgram } from "./replay-run";
 import { addObservation, copySums, siteObservations } from "./site-sums";
+import nodeTestSource from "./node-test.js?raw";
 
 // This worker's link into the editor's runtime (editor-api's workspace runtime), the port the adapter hands over first
 // thing: a server the program starts answers the preview through it, and its log and spans — a step's, its uncaught
@@ -785,17 +786,63 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 
 /** The runtime as tsval's module loader (VMOptions.modules): it resolves; tsval evaluates the program's files; what isn't
  *  the program's, almostnode loads — asked for by the program, so its built-ins are the stand-ins. */
+/** Where `node:test` is served from (node-test.js): a program file in no folder of the workspace's, so tsval runs it
+ *  as the program's code — a test's awaits on the run's event loop — and nothing tells it as one of the program's files
+ *  (its coverage, values and evidence aren't the program's). */
+const NODE_TEST = "/__editor__/node-test.js";
+
+/** The tests a test file's run ran, as each ended (node-test.js tells each start and end). */
+let testsRan: TestReport[] = [];
+/** Each running test's coverage counts as it started, by its titles (JSON): what ran since is that test's. */
+const testStarts = new Map<string, Map<ts.SourceFile, number[]>>();
+/** How many tests failed, as node-test.js tells at the end: a run with one fails, as `node --test` does. */
+let testsFailed = 0;
+
+/** node-test.js's `__editorTest`: a test started (`titles`), ended (and how: `outcome`, what it threw), or the file's
+ *  tests are done (`titles` then the count that failed). Called from the program's code, with strings only. */
+function testTold(kind: string, titles?: string, outcome?: string, error?: string): void {
+	if (kind === "start" && titles !== undefined) {
+		testStarts.set(titles, new Map([...current?.coverage ?? []].map(([file, entry]) => [file, [...entry.counts]])));
+	} else if (kind === "end" && titles !== undefined) {
+		const started = testStarts.get(titles);
+
+		testStarts.delete(titles);
+		testsRan.push({ "titles": JSON.parse(titles) as string[], "outcome": outcome as TestReport["outcome"], ...error === undefined ? {} : { "error": error }, "files": started === undefined ? [] : ranSince(started) });
+	} else if (kind === "done") {
+		testsFailed = Number(titles ?? 0);
+	}
+}
+
+/** The statements that ran since `started` (each file's counts then), in each of the program's files. */
+function ranSince(started: Map<ts.SourceFile, number[]>): TestReport["files"] {
+	return [...current?.coverage ?? []].filter(([file]) => file.fileName !== NODE_TEST).flatMap(([file, entry]) => {
+		const before = started.get(file) ?? [];
+		const at = (offset: number): [number, number] => {
+			const { line, character } = file.getLineAndCharacterOfPosition(offset);
+
+			return [line, character];
+		};
+		const statements = entry.statements.flatMap((node, index): [[number, number], [number, number]][] => (entry.counts[index] > (before[index] ?? 0) ? [[at(node.getStart(file)), at(node.getEnd())]] : []));
+
+		return statements.length === 0 ? [] : [{ "file": file.fileName, "statements": statements }];
+	});
+}
+
 function programModules(loaded: Runtime): ModuleLoader {
 	const vfs = loaded.getVFS();
 
 	return {
-		"resolve": (specifier, fromDir) => loaded.resolve(specifier, fromDir),
+		// (`node:test` is node-test.js, run as the program's own code: NODE_TEST)
+		"resolve": (specifier, fromDir) => (specifier === "node:test" ? { "kind": "program", "filename": NODE_TEST } : loaded.resolve(specifier, fromDir)),
 		"require": (specifier, fromDir) => loaded.require(specifier, fromDir, "program"),
-		"source": (filename) => vfs.readFileSync(filename, "utf8"),
+		"source": (filename) => (filename === NODE_TEST ? nodeTestSource : vfs.readFileSync(filename, "utf8")),
 		"cached": (filename) => loaded.cached(filename),
 		"register": (filename, module) => {
 			// Another of the program's files, about to run: its capability stops armed first.
-			noteProgramFile(filename, () => vfs.readFileSync(filename, "utf8"));
+			if (filename !== NODE_TEST) {
+				noteProgramFile(filename, () => vfs.readFileSync(filename, "utf8"));
+			}
+
 			loaded.register(filename, module as Parameters<Runtime["register"]>[1]);
 		},
 		"forget": (filename) => { loaded.forget(filename); }
@@ -1786,7 +1833,7 @@ function flushLive(): void {
 	for (const [file, record] of live) {
 		const batch = record.drain();
 
-		if (batch !== undefined) {
+		if (batch !== undefined && file.fileName !== NODE_TEST) {
 			// Another of the program's files: which, and its text the first time (what its values' ranges are in).
 			const other = file === sourceFile ? {} : { "file": file.fileName, ...toldSource.has(file.fileName) ? {} : { "source": file.text } };
 
@@ -1840,6 +1887,12 @@ function coverageReport(): CoverageReport {
 
 	others.delete(sourceFile);
 
+	for (const file of others) {
+		if (file.fileName === NODE_TEST) {
+			others.delete(file);
+		}
+	}
+
 	const files = [...others].map((file) => ({ ...fileCoverage(file), "source": file.text }));
 
 	return { ...fileCoverage(sourceFile), ...files.length === 0 ? {} : { "files": files }, ...packagesRan.size === 0 ? {} : { "packages": [...packagesRan.values()] } };
@@ -1889,8 +1942,14 @@ function finish(exitCode = 0, crash?: Crash): void {
 	flushLive();
 
 	tellEffects();
+
+	// (a test file's tests, each with what it ran — before the coverage, which ends what the editor keeps of the run)
+	if (testsRan.length > 0) {
+		post({ "type": "tests", "tests": testsRan });
+	}
+
 	post({ "type": "coverage", "report": coverageReport(), "final": true });
-	post({ "type": "terminated", "exitCode": exitCode, ...crash === undefined ? {} : { "crash": crash } });
+	post({ "type": "terminated", "exitCode": exitCode === 0 && testsFailed > 0 ? 1 : exitCode, ...crash === undefined ? {} : { "crash": crash } });
 }
 
 /** Where `vm` is stopped: its file, and the 1-based line in it. */
@@ -2209,7 +2268,11 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	pins = readPins();
 	dropUnpinned();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
+	testsRan = [];
+	testStarts.clear();
+	testsFailed = 0;
+
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 
 	evaluating = loaded.vm;
 

@@ -12,6 +12,8 @@
  * - `ask`: a gated call the policy says to ask about — sent as the debugger stops there (a `stopped` event, reason
  *   `capability`): the question shows on its line, and the answer comes back as a `decide` request;
  * - `recorded`: what an allowed call returned for real, kept so a rule can give it back in its place later;
+ * - `tests`: a test file's tests (node:test), each with how it came out and the statements it ran — kept as a trace of
+ *   that test on each file it ran, so a file's traces say which tests reach it;
  * - `listening`: a server the program started listens on a port — the run is a service, its preview there;
  * - `idle`: the run is waiting — on a request, its stdin or a timer — with no stop to step from (until it stops, or ends).
  *
@@ -105,6 +107,19 @@ export interface SiteObservation {
  *  and (`packages`) each package whose code ran, with its version and its folder as the runtime has it. */
 export interface CoverageEvent { "file": string; "source"?: string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "profile"?: StatementProfile[]; "files"?: CoverageEvent[]; "packages"?: LoadedPackage[] }
 
+/** One test a run ran: its suites' and its own titles, how it came out (and, failed, what it threw), and the
+ *  statements it ran, in each file of the program's — while it ran, its hooks and subtests included. */
+export interface TestReport {
+	"titles": string[];
+	"outcome": "pass" | "fail" | "skip" | "todo";
+	"error"?: string;
+	"files": { "file": string; "statements": [[number, number], [number, number]][] }[];
+}
+
+/** The `tests` event, sent as a test file's run ends (before `coverage`): its tests in the order they ran — `file` the
+ *  test file. */
+export interface TestsEvent { "file": string; "tests": TestReport[] }
+
 /** A package whose code a run ran: its package.json's name and version, and its folder. */
 export interface LoadedPackage { "name": string; "version"?: string; "dir": string }
 
@@ -158,6 +173,7 @@ export interface Events {
 	"ended": EndedEvent;
 	"ask": AskEvent;
 	"recorded": RecordedEvent;
+	"tests": TestsEvent;
 	"listening": ListeningEvent;
 	"idle": IdleEvent;
 }

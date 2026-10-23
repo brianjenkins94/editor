@@ -1180,6 +1180,41 @@ test("search: findFiles keeps to its glob, and to files.exclude unless told not 
 
 // A default config the editor supplies (tsconfig.json) is the repo's to replace: deleted, the default shows through;
 // written again, the new one is the workspace's — not refused because the default under it is read-only.
+// Tests (RUNNING.md, *Tests*): `node --test` runs a test file in the debugger on the editor's node:test, failing if a
+// test did, and each test is kept as a trace on each file it ran — the declarations it executed there, by BABLR span.
+test("tests: node --test keeps a trace of each test on each file it ran", async () => {
+	const workbench = session.workbench();
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const write = (path, lines) => api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(lines.join("\n")));
+
+		await write("/workspace/calc.js", ["function add(a, b) {", "\treturn a + b;", "}", "", "function subtract(a, b) {", "\treturn a - b;", "}", "", "module.exports = { add, subtract };", ""]);
+		await write("/workspace/calc.test.js", ["const assert = require(\"node:assert\");", "const { describe, test } = require(\"node:test\");", "const { add, subtract } = require(\"./calc.js\");", "", "describe(\"calc\", () => {", "\ttest(\"adds\", () => {", "\t\tassert.equal(add(1, 2), 3);", "\t});", "", "\ttest(\"subtracts\", async () => {", "\t\tawait new Promise((resolve) => setTimeout(resolve, 5));", "\t\tassert.equal(subtract(3, 2), 1);", "\t});", "});", "", "test(\"fails\", () => {", "\tassert.equal(add(1, 1), 3);", "});", ""]);
+	});
+	await session.terminal("node --test calc.test.js", { "fresh": true });
+
+	const run = await eventually("the test run's end", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.title === "node --test calc.test.js" && each.state !== "running"), 60_000);
+
+	assert.equal(run.exitCode, 1, "a test failed, so the run did");
+
+	const keptOn = (file) => workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => ""), `/workspace/.silo/local/traces/${file}.jsonl`).then((text) => text.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).filter((trace) => trace.test !== undefined));
+	const kept = await eventually("each test kept on calc.js", async () => {
+		const traces = await keptOn("calc.js");
+
+		return traces.length >= 3 ? traces : undefined;
+	}, 30_000);
+	const of = (id) => kept.find((trace) => trace.test.id === id);
+
+	assert.deepEqual([of("calc.test.js › calc › adds")?.test.outcome, of("calc.test.js › calc › subtracts")?.test.outcome, of("calc.test.js › fails")?.test.outcome], ["pass", "pass", "fail"]);
+	// What each executed of calc.js: adds and fails ran add, subtracts ran subtract — one declaration each.
+	assert.equal(of("calc.test.js › calc › adds").declarations.length, 1);
+	assert.deepEqual(of("calc.test.js › fails").declarations, of("calc.test.js › calc › adds").declarations);
+	assert.notDeepEqual(of("calc.test.js › calc › subtracts").declarations, of("calc.test.js › calc › adds").declarations);
+	// And on the test file itself, each test's own body (not the runner's code, which is node:test's).
+	assert.equal((await keptOn("calc.test.js")).length, 3);
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

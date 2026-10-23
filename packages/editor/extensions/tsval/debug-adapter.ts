@@ -651,6 +651,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.tell("effects", { "effects": message.effects });
 				break;
 
+			// A test file's tests, each with what it ran (the run contract's `tests`): kept as traces of them.
+			case "tests":
+				this.tell("tests", { "file": this.program, "tests": message.tests });
+				break;
+
 			case "coverage":
 				this.onCoverage(message);
 				break;

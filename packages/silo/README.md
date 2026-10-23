@@ -340,7 +340,7 @@ reported, with types. The engine bundled into tsserver, its plugin and the prese
 the config): its code runs in the worker, whose network is shut once the toolchain is fetched, over a read-only
 workspace; its imports resolve to the toolchain for the packages it carries, the workspace's node_modules for the rest.
 
-### Which tests reach what (designed 2026-10-22, not built)
+### Which tests reach what (designed 2026-10-22; the record built 2026-10-23)
 
 Two uses for one record. **Selection:** run the tests a change could break, not all of them. **Features:** a test is a
 way in every repository already has, and its file and title name what it's for. That's what the feature layer lacked:
@@ -368,13 +368,13 @@ What it found:
 - **Not checked:** whether a selection would have skipped a test that went on to fail.
 
 The design:
-- **It's evidence.** A new observation kind, `tested`, in the files that exist: `evidence/<user>/<env>/<file>.jsonl`.
-  One line per declaration span says which tests reached it
-  (`{"kind":"tested","span":…,"tests":{"test/git.test.mjs › diff, then restore undoes it":…}}`). Keyed by the code's
-  file, it's what selection reads: a diff names files, their evidence names the tests. Per user and per environment
-  (Node's unit tests, Chromium's architecture suites), `merge=union`, duplicates folded by the reader: union is also the
-  safe merge for selection, since it only ever adds a test. BABLR span ids follow a declaration through moves and
-  reformatting. An edited declaration gets a new id, so selection looks a change up by the base version's ids.
+- **It's traces** (built 2026-10-23; editor RUNNING.md, *Tests*). A test is kept as a run is (`traces`' `test`: its
+  id, the test file and its titles joined by ` › `, and its outcome), on each file it executed: the top-level
+  declarations it ran there, by BABLR span. Keyed by the code's file, it's what selection reads: a diff names files,
+  their traces name the tests. A file keeps each test's latest; shared at a commit while current, `merge=union`, as
+  runs are. An edited declaration gets a new id, so selection looks a change up by the base version's ids. (It was to
+  be a `tested` evidence kind; traces, by the same declarations as runs, replace it.) Tests run on tsval, in the editor
+  (decision 3, decided).
 - **Sets, not counters.** A test's reach is written when the set changes, so a run that reaches what it did before
   changes nothing in git. A declaration joins a test's set at once and leaves after N runs in a row without it. The
   count of misses is kept under `local/`. Architecture tests' ambient reach flickers with timing, and this keeps it from
@@ -565,10 +565,10 @@ From tests and purity (both above):
 2. **How CI's evidence gets into git.** A commit by CI when its reach sets change (rare once they settle), or git notes
    (`refs/notes/silo`, merged with git's own `cat_sort_uniq`), which stay out of main's history but outside the model
    where history is the committed `.silo/`.
-3. **What runs the unit tests.** The spike's Node hook fought tsx's CommonJS loading at every step. tsval could run
-   them as a command line, from the host `silo run` needs anyway: the same span ids as runs in the editor, and the only
-   way unit tests could observe purity. It's slower (an interpreter), and it depends on packages such as `typescript`
-   running natively rather than interpreted, which hasn't been checked.
+3. ~~**What runs the unit tests.**~~ Decided 2026-10-23: tsval, in the editor first (`node --test` in its terminal, on
+   its own node:test: editor RUNNING.md, *Tests*); silo's command line later through tsval's host, the one `silo run`
+   needs. The same span ids as runs, and the only way tests can observe purity. The cost is speed (an interpreter);
+   packages run natively.
 4. **The architecture suites' shared session.** Tests run in order in one session, so one test's async work lands in
    the next. Waiting for quiet between tests, or a session per test, would make their reach their own; or accept it, and
    let ambient code select the smoke suite.

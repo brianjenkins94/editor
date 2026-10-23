@@ -133,6 +133,25 @@ What it needs that isn't there:
 - **A writable layer per run**, over the workspace's.
 - **A home for runs nobody started.** The run log holds them; they don't take the Debug view's focus.
 
+## Tests
+
+A test file is a program like any other: `node --test` in the terminal runs each file it's given (or every test file
+under the directory, as node finds them) in the debugger, one after another, and fails if a test did. Breakpoints,
+stepping and capability stops work in a test as anywhere. Decided 2026-10-23 (NEXT.md's decision c): tests run on
+tsval, in the editor, so what a test reaches is known by the same span ids as a run's, in the browser.
+
+**`node:test` is the editor's** (extensions/tsval/node-test.js): JavaScript tsval runs as the program's own code, so a
+test's awaits are on the run's deterministic event loop — a host-side runner calling guest tests would take them off
+it. It isn't told as one of the program's files (no coverage, values or evidence of its own). It tells the debug
+worker each test's start and end; the statements that ran in between, hooks and subtests included, are that test's.
+What's there: `test`/`it`, `describe`/`suite`, `.skip`, `.todo`, the four hooks, a test's context (`diagnostic`,
+`skip`, `todo`, `test`, `after`, `assert`) and callback tests. Not yet: `mock`, snapshots, `only` filtering, timeouts.
+
+**A test is kept as a trace** (lib util/silo/traces' `test`: its id, the test file and its titles joined by ` › `, and
+its outcome) on each file it ran: the top-level declarations it executed there, by BABLR span. So a file's traces say
+which tests reach it, the record selection reads (*Unattended runs*: "What runs"). A file keeps each test's latest,
+apart from its runs. Tests' traces are shared at a commit as runs are: those still current for the committed text.
+
 ## What can't run this way
 
 The hope is none; the plan is as few as possible, each a named case with a reason, kept on a list here and shrunk.
