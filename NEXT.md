@@ -13,63 +13,59 @@ How it's kept:
 
 ## Queue
 
-1. **The smoke test's ext-log race.** "observability: an extension's log reaches the tree's collector" fails now and
-   then: the harness keeps 5000 console lines and the bridge's `runtime.fs` traffic pushes the extension's line out
-   before the test looks. Read it from `session.notable()` (the harness's buffer without that traffic, a3f1ace).
-   *Done:* the smoke test reads `notable()`, and three architecture runs in a row pass it.
-
-2. **Selection: what an edit reaches runs again.** On a save, the declarations it changed (their span ids gone from the
+1. **Selection: what an edit reaches runs again.** On a save, the declarations it changed (their span ids gone from the
    text) name the kept runs and tests that executed them; those run again, unattended (RUNNING.md, *Unattended runs*:
    "What runs"). Ambient code (reached at boot, or by most tests) selects the smoke suite only (the spike's finding,
-   README). *Waits on:* *Decisions* b. *Done:* editing one function re-runs only the runs and tests that executed
-   it, shown as balls on their files.
+   README). Everything it picks runs, one at a time, a new edit cancelling what's queued (decided: no budget). *Done:*
+   editing one function re-runs only the runs and tests that executed it, shown as balls on their files.
 
-3. **Features from tests.** Group the kept test traces by what they execute into features, named by their tests (the
+2. **Features from tests.** Group the kept test traces by what they execute into features, named by their tests (the
    spike's clustering: packages/silo/README.md, *Which tests reach what* — unit tests read as features, end-to-end tests
-   are mostly ambient), and attribute code to them. *Waits on:* *Decisions* f. *Done:* the editor shows a file's
-   code by the features its tests say it belongs to.
+   are mostly ambient), and attribute code to them, shown in a view of their own (decided): each feature, named by its
+   tests, with its files and declarations. *Done:* that view lists this repository's features, and a file's code goes
+   to them.
 
-4. **The feature ledger, step 1.** `.silo/features.json` (decisions about features, kept beside the code) and the
+3. **The feature ledger, step 1.** `.silo/features.json` (decisions about features, kept beside the code) and the
    drift checks that need no reach: stopped but present, removed but documented, experiment expired, dead ends, stale
    entries (packages/silo/README.md, *The feature ledger*; its later steps — prices, budgets, leases from tests' traces,
-   `silo remove` — follow there). *Waits on:* 3 (what one feature is). *Done:* `silo check` reports this repo's drift as
+   `silo remove` — follow there). *Waits on:* 2 (what one feature is). *Done:* `silo check` reports this repo's drift as
    warnings, and an entry set in the editor or by `silo status` is committed.
 
-5. **Halt where nobody's watching.** A run selected by 2 that reaches an unsafe call with no recording halts there and
+4. **Halt where nobody's watching.** A run selected by 1 that reaches an unsafe call with no recording halts there and
    leaves its question on the line (RUNNING.md, *Unattended runs*; *The `trigger` target* — live runs keep
-   skipping). *Waits on:* 2. *Done:* such a run ends before the call, and the line offers *Rule…* prefilled
+   skipping). *Waits on:* 1. *Done:* such a run ends before the call, and the line offers *Rule…* prefilled
    *trigger is edit*.
 
-6. **Replay matched by the whole request.** A recording is keyed by capability and resource only, so a POST and a GET to
+5. **Replay matched by the whole request.** A recording is keyed by capability and resource only, so a POST and a GET to
    one URL share one. Key it by method, URL and a hash of the body (RUNNING.md, *What it needs*; *Open*,
    "Matching a recording"). *Done:* a POST's recording isn't given to a GET of the same URL.
 
-7. **A picked run's coverage and run log.** Picking an older ball shows its values, but the gutter's coverage and the run
+6. **A picked run's coverage and run log.** Picking an older ball shows its values, but the gutter's coverage and the run
    log stay the latest run's (RUNTIME-EVIDENCE.md, *Live values, open*). Keep them with each run. *Done:* picking a ball shows its own.
 
-8. **A writable layer per run.** An unattended run's file writes go to a layer of its own, thrown away when it ends
+7. **A writable layer per run.** An unattended run's file writes go to a layer of its own, thrown away when it ends
    (RUNNING.md *Open*). *Done:* a live run that writes a file leaves the workspace as it was, and its reads see its own
    writes.
 
-9. **Purity, measured.** How much of this repository's code a static check calls pure / effectful / unknown, and why the
+8. **Purity, measured.** How much of this repository's code a static check calls pure / effectful / unknown, and why the
    unknowns are (packages/silo/README.md, *Purity*; decision 10 there). *Done:* the numbers, written into that section,
    and a go or no-go for building the check.
 
-10. **Purity, built** — if 9 says go: the static check in lib's analysis (beside `reach`, behind the TypeScript seam), and
-   tsval observing it at run time as a `purity` evidence kind (packages/silo/README.md, *Purity*). *Waits on:* 9.
+9. **Purity, built** — if 8 says go: the static check in lib's analysis (beside `reach`, behind the TypeScript seam), and
+   tsval observing it at run time as a `purity` evidence kind (packages/silo/README.md, *Purity*). *Waits on:* 8.
    *Done:* a function's verdict shows beside it, and a run's write from a function judged pure is flagged.
 
-11. **Values that didn't touch an input.** tsval tracks which values came from an input, so a run that read one can share
+10. **Values that didn't touch an input.** tsval tracks which values came from an input, so a run that read one can share
    the rest (RUNTIME-EVIDENCE.md, *Kept across reloads*: "Next"; lib traces `committable`).
    *Done:* a run that read a file shares the values it computed from its own literals.
 
-12. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
+11. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
    one a rule's (or a recording's) result too, so an app can run unattended (RUNNING.md, *What it needs*; *A
    call's result*). *Waits on:* *Decisions* d. *Done:* a rule giving a fetch's result answers a preview's fetch.
 
-13. **The ball as a run goes.** A long run's ball rolls while it runs, not only after (RUNTIME-EVIDENCE.md, *Live values, open*).
+12. **The ball as a run goes.** A long run's ball rolls while it runs, not only after (RUNTIME-EVIDENCE.md, *Live values, open*).
 
-14. **The terminal's first-hour commands and the tools agents expect.** Commands people type within the first hour:
+13. **The terminal's first-hour commands and the tools agents expect.** Commands people type within the first hour:
    `tsc` (the TypeScript server's diagnostics, printed as tsc does), `eslint` (the in-browser engine over the given
    files), `silo features|history` (util/silo over isomorphic-git snapshots), `curl`/`wget` (just-bash's `network`,
    gated by the capability rules), `man <cmd>` (its `--help`), `date` in the browser's time zone, and `ln -s` (or a
@@ -95,12 +91,9 @@ How it's kept:
 
 a. **The coverage spike's leftovers**: `packages/editor/build.ts`, `packages/editor/build/coverage.ts` and five lines
    in `test/architecture-harness.mjs`, uncommitted — commit them as an opt-in `COVERAGE=1` path, or drop them.
-b. **How much runs after an edit**: everything selection picks, or a budget (time, CPU), the rest left for later
-   (RUNNING.md *Open*).
 d. **An app's unattended run**: is the preview's reload on an edit (HMR) that run, its fetches replayed at the service
    worker? (RUNNING.md *Open*.)
 e. **The rest of packages/silo/README.md's *Decisions to make*** (which job tests and purity are; how CI's evidence gets
    into git; test identity; size; a subcommand or not) — none blocks the queue above.
-f. **Where features from tests show**: a view of its own, the Margin's cards, or the Rules-like tree (item 3).
 g. **RUNNING.md's open `trigger` questions** (*Open*): whether halting is an action of its own a rule can choose, and whether
-   unattended defaults are rules silo seeds (visible, editable) or the evaluator's fallback (item 5).
+   unattended defaults are rules silo seeds (visible, editable) or the evaluator's fallback (item 4).

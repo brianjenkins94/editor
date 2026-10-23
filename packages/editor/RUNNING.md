@@ -267,7 +267,8 @@ fails the run. Built: the target; not built: halting.
     copy-up.
   - **An app's unattended run.** The preview already reloads on an edit (HMR). Is that reload the unattended run, with
     its fetches replayed at the service worker?
-  - **How much runs after an edit.** Everything selection picks, or a budget (time, CPU) with the rest left for later.
+  - ~~**How much runs after an edit.**~~ Decided 2026-10-23: everything selection picks, one at a time, a new edit
+    cancelling what's still queued; no budget.
   - **A database client's calls as the boundary**, if replaying at the wire proves brittle: the members your code calls
     (from the baseline's join), not the requests they make.
 - The `trigger` target:
