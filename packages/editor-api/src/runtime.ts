@@ -1,5 +1,5 @@
 /**
- * The workspace runtime, as a debugger reaches it (EXTENSION-POINTS.md, 2): the workspace's own files, read and written
+ * The workspace runtime, as a debugger reaches it (packages/editor/ARCHITECTURE.md, *Extension points* 2): the workspace's own files, read and written
  * synchronously as a program's `require` and `readFileSync` need them, and the preview's requests to a server the
  * program starts. Any debugger may have it — tsval's, and an interpreter plugged in as `run.debugger`.
  *
@@ -339,7 +339,7 @@ export interface ObservedExtension {
 /**
  * The extension `name` on the editor's hub, for observability alone — any extension, a contributed one too: its logs
  * and metrics ride the hub as `ext:<name>`'s, through the workspace runtime's link (the way a debugger's worker joins,
- * EXTENSION-POINTS 2), which carries them and nothing of the editor's services. Not its console: the extension host is
+ * packages/editor/ARCHITECTURE.md, *Extension points* 2), which carries them and nothing of the editor's services. Not its console: the extension host is
  * every extension's, so what an extension logs is what it hands `log`. Undefined outside the editor.
  */
 export function observeExtension(name: string): ObservedExtension | undefined {
@@ -504,7 +504,7 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 	};
 }
 
-// The mailbox (EXTENSION-POINTS.md, 2, *The runtime's files*): a worker's calls to the editor, one at a time — the worker
+// The mailbox (packages/editor/ARCHITECTURE.md, *Extension points* 2, *The runtime's files*): a worker's calls to the editor, one at a time — the worker
 // writes a request and waits on it (Atomics.wait), the editor watches it (Atomics.waitAsync), answers, and wakes it. A
 // header of four Int32s, then the data; what doesn't fit goes in pieces, each acknowledged.
 

@@ -1,8 +1,8 @@
 /**
- * The Margin (RUNTIME-EVIDENCE.md, *Live values*): the file's runtime column, a pane view beside the code (EXTENSION-POINTS.md, 4) — a run's
+ * The Margin (RUNTIME-EVIDENCE.md, *Live values*): the file's runtime column, a pane view beside the code (ARCHITECTURE.md, *Extension points* 4) — a run's
  * values, a capability stop's question, how the last run ended, the program's steps (margin.ts), and coverage in its
  * gutter column (coverage.ts) — from every debugger's run contract events, on public API but for the commands
- * EXTENSION-POINTS lists (5): the bridge's decide, set value and Run, the capabilities extension's rules and statements,
+ * ARCHITECTURE.md lists (*Extension points* 5): the bridge's decide, set value and Run, the capabilities extension's rules and statements,
  * core's Rule view.
  */
 import { evidenceStore } from "@brianjenkins94/editor-api/evidence";

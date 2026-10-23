@@ -1,6 +1,6 @@
 /**
  * The Rule view (RUNNING.md, *Rules*): the rule editor (rule-editor.ts) under the Rules tree, shown while a rule's
- * being edited — and the one command that edits one (EXTENSION-POINTS 5):
+ * being edited — and the one command that edits one (ARCHITECTURE.md, *Extension points* 5):
  *
  * - `editor.rules.edit(request)`: a rule edited here — as it starts, what it's judged against, its buttons
  *   (editor-api's `./rules`) — answered with the button pressed and the rule as it was then, or null (closed, or replaced

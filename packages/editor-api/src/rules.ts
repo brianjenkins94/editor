@@ -2,7 +2,7 @@
  * Rules as they're read and edited (packages/editor/RUNNING.md, *Rules*), without the DOM: a rule as a sentence in the
  * catalog's words (describeRule — the Rules tree's rows), the catalog an edit offers (silo's, with a place's
  * variables), and what a rule being edited would do (verdictOf — said under it in the Rule view, and whether its
- * buttons can act on it) — and what an edit asks for (`editor.rules.edit`, EXTENSION-POINTS 5). The rule editor itself
+ * buttons can act on it) — and what an edit asks for (`editor.rules.edit`, packages/editor/ARCHITECTURE.md, *Extension points* 5). The rule editor itself
  * (its rows and inputs) is core's, in the Rule view (workbench/rule-view.ts); this is what it and the capabilities
  * extension share.
  *

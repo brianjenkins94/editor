@@ -1,6 +1,6 @@
 /**
  * Placed rules beside their code (RUNNING.md, *A rule placed in the code*): a pane view into the editor's Margin
- * (EXTENSION-POINTS.md, 4) — a gutter mark on the first line of the code each rule placed in the file is at, its
+ * (ARCHITECTURE.md, *Extension points* 4) — a gutter mark on the first line of the code each rule placed in the file is at, its
  * sentence on hover (whose, which lines), so a mocked variable or a given result isn't invisible; marked uncertain
  * where it was found by a weak match. The rules and where each is now come from the editor (`silo.rules.list`: its
  * sentence in the catalog's words, its place as the editor found it in the file as it is); drawn again as the policy

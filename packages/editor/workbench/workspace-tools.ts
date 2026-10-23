@@ -1,5 +1,5 @@
 /**
- * The workspace as an agent works in it — as it would on a local machine (EXTENSION-POINTS.md, Workspace tools;
+ * The workspace as an agent works in it — as it would on a local machine (ARCHITECTURE.md, *Workspace tools*;
  * debug-mcp's files_* and shell tools, tools/):
  *
  * - `files.read` { path, offset?, limit? }: a file's text, numbered as `cat -n` numbers it — what's open in an editor,

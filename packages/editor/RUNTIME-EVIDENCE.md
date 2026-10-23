@@ -319,7 +319,7 @@ explanatory prose beside the code it explains — and Victor's values are the sa
 The pane is an overlay inside the editor, not an editor group of its own: one scroll, nothing to synchronize. Monaco is
 the row sizer: a cell taller than its span gets a view zone after the span's last line for the difference, so the pane
 and the code can't drift. Notes in the pane were dropped (2026-10-12): notes are the notes extension's comment threads.
-The pane's tabs are pane views (EXTENSION-POINTS.md, 4); the Margin's content is data that core's pane-views.ts draws.
+The pane's tabs are pane views (ARCHITECTURE.md, *Extension points* 4); the Margin's content is data that core's pane-views.ts draws.
 
 ### The margin, always open
 
@@ -337,7 +337,7 @@ The pane's tabs are pane views (EXTENSION-POINTS.md, 4); the Margin's content is
   **A statement with a body is anchored by its head** — an `if`'s condition, a loop's header, a function's name —
   because a body's span changes with any token in it (a semicolon dropped inside orphans the whole `if`; the
   condition's survives). Half-typed text that doesn't parse follows the lines around the edit instead, until it parses.
-- **At a stop, its values are VS Code's own inline values too** (EXTENSION-POINTS.md, 6), so they'd show with no pane
+- **At a stop, its values are VS Code's own inline values too** (ARCHITECTURE.md, *Extension points* 6), so they'd show with no pane
   beside the editor (a desktop build). A value can be set at a stop from its row, as a literal, never run.
 
 ### Capability decisions, on the line

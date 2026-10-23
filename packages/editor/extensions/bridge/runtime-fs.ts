@@ -1,5 +1,5 @@
 /**
- * The runtime's files (EXTENSION-POINTS.md, 2, *The runtime's files, through core*): a debugger's worker reads and
+ * The runtime's files (ARCHITECTURE.md, *Extension points* 2, *The runtime's files, through core*): a debugger's worker reads and
  * writes the workspace synchronously through its mailbox (editor-api's `connectRuntime`), and each call is answered
  * here — an open editor's unsaved text for a read, a write as the workspace's (editors, Source Control and watchers see
  * it). A call of the program's (not the debugger's own `load`) is decided as tsval decides its own: by the session's

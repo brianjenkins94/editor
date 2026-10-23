@@ -4,7 +4,7 @@
  * a sentence in the catalog's words, in the order they're matched: the first that matches decides. A placed rule says
  * the line its statement is on now; one that can't be matched, or whose place is lost, says why.
  *
- * Its commands (EXTENSION-POINTS 5): `silo.rules.list` — every rule as it shows them (an agent's `rules_list` too); a rule
+ * Its commands (ARCHITECTURE.md, *Extension points* 5): `silo.rules.list` — every rule as it shows them (an agent's `rules_list` too); a rule
  * opens in core's Rule view below (`silo.rules.open`, by `editor.rules.edit`: *Save*, *Re-place at selection* a lost
  * one, *Remove* mine, *Cancel*), *New Rule* starts one (`silo.rules.new`), *Remove* takes one of mine out and
  * Re-place at selection* places a lost one at the code selected (`silo.rules.remove`, `.replace`: inline). The rules

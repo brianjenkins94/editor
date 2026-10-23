@@ -1,7 +1,7 @@
 /**
  * Live values, as notes (RUNTIME-EVIDENCE.md, *Live values*): a debug session's values — what each line bound, returned or chose,
  * a column per turn of the loop around it — beside the code in the pane's Margin, Bret Victor's binary search. The
- * Margin is a pane view like any extension's (EXTENSION-POINTS.md, 4): this answers `margin.paneView` with its content
+ * Margin is a pane view like any extension's (ARCHITECTURE.md, *Extension points* 4): this answers `margin.paneView` with its content
  * as data (marginOf), each thing placed by its range in the text that ran, and core's pane draws it; its buttons and
  * cells run `margin.*` commands. Every debugger tells its values as the run contract's custom events (`values` as they
  * grow, `ended`, a capability stop's `ask`) — read here as any extension reads them; this keeps the latest session's
@@ -139,7 +139,7 @@ const asks = new Map<string, { "session": string; "ask": CapabilityAsk; "anchors
 /** Where the Margin says what went wrong: its log on the editor's observability plane (extension.ts), when there is one. */
 let log: ObservedExtension["log"] | undefined;
 
-/** A capability stop's choice, back to its session — the bridge's, where the decider is (EXTENSION-POINTS 5). */
+/** A capability stop's choice, back to its session — the bridge's, where the decider is (ARCHITECTURE.md, *Extension points* 5). */
 const choose = async (session: string, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<unknown> => vscode.commands.executeCommand("editor.capability.decide", session, choice, rule, give);
 /** What a call returned the last time it ran for real (a preview's fetch, recorded), or null. */
 const recordedOf = async (capability: string, resource: string): Promise<{ "value": unknown; "at": string } | null> => await recordedResult(capability, resource) ?? null;
@@ -388,7 +388,7 @@ function valueOf(text: string, kind: string): unknown {
 	}
 }
 
-/** `request` edited in the Rule view (`editor.rules.edit`, EXTENSION-POINTS 5): the button pressed and the rule as it was
+/** `request` edited in the Rule view (`editor.rules.edit`, ARCHITECTURE.md, *Extension points* 5): the button pressed and the rule as it was
  *  then, or null (cancelled, or closed). Kept as being made, by `key`, until it's answered. */
 async function edit(key: string, request: Omit<EditRequest, "id">): Promise<EditAnswer> {
 	making.set(key, () => {
@@ -1168,7 +1168,7 @@ export function showMarks(uri: string, marks: PaneMark[]): void {
  *  wrong to `logger`. */
 export function registerMargin(logger?: ObservedExtension["log"]): void {
 	log = logger;
-	// The Margin, a pane view (EXTENSION-POINTS.md, 4): its content, asked for by pane-views — and what its buttons and
+	// The Margin, a pane view (ARCHITECTURE.md, *Extension points* 4): its content, asked for by pane-views — and what its buttons and
 	// cells run. Each rule it makes opens in the Rule view (rule-view.ts); its button waits while it's open.
 	const uriArg = (value: unknown): string => {
 		if (typeof value !== "string") {
@@ -1494,7 +1494,7 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 	/** The sessions that told an `ended`: their margins are cleared already. */
 	const told = new Set<string>();
 
-	// The run contract's events, from every debugger's sessions (EXTENSION-POINTS 1).
+	// The run contract's events, from every debugger's sessions (ARCHITECTURE.md, *Extension points* 1).
 	vscode.debug.onDidReceiveDebugSessionCustomEvent(({ session, event, body }) => {
 		switch (event) {
 			case "values":

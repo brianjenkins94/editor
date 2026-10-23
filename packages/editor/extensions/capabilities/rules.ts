@@ -3,7 +3,7 @@
  * Margin and agents: where each placed rule's place is now — followed through the edits made to its file since the last
  * commit (the edit history's bursts) by the editor's BABLR (`editor.annotations.*`) — and kept there as its file's
  * saved, a rule's change written, and what a rule gives a program's `process.argv`. The commands, documented in
- * EXTENSION-POINTS 5: `silo.rules.files` (each file's rules and their places), `silo.rules.set(previous, rule)`,
+ * ARCHITECTURE.md, *Extension points* 5: `silo.rules.files` (each file's rules and their places), `silo.rules.set(previous, rule)`,
  * `silo.rules.given(program, target)`.
  */
 import type { Resolved, SpanRef } from "@brianjenkins94/editor-api/annotations";

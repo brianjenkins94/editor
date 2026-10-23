@@ -1,5 +1,5 @@
 /**
- * Pane views (EXTENSION-POINTS.md, 4 in brianjenkins94/editor): a tab in the pane beside every editor, whose content an
+ * Pane views (packages/editor/ARCHITECTURE.md, *Extension points* 4 in brianjenkins94/editor): a tab in the pane beside every editor, whose content an
  * extension provides as data — drawn by the editor level with the code it's about, in the pane's one look, and moving
  * with it.
  *

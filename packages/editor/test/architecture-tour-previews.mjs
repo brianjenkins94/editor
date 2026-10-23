@@ -436,7 +436,7 @@ test("record: a node service's reads of the workspace, kept to be given back", a
 	});
 });
 
-// The event sheet's tab (EXTENSION-POINTS.md, 4: a pane view, the event-sheet extension's): the open file's part of its
+// The event sheet's tab (ARCHITECTURE.md, *Extension points* 4: a pane view, the event-sheet extension's): the open file's part of its
 // game beside the code it's in — a rule a card around its function, its condition and action on their line, each
 // behavior on its declaration — placed by the span references anchoring gives them, so they follow their code.
 test("event sheet: its tab — a game's rule a card around its code, its condition and action on their line, its behaviors on theirs", async () => {

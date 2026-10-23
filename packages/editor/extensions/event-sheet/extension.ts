@@ -6,7 +6,7 @@
  * its own (recognizer-worker.ts) so parsing doesn't hold up the extension host — anchoring what it recognizes with the
  * editor's BABLR (anchors.ts).
  *
- * And a pane view, its tab beside the editor (EXTENSION-POINTS.md, 4): the open file's part of the game beside the code
+ * And a pane view, its tab beside the editor (ARCHITECTURE.md, *Extension points* 4): the open file's part of the game beside the code
  * it's in — each rule a card around its function, each of its conditions and actions on its line, each object,
  * behavior and composite behavior on its declaration — placed by the span references anchoring gives them, so they
  * follow their code; projected again as the game's files are saved.

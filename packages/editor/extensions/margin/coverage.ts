@@ -1,7 +1,7 @@
 /**
  * Coverage, with nothing to ask for: every debug session that reports coverage — every tsval run, from the terminal or
  * F5 — leaves its file marked when it ends, and when it pauses: in the Margin's gutter column, just left of the code (a
- * pane view of its own into the Margin, `coverage.paneView`: EXTENSION-POINTS.md, 4), a mark beside each line that ran, another beside each line that didn't, and on hover how often
+ * pane view of its own into the Margin, `coverage.paneView`: ARCHITECTURE.md, *Extension points* 4), a mark beside each line that ran, another beside each line that didn't, and on hover how often
  * it ran; and the same colors in the scrollbar. Not in the glyph margin: VS Code won't set a breakpoint where another
  * extension's icon is (its `marginFreeFromNonDebugDecorations`), so that stays the breakpoints'.
  *

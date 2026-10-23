@@ -1,5 +1,5 @@
 /**
- * The pane's native face (EXTENSION-POINTS.md, 4, step 5): a pane view's content — the same data pane-views.ts draws
+ * The pane's native face (ARCHITECTURE.md, *Extension points* 4, natively): a pane view's content — the same data pane-views.ts draws
  * beside the code, placed the same way — drawn with VS Code's own contribution points instead, for when there's no
  * pane (a desktop build) or it's hidden (`editor.pane.toggleNative`): a row as an inlay hint at the end of its line
  * (its label and latest value; every cell on hover), prose as a CodeLens (its first line) and a hover (all of it),

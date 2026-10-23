@@ -247,7 +247,7 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 
 	// The texts a file went through since the last commit, burst by burst — for following code through them a small step
 	// at a time (placed rules: the capabilities extension's rules.ts), rather than from where it was placed to where it is
-	// in one jump. A command (EXTENSION-POINTS 5): `editor.history.texts(path)`.
+	// in one jump. A command (ARCHITECTURE.md, *Extension points* 5): `editor.history.texts(path)`.
 	vscode.commands.registerCommand("editor.history.texts", async (path: unknown) => (typeof path === "string" && CLASSIFIABLE.test(path) ? (await sinceCommit(path)).chain : []));
 
 	log.info("edit history installed");

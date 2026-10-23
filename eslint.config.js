@@ -41,10 +41,10 @@ const EDITOR = "packages/editor";
 const REALMS = ["app", "shell", "workbench", "workers", "previews", "extensions"];
 const EXTENSIONS = readdirSync(new URL(EDITOR + "/extensions", import.meta.url), { "withFileTypes": true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 const SOURCES = "*.{ts,tsx,mts,js,mjs}";
-// An extension imports core's code from editor-api, never shared/ (packages/editor/EXTENSION-POINTS.md, "Features as extensions") — but the bridge, which is
+// An extension imports core's code from editor-api, never shared/ (packages/editor/ARCHITECTURE.md, "Features as extensions") — but the bridge, which is
 // core's.
 const STILL_IN_SHARED = new Set(["bridge"]);
-// And tsval's privilege (EXTENSION-POINTS.md, 2): almostnode on the workspace's buffer, as core runs it — only these.
+// And tsval's privilege (packages/editor/ARCHITECTURE.md, *Extension points* 2): almostnode on the workspace's buffer, as core runs it — only these.
 const PRIVILEGED = { "tsval": ["workspace-runtime", "zenfs-vfs.js"] };
 
 /** `files` may not climb into any of the `banned` folders — but for `allowed`, shared/ files they may import. */
@@ -52,7 +52,7 @@ function realmImports(files, banned, ignores = [], allowed = []) {
 	const shared = allowed.length === 0 ? "" : "|shared/(?!(?:" + allowed.map((file) => file.replaceAll(".", "\\.")).join("|") + ")$)";
 	const pattern = {
 		"regex": "^(?:\\.\\./)+(?:(?:" + banned.join("|") + ")(?:/|$)" + shared + ")",
-		"message": "Realms import each other only through shared/, and extensions core's code only through editor-api (packages/editor/ARCHITECTURE.md, \"The realms\"; packages/editor/EXTENSION-POINTS.md, \"Features as extensions\")."
+		"message": "Realms import each other only through shared/, and extensions core's code only through editor-api (packages/editor/ARCHITECTURE.md, \"The realms\" and \"Features as extensions\")."
 	};
 
 	return { "files": files, "ignores": ignores, "rules": { "no-restricted-imports": ["error", { "patterns": [pattern] }] } };

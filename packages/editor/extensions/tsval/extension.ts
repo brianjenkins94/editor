@@ -1,5 +1,5 @@
 /**
- * tsval, the stepping debugger — an extension of the editor like any debugger's (EXTENSION-POINTS.md): a program run by
+ * tsval, the stepping debugger — an extension of the editor like any debugger's (ARCHITECTURE.md, *Extension points*): a program run by
  * tsval's interpreter in a worker, with breakpoints, steps back as well as forward, capability stops, Explore Orderings
  * and a deterministic event loop.
  *

@@ -30,7 +30,7 @@ export function unifiedDiff(path: string, before: string, after: string): string
 }
 
 /** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub — and the same as
- *  commands for extensions (EXTENSION-POINTS 5): `editor.git.status`, `editor.git.file(path)`, `editor.git.commit(message)`.
+ *  commands for extensions (ARCHITECTURE.md, *Extension points* 5): `editor.git.status`, `editor.git.file(path)`, `editor.git.commit(message)`.
  *  (An extension learns of a change as VS Code's own git does: a save, or a file watcher — the repository is files too.) */
 export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));

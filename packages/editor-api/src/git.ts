@@ -1,6 +1,6 @@
 /**
  * The editor's git's answers (workbench/git-service.ts): `editor.git.status`'s files, as the Source Control view reads
- * them (EXTENSION-POINTS 5), and the hub's `git.*`, as the shell's review panel does — and what BABLR says of a change
+ * them (packages/editor/ARCHITECTURE.md, *Extension points* 5), and the hub's `git.*`, as the shell's review panel does — and what BABLR says of a change
  * (`editor.annotations.classify`: the cosmetic extension's badge, the panel's).
  */
 

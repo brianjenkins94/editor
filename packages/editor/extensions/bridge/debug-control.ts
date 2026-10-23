@@ -458,7 +458,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 	trackSessions(context, hub);
 
 	context.subscriptions.push(
-		// The Margin's Mock… (EXTENSION-POINTS 5): a variable set at a session's stop, to a literal as code writes it.
+		// The Margin's Mock… (ARCHITECTURE.md, *Extension points* 5): a variable set at a session's stop, to a literal as code writes it.
 		vscode.commands.registerCommand("editor.debug.setValue", async (id: unknown, name: unknown, value: unknown) => {
 			const session = typeof id === "string" ? sessions.get(id) : undefined;
 

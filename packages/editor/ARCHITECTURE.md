@@ -2,8 +2,8 @@
 
 The editor spans ~six runtime **realms** (separate JS execution contexts). Most "where should this live?"
 confusion is really "which realm does it need to run in?" — so this doc is the realm map plus a placement
-procedure. For the capability-overlay subsystem specifically, read `extensions/capabilities/ARCHITECTURE.md`
-after this; this doc is the whole-editor picture.
+procedure. What an extension may plug into is *Extension points*, below, and the capability overlay is
+*Capabilities*.
 
 ## The two axes behind every placement decision
 
@@ -58,12 +58,12 @@ shapes one realm serves and another reads (`runs`, `git`); build-time Vite plugi
 imports of core's is editor-api's, not `shared/`'s — the `.silo/` stores (`./evidence`, `./policy`, `./effects`), run
 classification (`./lifecycle`), profiles (`./cpuprofile`), the gated realm (`./gated-eval`), worker failures
 (`./failures`), a preview's reports (`./recorded`), the network probes (`./probes`), almostnode over the runtime's
-files (`./runtime-vfs`) — so an extension passes EXTENSION-POINTS.md's test (*Features as extensions*). One exception, decided: tsval, the
-editor's own debugger, mounts the workspace's buffer as core does (`zenfs-vfs`, `workspace-runtime`; EXTENSION-POINTS.md, 2).
+files (`./runtime-vfs`) — so an extension passes *Features as extensions*' test (below). One exception, decided: tsval, the
+editor's own debugger, mounts the workspace's buffer as core does (`zenfs-vfs`, `workspace-runtime`; *Extension points* 2).
 Lint holds the line (`no-restricted-imports`, the root `eslint.config.js`): a relative import that climbs into another
 realm's folder — or, from an extension, another extension's — is an error. Only `workbench-entry` reaches into
 `extensions/`, to register them; `main.tsx`, `build.ts`, `dev.ts` and the tests may reach anywhere. What a debugger's worker needs of a run — the values recorder,
-recorded values, the gate's verdict — is editor-api's (EXTENSION-POINTS.md), so any debugger imports the same.
+recorded values, the gate's verdict — is editor-api's (*Extension points*), so any debugger imports the same.
 
 ## Extensions: which one, which host
 
@@ -137,7 +137,8 @@ the window from the link, never from what the page says); frames nested in the w
 directly, and the app's own hub, if it has one, joins through it (observability's `linkPreviewHost`). A worker the page
 starts joins the window's hub through the page: the page tap hands it a port as its first message (`WORKER_OFFER`), and
 its tap (`worker-tap.ts`) sends its records and capability questions through the page's (`tap.worker.log`,
-`tap.worker.decide`). A node script's fs writes ask the service worker synchronously (`POST /__capability__/decide`).
+`tap.worker.decide`). A run's own file calls go through the editor instead, by the workspace runtime's mailbox
+(*Extension points* 2), gated there.
 On the live diagram: `preview:<port>` (the iframe) and `vite:<port>` (its dev server) come and go with the preview.
 
 **What a preview's code does is runtime evidence** (RUNTIME-EVIDENCE.md, the third slice). As a preview starts, the
@@ -687,8 +688,9 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
   classifier ports; the SCM shim does not.)* Left for desktop: its changes from the built-in git's API, and BABLR.
 
 The capability overlay is the template for that classifier extension: pure core (`silo/policy`,
-tsval's `capability-calls`) → a tsserver plugin (ext host) that emits diagnostics → an ext-host binding
-(`extensions/capabilities/extension.ts`) that renders the panel. See `extensions/capabilities/ARCHITECTURE.md`.
+tsval's `capability-calls`) → a tsserver plugin (ext host) that answers requests → an ext-host binding
+(`extensions/capabilities/extension.ts`) that shows the answers as diagnostics and renders the panel. See
+*Capabilities*, below.
 
 ## The one gotcha the realms impose
 
@@ -712,3 +714,370 @@ kept from going on up — unwatched, it reaches the realm that started it and th
 under its own name. An extension's bootstrap reports its module's failure the same way (`{ failed }`, with the stack).
 What waits on a worker that never loaded stops waiting: a debug session ends, and the architecture harness fails the
 wait in progress with the realm's reason instead of timing out.
+
+## Extension points
+
+What another extension can plug into: the seams editor-contrib's template (`contrib/`) uses, and the ones it should be
+able to. Started 2026-10-08, after editor-contrib showed that an extension point we don't use ourselves drifts: its
+interpreter talked to the editor through DAP custom events while tsval went around them, straight to the hub, so the
+run effects added that day reached the run ledger from tsval's runs only.
+
+**The test.** An extension point is real when **our own code goes through it**. Each one below has an internal user on
+it (tsval, the Margin, the event sheet, the Rules view), so every run of the editor exercises what a contributed
+extension relies on, and a change that breaks one breaks ours first. Where VS Code has the extension point (a debugger,
+a view, a command, `contributes`), we use VS Code's: a documented contract, other people's code already written against
+it, and what's contributed stays portable to the desktop (the hub is core's, and the bridge is the one way across it).
+That's for VS Code augmentations; core's own runtime UI (the shell, previews, the prompt in a preview window) isn't one.
+
+**An extension is a folder** (2026-10-14): its package.json, its `browser` entry, and each file its manifest's `files`
+lists (npm's field), registered at that path, so it opens them as `extensionUri`'s (workbench/extensions.ts). The
+editor's own load that way too, so a contributed one can ship what they do (a worker it starts, a tsserver plugin's
+package, a webview's script) instead of inlining it.
+
+**What an author imports** is one package, `packages/editor-api` (released like hub, on the site as
+`packages/editor-api@latest.tgz`; its package.json says what each export is). editor-contrib depends on it; the bridge
+and tsval import the same types. It was `run-contract` until it carried more than the run contract (renamed
+2026-10-14). Its `Symbol.for` keys keep the old name: they're how a published copy and core find each other.
+
+### 1. The run contract
+
+A debugger is a runtime: what it reports goes in the Margin, the evidence and the run ledger. The events, requests and
+launch configuration are editor-api's (its index.ts says what each means). tsval tells all of it through the contract;
+the bridge reads every debugger's the one way (debug-events.ts), capability-stops.ts says what each answer at a
+capability stop means, and debug-control.ts drives any session for an agent with DAP's own requests. What Run means
+(an app's file runs the app, a rule's `process.argv` and its cases, the run's registration, its exit code) is the
+bridge's, for any debugger. The performance budgets held with tsval's values going to the workbench and back.
+
+A debugger in another extension host (editor-contrib's) is followed by what VS Code tells every host: no tracker sees
+it, so an agent doesn't see its output.
+
+### 2. The workspace runtime
+
+What the contract can't carry: a debugger's worker reads the workspace synchronously (`require`, `readFileSync`) and
+its servers answer the preview. **Any debugger may have it**, not just tsval: an interpreter like editor-contrib's
+should be able to run real programs against the workspace. The interface is editor-api's `./runtime`
+(`workspaceRuntime()`, `connectRuntime`, `serve`); on a desktop build it's Node's own `fs` and `net`.
+
+Underneath, the port is a link into the editor's hub, so the worker stays a realm of its own: its spans, its logs and
+each server's traffic (`server:<port>`) are the editor's to see. The extension's own code never joins the hub; the
+bridge stays the one bridge.
+
+**Its servers' bodies stream** (2026-10-14), both ways, as editor-api's `exchanges`: each piece another call on its
+request's route, naming its port, so every hop (the service worker, the tab's root, the dev-server worker) sends it the
+same way and none of them changed. A handler that assumes every request body is whole sees a stream only on a large
+upload. A preview's request for `localhost:<port>` reaches the server on that port the same way; a port nothing serves
+goes to the network. WebSockets wait for a way to observe them too.
+
+**Across extension hosts** (measured 2026-10-10, Brave, the dev build). An extension loaded from outside the editor
+runs in the web worker extension host (its code kept out of the workbench realm), and an extension's exports reach only
+its own host, so core puts the runtime in each host instead of exporting it. What handing a port across hosts meets:
+
+- **The workspace's buffer would cross.** The web worker host's iframe is same-origin (`allow-same-origin`,
+  `cross-origin-isolated`) and the host is cross-origin isolated. A `SharedArrayBuffer` posted from the workbench down
+  a `MessagePort` to a worker that iframe made is the same memory both ways: a write on either side is read on the
+  other.
+- **An extension can't open the way itself.** VS Code blocks `postMessage` for that host's extensions (the global is
+  replaced by one that only logs, and the prototype's is gone), so an extension can't send a port out. Core has to be
+  in the worker before that, as the architecture probe is (its bootstrap runs first and posts a port up through the
+  iframe, probes.ts). From there, a host's extensions share its global scope, and an extension posting to a worker of
+  its own (tsval's way) isn't blocked.
+- **`BroadcastChannel` is no way round:** it delivers a `SharedArrayBuffer` as `null`, even within one realm, and
+  carries no ports.
+
+#### The runtime's files, through core (decided 2026-10-10)
+
+A contributed debugger doesn't get the workspace's buffer. It's our storage format (patched zen-fs's SingleBuffer: a
+second zen-fs mounting it can break the filesystem's structure, `.git` and `.silo` with it), and the bytes are below
+everything the editor keeps around a file: an open editor's unsaved text, change events, the policy, the run's
+effects. It gets **synchronous files through core** instead, each call answered by the bridge (runtime-fs.ts):
+
+- **The wire.** The worker hands the bridge a small `SharedArrayBuffer` of its own, a mailbox, once. A call is the
+  worker writing its request into it and waiting (`Atomics.wait`); the bridge, watching it (`Atomics.waitAsync`),
+  makes the call and writes the answer back. No message a call, and one connection (the port), as before. VS Code's
+  TypeScript server on the web reads its files the same way.
+- **A read** is an open editor's text when it's open, else what's on disk; **a write** is the workspace's, so editors,
+  Source Control and watchers see it. Paths are `/workspace`'s, failing as node's do.
+- **Packages.** A package's published tarball, for one the debugger's `require` finds nothing of (the editor serves
+  packages from a CDN, and type acquisition writes only their types), at the version `.silo/versions.json` pins. The
+  worker unpacks it into its own memory, never the workspace's buffer: 64 MB is no place for node_modules. A package
+  the policy bans is never fetched.
+- **The gate.** A call is the program's unless it says it's the debugger's own load (the program and what it imports,
+  read-only). The program's are decided by the session's policy as tsval decides its own: allowed, skipped, or failing
+  with `EACCES`; a live run makes no write. The session is the one the extension named to `connect(name, session)`,
+  bound to the link, so the worker and the program in it can't run under another. The gate protects the workspace
+  from the *program*, uniformly, whichever debugger runs it. It isn't a wall against the extension, which has
+  `vscode.workspace.fs` like any extension.
+- **Effects, kept by core.** Each program call is counted among its run's effects as it's answered, so a debugger's
+  `effects` event tells only what the editor didn't see: the requests and commands it made itself.
+- **From either host.** `workspaceRuntime()` finds it where core put it: in the bridge's host, the bridge's (the
+  buffer included, for tsval); in the web worker host, core's (components/monaco-vscode-api/runtime.worker.ts, loaded
+  by core's bootstrap before VS Code's extension host, its ports going up the port the architecture probe reports
+  over), with no buffer.
+- **One way to link it** (`linkRuntime`), whichever host the port comes from. The worker is named `<name>#<instance>`,
+  its own id (an answer goes to that worker alone; the architecture view counts each as an instance of `<name>`), and
+  the link carries only the runtime: the worker's log, architecture and metrics, its mailbox, its servers' requests
+  and answers. No other service of the editor's, tsval's worker's included.
+
+**tsval's privilege, decided** (2026-10-15). tsval's program's calls go through the runtime's files too (almostnode
+over editor-api's `./runtime-vfs`), so core is the one gate for every debugger's programs; tsval still stops and asks
+at a call (a debugger's job) and gives a rule's result in a call's place. Its module loading keeps the buffer: never
+gated, and measured, a mailbox call costs ~0.5–0.7 ms (the read ~0.17 ms of it) and a run's loading makes 2 (a script)
+to 10 (two local modules) calls, 32 for one package it couldn't find, hundreds with real packages, every live run
+again. So tsval, the editor's own debugger built with core's zen-fs, mounts the buffer as core runs it
+(shared/workspace-runtime, shared/zenfs-vfs: the two `shared/` files the realm lint lets it import). Never a
+contributed debugger's. Everything else tsval uses is a contributed debugger's too (editor-api's `connectRuntime`,
+`./runtime-vfs`, `tarballUrl`), or its own (capability-calls.ts, canary.ts).
+
+**Any extension on the observability plane** (2026-10-15): `observeExtension(name)` joins an extension, a contributed
+one too, to the editor's hub through the same link, as `ext:<name>`, for its logs and metrics alone; nothing of the
+editor's services crosses. Not its console: the extension host is every extension's. The Margin is the first. The
+architecture view may draw the link; nothing depends on it.
+
+**A run's server serves as it wrote** (2026-10-15): the preview's taps are put in by the dev-server worker, which
+every preview request goes through, for a dev server's answer and any debugger's (`virtual.debug.<port>`) alike. A
+debugger's `serve` answers plainly.
+
+### 3. Span annotations
+
+Placing something on code so it survives edits and reformatting (RUNTIME-EVIDENCE.md, *Durable annotations on
+spans*): `editor.annotations.refer`, `resolve` and `spans`, commands the bridge registers. editor-api's
+`./annotations` types them and documents the contract (batching, each status, the three answers). Notes, insights'
+evidence, tsval's placed rules, the bridge's rule places and the run anchors (editor-api's `./anchors`) all call
+through it; no extension calls the commands by hand.
+
+### 4. Pane views
+
+The pane beside every editor (components/monaco-vscode-api/pane.ts) has a strip of tabs on its first line, and VS Code
+has no API for anything like it. Before 2026-10-12 one consumer owned all of it and drew every entry in the Margin,
+whoever's it was. Now each tab is a view an extension declares in its manifest (`contributes.paneViews`; VS Code
+ignores keys it doesn't know, and core reads the manifests it registers) and provides with a command, `<id>.paneView`,
+which core runs for a file and which answers with data (editor-api's `./pane`). A provider says its content changed
+with `editor.pane.refresh`; commands cross extension hosts, so a provider can be in any of them, editor-contrib's
+included. A provider can contribute *into* an existing view (`"into": "margin"`) rather than a tab of its own: that's
+how coverage and placed rules add to the Margin without owning it. test/pane-views.mjs proves it with an extension from
+outside the editor.
+
+**Data, not DOM**, because a pane view's rows sit level with the code and move with it (view zones, wrapping), which a
+webview can't follow, and the pane stays one look, whoever's view it is. Data is also what makes the second face
+possible: **natively** (a desktop build has no pane), pane-native.ts draws the same content with VS Code's own
+contribution points, public API only. *Pane: Toggle Pane / VS Code Annotations* switches. At a stop the values show
+twice (VS Code's inline values too).
+
+**Decided (2026-10-12):**
+
+1. **The rich editors leave the Margin.** The rule and mock editors a question's Rule… and Mock… open, and a
+   variable's mock, open in the Rule view under the Rules tree (where a rule is already edited), not inline. A view's
+   items stay data (markdown, rows, one-line input, buttons), and the Margin's buttons are commands that open them
+   there.
+2. **Notes keep their comment threads.** The notes extension's comment threads are how notes look in the editor (our
+   resolver placing each, VS Code drawing it); the Margin doesn't draw notes.
+3. **Core places everything.** An item's `at` is lines in the document as it is, a span reference core resolves, or
+   an offset range in a text that ran, which core refers once against that text and resolves as the file changes. No
+   provider computes lines from a text that ran; the one way to place things on code is core's (*tolerate cosmetic
+   formatting*).
+
+A Cards view waits for the cards projection (RUNTIME-EVIDENCE.md, *Projections*). A view with nothing for a file keeps
+its pane, so its tabs stay to switch back.
+
+### 5. The commands an extension may run (2026-10-14)
+
+Every command core answers that an extension may call: the list *Features as extensions*' test (below) holds a feature
+to. A command not here is core's own, and an extension that calls one doesn't pass.
+
+| Command | Answered by | What it is |
+| --- | --- | --- |
+| `editor.annotations.spans`, `.refer`, `.resolve` | core's BABLR (the bridge registers them) | span annotations (3), through editor-api's `annotations()`, never by hand |
+| `editor.annotations.classify(before, after)` | core's BABLR (bablr.ts: the worker's verdict on its cached parses, the session's answers kept) | what a change from one text to another is (editor-api's `ChangeVerdict`): cosmetic or semantic, the nodes that changed and their lines, through `annotations().classify`. The cosmetic extension's badge; the shell's review panel asks the same (`annotations.classify` on the hub) |
+| `editor.pane.refresh(view, uri?)` | core's pane (pane-views.ts) | a pane view's content changed (4), through editor-api's `refreshPane()` |
+| `editor.rules.edit(request)`, `.cancelEdit(id)` | core's Rule view (rule-view.ts) | a rule edited under the Rules tree: as it starts, what it's judged against (a call, a program's `process.argv`, a variable at a place, or the rule alone), its buttons. Answered `{ button, rule }` as pressed, or `null` (closed, cancelled, or replaced by another edit). The caller does what its buttons mean: the Rules tree's open and New Rule, the Margin's Rule… and Mock…, the bridge's preview prompt. `EditRequest`, and a rule's sentence and verdict, are editor-api's `./rules`. Core's, not an extension's view: a webview can't paint in this workbench (the coi-serviceworker keeps one origin; a webview's content needs its own), and nothing native edits predicates |
+| `editor.history.texts(path)` | core's edit history (edit-history.ts) | `string[]`: a file's texts through its recorded edits, oldest first, what a placed rule's place is followed through (the capabilities extension's rules.ts) |
+| `editor.git.status`, `.file(path)`, `.commit(message)` | core's git (git-service.ts) | the workspace's changes (`{ files: GitFileChange[] }`, editor-api's `./git`: path, status, staged, unstaged, cosmetic), a file's HEAD text (`{ head, working }`), a commit of everything (`{ oid }`). No change event: a change is a file change, as a watcher sees it (the Source Control view refreshes so) |
+| `editor.debugFile(uri?, { cases }?)` | the bridge | Run (▷): a program file in `run.debugger`, an app's file its app (RUNNING.md); `cases`, each a run's arguments, one run after another (the Margin's Mock… of process.argv) |
+| `editor.capability.decide(session, choice, rule?, give?)` | the bridge (capability-stops.ts) | a capability stop answered: `choice` a `CapabilityChoice` (editor-api): allow, skip or deny for this call, this run or always; `rule`, a rule made in the Rule view; `give-once`, `give` in the call's place. What a choice means is the bridge's decider's |
+| `editor.debug.setValue(session, name, value)` | the bridge (debug-control.ts) | at a stop, a variable set to `value`, a literal as code writes it; the run goes on with it (the Margin's Mock… of a variable) |
+| `editor.metrics.read(since?)` | the bridge, from the metrics plane | `{ [source]: MetricsSample[] }`, oldest first: every context's samples (`$sys.metrics.<source>`) from the last few minutes, only those newer than `since` when it's given. `MetricsSample` is observability's type. The insights monitor reads it |
+| `typescript.tsserverRequest("_statements", { file })` | the capabilities extension's tsserver plugin | `{ body: { statements } }`: a file's top-level statements (range, the comment above, a title and detail, what each declares and its type), the Margin's cards (RUNTIME-EVIDENCE.md, *Projections*) |
+| `typescript.tsserverRequest("_types.at", { file, ranges })` | the capabilities extension's tsserver plugin | `{ body: { types: (string \| null)[] } }`: TypeScript's type of each range (`{ start, end }`, offsets), `null` where no node has it, and every `null`, or no answer, when the capabilities extension isn't there, so a caller degrades. Notes and insights' hovers read it |
+
+**Not for extensions:** `editor.arch.commands` is command-tap's (extensions/command-tap.ts), which core's build puts in
+every extension it bundles, so the architecture view sees which extension registers and calls what. A contributed
+extension isn't tapped, so the view doesn't see it; counting in core's command service instead was dropped (core's
+command service can't tell which extension made a call). `editor.pane.native.*` are the native pane face's own buttons.
+
+**What agents ask** (debug-mcp's tools, over the hub) of an extension is answered by the bridge with that extension's
+command, from one fixed list (extensions/bridge/answers.ts). A hub request names an answer there, never a command.
+
+**Another extension's:** the capabilities extension answers the rules. They're not core's, so not in the table; one
+that runs them is the capabilities extension's consumer, and degrades without it, as `_types.at`'s callers do. (The
+bridge's preview prompt doesn't: it saves its rule by editor-api's `./policy`, as the rest of the decider does.)
+
+| Command | What it is |
+| --- | --- |
+| `silo.rules.set(previous?, rule?)` | my policy changed: `previous` replaced by `rule`, `rule` added, or `previous` removed |
+| `silo.rules.given(program, target)` | what a rule gives a program's `target` (`process.argv`): `{ rule, values }`, or `null` |
+| `silo.rules.files` | each policy file's rules (mine, the shared contract's) and where each placed one is now |
+| `silo.rules.list`, `.open`, `.new`, `.remove`, `.replace` | the Rules tree's: every rule as it lists them, and its actions; a rule opened in core's Rule view (`editor.rules.edit`) |
+
+### 6. VS Code's own contribution points
+
+Where VS Code has a contract for what we built ourselves, we move onto it: the run contract's lesson, applied to the UI
+the extensions add. monaco-vscode-api implements each API below; the comments and testing services are on in our
+workbench, the chat service isn't.
+
+| Ours | VS Code's | Decision |
+| --- | --- | --- |
+| The Rules view (core UI) | A tree view (`contributes.views`, a TreeDataProvider, inline actions) | **Moved** (2026-10-10): the capabilities extension's tree (rules-tree.ts) beside Capability calls, with its own commands (`silo.rules.*`, 5) since 2026-10-14. The rule editor stays core's, in the Rule view under it (`editor.rules.edit`, 5): nothing native edits predicates, and a webview can't paint here |
+| Live values at a stop | `InlineValuesProvider`, the debugger's own contract for values beside the code | **Added** (2026-10-10, the Margin's margin.ts): at a stop, each line's latest value at its end, for the session whose frame is in focus, whichever debugger's. Answered once the stop's values are in: VS Code asks as it stops, and doesn't ask again when they change |
+| Margin entries: the question, a run's end, coverage counts | CodeLens, inlay hints, decorations | **Added** (2026-10-12, 4): every pane view's content is data, drawn by the pane or natively by these (pane-native.ts), the Margin's desktop face |
+| Agent tools (app/tools/) | `contributes.languageModelTools`, `vscode.lm.registerTool` | **Not adopted:** those are tools for an agent inside VS Code (its chat), and VS Code isn't an MCP server that hands them to one outside. Our agent is outside: debug-mcp reaches the tab over the hub. A contributed tool would connect nothing we have |
+| Notes | The Comments API | **Adopted, as the display only.** The notes extension draws each note as a comment thread (`vscode.comments`), our resolver placing it on its span each time the file is shown or changes. VS Code keeps nothing and follows nothing past typing, so the span anchors stay the truth. A lost note waits in Problems. The Margin doesn't draw notes (4, decided) |
+| Coverage marks | `TestController` with `FileCoverage` | **Not adopted:** the beaker and TestController were removed by choice, for ambient marks of our own |
+
+Already VS Code's: Source Control, tasks, diagnostics, configuration, debuggers; the terminal speaks shell integration.
+
+### 7. The capability decider
+
+The bridge's decide.ts (extensions/bridge/capabilities) asks the policy, then the user (the prompt in the preview
+window). The decider is the seam: a contributed decider (an AI, an elicitation, a team's or CI's policy) answers
+instead, and the prompt is the default one. Not built: it waits until a second decider needs it (*Features as
+extensions*, S5).
+
+### A desktop build
+
+What a desktop VS Code extension of this would meet, as the code stands: the feature extensions are hub-free and run as
+they are (but `editor.annotations.*`, which core's BABLR answers); the run contract's layer is DAP and public API. What
+breaks is what the bridge reaches over the hub, because core isn't there:
+
+- **The workspace runtime** → Node's `fs` and `net` (2's interface); tsval's worker → `worker_threads`.
+- **Core's services that are just code** (the run registry, the evidence and run ledger, BABLR's spans, the edit
+  history, git) → moved into an extension (git: VS Code's own).
+- **Core's UI** (the Margin, the Rule view) → 6's native renderings (the Rules view is a tree view already; every pane
+  view's content has its native face); the Margin's pane itself has no counterpart.
+- **The browser runtime** (previews and their dev servers, the service worker's gate, just-bash, isomorphic-git) →
+  dropped for the real thing (Simple Browser, the terminal, git).
+- **Agent tools** → `languageModelTools` or an MCP server.
+
+### Later
+
+- **Evidence languages:** a BABLR grammar as a package, so a file in another language gets spans, and evidence.
+- **Preview frameworks:** almostnode's `frameworks/` (Vite today) as adapters.
+
+### Order
+
+What's left of it:
+
+1. editor-contrib's template provides a pane view (its interpreter's results into the Margin, or a tab of its own), so
+   the template shows every seam it should. It changes the template's imports.
+2. The decider (7), when a second decider needs it.
+
+## Features as extensions (2026-10-13 → 15)
+
+Each feature one folder, written as editor-contrib's template is: against VS Code's API, editor-api and the commands
+*Extension points* 5 lists, nothing else. A count of `packages/editor` (35k lines) had found most features spread over
+three to five folders; the event sheet, one folder, was the shape. Moving files doesn't get there: a feature's code
+sits in `workbench/` or the bridge because something it needs has no public way in. So the work was the missing seams.
+
+**The test.** A feature passes when it could ship in editor-contrib's place: its imports are `vscode`, editor-api and
+util; the commands it runs are VS Code's or 5's; its files load as a contributed extension's do. The shell's chrome,
+previews and the workbench's boot aren't VS Code augmentations and aren't held to it.
+
+**The seams.** S1, every extension loads from a folder (*Extension points*, above). S2, what extensions imported from
+`shared/` is editor-api's. S3, 5 lists every command an extension may run. S4, git as `editor.git.*` commands, so
+Source Control is `extensions/source-control`, and the agents' answers by the owning extension's command
+(bridge/answers.ts). S6, run events for any extension: VS Code hands every host each session's custom events, so the run
+contract's `values`, `ended` and `ask` were public already, and the Margin became `extensions/margin`, reading them
+itself. S7, a preview page as a runtime, for stops: the bridge tells a page's recorded stops as `values` on its
+preview's `production` session (the contract's `replace`). Where they ended differently, or didn't:
+
+- **Running stays in the bridge.** Preview runs as debug sessions, the task provider, the terminal's auto-attach and
+  the run picker translate core's runtime into VS Code's run UI, which is the bridge's job.
+- **S5, the decider, deferred** until a second decider needs it (*Extension points* 7), so capabilities' decision logic
+  (decide.ts, coalesce.ts, capability-stops.ts, rule places; ~650 lines) stays in the bridge.
+- **Rules, not as planned:** a webview can't paint in this workbench (one origin, the coi-serviceworker), so the Rule
+  view is core's real-DOM view and one core command edits any rule (`editor.rules.edit`); the rules, their places and
+  the tree's commands are the capabilities extension's; a rule's sentence is editor-api's `./rules`.
+- **tsval keeps the workspace buffer**, decided: a documented editor-only privilege (*Extension points* 2).
+  **The architecture view stays in the workbench**, where the raw hub is. **Command counts stay command-tap's**: core's
+  command service can't tell which extension made a call.
+- **Left:** one pane view reading another's (the Margin's cards read coverage's marks by a function call, inside the
+  margin extension); the edit history beyond annotations (its edit groups as commands, so it can become an extension).
+
+**What stays core.** `workbench/`: the boot, zen-fs and its overlays, the CDN `node_modules`, ATA, the git engine and
+service, BABLR's worker, the pane views' frame, the run registry, evidence's ledger, the runner, the terminal. The
+bridge: the uplink, the run contract's reader, runtime-fs, the annotation commands, metrics and parse status, and the
+crossings into core's own UI: about 2.2k lines, and the decider's ~650 while it waits.
+
+**Holding the line.** The realm lint (root `eslint.config.js`) stops an extension reaching another's folder, a realm's,
+or `shared/` (only the bridge, core's, may; tsval its two files). A feature that moves takes its tests, and core keeps
+no fallback for the old way.
+
+## Workspace tools (2026-10-10)
+
+debug-mcp's tools watched and debugged (the editor, problems, runs, previews, the debugger, the Margin), but an agent
+couldn't do the work itself, as it would on a local machine. Now it can: `files_*`, `terminal_run` and `git_*`
+(app/tools/; answered in the workbench by workspace-tools.ts and git-service.ts). What the code doesn't say:
+
+- A write or an edit is a `WorkspaceEdit`, so an open editor, undo, the edit history and format on save see it as
+  typing, then saved. A read is what's open in an editor (unsaved edits included), else what's on disk.
+- `terminal_run` is core's just-bash, as the terminal runs it (`node` in the debugger, `npm`); each call its own shell.
+- `git_diff` is jsdiff's (the `diff` package, already bundled for just-bash) in git's format: isomorphic-git has no
+  text diff of its own.
+
+**Maybe next:** a notes tool: every note in the workspace across files (its text, file, where it's placed now or that
+it's lost), so an agent can read and act on notes without opening each file.
+
+## Capabilities
+
+The capability IDE is **one pipeline with one shared core**, in the capabilities extension and its tsserver plugin.
+Every capability call goes through the same four steps, and each runtime consumes the core at its own call boundary.
+Hold to that and the seams stay put. Its next steps are paused (below).
+
+- **Detect**: the static call sites. The engine (engine.ts → `capabilities-engine.js`) runs util/silo's `findReach` on
+  the tree tsserver holds, typed by its checker.
+- **Resolve**: the concrete resource. The canary (tsval's canary.ts → `capabilities-canary.js`) runs the module in
+  tsval at `beforeCall`, in the background, for what isn't a literal.
+- **Surface**: the extension shows it. findings.ts asks `_capabilities.findings` and publishes the answer as its own
+  diagnostics (source `capabilities`); the Capability calls panel reads them back and overlays each call's
+  disposition from `.silo/policy.json`; the tripwire gives a denied call its own error (source
+  `capabilities-policy`). The Exceptions view shows what grew beyond the baseline and each run's answers at the call.
+- **Enforce**: at run time, where real effects are (below).
+
+The core is pure, with no vscode, node or oxc: util/silo's policy (dispositions, rules, resource matching) and tsval's
+capability-calls.ts (`classifyCall`, `shouldBreak`). The `.silo/` layout, and why its two axes are kept in separate
+files (the gap between them is the signal), is editor-api's policy.ts and util/silo's layout.
+
+**Invariants** (keep these true):
+
+- **One classifier.** `classifyCall` is the way to decide "is this a capability, what resource." The canary uses it
+  (AST first); its stand-ins carry tags only as an aliasing fallback (`const f = fetch; f(url)`), never as a second
+  classifier. A new runtime uses `classifyCall` too.
+- **One fs table.** Which `fs` methods read and which write is `@brianjenkins94/almostnode/fs-capabilities`, the table
+  the runtime shim gates by. `classifyCall`'s matchers, the canary's stand-ins, the debug worker and decide.ts all
+  derive from it, so the editor never misses a method the runtime asks about (as `rm`, `rename` and `copyFile` once
+  were).
+- **One policy model.** `@brianjenkins94/util/silo/policy` is the single source of dispositions and matching (shared
+  with silo); editor-api's `./policy` is the single source of `.silo/` I/O. The extension's policy.ts only adds the
+  panel's base-file I/O: the panel edits the shared contract, and silo never writes it.
+- **The plugin only answers.** Everything it computes is the engine's (lib's readings over the host's tree); the
+  extension asks with `typescript.tsserverRequest` and shows what comes back, and nothing goes into tsserver's own
+  diagnostics. So moving to TypeScript 7 is one adapter: its API connection answering the same requests (silo's
+  README, *Where analysis lives when TypeScript 7 arrives*).
+- **Thin interceptors.** No policy, grant store or prompt lives in an interceptor. The service worker's net gate is
+  where a preview's `fetch` can be stopped, but it decides nothing: it asks decide.ts over the hub. A debug run's file
+  calls are decided by the session's policy in the bridge (runtime-fs.ts, *Extension points* 2), and a package's call
+  beyond its baseline by decide.ts, as a preview's are. That keeps net, fs and exec uniform without duplicating the
+  brain.
+
+**A package's call** is decided at the call: trusted by the policy, made; within its baseline (the join of what the
+code imports of it, while the baseline's version is the one running), made; else the editor decides (decide.ts:
+redline, then the policy, then the prompt). The model is silo's README, *The model*; the order is debug-worker.ts's. It's
+asked about as that package's: the prompt names it and says why it asks (editor-api's `AskedWhy`), "Allow always" keeps
+a rule about that package's calls only, and an answer for the run is that package's, not every caller's.
+
+**Not built** (paused):
+
+- Gating a preview's dev server (almostnode in the node worker) at its shim. A preview's pages are gated at the
+  service worker; a debug run's files through core.
+- The "was I exposed to compromised dep X" audit: a query over the run ledger (each envelope has its files' oids and
+  its effects), never stored decision state.
+- The elicitation or AI decider behind `policyDecider` (*Extension points* 7).

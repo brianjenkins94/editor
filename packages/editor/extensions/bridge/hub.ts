@@ -17,7 +17,7 @@ export const bridgeHub = createHub({ "id": "bridge" });
  *  /workspace — an LSP server's through its control port, a debug run's in its launch. */
 export const workspace: { "buffer"?: SharedArrayBuffer } = {};
 
-/** The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; editor-api's
+/** The workspace runtime, for any debugger in this extension host (ARCHITECTURE.md, *Extension points* 2; editor-api's
  *  `WorkspaceRuntime`): the workspace's buffer as it is when asked for, and a port into the bridge hub per worker — linked
  *  as every runtime link is (editor-api's `linkRuntime`), and connected with its `connectRuntime`. */
 export function workspaceRuntime(): WorkspaceRuntime {

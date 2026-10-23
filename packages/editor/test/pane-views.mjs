@@ -1,5 +1,5 @@
 /**
- * Pane views (EXTENSION-POINTS.md, 4): a tab in the pane beside the editor, provided as data by an extension loaded from
+ * Pane views (ARCHITECTURE.md, *Extension points* 4): a tab in the pane beside the editor, provided as data by an extension loaded from
  * outside the editor (test/fixtures/pane-view, in the web worker extension host as editor-contrib's is) — drawn level
  * with the code each item is about, placed each way an item can be (lines, a span reference, a range in a text that
  * ran, followed as the file changes), its buttons and input running its commands; and items it adds into the Margin.

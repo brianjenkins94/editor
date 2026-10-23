@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 /**
  * The editor's workspace runtime in a worker core boots — for the web worker extension host's extensions, whose
- * debuggers reach the editor this way (EXTENSION-POINTS.md, 2): VS Code takes `postMessage` away from them, so each
+ * debuggers reach the editor this way (packages/editor/ARCHITECTURE.md, *Extension points* 2): VS Code takes `postMessage` away from them, so each
  * debugger's port into the editor goes up core's port (architecture/workerPort.ts), linked into the workbench's hub by
  * whoever holds it (installMonacoProbes' `linkRuntime`, the extension host's only). Put where editor-api's
  * `workspaceRuntime()` looks for it (its `RUNTIME` symbol). No buffer: the workspace's own bytes are for the editor's

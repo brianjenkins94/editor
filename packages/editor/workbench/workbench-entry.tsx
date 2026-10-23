@@ -121,7 +121,7 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 
 // A debugger's worker in the web worker extension host (an extension loaded from outside, editor-contrib's) reaches the
 // editor's runtime through the probe there — VS Code leaves its extensions no other way out — linked into this hub, and
-// answered as tsval's is (EXTENSION-POINTS.md, 2: its file calls by the bridge, its servers by the preview) — linked as
+// answered as tsval's is (ARCHITECTURE.md, *Extension points* 2: its file calls by the bridge, its servers by the preview) — linked as
 // every runtime link is (editor-api's linkRuntime: its own id, carrying only the runtime).
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
@@ -689,7 +689,7 @@ function maybeBoot(): void {
 			// plugin, which finds its engine and canary beside itself; its package worker for the baseline); history (its
 			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the Margin; the event sheet (its webview's script,
 			// its recognizer worker); running; type queries (`// ^?`); notes; Source Control (on the editor's git); cosmetic changes (BABLR's verdict on them, a file decoration); cspell (the real cspell under almostnode, in its
-			// worker). Public API only, but for what EXTENSION-POINTS lists (5).
+			// worker). Public API only, but for what ARCHITECTURE.md lists (*Extension points* 5).
 			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, marginExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cosmeticExtension, cspellExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}

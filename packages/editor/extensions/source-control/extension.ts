@@ -4,7 +4,7 @@
  * by the cosmetic extension, over any git.)
  *
  * Git is the editor's (git-engine.ts, isomorphic-git on the shared workspace, behind git-service.ts — the shell's review
- * panel reads it too); this is its VS Code face, through the commands the editor documents (EXTENSION-POINTS 5):
+ * panel reads it too); this is its VS Code face, through the commands the editor documents (ARCHITECTURE.md, *Extension points* 5):
  * `editor.git.status`, `editor.git.file`, `editor.git.commit`. It learns of a change as VS Code's own git does: a save, or
  * a file watcher — the repository is files too. A browser build's: a desktop build has git of its own.
  */

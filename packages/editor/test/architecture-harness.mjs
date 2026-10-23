@@ -386,7 +386,7 @@ export async function startSession(options = {}) {
 		/** Everything seen all session: the last snapshot, with every node and channel any look saw. */
 		"seen": () => ({ ...snapshot, "nodes": [...nodesSeen.values()], "channels": [...channelsSeen.values()], "topology": topologySeen }),
 		"conformance": async () => workbench().evaluate(() => globalThis.__architecture.conformance()),
-		/** A command run, as an extension runs one: the editor's (EXTENSION-POINTS 5) or an extension's. */
+		/** A command run, as an extension runs one: the editor's (ARCHITECTURE.md, *Extension points* 5) or an extension's. */
 		"execute": async (command, ...args) => workbench().evaluate(([name, given]) => globalThis.__editor.api.commands.executeCommand(name, ...given), [command, args]),
 		/** An RPC into the hub tree, from the workbench realm. */
 		// (a request that times out says what the page was saying about runs and debuggers meanwhile: the bridge logs each

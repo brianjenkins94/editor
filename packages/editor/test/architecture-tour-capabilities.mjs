@@ -322,7 +322,7 @@ test("eslint: real ESLint in its worker — a type-aware problem reported, and f
 	}
 });
 
-// A program's file calls are the editor's to make (EXTENSION-POINTS.md, 2: the runtime's files, through core) — so a read
+// A program's file calls are the editor's to make (ARCHITECTURE.md, *Extension points* 2: the runtime's files, through core) — so a read
 // is what the editor has: an open editor's unsaved text, not what's on disk.
 test("a program's read is the editor's: an open editor's unsaved text", async () => {
 	const workbench = session.workbench();

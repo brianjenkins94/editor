@@ -3,7 +3,7 @@
  * change is formatting or comments only — by BABLR's verdict of HEAD against the working tree — marked with a file
  * decoration (a ≈ badge, its name dimmed), which VS Code draws wherever the file is listed: Source Control, the Explorer,
  * tabs. Knows nothing of how git is kept: the changes come through the editor's git commands, the verdicts through the
- * editor's BABLR (`editor.annotations.classify`, sharing its cached parses) — EXTENSION-POINTS 5.
+ * editor's BABLR (`editor.annotations.classify`, sharing its cached parses) — ARCHITECTURE.md, *Extension points* 5.
  *
  * `cosmetic.list`: each changed code file's verdict, as last read.
  */

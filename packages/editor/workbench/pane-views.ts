@@ -1,5 +1,5 @@
 /**
- * Pane views (EXTENSION-POINTS.md, 4): the tabs on the pane's first line, and what each draws beside the code. Every view
+ * Pane views (ARCHITECTURE.md, *Extension points* 4): the tabs on the pane's first line, and what each draws beside the code. Every view
  * is an extension's — the Margin too (extensions/margin), shown first — declared in its manifest
  * (`contributes.paneViews`) and provided by its command `<id>.paneView`, run with a file's URI whenever the view is shown, the file is, or
  * it changes (or the provider says so: `editor.pane.refresh`). Its content is data (@brianjenkins94/editor-api/pane):

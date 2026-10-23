@@ -118,7 +118,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 		return typeof capability === "string" && typeof resource === "string" ? await recordedResult(capability, resource) ?? null : null;
 	}) });
 
-	// The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; editor-api's
+	// The workspace runtime, for any debugger in this extension host (ARCHITECTURE.md, *Extension points* 2; editor-api's
 	// `workspaceRuntime()`): tsval's — an extension of its own, extensions/tsval — with the workspace's buffer, ours. Its
 	// workers' file calls are answered by runtime-fs.ts, a debugger's anywhere (the web worker host's come by core's
 	// bootstrap there).

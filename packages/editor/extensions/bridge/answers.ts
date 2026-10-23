@@ -1,6 +1,6 @@
 /**
  * What agents ask of the editor's extensions (debug-mcp's tools, over the hub): the bridge — the one extension on the
- * hub — answers each by the command of the extension whose it is (EXTENSION-POINTS 5). A fixed list, not a relay: a hub
+ * hub — answers each by the command of the extension whose it is (ARCHITECTURE.md, *Extension points* 5). A fixed list, not a relay: a hub
  * request names an answer here, never a command.
  *
  * | hub request | tool | answered by |
