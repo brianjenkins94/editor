@@ -101,17 +101,11 @@ The question waits on that line in the margin until you're back. It says what th
 when you're not watching: give what the call returned last time, skip it, allow it, or stop here. Your answer is a rule
 like any other. So questions come only from runs that got that far, one per call, and nothing is set up front.
 
-**Defaults, before any answer** (the stance a policy starts from for `trigger is edit`):
-
-| Effect | Unattended |
-|---|---|
-| fs | Reads are real. Writes go to a writable layer of the run's own over the workspace's, discarded when it ends, so a write needs no rule |
-| net, a read (`reach`'s `safe`: GET, HEAD) | The recorded response to the same request; with none, halt |
-| net, anything else | Never made: the recorded response, else halt |
-| A database | It arrives as net (an HTTP driver), a WebSocket (held, as a preview's are), or in memory (sqlite or PGlite as wasm, IndexedDB). In memory it's the run's own and runs; the rest is the net case, matched on the request's body |
-| exec | Skipped (almostnode's `child_process` is a stub anyway) |
-| env | The recorded value, else halt |
-| Clock, random | Deterministic already (*The model*) |
+**No defaults** (decided 2026-10-23). Nothing is decided for an unattended run before you answer: where no rule covers a
+call, it halts. What makes the answer quick is what earlier runs saw: the question on the line comes with suggestions
+from the values observed at that call in previous runs — what it returned when it last ran for real (its recording),
+the values its result took, whether the run used it — each a rule one click away (*give* that value, *skip*, *allow*).
+File writes are the exception that needs no answer, once a run has a writable layer of its own (*Open*).
 
 **Skip or give.** Skipping a call is safe only where nothing reads what it returns, such as an `await fetch(…)` as a
 statement of its own, which tsval can tell. Where the result is used, the run needs a recorded or given value, or it
@@ -287,8 +281,8 @@ fails the run. Built: the target; not built: halting.
     halts fail.
   - **Whether halting deserves its own action.** One a rule could choose while someone's watching too, for a call that
     should never run unattended or attended without a fresh look.
-  - **Where defaults live.** Unattended defaults as rules in a contract silo seeds (visible, editable), or as the
-    evaluator's fallback when no rule matches.
+  - ~~**Where defaults live.**~~ Decided 2026-10-23: there are none. An unattended run halts where no rule covers a
+    call, and the margin suggests rules from the values earlier runs observed there (*Unattended runs*).
   - **Matching a recording.** A `give` of a recorded response matches today by capability and resource. Replaying a
     request needs its method and body too: a target for them (`request.method`, `request.body`), or a recording keyed
     by all three.
