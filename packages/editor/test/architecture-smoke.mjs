@@ -73,7 +73,8 @@ test("boot: every realm reports", async () => {
 // Any extension on the editor's observability plane (editor-api's observeExtension): the Margin's log, as ext:margin's,
 // collected with the rest of the tree's records — no hub of its own, no console tap.
 test("observability: an extension's log reaches the tree's collector, as ext:<name>'s", async () => {
-	await session.eventually("the Margin's record", () => session.printed().find((line) => /^\[ext:margin(?:#\w+)?\] .*the Margin is up/u.test(line)), 60_000);
+	// From what the page printed less the bridge's file traffic, which would push the line out of `printed` as types load.
+	await session.eventually("the Margin's record", () => session.notable().find((line) => /^\S+ \[ext:margin(?:#\w+)?\] .*the Margin is up/u.test(line)), 60_000);
 });
 
 test("preview: npm run dev in the terminal serves the demo", async () => {
