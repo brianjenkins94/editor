@@ -34,39 +34,45 @@ How it's kept:
    are mostly ambient), and attribute code to them. *Waits on:* 2; *Decisions* f. *Done:* the editor shows a file's
    code by the features its tests say it belongs to.
 
-5. **Halt where nobody's watching.** A run selected by 3 that reaches an unsafe call with no recording halts there and
+5. **The feature ledger, step 1.** `.silo/features.json` (decisions about features, kept beside the code) and the
+   drift checks that need no reach: stopped but present, removed but documented, experiment expired, dead ends, stale
+   entries (packages/silo/README.md, *The feature ledger*; its later steps — prices, budgets, leases from 2's traces,
+   `silo remove` — follow there). *Waits on:* 4 (what one feature is). *Done:* `silo check` reports this repo's drift as
+   warnings, and an entry set in the editor or by `silo status` is committed.
+
+6. **Halt where nobody's watching.** A run selected by 3 that reaches an unsafe call with no recording halts there and
    leaves its question on the line (RUNNING.md, *Unattended runs*; RULES.md, the `trigger` target — live runs keep
    skipping). *Waits on:* 3. *Done:* such a run ends before the call, and the line offers *Rule…* prefilled
    *trigger is edit*.
 
-6. **Replay matched by the whole request.** A recording is keyed by capability and resource only, so a POST and a GET to
+7. **Replay matched by the whole request.** A recording is keyed by capability and resource only, so a POST and a GET to
    one URL share one. Key it by method, URL and a hash of the body (RUNNING.md, *What it needs*; RULES.md *Open*,
    "Matching a recording"). *Done:* a POST's recording isn't given to a GET of the same URL.
 
-7. **A picked run's coverage and run log.** Picking an older ball shows its values, but the gutter's coverage and the run
+8. **A picked run's coverage and run log.** Picking an older ball shows its values, but the gutter's coverage and the run
    log stay the latest run's (LIVE-VALUES.md *Open*). Keep them with each run. *Done:* picking a ball shows its own.
 
-8. **A writable layer per run.** An unattended run's file writes go to a layer of its own, thrown away when it ends
+9. **A writable layer per run.** An unattended run's file writes go to a layer of its own, thrown away when it ends
    (RUNNING.md *Open*). *Done:* a live run that writes a file leaves the workspace as it was, and its reads see its own
    writes.
 
-9. **Purity, measured.** How much of this repository's code a static check calls pure / effectful / unknown, and why the
+10. **Purity, measured.** How much of this repository's code a static check calls pure / effectful / unknown, and why the
    unknowns are (packages/silo/README.md, *Purity*; decision 10 there). *Done:* the numbers, written into that section,
    and a go or no-go for building the check.
 
-10. **Purity, built** — if 9 says go: the static check in lib's analysis (beside `reach`, behind the TypeScript seam), and
-   tsval observing it at run time as a `purity` evidence kind (packages/silo/README.md, *Purity*). *Waits on:* 9;
+11. **Purity, built** — if 10 says go: the static check in lib's analysis (beside `reach`, behind the TypeScript seam), and
+   tsval observing it at run time as a `purity` evidence kind (packages/silo/README.md, *Purity*). *Waits on:* 10;
    *Decisions* c. *Done:* a function's verdict shows beside it, and a run's write from a function judged pure is flagged.
 
-11. **Values that didn't touch an input.** tsval tracks which values came from an input, so a run that read one can share
-   the rest (LIVE-VALUES.md, *Kept across reloads*: "Next"; lib traces `committable`). *Waits on:* 9's runner question
+12. **Values that didn't touch an input.** tsval tracks which values came from an input, so a run that read one can share
+   the rest (LIVE-VALUES.md, *Kept across reloads*: "Next"; lib traces `committable`). *Waits on:* 10's runner question
    (*Decisions* c). *Done:* a run that read a file shares the values it computed from its own literals.
 
-12. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
+13. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
    one a rule's (or a recording's) result too, so an app can run unattended (RUNNING.md, *What it needs*; RULES.md, *A
    call's result*). *Waits on:* *Decisions* d. *Done:* a rule giving a fetch's result answers a preview's fetch.
 
-13. **The ball as a run goes.** A long run's ball rolls while it runs, not only after (LIVE-VALUES.md *Open*).
+14. **The ball as a run goes.** A long run's ball rolls while it runs, not only after (LIVE-VALUES.md *Open*).
 
 ## Watching
 
@@ -92,4 +98,4 @@ e. **The rest of packages/silo/README.md's *Decisions to make*** (which job test
    into git; test identity; size; a subcommand or not) — none blocks the queue above.
 f. **Where features from tests show**: a view of its own, the Margin's cards, or the Rules-like tree (item 4).
 g. **RULES.md's open `trigger` questions**: whether halting is an action of its own a rule can choose, and whether
-   unattended defaults are rules silo seeds (visible, editable) or the evaluator's fallback (item 5).
+   unattended defaults are rules silo seeds (visible, editable) or the evaluator's fallback (item 6).

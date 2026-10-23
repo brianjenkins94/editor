@@ -47,9 +47,9 @@ recorded decisions with the code.
 
 ## What the first replay showed
 
-The first experiment replayed the repo's first-parent history through a feature extractor and wrote
-FEATURE-TIMELINE.md: 706 commits in 12 seconds, each file version parsed once and cached by blob. It reads no commit
-messages.
+The first experiment (2026-10-12) replayed the repo's first-parent history through a feature extractor and wrote a
+timeline (not kept: `silo history` writes it again): 706 commits in 12 seconds, each file version parsed once and
+cached by blob. It reads no commit messages.
 
 - **The week of Oct 5–11:** git's log is 116 commits, one subject line each. The derived week is 89 sentences, grouped
   by area, with internal hub plumbing folded into one line per area.

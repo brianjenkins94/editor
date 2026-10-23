@@ -423,6 +423,56 @@ Runs add three things:
 - **Counterexamples.** A write from a function judged pure means an assumption broke, which is a finding.
 - **Confidence.** Phrased as insights' suggestions are: "seen 4,000 times, never impure", not "pure".
 
+### The feature ledger: code keeps its place, or goes (designed 2026-10-12, not built)
+
+Code is easy to add and hard to remove: removing takes an argument, keeping takes none, so a codebase built fast keeps
+everything it tried. A cleanup audit of this repo found almost nothing dead. The weight was code whose reason had lapsed
+while nothing in the repo knew it: the capability engine, paused on Oct 2, still loading at boot and still changing on
+Oct 10; Run with Inputs, removed (9482074) and still described in a doc. Each decision lived in a chat, so nothing could
+check the code against it.
+
+The ledger flips the default: **a feature keeps its place by having a current reason, a decision or evidence that it's
+used; deleting it is priced, cheap and recorded.** Deterministic, like `features` and `history`: fixed rules over
+computed facts, no model. It's Remember (what was decided) and Gate (the checks in CI).
+
+- **The ledger:** `.silo/features.json`, shared, in `layout.ts`. Decisions only, not an inventory: a feature it doesn't
+  name is kept by evidence alone. Statuses `active` (with a reason), `experiment` (with an `until`), `parked`,
+  `stopped`, `removed` (a tombstone: where it went, why, and the command that restores it). An entry names a feature
+  key (`command|tsval.explore`) or a name with `paths`; most code worth deciding about is reached from a way in rather
+  than being one, so `paths` is first-class. `silo status <entry> <status> "<why>"`, or one click in the editor.
+- **Drift (`silo check`):** stopped but present; parked but running (reached at boot) or changing (`history` says so
+  since it was parked); experiment expired; removed but still named in a `.md`; dead ends (a button with no handler, a
+  declared command nobody registers, a setting nobody reads); reached only by tests; an entry matching nothing (with
+  `history`'s rename as the proposed key). Each finding names both ways out, change the code or the decision. Warnings
+  first, errors one at a time once each is quiet here.
+- **Prices:** what deleting a feature frees, the code only its entry reaches (what it dominates in the import graph,
+  later the call graph): lines, files, bytes per realm, and on request measured boot and memory with it stubbed out.
+  Shown on drift findings, dormant suggestions, and a pull request that removes code.
+- **Leases:** a feature the ledger doesn't decide about stays while runs reach its code — a test, a run in the editor,
+  an agent's tool call. It turns **dormant** when no test reaches it and, across enough runs that could have, none did
+  (a smoke test that never signs in mustn't make sign-in dormant). Dormant is a suggestion with its price: Remove, or
+  Keep with a reason that expires (90 days) and asks again.
+- **Budgets:** bytes per realm beside the performance suite's; raising one is a line in the diff.
+- **`silo remove` / `silo restore`:** remove takes out what only the entry reaches, its manifest entries and the
+  tombstone, lists the docs that name it, and leaves a change for review; restore runs the tombstone.
+- **Agents:** replacing an approach removes the old one in the same change; an experiment starts with an entry, so it
+  expires by default; a scheduled run of `silo check` and the dormant list opens one deletion pull request a week.
+- **In the editor:** drift in Problems; dormant features in the evidence's purple with their price, Remove and Keep.
+
+Where it lives: lib's `util/silo` (`ledger.ts` for the file, the drift rules and lease state; `cost.ts` for prices — not
+`reach.ts`, which is capability reach); the subcommands here; `silo check` in the lint workflow.
+
+How it weaves into the rest: its leases are the traces runs and tests keep (`traces`, by span; NEXT.md, test runs
+kept as traces), "could have reached" is selection's reach, and what one feature is comes from features from tests
+(NEXT.md) — the ways-in list it was designed on is this repository's only.
+
+Build order, each step useful alone: (1) the ledger and the checks that need no reach; (2) prices per area from the
+import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the agent rules and the weekly run.
+
+Open: **off isn't stopped** (a flag off by default ships but doesn't run: its own status, checked by "never reached");
+**restoring across a move** (a tombstone's paths mapped through the moves `history` detects); **what counts as one
+feature** (often "a path set people name", not a way in).
+
 ### Decided
 
 - **Analysis: wanted, in both front ends.** Both sides of each dependency and their join, checked against the runs, as
