@@ -129,3 +129,32 @@ test("silo install: nothing published in the last `days` days — `latest` is th
 	assert.deepEqual(installCommand("pnpm", [], 7, now), ["install", "--config.minimum-release-age=10080"]);
 	assert.deepEqual(installCommand("pnpm", ["react"], 7, now), ["add", "react", "--config.minimum-release-age=10080"]);
 });
+
+test("silo status, then silo check: the ledger's decisions held to the code, as warnings", async () => {
+	const ledgered = await repository({
+		"2026-10-20": {
+			"README.md": "The old exporter (old-export.ts) is how files leave.\n",
+			"notes/package.json": JSON.stringify({ "contributes": { "commands": [{ "command": "notes.add", "title": "Add Note" }, { "command": "notes.ghost", "title": "Ghost" }], "configuration": { "properties": { "notes.size": { "type": "number" }, "notes.unread": { "type": "boolean" } } } } }),
+			"notes/extension.ts": "import * as vscode from \"vscode\";\nvscode.commands.registerCommand(\"notes.add\", () => vscode.workspace.getConfiguration(\"notes\").get(\"size\"));\n"
+		}
+	});
+	const silo = (...args: string[]): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { "encoding": "utf8" });
+
+	const set = silo("status", "old exporter", "removed", "the share sheet replaced it", "--paths", "src/old-export.ts", "--in", "abc1234", "--repo", ledgered);
+
+	assert.equal(set.status, 0, String(set.stderr));
+	assert.match(String(set.stdout), /"old exporter" is removed \(since \d{4}-\d\d-\d\d\)/u);
+	assert.equal(JSON.parse(fs.readFileSync(path.join(ledgered, ".silo/features.json"), "utf8"))["old exporter"].in, "abc1234");
+	assert.equal(silo("status", "half", "experiment", "trying", "--repo", ledgered).status, 1, "an experiment needs an end");
+
+	const checked = silo("check", ledgered, "--json");
+	const { drift } = JSON.parse(String(checked.stdout)) as { "drift": { "check": string; "entry"?: string; "message": string }[] };
+
+	assert.equal(checked.status, 0, "drift warns, it doesn't fail");
+	assert.deepEqual(drift.map((each) => [each.check, each.entry ?? each.message]), [
+		["removed but documented", "old exporter"],
+		["dead end", "command notes.ghost is declared and never registered"],
+		["dead end", "setting notes.unread is declared and its code never reads it"]
+	]);
+	assert.match(String(silo("check", ledgered).stdout), /Drift \(3, warnings\):\n {2}removed but documented: "old exporter" was removed \(abc1234\), and README\.md still names it/u);
+});

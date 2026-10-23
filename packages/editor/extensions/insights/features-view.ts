@@ -4,10 +4,17 @@
  * under it its tests, each as it last came out, and its code — each declaration its tests reach, where it is now (a
  * click goes to it), or that it changed since they ran. The traces change as tests run, and the view with them.
  * `insights.features` answers the same, as data.
+ *
+ * A feature's decision is set here too (Set Status…): its status and why, into the feature ledger, `.silo/features.json`
+ * (lib util/silo/ledger — shared, so it's committed with the code), by the feature's name and the files its code is in;
+ * the view shows each one's status. `silo check` holds the code to it.
  */
 import type { RunTrace } from "@brianjenkins94/util/silo/traces";
+import type { LedgerStatus } from "@brianjenkins94/util/silo/ledger";
 import type { Declaration, TestFeature } from "@brianjenkins94/util/silo/test-features";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { ledgerText, parseLedger, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { featuresFromTests } from "@brianjenkins94/util/silo/test-features";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
 import * as vscode from "vscode";
@@ -37,7 +44,7 @@ const textOf = async (uri: vscode.Uri): Promise<string | undefined> => Promise.r
 
 /** The workspace's features from its tests' traces: this machine's (`.silo/local/traces`) and everyone's shared ones
  *  (`.silo/traces/<user>`), each declaration placed in its file as it is now. */
-async function featuresIn(root: vscode.Uri): Promise<{ "features": TestFeature[]; "placed": Map<string, Placed> }> {
+async function featuresIn(root: vscode.Uri): Promise<{ "features": TestFeature[]; "placed": Map<string, Placed>; "statuses": Map<string, string> }> {
 	const files = [...await jsonlUnder(vscode.Uri.joinPath(root, ".silo/local/traces")), ...await jsonlUnder(vscode.Uri.joinPath(root, ".silo/traces"))];
 	const traces: RunTrace[] = (await Promise.all(files.map(async (uri) => parseTraces(await textOf(uri) ?? "")))).flat();
 	const { features } = featuresFromTests(traces);
@@ -67,12 +74,52 @@ async function featuresIn(root: vscode.Uri): Promise<{ "features": TestFeature[]
 		}
 	}));
 
-	return { "features": features, "placed": placed };
+	const ledger = parseLedger(await textOf(vscode.Uri.joinPath(root, ledgerPath())));
+
+	return { "features": features, "placed": placed, "statuses": new Map(Object.entries(ledger).map(([name, entry]) => [name, entry.status])) };
+}
+
+/** What each status means, as Set Status… offers them. */
+const STATUS_PICKS: { "label": LedgerStatus; "detail": string }[] = [
+	{ "label": "active", "detail": "Kept on purpose: say why it stays." },
+	{ "label": "experiment", "detail": "Trying it: until a date, by when it's kept or removed." },
+	{ "label": "parked", "detail": "Not now: kept, not worked on." },
+	{ "label": "stopped", "detail": "Not wanted: `silo check` flags it while its code is still there." },
+	{ "label": "removed", "detail": "Gone: a tombstone, so docs that still name it are flagged." }
+];
+
+/** Ask for `feature`'s status and why, and write it into the ledger: its name, the files its code is in. */
+async function setStatus(root: vscode.Uri, feature: TestFeature): Promise<boolean> {
+	const status = await vscode.window.showQuickPick(STATUS_PICKS, { "title": `${feature.name}: its status`, "placeHolder": "What's been decided about it" });
+
+	if (status === undefined) {
+		return false;
+	}
+
+	const why = await vscode.window.showInputBox({ "title": `${feature.name}: ${status.label}`, "prompt": "Why — what the decision rests on", "validateInput": (value) => (value.trim() === "" ? "Say why" : undefined) });
+
+	if (why === undefined) {
+		return false;
+	}
+
+	const until = status.label === "experiment" ? await vscode.window.showInputBox({ "title": `${feature.name}: until`, "prompt": "The date it's decided by (YYYY-MM-DD)", "validateInput": (value) => (/^\d{4}-\d\d-\d\d$/u.test(value) ? undefined : "YYYY-MM-DD") }) : undefined;
+
+	if (status.label === "experiment" && until === undefined) {
+		return false;
+	}
+
+	const file = vscode.Uri.joinPath(root, ledgerPath());
+	const paths = [...new Set(feature.declarations.map((declaration) => declaration.file))].toSorted();
+	const ledger = withStatus(parseLedger(await textOf(file)), feature.name, status.label, why.trim(), new Date().toISOString().slice(0, 10), { "paths": paths, ...until === undefined ? {} : { "until": until } });
+
+	await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(ledgerText(ledger)));
+
+	return true;
 }
 
 export function registerFeaturesView(context: vscode.ExtensionContext): void {
 	const changed = new vscode.EventEmitter<undefined>();
-	let shown: { "features": TestFeature[]; "placed": Map<string, Placed> } = { "features": [], "placed": new Map() };
+	let shown: Awaited<ReturnType<typeof featuresIn>> = { "features": [], "placed": new Map(), "statuses": new Map() };
 	const codeOf = (feature: TestFeature): Placed[] => feature.declarations.flatMap((declaration) => {
 		const placed = shown.placed.get(`${declaration.file}#${declaration.id}`);
 
@@ -105,7 +152,10 @@ export function registerFeaturesView(context: vscode.ExtensionContext): void {
 					const tree = new vscode.TreeItem(item.feature.name, vscode.TreeItemCollapsibleState.Collapsed);
 					const files = new Set(item.feature.declarations.map((declaration) => declaration.file));
 
-					tree.description = `${item.feature.tests.length} test${item.feature.tests.length === 1 ? "" : "s"} · ${[...files].join(", ")}`;
+					const status = shown.statuses.get(item.feature.name);
+
+					tree.description = `${status === undefined ? "" : status + " · "}${item.feature.tests.length} test${item.feature.tests.length === 1 ? "" : "s"} · ${[...files].join(", ")}`;
+					tree.contextValue = "feature";
 					tree.iconPath = new vscode.ThemeIcon(item.feature.tests.some((test) => test.outcome === "fail") ? "error" : "symbol-namespace");
 
 					return tree;
@@ -149,7 +199,7 @@ export function registerFeaturesView(context: vscode.ExtensionContext): void {
 	const refresh = async (): Promise<void> => {
 		const root = vscode.workspace.workspaceFolders?.[0]?.uri;
 
-		shown = root === undefined ? { "features": [], "placed": new Map() } : await featuresIn(root);
+		shown = root === undefined ? { "features": [], "placed": new Map(), "statuses": new Map() } : await featuresIn(root);
 		view.message = shown.features.length === 0 ? "No features yet: run your tests (node --test in the terminal), and what each one reaches groups them here." : undefined;
 		changed.fire(undefined);
 	};
@@ -159,14 +209,36 @@ export function registerFeaturesView(context: vscode.ExtensionContext): void {
 			void refresh();
 		}, 500);
 	};
-	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/**/traces/**/*.jsonl");
+	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/{**/traces/**/*.jsonl,features.json}");
 
 	context.subscriptions.push(changed, view, watcher, watcher.onDidCreate(soon), watcher.onDidChange(soon), watcher.onDidDelete(soon), view.onDidChangeVisibility(soon),
+		// A feature's decision, into the ledger (from the view's item, or by name, as an agent or a test asks).
+		vscode.commands.registerCommand("insights.setStatus", async (item?: Item | string, status?: LedgerStatus, why?: string) => {
+			const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+			const feature = typeof item === "string" ? shown.features.find((each) => each.name === item) : item?.kind === "feature" ? item.feature : undefined;
+
+			if (root === undefined || feature === undefined) {
+				return false;
+			}
+
+			if (status !== undefined && why !== undefined) {
+				const file = vscode.Uri.joinPath(root, ledgerPath());
+				const paths = [...new Set(feature.declarations.map((declaration) => declaration.file))].toSorted();
+
+				await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(ledgerText(withStatus(parseLedger(await textOf(file)), feature.name, status, why, new Date().toISOString().slice(0, 10), { "paths": paths }))));
+			} else if (!await setStatus(root, feature)) {
+				return false;
+			}
+
+			await refresh();
+
+			return true;
+		}),
 		// The view's features as data: each one's name, its tests and how each came out, and its code where it is now.
 		vscode.commands.registerCommand("insights.features", async () => {
 			await refresh();
 
-			return shown.features.map((feature) => ({ "name": feature.name, "tests": feature.tests, "code": codeOf(feature).map((placed) => ({ "file": placed.declaration.file, "id": placed.declaration.id, "label": placed.label, ...placed.range === undefined ? {} : { "line": placed.range.start.line + 1 } })) }));
+			return shown.features.map((feature) => ({ "name": feature.name, ...shown.statuses.has(feature.name) ? { "status": shown.statuses.get(feature.name) } : {}, "tests": feature.tests, "code": codeOf(feature).map((placed) => ({ "file": placed.declaration.file, "id": placed.declaration.id, "label": placed.label, ...placed.range === undefined ? {} : { "line": placed.range.start.line + 1 } })) }));
 		}),
 		{ "dispose": () => { clearTimeout(pending); } });
 	void refresh();

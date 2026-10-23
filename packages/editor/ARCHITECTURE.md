@@ -491,6 +491,7 @@ flowchart LR
   n_ext_event_sheet_recognizer_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_history -->|"reads"| n_store__silo_runs__file__jsonl
   n_ext_history <-.->|"commands"| n_ext_vscode
+  n_ext_insights -->|"reads"| n_store__silo__file__json
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_insights <-.->|"commands"| n_ext_vscode
@@ -571,7 +572,7 @@ flowchart LR
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, margin, notes |
 | `.silo/.gitignore` | Workbench | Workbench, bridge, margin |
-| `.silo/<file>.json` | Workbench, capabilities | Dev-server worker, Workbench, bridge, capabilities |
+| `.silo/<file>.json` | Workbench, capabilities | Dev-server worker, Workbench, bridge, capabilities, insights |
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, margin, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |

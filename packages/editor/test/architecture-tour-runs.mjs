@@ -1282,6 +1282,19 @@ test("features: the kept tests group into features by the code they ran", async 
 	assert.deepEqual(named("calc › subtracts")?.code.map((code) => code.label), ["function subtract(a, b) {"]);
 });
 
+// A feature's decision, set in the editor (Set Status… on the Features view's item): into the feature ledger,
+// .silo/features.json — shared, so it's committed with the code — by its name and the files its code is in.
+test("features: a feature's status, set in the editor, goes into the ledger", async () => {
+	const workbench = session.workbench();
+
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.setStatus", "calc › subtracts", "parked", "not worked on for now")), true);
+
+	const ledger = JSON.parse(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/.silo/features.json")).then((bytes) => new TextDecoder().decode(bytes))));
+
+	assert.deepEqual({ ...ledger["calc › subtracts"], "since": "" }, { "status": "parked", "why": "not worked on for now", "since": "", "paths": ["calc.js"] });
+	assert.equal((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.features"))).find((feature) => feature.name === "calc › subtracts")?.status, "parked", "the view shows it");
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

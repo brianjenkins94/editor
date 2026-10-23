@@ -39,6 +39,11 @@
         "command": "insights.features",
         "title": "Features from Tests, as Data",
         "category": "Insights"
+      },
+      {
+        "command": "insights.setStatus",
+        "title": "Set Status…",
+        "category": "Insights"
       }
     ],
     "menus": {
@@ -47,6 +52,10 @@
           "command": "insights.applySuggestion",
           "when": "view == insights.suggestions && viewItem == suggestion.fixable",
           "group": "inline"
+        },
+        {
+          "command": "insights.setStatus",
+          "when": "view == insights.features && viewItem == feature"
         }
       ],
       "commandPalette": [
@@ -56,6 +65,10 @@
         },
         {
           "command": "insights.features",
+          "when": "false"
+        },
+        {
+          "command": "insights.setStatus",
           "when": "false"
         }
       ]

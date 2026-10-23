@@ -486,7 +486,14 @@ Tests are a fourth: a way in every repository has, named by what it's for — bu
 help); **what counts as one feature** (features with the same reach are probably one). Prior art: Jujutsu (a change
 keeps its id across rewrites), Unison (history per definition), Smalltalk's changes log and ENVY, xit.
 
-### The feature ledger: code keeps its place, or goes (designed 2026-10-12, not built)
+### The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)
+
+**Built (step 1):** the ledger (`ledger.ts`, `.silo/features.json`), `silo status`, and in the editor Set Status… on a
+feature of the Features view; `silo check` reports the checks that need no reach as warnings — stopped but present,
+removed but documented (a removed entry's id or paths in a `.md`), experiment expired, stale entry, and dead ends (a
+command or view declared and never registered, a setting whose name its code never quotes). This repository's ledger
+holds its standing decisions (Run with Inputs removed; derived history, the compiled tier and the capability engine
+parked); its first check found one dead end, `eslint.workingDirectories`.
 
 Code is easy to add and hard to remove: removing takes an argument, keeping takes none, so a codebase built fast keeps
 everything it tried. A cleanup audit of this repo found almost nothing dead. The weight was code whose reason had lapsed

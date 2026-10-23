@@ -4,6 +4,10 @@
  *   silo init [repo]                                   start keeping .silo/: the baseline, synced with what's installed
  *   silo install [package…] [--min-age 7] [--project …] install — nothing newer than a week — and sync the baseline
  *   silo features [repo] [--json]                      every way into the program, found in its code
+ *   silo status <entry> <status> [why] [--key …] [--paths …] [--until …]
+ *                                                      a decision about a feature, in the ledger (.silo/features.json)
+ *   silo check [repo] [--json]                         the ledger's drift from the code (warnings), and what the runs'
+ *                                                        packages did beyond the baseline
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
  *                                                        commit messages, which are never read
  *
@@ -14,6 +18,7 @@
  * the browser over its own workspace. This file is only the desktop's way to ask: git, the disk, and stdout.
  */
 import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
+import type { Drift, LedgerStatus } from "@brianjenkins94/util/silo/ledger";
 import type { Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { Step } from "@brianjenkins94/util/silo/history";
 import type { Rolldown } from "@brianjenkins94/util/silo/slice";
@@ -30,6 +35,8 @@ import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
+import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { drift, ledgerText, parseLedger, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { rolldown } from "rolldown";
@@ -88,6 +95,22 @@ export async function currentFeatures(repo: string): Promise<ReturnType<typeof f
 	} finally {
 		analyzer.close?.();
 	}
+}
+
+/** The feature ledger's drift from `repo` as it is (the checks that need no reach: lib util/silo/ledger). */
+export async function ledgerDrift(repo: string, today = new Date().toISOString().slice(0, 10)): Promise<Drift[]> {
+	const ledger = parseLedger(fs.existsSync(path.join(repo, ledgerPath())) ? fs.readFileSync(path.join(repo, ledgerPath()), "utf8") : undefined);
+	const files = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && fs.existsSync(path.join(repo, file)));
+	const read = (file: string): { "file": string; "text": string } => ({ "file": file, "text": fs.readFileSync(path.join(repo, file), "utf8") });
+	const ways = [...(await currentFeatures(repo)).values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides }));
+
+	return drift(ledger, {
+		"today": today,
+		"ways": ways,
+		"exists": (each) => fs.existsSync(path.join(repo, each)),
+		"docs": files.filter((file) => file.endsWith(".md")).map(read),
+		"code": files.filter((file) => includeByDefault(file) && /\.[cm]?[jt]sx?$/u.test(file)).map(read)
+	});
 }
 
 /** The steps of a span of the history (its baseline, the commit before it, comes first and tells nothing). */
@@ -272,24 +295,79 @@ export const app = subcommands({
 			}
 		}),
 		command({
-			"name": "check",
-			"description": "What the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 when there's any.",
-			"config": juvy({ "repo": repoArgument, "json": jsonFlag }),
-			"handler": (config) => {
-				const paths = siloPaths(repoOf(config.get("repo")));
+			"name": "status",
+			"description": "Write a decision about a feature into the ledger (.silo/features.json, shared — commit it): its status (active, experiment, parked, stopped, removed) and why, stamped with today when the status changes; what it is by a way in's key (as `silo features` names it) and/or paths; an experiment's end; a removal's commit and how to restore it. `silo check` holds the code to it.",
+			"config": juvy({
+				"entry": { "format": String, "default": "", "positional": true, "doc": "Its name, as people call it (\"capability engine\")." },
+				"status": { "format": String, "default": "", "positional": true, "doc": `One of ${STATUSES.join(", ")}.` },
+				"why": { "format": String, "default": "", "positional": true, "doc": "Why: what the decision rests on." },
+				"key": { "format": String, "default": "", "doc": "The way in it is, as `silo features` keys it (command|tsval.explore)." },
+				"paths": { "format": Array, "default": [], "doc": "Its files or folders, from the repository's root." },
+				"until": { "format": String, "default": "", "doc": "An experiment's end, YYYY-MM-DD." },
+				"in": { "format": String, "default": "", "doc": "A removal's commit." },
+				"restore": { "format": String, "default": "", "doc": "A removal's command that brings it back." },
+				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." }
+			}),
+			"handler": async (config) => {
+				const repo = repoOf(config.get("repo"));
+				const file = path.join(repo, ledgerPath());
+				const entry = config.get("entry") as string;
+				const why = config.get("why") as string;
 
-				if (!fs.existsSync(paths.baseline)) {
-					process.stderr.write("No baseline yet: `silo init` makes one.\n");
+				if (entry === "" || why === "") {
+					process.stderr.write("silo status: say which entry, its status and why — silo status \"capability engine\" parked \"records move into the run ledger first\"\n");
 					process.exitCode = 1;
 
 					return;
 				}
 
-				const found = beyondBaseline(loadRuns(paths), loadBaseline(paths).packages);
+				const more = Object.fromEntries((["key", "until", "in", "restore"] as const).flatMap((name) => (config.get(name) === "" ? [] : [[name, config.get(name) as string]])));
+				const paths = config.get("paths") as string[];
+
+				try {
+					const ledger = withStatus(parseLedger(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : undefined), entry, config.get("status") as LedgerStatus, why, new Date().toISOString().slice(0, 10), { ...more, ...paths.length === 0 ? {} : { "paths": paths } });
+
+					// (.silo/ as silo keeps it: its .gitignore keeping local/ out of git, its .gitattributes)
+					await ensureSiloDir(siloPaths(repo));
+					fs.writeFileSync(file, ledgerText(ledger));
+					process.stdout.write(`"${entry}" is ${ledger[entry].status} (since ${ledger[entry].since}), in ${path.relative(process.cwd(), file) || file}. Commit it.\n`);
+				} catch (error) {
+					process.stderr.write(`silo status: ${error instanceof Error ? error.message : String(error)}\n`);
+					process.exitCode = 1;
+				}
+			}
+		}),
+		command({
+			"name": "check",
+			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, and dead ends (a command or view declared and never registered, a setting never read) — as warnings, each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 when the runs did something beyond the baseline.",
+			"config": juvy({ "repo": repoArgument, "json": jsonFlag }),
+			"handler": async (config) => {
+				const repo = repoOf(config.get("repo"));
+				const paths = siloPaths(repo);
+				const drifted = await ledgerDrift(repo);
+				const found = fs.existsSync(paths.baseline) ? beyondBaseline(loadRuns(paths), loadBaseline(paths).packages) : undefined;
 
 				if (config.get("json")) {
-					process.stdout.write(JSON.stringify(found, undefined, "\t") + "\n");
-				} else if (found.length === 0) {
+					process.stdout.write(JSON.stringify({ "drift": drifted, "beyondBaseline": found ?? null }, undefined, "\t") + "\n");
+					process.exitCode = (found?.length ?? 0) > 0 ? 1 : 0;
+
+					return;
+				}
+
+				// (warnings: each check becomes an error once it's quiet here — silo README, *The feature ledger*)
+				if (drifted.length === 0) {
+					process.stdout.write("The ledger and the code agree.\n");
+				} else {
+					process.stdout.write(`Drift (${drifted.length}, warnings):\n${drifted.map((each) => `  ${each.check}: ${each.message}\n    change the code: ${each.code}; or the decision: ${each.decision}`).join("\n")}\n`);
+				}
+
+				if (found === undefined) {
+					process.stdout.write("No baseline yet, so no package calls to check: `silo init` makes one.\n");
+
+					return;
+				}
+
+				if (found.length === 0) {
 					process.stdout.write("Every package call the runs made is one the baseline accounts for.\n");
 				} else {
 					for (const each of found) {
