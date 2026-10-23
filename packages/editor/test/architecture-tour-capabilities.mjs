@@ -22,8 +22,14 @@ tour("architecture-tour-capabilities");
 // Deny fails the call as the policy would; Skip doesn't make it, the run going on; Allow once lets it run; Allow always
 // writes my policy override, and the next run goes straight through. Rule… opens the rule editor there (RULES.md),
 // prefilled with the call: widened to a glob and saved, it decides the call, and the next run's.
-test("capability decisions: a gated call asks on its line, and the choice resumes the run", async () => {
+test("capability decisions: a gated call asks on its line, and the choice resumes the run", async (t) => {
 	const workbench = session.workbench();
+
+	// How long each of its runs took to start, step by step (the bridge's log): in CI this test takes 20–50s where it takes
+	// a few seconds locally, and a start now and then doesn't answer in 60s — said whether it passes or not.
+	t.after(() => {
+		t.diagnostic(session.notable().filter((line) => line.includes("[bridge] debug.start")).map((line) => line.replace(/ \{program: .*$/u, "")).join("\n"));
+	});
 	const source = [
 		"import { writeFileSync } from \"node:fs\";",
 		"",

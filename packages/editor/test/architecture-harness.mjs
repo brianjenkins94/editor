@@ -205,7 +205,7 @@ export async function startSession(options = {}) {
 		if (!message.text().includes("runtime.fs")) {
 			notable.push(`${new Date().toISOString().slice(11, 23)} ${message.text().slice(0, 300)}`);
 
-			if (notable.length > 1000) {
+			if (notable.length > 5000) {
 				notable.shift();
 			}
 		}
@@ -377,6 +377,8 @@ export async function startSession(options = {}) {
 		"workbench": workbench,
 		/** What the page printed lately: each line as the console has it — a collected record as `[source] text`. */
 		"printed": () => printed,
+		/** The same, less the bridge's file traffic (`runtime.fs`), each with the time it was printed. */
+		"notable": () => notable,
 		"until": observed,
 		"eventually": eventually,
 		"snapshot": () => snapshot,
