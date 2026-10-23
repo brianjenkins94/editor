@@ -182,6 +182,9 @@ export async function startSession(options = {}) {
 	const pageErrors = [];
 	// What the page printed lately — the root prints every record the hub tree collects ([source] text).
 	const printed = [];
+	// The same, less the bridge's file traffic (`runtime.fs`: thousands of lines as types load, which push everything else
+	// out of `printed`): what a request that timed out says it was doing.
+	const notable = [];
 	// Who hears of a realm that couldn't load: each wait in progress, which fails on it at once (failFast).
 	const realmFailed = new Set();
 
@@ -197,6 +200,14 @@ export async function startSession(options = {}) {
 
 		if (printed.length > 5000) {
 			printed.shift();
+		}
+
+		if (!message.text().includes("runtime.fs")) {
+			notable.push(`${new Date().toISOString().slice(11, 23)} ${message.text().slice(0, 300)}`);
+
+			if (notable.length > 1000) {
+				notable.shift();
+			}
 		}
 
 		if (message.type() === "error") {
@@ -376,7 +387,17 @@ export async function startSession(options = {}) {
 		/** A command run, as an extension runs one: the editor's (EXTENSION-POINTS 5) or an extension's. */
 		"execute": async (command, ...args) => workbench().evaluate(([name, given]) => globalThis.__editor.api.commands.executeCommand(name, ...given), [command, args]),
 		/** An RPC into the hub tree, from the workbench realm. */
-		"request": async (subject, data, timeoutMs) => workbench().evaluate(([sentSubject, sentData, sentTimeoutMs]) => globalThis.__architecture.request(sentSubject, sentData, sentTimeoutMs), [subject, data, timeoutMs]),
+		// (a request that times out says what the page was saying about runs and debuggers meanwhile: the bridge logs each
+		// step of a `debug.start`)
+		"request": async (subject, data, timeoutMs) => workbench().evaluate(([sentSubject, sentData, sentTimeoutMs]) => globalThis.__architecture.request(sentSubject, sentData, sentTimeoutMs), [subject, data, timeoutMs]).catch((error) => {
+			if (!/timed out/u.test(error.message)) {
+				throw error;
+			}
+
+			const lines = notable.filter((line) => /debug|tsval|\brun|worker|error|couldn't/iu.test(line)).slice(-40);
+
+			throw new Error(`${error.message}\nThe page's last lines about runs and debuggers:\n  ${lines.join("\n  ") || "(none)"}`, { "cause": error });
+		}),
 		/** Type a command into a terminal: the current one, or a new one (the current may be busy with a server). */
 		"terminal": async (command, { fresh = false } = {}) => {
 			// The terminal is created on demand (it's off the boot path), so a session starts without one.

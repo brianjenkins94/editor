@@ -23,6 +23,7 @@
  * owns the session, even with several editor tabs linked to debug-mcp.
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { Observed } from "@brianjenkins94/observability";
 import { serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { appRootOf, runApp, runDebugger } from "./launch";
@@ -273,6 +274,8 @@ async function textOf(uri: vscode.Uri): Promise<string> {
 
 /** Every session, by its id. */
 const sessions = new Map<string, Session>();
+/** Where a run's start says how far it got (the bridge's log): what a start that never answers is read by. */
+let log: Observed["log"] | undefined;
 /** `debug.start` calls waiting for the session their launch config marks. */
 const pendingLaunches = new Map<string, (session: Session) => void>();
 
@@ -450,7 +453,8 @@ function setBreakpoints(program: string, lines: number[]): void {
 	vscode.debug.addBreakpoints(lines.map((line) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line - 1, 0)))));
 }
 
-export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): void {
+export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, logger?: Observed["log"]): void {
+	log = logger;
 	trackSessions(context, hub);
 
 	context.subscriptions.push(
@@ -522,6 +526,18 @@ async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcom
 	}
 
 	const launchId = crypto.randomUUID();
+	// How far it got, and when (ms since the call): said as each step's done, and where it was if the caller gives up.
+	const begun = Date.now();
+	let phase = "launching";
+	const reached = (next: string, detail: Record<string, unknown> = {}): void => {
+		phase = next;
+		log?.info(`debug.start: ${next}`, { "program": path, "launch": launchId.slice(0, 8), "ms": Date.now() - begun, ...detail });
+	};
+
+	signal.addEventListener("abort", () => {
+		log?.warn(`debug.start: given up while ${phase}`, { "program": path, "launch": launchId.slice(0, 8), "ms": Date.now() - begun });
+	}, { "once": true });
+	reached("launching");
 
 	// Before the launch, so they're registered by the time the session starts running.
 	if (breakpoints !== undefined) {
@@ -555,5 +571,15 @@ async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcom
 		throw new Error(`VS Code didn't start a ${type} debug session`);
 	}
 
-	return (await launched).settled(signal);
+	reached("started, waiting for the session");
+
+	const session = await launched;
+
+	reached("followed, waiting for its first stop", { "session": session.session.id.slice(0, 8), "state": session.state });
+
+	const outcome = await session.settled(signal);
+
+	reached(`settled: ${outcome.state}`, { "reason": outcome.reason });
+
+	return outcome;
 }

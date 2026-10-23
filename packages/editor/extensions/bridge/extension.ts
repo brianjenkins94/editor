@@ -130,7 +130,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	// Every debugger's capability stops: the question in the margin, the answer back to the run (capability-stops.ts).
 	registerCapabilityStops(context, bridgeHub);
 	// Every debugger's sessions driven over the hub (debug-mcp's debug_* tools): followed and stepped through DAP.
-	serveDebugControl(context, bridgeHub);
+	serveDebugControl(context, bridgeHub, bridgeLog);
 	// What agents ask of the editor's extensions, each by its command (answers.ts: a fixed list).
 	serveAnswers(context, bridgeHub);
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
