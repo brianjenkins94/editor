@@ -13,12 +13,12 @@ How it's kept:
 
 ## Queue
 
-1. **Halt where nobody's watching, and suggest from what runs saw.** A run selected after an edit that reaches a call
-   no rule covers halts there and leaves its question on the line (RUNNING.md, *Unattended runs*; *The `trigger`
-   target* — live runs keep skipping). No defaults (decided 2026-10-23): the question comes with suggestions from the
-   values earlier runs observed at that call — its recorded result, the values its result took — each a rule one click
-   away. *Done:* such a run ends before the call, and its line offers those suggestions and *Rule…* prefilled
-   *trigger is edit*.
+1. **Halt where nothing ran for real, and pin past values.** A run selected after an edit gives a call no rule covers
+   what it returned the last time it ran for real (past runs are the default, decided 2026-10-23); a call that never
+   did halts there, its question on the line (RUNNING.md, *Unattended runs*; *The `trigger` target* — live runs keep
+   skipping). A call's line has a pin: a dropdown of the values past runs observed there, picking one saving a rule,
+   *at this call, give that value*. *Done:* such a run ends before a call that never ran for real, and pinning a past
+   value makes the rule that gives it.
 
 2. **Replay matched by the whole request.** A recording is keyed by capability and resource only, so a POST and a GET to
    one URL share one. Key it by method, URL and a hash of the body (RUNNING.md, *What it needs*; *Open*,
@@ -99,7 +99,7 @@ d. **An app's unattended run**: is the preview's reload on an edit (HMR) that ru
 e. **The rest of packages/silo/README.md's *Decisions to make*** (which job tests and purity are; how CI's evidence gets
    into git; test identity; size; a subcommand or not) — none blocks the queue above.
 g. **Whether halting is an action of its own** a rule can choose, for a call that should never run without a fresh
-   look, watched or not (RUNNING.md *Open*, the `trigger` target; item 1). (Unattended defaults: none, decided.)
+   look, watched or not (RUNNING.md *Open*, the `trigger` target; item 1). (Unattended defaults: past runs', decided.)
 h. **`eslint.workingDirectories`** (the ledger's first dead end, `silo check`): declared for parity with the desktop
    extension, never read (in the browser the workspace root is always the working directory). Keep it (`silo status`
    it active, with that reason) or take its declaration out.

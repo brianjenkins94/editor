@@ -101,11 +101,11 @@ The question waits on that line in the margin until you're back. It says what th
 when you're not watching: give what the call returned last time, skip it, allow it, or stop here. Your answer is a rule
 like any other. So questions come only from runs that got that far, one per call, and nothing is set up front.
 
-**No defaults** (decided 2026-10-23). Nothing is decided for an unattended run before you answer: where no rule covers a
-call, it halts. What makes the answer quick is what earlier runs saw: the question on the line comes with suggestions
-from the values observed at that call in previous runs — what it returned when it last ran for real (its recording),
-the values its result took, whether the run used it — each a rule one click away (*give* that value, *skip*, *allow*).
-File writes are the exception that needs no answer, once a run has a writable layer of its own (*Open*).
+**Past runs are the default** (decided 2026-10-23). Where no rule covers a call, an unattended run gives it what it
+returned the last time it ran for real (its recording), as live runs do already; only a call that never ran for real
+halts. To keep a value instead, **pin** it: the call's line has a dropdown of the values past runs observed there, and
+picking one saves a rule — *at this call, give that value* — so a pin is a rule, made without opening the rule editor
+(*Mock…* opens it for any other value). File writes need no answer once a run has a writable layer of its own (*Open*).
 
 **Skip or give.** Skipping a call is safe only where nothing reads what it returns, such as an `await fetch(…)` as a
 statement of its own, which tsval can tell. Where the result is used, the run needs a recorded or given value, or it
@@ -281,8 +281,8 @@ fails the run. Built: the target; not built: halting.
     halts fail.
   - **Whether halting deserves its own action.** One a rule could choose while someone's watching too, for a call that
     should never run unattended or attended without a fresh look.
-  - ~~**Where defaults live.**~~ Decided 2026-10-23: there are none. An unattended run halts where no rule covers a
-    call, and the margin suggests rules from the values earlier runs observed there (*Unattended runs*).
+  - ~~**Where defaults live.**~~ Decided 2026-10-23: past runs are the default — a call gets what it last returned for
+    real, and only one that never ran for real halts; pinning a value past runs saw is a rule (*Unattended runs*).
   - **Matching a recording.** A `give` of a recorded response matches today by capability and resource. Replaying a
     request needs its method and body too: a target for them (`request.method`, `request.body`), or a recording keyed
     by all three.
