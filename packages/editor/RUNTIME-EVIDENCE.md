@@ -411,8 +411,13 @@ saw (a call made or given a result), no process.argv, and code that can't read f
 require, nothing of process, fetch, sockets, storage or the page). Any other run is shared by its values' types, the
 inputs it read (a URL without its query), and how it ended without the message; its values stay local. (A runtime
 doesn't tell every read: the editor answers a program's workspace reads itself, outside the run's effects, which is why
-the code decides too.) Next: tsval tracking which values came from an input, so a run that read one can share the
-values that didn't.
+the code decides too.)
+
+Values built only from the file's own literals are shared as they were even from a run that read (2026-10-24; lib
+util/silo/purity `determinedValues`, the capabilities plugin's `_determined`): a static floor, decided on the safe side
+(the list is the function's comment), asked for only when such a run is kept and only while the document still holds
+the text that ran. It follows data, not control: which branch ran is shared already, by where the values are. tsval
+tracking what came from an input at runtime would raise the floor (NEXT.md).
 
 ### Live values, open
 

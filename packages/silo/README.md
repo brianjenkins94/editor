@@ -465,6 +465,11 @@ each function's first with the file's coverage (`impure`), and a function judged
 flagged on its card — "judged pure, but wrote n (line 3)": an assumption broken, a getter's effect, say. Not yet: runs
 answering the unknowns (observed purity as evidence kept across runs, "seen 4,000 times, never impure").
 
+The same file holds its data-flow sibling, `determinedValues` (2026-10-24): where a run puts values, and which are
+built only from the file's own literals, so a run that read an input shares those as they were (traces' `committable`;
+the editor's RUNTIME-EVIDENCE.md, *Kept across reloads*). It shares the pure built-ins table, and an object is
+determined only while it holds primitives, takes only determined writes and isn't handed on.
+
 **Go** (recommended; NEXT.md's decision i — taken). Four functions in five get a definite verdict statically, and the fifth is
 mostly what runs are for: dynamic dispatch, where tsval sees which code ran; and external packages, where a table per
 package (Node's `path` and `url` already are one) or reading our own packages' sources (95 functions unknown only for

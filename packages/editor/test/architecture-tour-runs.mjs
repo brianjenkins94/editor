@@ -1483,6 +1483,43 @@ test("purity: a function's verdict on its card, and a pure one a run saw write o
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
 
+// A run that read an input shares its values' types alone — but those built from the file's literals alone it shares as
+// they were (packages/editor/RUNTIME-EVIDENCE.md, *Kept across reloads*; lib util/silo/purity `determinedValues`).
+test("determined values: a run that read a file shares what it computed from its own literals, and not what it read", async () => {
+	const { committable } = await import("@brianjenkins94/util/silo/traces");
+	const workbench = session.workbench();
+	const kept = () => workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/.silo/local/traces/literals.js.jsonl")).then((bytes) => new TextDecoder().decode(bytes), () => "")).then((text) => text.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)));
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/literals.js");
+
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/secret.txt"), new TextEncoder().encode("sk-live-123"));
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["import { readFileSync } from \"node:fs\";", "", "const rates = [1, 2, 3];", "let total = 0;", "", "for (const rate of rates) {", "\ttotal += rate;", "}", "", "const key = readFileSync(\"/workspace/secret.txt\", \"utf8\");", "const shown = key.slice(0, 3);", "", "console.log(total, shown);", ""].join("\n")));
+		await api.window.showTextDocument(uri);
+		await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+	});
+	await session.page.keyboard.press("ControlOrMeta+s");
+
+	const trace = await eventually("the run, kept, its values marked", async () => (await kept()).find((each) => each.values.some((value) => value.name === "total" && value.determined === true)), 60_000);
+	const determined = (name) => trace.values.filter((value) => value.name === name).map((value) => value.determined === true);
+
+	assert.deepEqual(determined("rates"), [true]);
+	assert.ok(determined("total").length > 1 && determined("total").every(Boolean), "a sum over literals, each step");
+	assert.deepEqual(determined("key"), [false], "what it read");
+	assert.deepEqual(determined("shown"), [false], "computed from what it read");
+
+	const shared = committable(trace);
+	const valueOf = (name) => shared.values.filter((value) => value.name === name).map((value) => value.value ?? `‹${value.type}›`);
+
+	assert.deepEqual(valueOf("rates"), ["[1, 2, 3]"]);
+	assert.equal(valueOf("total").at(-1), "6");
+	assert.deepEqual(valueOf("key"), ["‹string›"]);
+	assert.ok(!JSON.stringify(shared).includes("sk-"), "nothing of what it read");
+
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

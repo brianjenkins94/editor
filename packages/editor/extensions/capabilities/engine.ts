@@ -12,6 +12,8 @@
  *   cards (projections).
  * - `purityOf` (lib's `purity`): each of a file's top-level functions pure, effectful or unknown — read lazily, one
  *   reader a program, so a function's verdict reads only what it reaches.
+ * - `determinedValues` (lib's `purity`): where a run puts values, and which are built only from the file's literals —
+ *   what a run that read an input can still share as it was.
  */
 import type { SurfaceEntry } from "@brianjenkins94/util/silo/detect";
 import { surfaceEntries } from "@brianjenkins94/util/silo/detect";
@@ -21,6 +23,7 @@ import type { FilePurity } from "@brianjenkins94/util/silo/purity";
 import { purityReader } from "@brianjenkins94/util/silo/purity";
 import { typeAtStart } from "@brianjenkins94/util/silo/typed";
 
+export { determinedValues } from "@brianjenkins94/util/silo/purity";
 export { statementsOf, typesAt } from "@brianjenkins94/util/silo/typed";
 
 /** One capability finding, as the extension shows it: its span, whether it's dangerous (a warning, else a hint), and

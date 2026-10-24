@@ -62,7 +62,9 @@ import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { recordedResult } from "@brianjenkins94/editor-api/policy";
 import { argvRunsOf, decisionOf, resultOf } from "@brianjenkins94/editor-api/rules";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
-import { declarationsHolding, inputOf, spanAround, traceKey } from "@brianjenkins94/util/silo/traces";
+import type { Determined } from "@brianjenkins94/util/silo/purity";
+import { determinedAt } from "@brianjenkins94/util/silo/purity";
+import { declarationsHolding, inputOf, mayRead, spanAround, traceKey } from "@brianjenkins94/util/silo/traces";
 import * as vscode from "vscode";
 import { parseInputs } from "./inputs";
 import { blobOid, keepRun, keptRuns } from "./runs";
@@ -1142,6 +1144,21 @@ function runsOf(uri: string, shown: Session | undefined): PaneRun[] {
 	});
 }
 
+/** Where `source` (the text a run of `uri` ran) puts values, and which are built from its literals alone (the
+ *  capabilities plugin's `_determined`: lib util/silo/purity) — none unless the file's open with that very text, the
+ *  offsets tsserver's answer is in. */
+async function determinedIn(uri: string, source: string): Promise<Determined[] | undefined> {
+	const document = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);
+
+	if (document?.getText() !== source) {
+		return undefined;
+	}
+
+	const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "places"?: Determined[] | null } } | undefined>("typescript.tsserverRequest", "_determined", { "file": document.uri })).catch(() => undefined);
+
+	return document.getText() === source ? (response?.body?.places ?? undefined) : undefined;
+}
+
 /** A finished run, kept (runs.ts): the same run as one kept already is that one, counted again (its ball, not a new
  *  one); else a trace of it, on this machine — a commit shares those of the text it commits (git-engine.ts). */
 async function keepSession(id: string, live = false): Promise<void> {
@@ -1177,6 +1194,8 @@ async function keepSession(id: string, live = false): Promise<void> {
 			...[...run.calls.values()].flatMap((call) => (call.at === undefined ? [] : [call.at]))
 		];
 		const declarations = spans === undefined ? undefined : declarationsHolding(spans, ran);
+		// A run that may have read: which of its values were built from the file's literals alone, shared as they were.
+		const places = inputs.length > 0 || run.values.some((value) => value.kind === "input") || mayRead(source) ? await determinedIn(uri, source) : undefined;
 		const trace: RunTrace = {
 			"id": run.id,
 			"file": vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false),
@@ -1190,7 +1209,9 @@ async function keepSession(id: string, live = false): Promise<void> {
 			"values": run.values.map((value) => {
 				const span = spans === undefined || value.at === undefined ? undefined : spanAround(spans, value.at[0], value.at[1]);
 
-				return { "line": value.line, "name": value.name, "kind": value.kind, "call": value.call, "turns": value.turns, "value": value.value, ...value.at === undefined ? {} : { "at": value.at }, ...span === undefined ? {} : { "span": span.id } };
+				const determined = places !== undefined && value.at !== undefined && (value.kind === "bind" || value.kind === "return") && determinedAt(places, value.at);
+
+				return { "line": value.line, "name": value.name, "kind": value.kind, "call": value.call, "turns": value.turns, "value": value.value, ...value.at === undefined ? {} : { "at": value.at }, ...span === undefined ? {} : { "span": span.id }, ...determined ? { "determined": true as const } : {} };
 			}),
 			"calls": [...run.calls.values()],
 			"source": source
