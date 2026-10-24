@@ -13,7 +13,8 @@
  * - `_capabilities.surface` — every source file's import surface across the programs the server holds, for the
  *   baseline's `consumer` (baseline.ts).
  * - `_types.at` — the type of each of a file's ranges (runtime evidence's declared types; RUNTIME-EVIDENCE.md).
- * - `_statements` — a file's top-level statements as a projection's cards (RUNTIME-EVIDENCE.md, *Projections*).
+ * - `_statements` — a file's top-level statements as a projection's cards (RUNTIME-EVIDENCE.md, *Projections*), and
+ *   each top-level function's purity (silo's: pure, effectful, unknown…), for the card it's on.
  */
 
 export default function init(modules) {
@@ -191,7 +192,20 @@ export default function init(modules) {
 		info.session.addProtocolHandler("_statements", function(request) {
 			const at = fileOf(info, request);
 
-			return { "response": { "statements": engine === undefined || at.sourceFile === undefined ? null : engine.statementsOf(ts, at.program.getTypeChecker(), at.sourceFile) }, "responseRequired": true };
+			if (engine === undefined || at.sourceFile === undefined) {
+				return { "response": { "statements": null }, "responseRequired": true };
+			}
+
+			// (purity's verdicts beside the cards — none, rather than the cards, if reading them fails)
+			let purity;
+
+			try {
+				purity = engine.purityOf(ts, at.program, at.sourceFile);
+			} catch {
+				purity = null;
+			}
+
+			return { "response": { "statements": engine.statementsOf(ts, at.program.getTypeChecker(), at.sourceFile), "purity": purity }, "responseRequired": true };
 		});
 	}
 

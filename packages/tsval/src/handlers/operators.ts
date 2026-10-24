@@ -408,6 +408,7 @@ export function simpleValue(vm: Machine, node: ts.Node, scope: Scope): unknown {
 
 /** An assignment of a simple operand, as assignThrough makes it: stored, traced, its result. */
 function assigned(vm: Machine, node: ts.Node, scope: Scope, name: string, value: unknown, result: unknown): unknown {
+	vm.wroteName(scope, name);
 	scope.set(name, value);
 
 	if (vm.trace !== undefined) {

@@ -10,11 +10,15 @@
  * - `surface`: a file's import surface, for the baseline's `consumer` (baseline.ts).
  * - `typesAt` and `statementsOf` (lib's `typed`): the types at a file's ranges (runtime evidence) and its statements as
  *   cards (projections).
+ * - `purityOf` (lib's `purity`): each of a file's top-level functions pure, effectful or unknown — read lazily, one
+ *   reader a program, so a function's verdict reads only what it reaches.
  */
 import type { SurfaceEntry } from "@brianjenkins94/util/silo/detect";
 import { surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import { findReach, surfaceOf } from "@brianjenkins94/util/silo/reach";
+import type { FilePurity } from "@brianjenkins94/util/silo/purity";
+import { purityReader } from "@brianjenkins94/util/silo/purity";
 import { typeAtStart } from "@brianjenkins94/util/silo/typed";
 
 export { statementsOf, typesAt } from "@brianjenkins94/util/silo/typed";
@@ -67,6 +71,22 @@ export function findings(ts: any, sourceFile: any, checker: any, observations: r
 	}
 
 	return found;
+}
+
+/** Each program's purity reader: a program is the server's for one version of the files, so its verdicts hold for it. */
+const readers = new WeakMap<object, ReturnType<typeof purityReader>>();
+
+/** A file's top-level functions, each with its purity verdict and why (lib's `purity`). */
+// eslint-disable-next-line ts/no-explicit-any -- the host's `ts`, program and SourceFile, as the plugin hands them over
+export function purityOf(ts: any, program: any, sourceFile: any): FilePurity[] {
+	let reader = readers.get(program);
+
+	if (reader === undefined) {
+		reader = purityReader(ts, program);
+		readers.set(program, reader);
+	}
+
+	return reader.fileVerdicts(sourceFile);
 }
 
 /** One document's import surface — each specifier, the members its code uses of it (`dynamic`: some it can't name). */

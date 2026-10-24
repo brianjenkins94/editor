@@ -1431,6 +1431,45 @@ test("runs kept: picking an older run shows its own coverage", async () => {
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
 
+// Purity (packages/silo/README.md, *Purity*): each function's card says what silo's static check judges it — and one
+// judged pure that a run saw write outside itself says so: here, through a getter, which the check assumes has no
+// effects (an assumption broken: a finding).
+test("purity: a function's verdict on its card, and a pure one a run saw write outside, flagged", async () => {
+	const workbench = session.workbench();
+	const state = () => workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "getter.ts").catch(() => undefined));
+	const card = (found, title) => found?.cards.find((each) => each.title === title);
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/getter.ts");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["const counter = { n: 0 };", "const box = { get value() { counter.n += 1; return 1; } };", "", "function read(o: { value: number }) {", "\treturn o.value;", "}", "", "function add(a: number, b: number) {", "\treturn a + b;", "}", "", "console.log(read(box), add(1, 2));", ""].join("\n")));
+
+		const editor = await api.window.showTextDocument(uri);
+		const at = editor.document.getText().indexOf("add(1, 2)");
+
+		await editor.edit((builder) => {
+			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "add(1, 2)".length)), "add(2, 3)");
+		});
+		await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+	});
+	await session.page.keyboard.press("ControlOrMeta+s");
+
+	const found = await eventually("the cards, with their purity and the run's writes", async () => {
+		const current = await state();
+
+		return card(current, "add")?.purity !== undefined && card(current, "read")?.flagged !== undefined ? current : undefined;
+	}, 60_000);
+
+	assert.equal(card(found, "add").purity, "pure");
+	assert.equal(card(found, "add").flagged, undefined, "a pure function the run saw keep to itself");
+	assert.equal(card(found, "read").purity, "pure", "judged pure statically: a getter's effects are assumed away");
+	// (the getter's line: a save's ESLint fixes may have spread it over several)
+	assert.match(card(found, "read").flagged, /^judged pure, but wrote n \(line [23]\)$/u, "the run saw it write outside itself, through the getter");
+
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

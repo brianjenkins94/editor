@@ -142,6 +142,13 @@ const found = await explore(async (schedule) => {
 Guest→guest calls never touch the host stack, so a guard cannot be bypassed from inside the guest;
 `[].constructor.constructor` reaches the guard like any other read.
 
+**Writes that escape a call** (`escapes`, off by default): told each write a call makes to a binding or object made
+before it began — a module's variable, an argument, `this` outside its constructor, what a closure holds — directly or
+through a built-in that mutates what it's given (`push`, `Map.set`, `Object.assign`), once for each call on the stack it
+escapes (a getter's write is its caller's too). Scopes and objects are stamped with the call count as they're made, a
+built-in's fresh array or object included. What a pure function never does: the editor flags one silo judged pure
+(silo README, *Purity*).
+
 ## Modules: almostnode resolves, tsval evaluates
 
 How the editor finds and runs a program's modules, the same way whether it's run or debugged (2026-10-07; built). A

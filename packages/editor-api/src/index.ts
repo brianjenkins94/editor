@@ -108,7 +108,12 @@ export interface SiteObservation {
 /** The `coverage` event, sent as a run ends: every statement that could run, with how often it did (0 included), and
  *  every observed site that ran — the entry's, and (`files`) each other file of the program's that ran, with its text —
  *  and (`packages`) each package whose code ran, with its version and its folder as the runtime has it. */
-export interface CoverageEvent { "file": string; "source"?: string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "profile"?: StatementProfile[]; "files"?: CoverageEvent[]; "packages"?: LoadedPackage[] }
+export interface CoverageEvent { "file": string; "source"?: string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "profile"?: StatementProfile[]; "files"?: CoverageEvent[]; "packages"?: LoadedPackage[]; "impure"?: ImpureWrite[] }
+
+/** A function a run saw write outside itself (tsval's `escapes`): the function's range, the first such write — what it
+ *  wrote to (a name, a key, a mutating method) and its line — and how many it made. What silo's purity check judged
+ *  pure and a run saw do this is a finding: an assumption broke (silo README, *Purity*). */
+export interface ImpureWrite { "start": [number, number]; "end": [number, number]; "what": string; "line": number; "count": number }
 
 /** One test a run ran: its suites' and its own titles, how it came out (and, failed, what it threw), and the
  *  statements it ran, in each file of the program's — while it ran, its hooks and subtests included. */

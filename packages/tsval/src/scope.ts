@@ -52,6 +52,12 @@ export class Scope {
 	/** The construction in progress for the nearest constructor scope (see handlers/classes.ts). */
 	public construction?: Construction;
 
+	/** The machine's call count, as scopes are made (set by VM.nextCall). */
+	public static clock = 0;
+	/** How many calls had begun when the scope was made (the machine's `calls`, VMOptions.escapes): a write to one of its
+	 *  bindings escapes a call that began after it. */
+	public readonly born = Scope.clock;
+
 	public constructor(parent?: Scope, isolated = false) {
 		this.parent = parent;
 		this.isolated = isolated;

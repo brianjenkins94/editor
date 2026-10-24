@@ -291,12 +291,17 @@ export function getValue(vm: Machine, scope: Scope, ref: Ref, crossing = true): 
 export function putValue(vm: Machine, scope: Scope, ref: Ref, value: unknown): void {
 	switch (ref.kind) {
 		case "id":
-		{ scope.set(ref.name, value);
+		{ vm.wroteName(scope, ref.name);
+		scope.set(ref.name, value);
 
-			return; }
+		return; }
 
 		case "member": {
 			const { obj, key } = memberOf(ref, true);
+
+			if (vm.escapes !== undefined && ((typeof obj === "object" && obj !== null) || typeof obj === "function")) {
+				vm.wrote(obj, String(key));
+			}
 
 			setProperty(vm, obj, key, value);
 

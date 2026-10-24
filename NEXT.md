@@ -13,22 +13,17 @@ How it's kept:
 
 ## Queue
 
-1. **Purity, built.** The static check in lib's analysis (beside `reach`, behind the TypeScript seam), as measured —
-   its table of built-ins and the three fixes sampling found — and tsval observing purity at run time as a `purity`
-   evidence kind (packages/silo/README.md, *Purity*). *Waits on:* *Decisions* i. *Done:* a function's verdict shows
-   beside it, and a run's write from a function judged pure is flagged.
-
-2. **Values that didn't touch an input.** tsval tracks which values came from an input, so a run that read one can share
+1. **Values that didn't touch an input.** tsval tracks which values came from an input, so a run that read one can share
    the rest (RUNTIME-EVIDENCE.md, *Kept across reloads*: "Next"; lib traces `committable`).
    *Done:* a run that read a file shares the values it computed from its own literals.
 
-3. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
+2. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
    one a rule's (or a recording's) result too, so an app can run unattended (RUNNING.md, *What it needs*; *A
    call's result*). *Waits on:* *Decisions* d. *Done:* a rule giving a fetch's result answers a preview's fetch.
 
-4. **The ball as a run goes.** A long run's ball rolls while it runs, not only after (RUNTIME-EVIDENCE.md, *Live values, open*).
+3. **The ball as a run goes.** A long run's ball rolls while it runs, not only after (RUNTIME-EVIDENCE.md, *Live values, open*).
 
-5. **The terminal's first-hour commands and the tools agents expect.** Commands people type within the first hour:
+4. **The terminal's first-hour commands and the tools agents expect.** Commands people type within the first hour:
    `tsc` (the TypeScript server's diagnostics, printed as tsc does), `eslint` (the in-browser engine over the given
    files), `silo features|history` (util/silo over isomorphic-git snapshots), `curl`/`wget` (just-bash's `network`,
    gated by the capability rules), `man <cmd>` (its `--help`), `date` in the browser's time zone, and `ln -s` (or a
@@ -37,24 +32,29 @@ How it's kept:
    `tests_run` (node:test results as data), `silo_features`, `silo_history`. Conventions: workbench/terminal/catalog.ts,
    app/tools/host.ts. *Done:* each exists as its folder, with a test.
 
-6. **Selection beyond a file's own tests.** A run of a program is kept only on its own file, so an edit to a module it
+5. **Selection beyond a file's own tests.** A run of a program is kept only on its own file, so an edit to a module it
    imported doesn't select it: keep a run's trace on each file it executed, as a test's is, and select it the same way.
    And CI: select the architecture suites' tests by what they reached, ambient code (reached at boot, or by most tests)
    selecting the smoke suite only (packages/silo/README.md, *Which tests reach what*: "Selecting", "Trust"). *Done:*
    editing an imported module re-runs the programs that ran it; CI runs only the suites a change reached.
 
-7. **unenv's own modules, audited.** Each miss so far (EventEmitter as a class; streams; string_decoder; assert with no
+6. **unenv's own modules, audited.** Each miss so far (EventEmitter as a class; streams; string_decoder; assert with no
    messages and JSON equality, 2026-10-23) was a module unenv wrote itself rather than ported from Node, and Node's own
    code from npm replaced it (packages/almostnode/builtins.ts). Go through the rest it serves as they are — util,
    timers, url, querystring, os, buffer, the stubs — and for each that's hand-rolled where Node's code exists on npm,
    swap it in, with a test of the behaviour that differed. *Done:* every unenv module almostnode serves is a port of
    Node's, a stub that says "not implemented", or replaced, and builtins.ts says which.
 
-8. **The feature ledger, steps 2–6** (packages/silo/README.md, *The feature ledger*: build order): prices per area
+7. **The feature ledger, steps 2–6** (packages/silo/README.md, *The feature ledger*: build order): prices per area
    from the import graph; realm byte budgets beside the performance suite's; leases from the traces runs and tests keep
    (dormant: reachable, never reached); `silo remove` and `silo restore`; the agent rules and a weekly `silo check` run.
    Also from step 1: drift in the editor's Problems view, and `silo check` in the lint workflow once it's quiet here.
    *Done:* each, as its step in the README says.
+
+8. **Purity from runs.** Observed purity kept as evidence across runs (silo README, *Purity*: a `purity` kind at
+   function spans, sharing the evidence files and their fading), so runs answer the static check's unknowns and give
+   its verdicts confidence ("seen 4,000 times, never impure"). *Done:* a function the check calls unknown, run often
+   without writing outside, shows that on its card.
 
 ## Watching
 
@@ -86,6 +86,3 @@ g. **Whether halting is an action of its own** a rule can choose, for a call tha
 h. **`eslint.workingDirectories`** (the ledger's first dead end, `silo check`): declared for parity with the desktop
    extension, never read (in the browser the workspace root is always the working directory). Keep it (`silo status`
    it active, with that reason) or take its declaration out.
-i. **Build the purity check?** Measured (packages/silo/README.md, *Purity*: Measured): 80% of this repository's
-   functions get a definite verdict statically (22% pure, 52% effectful); the unknown 20% are mostly dynamic dispatch
-   and external packages, which runs and per-package tables answer. Recommended: go (queue item 1).

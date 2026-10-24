@@ -114,7 +114,7 @@ const arrayLiteralExpression = evaluating<ts.ArrayLiteralExpression>(
 	// Elisions (`[1, , 3]`) are OmittedExpressions: they produce no operand and leave a hole.
 	(node) => node.elements.filter((el) => !isOmittedExpression(el)).map((el) => (isSpreadElement(el) ? el.expression : el)),
 	(vm, _frame, node, raw) => {
-		const out = new vm.realm.Array() as unknown[];
+		const out = vm.made(new vm.realm.Array() as unknown[]);
 		let cursor = 0;
 		let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
 
@@ -218,7 +218,7 @@ function findObjectLiteralOperands(node: ts.ObjectLiteralExpression): { "node": 
 }
 
 export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.ObjectLiteralExpression, values: unknown[]): void {
-	const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
+	const obj = vm.made(new vm.realm.Object() as Record<PropertyKey, unknown>);
 	let cursor = 0; // advances over the evaluated keys (already property keys) and values, in source order
 	const keyOf = (name: ts.PropertyName): PropertyKey => {
 		if (isComputedPropertyName(name)) {

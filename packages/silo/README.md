@@ -456,7 +456,16 @@ function counted as part of the one around it).
   function's effects counted whether or not it's called, and a call through a value the checker resolves to its
   declared type only.
 
-**Go** (recommended; NEXT.md's decision i). Four functions in five get a definite verdict statically, and the fifth is
+**Built (2026-10-24, on the go).** The check is lib's `purity.ts` (`purityReader(ts, program)`, lazy: a function's
+verdict reads only what it reaches; one destructuring fix beyond the measurement's — a destructured parameter is an
+argument, a destructured local a part of something handed over), measured again from it: 21.7% pure, 52.3% effectful,
+19.7% unknown. The editor shows each top-level function's verdict on its card in the Margin (the capabilities plugin's
+`_statements`). Runs observe it: tsval's `escapes` tells each write a call makes outside itself, the debug worker sends
+each function's first with the file's coverage (`impure`), and a function judged pure that a run saw write outside is
+flagged on its card — "judged pure, but wrote n (line 3)": an assumption broken, a getter's effect, say. Not yet: runs
+answering the unknowns (observed purity as evidence kept across runs, "seen 4,000 times, never impure").
+
+**Go** (recommended; NEXT.md's decision i — taken). Four functions in five get a definite verdict statically, and the fifth is
 mostly what runs are for: dynamic dispatch, where tsval sees which code ran; and external packages, where a table per
 package (Node's `path` and `url` already are one) or reading our own packages' sources (95 functions unknown only for
 `@brianjenkins94/util`) closes much of it. The check is cheap, and its errors run toward unknown and effectful, not

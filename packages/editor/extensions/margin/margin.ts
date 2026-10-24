@@ -47,7 +47,7 @@
  * A preview's recorded stops come the same way: `values` on its run's `production` session (the bridge's), each report
  * every hit so far (`replace`).
  */
-import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, LiveCall, LiveValue, RunEnd, TestsEvent, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, ImpureWrite, LiveCall, LiveValue, RunEnd, TestsEvent, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
@@ -98,7 +98,7 @@ interface MarginState {
 	"ask"?: { "line": number; "call": string; "capability": string; "resource": string; "resolved": boolean };
 	"end"?: { "line": number; "kind": string; "message"?: string };
 	"marks": { "line": number; "kind": string; "title"?: string }[];
-	"cards": { "fromLine": number; "toLine": number; "title": string }[];
+	"cards": { "fromLine": number; "toLine": number; "title": string; "purity"?: string; "flagged"?: string }[];
 	"runLog"?: RunLog;
 	/** The runs kept of the file, oldest first: each one's id, and whether it's the one shown. */
 	"runs": { "id": string; "picked": boolean }[];
@@ -124,6 +124,8 @@ const liveSessions = new Set<string>();
 const inputsOf = new Map<string, string[]>();
 /** The statements each session executed, by file (its coverage, [line, character] each): what its code is. */
 const executedOf = new Map<string, Map<string, [[number, number], [number, number]][]>>();
+/** Each file's functions the latest run saw write outside themselves (the coverage event's `impure`), by path. */
+const impureOf = new Map<string, ImpureWrite[]>();
 /** Each session's tests, when it ran a test file (the run contract's `tests`): kept with its run. */
 const testsOf = new Map<string, TestsEvent>();
 /** How many of a run's steps its ball rolls through, at most. */
@@ -563,10 +565,13 @@ async function mockVariable(uri: string, at: Range, cell: { "text": string; "kin
 
 /** A top-level statement, as tsserver says it (the capabilities plugin's `_statements`): its range, the `//` comment
  *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
-interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[] }
+interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[]; "purity"?: Purity }
+
+/** A function's purity, as silo judges it statically (the plugin's `_statements`: lib util/silo/purity) — and why not. */
+interface Purity { "verdict": string; "reasons": string[] }
 
 /** A step of the program (RUNTIME-EVIDENCE.md, *Projections*): statements written together, a card around them in the margin. */
-interface Step { "fromLine": number; "toLine": number; "title": string; "detail": string; "declares": { "name": string; "type": string | null }[]; "body": boolean }
+interface Step { "fromLine": number; "toLine": number; "title": string; "detail": string; "declares": { "name": string; "type": string | null }[]; "body": boolean; "purity"?: Purity }
 
 /** Each file's top-level statements, by the document version they were read at. */
 const statementsRead = new Map<string, { "version": number; "statements": Promise<Statement[] | undefined> }>();
@@ -582,7 +587,12 @@ function statementsOf(document: vscode.TextDocument): Promise<Statement[] | unde
 		return known.statements;
 	}
 
-	const statements = Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "statements"?: Statement[] | null } } | undefined>("typescript.tsserverRequest", "_statements", { "file": document.uri })).then((response) => response?.body?.statements ?? undefined, () => undefined);
+	// (each top-level function's purity, onto the statement it's in)
+	const statements = Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "statements"?: Statement[] | null; "purity"?: (Purity & { "start": number; "end": number })[] | null } } | undefined>("typescript.tsserverRequest", "_statements", { "file": document.uri })).then((response) => response?.body?.statements?.map((statement) => {
+		const purity = response.body?.purity?.find((each) => statement.start <= each.start && each.end <= statement.end);
+
+		return purity === undefined ? statement : { ...statement, "purity": { "verdict": purity.verdict, "reasons": purity.reasons } };
+	}) ?? undefined, () => undefined);
 
 	statementsRead.set(uri, { "version": document.version, "statements": statements });
 	void statements.then((read) => {
@@ -641,13 +651,39 @@ function stepsOf(document: vscode.TextDocument, statements: Statement[]): Step[]
 			previous.declares.push(...statement.declares ?? []);
 			previous.names.push(statement.title);
 			previous.detail = `${previous.count} statements`;
+			// (a step of several statements has no one verdict)
+			delete previous.purity;
 		} else {
-			steps.push({ "fromLine": fromLine, "toLine": toLine, "end": statement.end, "count": 1, "title": statement.comment ?? "", "names": [statement.title], "detail": statement.detail, "declares": [...statement.declares ?? []], "body": bodied(statement) });
+			steps.push({ "fromLine": fromLine, "toLine": toLine, "end": statement.end, "count": 1, "title": statement.comment ?? "", "names": [statement.title], "detail": statement.detail, "declares": [...statement.declares ?? []], "body": bodied(statement), ...statement.purity === undefined ? {} : { "purity": statement.purity } });
 		}
 	}
 
 	// Untitled, a step is named by what it starts and ends with: `country … total`.
-	return steps.map(({ fromLine, toLine, title, names, detail, declares, body }) => ({ "fromLine": fromLine, "toLine": toLine, "title": stepTitle(title, names), "detail": detail, "declares": declares, "body": body }));
+	return steps.map(({ fromLine, toLine, title, names, detail, declares, body, purity }) => ({ "fromLine": fromLine, "toLine": toLine, "title": stepTitle(title, names), "detail": detail, "declares": declares, "body": body, ...purity === undefined ? {} : { "purity": purity } }));
+}
+
+/** The latest run's write outside itself by the function a step is, if it made one (on the step's lines as they were
+ *  when it ran: a function's own lines). */
+function impureIn(uri: string, step: Step): ImpureWrite | undefined {
+	return impureOf.get(vscode.Uri.parse(uri).path)?.find((each) => step.fromLine <= each.start[0] && each.start[0] <= step.toLine);
+}
+
+/** What a function step's card says of its purity: silo's verdict, and — judged pure, yet the latest run saw it write
+ *  outside itself — that the judgment broke there (a finding: silo README, *Purity*). Undefined for a step that isn't
+ *  one function. */
+function purityText(step: Step, impure: ImpureWrite | undefined): { "text": string; "title": string; "flagged": boolean } | undefined {
+	if (step.purity === undefined) {
+		return undefined;
+	}
+
+	const { verdict, reasons } = step.purity;
+	const why = reasons.length === 0 ? "" : ` — ${reasons.slice(0, 3).join("; ")}${reasons.length > 3 ? "; …" : ""}`;
+
+	if (verdict === "pure" && impure !== undefined) {
+		return { "text": `judged pure, but wrote ${impure.what} (line ${impure.line + 1})`, "title": `Judged pure statically, but the latest run saw it write outside itself: ${impure.what} on line ${impure.line + 1}${impure.count > 1 ? `, and ${impure.count - 1} more` : ""}. An assumption the check makes broke here.`, "flagged": true };
+	}
+
+	return { "text": verdict, "title": `Purity: ${verdict}${why}`, "flagged": false };
 }
 
 /** Whether a step ran, from coverage's marks on its lines (as they're drawn: on the lines their code is on now) — a
@@ -996,7 +1032,11 @@ function marginState(uri: string, session: Session | undefined, stated: Row[], a
 		...askedAt === undefined ? {} : { "ask": { "line": askedAt.line + 1, "call": askedAt.callee, "capability": askedAt.capability, "resource": askedAt.resource, "resolved": askedAt.resolved } },
 		...end === undefined ? {} : { "end": { "line": end.line + 1, "kind": end.kind, ...end.message === undefined ? {} : { "message": end.message } } },
 		"marks": [...lineMarks, ...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, ...end.message === undefined ? {} : { "title": end.message } }]].map((mark) => ({ "line": mark.line + 1, "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } })),
-		"cards": steps.map((step) => ({ "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title })),
+		"cards": steps.map((step) => {
+			const purity = purityText(step, impureIn(uri, step));
+
+			return { "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title, ...purity === undefined ? {} : { "purity": step.purity!.verdict, ...purity.flagged ? { "flagged": purity.text } : {} } };
+		}),
 		...runLog === undefined ? {} : { "runLog": runLog },
 		"runs": (kept.get(uri) ?? []).map((run) => ({ "id": run.id, "picked": run === session }))
 	};
@@ -1039,13 +1079,14 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	];
 	const groups = steps.map((step, index): PaneGroup => {
 		const ran = ranOf(step, lineMarks);
+		const purity = purityText(step, impureIn(uri, step));
 
 		return {
 			"id": `step:${index}`,
 			"at": { "lines": [step.fromLine, step.toLine] },
 			"label": step.title,
-			...step.detail === "" ? {} : { "detail": step.detail },
-			...step.declares.length === 0 ? {} : { "title": step.declares.map(({ name, type }) => (type === null ? name : `${name}: ${type}`)).join("\n") },
+			...step.detail === "" && purity === undefined ? {} : { "detail": [step.detail, purity?.text].filter((each) => each !== undefined && each !== "").join(" · ") },
+			...step.declares.length === 0 && purity === undefined ? {} : { "title": [...step.declares.map(({ name, type }) => (type === null ? name : `${name}: ${type}`)), ...purity === undefined ? [] : [purity.title]].join("\n") },
 			...ran === undefined ? {} : { "state": ran.kind as PaneGroup["state"], "stateText": ran.text }
 		};
 	});
@@ -1693,6 +1734,8 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 
 				for (const report of [body as CoverageEvent, ...(body as CoverageEvent).files ?? []]) {
 					executed.set(report.file, report.statements.filter((statement) => statement.count > 0).map((statement) => [statement.start, statement.end]));
+					// (what the run saw each function write outside itself: the latest run's, for the cards)
+					impureOf.set(report.file, report.impure ?? []);
 				}
 
 				executedOf.set(session.id, executed);

@@ -803,6 +803,21 @@ const NODE_TEST = "/__editor__/node-test.js";
 let testsRan: TestReport[] = [];
 /** Each running test's coverage counts as it started, by its titles (JSON): what ran since is that test's. */
 const testStarts = new Map<string, Map<ts.SourceFile, number[]>>();
+/** Each function's writes outside itself this run (tsval's `escapes`): the first, and how many — told with its file's
+ *  coverage (`impure`), where a function silo judged pure and a run saw do this is flagged. */
+const escaped = new Map<ts.Node, { "what": string; "node": ts.Node | null; "count": number }>();
+
+/** tsval's `escapes`: a write a call made outside itself, kept by its function. */
+function escapeSeen(event: { "function": ts.Node; "what": string; "node": ts.Node | null }): void {
+	const seen = escaped.get(event.function);
+
+	if (seen === undefined) {
+		escaped.set(event.function, { "what": event.what, "node": event.node, "count": 1 });
+	} else {
+		seen.count += 1;
+	}
+}
+
 /** How many tests failed, as node-test.js tells at the end: a run with one fails, as `node --test` does. */
 let testsFailed = 0;
 
@@ -1985,7 +2000,16 @@ function fileCoverage(file: ts.SourceFile): CoverageReport {
 		return entry === undefined ? [] : [{ "start": [start.line, start.character] as [number, number], "anchor": rangeOf(statement), ...entry }];
 	});
 
-	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file), ...profile.length === 0 ? {} : { "profile": profile } };
+	// Its functions that wrote outside themselves (tsval's escapes).
+	const impure = [...escaped].filter(([fn]) => fn.getSourceFile() === file).map(([fn, seen]) => {
+		const start = file.getLineAndCharacterOfPosition(fn.getStart(file));
+		const end = file.getLineAndCharacterOfPosition(fn.getEnd());
+		const line = seen.node === null || seen.node.getSourceFile() !== file ? start.line : file.getLineAndCharacterOfPosition(seen.node.getStart(file)).line;
+
+		return { "start": [start.line, start.character] as [number, number], "end": [end.line, end.character] as [number, number], "what": seen.what, "line": line, "count": seen.count };
+	});
+
+	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file), ...profile.length === 0 ? {} : { "profile": profile }, ...impure.length === 0 ? {} : { "impure": impure } };
 }
 
 /** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would, and
@@ -2335,8 +2359,9 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	testsRan = [];
 	testStarts.clear();
 	testsFailed = 0;
+	escaped.clear();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 
 	evaluating = loaded.vm;
 

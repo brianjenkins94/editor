@@ -213,6 +213,11 @@ export interface VMOptions {
 	 *  what a debugger shows beside each line (a live-values panel). Off by default. See `TraceEvent`. The callback
 	 *  must not run guest code. */
 	"trace"?: Tracer;
+	/** Told each write a call makes that escapes it: to a binding of a scope, or an object, made before the call began (a
+	 *  module's variable, an argument, `this` outside its constructor, what a closure holds) — directly, or by a built-in
+	 *  that mutates its receiver or first argument (`push`, `Map.set`, `Object.assign`). Off by default. See `EscapeEvent`.
+	 *  The callback must not run guest code. */
+	"escapes"?: Escaper;
 }
 
 /**
@@ -253,6 +258,13 @@ export interface TraceContext {
 const NO_LOOPS: TraceEvent["loops"] = Object.freeze([]);
 
 export type Tracer = (event: TraceEvent) => void;
+
+/** A write a call made to a binding or object that was there before the call began — what a pure function doesn't do
+ *  (silo README, *Purity*): the function whose call it was (`function`, its node), the call's number, what was written
+ *  (a binding's name, a property's key, a mutating method's name) and where (`node`, the node being evaluated). */
+export interface EscapeEvent { "function": ts.Node; "call": number; "what": string; "node": ts.Node | null }
+
+export type Escaper = (event: EscapeEvent) => void;
 
 /**
  * The sites `observe` is told about, with the node it's given and what `value` is:
@@ -477,6 +489,14 @@ export class Machine implements VM {
 	public trace: Tracer | undefined;
 	/** How many calls and constructions have been made: the last one's number (FrameBase.call). */
 	public calls = 0;
+	/** What escaping writes are told to (VMOptions.escapes). */
+	public escapes: Escaper | undefined;
+	/** Each object's `calls` when it was made (VMOptions.escapes): one made before a call began is outside it. */
+	public readonly madeIn = new WeakMap<object, number>();
+	/** The host's built-ins that write into their receiver (`this`) or their first argument, by function (built once). */
+	private writers: Map<unknown, { "name": string; "first"?: true }> | undefined;
+	/** The host's built-ins that hand back a new array or object. */
+	private freshMakers: Set<unknown> | undefined;
 
 	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
 	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
@@ -551,6 +571,7 @@ export class Machine implements VM {
 		this.modules = options.modules;
 		this.observe = options.observe;
 		this.trace = options.trace;
+		this.escapes = options.escapes;
 	}
 
 	/** A statement started (`node`), to its file's coverage: its counts found once per change of file. */
@@ -622,8 +643,108 @@ export class Machine implements VM {
 	/** The next call's number (FrameBase.call). */
 	public nextCall(): number {
 		this.calls += 1;
+		Scope.clock = this.calls;
 
 		return this.calls;
+	}
+
+	/** `value`, made now (VMOptions.escapes: a call that began after now didn't make it). */
+	public made<T>(value: T): T {
+		if (this.escapes !== undefined && ((typeof value === "object" && value !== null) || typeof value === "function")) {
+			this.madeIn.set(value as object, this.calls);
+		}
+
+		return value;
+	}
+
+	/** A write to `target` — a binding's scope (undefined: a global), or an object — told (VMOptions.escapes) for each call
+	 *  on the stack that began after it was made: the call making it, and each caller it escapes too (a function is impure
+	 *  by what it calls, as silo's purity check judges). A constructor writing its own instance, or a field initializer,
+	 *  escapes nothing. */
+	public wrote(target: Scope | object | undefined, what: string): void {
+		if (this.escapes === undefined) {
+			return;
+		}
+
+		const born = target === undefined ? -1 : target instanceof Scope ? target.born : this.madeIn.get(target) ?? -1;
+		// (a nested run — a getter, a callback the host calls — has a stack of its own; the ones around it were saved as it
+		// began, innermost last)
+		const stacks: Frame[][] = [this.frames];
+
+		for (let depth = this.depth - 1; depth >= 0; depth -= 1) {
+			const saved = this.contexts[depth];
+
+			if (saved !== undefined) {
+				stacks.push(saved.frames);
+			}
+		}
+
+		for (const frame of stacks.flatMap((stack) => [...stack].reverse())) {
+			if (frame.kind === "construct") {
+				return;
+			}
+
+			if (frame.kind !== "call") {
+				continue;
+			}
+
+			const call = frame.call ?? 0;
+
+			// (a constructor writing its own instance: the instance is what it makes)
+			if (target !== undefined && target === frame.thisArg && ts.isConstructorDeclaration(frame.node)) {
+				return;
+			}
+
+			// (calls began in order: an outer one that began after the target was made, the target is its own too)
+			if (born >= call) {
+				return;
+			}
+
+			this.escapes({ "function": frame.node, "call": call, "what": what, "node": this.currentNode });
+		}
+	}
+
+	/** A write to the binding `name` as `scope` sees it (the scope holding it; none — a global): told when escaping. */
+	public wroteName(scope: Scope, name: string): void {
+		if (this.escapes === undefined) {
+			return;
+		}
+
+		let holder: Scope | undefined = scope;
+
+		while (holder !== undefined && !holder.bindings.has(name)) {
+			holder = holder.parent;
+		}
+
+		this.wrote(holder, name);
+	}
+
+	/** The host's writers and fresh-value makers, from this machine's realm (built the first time they're asked for). */
+	private hostWriters(): { "writers": Map<unknown, { "name": string; "first"?: true }>; "fresh": Set<unknown> } {
+		if (this.writers === undefined || this.freshMakers === undefined) {
+			const array = this.realm.Array.prototype as unknown as Record<string, unknown>;
+			const object = this.realm.Object as unknown as Record<string, unknown>;
+			const writers = new Map<unknown, { "name": string; "first"?: true }>();
+
+			for (const name of ["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin"]) {
+				writers.set(array[name], { "name": name });
+			}
+
+			for (const [kind, names] of [[Map, ["set", "delete", "clear"]], [Set, ["add", "delete", "clear"]], [WeakMap, ["set", "delete"]], [WeakSet, ["add", "delete"]]] as const) {
+				for (const name of names) {
+					writers.set((kind.prototype as unknown as Record<string, unknown>)[name], { "name": name });
+				}
+			}
+
+			for (const name of ["assign", "defineProperty", "defineProperties", "setPrototypeOf", "freeze", "seal"]) {
+				writers.set(object[name], { "name": name, "first": true });
+			}
+
+			this.writers = writers;
+			this.freshMakers = new Set([...["map", "filter", "slice", "concat", "flat", "flatMap", "toSorted", "toReversed", "toSpliced", "with"].map((name) => array[name]), (this.realm.Array as unknown as Record<string, unknown>)["from"], (this.realm.Array as unknown as Record<string, unknown>)["of"], ...["keys", "values", "entries", "fromEntries", "groupBy"].map((name) => object[name]), JSON.parse, String.prototype.split, String.prototype.match]);
+		}
+
+		return { "writers": this.writers, "fresh": this.freshMakers };
 	}
 
 	/** Tell the tracer (VMOptions.trace), if any, a value `node` bound, returned or chose: with the call it's in and the
@@ -746,9 +867,24 @@ export class Machine implements VM {
 		}
 
 		this.callSite = site; // (set BEFORE the guard runs: a guard may read it, or the `site` argument)
+
+		// A built-in writing into what it's given (VMOptions.escapes): its receiver, or its first argument.
+		const writer = this.escapes === undefined || isConstruct ? undefined : this.hostWriters().writers.get(callee);
+		const into = writer === undefined ? undefined : writer.first === true ? args[0] : thisArg;
+
+		if (writer !== undefined && ((typeof into === "object" && into !== null) || typeof into === "function")) {
+			this.wrote(into as object, writer.name);
+		}
+
 		try {
 			const target = this.hostGuard?.beforeCall === undefined ? callee : this.hostGuard.beforeCall(callee, thisArg, isConstruct, { "node": site, "args": args, "isConstruct": isConstruct });
 			const result = isConstruct ? Reflect.construct(target as unknown as new (...ctorArgs: unknown[]) => unknown, args) : target.apply(thisArg, args);
+
+			// (what a host constructor or a fresh-value maker hands back is made now)
+			if (this.escapes !== undefined && (isConstruct || this.hostWriters().fresh.has(callee))) {
+				this.made(result);
+			}
+
 			const value = this.fromHost(result);
 
 			// Event loop: a promise a host call returns is external — when it settles isn't the program's to say. The

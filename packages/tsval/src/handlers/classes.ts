@@ -757,7 +757,7 @@ function constructFrame(vm: Machine, frame: ConstructFrame): void {
 	const meta = classMetaOf(ctor);
 
 	if (frame.phase === 0) {
-		const instance = frame.instance ?? Object.create(ctor.prototype);
+		const instance = frame.instance ?? vm.made(Object.create(ctor.prototype));
 		const construction: Construction = { "instance": instance, "ctor": ctor };
 
 		frame.construction = construction;

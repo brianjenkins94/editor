@@ -576,6 +576,7 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 		const target = unwrapParens(initializer);
 
 		if (isIdentifier(target)) {
+			vm.wroteName(frame.scope, target.text);
 			frame.scope.set(target.text, value);
 			vm.traced("bind", target, target.text, value);
 		} else {
