@@ -318,7 +318,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.ballLine = line;
 		this.ball.hidden = false;
 		this.placeBall();
-		this.ball.offsetTop;
+		// (laid out where it is before gliding is on again)
+		this.ball.getBoundingClientRect();
 		this.ball.classList.remove("placing");
 	}
 
