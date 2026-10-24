@@ -58,6 +58,10 @@ How it's kept:
 
 ## Watching
 
+- **tour-capabilities' package prompt timed out waiting for the baseline** once in CI (af79463; passed on rerun). The
+  baseline is made as the project opens, from the CDN; the same run's log has CDN fetches failing. If it comes back,
+  find whether the baseline waits on a fetch that failed, and make the test (or the baseline) say so.
+
 - **isomorphic-git's "racy git"**: a same-size rewrite within the second it was staged goes unseen (the terminal's
   `git` test notes it; real git guards against it). Fix in the git engine if it bites.
 
