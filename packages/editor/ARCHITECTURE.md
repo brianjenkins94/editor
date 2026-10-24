@@ -501,6 +501,7 @@ flowchart LR
   n_ext_margin -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_margin -->|"reads"| n_store__silo_local__file__json
   n_ext_margin -->|"reads, writes"| n_store__silo_local____file__jsonl
+  n_ext_margin <-.->|"commands"| n_ext_running
   n_ext_margin <-.->|"commands"| n_ext_vscode
   n_ext_margin <-.->|"the workspace runtime's hub link (editor-api's observeExtension)"| n_workbench
   n_ext_markdown_language_features_serverWorkerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0

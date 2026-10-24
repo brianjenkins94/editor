@@ -1362,6 +1362,9 @@ test("halt: a selected run halts before a call that never ran for real, and a pi
 	});
 
 	assert.ok(rules.includes(url) && rules.includes("\"trigger\""), "the pin, a rule for runs after an edit");
+	// On the architecture view: the pin runs the file again by the running extension's command (waited for: its host's
+	// totals go out a moment after).
+	await session.until("the Margin → running, by command", hasLabel("ext:margin", "ext:running", /^cmd run\.live\.again$/u), 30_000);
 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
