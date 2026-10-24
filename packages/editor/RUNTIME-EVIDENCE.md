@@ -417,7 +417,8 @@ values that didn't.
 ### Live values, open
 
 - **The bounds**, and how many calls the margin lets you pick between.
-- **A picked run's coverage and run log**: they're the latest run's; kept with each run, picking one could show its own.
+- ~~**A picked run's coverage and run log**~~: built 2026-10-23 — each run keeps the coverage marks and profile it had as the
+  latest, and a picked one shows its own (the latest shows the marks as they are now, following edits).
 - **The ball while a run is going**: a run takes a fraction of a second, so the ball rolls once it's finished, through
   where it went; a long run could roll as it goes.
 

@@ -1369,6 +1369,61 @@ test("halt: a selected run halts before a call that never ran for real, and a pi
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
 
+// A picked run (a ball of the Margin's) shows its own coverage, not the latest run's: kept with each run as it came.
+test("runs kept: picking an older run shows its own coverage", async () => {
+	const workbench = session.workbench();
+	const uri = "file:///workspace/pick.js";
+	const edit = async (from, to) => {
+		await workbench.evaluate(async ([find, replace]) => {
+			const { api } = globalThis.__editor;
+			const editor = api.window.activeTextEditor;
+			const at = editor.document.getText().indexOf(find);
+
+			await editor.edit((builder) => {
+				builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + find.length)), replace);
+			});
+			await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+		}, [from, to]);
+		await session.page.keyboard.press("ControlOrMeta+s");
+	};
+	const state = () => workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "pick.js").catch(() => undefined));
+	const kindAt = (found, line) => found.marks.find((mark) => mark.line === line && mark.kind.startsWith("coverage-"))?.kind;
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/pick.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["let x = 1;", "", "if (x > 0) {", "\tconsole.log(\"positive\");", "} else {", "\tconsole.log(\"negative\");", "}", ""].join("\n")));
+		await api.window.showTextDocument(uri);
+	});
+	await edit("let x = 1;", "let x = 2;");
+	await eventually("the first run's coverage", async () => (kindAt(await state() ?? { "marks": [] }, 4) === "coverage-ran" || undefined), 60_000);
+	await edit("let x = 2;", "let x = -2;");
+
+	const latest = await eventually("the second run, and its coverage", async () => {
+		const found = await state();
+
+		return found?.runs.length >= 2 && kindAt(found, 6) === "coverage-ran" ? found : undefined;
+	}, 60_000);
+
+	assert.notEqual(kindAt(latest, 4), "coverage-ran", "the latest run took the other branch");
+
+	const older = latest.runs.at(-2);
+
+	await workbench.evaluate(([file, id]) => globalThis.__editor.api.commands.executeCommand("margin.pickRun", file, id), [uri, older.id]);
+
+	const picked = await eventually("the older run, picked", async () => {
+		const found = await state();
+
+		return found?.runs.find((run) => run.id === older.id)?.picked === true ? found : undefined;
+	});
+
+	assert.equal(kindAt(picked, 4), "coverage-ran", "its own: the branch it took");
+	assert.notEqual(kindAt(picked, 6), "coverage-ran");
+
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

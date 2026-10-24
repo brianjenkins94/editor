@@ -84,7 +84,7 @@ interface Cell { "text": string; "kind": string }
 
 /** A session's values, and what's picked in them: a function's call (by `function:line`; none, its latest) and a held
  *  column. */
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at"?: number; "done"?: boolean; "end"?: RunEnd & { "anchors"?: Anchors }; "live"?: boolean; "count"?: number; "key"?: string }
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at"?: number; "done"?: boolean; "end"?: RunEnd & { "anchors"?: Anchors }; "live"?: boolean; "count"?: number; "key"?: string; "marks"?: PaneMark[]; "profile"?: ProfiledLine[] }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
@@ -100,6 +100,8 @@ interface MarginState {
 	"marks": { "line": number; "kind": string; "title"?: string }[];
 	"cards": { "fromLine": number; "toLine": number; "title": string }[];
 	"runLog"?: RunLog;
+	/** The runs kept of the file, oldest first: each one's id, and whether it's the one shown. */
+	"runs": { "id": string; "picked": boolean }[];
 }
 
 /** Each drawn file's MarginState, by URI. */
@@ -995,7 +997,8 @@ function marginState(uri: string, session: Session | undefined, stated: Row[], a
 		...end === undefined ? {} : { "end": { "line": end.line + 1, "kind": end.kind, ...end.message === undefined ? {} : { "message": end.message } } },
 		"marks": [...lineMarks, ...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, ...end.message === undefined ? {} : { "title": end.message } }]].map((mark) => ({ "line": mark.line + 1, "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } })),
 		"cards": steps.map((step) => ({ "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title })),
-		...runLog === undefined ? {} : { "runLog": runLog }
+		...runLog === undefined ? {} : { "runLog": runLog },
+		"runs": (kept.get(uri) ?? []).map((run) => ({ "id": run.id, "picked": run === session }))
 	};
 }
 
@@ -1015,12 +1018,15 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	addArgvRow(uri, text, rows);
 
 	const last = rows.reduce<Row | undefined>((latest, row) => (latest === undefined || row.line > latest.line ? row : latest), undefined);
+	// A run picked from those kept shows its own coverage and run log (kept with it as it was the latest); the latest, the
+	// marks as they are now.
+	const older = session !== undefined && session !== kept.get(uri)?.at(-1);
 	// The last run, step by step, at the file's end (after the last card).
-	const profiled = profiles.get(uri);
+	const profiled = older && session.profile !== undefined ? session.profile : profiles.get(uri);
 	const runLog = profiled === undefined || steps.length === 0 ? undefined : runLogOf(steps, profiled);
 	const logLine = shown === undefined ? 0 : Math.max(shown.lineCount - 1, ...steps.map((step) => step.toLine));
 	// Coverage's marks (coverage.ts draws them, into the Margin): each card says from them how its code ran.
-	const lineMarks: PaneMark[] = marked.get(uri) ?? [];
+	const lineMarks: PaneMark[] = (older ? session.marks : undefined) ?? marked.get(uri) ?? [];
 	const items: PaneItem[] = [
 		// A capability stop's question first on its line: it's what the run waits on.
 		...asking === undefined ? [] : [askItem(uri, asking)],
@@ -1310,12 +1316,27 @@ export function showProfile(uri: string, lines: ProfiledLine[] | undefined): voi
 		profiles.set(uri, lines);
 	}
 
+	// (kept with the latest run, for when it's picked later)
+	const latest = kept.get(uri)?.at(-1);
+
+	if (latest !== undefined && lines !== undefined) {
+		latest.profile = lines;
+	}
+
 	draw(uri);
 }
 
 /** The marks beside `uri`'s lines in the margin's gutter column (coverage's), replacing its last. */
 export function showMarks(uri: string, marks: PaneMark[]): void {
 	marked.set(uri, marks);
+
+	// (kept with the latest run, for when it's picked later)
+	const latest = kept.get(uri)?.at(-1);
+
+	if (latest !== undefined) {
+		latest.marks = marks;
+	}
+
 	draw(uri);
 }
 
