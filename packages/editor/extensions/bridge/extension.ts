@@ -17,7 +17,7 @@ import * as vscode from "vscode";
 import { storeNode } from "../../shared/architecture-zenfs";
 import { ARCH_COMMANDS } from "../command-tap";
 import { serveAnswers } from "./answers";
-import { decideCapability } from "./capabilities/decide";
+import { decideCapability, decidePreviewFetch } from "./capabilities/decide";
 import { registerCapabilityStops } from "./capability-stops";
 import { runProgram, serveDebugControl } from "./debug-control";
 import { registerDebugEvents } from "./debug-events";
@@ -90,15 +90,16 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	// here over the hub: the SW's swHub → root → workbench → bridgeHub reaches this serve, and the popup/grant-store/
 	// redline logic all lives here (the ext host has vscode + workspace.fs), never in an interceptor. A call that
 	// carries a `port` (the preview shim) but no `runId` gets its runId resolved from the port here, so the record
-	// attributes to the right run. Returns true=allow, false=deny.
+	// attributes to the right run. Returns true=allow, false=deny — or, for a preview's fetch, a result to give or a halt.
 	context.subscriptions.push({ "dispose": serve(bridgeHub, "capability.decide", (data) => {
-		const call = data as CapabilityCall;
+		const call = data as CapabilityCall & { "fetch"?: boolean };
 
 		if (call.runId === undefined && typeof call.port === "number") {
 			call.runId = previewRunByPort.get(call.port);
 		}
 
-		return decideCapability(call);
+		// (a preview's fetch, from the service worker: it can also be given a result in its place, or halted)
+		return call.fetch === true ? decidePreviewFetch(call) : decideCapability(call);
 	}) });
 
 	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate — kept so

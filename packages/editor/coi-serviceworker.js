@@ -98,6 +98,27 @@ async function decide(call, tab) {
 	}
 }
 
+// A preview's fetch, decided: true (made), false (refused), { give, by } (a result given in its place — a rule's, or its
+// recording when nobody's watching the preview) or { halt } (nobody's watching, and it never ran for real). Fails closed.
+async function decideFetch(call, tab) {
+	try {
+		const answer = await rpc.request("capability.decide." + tab, { ...call, "fetch": true }, DECIDE);
+
+		return answer !== null && typeof answer === "object" ? answer : answer !== false;
+	} catch (error) {
+		swLog.error("capability.decide unreachable — denying (fail-closed)", { "kind": call.kind, "error": String(error) });
+
+		return false;
+	}
+}
+
+// A result given in a fetch's place, as the page reads one: JSON for a value, its text for a string.
+function givenResponse(value, by) {
+	const text = typeof value === "string";
+
+	return new Response(text ? value : JSON.stringify(value), { "status": 200, "headers": { "content-type": text ? "text/plain; charset=utf-8" : "application/json", "x-silo-given": by } });
+}
+
 // The preview a request belongs to ({ tab, port }): the /__virtual__/<tab>/<port>/ document that made it (or is
 // being navigated to).
 async function previewClientOf(event) {
@@ -144,9 +165,20 @@ async function gateAndFetch(event, request, requestUrl) {
 	if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
 		const preview = await previewClientOf(event);
 
-		// A preview client's fetch → gate it, in its tab (the decider attributes it to the run that owns the port).
-		if (preview !== undefined && !(await decide({ "kind": "net", "args": [request.url], "port": preview.port }, preview.tab))) {
+		// A preview client's fetch → gate it, in its tab (the decider attributes it to the run that owns the port) — or give
+		// it a result in its place (RUNNING.md, *A call's result*), or halt it, nobody watching (*Unattended runs*).
+		const decided = preview === undefined ? true : await decideFetch({ "kind": "net", "args": [request.url], "port": preview.port }, preview.tab);
+
+		if (decided === false) {
 			return new Response("Blocked by capability policy: net " + requestUrl.host, { "status": 403, "statusText": "Capability denied" });
+		}
+
+		if (typeof decided === "object" && "give" in decided) {
+			return givenResponse(decided.give, decided.by);
+		}
+
+		if (typeof decided === "object") {
+			return new Response("Halted: " + decided.halt, { "status": 503, "statusText": "Halted" });
 		}
 	}
 

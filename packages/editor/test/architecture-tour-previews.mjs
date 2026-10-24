@@ -267,6 +267,69 @@ test("preview prompt: Rule… makes the rule in the Rules view, and the call wai
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// A preview's fetch given a result in its place (RUNNING.md, *A call's result*): a rule's, without the network — and,
+// nobody watching the preview (every preview frame hidden), its recording where the policy would ask, or halted when it
+// never ran for real (*Unattended runs*: decided 2026-10-24, the preview's reload on an edit is the app's run).
+test("a preview's fetch: a rule's result given in its place; unwatched, its recording, or halted", async () => {
+	const workbench = session.workbench();
+	const given = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "net" }, { "target_id": "resource", "operator_id": "is", "argument": "https://api.example.com/rates" }] }, "then": [{ "action_id": "give", "target_id": "result", "argument": { "CA": 0.13 } }] };
+	// (a preview's fetch, from its own page — found again if an earlier test's run left it mid-navigation)
+	const fetched = async (url, tries = 5) => {
+		const preview = await eventually("a preview", () => session.page.frames().find((frame) => /\/__virtual__\/[^/]+\/\d+\//u.test(frame.url())));
+
+		try {
+			return await preview.evaluate((address) => fetch(address).then(async (response) => ({ "status": response.status, "by": response.headers.get("x-silo-given"), "body": await response.text() }), (error) => ({ "error": String(error) })), url);
+		} catch (error) {
+			if (tries > 1 && /Execution context was destroyed|Frame was detached/u.test(String(error))) {
+				return fetched(url, tries - 1);
+			}
+
+			throw error;
+		}
+	};
+	// (every preview frame hidden, or shown again: as a dock tab behind another, nobody's watching it)
+	const hidden = (hide) => session.page.evaluate((hiding) => {
+		for (const frame of document.querySelectorAll("iframe")) {
+			try {
+				if (frame.contentWindow.location.pathname.startsWith("/__virtual__/")) {
+					// eslint-disable-next-line webawesome/no-inline-styles -- the test standing in for a dock tab behind another
+					frame.style.visibility = hiding ? "hidden" : "";
+				}
+			} catch { /* another origin's: not a preview */ }
+		}
+	}, hide);
+
+	await session.execute("silo.rules.set", undefined, given);
+	await workbench.evaluate(async (recorded) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/.silo/local/recorded.json"), new TextEncoder().encode(JSON.stringify(recorded)));
+	}, { "version": 1, "results": { "net https://api.example.com/recorded": { "value": { "FR": 0.2 }, "at": new Date().toISOString() } } });
+
+	try {
+		// The rule's result, and no request made.
+		const ruled = await fetched("https://api.example.com/rates");
+
+		assert.deepEqual([ruled.status, ruled.by, JSON.parse(ruled.body)], [200, "rule", { "CA": 0.13 }]);
+
+		// Nobody watching: what it returned for real, given back — and one that never ran for real, halted.
+		await hidden(true);
+
+		const replayed = await fetched("https://api.example.com/recorded");
+
+		assert.deepEqual([replayed.status, replayed.by, JSON.parse(replayed.body)], [200, "recording", { "FR": 0.2 }]);
+
+		const halted = await fetched("https://api.example.com/never");
+
+		assert.equal(halted.status, 503, JSON.stringify(halted));
+		assert.match(halted.body, /^Halted: nobody's watching the preview, and https:\/\/api\.example\.com\/never never ran for real$/u);
+	} finally {
+		await hidden(false);
+		await session.execute("silo.rules.set", given).catch(() => undefined);
+		await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file("/workspace/.silo/local/recorded.json")).then(() => undefined, () => undefined));
+	}
+});
+
 // An app's file runs the app (RUNNING.md, *Apps*): its code runs in its page, so Run starts its dev script — the dev
 // server a run, its preview open — rather than stepping the file here; Run again shows the preview it already has.
 test("run: an app's file runs the app — its dev server and its preview", async () => {

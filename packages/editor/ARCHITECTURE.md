@@ -619,7 +619,7 @@ flowchart LR
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
-| Shell | capability | `capability.prompt()` |
+| Shell | capability | `capability.prompt()`, `capability.watched()` |
 | Shell | debug | `debug.state` |
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed` |

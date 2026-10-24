@@ -17,12 +17,12 @@ import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { recordEffect } from "@brianjenkins94/editor-api/effects";
-import { loadEffectivePolicy, persistOverride, recordObservation, replaceRule } from "@brianjenkins94/editor-api/policy";
+import { loadEffectivePolicy, persistOverride, recordedResult, recordObservation, replaceRule } from "@brianjenkins94/editor-api/policy";
 import { decisionOf } from "@brianjenkins94/editor-api/rules";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
-import { effectiveDisposition, isDangerous, packageDisposition } from "@brianjenkins94/util/silo/policy";
+import { effectiveDisposition, givenResult, isDangerous, packageDisposition } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { bridgeHub } from "../hub";
 import { coalesce } from "./coalesce";
@@ -58,6 +58,9 @@ export interface CapabilityCall {
 	"package"?: string;
 	/** Why the package's call is asked about (what its baseline says of it), said at the prompt. */
 	"why"?: AskedWhy;
+	/** Who it's made for (the policy's `trigger`): `you` (someone's watching: the default) or `edit` (a preview nobody's
+	 *  watching, run again after an edit). */
+	"trigger"?: "you" | "edit";
 }
 
 /** A package as `name@version` names it (a scoped name's own `@` kept). */
@@ -218,7 +221,8 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 	const resource = request.resource ?? "";
 	// (a package's call: the rules about that package's calls too)
 	const pkg = askerOf(request).package;
-	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability), { "trigger": "you", ...pkg === undefined ? {} : packageNamed(pkg) });
+	const { trigger = "you" } = request as { "trigger"?: "you" | "edit" };
+	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability), { "trigger": trigger, ...pkg === undefined ? {} : packageNamed(pkg) });
 
 	if (effective === "allow") {
 		return { "behavior": "allow", "decided": "policy" };
@@ -313,6 +317,10 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 		(request as { "window"?: string }).window = call.window;
 	}
 
+	if (call.trigger !== undefined) {
+		(request as { "trigger"?: string }).trigger = call.trigger;
+	}
+
 	// And whose call it is, and why it's asked: a package's is decided by the rules about its calls, and the prompt says so.
 	if (call.package !== undefined) {
 		Object.assign(request, { "package": call.package }, call.why === undefined ? {} : { "why": call.why });
@@ -386,8 +394,73 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 	}
 }
 
-/** The bans a preview's run has been told of, by run and package. */
+/** The bans a preview's run has been told of, by run and package — and the fetches it halted before, by run and URL. */
 const told = new Set<string>();
+
+/** What a preview's fetch gets: made (`true`), refused (`false`), a result given in its place (a rule's, or — nobody
+ *  watching — what it returned when it last ran for real), or halted (nobody watching, the policy would ask, and it
+ *  never ran for real). */
+export type FetchDecision = boolean | { "give": unknown; "by": "rule" | "recording" } | { "halt": string };
+
+/** Whether anyone's watching the preview at `port` (one of its windows on screen: the shell's `capability.watched`) —
+ *  taken as watched when the shell can't say, so the call is asked about rather than decided unseen. */
+async function watched(port: number | undefined): Promise<boolean> {
+	if (port === undefined) {
+		return true;
+	}
+
+	try {
+		return (await shellRpc.request("capability.watched", { "port": port }, { "timeoutMs": 5000 })) !== false;
+	} catch {
+		return true;
+	}
+}
+
+/**
+ * Decide a preview's fetch (RUNNING.md, *A call's result*; *Unattended runs*): a rule giving its result answers it in
+ * the call's place, as the debugger's stand-ins do. A preview nobody's watching is an unattended run's — after an edit,
+ * its reload — decided as `trigger is edit`: where the policy would ask, it gets what it returned when it last ran for
+ * real, and one that never did is halted, said once. Otherwise as any call (decideCapabilityAs).
+ */
+export async function decidePreviewFetch(call: CapabilityCall): Promise<FetchDecision> {
+	const url = typeof call.args?.[0] === "string" ? call.args[0] : "";
+	const policy = await loadEffectivePolicy();
+	const trigger = await watched(call.port) ? "you" : "edit";
+	const given = givenResult(policy, { "trigger": trigger, "capability": "net", "resource": url });
+
+	if (given !== undefined) {
+		if (call.runId !== undefined) {
+			recordEffect(call.runId, "net", url, "given", 1, "policy");
+		}
+
+		return { "give": given.value, "by": "rule" };
+	}
+
+	if (trigger === "edit" && effectiveDisposition(policy, "net", hostOf(url), isDangerous("net"), { "trigger": trigger }) === "review") {
+		const recorded = await recordedResult("net", url);
+
+		if (recorded !== undefined) {
+			if (call.runId !== undefined) {
+				recordEffect(call.runId, "net", url, "given", 1, "recorded");
+			}
+
+			return { "give": recorded.value, "by": "recording" };
+		}
+
+		if (call.runId !== undefined) {
+			recordEffect(call.runId, "net", url, "skipped", 1);
+		}
+
+		if (!told.has(`${call.runId ?? ""}\0${url}`)) {
+			told.add(`${call.runId ?? ""}\0${url}`);
+			void vscode.window.showWarningMessage(`The preview's fetch of ${url} halted: nobody's watching the preview, and it never ran for real. Show the preview to be asked, or give it a result by a rule.`);
+		}
+
+		return { "halt": `nobody's watching the preview, and ${url} never ran for real` };
+	}
+
+	return (await decideCapabilityAs({ ...call, "trigger": trigger })).allow;
+}
 
 /** Decide one raw capability call: `true` to allow, `false` to deny (decideCapabilityAs, without how). */
 export async function decideCapability(call: CapabilityCall): Promise<boolean> {

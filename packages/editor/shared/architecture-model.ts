@@ -283,6 +283,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.record", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "capability.recorded", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "capability.prompt", "from": ["bridge"], "to": ["shell"] },
+	{ "pattern": "capability.watched", "from": ["bridge"], "to": ["shell"] },
 	// ── workers ──
 	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"] },
 	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] },

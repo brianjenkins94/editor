@@ -691,6 +691,28 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		return result;
 	});
 
+	// Whether anyone's watching a server's app: one of its windows on screen — its page's tab showing, and its frame
+	// shown (not a dock group's tab behind another, nor a collapsed window), or its popped-out window showing. Asked by the
+	// ext-host decider before a preview's fetch: one nobody's watching is an unattended run's (RUNNING.md, *Unattended
+	// runs*), its fetches given their recordings where the policy would ask.
+	const shown = (surface: PreviewSurface): boolean => {
+		if (surface.popup !== undefined) {
+			try {
+				return !surface.popup.window.closed && surface.popup.window.document.visibilityState === "visible";
+			} catch {
+				return true; // (not readable: taken as watched, so it's asked rather than decided unseen)
+			}
+		}
+
+		return document.visibilityState === "visible" && surface.frame.checkVisibility({ "visibilityProperty": true, "opacityProperty": true });
+	};
+
+	serve(hub, "capability.watched", (request) => {
+		const { port } = (request ?? {}) as { "port"?: number };
+
+		return typeof port === "number" && windowsOf(port).some(shown);
+	});
+
 	// Bridge from the injected tap (node-worker.ts OBS_TAP) — two channels, both from a preview iframe:
 	//   • `cap-decide` : the WS/WebRTC shim asks whether to allow a connection the SW net gate can't see. Round-trip
 	//     to the ext-host decider (`capability.decide`, keyed by the SOURCE surface's port so it attributes to that

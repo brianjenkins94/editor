@@ -128,8 +128,7 @@ a `give` in your policy file, choosing what to leave out, and the commit is wher
 What it needs that isn't there:
 
 - ~~**Recordings keyed by the request**~~ (method, URL, a hash of the body): built.
-- **`give result` for a preview's calls.** Today it applies only where the debugger stands in for a call; a preview's
-  fetches are decided at the service worker, and are either real or denied (*A call's result*).
+- ~~**`give result` for a preview's calls**~~: built 2026-10-24 (*A call's result*).
 - ~~**A writable layer per run**~~, over the workspace's: built — in memory in the debug worker, over the editor's
   runtime files (editor-api runtime.ts `layered`), so the workspace's overlay stack needed no copy-up. A live run's
   write to a workspace file goes there (an effect decided `layer`), a read of what it wrote reads it there, and the
@@ -248,8 +247,13 @@ rules are kept placed too: the one write silo makes to `policy.json`, a re-ancho
 
 ### A call's result
 
-*give result* (a fetch's body, a read's contents) is given instead of the call, only where something stands in for it:
-the debugger's stand-ins return it; a preview's real call isn't decided by it. *Rule…* at a stop starts from what the
+*give result* (a fetch's body, a read's contents) is given instead of the call, where something stands in for it: the
+debugger's stand-ins return it, and since 2026-10-24 the service worker answers a preview's fetch with it, the network
+untouched (a JSON body for a value, text for a string; `x-silo-given: rule`). A preview nobody's watching — none of its
+windows on screen: its page's tab hidden, a dock tab behind another, collapsed (the shell's `capability.watched`) — is
+an unattended run's, decided as `trigger is edit`: where the policy would ask, its fetch is given what it returned last
+time (`x-silo-given: recording`), and one that never ran for real is halted (a 503 saying why, told once) — the
+preview's reload on an edit among them (*Open*). (extensions/bridge/capabilities/decide.ts `decidePreviewFetch`.) *Rule…* at a stop starts from what the
 call returned the last time it ran for real: a preview's allowed fetch and a run's allowed read, the latest of each, in
 `.silo/local/recorded.json`, this machine's only (a real response can hold secrets). Commands aren't recorded:
 almostnode's `child_process` is a stub.
