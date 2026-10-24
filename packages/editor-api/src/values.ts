@@ -5,10 +5,10 @@
  *
  * Kept for the session only, in the worker's memory; nothing is written anywhere.
  */
-import type { LiveBatch, LiveCall, LiveValue } from "./index.ts";
+import type { LiveBatch, LiveCall, LivePlace, LiveValue } from "./index.ts";
 
 // A value, a call and a batch are the run contract's (@brianjenkins94/editor-api): what any debugger tells the margin.
-export type { LiveBatch, LiveCall, LiveValue } from "./index.ts";
+export type { LiveBatch, LiveCall, LivePlace, LiveValue } from "./index.ts";
 
 /** What one trace event says, with its line and its call's function already read off its nodes. */
 export interface Traced extends LiveValue {
@@ -99,6 +99,11 @@ export class LiveRecord {
 	/** The latest (step, place) taken: anything not after it is a replay (see resume). */
 	private lastStep = -1;
 	private lastPlace = -1;
+	/** Where the last value told was, and whether it was dropped (a batch then says so: `now`). */
+	private now: LivePlace | undefined;
+	private nowDropped = false;
+	/** Whether a value was told since the last batch, kept or not. */
+	private toldSince = false;
 
 	public constructor(bounds: Bounds = BOUNDS) {
 		this.bounds = bounds;
@@ -128,6 +133,9 @@ export class LiveRecord {
 
 		this.lastStep = traced.step;
 		this.lastPlace = this.toldPlace;
+		this.now = { "line": traced.line, ...traced.at === undefined ? {} : { "at": traced.at } };
+		this.nowDropped = true;
+		this.toldSince = true;
 
 		let count = this.calls.get(traced.call);
 
@@ -155,17 +163,20 @@ export class LiveRecord {
 		}
 
 		this.calls.set(traced.call, count + 1);
+		this.nowDropped = false;
 		this.pending.push({ "line": traced.line, "name": traced.name, "value": "raw" in traced ? preview(traced.raw) : traced.value, "kind": traced.kind, "call": traced.call, "turns": traced.turns, ...traced.at === undefined ? {} : { "at": traced.at } });
 	}
 
-	/** What's new since the last batch (undefined when nothing is). */
+	/** What's new since the last batch — values kept, or only dropped, and where the run is past the bounds (undefined
+	 *  when nothing was told). */
 	public drain(): LiveBatch | undefined {
-		if (this.pending.length === 0 && this.pendingCalls.length === 0) {
+		if (!this.toldSince && this.pending.length === 0 && this.pendingCalls.length === 0) {
 			return undefined;
 		}
 
-		const batch = { "values": this.pending, "calls": this.pendingCalls, "dropped": this.dropped };
+		const batch = { "values": this.pending, "calls": this.pendingCalls, "dropped": this.dropped, ...this.nowDropped && this.now !== undefined ? { "now": this.now } : {} };
 
+		this.toldSince = false;
 		this.pending = [];
 		this.pendingCalls = [];
 

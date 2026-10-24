@@ -1388,6 +1388,7 @@ test("runs kept: picking an older run shows its own coverage", async () => {
 		}, [from, to]);
 		await session.page.keyboard.press("ControlOrMeta+s");
 	};
+
 	const state = () => workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "pick.js").catch(() => undefined));
 	const kindAt = (found, line) => found.marks.find((mark) => mark.line === line && mark.kind.startsWith("coverage-"))?.kind;
 	// (each branch's line as the file is now, 1-based: a save's fixes can move lines)
@@ -1429,6 +1430,68 @@ test("runs kept: picking an older run shows its own coverage", async () => {
 	assert.notEqual(kindAt(picked, negative), "coverage-ran");
 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
+});
+
+// A long run's ball follows it as it goes (RUNTIME-EVIDENCE.md, *Runs kept, as balls*): out beside the line the run is on
+// while it's still going — past the bounds on what's kept of its values, into its second loop — and settling where it
+// ended once it has, not rolled again from the top. (A Run: a live run on a save stops at a million statements.)
+test("runs kept: a long run's ball follows it while it goes, then settles", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/loops.js";
+	const state = () => workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "loops.js").catch(() => undefined));
+	// (the ball, and the text of the code line beside its centre)
+	const ball = () => workbench.evaluate(() => {
+		const element = [...document.querySelectorAll(".notes-margin-ball")].find((each) => !each.hidden);
+
+		if (element === undefined) {
+			return { "out": false };
+		}
+
+		const { top, height } = element.getBoundingClientRect();
+		const beside = [...document.querySelectorAll(".view-lines .view-line")].find((line) => {
+			const rect = line.getBoundingClientRect();
+
+			return rect.top <= top + height / 2 && top + height / 2 < rect.bottom;
+		});
+
+		return { "out": true, "settled": element.classList.contains("settled"), "line": beside?.textContent.replace(/\s+/gu, " ").trim() ?? null };
+	});
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file(path);
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["let total = 0;", "", "for (let i = 0; i < 3000000; i += 1) {", "\ttotal += i % 7;", "}", "", "let count = 0;", "", "for (let j = 0; j < 3000000; j += 1) {", "\tcount += j % 3;", "}", "", "console.log(total, count);", ""].join("\n")));
+		await api.window.showTextDocument(uri);
+	}, program);
+
+	const ran = session.request("debug.start", { "program": program, "breakpoints": [] }, 120_000);
+	// Going: its ball in the strip has no colour yet, and the gutter's is out beside the line the run is on.
+	const going = (lines) => eventually(`the run's ball, out beside ${lines} while it goes`, async () => {
+		const [found, shown] = [await state(), await ball()];
+
+		return found?.runs.at(-1)?.state === undefined && shown.out && !shown.settled && lines.test(shown.line ?? "") ? { ...shown, "dropped": found.dropped } : undefined;
+	}, 60_000);
+
+	// (in the second loop: past the first's 50 turns kept, where it is comes with each batch all the same — and what
+	// wasn't kept is counted as it goes)
+	const second = await going(/count \+= j % 3|j < 3000000/u);
+
+	assert.ok(second.dropped > 3_000_000, `the first loop's values dropped by then: ${JSON.stringify(second)}`);
+	assert.deepEqual((await ran).output, ["8999994 3000000"]);
+
+	// Ended: it ran, and the ball settles where it was rather than rolling from the top again.
+	await eventually("the run, ended", async () => ((await state())?.runs.at(-1)?.state === "ran" || undefined), 30_000);
+
+	const ended = await ball();
+
+	assert.ok(!ended.out || ended.settled, `settled, not rolling again: ${JSON.stringify(ended)}`);
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.commands.executeCommand("workbench.action.closeActiveEditor");
+		await api.workspace.fs.delete(api.Uri.file(path));
+	}, program);
 });
 
 // Purity (packages/silo/README.md, *Purity*): each function's card says what silo's static check judges it — and one

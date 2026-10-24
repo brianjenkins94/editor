@@ -20,7 +20,7 @@
  * fork of the stop to the call to see it).
  * Rule…* opens the rule editor in the Rule view (core's `editor.rules.edit`, RUNNING.md, *Rules*), prefilled with the
  * call — *capability is*, *resource is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it
- * *Just this once*, or *Save as rule* in my policy, the run going on as it decides. Or *give* the call's *result*
+ * Just this once*, or *Save as rule* in my policy, the run going on as it decides. Or *give* the call's *result*
  * instead of it (RUNNING.md, *A call's result*) — starting from what it returned the last time it ran for real, when
  * that's recorded (editor-api's `recordedResult`).
  *
@@ -47,12 +47,13 @@
  * A preview's recorded stops come the same way: `values` on its run's `production` session (the bridge's), each report
  * every hit so far (`replace`).
  */
-import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, ImpureWrite, LiveCall, LiveValue, RunEnd, TestsEvent, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, ImpureWrite, LiveCall, LivePlace, LiveValue, RunEnd, TestsEvent, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
+import type { Determined } from "@brianjenkins94/util/silo/purity";
 import type { RunTrace, Span } from "@brianjenkins94/util/silo/traces";
 import type { LineMark as PaneMark, ProfiledLine } from "./coverage";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
@@ -62,7 +63,6 @@ import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { recordedResult } from "@brianjenkins94/editor-api/policy";
 import { argvRunsOf, decisionOf, resultOf } from "@brianjenkins94/editor-api/rules";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
-import type { Determined } from "@brianjenkins94/util/silo/purity";
 import { determinedAt } from "@brianjenkins94/util/silo/purity";
 import { declarationsHolding, inputOf, mayRead, spanAround, traceKey } from "@brianjenkins94/util/silo/traces";
 import * as vscode from "vscode";
@@ -86,7 +86,7 @@ interface Cell { "text": string; "kind": string }
 
 /** A session's values, and what's picked in them: a function's call (by `function:line`; none, its latest) and a held
  *  column. */
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at"?: number; "done"?: boolean; "end"?: RunEnd & { "anchors"?: Anchors }; "live"?: boolean; "count"?: number; "key"?: string; "marks"?: PaneMark[]; "profile"?: ProfiledLine[] }
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at"?: number; "done"?: boolean; "end"?: RunEnd & { "anchors"?: Anchors }; "live"?: boolean; "count"?: number; "key"?: string; "marks"?: PaneMark[]; "profile"?: ProfiledLine[]; "now"?: LivePlace }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
@@ -102,8 +102,8 @@ interface MarginState {
 	"marks": { "line": number; "kind": string; "title"?: string }[];
 	"cards": { "fromLine": number; "toLine": number; "title": string; "purity"?: string; "flagged"?: string }[];
 	"runLog"?: RunLog;
-	/** The runs kept of the file, oldest first: each one's id, and whether it's the one shown. */
-	"runs": { "id": string; "picked": boolean }[];
+	/** The runs kept of the file, oldest first: each one's id, whether it's the one shown, and how it ended (none while it goes). */
+	"runs": { "id": string; "picked": boolean; "state"?: PaneRun["state"] }[];
 }
 
 /** Each drawn file's MarginState, by URI. */
@@ -132,6 +132,8 @@ const impureOf = new Map<string, ImpureWrite[]>();
 const testsOf = new Map<string, TestsEvent>();
 /** How many of a run's steps its ball rolls through, at most. */
 const MAX_PATH = 400;
+/** How long a run goes before its ball follows it as it goes: a shorter one's rolls once it's finished. */
+const FOLLOW_AFTER = 1000;
 /** Each file's marks for the margin's gutter column (coverage), per file URI. */
 const marked = new Map<string, PaneMark[]>();
 /** Where each file's last run's work went (coverage.ts: tsval's profile), on the lines its statements are on now. */
@@ -890,7 +892,7 @@ async function pastValues(uri: string, capability: string, resource: string, lin
 				const seen = found.get(key);
 
 				found.set(key, seen ?? { "value": parsed.value, "label": value.value ?? "", "detail": `${value.name} — seen in a past run`, "seen": 0 });
-				found.get(key)!.seen += trace.count;
+				found.get(key).seen += trace.count;
 			}
 		}
 	}
@@ -898,7 +900,7 @@ async function pastValues(uri: string, capability: string, resource: string, lin
 	return [...found.values()].toSorted((left, right) => right.seen - left.seen);
 }
 
-/** *Pin…*: a value past runs saw at the call, kept as a rule — runs after an edit give the call that value. `value`, when
+/** Pin…*: a value past runs saw at the call, kept as a rule — runs after an edit give the call that value. `value`, when
  *  it's given (an agent, a test), is pinned as it is; else the past values are offered. */
 async function pin(uri: string, capability: string, resource: string, line: number, given?: { "value": unknown }): Promise<boolean> {
 	let chosen = given;
@@ -1037,10 +1039,10 @@ function marginState(uri: string, session: Session | undefined, stated: Row[], a
 		"cards": steps.map((step) => {
 			const purity = purityText(step, impureIn(uri, step));
 
-			return { "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title, ...purity === undefined ? {} : { "purity": step.purity!.verdict, ...purity.flagged ? { "flagged": purity.text } : {} } };
+			return { "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title, ...purity === undefined ? {} : { "purity": step.purity.verdict, ...purity.flagged ? { "flagged": purity.text } : {} } };
 		}),
 		...runLog === undefined ? {} : { "runLog": runLog },
-		"runs": (kept.get(uri) ?? []).map((run) => ({ "id": run.id, "picked": run === session }))
+		"runs": (kept.get(uri) ?? []).map((run) => ({ "id": run.id, "picked": run === session, ...stateOf(run) === undefined ? {} : { "state": stateOf(run) } }))
 	};
 }
 
@@ -1108,11 +1110,19 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	return { "items": items, "groups": groups, "marks": marks, ...runsShown(uri, session) };
 }
 
-/** The file's runs kept, and where the one shown went once it's finished (its ball rolls along it). */
+/** The file's runs kept, and where the one shown went once it's finished (its ball rolls along it) — or, going for a
+ *  while, where it is now (its ball follows it). */
 function runsShown(uri: string, session: Session | undefined): Pick<PaneContent, "runs" | "path"> {
 	const runs = runsOf(uri, session);
+	let path: PanePath | undefined;
 
-	return { ...runs.length === 0 ? {} : { "runs": runs }, ...session?.done === true ? { "path": pathOf(session) } : {} };
+	if (session?.done === true) {
+		path = pathOf(session);
+	} else if (session?.now !== undefined && Date.now() - (session.at ?? Date.now()) >= FOLLOW_AFTER) {
+		path = { "id": session.id, "at": [placeOf(session.anchors, session.now.line, session.now.at)], "live": true };
+	}
+
+	return { ...runs.length === 0 ? {} : { "runs": runs }, ...path === undefined ? {} : { "path": path } };
 }
 
 /** How a kept run ended, as its ball's colour: ran to its end, crashed, stopped short — none while it's running. */
@@ -1637,6 +1647,7 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 
 		session.anchors ??= anchorsFor(file, source);
 		session.values.push(...batch.values);
+		session.now = batch.now ?? batch.values.at(-1) ?? session.now;
 
 		for (const call of batch.calls ?? []) {
 			session.calls.set(call.id, call);

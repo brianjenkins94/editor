@@ -437,7 +437,7 @@ async function draw(uri: string): Promise<void> {
 	// (the pane stays, its tabs with it, whatever the view has: an empty view is still shown)
 	showPane(uri, placed.map(({ item, fromLine, toLine }) => ({ "id": `item:${item.id}`, "fromLine": fromLine, "toLine": toLine })), render, frameMarks, placedGroups.map(({ group, fromLine, toLine }) => ({ "id": `group:${group.id}`, "fromLine": fromLine, "toLine": toLine })));
 	// A ball per run kept, the one shown held — a click picks another, by its command — and the shown run's ball rolled
-	// down the gutter through the lines it went, once.
+	// down the gutter through the lines it went, once (or, while it's going, beside the line it's on).
 	showPaneRuns(uri, runs.map((run) => ({ "id": run.id, "title": run.title, ...run.state === undefined ? {} : { "state": run.state }, ...run.picked === undefined ? {} : { "picked": run.picked } })), (id) => {
 		const command = runs.find((run) => run.id === id)?.command;
 
@@ -450,7 +450,7 @@ async function draw(uri: string): Promise<void> {
 		const from = items.length + groups.length + marks.length;
 		const lines = path.at.flatMap((_, index) => (places[from + index] === undefined ? [] : [places[from + index][0]])).filter((line, index, all) => index === 0 || line !== all[index - 1]);
 
-		rollPaneBall(uri, path.id, lines);
+		rollPaneBall(uri, path.id, lines, path.live === true);
 	}
 }
 

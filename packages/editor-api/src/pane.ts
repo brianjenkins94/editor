@@ -55,8 +55,10 @@ export interface PaneMark { "at": PaneAt; "kind": "ran" | "partial" | "missed" |
 export interface PaneRun { "id": string; "title": string; "state"?: "ran" | "crashed" | "stopped"; "picked"?: boolean; "command": PaneCommand }
 
 /** Where a run went, in the order it went (a statement's place each, `at`): the editor rolls a ball down the gutter
- *  along it once for each `id` it's given — a new run, or one picked — then lets it settle. */
-export interface PanePath { "id": string; "at": PaneAt[] }
+ *  along it once for each `id` it's given — a new run, or one picked — then lets it settle. `live`: the run is still
+ *  going, and `at` is where it is now — the ball follows it there, and the same `id`'s path without `live` settles it
+ *  where it ended rather than rolling it again. */
+export interface PanePath { "id": string; "at": PaneAt[]; "live"?: true }
 
 /** What a view shows of a file: its items, cards, gutter marks — and, for a view of runs, the runs kept (`runs`) and the
  *  shown one's `path`. */

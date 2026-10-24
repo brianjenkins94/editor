@@ -69,8 +69,13 @@ export interface LiveValue {
  *  listed). */
 export interface LiveCall { "id": number; "name": string; "line": number; "at"?: [number, number] }
 
-/** What's new since the last batch, and how many values were dropped so far (a debugger keeps them bounded). */
-export interface LiveBatch { "values": LiveValue[]; "calls": LiveCall[]; "dropped": number }
+/** What's new since the last batch, and how many values were dropped so far (a debugger keeps them bounded). `now`:
+ *  where the run is, when the last value told was dropped (otherwise it's the last of `values`) — a long run's ball
+ *  follows it past the bounds. */
+export interface LiveBatch { "values": LiveValue[]; "calls": LiveCall[]; "dropped": number; "now"?: LivePlace }
+
+/** A place a value was told: its line, and its node's offsets. */
+export interface LivePlace { "line": number; "at"?: [number, number] }
 
 /** The `values` event: a batch, of `file` — with the text that ran the first time a file's values are told. `replace`:
  *  every value of the file so far, in place of those told before (a preview's recorded stops, each report all its hits). */

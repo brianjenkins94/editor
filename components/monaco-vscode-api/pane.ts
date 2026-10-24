@@ -31,7 +31,7 @@
  *
  * Runs (RUNNING.md, unattended runs): the strip ends with a ball for each run of the file the consumer keeps
  * (`showPaneRuns`), the one shown held, a click picking another; and a run rolls a ball down the gutter column along the
- * lines it went through (`rollPaneBall`), once, before it settles.
+ * lines it went through (`rollPaneBall`), once, before it settles — or, a long one, follows it as it goes.
  */
 import { getService, ICodeEditorService } from "@codingame/monaco-vscode-api";
 import { CommandsRegistry } from "@codingame/monaco-vscode-api/monaco";
@@ -61,6 +61,8 @@ const runsOf = new Map<string, { "runs": PaneRunBall[]; "pick": (id: string) => 
 
 /** The run each file's ball last rolled for, by URI: a draw of the same run doesn't roll it again. */
 const rolled = new Map<string, string>();
+/** The run each file's ball is following as it goes, by URI: when it ends, its ball settles where it is. */
+const following = new Map<string, string>();
 
 /** A ball's roll: at most this long however many lines a run went through, and at most this long a line. */
 const ROLL_MS = 1600;
@@ -270,23 +272,54 @@ class Frame implements monaco.editor.IOverlayWidget {
 				this.placeBall();
 				this.rolling = setTimeout(next, step);
 			} else {
-				this.ball.classList.add("settled");
-				this.rolling = setTimeout(() => {
-					this.ball.hidden = true;
-					this.ballLine = undefined;
-				}, 600);
+				this.settle();
 			}
 		};
 
-		// (from its first line, without gliding there from wherever it last settled)
+		this.bringOut(lines[0]);
+		next();
+	}
+
+	/** The ball beside `line`, where a run still going is now: gliding there from where it was, if it's out. */
+	public follow(line: number | undefined): void {
+		clearTimeout(this.rolling);
+
+		if (line === undefined) {
+			return;
+		}
+
+		if (this.ball.hidden || this.ball.classList.contains("settled")) {
+			this.bringOut(line);
+		} else {
+			this.ballLine = line;
+			this.placeBall();
+		}
+	}
+
+	/** The ball fading where it is, then gone. */
+	public settle(): void {
+		clearTimeout(this.rolling);
+
+		if (this.ballLine === undefined) {
+			return;
+		}
+
+		this.ball.classList.add("settled");
+		this.rolling = setTimeout(() => {
+			this.ball.hidden = true;
+			this.ballLine = undefined;
+		}, 600);
+	}
+
+	/** The ball out beside `line`, without gliding there from wherever it last settled. */
+	private bringOut(line: number): void {
 		this.ball.classList.remove("settled");
 		this.ball.classList.add("placing");
-		this.ballLine = lines[0];
+		this.ballLine = line;
 		this.ball.hidden = false;
 		this.placeBall();
-		void this.ball.offsetTop;
+		this.ball.offsetTop;
 		this.ball.classList.remove("placing");
-		next();
 	}
 
 	/** Every frame laid out again (the divider moved). */
@@ -404,6 +437,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 				frame.relayout();
 			}
 		};
+
 		const end = (): void => {
 			this.sash.removeEventListener("pointermove", move);
 			this.sash.removeEventListener("pointerup", end);
@@ -626,18 +660,20 @@ class Frame implements monaco.editor.IOverlayWidget {
 async function start(): Promise<void> {
 	const service = await getService(ICodeEditorService);
 
-	codeEditors = service as unknown as WrapService;
+	codeEditors = service;
 
 	// Alt+Z, taken over for an editor with a pane (see above); anywhere else, VS Code's own.
 	const toggle = CommandsRegistry.getCommand(TOGGLE_WORD_WRAP);
 
 	if (toggle !== undefined) {
 		CommandsRegistry.registerCommand(TOGGLE_WORD_WRAP, (accessor, ...args: unknown[]) => {
-			const editor = (service.getFocusedCodeEditor() ?? service.getActiveCodeEditor()) as unknown as monaco.editor.ICodeEditor | null;
+			const editor = service.getFocusedCodeEditor() ?? service.getActiveCodeEditor();
 			const frame = editor === null ? undefined : frames.get(editor);
 
 			if (frame === undefined) {
-				return toggle.handler(accessor, ...args);
+				toggle.handler(accessor, ...args);
+
+				return;
 			}
 
 			frame.toggleWrap();
@@ -656,10 +692,10 @@ async function start(): Promise<void> {
 	};
 
 	for (const editor of service.listCodeEditors()) {
-		follow(editor as unknown as monaco.editor.ICodeEditor);
+		follow(editor);
 	}
 
-	service.onCodeEditorAdd((editor) => { follow(editor as unknown as monaco.editor.ICodeEditor); });
+	service.onCodeEditorAdd((editor) => { follow(editor); });
 }
 
 /** An editor's frame, shown or taken down to match its file's pane. */
@@ -702,16 +738,34 @@ export function showPaneRuns(uri: string, runs: PaneRunBall[], pick: (id: string
 }
 
 /** Roll a ball down the gutter column of every editor showing `uri`, through `lines` (0-based, the order a run went) —
- *  once for each run `id`: a draw of the same run doesn't roll it again. */
-export function rollPaneBall(uri: string, id: string, lines: number[]): void {
+ *  once for each run `id`: a draw of the same run doesn't roll it again. `live`: the run is still going, and the ball
+ *  follows it to `lines`' last; once it ends, it settles there rather than rolling. */
+export function rollPaneBall(uri: string, id: string, lines: number[], live = false): void {
+	if (live) {
+		following.set(uri, id);
+
+		for (const frame of framesOf(uri)) {
+			frame.follow(lines.at(-1));
+		}
+
+		return;
+	}
+
 	if (rolled.get(uri) === id) {
 		return;
 	}
 
+	const followed = following.get(uri) === id;
+
 	rolled.set(uri, id);
+	following.delete(uri);
 
 	for (const frame of framesOf(uri)) {
-		frame.roll(lines);
+		if (followed) {
+			frame.settle();
+		} else {
+			frame.roll(lines);
+		}
 	}
 }
 
@@ -728,7 +782,7 @@ export function showPane(uri: string, entries: PaneEntry[] | undefined, render?:
 	started ??= start();
 	void started.then(async () => {
 		for (const editor of (await getService(ICodeEditorService)).listCodeEditors()) {
-			sync(editor as unknown as monaco.editor.ICodeEditor);
+			sync(editor);
 		}
 	});
 }

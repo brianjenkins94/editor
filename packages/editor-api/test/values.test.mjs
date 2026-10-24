@@ -56,6 +56,21 @@ test("bounds: a loop's late turns, a call's later values, later calls — droppe
 	assert.equal(batch.dropped, 4, "turns 2 and 3, the call's fourth value, the second call");
 });
 
+test("now: where a run is past the bounds, with each batch — and a batch for values only dropped", () => {
+	const record = new LiveRecord({ "turns": 1, "perCall": 100, "calls": 10 });
+
+	record.add(value({ "raw": 0, "turns": [0], "line": 3, "at": [40, 45], "step": 0 }));
+	assert.equal(record.drain().now, undefined, "the last value told was kept: it's where the run is");
+
+	record.add(value({ "raw": 1, "turns": [1], "line": 3, "at": [40, 45], "step": 1 }));
+	record.add(value({ "raw": 2, "turns": [2], "line": 5, "at": [60, 61], "step": 2 }));
+	assert.deepEqual(record.drain(), { "values": [], "calls": [], "dropped": 2, "now": { "line": 5, "at": [60, 61] } });
+	assert.equal(record.drain(), undefined, "nothing told since");
+
+	record.add(value({ "raw": "after", "line": 8, "step": 3 }));
+	assert.equal(record.drain().now, undefined, "kept again: the last value is where it is");
+});
+
 test("a call whose first value was dropped is named once all the same", () => {
 	const record = new LiveRecord({ "turns": 1, "perCall": 10, "calls": 5 });
 

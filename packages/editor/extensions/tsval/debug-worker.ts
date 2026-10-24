@@ -94,6 +94,10 @@ function liveIn(file: ts.SourceFile): LiveRecord {
 }
 
 let liveTimer: ReturnType<typeof setInterval> | undefined;
+/** When the live values were last told, and how many values were traced since the clock was last read: a run holds the
+ *  worker while it goes, so the interval can't fire — the trace tells them too, every quarter second. */
+let flushedAt = 0;
+let tracedSince = 0;
 
 /** Where the run is: a program file and a 1-based line in it — the entry's, or another of the program's (packages/tsval/README.md, *Modules*). */
 interface Place { "file": string; "line": number }
@@ -1816,6 +1820,15 @@ function traceValue(event: TraceEvent): void {
 
 	lastTraced = traced;
 	liveIn(place.file).add(traced);
+	tracedSince += 1;
+
+	if (tracedSince >= 1024) {
+		tracedSince = 0;
+
+		if (Date.now() - flushedAt >= 250) {
+			flushLive();
+		}
+	}
 }
 
 /** The run's process.argv, as the margin shows it (a command line: what Mock takes), on the first line reading it — if
@@ -1898,6 +1911,8 @@ function calleeName(node: ts.Node): string {
 
 /** Tell the adapter the live values new since it was last told. */
 function flushLive(): void {
+	flushedAt = Date.now();
+
 	for (const [file, record] of live) {
 		const batch = record.drain();
 

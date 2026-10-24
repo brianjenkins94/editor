@@ -392,6 +392,12 @@ held, the colour how it ended (ran, crashed, stopped short). A finished run roll
 the lines it went, in the order it went (at most 400 steps), then the ball settles. Picking an older ball shows its
 values again, where its code can still be found, and rolls its ball.
 
+A run going for more than a second (2026-10-24) has its ball out beside the line it's on, following it batch by batch,
+and settling where it ended rather than rolling from the top. A run holds the debug worker while it goes, so the
+values are told from its trace every quarter second, not only by a timer; and each batch says where the run is even
+when its values there weren't kept (`LiveBatch.now`), so the ball follows it past the bounds, and their count goes up
+as it runs. A live run on a save stops at its step budget well inside the second, so it's a Run that's followed.
+
 ### Kept across reloads, deduped, and shared as they're committed
 
 2026-10-22 (lib util/silo/traces; extensions/margin/runs.ts; git-engine.ts `shareRuns`). A finished run is kept as a
@@ -424,8 +430,6 @@ tracking what came from an input at runtime would raise the floor (NEXT.md).
 - **The bounds**, and how many calls the margin lets you pick between.
 - ~~**A picked run's coverage and run log**~~: built 2026-10-23 — each run keeps the coverage marks and profile it had as the
   latest, and a picked one shows its own (the latest shows the marks as they are now, following edits).
-- **The ball while a run is going**: a run takes a fraction of a second, so the ball rolls once it's finished, through
-  where it went; a long run could roll as it goes.
 
 ### Projections: cards, and later editing as cards
 
