@@ -7,18 +7,19 @@
  * text included), read as tooling reads: never asked about, never counted. typescript-eslint's project service reads the
  * workspace's tsconfig and the files it imports, so the type-aware rules have their types.
  *
- * The config is the workspace's own `eslint.config.*`, as ESLint finds it — the repository's code, run here: its
- * imports resolve as Node resolves them, the toolchain standing in for the workspace's installs of the packages it has
+ * The config is the workspace's own, as ESLint finds it for each file — the nearest `eslint.config.*` above it, so a
+ * package's own in a monorepo — from the working directory the extension gives (`eslint.workingDirectories`, as the
+ * desktop extension reads it). It's the repository's code, run here: its imports resolve as Node resolves them, the toolchain standing in for the workspace's installs of the packages it has
  * (the workspace's copies of those aren't seen: the toolchain's are the ones known to run here — a workspace's TypeScript
- * 7, say, typescript-eslint can't use), the workspace's node_modules for the rest. Without one, or when it fails to
- * load, the preset (`@brianjenkins94/util/eslint`) — and the failure is said. What runs here can't reach out: once the
+ * 7, say, typescript-eslint can't use), the workspace's node_modules for the rest. A file with none above it, or whose
+ * config fails to load, gets the preset (`@brianjenkins94/util/eslint`) — and the failure is said. What runs here can't reach out: once the
  * toolchain is fetched, the worker's network is shut (lockNetwork), and the workspace is read-only.
  *
  * Asked over its own channel (plain postMessage, as tsval's adapter and worker talk): it says `{ ready }` once it
  * listens; given `{ runtime: port }` (the extension's `workspaceRuntime().connect("eslint")`), it loads — then
- * `{ booted, ms, config }` (`config`: the file it lints with, or undefined for the preset, and `error` when the
- * workspace's failed to load), or `{ failed }` — and answers `{ id, lint: { file, text } }` with `{ id, messages }` and
- * `{ id, fix: { file, text } }` with `{ id, output, fixed }`, or `{ id, error }`. Requests sent before it booted wait.
+ * `{ booted, ms }`, or `{ failed }` — and answers `{ id, lint: { file, text, cwd } }` with `{ id, messages }` and
+ * `{ id, fix: { file, text, cwd } }` with `{ id, output, fixed }`, each with `config` (the file's config, or none for
+ * the preset) and `error` (why its config didn't load) — or `{ id, error }`. Requests sent before it booted wait.
  */
 import type { RuntimeFs } from "@brianjenkins94/editor-api/runtime";
 import { createRuntime } from "@brianjenkins94/almostnode";
@@ -29,13 +30,14 @@ import { RuntimeVfs } from "@brianjenkins94/editor-api/runtime-vfs";
 /** What a lint says of a file: eslint's messages, as LintMessage has them (what the extension shows). */
 interface Message { "line": number; "column": number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
-/** What runs ESLint, once loaded: lint a text, or fix it. */
-interface Linter { "lint": (text: string, file: string) => Promise<Message[]>; "fix": (text: string, file: string) => Promise<{ "output": string; "fixed": boolean }> }
+/** Which config linted a file: its path (none: the preset), and why it isn't the file's own when that failed to load. */
+interface Using { "config"?: string; "error"?: string }
+
+/** What runs ESLint, once loaded: lint a text, or fix it, as `file` from the working directory `cwd`. */
+interface Linter { "lint": (text: string, file: string, cwd: string) => Promise<Using & { "messages": Message[] }>; "fix": (text: string, file: string, cwd: string) => Promise<Using & { "output": string; "fixed": boolean }> }
 
 /** The module ESLint is loaded from: at the root, beside the toolchain's node_modules. */
 const ENTRY = "/eslint-entry.js";
-/** The names ESLint looks for a config by, in its order, at the workspace's root. */
-const CONFIGS = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", "eslint.config.mts", "eslint.config.cts"];
 
 /** The package a path is in, if it's under a node_modules folder: the name after the first one (`@scope/name` too). */
 function packageOf(path: string): string | undefined {
@@ -99,11 +101,8 @@ function lockNetwork(): void {
 	}
 }
 
-/** What ESLint lints with: the workspace's config, or the preset (`config` undefined) — and why not the workspace's. */
-interface Loaded { "linter": Linter; "config"?: string; "error"?: string }
-
-/** ESLint, loaded under almostnode, over the workspace `files`, with the workspace's config or else the preset. */
-async function load(files: RuntimeFs): Promise<Loaded> {
+/** ESLint, loaded under almostnode, over the workspace `files`: each file with its own config, or else the preset. */
+async function load(files: RuntimeFs): Promise<Linter> {
 	const archive = await fetch(new URL("./eslint-toolchain.tgz", import.meta.url));
 
 	if (!archive.ok) {
@@ -124,46 +123,65 @@ async function load(files: RuntimeFs): Promise<Loaded> {
 		vfs.writeFileSync(file, bytes);
 	}
 
-	const config = CONFIGS.map((name) => "/workspace/" + name).find((path) => files.stat(path, { "load": true })?.type === "file");
-	// (same-origin: the code is the toolchain the build packed and the workspace's config; `cwd` is the workspace, which
+	// (same-origin: the code is the toolchain the build packed and the workspace's configs; `cwd` is the workspace, which
 	// the preset reads its tsconfig against as it's imported; packages resolved as Node resolves them — the toolchain is
-	// what Node loaded; the config imported from this runtime's files, as Node imports it, TypeScript included)
+	// what Node loaded; a config imported from this runtime's files, as Node imports it, TypeScript included)
 	const runtime = await createRuntime(vfs, { "dangerouslyAllowSameOrigin": true, "cwd": "/workspace", "browserField": false, "nativeFileImports": false });
 	const loaded = await runtime.execute(`
-module.exports = async (config) => {
+module.exports = async () => {
 	const { ESLint } = require("eslint");
 	const messages = (result) => result.messages.map((message) => ({ "line": message.line, "column": message.column, "endLine": message.endLine, "endColumn": message.endColumn, "message": message.message, "ruleId": message.ruleId, "severity": message.severity, "fixable": message.fix !== undefined }));
-	const linterOf = async (options) => {
-		const linting = new ESLint(options);
-		const fixing = new ESLint({ ...options, "fix": true });
+	const pair = (options) => ({ "linting": new ESLint(options), "fixing": new ESLint({ ...options, "fix": true }) });
+	// (one ESLint a working directory, each finding a file's config above it as ESLint 10 does — and caching what it loads)
+	const byCwd = new Map();
+	const at = (cwd) => {
+		if (!byCwd.has(cwd)) {
+			byCwd.set(cwd, pair({ "cwd": cwd, "flags": ["unstable_native_nodejs_ts_config"] }));
+		}
 
-		// (the config is loaded now, so a config that can't be is known before anything is linted)
-		await linting.calculateConfigForFile("/workspace/index.ts");
-
-		return {
-			"lint": async (text, file) => messages((await linting.lintText(text, { "filePath": file, "warnIgnored": false }))[0] ?? { "messages": [] }),
-			"fix": async (text, file) => {
-				const [result] = await fixing.lintText(text, { "filePath": file, "warnIgnored": false });
-
-				return { "output": result?.output ?? text, "fixed": result?.output !== undefined && result.output !== text };
-			}
-		};
+		return byCwd.get(cwd);
 	};
-	const preset = async () => linterOf({ "cwd": "/workspace", "overrideConfigFile": true, "overrideConfig": (await import("@brianjenkins94/util/eslint")).default });
+	let preset;
+	const presetPair = async () => (preset ??= pair({ "cwd": "/workspace", "overrideConfigFile": true, "overrideConfig": (await import("@brianjenkins94/util/eslint")).default }));
+	// (the file's config, loaded now so one that can't be is known before anything is linted with it)
+	const using = async (file, cwd) => {
+		const own = at(cwd);
+		const config = await own.linting.findConfigFile(file);
 
-	if (config === undefined) {
-		return { "linter": await preset() };
-	}
+		if (config === undefined) {
+			return { "eslint": await presetPair() };
+		}
 
-	try {
-		return { "linter": await linterOf({ "cwd": "/workspace", "overrideConfigFile": config, "flags": ["unstable_native_nodejs_ts_config"] }), "config": config };
-	} catch (error) {
-		return { "linter": await preset(), "error": error instanceof Error ? error.message : String(error) };
-	}
+		try {
+			await own.linting.calculateConfigForFile(file);
+
+			return { "eslint": own, "config": config };
+		} catch (error) {
+			return { "eslint": await presetPair(), "config": config, "error": error instanceof Error ? error.message : String(error) };
+		}
+	};
+	const told = ({ config, error }) => ({ ...config === undefined ? {} : { "config": config }, ...error === undefined ? {} : { "error": error } });
+
+	// (what the workspace's root lints with, loaded now — its config, or the preset — so the first file waits on less)
+	await using("/workspace/index.ts", "/workspace");
+
+	return {
+		"lint": async (text, file, cwd) => {
+			const use = await using(file, cwd);
+
+			return { "messages": messages((await use.eslint.linting.lintText(text, { "filePath": file, "warnIgnored": false }))[0] ?? { "messages": [] }), ...told(use) };
+		},
+		"fix": async (text, file, cwd) => {
+			const use = await using(file, cwd);
+			const [result] = await use.eslint.fixing.lintText(text, { "filePath": file, "warnIgnored": false });
+
+			return { "output": result?.output ?? text, "fixed": result?.output !== undefined && result.output !== text, ...told(use) };
+		}
+	};
 };
 `, ENTRY);
 
-	return await (loaded.exports as (config: string | undefined) => Promise<Loaded>)(config);
+	return await (loaded.exports as () => Promise<Linter>)();
 }
 
 /** ESLint once it's loaded — what every request waits on, a request sent before the runtime's port arrived included. */
@@ -173,7 +191,7 @@ const linter = new Promise<Linter>((resolve) => {
 });
 
 globalThis.addEventListener("message", (event: MessageEvent) => {
-	const data = event.data as { "runtime"?: MessagePort; "id"?: number; "lint"?: { "file": string; "text": string }; "fix"?: { "file": string; "text": string } };
+	const data = event.data as { "runtime"?: MessagePort; "id"?: number; "lint"?: { "file": string; "text": string; "cwd": string }; "fix"?: { "file": string; "text": string; "cwd": string } };
 
 	if (data.runtime !== undefined) {
 		const link = connectRuntime(data.runtime, { "name": "eslint" });
@@ -181,9 +199,9 @@ globalThis.addEventListener("message", (event: MessageEvent) => {
 
 		const loading = link.ready.then(() => load(link.fs));
 
-		loaded(loading.then((done) => done.linter));
-		loading.then((done) => {
-			globalThis.postMessage({ "booted": true, "ms": Math.round(performance.now() - started), "config": done.config, "error": done.error });
+		loaded(loading);
+		loading.then(() => {
+			globalThis.postMessage({ "booted": true, "ms": Math.round(performance.now() - started) });
 		}, (error: unknown) => {
 			globalThis.postMessage({ "failed": error instanceof Error ? error.stack ?? error.message : String(error) });
 		});
@@ -202,9 +220,9 @@ globalThis.addEventListener("message", (event: MessageEvent) => {
 			const running = await linter;
 
 			if (data.lint !== undefined) {
-				globalThis.postMessage({ "id": id, "messages": await running.lint(data.lint.text, data.lint.file) });
+				globalThis.postMessage({ "id": id, ...await running.lint(data.lint.text, data.lint.file, data.lint.cwd) });
 			} else if (data.fix !== undefined) {
-				globalThis.postMessage({ "id": id, ...await running.fix(data.fix.text, data.fix.file) });
+				globalThis.postMessage({ "id": id, ...await running.fix(data.fix.text, data.fix.file, data.fix.cwd) });
 			}
 		} catch (error) {
 			globalThis.postMessage({ "id": id, "error": error instanceof Error ? error.message : String(error) });

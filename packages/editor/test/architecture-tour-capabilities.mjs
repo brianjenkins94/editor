@@ -1310,6 +1310,78 @@ test("eslint: the workspace's own eslint.config — its rules, reloaded as it ch
 	}
 });
 
+// A monorepo's packages, each with its own eslint.config and none at the root: ESLint finds each file's (as ESLint 10
+// does), and `eslint.workingDirectories` is the folder it works from, read as the desktop extension reads it — what a
+// rule sees as `context.cwd` (each config's own rule says it).
+test("eslint: each package's own config, from the working directory eslint.workingDirectories gives", async () => {
+	const workbench = session.workbench();
+	const write = (path, text) => workbench.evaluate(async ([file, contents]) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(file), new TextEncoder().encode(contents));
+	}, [path, text]);
+	const said = (path) => workbench.evaluate((file) => {
+		const { api } = globalThis.__editor;
+		const diagnostics = api.languages.getDiagnostics(api.Uri.file(file)).filter((diagnostic) => diagnostic.source === "eslint");
+
+		return { "codes": diagnostics.map((diagnostic) => diagnostic.code ?? ""), "cwd": diagnostics.find((diagnostic) => diagnostic.code === "here/cwd")?.message ?? null };
+	}, path);
+	const workingDirectories = (value) => workbench.evaluate((entries) => globalThis.__editor.api.workspace.getConfiguration("eslint").update("workingDirectories", entries ?? undefined, globalThis.__editor.api.ConfigurationTarget.Workspace), value);
+	// (a package's config: a rule of its own saying ESLint's working directory, and one rule more)
+	const config = (rule) => `export default [{ "plugins": { "here": { "rules": { "cwd": { "create": (context) => ({ "Program": (node) => { context.report({ node, "message": \`cwd \${context.cwd}\` }); } }) } } } }, "rules": { "here/cwd": "warn", "${rule}": "error" } }];\n`;
+	const files = ["/workspace/packages/a/package.json", "/workspace/packages/a/eslint.config.js", "/workspace/packages/a/src/a.js", "/workspace/packages/b/package.json", "/workspace/packages/b/eslint.config.js", "/workspace/packages/b/src/b.js"];
+
+	await write(files[0], "{}\n");
+	await write(files[1], config("no-var"));
+	await write(files[2], "var a = 1;\n\nconsole.log(a);\n");
+	await write(files[3], "{}\n");
+	await write(files[4], config("no-console"));
+	await write(files[5], "var b = 1;\n\nconsole.log(b);\n");
+	await workbench.evaluate(async ([a, b]) => {
+		const { api } = globalThis.__editor;
+
+		await api.window.showTextDocument(api.Uri.file(a), { "preview": false });
+		await api.window.showTextDocument(api.Uri.file(b), { "preview": false });
+	}, [files[2], files[5]]);
+
+	try {
+		// Each package's own rules, the setting as it is by default (`location`): ESLint works from the workspace's root.
+		const [a, b] = await eventually("each package's own config", async () => {
+			const both = [await said(files[2]), await said(files[5])];
+
+			return both[0].codes.includes("no-var") && both[1].codes.includes("no-console") ? both : undefined;
+		}, 240_000);
+
+		assert.ok(!a.codes.includes("no-console") && !b.codes.includes("no-var"), `not the other's: ${JSON.stringify([a, b])}`);
+		assert.equal(a.cwd, "cwd /workspace");
+
+		// `auto`: the nearest folder above the file that's a project's — its package's.
+		await workingDirectories([{ "mode": "auto" }]);
+		await eventually("a's package as its working directory", async () => ((await said(files[2])).cwd === "cwd /workspace/packages/a" || undefined), 120_000);
+
+		// A pattern: the folders it matches above the file.
+		await workingDirectories([{ "pattern": "./packages/*/" }]);
+		await eventually("b's package, by the pattern", async () => ((await said(files[5])).cwd === "cwd /workspace/packages/b" || undefined), 120_000);
+
+		// A directory listed, the longest holding the file — over a mode before it.
+		await workingDirectories([{ "mode": "auto" }, "packages"]);
+		await eventually("the listed directory", async () => ((await said(files[2])).cwd === "cwd /workspace/packages" || undefined), 120_000);
+	} finally {
+		await workingDirectories(undefined).catch(() => undefined);
+		await workbench.evaluate(async (paths) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("workbench.action.closeAllEditors");
+
+			for (const path of paths) {
+				await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+			}
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/packages"), { "recursive": true }).then(() => undefined, () => undefined);
+		}, files);
+	}
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });

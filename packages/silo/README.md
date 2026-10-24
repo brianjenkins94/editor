@@ -340,6 +340,10 @@ reported, with types. The engine bundled into tsserver, its plugin and the prese
 `eslint.config.*` is what it lints with (the preset when there's none, or when it fails to load — said as a problem on
 the config): its code runs in the worker, whose network is shut once the toolchain is fetched, over a read-only
 workspace; its imports resolve to the toolchain for the packages it carries, the workspace's node_modules for the rest.
+Since 2026-10-24 each file's config is the nearest above it, as ESLint 10 finds it (a monorepo's package configs, none
+at the root), and ESLint works from the folder `eslint.workingDirectories` gives, read as the desktop server reads it:
+listed directories and patterns (the longest holding the file), `auto` (the nearest folder with a package.json,
+.eslintignore or config), `location` (the root). The worker keeps an ESLint per working directory.
 
 ### Which tests reach what (designed 2026-10-22; the record built 2026-10-23)
 
@@ -549,8 +553,8 @@ feature of the Features view; `silo check` reports the checks that need no reach
 removed but documented (a removed entry's id or paths in a `.md`), experiment expired, stale entry, and dead ends (a
 command or view declared and never registered, a setting whose name its code never quotes). This repository's ledger
 holds its standing decisions (Run with Inputs removed; derived history, the compiled tier and the capability engine
-parked); its first check found one dead end, `eslint.workingDirectories` — not dead but half-honored (2026-10-24:
-ESLint lints from the workspace root, its default; per-folder configs are queued in NEXT.md).
+parked); its first check found one dead end, `eslint.workingDirectories` — not dead but half-honored then (ESLint
+linted from the workspace root, its default), and honored since 2026-10-24.
 
 Code is easy to add and hard to remove: removing takes an argument, keeping takes none, so a codebase built fast keeps
 everything it tried. A cleanup audit of this repo found almost nothing dead. The weight was code whose reason had lapsed

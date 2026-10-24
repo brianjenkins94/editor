@@ -14,9 +14,11 @@
  *     document's text;
  *   • the formatter is registered only while `eslint.format.enable` is true — the desktop extension's default is
  *     false, so `editor.defaultFormatter` alone doesn't make eslint format on either side;
- *   • the config is the workspace's `eslint.config.*` (else the preset): one that fails to load is a problem on that
- *     file, saying why and that the preset lints meanwhile, and a change to one starts the worker afresh, as the
- *     desktop server reloads its config.
+ *   • each file's config is the nearest `eslint.config.*` above it, as ESLint 10 finds it (else the preset), from the
+ *     working directory `eslint.workingDirectories` gives it, read as the desktop server reads it; a config that fails
+ *     to load is a problem on that file, saying why and that the preset lints meanwhile, and a change to one starts the
+ *     worker afresh, as the desktop server reloads its config. (`!cwd` is moot: the worker's process stays at the
+ *     workspace's root, and ESLint's `cwd` is the working directory.)
  */
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { workspaceRuntime } from "@brianjenkins94/editor-api/runtime";
@@ -32,19 +34,21 @@ const UNUSED_RULES = new Set(["no-unused-imports", "no-unused-private-class-memb
 /** What the worker says of a file (eslint's messages). */
 interface Message { "line": number; "column": number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
-/** The names ESLint finds a config by, at the workspace's root (worker.ts's CONFIGS). */
-const CONFIG_GLOB = "eslint.config.{js,mjs,cjs,ts,mts,cts}";
+/** The names ESLint finds a config by, in any folder (worker.ts: ESLint's own lookup). */
+const CONFIG_GLOB = "**/eslint.config.{js,mjs,cjs,ts,mts,cts}";
+/** What marks a folder as a project's, for `{ "mode": "auto" }`: the desktop server's marks, flat config's names among them. */
+const PROJECT_MARKS = new Set(["package.json", ".eslintignore", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", "eslint.config.mts", "eslint.config.cts"]);
 
-/** The worker: lint a text, or fix it — until it's disposed. */
-interface Worker { "lint": (file: string, text: string) => Promise<Message[]>; "fix": (file: string, text: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
+/** Which config linted a file (none: the preset), and why it isn't the file's own when that failed to load. */
+interface Using { "config"?: string; "error"?: string }
 
-/** What the worker lints with once it's loaded: the workspace's config file, or the preset (undefined) — and why not
- *  the workspace's, when it failed to load. */
-type OnConfig = (config: string | undefined, error: string | undefined) => void;
+/** The worker: lint a text, or fix it, as `file` from the working directory `cwd` — until it's disposed. */
+interface Worker { "lint": (file: string, text: string, cwd: string) => Promise<Message[]>; "fix": (file: string, text: string, cwd: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
 
 /** ESLint's worker (worker.ts, through its bootstrap `worker.js`), given its link into the workspace runtime once it
- *  listens. Undefined where there's no workspace runtime (no editor core in this host): nothing is linted. */
-function startWorker(context: vscode.ExtensionContext, onConfig: OnConfig): Worker | undefined {
+ *  listens; `onUsing` hears which config each answer came from. Undefined where there's no workspace runtime (no editor
+ *  core in this host): nothing is linted. */
+function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) => void): Worker | undefined {
 	const runtime = workspaceRuntime();
 
 	if (runtime === undefined) {
@@ -91,11 +95,7 @@ function startWorker(context: vscode.ExtensionContext, onConfig: OnConfig): Work
 		}
 
 		if (data["booted"] === true) {
-			const config = typeof data["config"] === "string" ? data["config"] : undefined;
-			const error = typeof data["error"] === "string" ? data["error"] : undefined;
-
-			console.info(`[eslint] ESLint loaded in ${String(data["ms"])} ms, linting with ${config ?? "the preset"}`);
-			onConfig(config, error);
+			console.info(`[eslint] ESLint loaded in ${String(data["ms"])} ms`);
 
 			return;
 		}
@@ -105,9 +105,10 @@ function startWorker(context: vscode.ExtensionContext, onConfig: OnConfig): Work
 		if (call !== undefined) {
 			pending.delete(data["id"] as number);
 
-			if (typeof data["error"] === "string") {
+			if (typeof data["error"] === "string" && !("messages" in data) && !("output" in data)) {
 				call.reject(new Error(data["error"]));
 			} else {
+				onUsing({ ...typeof data["config"] === "string" ? { "config": data["config"] } : {}, ...typeof data["error"] === "string" ? { "error": data["error"] } : {} });
 				call.resolve(data);
 			}
 		}
@@ -131,9 +132,9 @@ function startWorker(context: vscode.ExtensionContext, onConfig: OnConfig): Work
 		: Promise.reject(failure));
 
 	return {
-		"lint": async (file, text) => (await ask({ "lint": { "file": file, "text": text } }))["messages"] as Message[],
-		"fix": async (file, text) => {
-			const answer = await ask({ "fix": { "file": file, "text": text } });
+		"lint": async (file, text, cwd) => (await ask({ "lint": { "file": file, "text": text, "cwd": cwd } }))["messages"] as Message[],
+		"fix": async (file, text, cwd) => {
+			const answer = await ask({ "fix": { "file": file, "text": text, "cwd": cwd } });
 
 			return { "output": answer["output"] as string, "fixed": answer["fixed"] === true };
 		},
@@ -155,6 +156,91 @@ function settings(): { "enable": boolean; "validate": string[] | null; "customiz
 		"validate": config.get<string[] | null>("validate", null),
 		"customizations": Array.isArray(customizations) ? customizations.filter((entry): entry is { "rule": string; "severity": string } => entry !== null && typeof entry === "object" && typeof (entry as Record<string, unknown>)["rule"] === "string" && typeof (entry as Record<string, unknown>)["severity"] === "string") : []
 	};
+}
+
+/** An `eslint.workingDirectories` entry, as the desktop extension takes them. */
+type WorkingDirectory = string | { "directory": string } | { "pattern": string } | { "mode": string };
+
+/** A glob over folders as a regular expression: `**` across folders, `*` and `?` within one's name. */
+function globOf(pattern: string): RegExp {
+	const glob = pattern.replace(/^\.\//u, "").replace(/\/?$/u, "/");
+	const source = glob.replaceAll(/\*\*\/|[*?.+^${}()|[\]\\]/gu, (token) => ({ "**/": "(?:[^/]+/)*", "*": "[^/]*", "?": "[^/]" })[token] ?? `\\${token}`);
+
+	return new RegExp(`^${source}$`, "u");
+}
+
+/** The nearest folder from `file`'s up to `root` with a project's mark in it (PROJECT_MARKS), or `root`. */
+async function projectFolderOf(root: string, file: string): Promise<string> {
+	if (file.includes("/node_modules/")) {
+		return root;
+	}
+
+	for (let folder = file.slice(0, file.lastIndexOf("/")); folder.length > root.length; folder = folder.slice(0, folder.lastIndexOf("/"))) {
+		const names = await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)).then((entries) => entries.map(([name]) => name), () => []);
+
+		if (names.some((name) => PROJECT_MARKS.has(name))) {
+			return folder;
+		}
+	}
+
+	return root;
+}
+
+/** The folders an entry lists that could hold `file`: a directory (relative to `root`, or absolute), or each folder above
+ *  the file a pattern matches. */
+function candidatesOf(entry: WorkingDirectory, root: string, file: string): string[] {
+	if (typeof entry === "string" || "directory" in entry) {
+		const directory = typeof entry === "string" ? entry : entry.directory;
+
+		return [(directory.startsWith("/") ? directory : `${root}/${directory}`).replaceAll(/\/\.(?=\/|$)/gu, "").replace(/\/+$/u, "")];
+	}
+
+	if (!("pattern" in entry)) {
+		return [];
+	}
+
+	const pattern = globOf(entry.pattern);
+	const folders: string[] = [];
+
+	for (let folder = file.slice(0, file.lastIndexOf("/")); folder.length > root.length; folder = folder.slice(0, folder.lastIndexOf("/"))) {
+		if (pattern.test(`${folder.slice(root.length + 1)}/`)) {
+			folders.push(folder);
+		}
+	}
+
+	return folders;
+}
+
+/** The folder ESLint works from for `document` — `eslint.workingDirectories` as the desktop server reads it: of the
+ *  listed directories and patterns' folders holding the file, the longest, unless a `mode` comes after it; `auto` the
+ *  nearest folder above the file that's a project's (PROJECT_MARKS); else, `location` or the setting unset, the
+ *  workspace's root. */
+async function workingDirectoryOf(document: vscode.TextDocument): Promise<string> {
+	const root = (vscode.workspace.getWorkspaceFolder(document.uri) ?? vscode.workspace.workspaceFolders?.[0])?.uri.path ?? "/workspace";
+	const file = document.uri.path;
+	const entries = vscode.workspace.getConfiguration("eslint", document.uri).get<unknown>("workingDirectories");
+	let chosen: { "directory": string } | { "mode": string } | undefined;
+
+	// (an entry that isn't one of the shapes is passed over, as the desktop server passes it over)
+	const listed = (Array.isArray(entries) ? entries : []).filter((entry): entry is WorkingDirectory => typeof entry === "string" || (typeof entry === "object" && entry !== null));
+
+	for (const entry of listed) {
+		if (typeof entry === "object" && "mode" in entry) {
+			chosen = { "mode": entry.mode };
+		}
+
+		for (const directory of candidatesOf(entry, root, file)) {
+			if (file.startsWith(`${directory}/`) && (chosen === undefined || "mode" in chosen || chosen.directory.length < directory.length)) {
+				chosen = { "directory": directory };
+			}
+		}
+	}
+
+	if (chosen !== undefined && "directory" in chosen) {
+		return chosen.directory;
+	}
+
+	return chosen?.mode === "auto" ? projectFolderOf(root, file) : root;
 }
 
 /** Whether eslint lints `document`: `eslint.enable`, then `eslint.validate` (null: every JavaScript/TypeScript language). */
@@ -222,26 +308,26 @@ function wholeDocument(document: vscode.TextDocument): vscode.Range {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-	// (a workspace config that failed to load: a problem on it, apart from what linting it says)
+	// (a workspace config that failed to load: a problem on it, apart from what linting it says — until it loads)
 	const configProblems = vscode.languages.createDiagnosticCollection("eslint-config");
-	const onConfig: OnConfig = (config, error) => {
-		configProblems.clear();
-
-		const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
-
-		if (error !== undefined && folder !== undefined) {
-			void vscode.workspace.findFiles(new vscode.RelativePattern(folder, CONFIG_GLOB), null, 1).then(([file]) => {
-				if (file !== undefined) {
-					const problem = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 0), `ESLint couldn't load this config, so the preset lints meanwhile: ${error}`, vscode.DiagnosticSeverity.Error);
-
-					problem.source = "eslint";
-					configProblems.set(file, [problem]);
-				}
-			});
+	const onUsing = ({ config, error }: Using): void => {
+		if (config === undefined) {
+			return;
 		}
+
+		if (error === undefined) {
+			configProblems.delete(vscode.Uri.file(config));
+
+			return;
+		}
+
+		const problem = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 0), `ESLint couldn't load this config, so the preset lints meanwhile: ${error}`, vscode.DiagnosticSeverity.Error);
+
+		problem.source = "eslint";
+		configProblems.set(vscode.Uri.file(config), [problem]);
 	};
 
-	const first = startWorker(context, onConfig);
+	const first = startWorker(context, onUsing);
 
 	if (first === undefined) {
 		return;
@@ -263,7 +349,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			return undefined;
 		}
 
-		const { output, fixed } = await worker.fix(document.uri.fsPath, document.getText());
+		const { output, fixed } = await worker.fix(document.uri.fsPath, document.getText(), await workingDirectoryOf(document));
 
 		return fixed && output !== document.getText() ? output : undefined;
 	};
@@ -276,7 +362,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 
 		const { version } = document;
-		const messages = await worker.lint(document.uri.fsPath, document.getText()).catch((error: unknown) => {
+		const messages = await worker.lint(document.uri.fsPath, document.getText(), await workingDirectoryOf(document)).catch((error: unknown) => {
 			console.error("[eslint] couldn't lint", document.uri.fsPath, error instanceof Error ? error.message : String(error));
 
 			return undefined;
@@ -388,7 +474,8 @@ export function activate(context: vscode.ExtensionContext): void {
 			clearTimeout(restart);
 			restart = setTimeout(() => {
 				worker.dispose();
-				worker = startWorker(context, onConfig) ?? worker;
+				configProblems.clear();
+				worker = startWorker(context, onUsing) ?? worker;
 
 				for (const document of vscode.workspace.textDocuments) {
 					schedule(document, 0);
