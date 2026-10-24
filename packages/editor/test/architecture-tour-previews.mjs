@@ -287,13 +287,12 @@ test("a preview's fetch: a rule's result given in its place; unwatched, its reco
 			throw error;
 		}
 	};
-	// (every preview frame hidden, or shown again: as a dock tab behind another, nobody's watching it)
+	// (every preview frame's box hidden, or shown again: as a dock tab behind another, nobody's watching it)
 	const hidden = (hide) => session.page.evaluate((hiding) => {
 		for (const frame of document.querySelectorAll("iframe")) {
 			try {
 				if (frame.contentWindow.location.pathname.startsWith("/__virtual__/")) {
-					// eslint-disable-next-line webawesome/no-inline-styles -- the test standing in for a dock tab behind another
-					frame.style.visibility = hiding ? "hidden" : "";
+					frame.parentElement.hidden = hiding;
 				}
 			} catch { /* another origin's: not a preview */ }
 		}
