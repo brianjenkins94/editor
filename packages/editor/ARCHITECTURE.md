@@ -491,9 +491,9 @@ flowchart LR
   n_ext_event_sheet_recognizer_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_history -->|"reads"| n_store__silo_runs__file__jsonl
   n_ext_history <-.->|"commands"| n_ext_vscode
-  n_ext_insights -->|"reads, writes"| n_store__silo__file__json
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
+  n_ext_insights -->|"reads, writes"| n_store__silo__file__json
   n_ext_insights <-.->|"commands"| n_ext_vscode
   n_ext_json_language_features_jsonServerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_margin -->|"reads"| n_store__silo__gitattributes

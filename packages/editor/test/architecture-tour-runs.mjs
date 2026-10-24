@@ -1308,6 +1308,64 @@ test("features: a feature's status, set in the editor, goes into the ledger", as
 	}, 30_000);
 });
 
+// Halting (RUNNING.md, *Unattended runs*): a run a save selected, which nobody's looking at, gives a call what it returned
+// the last time it ran for real — and halts before one that never did, its line saying so with Rule… and Pin…. Pinning
+// a value is a rule: runs after an edit are given it.
+test("halt: a selected run halts before a call that never ran for real, and a pinned value is a rule", async () => {
+	const workbench = session.workbench();
+	const url = "https://rates.example.test/eur";
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const write = (path, lines) => api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(lines.join("\n")));
+
+		await write("/workspace/rates.js", ["async function rate() {", "\treturn 2;", "}", "", "module.exports = { rate };", ""]);
+		await write("/workspace/rates.test.js", ["const assert = require(\"node:assert\");", "const { test } = require(\"node:test\");", "const { rate } = require(\"./rates.js\");", "", "test(\"rate\", async () => {", "\tassert.equal(await rate(), 2);", "});", ""]);
+	});
+	await session.terminal("node --test rates.test.js", { "fresh": true });
+	await eventually("rates.test.js's test kept on rates.js", async () => (await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/.silo/local/traces/rates.js.jsonl")).then((bytes) => new TextDecoder().decode(bytes), () => ""))).includes("rates.test.js › rate") || undefined, 60_000);
+
+	// rate() now fetches — a call no run ever made for real — and the save selects rates.test.js, which ran rate.
+	await workbench.evaluate(async (address) => {
+		const { api } = globalThis.__editor;
+		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/rates.js"));
+		const text = editor.document.getText();
+		const at = text.indexOf("return 2;");
+
+		await editor.edit((builder) => {
+			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "return 2;".length)), `const response = await fetch("${address}");\n\n\treturn Number(await response.text());`);
+		});
+		await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+	}, url);
+	await session.page.keyboard.press("ControlOrMeta+s");
+
+	const state = await eventually("the selected run halted on rates.js", async () => {
+		const found = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "rates.js").catch(() => undefined));
+
+		return found?.end?.kind === "stopped" && /halted before net/u.test(found.end.message ?? "") ? found : undefined;
+	}, 60_000);
+	const halt = state.values.find((row) => row.label === "halted");
+
+	assert.match(state.end.message, new RegExp(`halted before net ${url.replaceAll(".", "\\.")}: it never ran for real`, "u"));
+	assert.deepEqual(halt?.cells, [`net ${url}`], "the call it halted before, on its line");
+	assert.ok(await workbench.evaluate(() => [...document.querySelectorAll("wa-button, button")].some((button) => button.textContent.trim() === "Pin…")), "Pin… on its line");
+
+	// Pinning a value: a rule in my policy — runs after an edit give the call that value.
+	assert.equal(await workbench.evaluate(([address, line]) => globalThis.__editor.api.commands.executeCommand("margin.pin", "file:///workspace/rates.js", "net", address, line, "2"), [url, halt.line - 1]), true);
+
+	const rules = await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const folder = api.Uri.file("/workspace/.silo/policy");
+		const files = await api.workspace.fs.readDirectory(folder);
+
+		return (await Promise.all(files.map(async ([name]) => new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.joinPath(folder, name)))))).join("\n");
+	});
+
+	assert.ok(rules.includes(url) && rules.includes("\"trigger\""), "the pin, a rule for runs after an edit");
+
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

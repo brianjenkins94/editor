@@ -267,8 +267,8 @@ function rowOfLine(line: number, lineValues: LiveValue[], ordered: Map<string, s
 	const binds = !named && (only.kind === "bind" || only.kind === "set" || only.kind === "input");
 	const label = labelOf(only, named, binds);
 	const group = `${call}/${depth}`;
-	// A call the run didn't make there — skipped, or given its recording: `<capability> <resource>`.
-	const unmade = lineValues.findLast((value) => value.kind === "skip" || value.kind === "given")?.value;
+	// A call the run didn't make there — skipped, given its recording, or halted before: `<capability> <resource>`.
+	const unmade = lineValues.findLast((value) => value.kind === "skip" || value.kind === "given" || value.kind === "halt")?.value;
 	const notMade = unmade === undefined ? {} : { "unmade": unmade };
 
 	if (depth === 0) {
@@ -733,6 +733,11 @@ function placeOf(anchors: Anchors | undefined, line: number, at: Range | undefin
 const CELL_KINDS = new Set(["number", "string", "boolean", "object", "error", "undefined", "branch", "set", "skip", "given"]);
 
 function cellKind(kind: string | undefined): PaneCell["kind"] {
+	// (a call a run halted before looks as one it skipped: not made)
+	if (kind === "halt") {
+		return "skip";
+	}
+
 	return kind !== undefined && CELL_KINDS.has(kind) ? kind as PaneCell["kind"] : undefined;
 }
 
@@ -785,21 +790,104 @@ function mockOf(uri: string, row: Row, session: Session | undefined): PaneAction
 	return { "title": "Mock…", "command": "margin.mockVariable", "arguments": [uri, row.name, row.at ?? null, (row.inline ?? row.cells.findLast((each) => each !== undefined))?.text ?? "", (row.inline ?? row.cells.findLast((each) => each !== undefined))?.kind ?? ""], "tooltip": "Give it another value: at this stop, or by a rule, each time the program gets here", ...making.has(key) || row.at === undefined || session?.anchors === undefined ? { "disabled": true } : {} };
 }
 
-/** A row's *Rule…* for a call a live run didn't make — skipped, or given its recording (`replayed`): what runs after an
- *  edit do with it. None for any other row, or a run someone was watching. */
-function unattendedOf(uri: string, row: Row, session: Session | undefined): PaneAction | undefined {
+/** A row's *Rule…* and *Pin…* for a call a live run didn't make — skipped, given its recording (`replayed`), or halted
+ *  before: what runs after an edit do with it. *Pin…* keeps a value past runs saw there (RUNNING.md, *Unattended runs*:
+ *  past runs are the default). None for any other row, or a run someone was watching. */
+function unattendedOf(uri: string, row: Row, session: Session | undefined): PaneAction[] {
 	// (a run someone was watching skipped a call because they said so, at its stop)
 	const text = session?.live === true ? row.unmade : undefined;
 
 	if (text === undefined || text === "") {
-		return undefined;
+		return [];
 	}
 
 	const [capability, ...rest] = text.split(" ");
 	const resource = rest.join(" ");
 	const key = `${uri}#unattended:${capability} ${resource}`;
 
-	return { "title": "Rule…", "command": "margin.unattended", "arguments": [uri, capability, resource], "tooltip": making.has(key) ? "Its rule is open in the Rule view" : "What runs after an edit, which nobody is watching, do with this call: a rule", ...making.has(key) ? { "disabled": true } : {} };
+	return [
+		{ "title": "Rule…", "command": "margin.unattended", "arguments": [uri, capability, resource], "tooltip": making.has(key) ? "Its rule is open in the Rule view" : "What runs after an edit, which nobody is watching, do with this call: a rule", ...making.has(key) ? { "disabled": true } : {} },
+		{ "title": "Pin…", "command": "margin.pin", "arguments": [uri, capability, resource, row.line], "tooltip": "Keep a value past runs saw here: runs after an edit are given it (a rule)" }
+	];
+}
+
+/** A value a run kept as a preview (`'hi'`, `12`, `true`, `null`) as the value itself — undefined for one that isn't a
+ *  primitive (an object's preview can't be given back as it was). */
+function previewed(text: string): { "value": unknown } | undefined {
+	if (/^'[\s\S]*'$/u.test(text)) {
+		return { "value": text.slice(1, -1).replaceAll("\\'", "'").replaceAll("\\\\", "\\") };
+	}
+
+	if (text === "undefined") {
+		return { "value": undefined };
+	}
+
+	try {
+		const value: unknown = JSON.parse(text);
+
+		return value === null || ["number", "boolean", "string"].includes(typeof value) ? { "value": value } : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The values past runs saw at a call on `line` of `uri`: what it returned the last time it ran for real (its recording),
+ *  then the values bound or returned on that line in the runs kept of the file — each once, the most seen first. */
+async function pastValues(uri: string, capability: string, resource: string, line: number): Promise<{ "value": unknown; "label": string; "detail": string }[]> {
+	const found = new Map<string, { "value": unknown; "label": string; "detail": string; "seen": number }>();
+	const recorded = await recordedOf(capability, resource).catch(() => null) ?? null;
+
+	if (recorded !== null) {
+		found.set(JSON.stringify(recorded.value) ?? "undefined", { "value": recorded.value, "label": typeof recorded.value === "string" ? `'${recorded.value}'` : String(JSON.stringify(recorded.value) ?? "undefined"), "detail": "what it returned the last time it ran for real", "seen": Number.MAX_SAFE_INTEGER });
+	}
+
+	for (const trace of await keptRuns(vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false))) {
+		for (const value of trace.values) {
+			const parsed = value.line === line && (value.kind === "bind" || value.kind === "return") && value.value !== undefined ? previewed(value.value) : undefined;
+
+			if (parsed !== undefined) {
+				const key = JSON.stringify(parsed.value) ?? "undefined";
+				const seen = found.get(key);
+
+				found.set(key, seen ?? { "value": parsed.value, "label": value.value ?? "", "detail": `${value.name} — seen in a past run`, "seen": 0 });
+				found.get(key)!.seen += trace.count;
+			}
+		}
+	}
+
+	return [...found.values()].toSorted((left, right) => right.seen - left.seen);
+}
+
+/** *Pin…*: a value past runs saw at the call, kept as a rule — runs after an edit give the call that value. `value`, when
+ *  it's given (an agent, a test), is pinned as it is; else the past values are offered. */
+async function pin(uri: string, capability: string, resource: string, line: number, given?: { "value": unknown }): Promise<boolean> {
+	let chosen = given;
+
+	if (chosen === undefined) {
+		const values = await pastValues(uri, capability, resource, line);
+
+		if (values.length === 0) {
+			void vscode.window.showInformationMessage(`No past values for ${capability} ${resource}: once it runs for real (Run, or the terminal), what it returned is there to pin — or Rule… gives any value.`);
+
+			return false;
+		}
+
+		const picked = await vscode.window.showQuickPick(values.map((each) => ({ "label": each.label, "detail": each.detail, "value": each.value })), { "title": `Pin ${capability} ${resource}`, "placeHolder": "The value runs after an edit are given" });
+
+		if (picked === undefined) {
+			return false;
+		}
+
+		chosen = { "value": picked.value };
+	}
+
+	await rulesSet(undefined, {
+		"when": { "logicalType_id": "all", "predicates": [{ "target_id": "trigger", "operator_id": "is", "argument": "edit" }, { "target_id": "capability", "operator_id": "is", "argument": capability }, { "target_id": "resource", "operator_id": "is", "argument": resource }] },
+		"then": [{ "action_id": "give", "target_id": "result", "argument": chosen.value }]
+	});
+	await Promise.resolve(vscode.commands.executeCommand("run.live.again", uri)).catch(() => undefined);
+
+	return true;
 }
 
 /** A row a run put on a line, as data: a function's call picker, its label, the line's own value, a column a turn of a
@@ -813,7 +901,7 @@ function rowItem(uri: string, row: Row, index: number, session: Session | undefi
 	};
 
 	const given = row.input === true ? givenArgv.get(uri) : undefined;
-	const actions = [mockOf(uri, row, session), unattendedOf(uri, row, session)].filter((action) => action !== undefined);
+	const actions = [mockOf(uri, row, session), ...unattendedOf(uri, row, session)].filter((action) => action !== undefined);
 
 	return {
 		"id": `values:${index}`,
@@ -1299,6 +1387,13 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 		}
 
 		await editing(uri, ruleUnattended(uri, capability, resource));
+	});
+	vscode.commands.registerCommand("margin.pin", async (value: unknown, capability: unknown, resource: unknown, line: unknown, given?: unknown) => {
+		if (typeof capability !== "string" || typeof resource !== "string" || typeof line !== "number") {
+			throw new TypeError("margin.pin: a call's capability, resource and line");
+		}
+
+		return pin(uriArg(value), capability, resource, line, given === undefined ? undefined : { "value": given });
 	});
 	vscode.commands.registerCommand("margin.mockArgv", async (value: unknown, text: unknown) => {
 		const uri = uriArg(value);

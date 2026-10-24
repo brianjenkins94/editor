@@ -78,7 +78,9 @@ stepping back through UI code, but stepping back needs stopping first. Not plann
 gated call's subject carries `trigger`; a call a live run would skip is given what it returned when it last ran for
 real, if that's recorded; its line has *Rule…*; and each run is kept, a ball you can pick. **Built (2026-10-23):**
 selection for tests — a save runs again, live and one at a time, each test file whose tests' traces on the saved file
-hold a declaration its text no longer has (running/live-run.ts `reachedTests`); an edit cancels what's queued. Not yet:
+hold a declaration its text no longer has (running/live-run.ts `reachedTests`); an edit cancels what's queued. Those
+runs are unattended (`__unattended`): a call no recording covers halts the run before it, its line saying so, with
+*Rule…* and *Pin…* (the Margin's `margin.pin`: the values past runs saw there, picked one kept as a rule). Not yet:
 a run of another program is kept only on its own file, so it isn't selected by an edit to a file it imported; and CI's
 selection (ambient code → the smoke suite). Decided: in a live run (the
 file in front of you, its skipped lines marked) a call with no recording is **skipped**; a run you aren't looking at

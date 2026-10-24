@@ -135,6 +135,11 @@ let liveRun = false;
 /** What calls returned when they last ran for real, by `<capability> <resource>` (the run contract's `__recorded`): a live
  *  run, which nobody is watching, gives a call its recording where it would otherwise skip it. */
 let recordedResults: Record<string, unknown> = {};
+/** A live run nobody's looking at (selected after an edit: RUNNING.md, *Unattended runs*): past runs are the default — a
+ *  call gets what it returned the last time it ran for real — and a call that never did halts the run there. */
+let unattended = false;
+/** What a halted run's error carries: the call it halted before. */
+const HALTED = Symbol("halted");
 /** The packages whose code the run ran (almostnode tells each as its first module runs), by folder: told with its
  *  coverage, for its envelope (whether anyone ran a version later found compromised). */
 const packagesRan = new Map<string, LoadedPackage>();
@@ -997,6 +1002,12 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 				return replayed(tagged.capability, resource, givenAs(tagged.capability, fn.apply(this, args), recordedResults[key]));
 			}
 
+			// Nobody's looking and it never ran for real: nothing to give it, so the run ends before it (but for a call the
+			// policy itself says to skip).
+			if (unattended && !policySkips(policy, tagged.capability, resource, liveRun)) {
+				halted(tagged.capability, resource);
+			}
+
 			return skipped(tagged.capability, resource, fn.apply(this, args), decided);
 		}
 
@@ -1127,6 +1138,22 @@ function skipped(capability: string, resource: string, result: unknown, decided?
 	}
 
 	return result;
+}
+
+/** An unattended run ends before a call that never ran for real — told on its line (its *Rule…* and *Pin…* there),
+ *  then thrown past the program's own catches, to end the run where it is. */
+function halted(capability: string, resource: string): never {
+	const node = evaluating?.currentNode;
+	const what = resource === "" ? capability : `${capability} ${resource}`;
+
+	if (evaluating !== undefined && node !== null && node !== undefined) {
+		const file = node.getSourceFile();
+		const { call, turns } = whereNow(evaluating);
+
+		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "name": "halted", "value": what, "kind": "halt", "call": call, "turns": turns, "step": evaluating.statements, "at": rangeOf(node) });
+	}
+
+	throw Object.assign(new Error(`halted before ${what}`), { [UNCATCHABLE]: true, [HALTED]: what });
 }
 
 /** A call a live run gave its recording in place of (`result`: the stand-in answering with it) — told on its line, as a
@@ -2094,6 +2121,14 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 				}
 			}
 		} catch (error) {
+			// An unattended run halted before a call that never ran for real: it stops there, saying why — not a crash.
+			if (typeof error === "object" && error !== null && HALTED in error) {
+				finish(0, stoppedAt(base, `halted before ${String((error as { [HALTED]: unknown })[HALTED])}: it never ran for real, so there's nothing to give it — Rule… or Pin… on its line`));
+				done = true;
+
+				return;
+			}
+
 			// A live run past its budget stops where it got to — saying so, not as a crash.
 			if (liveRun && error instanceof TsvalInternalError && error.message.startsWith("step budget exceeded")) {
 				finish(0, stoppedAt(base, "too long to run live — Run to finish"));
@@ -2240,6 +2275,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// A server it starts keeps it alive: out of work, it idles, serving.
 	liveRun = message.live === true;
 	recordedResults = liveRun && message.recorded !== undefined ? message.recorded : {};
+	unattended = liveRun && message.unattended === true;
 
 	// (a live run's timers at once — its waits skipped — and nothing keeps it alive past its first idle)
 	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": liveRun ? "fast" as const : "real" as const, "keepAlive": () => !liveRun && (held.size > 0 || readsStdin()) };

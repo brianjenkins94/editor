@@ -40,7 +40,9 @@
  * to its BABLR span ids, so a value or a count follows its code through edits and reformats.
  *
  * A live run — the editor runs the file again whenever typing pauses — has `__live: true` in its launch configuration.
- * It must not have effects (writes, requests, commands): skip them. A run the editor records has its id as `__runId`.
+ * It must not have effects (writes, requests, commands): skip them. One a save selected, which nobody's looking at, has
+ * `__unattended: true` too: a call no recording covers ends the run before it — a `halt` value on its line, the run's
+ * end there. A run the editor records has its id as `__runId`.
  */
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 
@@ -53,8 +55,9 @@ export interface LiveValue {
 	/** `set`: a value set by hand at a stop, not by the program. `input`: what the program read from outside —
 	 *  process.argv, as a command line — on the first line that reads it. `skip`: a call that wasn't made, its capability
 	 *  and resource the value. `given`: a call a live run gave what it returned when it last ran for real, instead of
-	 *  making it (its capability and resource the value). */
-	"kind": "bind" | "return" | "branch" | "set" | "input" | "skip" | "given";
+	 *  making it (its capability and resource the value). `halt`: a call an unattended run ended before, since it never
+	 *  ran for real and so there was nothing to give it (its capability and resource the value). */
+	"kind": "bind" | "return" | "branch" | "set" | "input" | "skip" | "given" | "halt";
 	/** The call it happened in (a `LiveCall.id`); 0 for the top level. */
 	"call": number;
 	"turns": number[];

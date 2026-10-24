@@ -10,7 +10,8 @@
  *
  * A save runs again what the edit reached, too (RUNNING.md, *Unattended runs*: "What runs"): each test whose trace on the
  * saved file (lib util/silo/traces' `test`) holds a declaration that's no longer in its text — it executed code that
- * changed. Their test files run live, one at a time, after the file itself; an edit cancels what's still queued.
+ * changed. Their test files run live, one at a time, after the file itself; an edit cancels what's still queued. Nobody's
+ * looking at those: a call in one that never ran for real halts it, its line saying so (Rule…, Pin…).
  */
 import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
@@ -95,8 +96,9 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		await startPath(document.uri.path, document.getText());
 	};
 
-	/** Start a live run of `path` (its text `text`): whether one started. */
-	const startPath = async (path: string, text: string): Promise<boolean> => {
+	/** Start a live run of `path` (its text `text`) — `unattended` for one a save selected, which nobody's looking at:
+	 *  a call that never ran for real halts it (RUNNING.md, *Unattended runs*). Whether one started. */
+	const startPath = async (path: string, text: string, unattended = false): Promise<boolean> => {
 		// (an app's file runs in its page, not here — RUNNING.md, *Apps*)
 		if (!enabled() || yours(path) || running.has(path) || starting.has(path) || await appRootOf(path, readText) !== undefined) {
 			return false;
@@ -107,7 +109,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		last.set(path, { "text": text, "at": Date.now() });
 
 		try {
-			return await vscode.debug.startDebugging(undefined, { "type": runDebugger(), "request": "launch", "name": `${path.split("/").pop()} (live)`, "program": path, "internalConsoleOptions": "neverOpen", "__live": true }, { "suppressDebugToolbar": true, "suppressDebugStatusbar": true, "suppressDebugView": true, "suppressSaveBeforeStart": true });
+			return await vscode.debug.startDebugging(undefined, { "type": runDebugger(), "request": "launch", "name": `${path.split("/").pop()} (live)`, "program": path, "internalConsoleOptions": "neverOpen", "__live": true, ...unattended ? { "__unattended": true } : {} }, { "suppressDebugToolbar": true, "suppressDebugStatusbar": true, "suppressDebugView": true, "suppressSaveBeforeStart": true });
 		} finally {
 			starting.delete(path);
 		}
@@ -125,7 +127,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			const text = await readText(selected);
 
 			// (one that can't run now — a run of yours of it going, say — is skipped)
-			if (text === undefined || !await startPath(selected, text)) {
+			if (text === undefined || !await startPath(selected, text, true)) {
 				selected = undefined;
 				await next();
 			}

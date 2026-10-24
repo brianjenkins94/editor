@@ -31,7 +31,7 @@ export interface Crash { "line": number; "at": [number, number]; "message": stri
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay; "live"?: boolean; "recorded"?: Record<string, unknown> }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay; "live"?: boolean; "unattended"?: boolean; "recorded"?: Record<string, unknown> }
 	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
 	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
