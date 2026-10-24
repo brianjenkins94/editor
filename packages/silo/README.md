@@ -2,10 +2,11 @@
 
 Silo is everything that should exist when trying to build software safely in the 21st century. It does four jobs:
 
-1. **Anticipate.** Static analysis (and deobfuscation) works out what a package might need.
+1. **Anticipate.** Static analysis (and deobfuscation) works out what a package might need, and what your own code
+   might do: which functions are pure, which tests a change can reach.
 2. **Track.** It records what each package needs over time, to protect you from a compromised one.
-3. **Remember.** It keeps your policy and a record of your runs, to understand the coverage and growth of your program
-   over time.
+3. **Remember.** It keeps your policy and a record of your runs (what they reached, what they saw stay pure), to
+   understand the coverage and growth of your program over time.
 4. **Gate.** It protects you from arbitrary code running on your system by gating potentially dangerous fs, net and
    env access, in the day of AI and data exfiltration.
 
@@ -106,9 +107,9 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
    `features` and `history` rest on the parked feature layer.
 6. **The leftovers.** Whether `packages` and `deobfuscate` get wired into the baseline (see 1), and whether `guard`
    stays. (`provenance` and `review`, the dropped AI-approval purpose's, are removed.)
-7. **Tests and purity have no job yet.** Which tests reach which code, and which functions are pure (both designed
-   below, neither built), are facts about your own code, not about packages or calls. Keeping what runs observed is
-   Remember; choosing which tests to run, and deciding purity statically, fit none of the four as they're written.
+7. ~~**Tests and purity have no job yet.**~~ Decided 2026-10-24: no fifth job. Choosing which tests a change reaches,
+   and deciding purity statically, are Anticipate (the heuristic floor); what runs observed — reach, purity seen — is
+   Remember (the runtime ceiling). The jobs at the top say so.
 
 ## Design: one silo, two front ends
 
@@ -548,7 +549,8 @@ feature of the Features view; `silo check` reports the checks that need no reach
 removed but documented (a removed entry's id or paths in a `.md`), experiment expired, stale entry, and dead ends (a
 command or view declared and never registered, a setting whose name its code never quotes). This repository's ledger
 holds its standing decisions (Run with Inputs removed; derived history, the compiled tier and the capability engine
-parked); its first check found one dead end, `eslint.workingDirectories`.
+parked); its first check found one dead end, `eslint.workingDirectories` — not dead but half-honored (2026-10-24:
+ESLint lints from the workspace root, its default; per-folder configs are queued in NEXT.md).
 
 Code is easy to add and hard to remove: removing takes an argument, keeping takes none, so a codebase built fast keeps
 everything it tried. A cleanup audit of this repo found almost nothing dead. The weight was code whose reason had lapsed
@@ -623,23 +625,22 @@ feature** (often "a path set people name", not a way in).
 
 From tests and purity (both above):
 
-1. **Which job they are**, or whether there's a fifth ("What doesn't fit", 7).
-2. **How CI's evidence gets into git.** A commit by CI when its reach sets change (rare once they settle), or git notes
-   (`refs/notes/silo`, merged with git's own `cat_sort_uniq`), which stay out of main's history but outside the model
-   where history is the committed `.silo/`.
+1. ~~**Which job they are.**~~ Decided 2026-10-24: Anticipate and Remember, no fifth ("What doesn't fit", 7).
+2. ~~**How CI's evidence gets into git.**~~ Decided 2026-10-24: a commit by CI when its reach sets change (rare once
+   they settle), marked so it doesn't start CI again — history stays the committed `.silo/`; not git notes.
 3. ~~**What runs the unit tests.**~~ Decided 2026-10-23: tsval, in the editor first (`node --test` in its terminal, on
    its own node:test: editor RUNNING.md, *Tests*); silo's command line later through tsval's host, the one `silo run`
    needs. The same span ids as runs, and the only way tests can observe purity. The cost is speed (an interpreter);
    packages run natively.
-4. **The architecture suites' shared session.** Tests run in order in one session, so one test's async work lands in
-   the next. Waiting for quiet between tests, or a session per test, would make their reach their own; or accept it, and
-   let ambient code select the smoke suite.
-5. **The ambient line.** 30% of a suite's tests was one setting in the spike.
+4. ~~**The architecture suites' shared session.**~~ Decided 2026-10-24: accepted — one test's async work landing in
+   the next is why ambient code (below) selects the smoke suite rather than the tests that happened to see it.
+5. ~~**The ambient line.**~~ Decided 2026-10-24: 30% of a suite's tests, one setting, tuned from what selection misses.
 6. **Size.** Architecture tests reach about 340 declarations each: across 97 tests, tens of thousands of `tested`
-   entries in the evidence files.
-7. **Test identity.** A test is its file and full title; renaming one orphans its record until it runs again.
-8. **A selection's safety**, which needs the failure history first.
-9. **A subcommand, or not.** Selection could be `silo run`'s (`--changed`), or its own command, once it has a job.
+   entries in the evidence files. Accepted until selection runs in CI and has numbers.
+7. ~~**Test identity.**~~ Decided 2026-10-24: its file and full title; a renamed test records again on its next run.
+8. **A selection's safety**, which needs the failure history first: judged once selection has run in CI a while.
+9. ~~**A subcommand, or not.**~~ Decided 2026-10-24: neither — selection isn't the silo command line's; it's the
+   editor's (on a save) and CI's.
 10. ~~**How much purity static analysis decides.**~~ Measured 2026-10-24 (*Purity*, above): 80% of functions get a
     definite verdict, 22% of them pure; the unknown 20% are mostly dynamic dispatch and external packages.
 

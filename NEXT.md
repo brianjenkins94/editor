@@ -13,24 +13,27 @@ How it's kept:
 
 ## Queue
 
-1. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
-   one a rule's (or a recording's) result too, so an app can run unattended (RUNNING.md, *What it needs*; *A
-   call's result*). *Waits on:* *Decisions* d. *Done:* a rule giving a fetch's result answers a preview's fetch.
+1. **`eslint.workingDirectories`, honored.** ESLint lints every file from the workspace root with the root's
+   `eslint.config.*` (or the preset) — the setting's default, `[{ "mode": "location" }]`, for a repo with one config. A
+   monorepo with a config per package and none at the root gets the preset where desktop would use each package's.
+   Read the setting as the desktop extension does (`location`, `auto`, explicit directories and patterns) and lint each
+   file with its working directory's config: a linter per directory in the worker (extensions/eslint/worker.ts).
+   *Done:* in a workspace with two packages' configs and none at the root, each package's files get their own rules.
 
-2. **The terminal's first-hour commands and the tools agents expect.** Commands people type within the first hour:
-   `tsc` (the TypeScript server's diagnostics, printed as tsc does), `eslint` (the in-browser engine over the given
-   files), `silo features|history` (util/silo over isomorphic-git snapshots), `curl`/`wget` (just-bash's `network`,
-   gated by the capability rules), `man <cmd>` (its `--help`), `date` in the browser's time zone, and `ln -s` (or a
-   plain "not supported"). Tools agents look for: `code_definition`, `code_references`, `code_hover`, `code_symbols`
-   (VS Code's `execute…Provider` commands; today an agent greps), `editor_open` (show the user a file at a line),
-   `tests_run` (node:test results as data), `silo_features`, `silo_history`. Conventions: workbench/terminal/catalog.ts,
-   app/tools/host.ts. *Done:* each exists as its folder, with a test.
+2. **A result given to a preview's call.** A preview's fetches are decided at the service worker, real or denied; give
+   one a rule's (or a recording's) result too (RUNNING.md, *What it needs*; *A call's result*). The preview's reload on
+   an edit is the app's run (decided 2026-10-24, RUNNING.md *Open*): watched while it's shown, unattended while it's
+   hidden, its fetches then given their recordings and one with none halting. *Done:* a rule giving a fetch's result
+   answers a preview's fetch, and a hidden preview's reload replays its recordings.
 
 3. **Selection beyond a file's own tests.** A run of a program is kept only on its own file, so an edit to a module it
    imported doesn't select it: keep a run's trace on each file it executed, as a test's is, and select it the same way.
-   And CI: select the architecture suites' tests by what they reached, ambient code (reached at boot, or by most tests)
-   selecting the smoke suite only (packages/silo/README.md, *Which tests reach what*: "Selecting", "Trust"). *Done:*
-   editing an imported module re-runs the programs that ran it; CI runs only the suites a change reached.
+   And CI: select the architecture suites' tests by what they reached (build/coverage.ts, `COVERAGE=1`, instruments
+   them; read each test's coverage from the realms the harness keeps), ambient code (reached at boot, or by 30% of a
+   suite's tests) selecting the smoke suite only, CI committing its reach when it changes (packages/silo/README.md,
+   *Which tests reach what*: "Selecting", "Trust"; its *Decisions to make*). Selection is the editor's and CI's, not
+   the silo command line's. *Done:* editing an imported module re-runs the programs that ran it; CI runs only the
+   suites a change reached.
 
 4. **unenv's own modules, audited.** Each miss so far (EventEmitter as a class; streams; string_decoder; assert with no
    messages and JSON equality, 2026-10-23) was a module unenv wrote itself rather than ported from Node, and Node's own
@@ -78,14 +81,11 @@ How it's kept:
 
 ## Decisions
 
-a. **The coverage spike's leftovers**: `packages/editor/build.ts`, `packages/editor/build/coverage.ts` and five lines
-   in `test/architecture-harness.mjs`, uncommitted — commit them as an opt-in `COVERAGE=1` path, or drop them.
-d. **An app's unattended run**: is the preview's reload on an edit (HMR) that run, its fetches replayed at the service
-   worker? (RUNNING.md *Open*.)
-e. **The rest of packages/silo/README.md's *Decisions to make*** (which job tests and purity are; how CI's evidence gets
-   into git; test identity; size; a subcommand or not) — none blocks the queue above.
-g. **Whether halting is an action of its own** a rule can choose, for a call that should never run without a fresh
-   look, watched or not (RUNNING.md *Open*, the `trigger` target). (Unattended defaults: past runs', decided; halting built.)
-h. **`eslint.workingDirectories`** (the ledger's first dead end, `silo check`): declared for parity with the desktop
-   extension, never read (in the browser the workspace root is always the working directory). Keep it (`silo status`
-   it active, with that reason) or take its declaration out.
+None open (the last ones settled 2026-10-24: their answers are in the docs above them).
+
+## Parked
+
+- **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one): `tsc`,
+  `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`, `code_references`,
+  `code_hover`, `code_symbols`, `editor_open`, `tests_run`, `silo_features`, `silo_history`. Conventions when one is
+  asked for: workbench/terminal/catalog.ts, app/tools/host.ts.

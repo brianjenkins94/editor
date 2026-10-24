@@ -273,8 +273,10 @@ fails the run. Built: the target; not built: halting.
 - What a recorded stop keeps of an object, and how one stop is told from another (the event, the render, the turn).
 - Does a breakpoint condition become a rule's *when*, with *stop* its action: one model for stopping and deciding?
 - Unattended runs (*Unattended runs*):
-  - **An app's unattended run.** The preview already reloads on an edit (HMR). Is that reload the unattended run, with
-    its fetches replayed at the service worker?
+  - ~~**An app's unattended run.**~~ Decided 2026-10-24: the preview's reload on an edit (HMR) is the app's run. While
+    the preview is shown someone's watching, and its fetches go as the policy says; while it's hidden it's unattended,
+    each fetch given its recording at the service worker and one with none halting. A rule's given result answers a
+    fetch either way.
   - ~~**How much runs after an edit.**~~ Decided 2026-10-23: everything selection picks, one at a time, a new edit
     cancelling what's still queued; no budget.
   - **A database client's calls as the boundary**, if replaying at the wire proves brittle: the members your code calls
@@ -282,8 +284,8 @@ fails the run. Built: the target; not built: halting.
 - The `trigger` target:
   - **One target or a flag.** `trigger` with three values, or `attended` (yes or no), with CI an unattended run whose
     halts fail.
-  - **Whether halting deserves its own action.** One a rule could choose while someone's watching too, for a call that
-    should never run unattended or attended without a fresh look.
+  - ~~**Whether halting deserves its own action.**~~ Decided 2026-10-24: no — a rule that says `ask` is that call:
+    asked while someone's watching, halted when no one is.
   - ~~**Where defaults live.**~~ Decided 2026-10-23: past runs are the default — a call gets what it last returned for
     real, and only one that never ran for real halts; pinning a value past runs saw is a rule (*Unattended runs*).
   - ~~**Matching a recording.**~~ Built 2026-10-23: a recording is keyed by the whole request — its capability and

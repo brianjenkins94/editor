@@ -178,6 +178,11 @@ export async function startSession(options = {}) {
 	await options.prepare?.(context);
 
 	const page = await context.newPage();
+
+	// COVERAGE=1: the session's realms, where each test's coverage is read (build/coverage.ts instruments them).
+	if (process.env.COVERAGE === "1") {
+		(globalThis.__coverageSessions ??= new Set()).add({ "page": page, "context": context });
+	}
 	// What went wrong in the page, kept to say why when the editor doesn't boot (and printed as it happens in CI).
 	const pageErrors = [];
 	// What the page printed lately — the root prints every record the hub tree collects ([source] text).
