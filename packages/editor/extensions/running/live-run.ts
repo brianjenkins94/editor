@@ -115,9 +115,10 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		}
 	};
 
-	/** The next test file a save reached, once nothing it queued is running. */
+	/** The next test file a save reached, once nothing else live is running — the saved file's own run first, so what a
+	 *  selected run did to a file's Margin (a halt, say) is the last word there, not overwritten by the file's own. */
 	const next = async (): Promise<void> => {
-		if (selected !== undefined && running.has(selected)) {
+		if ((selected !== undefined && running.has(selected)) || starting.size > 0 || [...running.keys()].some((path) => path !== selected)) {
 			return;
 		}
 
@@ -182,6 +183,10 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 
 			if (path === selected) {
 				selected = undefined;
+			}
+
+			// (whichever live run ended — the saved file's own, or a selected one — the queue goes on)
+			if (isLive(session) && queued.length > 0) {
 				void next();
 			}
 		}),
@@ -218,8 +223,8 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 				}
 
 				stop(document.uri.path);
-				void start(document);
-				void select(document);
+				// (the file's own run started first: what the save reached runs after it)
+				void start(document).then(() => select(document));
 			}, SAVE_DEBOUNCE_MS);
 		}),
 		// Run a file again now (a rule just saved for its calls, say), whatever ran before.
