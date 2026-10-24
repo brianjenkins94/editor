@@ -1483,9 +1483,12 @@ test("runs kept: a long run's ball follows it while it goes, then settles", asyn
 	// Ended: it ran, and the ball settles where it was rather than rolling from the top again.
 	await eventually("the run, ended", async () => ((await state())?.runs.at(-1)?.state === "ran" || undefined), 30_000);
 
-	const ended = await ball();
+	// (the pane draws its ball a moment after the Margin's state says so)
+	await eventually("the ball, settled where the run ended — not rolled again from the top", async () => {
+		const shown = await ball();
 
-	assert.ok(!ended.out || ended.settled, `settled, not rolling again: ${JSON.stringify(ended)}`);
+		return !shown.out || shown.settled || undefined;
+	}, 10_000);
 	await workbench.evaluate(async (path) => {
 		const { api } = globalThis.__editor;
 
