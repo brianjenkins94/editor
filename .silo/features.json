@@ -1,33 +1,33 @@
 {
-	"Run with Inputs": {
-		"status": "removed",
-		"why": "the margin's Mock… and a rule giving process.argv replaced it (RUNNING.md, *Rules*)",
-		"since": "2026-10-23",
-		"key": "command|editor.runWithInputs",
-		"in": "9482074"
-	},
-	"capability engine": {
-		"status": "parked",
-		"why": "paused 2026-10-02 for coverage and profiling; its records may move into the run ledger",
-		"since": "2026-10-23",
-		"paths": [
-			"packages/editor/extensions/capabilities/engine.ts"
-		]
-	},
-	"derived history": {
-		"status": "parked",
-		"why": "its ways-in list is this repository's alone; features from tests are the portable way in (silo README, *Derived history*)",
-		"since": "2026-10-23",
-		"paths": [
-			"packages/editor/extensions/history"
-		]
-	},
-	"tsval compiled tier": {
-		"status": "parked",
-		"why": "until a program is too slow in practice (tsval README, *A compiled tier*)",
-		"since": "2026-10-23",
-		"paths": [
-			"packages/tsval/bench/compile-ceiling.ts"
-		]
-	}
+  "Run with Inputs": {
+    "status": "removed",
+    "why": "the margin's Mock… and a rule giving process.argv replaced it (RUNNING.md, *Rules*)",
+    "since": "2026-10-23",
+    "key": "command|editor.runWithInputs",
+    "in": "9482074"
+  },
+  "capability engine": {
+    "status": "parked",
+    "why": "paused 2026-10-02 for coverage and profiling; its records may move into the run ledger",
+    "since": "2026-10-23",
+    "paths": [
+      "packages/editor/extensions/capabilities/engine.ts"
+    ]
+  },
+  "derived history": {
+    "status": "parked",
+    "why": "its ways-in list is this repository's alone; features from tests are the portable way in (silo README, *Derived history*)",
+    "since": "2026-10-23",
+    "paths": [
+      "packages/editor/extensions/history"
+    ]
+  },
+  "tsval compiled tier": {
+    "status": "parked",
+    "why": "until a program is too slow in practice (tsval README, *A compiled tier*)",
+    "since": "2026-10-23",
+    "paths": [
+      "packages/tsval/bench/compile-ceiling.ts"
+    ]
+  }
 }
