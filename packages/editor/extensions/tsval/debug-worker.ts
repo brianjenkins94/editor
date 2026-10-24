@@ -33,7 +33,7 @@ import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { unpack } from "@brianjenkins94/almostnode/packages";
 import { policySkips, recordingKey, requestOf, triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
 import { revive } from "@brianjenkins94/editor-api/recorded";
-import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
+import { connectRuntime, layered } from "@brianjenkins94/editor-api/runtime";
 
 import { LiveRecord } from "@brianjenkins94/editor-api/values";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
@@ -138,6 +138,9 @@ let recordedResults: Record<string, unknown> = {};
 /** A live run nobody's looking at (selected after an edit: RUNNING.md, *Unattended runs*): past runs are the default — a
  *  call gets what it returned the last time it ran for real — and a call that never did halts the run there. */
 let unattended = false;
+/** A live run's own writable layer over the workspace's files (editor-api's `layered`): its writes go there and are
+ *  thrown away with it, its reads see them. None for a run someone started. */
+let runLayer: ReturnType<typeof layered> | undefined;
 /** What a halted run's error carries: the call it halted before. */
 const HALTED = Symbol("halted");
 /** The packages whose code the run ran (almostnode tells each as its first module runs), by folder: told with its
@@ -705,7 +708,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		const link = editorLink;
 
 		await link.ready.then(() => {
-			programFsFor = (cwd) => createFsShim(new RuntimeVfs(link.fs), () => cwd);
+			programFsFor = (cwd) => createFsShim(new RuntimeVfs(runLayer ?? link.fs), () => cwd);
 		}, () => undefined);
 	}
 
@@ -920,6 +923,21 @@ function madeArgs(capability: string, args: unknown[], resourceArg: number, cwd:
 	return capability.startsWith("fs:") && typeof argument === "string" && !argument.startsWith("/") ? args.map((each, index) => (index === resourceArg ? `${cwd}/${argument}` : each)) : args;
 }
 
+/** `path`, absolute and with `.` and `..` resolved — as the run's layer keys its files. */
+function normalPath(path: string): string {
+	const parts: string[] = [];
+
+	for (const part of path.split("/")) {
+		if (part === "..") {
+			parts.pop();
+		} else if (part !== "" && part !== ".") {
+			parts.push(part);
+		}
+	}
+
+	return "/" + parts.join("/");
+}
+
 /** Whether a call on `path` is on a workspace file — one the editor makes, and keeps among the run's effects itself. */
 function editorKeeps(capability: string, path: unknown): boolean {
 	return capability.startsWith("fs:") && typeof path === "string" && (path === "/workspace" || path.startsWith("/workspace/"));
@@ -993,8 +1011,12 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		// Skipped (by the policy, or a live run's: not made, the run going on — as at its stop), made, or refused — as any
 		// debugger's calls through the runtime's files are (gate.ts).
 		const verdict = verdictOf(policy, tagged.capability, resource, liveRun);
+		// A live run's write to a workspace file goes into its own layer (thrown away when it ends) instead of not happening,
+		// and a read of what it wrote reads it there — but for a call a rule itself skips.
+		const target = madeArgs(tagged.capability, args, tagged.resourceArg, cwd)[tagged.resourceArg];
+		const intoLayer = verdict === "skip" && runLayer !== undefined && programFs !== undefined && editorKeeps(tagged.capability, target) && !policySkips(policy, tagged.capability, resource, liveRun) && (tagged.capability !== "fs:read" || runLayer.holds(normalPath(String(target))));
 
-		if (verdict === "skip") {
+		if (verdict === "skip" && !intoLayer) {
 			// A live run's skip (not the policy's): what the call returned when it last ran for real, given back, if it did —
 			// the same request's (a POST's recording isn't a GET's).
 			const key = recordingKey(tagged.capability, resource, requestOf(tagged.capability, args));
@@ -1023,8 +1045,11 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		// A relative path is the program's directory's (its process.cwd(): a terminal's), as node resolves it.
 		const made = madeArgs(tagged.capability, args, tagged.resourceArg, cwd);
 
-		// (a workspace file's call the editor makes, and keeps among the run's effects itself)
-		if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
+		// (a workspace file's call the editor makes, and keeps among the run's effects itself — but one into the run's own
+		// layer, which the editor never sees)
+		if (intoLayer) {
+			tally(tagged.capability, resource, "made", undefined, "layer");
+		} else if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
 			tally(tagged.capability, resource, "made", undefined, decided);
 		}
 
@@ -2277,6 +2302,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	liveRun = message.live === true;
 	recordedResults = liveRun && message.recorded !== undefined ? message.recorded : {};
 	unattended = liveRun && message.unattended === true;
+	// (a fresh layer for each live run: what the last one wrote is gone)
+	runLayer = liveRun && editorLink !== undefined ? layered(editorLink.fs) : undefined;
 
 	// (a live run's timers at once — its waits skipped — and nothing keeps it alive past its first idle)
 	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": liveRun ? "fast" as const : "real" as const, "keepAlive": () => !liveRun && (held.size > 0 || readsStdin()) };

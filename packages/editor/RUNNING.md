@@ -85,7 +85,8 @@ a run of another program is kept only on its own file, so it isn't selected by a
 selection (ambient code → the smoke suite). Decided: in a live run (the
 file in front of you, its skipped lines marked) a call with no recording is **skipped**; a run you aren't looking at
 **halts** (below). Recordings are keyed by the whole request (built 2026-10-23: editor-api gate.ts `requestOf`, a
-method and a hash of the body beyond a plain read's URL). Not built: the per-run file-system layer.
+method and a hash of the body beyond a plain read's URL). And each live run has a writable layer of its own (built
+2026-10-23: editor-api runtime.ts `layered`).
 
 Runs the editor starts on its own after an edit, so you see how a change affects what already ran without pressing
 Run, and without a testing UI. They're runs like any other: the same session, margin, run log and evidence. The
@@ -107,7 +108,7 @@ like any other. So questions come only from runs that got that far, one per call
 returned the last time it ran for real (its recording), as live runs do already; only a call that never ran for real
 halts. To keep a value instead, **pin** it: the call's line has a dropdown of the values past runs observed there, and
 picking one saves a rule — *at this call, give that value* — so a pin is a rule, made without opening the rule editor
-(*Mock…* opens it for any other value). File writes need no answer once a run has a writable layer of its own (*Open*).
+(*Mock…* opens it for any other value). File writes need no answer: a live run writes into a layer of its own.
 
 **Skip or give.** Skipping a call is safe only where nothing reads what it returns, such as an `await fetch(…)` as a
 statement of its own, which tsval can tell. Where the result is used, the run needs a recorded or given value, or it
@@ -126,11 +127,13 @@ a `give` in your policy file, choosing what to leave out, and the commit is wher
 
 What it needs that isn't there:
 
-- **Recordings keyed by the request** (method, URL, a hash of the body), not the latest response of each call:
-  replaying needs to know a request is the same one.
+- ~~**Recordings keyed by the request**~~ (method, URL, a hash of the body): built.
 - **`give result` for a preview's calls.** Today it applies only where the debugger stands in for a call; a preview's
   fetches are decided at the service worker, and are either real or denied (*A call's result*).
-- **A writable layer per run**, over the workspace's.
+- ~~**A writable layer per run**~~, over the workspace's: built — in memory in the debug worker, over the editor's
+  runtime files (editor-api runtime.ts `layered`), so the workspace's overlay stack needed no copy-up. A live run's
+  write to a workspace file goes there (an effect decided `layer`), a read of what it wrote reads it there, and the
+  layer goes with the run; a rule's *skip* still skips.
 - **A home for runs nobody started.** The run log holds them; they don't take the Debug view's focus.
 
 ## Tests
@@ -269,9 +272,7 @@ fails the run. Built: the target; not built: halting.
 - A package's own calls: its network is the worker's, unasked.
 - What a recorded stop keeps of an object, and how one stop is told from another (the event, the render, the turn).
 - Does a breakpoint condition become a rule's *when*, with *stop* its action: one model for stopping and deciding?
-- Unattended runs (*Unattended runs*; halting is queued in NEXT.md):
-  - **A writable layer per run.** Whether the workspace's overlay stack can take one; its layers were designed without
-    copy-up.
+- Unattended runs (*Unattended runs*):
   - **An app's unattended run.** The preview already reloads on an edit (HMR). Is that reload the unattended run, with
     its fetches replayed at the service worker?
   - ~~**How much runs after an edit.**~~ Decided 2026-10-23: everything selection picks, one at a time, a new edit

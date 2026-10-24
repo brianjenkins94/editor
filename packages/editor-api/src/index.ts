@@ -139,8 +139,9 @@ export interface Effect {
 	"package"?: string;
 	/** How it was decided: within what the package's baseline accepts (`baseline`), by the policy (`policy`), at the
 	 *  call — the person's answer, an exception to the policy: allowed `once`, allowed `always`, or `refused` — or, in a
-	 *  run nobody was watching, what it returned when it last ran for real, given back (`recorded`). */
-	"decided"?: "baseline" | "policy" | "once" | "always" | "refused" | "recorded";
+	 *  run nobody was watching, what it returned when it last ran for real, given back (`recorded`), or a file written into
+	 *  the run's own layer, thrown away when it ends (`layer`). */
+	"decided"?: "baseline" | "policy" | "once" | "always" | "refused" | "recorded" | "layer";
 }
 
 /** The `effects` event: the run's effects so far — all of them, each telling; its last is the run's. */

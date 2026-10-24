@@ -582,7 +582,7 @@ test("inline values: at a stop, each line's latest value at its end, as VS Code 
 // Live runs (RUNTIME-EVIDENCE.md, *Live runs*): the file in the editor runs again on a save or the interval — no Run — its
 // values in the margin; a write it can't make is skipped (nothing written, the line saying so); half-typed, the last run's
 // values stay; a loop that never ends stops at its budget, saying so on its line; none of them is in the running list.
-test("live runs: saved, the file runs again — writes skipped, half-typed kept, an endless loop stopped", async () => {
+test("live runs: saved, the file runs again — writes into its own layer, half-typed kept, an endless loop stopped", async () => {
 	const workbench = session.workbench();
 	const file = "/workspace/live.js";
 	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].filter((child) => !child.classList.contains("live-values-mock")).map((child) => child.textContent.trim())])));
@@ -606,7 +606,7 @@ test("live runs: saved, the file runs again — writes skipped, half-typed kept,
 		const { api } = globalThis.__editor;
 		const uri = api.Uri.file(path);
 
-		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("const fs = require('fs');\nlet total = 0;\nfor (const p of [3, 4, 5]) {\n\ttotal += p;\n}\nfs.writeFileSync('out-live.txt', String(total));\nconsole.log(total);\n"));
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("const fs = require('fs');\nlet total = 0;\nfor (const p of [3, 4, 5]) {\n\ttotal += p;\n}\nfs.writeFileSync('out-live.txt', String(total));\nconst back = fs.readFileSync('out-live.txt', 'utf8');\nconsole.log(total);\n"));
 		await api.window.showTextDocument(uri);
 	}, file);
 	await edit("[3, 4, 5]", "[3, 4, 5, 6]");
@@ -620,8 +620,10 @@ test("live runs: saved, the file runs again — writes skipped, half-typed kept,
 	});
 
 	assert.deepEqual(loopTotal(ran), ["total =", "3", "7", "12", "18"]);
-	assert.ok(Object.values(ran).some((row) => JSON.stringify(row.filter((cell) => cell !== "")) === JSON.stringify(["skipped", "fs:write out-live.txt"])), "the write, skipped");
-	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/out-live.txt")).then(() => true, () => false)), false, "nothing written");
+	// The write went into the run's own layer (RUNNING.md, *Unattended runs*): read back, it's there for the run — and the
+	// workspace is as it was.
+	assert.ok(Object.values(ran).some((row) => JSON.stringify(row.filter((cell) => cell !== "")) === JSON.stringify(["back =", "'18'"])), "its own write, read back");
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/out-live.txt")).then(() => true, () => false)), false, "nothing written to the workspace");
 	assert.equal((await session.request("runs.list", undefined, 5000)).some((run) => /\(live\)/u.test(run.title)), false, "not in the running list");
 
 	// Half-typed: the run that didn't parse tells nothing; the last one's values stay where they were.

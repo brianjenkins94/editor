@@ -391,6 +391,131 @@ export interface RuntimeFs {
 	"rename": (path: string, to: string) => void;
 }
 
+/** A layer of a run's own over the workspace's files (RUNNING.md, *Unattended runs*): what a run nobody's watching writes
+ *  — files, folders, removals, renames — goes here, in memory, and is thrown away with it; what it reads is the layer's
+ *  where the run wrote, removed or renamed, the workspace's otherwise. So a live run's writes need no answer, and the
+ *  workspace stays as it was. `holds(path)`: whether the layer decides that path (the run's own doing). */
+export function layered(lower: RuntimeFs): RuntimeFs & { "holds": (path: string) => boolean } {
+	const files = new Map<string, Uint8Array>();
+	const folders = new Set<string>();
+	const removed = new Set<string>();
+	const encoder = new TextEncoder();
+	const parentOf = (path: string): string => path.slice(0, path.lastIndexOf("/")) || "/";
+	const gone = (path: string): boolean => {
+		for (let at = path; at !== "/" && at !== ""; at = parentOf(at)) {
+			if (removed.has(at) && !files.has(at) && !folders.has(at)) {
+				return true;
+			}
+
+			if (files.has(at) || folders.has(at)) {
+				return false;
+			}
+		}
+
+		return false;
+	};
+	const holds = (path: string): boolean => files.has(path) || folders.has(path) || gone(path);
+	const stat = (path: string, options?: { "load"?: boolean }): RuntimeStat | undefined => {
+		if (files.has(path)) {
+			return { "type": "file", "size": files.get(path)!.byteLength, "mtime": Date.now() };
+		}
+
+		if (folders.has(path)) {
+			return { "type": "directory", "size": 0, "mtime": Date.now() };
+		}
+
+		return gone(path) ? undefined : lower.stat(path, options);
+	};
+	const remove = (path: string): void => {
+		for (const each of [...files.keys()].filter((file) => file === path || file.startsWith(path + "/"))) {
+			files.delete(each);
+		}
+
+		for (const each of [...folders].filter((folder) => folder === path || folder.startsWith(path + "/"))) {
+			folders.delete(each);
+		}
+
+		removed.add(path);
+	};
+
+	return {
+		"holds": holds,
+		"stat": stat,
+		"readFile": (path, options) => {
+			const own = files.get(path);
+
+			if (own !== undefined) {
+				return own;
+			}
+
+			if (gone(path)) {
+				throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { "code": "ENOENT", "errno": -2, "syscall": "open", "path": path });
+			}
+
+			return lower.readFile(path, options);
+		},
+		"writeFile": (path, data) => {
+			// (its folders there for it, as the workspace has them or the run made them)
+			for (let at = parentOf(path); at !== "/" && at !== "" && stat(at) === undefined; at = parentOf(at)) {
+				folders.add(at);
+				removed.delete(at);
+			}
+
+			files.set(path, typeof data === "string" ? encoder.encode(data) : data);
+			removed.delete(path);
+		},
+		"mkdir": (path) => {
+			for (let at = path; at !== "/" && at !== "" && stat(at) === undefined; at = parentOf(at)) {
+				folders.add(at);
+				removed.delete(at);
+			}
+		},
+		"readdir": (path, options) => {
+			const below = !folders.has(path) && !gone(path) && lower.stat(path, options)?.type === "directory" ? lower.readdir(path, options) : [];
+			const own = [...files.keys(), ...folders].filter((each) => parentOf(each) === path).map((each) => each.slice(path.length + 1));
+
+			return [...new Set([...below, ...own])].filter((name) => !gone(`${path}/${name}`)).toSorted();
+		},
+		"rm": remove,
+		"rename": (path, to) => {
+			const kind = stat(path)?.type;
+
+			if (kind === undefined) {
+				throw Object.assign(new Error(`ENOENT: no such file or directory, rename '${path}'`), { "code": "ENOENT", "errno": -2, "syscall": "rename", "path": path });
+			}
+
+			if (kind === "file") {
+				const bytes = files.get(path) ?? lower.readFile(path);
+
+				remove(path);
+				files.set(to, bytes);
+				removed.delete(to);
+
+				return;
+			}
+
+			// A folder: each file under it, copied across, then the old one gone.
+			const copy = (from: string, into: string): void => {
+				folders.add(into);
+				removed.delete(into);
+
+				for (const name of (files.has(from) ? [] : stat(from)?.type === "directory" ? [...new Set([...lower.stat(from)?.type === "directory" ? lower.readdir(from) : [], ...[...files.keys(), ...folders].filter((each) => parentOf(each) === from).map((each) => each.slice(from.length + 1))])] : [])) {
+					const child = `${from}/${name}`;
+
+					if (stat(child)?.type === "directory") {
+						copy(child, `${into}/${name}`);
+					} else if (!gone(child)) {
+						files.set(`${into}/${name}`, files.get(child) ?? lower.readFile(child));
+					}
+				}
+			};
+
+			copy(path, to);
+			remove(path);
+		}
+	};
+}
+
 /**
  * Why a package's call is asked about — what the baseline said of it, so whoever is asked knows: the capability `grew`
  * (`by` the code's use of the package — `origin` the members it started using, `*` all of it — or a new `version`,
