@@ -422,6 +422,47 @@ Runs add three things:
 - **Counterexamples.** A write from a function judged pure means an assumption broke, which is a finding.
 - **Confidence.** Phrased as insights' suggestions are: "seen 4,000 times, never impure", not "pure".
 
+**Measured (2026-10-24).** A prototype of the check above (TypeScript 5.9's checker; the table of built-ins; the
+fixpoint over the call graph; about 450 lines, 5 s), run over this repository's TypeScript outside tests and vendored
+code: 484 files, 4,929 functions (functions, methods, accessors, constructors, and arrows bound to a name; a nested
+function counted as part of the one around it).
+
+| Verdict | With what it calls | Its own body alone |
+|---|---|---|
+| pure | 1,086 (22.0%) | 1,434 (29.1%) |
+| pure-if | 30 (0.6%) | 34 (0.7%) |
+| reads-state | 258 (5.2%) | 362 (7.3%) |
+| mutates-args | 23 (0.5%) | 62 (1.3%) |
+| unknown | 987 (20.0%) | 1,182 (24.0%) |
+| effectful | 2,545 (51.6%) | 1,855 (37.6%) |
+
+- **Why unknown.** Of the 1,182 functions unknown from their own body: 532 (45%) only because of dynamic dispatch — a
+  call through an interface or a function-typed value (789 functions make one; which code runs isn't known statically),
+  through `any` (564: TypeScript here isn't strict), or `call`/`apply`/`bind`; 379 (32%) only because of an external
+  package (`@brianjenkins94/util` 347 functions, 95 of them unknown for it alone; TypeScript's API 171; hono 100;
+  preact 77); the rest, built-ins the table doesn't name yet (`PromiseLike.then`, `Event.preventDefault`, …) and
+  overloads. 112 more are unknown only through what they call.
+- **Why effectful.** The host for 1,154 (the DOM, VS Code's API, Node's fs and process, `console`, timers); a write
+  outside the function for about 1,000 (a module's variable or Map, `this` outside a constructor, a reference it was
+  handed); a nondeterministic read for 190 (`Date.now()`, `Math.random()`, `crypto.randomUUID()`).
+- **By package.** The libraries come out purest: editor-api 30.5% pure, almostnode 28.4%, admin 35.6%; the editor's
+  glue to VS Code and the DOM 21.8% pure and 56.5% effectful; bablr-language-ts 83.8% unknown (its calls go into
+  BABLR through untyped values).
+- **What sampling caught.** Reading samples of each verdict found three ways the first cut called a function purer than
+  it is, each fixed conservatively: a write through a local holding what a call returned (an alias: `const parent =
+  this.getNode(…); parent.children.delete(…)`) is now a write outside unless the local was made there; a name read as
+  a property access's base (`init?.workspaceFolder`, `location.href`) is now seen; a module's `const` holding a Map, an
+  array or an object reads as state. What's left approximate: getters and Proxies (assumed absent, as above), a nested
+  function's effects counted whether or not it's called, and a call through a value the checker resolves to its
+  declared type only.
+
+**Go** (recommended; NEXT.md's decision i). Four functions in five get a definite verdict statically, and the fifth is
+mostly what runs are for: dynamic dispatch, where tsval sees which code ran; and external packages, where a table per
+package (Node's `path` and `url` already are one) or reading our own packages' sources (95 functions unknown only for
+`@brianjenkins94/util`) closes much of it. The check is cheap, and its errors run toward unknown and effectful, not
+toward a wrong "pure", once aliasing is handled as above — which is what memoizing or replaying a call needs. Build it
+as above, the table and the three fixes included; runs add the unknowns' answers and the counterexamples.
+
 ### Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)
 
 Commits are a poor record of change: they happen when tooling needs one (a push, CI, a deploy), so their messages become
@@ -585,6 +626,6 @@ From tests and purity (both above):
 7. **Test identity.** A test is its file and full title; renaming one orphans its record until it runs again.
 8. **A selection's safety**, which needs the failure history first.
 9. **A subcommand, or not.** Selection could be `silo run`'s (`--changed`), or its own command, once it has a job.
-10. **How much purity static analysis decides.** Unmeasured. The share of this repository's declarations that come out
-    pure, effectful and unknown, and why the unknowns are unknown, says how much runs have to add.
+10. ~~**How much purity static analysis decides.**~~ Measured 2026-10-24 (*Purity*, above): 80% of functions get a
+    definite verdict, 22% of them pure; the unknown 20% are mostly dynamic dispatch and external packages.
 
