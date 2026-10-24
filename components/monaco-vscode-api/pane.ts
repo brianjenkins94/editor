@@ -117,7 +117,7 @@ function cellsOf(entries: PaneEntry[]): { "fromLine": number; "toLine": number; 
 	return cells;
 }
 
-interface Cell { "fromLine": number; "toLine": number; "element": HTMLElement; "zone"?: { "id": string; "height": number } }
+interface Cell { "fromLine": number; "toLine": number; "element": HTMLElement; "items": { "line": number; "element": HTMLElement }[]; "zone"?: { "id": string; "height": number } }
 
 /** One editor's frame: an overlay widget it lays out as the editor scrolls, lays out and changes, and the view zones
  *  its tall cells need. */
@@ -346,6 +346,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 			// (its first line, 0-based: what a script driving the editor looks it up by)
 			element.dataset["line"] = String(cell.fromLine);
 
+			const items: Cell["items"] = [];
+
 			for (const entry of cell.entries) {
 				const item = document.createElement("div");
 
@@ -353,6 +355,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 				item.addEventListener("mouseenter", () => { this.mark(entry); });
 				item.addEventListener("mouseleave", () => { this.mark(undefined); });
 				element.append(item);
+				items.push({ "line": entry.fromLine, "element": item });
 
 				const dispose = render(entry, item);
 
@@ -364,7 +367,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 			this.element.append(element);
 			this.resize.observe(element);
 
-			return { "fromLine": cell.fromLine, "toLine": cell.toLine, "element": element };
+			return { "fromLine": cell.fromLine, "toLine": cell.toLine, "element": element, "items": items };
 		});
 		this.layout();
 	}
@@ -503,6 +506,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 	/** Size each tall cell's view zone (the code side of the row grows by the difference), then place everything. */
 	private layout(): void {
+		this.align();
 		this.editor.changeViewZones((accessor) => {
 			for (const cell of this.cells) {
 				// The span's own height: its lines' (each as many rows as it wraps to), not counting the zone after it.
@@ -521,6 +525,23 @@ class Frame implements monaco.editor.IOverlayWidget {
 			}
 		});
 		this.place();
+	}
+
+	/** Each entry of a cell (entries whose lines overlap: a statement's, and those of statements inside it) beside its
+	 *  own line, not just under the one before it: as far down as its line, if the entries before it leave room. */
+	private align(): void {
+		for (const cell of this.cells) {
+			const top = this.editor.getTopForLineNumber(cell.fromLine + 1);
+			let bottom = 0;
+
+			for (const item of cell.items) {
+				const below = this.editor.getTopForLineNumber(item.line + 1) - top - bottom;
+
+				// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: down to its line (no room: the sheet's gap)
+				item.element.style.marginTop = item.element.previousElementSibling === null || below < 0 ? "" : `${below}px`;
+				bottom = item.element.offsetTop + item.element.offsetHeight;
+			}
+		}
 	}
 
 	/** Where everything goes now: the frame at the divider (by default past the longest line, but no further than 60% of

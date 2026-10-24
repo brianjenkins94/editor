@@ -65,9 +65,11 @@ How it's kept:
 - **isomorphic-git's "racy git"**: a same-size rewrite within the second it was staged goes unseen (the terminal's
   `git` test notes it; real git guards against it). Fix in the git engine if it bites.
 
-- **tour-capabilities' `debug.start` hang** (pre-existing, rare: none in nine reruns). Starts take 0.4–3s in CI, so it's
-  a hang, not slowness. When it fails, the error names the step it stuck on (d4ded28, a3f1ace): fix that step, then
-  delete this.
+- **tour-capabilities' `debug.start` hang** (pre-existing; none in nine reruns, then on 6e60505 and a74004d in a row).
+  Both times the second start of *a gated call asks on its line* (Skip, right after Deny's run ended with EACCES) stuck
+  at "followed, waiting for its first stop" (`Session.settled`): once it answered 30 ms later with no reason, once never.
+  The whole tour passes locally (24/24). The assertion now prints the outcome's state, line and output: read it on the
+  next failure, fix that step, then delete this.
 
 - **`TextDocument.save()` returns false** from the extension API in the editor (seen in the architecture harness: the
   document stays dirty; Ctrl+S saves fine). Find out whether it's the harness or the editor; if the editor, queue the

@@ -1467,6 +1467,19 @@ test("purity: a function's verdict on its card, and a pure one a run saw write o
 	// (the getter's line: a save's ESLint fixes may have spread it over several)
 	assert.match(card(found, "read").flagged, /^judged pure, but wrote n \(line [23]\)$/u, "the run saw it write outside itself, through the getter");
 
+	// A statement inside another (the getter's, inside box's) on its own line, not stacked under the outer one's: when the
+	// save spread the getter over lines, its row is beside its line.
+	const tops = await workbench.evaluate(() => {
+		const row = [...document.querySelectorAll(".notes-margin-cell .live-values-row")].find((each) => each.querySelector(".live-values-label")?.textContent.trim().startsWith("counter.n"));
+		const line = [...document.querySelectorAll(".view-line")].find((each) => each.textContent.includes("counter.n += 1"));
+
+		return { "row": row?.getBoundingClientRect().top, "line": line?.getBoundingClientRect().top, "spread": line !== undefined && !line.textContent.includes("const box") };
+	});
+
+	if (tops.spread) {
+		assert.ok(Math.abs(tops.row - tops.line) < 1, `the getter's row beside its line (row at ${tops.row}, line at ${tops.line})`);
+	}
+
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
 

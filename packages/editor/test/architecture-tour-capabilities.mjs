@@ -68,7 +68,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 		cold = false;
 
-		assert.equal(stopped.reason, "capability", "stopped by the policy, not a breakpoint");
+		assert.equal(stopped.reason, "capability", `stopped by the policy, not a breakpoint: ${JSON.stringify({ "state": stopped.state, "line": stopped.line, "code": stopped.code, "output": stopped.output })}`);
 		assert.equal(stopped.line, 5);
 		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
 

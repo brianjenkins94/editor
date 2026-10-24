@@ -42,7 +42,9 @@ export const classicLook = unlayeredGlobalCss({
 		"color": "var(--vscode-tab-inactiveForeground) !important"
 	},
 	[`${TITLE} .tab.active .tab-label`]: { "color": "var(--vscode-tab-activeForeground) !important" },
-	[`${TITLE} .tab .tab-actions`]: { "margin": "auto 0 !important", "border": "0 !important", "borderRadius": "0 !important", "width": "28px !important", "height": "20px !important" },
+	// The close button: centred in the 28px Modern UI keeps right of the name, as a classic tab's is, not against it.
+	[`${TITLE} .tab .tab-actions`]: { "margin": "auto 0 !important", "right": "0 !important", "border": "0 !important", "borderRadius": "0 !important", "width": "28px !important", "height": "20px !important" },
+	[`${TITLE} .tab .tab-actions > .monaco-action-bar`]: { "margin": "0 auto" },
 	[`${TITLE} .editor-actions`]: { "paddingRight": "8px !important", "marginBottom": "0 !important" },
 	// The side bar's title and its views' headers: classic type, and headers flat across the bar.
 	[`${MODERN} .part.sidebar > .composite.title`]: { "padding": "0 8px !important" },
