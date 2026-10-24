@@ -1297,10 +1297,15 @@ test("features: a feature's status, set in the editor, goes into the ledger", as
 	assert.deepEqual({ ...ledger["calc › subtracts"], "since": "" }, { "status": "parked", "why": "not worked on for now", "since": "", "paths": ["calc.js"] });
 	assert.equal((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.features"))).find((feature) => feature.name === "calc › subtracts")?.status, "parked", "the view shows it");
 
-	// On the architecture view, the ledger is a store Insights reads (waited for: its host's totals go out a moment after).
+	// On the architecture view, the ledger is a store Insights writes and reads (waited for: its host's totals go out a
+	// moment after).
 	const { discoveredStores } = await import("../shared/architecture-model.ts");
 
-	await session.until("Insights reading the ledger", (snapshot) => discoveredStores(snapshot).find((store) => store.store === ".silo/<file>.json")?.readers.includes("ext:insights"), 30_000);
+	await session.until("Insights writing and reading the ledger", (snapshot) => {
+		const ledger = discoveredStores(snapshot).find((store) => store.store === ".silo/<file>.json");
+
+		return ledger?.writers.includes("ext:insights") === true && ledger.readers.includes("ext:insights");
+	}, 30_000);
 });
 
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
