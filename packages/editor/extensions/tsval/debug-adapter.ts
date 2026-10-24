@@ -669,7 +669,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			// What a run's allowed call returned, recorded (RUNNING.md, *A call's result*): a rule can give it back.
 			case "recorded":
-				this.tell("recorded", { "capability": message.capability, "resource": message.resource, "value": message.value });
+				this.tell("recorded", { "capability": message.capability, "resource": message.resource, "value": message.value, ...message.request === undefined ? {} : { "request": message.request } });
 				break;
 
 			// The session's live values (RUNTIME-EVIDENCE.md, *Live values*), on to core (through debug-events.ts): the file they're of, what's new.

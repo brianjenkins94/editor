@@ -160,7 +160,7 @@ export interface EndedEvent { "file": string; "source"?: string; "end"?: RunEnd 
 export interface AskEvent { "file": string; "source"?: string; "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean }
 
 /** The `recorded` event: what an allowed call returned, for a rule to give back. */
-export interface RecordedEvent { "capability": string; "resource": string; "value": unknown }
+export interface RecordedEvent { "capability": string; "resource": string; "value": unknown; "request"?: string }
 
 /** The `listening` event: a server the program started listens on `port`. */
 export interface ListeningEvent { "port": number }

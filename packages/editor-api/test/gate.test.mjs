@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { verdictOf } from "../src/gate.ts";
+import { recordingKey, requestOf, verdictOf } from "../src/gate.ts";
 
 /** A policy of one rule: `action` for `capability` on `resource`. */
 function policyOf(capability, resource, action) {
@@ -24,4 +24,18 @@ test("a live run makes nothing but a read the policy allows", () => {
 	assert.equal(verdictOf(policyOf("fs:write", "/workspace/a.txt", "allow"), "fs:write", "/workspace/a.txt", true), "skip", "an allowed write, skipped");
 	assert.equal(verdictOf(policyOf("fs:read", "/workspace/a.txt", "deny"), "fs:read", "/workspace/a.txt", true), "skip", "a refused read, skipped rather than failing");
 	assert.equal(verdictOf(undefined, "fs:read", "/workspace/a.txt", true), "skip", "a read nobody decided");
+});
+
+test("a recording is the whole request's: a POST's isn't given to a GET of the same URL", () => {
+	const url = "https://api.example.test/orders";
+	const keyOf = (...args) => recordingKey("net", url, requestOf("net", args));
+
+	assert.equal(keyOf(url), `net ${url}`, "a plain read keys as it always has");
+	assert.equal(keyOf(url, { "method": "head" }), `net ${url}`);
+	assert.match(keyOf(url, { "method": "POST", "body": "{\"id\":1}" }), /^net https:\/\/api\.example\.test\/orders POST #[0-9a-f]{8}$/u);
+	assert.notEqual(keyOf(url, { "method": "POST", "body": "{\"id\":1}" }), keyOf(url), "not a GET's");
+	assert.notEqual(keyOf(url, { "method": "POST", "body": "{\"id\":1}" }), keyOf(url, { "method": "POST", "body": "{\"id\":2}" }), "nor another body's");
+	assert.equal(keyOf(url, { "method": "POST", "body": "{\"id\":1}" }), keyOf(url, { "method": "post", "body": "{\"id\":1}" }), "the same request, the same key");
+	assert.equal(keyOf({ "method": "DELETE", "url": url }), `net ${url} DELETE`, "a Request's method");
+	assert.equal(requestOf("fs:read", ["/workspace/a.txt", { "method": "POST" }]), undefined, "only net calls have a request");
 });

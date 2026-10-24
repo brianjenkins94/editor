@@ -38,6 +38,7 @@ import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, policyPath, SILO
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { recordEffect } from "./effects.ts";
+import { recordingKey } from "./gate.ts";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -434,16 +435,16 @@ let recording: Promise<unknown> = Promise.resolve();
 /** Keep what a call returned when it ran for real (a preview's fetch: its body, parsed when it's JSON; a script's read of
  *  a workspace file: its text) — the latest of
  *  each call, in `.silo/local/recorded.json`: this machine's only, never committed (a real response can hold secrets). */
-export async function recordResult(capability: string, resource: string, value: unknown): Promise<void> {
+export async function recordResult(capability: string, resource: string, value: unknown, request?: string): Promise<void> {
 	// One after another: a script's reads come quickly, and each rewrites the file from what's in it.
-	const write = recording.then(() => recordNow(capability, resource, value));
+	const write = recording.then(() => recordNow(capability, resource, value, request));
 
 	recording = write.catch(() => undefined);
 
 	return write;
 }
 
-async function recordNow(capability: string, resource: string, value: unknown): Promise<void> {
+async function recordNow(capability: string, resource: string, value: unknown, request?: string): Promise<void> {
 	const root = siloRoot();
 
 	if (root === undefined) {
@@ -453,7 +454,7 @@ async function recordNow(capability: string, resource: string, value: unknown): 
 	await ensureGitignore(root);
 
 	const recorded = await loadRecorded(root);
-	const key = `${capability} ${resource}`;
+	const key = recordingKey(capability, resource, request);
 
 	delete recorded.results[key];
 	recorded.results[key] = { "value": value, "at": new Date().toISOString() };
@@ -467,7 +468,7 @@ async function recordNow(capability: string, resource: string, value: unknown): 
 	await writeText(recordedUri(root), JSON.stringify(recorded, null, "\t") + "\n");
 }
 
-/** Every call's recorded result, by `<capability> <resource>`: what a run nobody's watching (a live run) gives a call
+/** Every call's recorded result, by `<capability> <resource>` and its request when it has one (gate.ts' recordingKey): what a run nobody's watching (a live run) gives a call
  *  back in its place (RUNNING.md, unattended runs). */
 export async function recordedResults(): Promise<Record<string, unknown>> {
 	const root = siloRoot();
@@ -475,9 +476,10 @@ export async function recordedResults(): Promise<Record<string, unknown>> {
 	return root === undefined ? {} : Object.fromEntries(Object.entries((await loadRecorded(root)).results).map(([key, { value }]) => [key, value]));
 }
 
-/** What a call returned the last time it ran for real, and when — undefined if it's never been recorded. */
-export async function recordedResult(capability: string, resource: string): Promise<{ "value": unknown; "at": string } | undefined> {
+/** What a call returned the last time it ran for real, and when — undefined if it's never been recorded. `request`: a
+ *  request other than a plain read (gate.ts' requestOf). */
+export async function recordedResult(capability: string, resource: string, request?: string): Promise<{ "value": unknown; "at": string } | undefined> {
 	const root = siloRoot();
 
-	return root === undefined ? undefined : (await loadRecorded(root)).results[`${capability} ${resource}`];
+	return root === undefined ? undefined : (await loadRecorded(root)).results[recordingKey(capability, resource, request)];
 }

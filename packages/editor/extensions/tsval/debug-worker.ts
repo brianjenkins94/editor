@@ -31,7 +31,7 @@ import type { SiteSums } from "./site-sums";
 
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { unpack } from "@brianjenkins94/almostnode/packages";
-import { policySkips, triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
+import { policySkips, recordingKey, requestOf, triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
 import { revive } from "@brianjenkins94/editor-api/recorded";
 import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 
@@ -995,8 +995,9 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		const verdict = verdictOf(policy, tagged.capability, resource, liveRun);
 
 		if (verdict === "skip") {
-			// A live run's skip (not the policy's): what the call returned when it last ran for real, given back, if it did.
-			const key = `${tagged.capability} ${resource}`;
+			// A live run's skip (not the policy's): what the call returned when it last ran for real, given back, if it did —
+			// the same request's (a POST's recording isn't a GET's).
+			const key = recordingKey(tagged.capability, resource, requestOf(tagged.capability, args));
 
 			if (liveRun && Object.hasOwn(recordedResults, key) && !policySkips(policy, tagged.capability, resource, liveRun)) {
 				return replayed(tagged.capability, resource, givenAs(tagged.capability, fn.apply(this, args), recordedResults[key]));
@@ -1027,7 +1028,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			tally(tagged.capability, resource, "made", undefined, decided);
 		}
 
-		return madeFor(tagged.capability, resource, () => effect(...made));
+		return madeFor(tagged.capability, resource, () => effect(...made), requestOf(tagged.capability, args));
 	};
 
 	// almostnode's own module (or the network) a stand-in module stands for: its members, the gated ones made real.
@@ -1091,12 +1092,12 @@ function textOf(value: unknown): string | undefined {
 
 /** Make `call` — a program's capability call, allowed — for real: a write let through the runtime's refusal while it's
  *  made, what a read returned recorded (text, not too much of it). */
-function madeFor(capability: string, resource: string, call: () => unknown): unknown {
+function madeFor(capability: string, resource: string, call: () => unknown, request?: string): unknown {
 	const record = (value: unknown): void => {
 		const text = textOf(value);
 
 		if (text !== undefined && text !== "" && text.length <= RECORD_MAX) {
-			post({ "type": "recorded", "capability": capability, "resource": resource, "value": text });
+			post({ "type": "recorded", "capability": capability, "resource": resource, "value": text, ...request === undefined ? {} : { "request": request } });
 		}
 	};
 

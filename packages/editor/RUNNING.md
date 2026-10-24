@@ -84,8 +84,8 @@ runs are unattended (`__unattended`): a call no recording covers halts the run b
 a run of another program is kept only on its own file, so it isn't selected by an edit to a file it imported; and CI's
 selection (ambient code → the smoke suite). Decided: in a live run (the
 file in front of you, its skipped lines marked) a call with no recording is **skipped**; a run you aren't looking at
-**halts** (below). Not built: those other runs, so halting isn't either; the per-run file-system layer; recordings keyed
-by the whole request.
+**halts** (below). Recordings are keyed by the whole request (built 2026-10-23: editor-api gate.ts `requestOf`, a
+method and a hash of the body beyond a plain read's URL). Not built: the per-run file-system layer.
 
 Runs the editor starts on its own after an edit, so you see how a change affects what already ran without pressing
 Run, and without a testing UI. They're runs like any other: the same session, margin, run log and evidence. The
@@ -285,6 +285,8 @@ fails the run. Built: the target; not built: halting.
     should never run unattended or attended without a fresh look.
   - ~~**Where defaults live.**~~ Decided 2026-10-23: past runs are the default — a call gets what it last returned for
     real, and only one that never ran for real halts; pinning a value past runs saw is a rule (*Unattended runs*).
-  - **Matching a recording.** A `give` of a recorded response matches today by capability and resource. Replaying a
-    request needs its method and body too: a target for them (`request.method`, `request.body`), or a recording keyed
-    by all three.
+  - ~~**Matching a recording.**~~ Built 2026-10-23: a recording is keyed by the whole request — its capability and
+    resource, and for anything but a plain read its method and a hash of its body (editor-api gate.ts `requestOf`,
+    `recordingKey`), so a POST's isn't given to a GET of the same URL. A rule still matches by capability and resource;
+    a target for the request (`request.method`, `request.body`) waits for a rule that needs one. A preview's fetch,
+    recorded at the service worker, is keyed as a read.

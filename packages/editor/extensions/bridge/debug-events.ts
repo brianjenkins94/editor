@@ -149,9 +149,9 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					break;
 
 				case "recorded": {
-					const { capability, resource, value } = body as RecordedEvent;
+					const { capability, resource, value, request } = body as RecordedEvent;
 
-					void recordResult(capability, resource, value).catch(() => undefined);
+					void recordResult(capability, resource, value, request).catch(() => undefined);
 					break;
 				}
 
