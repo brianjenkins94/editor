@@ -1388,25 +1388,30 @@ test("runs kept: picking an older run shows its own coverage", async () => {
 	};
 	const state = () => workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "pick.js").catch(() => undefined));
 	const kindAt = (found, line) => found.marks.find((mark) => mark.line === line && mark.kind.startsWith("coverage-"))?.kind;
+	// (each branch's line as the file is now, 1-based: a save's fixes can move lines)
+	const lineOf = (text) => workbench.evaluate((find) => globalThis.__editor.api.window.activeTextEditor.document.getText().split("\n").findIndex((line) => line.includes(find)) + 1, text);
 
 	await workbench.evaluate(async () => {
 		const { api } = globalThis.__editor;
 		const uri = api.Uri.file("/workspace/pick.js");
 
-		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["let x = 1;", "", "if (x > 0) {", "\tconsole.log(\"positive\");", "} else {", "\tconsole.log(\"negative\");", "}", ""].join("\n")));
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["const x = 1;", "", "if (x > 0) {", "\tconsole.log(\"positive\");", "} else {", "\tconsole.log(\"negative\");", "}", ""].join("\n")));
 		await api.window.showTextDocument(uri);
 	});
-	await edit("let x = 1;", "let x = 2;");
-	await eventually("the first run's coverage", async () => (kindAt(await state() ?? { "marks": [] }, 4) === "coverage-ran" || undefined), 60_000);
-	await edit("let x = 2;", "let x = -2;");
+	await edit("const x = 1;", "const x = 2;");
+	await eventually("the first run's coverage", async () => (kindAt(await state() ?? { "marks": [] }, await lineOf("positive")) === "coverage-ran" || undefined), 60_000);
+	await edit("const x = 2;", "const x = -2;");
 
 	const latest = await eventually("the second run, and its coverage", async () => {
 		const found = await state();
 
-		return found?.runs.length >= 2 && kindAt(found, 6) === "coverage-ran" ? found : undefined;
+		return found?.runs.length >= 2 && kindAt(found, await lineOf("negative")) === "coverage-ran" ? found : undefined;
 	}, 60_000);
 
-	assert.notEqual(kindAt(latest, 4), "coverage-ran", "the latest run took the other branch");
+	const positive = await lineOf("positive");
+	const negative = await lineOf("negative");
+
+	assert.notEqual(kindAt(latest, positive), "coverage-ran", "the latest run took the other branch");
 
 	const older = latest.runs.at(-2);
 
@@ -1418,8 +1423,8 @@ test("runs kept: picking an older run shows its own coverage", async () => {
 		return found?.runs.find((run) => run.id === older.id)?.picked === true ? found : undefined;
 	});
 
-	assert.equal(kindAt(picked, 4), "coverage-ran", "its own: the branch it took");
-	assert.notEqual(kindAt(picked, 6), "coverage-ran");
+	assert.equal(kindAt(picked, positive), "coverage-ran", "its own: the branch it took");
+	assert.notEqual(kindAt(picked, negative), "coverage-ran");
 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
