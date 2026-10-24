@@ -55,6 +55,11 @@ How it's kept:
 
 ## Watching
 
+- **tour-runs' selection test timed out** in CI once, waiting for "calc.test.js run again, after the save" (1cc007e;
+  passed on rerun; the features test after it failed on the state it left). It passed locally every time this session,
+  and on 289dadd's run with the same code. If it comes back, find whether the save's selected run waits behind the
+  file's own run or ESLint's fix on save.
+
 - **tour-capabilities' package prompt timed out waiting for the baseline** once in CI (af79463; passed on rerun). The
   baseline is made as the project opens, from the CDN; the same run's log has CDN fetches failing. If it comes back,
   find whether the baseline waits on a fetch that failed, and make the test (or the baseline) say so.
