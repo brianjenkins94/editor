@@ -433,6 +433,7 @@ flowchart LR
     n_store__silo_notes____file__jsonl[".silo/notes/…/&lt;file&gt;.jsonl"]
     n_store__silo_policy__file__json[".silo/policy/&lt;file&gt;.json"]
     n_store__silo_runs__file__jsonl[".silo/runs/&lt;file&gt;.jsonl"]
+    n_store__vscode__file__json[".vscode/&lt;file&gt;.json"]
   end
   subgraph c_sharedMemory["Shared memory"]
     n_zenfs["Workspace (zen-fs)"]
@@ -559,6 +560,7 @@ flowchart LR
   n_workbench -->|"reads, writes"| n_store__silo_notes____file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo_policy__file__json
   n_workbench -->|"reads, writes"| n_store__silo_runs__file__jsonl
+  n_workbench -->|"reads, writes"| n_store__vscode__file__json
   n_workbench -->|"writes"| n_store__silo_local____file__bin
   n_workbench <-.->|"WebWorker protocol / postMessage"| n_worker_TextMateWorker
   n_workbench <-.->|"WebWorker protocol / postMessage"| n_worker_editorWorkerService
@@ -582,6 +584,7 @@ flowchart LR
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/policy/<file>.json` | Workbench, bridge, capabilities | Workbench, bridge, capabilities, tsval |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench, capabilities, history |
+| `.vscode/<file>.json` | Workbench | Workbench |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
 | `IndexedDB silo-local` | Workspace (zen-fs) | Workspace (zen-fs) |
 | `IndexedDB vscode-web-db` | Workbench | Workbench |
