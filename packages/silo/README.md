@@ -598,7 +598,11 @@ computed facts, no model. It's Remember (what was decided) and Gate (the checks 
   an agent's tool call. It turns **dormant** when no test reaches it and, across enough runs that could have, none did
   (a smoke test that never signs in mustn't make sign-in dormant). Dormant is a suggestion with its price: Remove, or
   Keep with a reason that expires (90 days) and asks again.
-- **Budgets:** bytes per realm beside the performance suite's; raising one is a line in the diff.
+- **Budgets:** bytes per realm beside the performance suite's; raising one is a line in the diff. Built 2026-10-25 (the
+  editor's test/performance.mjs, `scriptKB.<realm>` in performance-budgets.json): the script each realm loaded by the
+  time it's idle, decoded, from each frame's and worker's resource timing — the shell, the workbench, the extension
+  host, TypeScript's servers, ESLint, cSpell held to budgets about a tenth over what they were, warning past 5% over
+  the last green run.
 - **`silo remove` / `silo restore`:** remove takes out what only the entry reaches, its manifest entries and the
   tombstone, lists the docs that name it, and leaves a change for review; restore runs the tombstone.
 - **Agents:** replacing an approach removes the old one in the same change; an experiment starts with an entry, so it

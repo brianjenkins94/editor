@@ -5,6 +5,9 @@
  *  - `typedHoverMs`: opening the demo's App.tsx to a hover on `useState` that has its type;
  *  - `memoryMB.<realm>`: the tab's memory by realm at idle, from the metrics plane (the workbench's memory gauge, a
  *    reading taken after the hover — measured eagerly, so it's immediate and has every realm, TypeScript's servers too);
+ *  - `scriptKB.<realm>`: the script each realm loaded, by the time it's idle — decoded, as the page's resource timing
+ *    has it, in each frame and worker the session reaches (the shell, the workbench, the extension host, the language
+ *    servers …): the feature ledger's realm budgets (packages/silo/README.md, *The feature ledger*: "Budgets");
  *  - `repoLoadMs`: delivering a fixed, generated 1000-file project until its last file is in the workspace (generated,
  *    not this checkout's files, so the number doesn't drift as the repo grows).
  *
@@ -179,6 +182,47 @@ test("memory by realm, at idle", async () => {
 	}
 
 	for (const name of Object.keys(budgets).filter((budgeted) => budgeted.startsWith("memoryMB."))) {
+		measured(name, results[name] ?? 0);
+	}
+});
+
+// The script each realm loaded (the feature ledger's realm budgets: raising one is a line in this diff's budgets file).
+test("script by realm, at idle", async () => {
+	await editor();
+
+	const bytes = new Map();
+	// (what a realm's resource timing says its scripts were, decoded — a worker's own script is its creator's entry)
+	const scripts = () => performance.getEntriesByType("resource").filter((entry) => entry.initiatorType === "script" || /\.m?js(?:[?#]|$)/u.test(entry.name)).reduce((total, entry) => total + (entry.decodedBodySize || 0), 0);
+	const add = (realm, value) => {
+		bytes.set(realm, (bytes.get(realm) ?? 0) + value);
+	};
+
+	for (const frame of session.page.frames()) {
+		const url = frame.url();
+		// (the shell, the workbench, the extension host's frame — not a preview's app or a webview: their code is theirs)
+		const realm = frame === session.page.mainFrame() ? "shell" : /\/__vscode__\/host\.html/u.test(url) ? "workbench" : /webWorkerExtensionHostIframe/u.test(url) ? "extension host frame" : undefined;
+
+		if (realm !== undefined) {
+			add(realm, await frame.evaluate(scripts).catch(() => 0));
+		}
+	}
+
+	// (a worker by its name, as the memory reading names realms: `ExtensionHostWorker -> TS semantic server #1` is the
+	// TS semantic server's)
+	for (const worker of session.page.workers()) {
+		const name = await worker.evaluate(() => globalThis.name || "").catch(() => "");
+		const realm = name === "ExtensionHostWorker" ? "extension host" : name.replace(/^ExtensionHostWorker -> /u, "").replace(/ #\d+$/u, "");
+
+		add(realm === "" ? "worker" : realm, await worker.evaluate(scripts).catch(() => 0));
+	}
+
+	for (const [realm, value] of bytes) {
+		recorded("scriptKB." + realm, value / 1024);
+	}
+
+	console.log("script by realm (KB):", JSON.stringify(Object.fromEntries([...bytes].map(([realm, value]) => [realm, Math.round(value / 1024)]))));
+
+	for (const name of Object.keys(budgets).filter((budgeted) => budgeted.startsWith("scriptKB."))) {
 		measured(name, results[name] ?? 0);
 	}
 });

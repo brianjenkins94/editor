@@ -9,5 +9,12 @@
   "memoryMB.TS syntax server": { "max": 550, "warnAbove": 0.25 },
   "memoryMB.cspell": { "max": 200, "warnAbove": 0.25 },
   "memoryMB.eslint": { "max": 400, "warnAbove": 0.25 },
-  "memoryMB.node": { "max": 200, "warnAbove": 0.25 }
+  "memoryMB.node": { "max": 200, "warnAbove": 0.25 },
+  "scriptKB.shell": { "max": 11000, "warnAbove": 0.05 },
+  "scriptKB.workbench": { "max": 49000, "warnAbove": 0.05 },
+  "scriptKB.extension host": { "max": 16700, "warnAbove": 0.05 },
+  "scriptKB.TS semantic server": { "max": 7800, "warnAbove": 0.05 },
+  "scriptKB.TS syntax server": { "max": 7800, "warnAbove": 0.05 },
+  "scriptKB.eslint": { "max": 9800, "warnAbove": 0.05 },
+  "scriptKB.cspell": { "max": 16500, "warnAbove": 0.05 }
 }
