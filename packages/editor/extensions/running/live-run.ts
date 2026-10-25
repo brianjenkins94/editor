@@ -8,10 +8,11 @@
  * going — that run is what its margin shows (a service of yours running elsewhere doesn't stop them). Off with
  * `run.liveRuns`; the interval is `run.liveRuns.interval` (seconds, 0: saves only).
  *
- * A save runs again what the edit reached, too (RUNNING.md, *Unattended runs*: "What runs"): each test whose trace on the
- * saved file (lib util/silo/traces' `test`) holds a declaration that's no longer in its text — it executed code that
- * changed. Their test files run live, one at a time, after the file itself; an edit cancels what's still queued. Nobody's
- * looking at those: a call in one that never ran for real halts it, its line saying so (Rule…, Pin…).
+ * A save runs again what the edit reached, too (RUNNING.md, *Unattended runs*: "What runs"): each test, and each program
+ * run, whose trace on the saved file (lib util/silo/traces' `test`, `program`: a module it imported) holds a declaration
+ * that's no longer in its text — it executed code that changed. Their test files and programs run live, one at a time,
+ * after the file itself; an edit cancels what's still queued. Nobody's looking at those: a call in one that never ran for
+ * real halts it, its line saying so (Rule…, Pin…).
  */
 import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
@@ -33,9 +34,10 @@ const PROGRAM = /\.(?:m|c)?[jt]sx?$/u;
 const runDebugger = (): string => vscode.workspace.getConfiguration("run").get<string>("debugger") || "tsval";
 const readText = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
-/** The test files whose tests executed code of `path` that `text` no longer has: each test's trace on it holds a
- *  declaration (a BABLR span id) its spans don't. In the order they were kept; none when the text doesn't parse. */
-export async function reachedTests(path: string, text: string): Promise<string[]> {
+/** The test files whose tests, and the programs whose runs, executed code of `path` that `text` no longer has: each
+ *  one's trace on it holds a declaration (a BABLR span id) its spans don't. In the order they were kept; none when the
+ *  text doesn't parse. */
+export async function reachedRuns(path: string, text: string): Promise<string[]> {
 	const root = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(path))?.uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
 
 	if (root === undefined) {
@@ -43,9 +45,9 @@ export async function reachedTests(path: string, text: string): Promise<string[]
 	}
 
 	const kept = await readText(vscode.Uri.joinPath(root, localTracesPath(vscode.workspace.asRelativePath(vscode.Uri.file(path), false))).path);
-	const tests = parseTraces(kept ?? "").filter((trace): trace is RunTrace & Required<Pick<RunTrace, "test" | "declarations">> => trace.test !== undefined && trace.declarations !== undefined);
+	const reached = parseTraces(kept ?? "").filter((trace): trace is RunTrace & Required<Pick<RunTrace, "declarations">> => (trace.test !== undefined || trace.program !== undefined) && trace.declarations !== undefined);
 
-	if (tests.length === 0) {
+	if (reached.length === 0) {
 		return [];
 	}
 
@@ -56,7 +58,7 @@ export async function reachedTests(path: string, text: string): Promise<string[]
 	}
 
 	const ids = new Set(answer.value.map((span) => span.id));
-	const files = tests.filter((trace) => trace.declarations.some((id) => !ids.has(id))).map((trace) => vscode.Uri.joinPath(root, trace.test.id.split(" › ")[0]).path);
+	const files = reached.filter((trace) => trace.declarations.some((id) => !ids.has(id))).map((trace) => vscode.Uri.joinPath(root, trace.test?.id.split(" › ")[0] ?? trace.program ?? "").path);
 
 	return [...new Set(files)].filter((file) => file !== path);
 }
@@ -74,7 +76,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	const edited = new Set<string>();
 	/** Every debug session going. */
 	const sessions = new Set<vscode.DebugSession>();
-	/** The test files a save reached, still to run (one at a time); and the one running now. */
+	/** The test files and programs a save reached, still to run (one at a time); and the one running now. */
 	let queued: string[] = [];
 	let selected: string | undefined;
 	const enabled = (): boolean => vscode.workspace.getConfiguration("run").get<boolean>("liveRuns", true);
@@ -115,7 +117,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		}
 	};
 
-	/** The next test file a save reached, once nothing else live is running — the saved file's own run first, so what a
+	/** The next test file or program a save reached, once nothing else live is running — the saved file's own run first, so what a
 	 *  selected run did to a file's Margin (a halt, say) is the last word there, not overwritten by the file's own. */
 	const next = async (): Promise<void> => {
 		if ((selected !== undefined && running.has(selected)) || starting.size > 0 || [...running.keys()].some((path) => path !== selected)) {
@@ -137,7 +139,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 
 	/** What a save reached: queued behind what's queued already, each file once. */
 	const select = async (document: vscode.TextDocument): Promise<void> => {
-		const files = await reachedTests(document.uri.path, document.getText());
+		const files = await reachedRuns(document.uri.path, document.getText());
 
 		queued = [...new Set([...queued, ...files])].filter((file) => file !== selected);
 		await next();

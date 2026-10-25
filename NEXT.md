@@ -13,14 +13,12 @@ How it's kept:
 
 ## Queue
 
-1. **Selection beyond a file's own tests.** A run of a program is kept only on its own file, so an edit to a module it
-   imported doesn't select it: keep a run's trace on each file it executed, as a test's is, and select it the same way.
-   And CI: select the architecture suites' tests by what they reached (build/coverage.ts, `COVERAGE=1`, instruments
-   them; read each test's coverage from the realms the harness keeps), ambient code (reached at boot, or by 30% of a
-   suite's tests) selecting the smoke suite only, CI committing its reach when it changes (packages/silo/README.md,
-   *Which tests reach what*: "Selecting", "Trust"; its *Decisions to make*). Selection is the editor's and CI's, not
-   the silo command line's. *Done:* editing an imported module re-runs the programs that ran it; CI runs only the
-   suites a change reached.
+1. **CI's selection.** Select the architecture suites' tests by what they reached (build/coverage.ts, `COVERAGE=1`,
+   instruments them; read each test's coverage from the realms the harness keeps), ambient code (reached at boot, or by
+   30% of a suite's tests) selecting the smoke suite only, CI committing its reach when it changes
+   (packages/silo/README.md, *Which tests reach what*: "Selecting", "Trust"; its *Decisions to make*). Selection is the
+   editor's and CI's, not the silo command line's. (The editor's half — a program's run selected by an edit to a module it
+   imported — built 2026-10-24.) *Done:* CI runs only the suites a change reached.
 
 2. **unenv's own modules, audited.** Each miss so far (EventEmitter as a class; streams; string_decoder; assert with no
    messages and JSON equality, 2026-10-23) was a module unenv wrote itself rather than ported from Node, and Node's own

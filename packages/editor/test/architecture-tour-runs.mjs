@@ -1310,6 +1310,70 @@ test("features: a feature's status, set in the editor, goes into the ledger", as
 	}, 30_000);
 });
 
+// Beyond a file's own tests (RUNNING.md, *Unattended runs*: "What runs"): a program's run is kept on each module it
+// imported too, by the declarations it ran there (lib traces' `program`), so editing one re-runs the programs that ran
+// what changed — and only those.
+test("selection: an edit to an imported module reruns the programs that ran what changed, and only those", async () => {
+	const workbench = session.workbench();
+	const write = (path, text) => workbench.evaluate(async ([file, contents]) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(file), new TextEncoder().encode(contents));
+	}, [path, text]);
+	const reachOn = (file) => workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => ""), `/workspace/.silo/local/traces/${file}.jsonl`).then((text) => text.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).filter((trace) => trace.program !== undefined));
+	const programOf = (traces, program) => traces.find((trace) => trace.program === program);
+	const files = ["/workspace/shapes.js", "/workspace/report.js", "/workspace/fence.js"];
+
+	await write(files[0], "export function area(r) {\n\treturn 3 * r * r;\n}\n\nexport function perimeter(r) {\n\treturn 6 * r;\n}\n");
+	await write(files[1], "import { area } from \"./shapes.js\";\n\nconsole.log(area(2));\n");
+	await write(files[2], "import { perimeter } from \"./shapes.js\";\n\nconsole.log(perimeter(2));\n");
+
+	try {
+		assert.deepEqual((await session.request("debug.start", { "program": files[1], "breakpoints": [] }, 60_000)).output, ["12"]);
+		assert.deepEqual((await session.request("debug.start", { "program": files[2], "breakpoints": [] }, 60_000)).output, ["12"]);
+
+		const before = await eventually("both programs' reach, kept on shapes.js", async () => {
+			const traces = await reachOn("shapes.js");
+
+			return programOf(traces, "report.js") === undefined || programOf(traces, "fence.js") === undefined ? undefined : traces;
+		}, 60_000);
+
+		assert.notDeepEqual(programOf(before, "report.js").declarations, programOf(before, "fence.js").declarations, "each ran its own function of it");
+
+		// area edited and saved.
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+			const editor = await api.window.showTextDocument(api.Uri.file("/workspace/shapes.js"));
+			const at = editor.document.getText().indexOf("3 * r * r");
+
+			await editor.edit((builder) => {
+				builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "3 * r * r".length)), "Math.PI * r * r");
+			});
+			await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+		});
+		await session.page.keyboard.press("ControlOrMeta+s");
+
+		const after = await eventually("report.js run again, after the save", async () => {
+			const traces = await reachOn("shapes.js");
+
+			return programOf(traces, "report.js")?.trigger === "edit" ? traces : undefined;
+		}, 60_000);
+
+		assert.notDeepEqual(programOf(after, "report.js").declarations, programOf(before, "report.js").declarations, "it ran the edited area");
+		assert.equal(programOf(after, "fence.js").at, programOf(before, "fence.js").at, "fence.js didn't run: nothing of it reached area");
+	} finally {
+		await workbench.evaluate(async (paths) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+
+			for (const path of paths) {
+				await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+			}
+		}, files);
+	}
+});
+
 // Halting (RUNNING.md, *Unattended runs*): a run a save selected, which nobody's looking at, gives a call what it returned
 // the last time it ran for real — and halts before one that never did, its line saying so with Rule… and Pin…. Pinning
 // a value is a rule: runs after an edit are given it.

@@ -1171,7 +1171,7 @@ async function determinedIn(uri: string, source: string): Promise<Determined[] |
 
 /** A finished run, kept (runs.ts): the same run as one kept already is that one, counted again (its ball, not a new
  *  one); else a trace of it, on this machine — a commit shares those of the text it commits (git-engine.ts). */
-async function keepSession(id: string, live = false): Promise<void> {
+async function keepSession(id: string, live = false, program?: string): Promise<void> {
 	const inputs = inputsOf.get(id) ?? [];
 	const executed = executedOf.get(id);
 	const tests = testsOf.get(id);
@@ -1182,6 +1182,8 @@ async function keepSession(id: string, live = false): Promise<void> {
 
 	if (tests !== undefined) {
 		await keepTests(tests, inputs, live ? "edit" : "you");
+	} else if (program !== undefined && executed !== undefined) {
+		await keepReach(program, executed, inputs, live ? "edit" : "you");
 	}
 
 	for (const [uri, runs] of kept) {
@@ -1255,24 +1257,7 @@ async function keepSession(id: string, live = false): Promise<void> {
 async function keepTests({ file, tests }: TestsEvent, inputs: string[], trigger: RunTrace["trigger"]): Promise<void> {
 	const testFile = vscode.workspace.asRelativePath(vscode.Uri.file(file), false);
 	const at = new Date().toISOString();
-	const texts = new Map<string, Promise<{ "source": string; "spans"?: Span[] } | undefined>>();
-	const placed = (path: string) => {
-		if (!texts.has(path)) {
-			texts.set(path, (async () => {
-				const source = await vscode.workspace.fs.readFile(vscode.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
-
-				if (source === undefined) {
-					return undefined;
-				}
-
-				const answer = await annotations(vscode.commands).spans(source).catch(() => undefined);
-
-				return { "source": source, ...answer !== undefined && "value" in answer ? { "spans": answer.value } : {} };
-			})());
-		}
-
-		return texts.get(path);
-	};
+	const placed = placing();
 
 	for (const test of tests) {
 		for (const ran of test.files) {
@@ -1302,6 +1287,70 @@ async function keepTests({ file, tests }: TestsEvent, inputs: string[], trigger:
 				"values": [],
 				"calls": [],
 				"source": text.source
+			}, KEPT);
+		}
+	}
+}
+
+/** Each file's text as it is now and BABLR's spans of it, read once however many runs or tests ask (none: unreadable). */
+function placing(): (path: string) => Promise<{ "source": string; "spans"?: Span[] } | undefined> {
+	const texts = new Map<string, Promise<{ "source": string; "spans"?: Span[] } | undefined>>();
+
+	return async (path) => {
+		if (!texts.has(path)) {
+			texts.set(path, (async () => {
+				const source = await vscode.workspace.fs.readFile(vscode.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
+
+				if (source === undefined) {
+					return undefined;
+				}
+
+				const answer = await annotations(vscode.commands).spans(source).catch(() => undefined);
+
+				return { "source": source, ...answer !== undefined && "value" in answer ? { "spans": answer.value } : {} };
+			})());
+		}
+
+		return texts.get(path);
+	};
+}
+
+/** A program's run, kept on every other file of the workspace it executed (lib traces' `program`), as a test's is: the
+ *  top-level declarations of that file it ran — so an edit to a module it imported selects it (running/live-run.ts). Its
+ *  values are on that file's own runs already, where it had any. */
+async function keepReach(program: string, executed: Map<string, [[number, number], [number, number]][]>, inputs: string[], trigger: RunTrace["trigger"]): Promise<void> {
+	const root = vscode.workspace.workspaceFolders?.[0]?.uri.path;
+	const at = new Date().toISOString();
+	const placed = placing();
+
+	for (const [file, statements] of executed) {
+		// (the workspace's own files: not the program's, nor a package's)
+		if (file === program || root === undefined || !file.startsWith(`${root}/`) || file.includes("/node_modules/")) {
+			continue;
+		}
+
+		const text = await placed(file);
+
+		if (text?.spans === undefined) {
+			continue;
+		}
+
+		const offsetOf = offsetsIn(text.source);
+		const declarations = declarationsHolding(text.spans, statements.map(([start, end]): [number, number] => [offsetOf(start), offsetOf(end)]));
+
+		if (declarations.length > 0) {
+			await keepRun({
+				"id": crypto.randomUUID(),
+				"file": vscode.workspace.asRelativePath(vscode.Uri.file(file), false),
+				"oid": await blobOid(text.source),
+				"declarations": declarations,
+				"trigger": trigger,
+				"program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false),
+				"at": at,
+				"count": 1,
+				"inputs": [...new Set(inputs)].toSorted(),
+				"values": [],
+				"calls": []
 			}, KEPT);
 		}
 	}
@@ -1807,7 +1856,7 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 		const live = liveSessions.delete(session.id);
 
 		// (after every event it told: its values, end and effects)
-		void keepSession(session.id, live).catch((error: unknown) => {
+		void keepSession(session.id, live, typeof program === "string" ? program : undefined).catch((error: unknown) => {
 			log?.warn("a run couldn't be kept", { "error": failureText(error) });
 		});
 
