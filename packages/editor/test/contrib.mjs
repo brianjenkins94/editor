@@ -125,7 +125,8 @@ test("an agent's run of editor-contrib's interpreter answers with how it ended",
 });
 
 test("editor-contrib's extension is on the editor's observability plane: its log, as ext:contrib's", async () => {
-	await session.eventually("its record", () => session.printed().find((line) => /^\[ext:contrib(?:#\w+)?\] .*editor-contrib's extension is up/u.test(line)), 60_000);
+	// (from what the page printed less the bridge's file traffic, which can push the line out of `printed` as types load)
+	await session.eventually("its record", () => session.notable().find((line) => /^\S+ \[ext:contrib(?:#\w+)?\] .*editor-contrib's extension is up/u.test(line)), 60_000);
 });
 
 test("editor.annotations.spans gives an extension the editor's spans for a text", async () => {

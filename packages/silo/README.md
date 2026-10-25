@@ -392,6 +392,19 @@ The design:
 - **Trust.** Once CI gates on selection, a pull request could edit the records so its own tests are skipped. So CI
   selects with the records at the merge base, and counts only CI's own evidence (`evidence/ci/…`).
 
+**Built for CI (2026-10-24)** (packages/editor/test/selection.mjs; architecture.yml's `select` and `reach` jobs). Every
+architecture shard but performance runs instrumented (`COVERAGE=1`, build/coverage.ts), and the harness reads each
+test's reach in every realm of its session, before and after it. On main, CI folds that into
+`.silo/evidence/ci/architecture.json` — per declaration (a file's top-level name, a class's `Class.member`, the rest
+`(top level)`), the tests that reached it — and commits it when it changes. Its sets only grow, but a declaration its
+file lost drops out: an approximation of "leaves after N runs without it" that over-selects rather than churns. A
+change selects by the records at its base: a changed declaration (by its tokens: a reformat selects nothing) its tests'
+shards; ambient code (boot's test, or 30% of a shard's tests) the smoke shard; any code the smoke and performance
+shards; a suite file its shard; ARCHITECTURE.md's diagram the tours (the diagram check runs only when they all do); a
+doc, a unit test or `.silo/` nothing; anything else (a dependency, a build script, the workflow) every shard; and a test
+with no record yet its shard. Over the 30 commits before it, with records from one instrumented run: 7 would have run
+every shard, 6 none, the rest some. Not built: outcomes kept for a selection's safety; unit tests' selection.
+
 ### Purity: decided statically, checked by runs (designed 2026-10-22, not built)
 
 Which functions are pure, to show later (memoizing, replaying a call safely, explaining a function). Mostly decidable

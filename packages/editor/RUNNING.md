@@ -83,7 +83,8 @@ runs are unattended (`__unattended`): a call no recording covers halts the run b
 *Rule…* and *Pin…* (the Margin's `margin.pin`: the values past runs saw there, picked one kept as a rule). **Built
 (2026-10-24):** a program's run is kept on each workspace file it imported too, by the declarations it ran there (lib
 traces' `program`: that program's latest, as a test's), so an edit to a module selects the programs that ran what
-changed. Not yet: CI's selection (ambient code → the smoke suite). Decided: in a live run (the
+changed. And CI selects the architecture suites the same way, by what each test reached (packages/silo/README.md, *Which
+tests reach what*: built for CI 2026-10-24). Decided: in a live run (the
 file in front of you, its skipped lines marked) a call with no recording is **skipped**; a run you aren't looking at
 **halts** (below). Recordings are keyed by the whole request (built 2026-10-23: editor-api gate.ts `requestOf`, a
 method and a hash of the body beyond a plain read's URL). And each live run has a writable layer of its own (built

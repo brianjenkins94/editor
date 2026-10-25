@@ -28,25 +28,43 @@
   # Sharded: each suite file (or a few short ones together) on a runner of its own, so they run side by side without
   # sharing a CPU — the tour is three files, each in a session of its own (test/architecture-tour-session.mjs). The tour's
   # shards keep what they saw; `diagram` merges it and checks ARCHITECTURE.md's diagram against it.
+  #
+  # Selected (packages/editor/test/selection.mjs; packages/silo/README.md, *Which tests reach what*): only the shards a
+  # change reached run, by what each test reached when it last ran — the records at the base (the commit before a push,
+  # a pull request's merge base), so a change can't skip its own tests by editing them. Every shard but performance runs
+  # instrumented (COVERAGE=1) and keeps what each of its tests reached; on main, `reach` folds that into the records and
+  # commits them when they change.
   "jobs": {
+    "select": {
+      "runs-on": "ubuntu-latest",
+      "outputs": {
+        "matrix": "${{ steps.select.outputs.matrix }}",
+        "any": "${{ steps.select.outputs.any }}",
+        "tours": "${{ steps.select.outputs.tours }}"
+      },
+      "steps": [
+        { "uses": "actions/checkout@v4", "with": { "fetch-depth": 0 } },
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
+        {
+          "id": "select",
+          "run": "base=\"${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}\"\nif [ \"${{ github.event_name }}\" = pull_request ]; then base=$(git merge-base \"$base\" HEAD); fi\nmatrix=$(node packages/editor/test/selection.mjs select \"$base\")\necho \"matrix=$matrix\" >> \"$GITHUB_OUTPUT\"\necho \"any=$(echo \"$matrix\" | jq '.include | length > 0')\" >> \"$GITHUB_OUTPUT\"\necho \"tours=$(echo \"$matrix\" | jq '[.include[].shard | select(startswith(\"tour-\"))] | length == 3')\" >> \"$GITHUB_OUTPUT\""
+        }
+      ],
+      "timeout-minutes": 10
+    },
     "suites": {
       "name": "${{ matrix.shard }}",
+      "needs": "select",
+      "if": "${{ needs.select.outputs.any == 'true' }}",
       "runs-on": "ubuntu-latest",
       # actions: read, to download the last green run's performance results.
       "permissions": { "contents": "read", "actions": "read" },
       "strategy": {
         # Every shard runs to the end: a failure in one says nothing about the others.
         "fail-fast": false,
-        "matrix": {
-          "include": [
-            { "shard": "smoke-app", "files": "test/worker-realms.mjs test/architecture-smoke.mjs test/architecture-app.mjs test/contrib.mjs test/pane-views.mjs" },
-            { "shard": "tour-previews", "files": "test/architecture-tour-previews.mjs" },
-            { "shard": "tour-runs", "files": "test/architecture-tour-runs.mjs" },
-            { "shard": "tour-capabilities", "files": "test/architecture-tour-capabilities.mjs" },
-            # Alone, so nothing else shares the CPU while it measures.
-            { "shard": "performance", "files": "test/performance.mjs" }
-          ]
-        }
+        # (selection.mjs's SHARDS: smoke-app, the three tours, and performance — alone, so nothing else shares the CPU
+        # while it measures)
+        "matrix": "${{ fromJSON(needs.select.outputs.matrix) }}"
       },
       "steps": [
         { "uses": "actions/checkout@v4" },
@@ -91,8 +109,16 @@
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
             "ARCH_HUB_TGZ": "http://localhost:5198/hub@0.0.0.tgz",
             "ARCH_OBSERVABILITY_TGZ": "http://localhost:5198/observability@0.0.0.tgz",
-            "PERF_BASELINE": "/tmp/performance-baseline/performance.json"
+            "PERF_BASELINE": "/tmp/performance-baseline/performance.json",
+            # (what each test reaches, kept for selection — not while performance measures)
+            "COVERAGE": "${{ matrix.shard != 'performance' && '1' || '' }}"
           }
+        },
+        # What each of its tests reached, for the records.
+        {
+          "if": "${{ matrix.shard != 'performance' }}",
+          "uses": "actions/upload-artifact@v4",
+          "with": { "name": "reach-${{ matrix.shard }}", "path": "/tmp/architecture-reach/*.json", "if-no-files-found": "error" }
         },
         # What a tour shard saw, for the diagram.
         {
@@ -114,9 +140,11 @@
       ],
       "timeout-minutes": 15
     },
-    # ARCHITECTURE.md's diagram, against what the tour's shards saw together. No browser: a merge and a render.
+    # ARCHITECTURE.md's diagram, against what the tour's shards saw together — when every tour ran. No browser: a merge
+    # and a render.
     "diagram": {
-      "needs": "suites",
+      "needs": ["select", "suites"],
+      "if": "${{ needs.select.outputs.tours == 'true' }}",
       "runs-on": "ubuntu-latest",
       "steps": [
         { "uses": "actions/checkout@v4" },
@@ -128,6 +156,27 @@
         { "run": "pnpm --filter ./packages/editor run test:architecture:diagram" }
       ],
       "timeout-minutes": 15
+    },
+    # The records (.silo/evidence/ci/architecture.json): what each test that ran reached, folded in and committed when
+    # it changed — on main, once every selected shard passed. CI's own evidence only (packages/silo/README.md, "Trust").
+    "reach": {
+      "needs": ["select", "suites"],
+      "if": "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.suites.result == 'success' }}",
+      "runs-on": "ubuntu-latest",
+      "permissions": { "contents": "write" },
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
+        {
+          "uses": "actions/download-artifact@v4",
+          "with": { "pattern": "reach-*", "merge-multiple": true, "path": "/tmp/architecture-reach" }
+        },
+        # (read against this commit's files; committed on top of main as it is now — a push since is only rebased over)
+        {
+          "run": "node packages/editor/test/selection.mjs merge /tmp/architecture-reach\nif git diff --quiet -- .silo/evidence/ci/architecture.json && [ -z \"$(git status --porcelain -- .silo/evidence/ci/architecture.json)\" ]; then echo 'the reach is as it was'; exit 0; fi\ngit config user.name 'github-actions[bot]'\ngit config user.email '41898282+github-actions[bot]@users.noreply.github.com'\ngit add .silo/evidence/ci/architecture.json\ngit commit -m \"the architecture suites' reach, from CI (${{ github.sha }})\"\nfor attempt in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep 5; done\nexit 1"
+        }
+      ],
+      "timeout-minutes": 10
     }
   }
 }

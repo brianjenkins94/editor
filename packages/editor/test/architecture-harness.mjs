@@ -27,6 +27,79 @@ const BOOT_TIMEOUT_MS = 90_000;
  *  time each want their own (`debugMcpPort`). */
 export const DEBUG_MCP_PORT = 7399;
 
+/** Where COVERAGE=1 keeps each suite file's tests' reach (below), `<suite file>.json`. */
+export const REACH_DIR = path.join(fs.tmpdir(), "architecture-reach");
+
+// COVERAGE=1 (build/coverage.ts instruments the editor's own modules, in every realm): each test's reach — the statements
+// of those modules it ran, in every realm of the sessions its file started (its frames, its workers, the service
+// worker), counted before and after it — written once the file's done to REACH_DIR, `{ [test]: { [file]: [[startLine,
+// startCharacter, endLine, endCharacter], …] } }`, for CI's selection. Only in a suite file's own process, not the run's
+// global setup's.
+if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined) {
+	const { after, afterEach, beforeEach } = await import("node:test");
+	/** Each realm's id, by the realm (a frame, a worker), so its modules' counts are told apart before and after. */
+	const realmIds = new WeakMap();
+	let realms = 0;
+	/** Each module's statements, by `<realm>\0<file>\0<version>`: read once, its counts each time. */
+	const statementsOf = new Map();
+	const reach = {};
+	let before = new Map();
+
+	/** Every instrumented module's statement counts now, in every realm of every session. */
+	const countsNow = async () => {
+		const counts = new Map();
+
+		for (const { page, context } of globalThis.__coverageSessions ?? []) {
+			for (const realm of [...page.frames(), ...page.workers(), ...context.serviceWorkers()]) {
+				if (!realmIds.has(realm)) {
+					realms += 1;
+					realmIds.set(realm, realms);
+				}
+
+				const id = String(realmIds.get(realm));
+				const known = [...statementsOf.keys()].filter((key) => key.startsWith(`${id}\0`)).map((key) => key.slice(id.length + 1));
+				const modules = await realm.evaluate((told) => (globalThis.__evidence?.evidence() ?? []).map(({ file, version, statements }) => ({ "file": file, "version": version, "counts": statements.map(({ count }) => count), ...told.includes(`${file}\0${version}`) ? {} : { "statements": statements.map(({ start, end }) => [...start, ...end]) } })), known).catch(() => []);
+
+				for (const { file, version, counts: each, statements } of modules) {
+					const key = `${id}\0${file}\0${version}`;
+
+					if (statements !== undefined) {
+						statementsOf.set(key, statements);
+					}
+
+					counts.set(key, { "file": file, "counts": each });
+				}
+			}
+		}
+
+		return counts;
+	};
+
+	beforeEach(async () => {
+		before = await countsNow();
+	});
+	afterEach(async (test) => {
+		const ran = {};
+
+		for (const [key, { file, counts }] of await countsNow()) {
+			const was = before.get(key)?.counts;
+			const statements = statementsOf.get(key) ?? [];
+
+			for (const [site, count] of counts.entries()) {
+				if (count > (was?.[site] ?? 0) && statements[site] !== undefined) {
+					(ran[file] ??= new Map()).set(statements[site].join(","), statements[site]);
+				}
+			}
+		}
+
+		reach[test.fullName] = Object.fromEntries(Object.entries(ran).map(([file, sites]) => [file, [...sites.values()]]));
+	});
+	after(async () => {
+		await fs.mkdir(REACH_DIR, { "recursive": true });
+		await fs.writeFile(path.join(REACH_DIR, `${path.basename(process.argv[1], ".mjs")}.json`), JSON.stringify(reach));
+	});
+}
+
 async function reachable(url) {
 	try {
 		return (await fetch(url)).ok;
