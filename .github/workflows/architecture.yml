@@ -171,9 +171,10 @@
           "uses": "actions/download-artifact@v4",
           "with": { "pattern": "reach-*", "merge-multiple": true, "path": "/tmp/architecture-reach" }
         },
-        # (read against this commit's files; committed on top of main as it is now — a push since is only rebased over)
+        # (folded into the records as main has them now — another run's may have landed since this commit — read against
+        # this commit's files; then committed on main's tip, a fast-forward: if main moves before the push, again)
         {
-          "run": "node packages/editor/test/selection.mjs merge /tmp/architecture-reach\nif git diff --quiet -- .silo/evidence/ci/architecture.json && [ -z \"$(git status --porcelain -- .silo/evidence/ci/architecture.json)\" ]; then echo 'the reach is as it was'; exit 0; fi\ngit config user.name 'github-actions[bot]'\ngit config user.email '41898282+github-actions[bot]@users.noreply.github.com'\ngit add .silo/evidence/ci/architecture.json\ngit commit -m \"the architecture suites' reach, from CI (${{ github.sha }})\"\nfor attempt in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep 5; done\nexit 1"
+          "run": "records=.silo/evidence/ci/architecture.json\ngit config user.name 'github-actions[bot]'\ngit config user.email '41898282+github-actions[bot]@users.noreply.github.com'\nfor attempt in 1 2 3; do\n  git checkout -q -f --detach ${{ github.sha }}\n  git fetch -q origin main\n  git show \"origin/main:$records\" > \"$records\" 2>/dev/null || rm -f \"$records\"\n  node packages/editor/test/selection.mjs merge /tmp/architecture-reach\n  cp \"$records\" /tmp/records.json\n  git checkout -q -f --detach origin/main\n  mkdir -p \"$(dirname \"$records\")\"\n  cp /tmp/records.json \"$records\"\n  if git diff --quiet -- \"$records\" && git ls-files --error-unmatch \"$records\" >/dev/null 2>&1; then echo 'the reach is as it was'; exit 0; fi\n  git add \"$records\"\n  git commit -q -m \"the architecture suites' reach, from CI (${{ github.sha }})\"\n  if git push -q origin HEAD:main; then exit 0; fi\n  sleep 5\ndone\nexit 1"
         }
       ],
       "timeout-minutes": 10
