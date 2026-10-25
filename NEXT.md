@@ -32,6 +32,10 @@ How it's kept:
 
 ## Watching
 
+- **packages/api's "an email account without a password is told to use a code" test failed** in CI once ("a code was
+  sent to someone-…@example.com", bc7a208, a workflow-only change; passed on rerun). If it comes back, find what a
+  second test's sign-in code reaches in the first's mailbox (a shared mail stub, or an address not unique enough).
+
 - **tour-runs' selection test timed out** in CI once, waiting for "calc.test.js run again, after the save" (1cc007e;
   passed on rerun; the features test after it failed on the state it left). It passed locally every time this session,
   and on 289dadd's run with the same code. If it comes back, find whether the save's selected run waits behind the
