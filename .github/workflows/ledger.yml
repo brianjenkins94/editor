@@ -1,0 +1,31 @@
+{
+  "name": "ledger",
+  "on": {
+    "schedule": [{ "cron": "0 9 * * 1" }],
+    "workflow_dispatch": null
+  },
+  # The feature ledger's weekly run (packages/silo/README.md, *The feature ledger*: "Agents"): `silo check`, and for the
+  # first dormant way in it lists — its files load in CI's runs, its code never runs — one deletion pull request: `silo
+  # remove`'s change, with its price and what's left to do by hand in the body. One at a time: none while one's open.
+  # Nothing merges on its own: a person reviews it, and keeps the feature instead (`silo status … active --until`) if it
+  # should stay. (A pull request a workflow opens starts no CI: pushing to it does.)
+  "concurrency": {
+    "group": "${{ github.workflow }}",
+    "cancel-in-progress": false
+  },
+  "jobs": {
+    "dormant": {
+      "runs-on": "ubuntu-latest",
+      "permissions": { "contents": "write", "pull-requests": "write" },
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
+        {
+          "run": "silo() { (cd packages/silo && npx tsx src/cli.ts \"$@\"); }\nopen=$(gh pr list --state open --search 'head:silo/remove-' --json number --jq 'length')\nif [ \"$open\" != \"0\" ]; then echo 'A deletion pull request is open already: one at a time.'; exit 0; fi\nreport=$(silo check --json || true)\n# (the first dormant way in silo can take out on its own: one whose code shares its files is for a person)\nremoved=''\nfor each in $(echo \"$report\" | jq -r '.dormant[] | @base64'); do\n  id=$(echo \"$each\" | base64 -d | jq -r .id)\n  key=$(echo \"$each\" | base64 -d | jq -r .key)\n  if removed=$(silo remove \"$id\" \"dormant: CI's runs load its files and never run its code\" --key \"$key\"); then break; fi\n  echo \"$removed\"\n  removed=''\n  git checkout -q -- .\ndone\nif [ -z \"$removed\" ]; then echo 'Nothing dormant that silo can take out on its own.'; exit 0; fi\nbranch=\"silo/remove-$(echo \"$id\" | tr -c 'A-Za-z0-9.-' '-' | sed 's/-*$//')\"\ngit checkout -b \"$branch\"\ngit config user.name 'github-actions[bot]'\ngit config user.email '41898282+github-actions[bot]@users.noreply.github.com'\ngit add -A\ngit commit -q -m \"remove $id: dormant — CI's runs load its files and never run its code\"\ngit push -f origin \"$branch\"\nprintf '%s\\n\\n%s\\n\\n%s\\n' \"\\`silo check\\` found $key dormant: CI's runs (.silo/evidence/ci/architecture.json) load its files and never run its code. This is \\`silo remove\\`'s change — review it, and see to what it leaves by hand; or close this and keep it a while instead (\\`silo status \\\"$id\\\" active \\\"<why>\\\" --key \\\"$key\\\" --until <date>\\`).\" '```' \"$removed\" > /tmp/body.md\necho '```' >> /tmp/body.md\ngh pr create --head \"$branch\" --title \"Remove $id (dormant)\" --body-file /tmp/body.md",
+          "env": { "GH_TOKEN": "${{ github.token }}" }
+        }
+      ],
+      "timeout-minutes": 15
+    }
+  }
+}

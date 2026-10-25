@@ -20,3 +20,16 @@ messages name what to use instead.
   stylesheet. It's budgeted: `packages/theme/budget.json` may only go down
   (`node --test packages/theme/test/budget.mjs`). If you remove styling, lower the budget; if you must add, raise it
   there, where the diff shows it.
+
+## Features
+
+The feature ledger (`.silo/features.json`; packages/silo/README.md, *The feature ledger*) is what's been decided about
+features, and `silo check` (CI's lint) holds the code to it:
+
+- **Replacing an approach removes the old one in the same change** — `silo remove "<name>" "<why>"` (what only it
+  reaches, its manifest entries, a tombstone), or delete it and `silo status` it removed with where it went.
+- **An experiment starts with an entry** — `silo status "<name>" experiment "<why>" --until <date>`; it expires by
+  default, and `silo check` says so.
+- **A dormant way in** (`silo check` lists them: their files load in CI's runs, their code never runs) is a decision to
+  make, not to ignore: remove it, or keep it with a reason that expires (`active --until`, 90 days on).
+

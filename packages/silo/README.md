@@ -50,8 +50,8 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? | `coverage` (what committed runs ran, by feature), `features`, `history` | insights (coverage in the gutter), notes, the history extension, the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout` | `runs/`, `evidence/`, `traces/`, `policy*` |
-| Gate | Should this call happen? | none | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features`, `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `cost` | `runs/`, `evidence/`, `traces/`, `policy*`, `features.json` |
+| Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
 ## What the prototype had, and where it is now
 
@@ -618,6 +618,30 @@ kept as traces), "could have reached" is selection's reach, and what one feature
 
 Build order, each step useful alone: (1) the ledger and the checks that need no reach; (2) prices per area from the
 import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the agent rules and the weekly run.
+
+**Built (steps 2–6, 2026-10-25):**
+- **Prices** (lib `cost.ts`): by the declaration graph, what's reachable from every way in with an entry and not
+  without it — its declarations, the files that are nothing but those, their bytes and lines; code no way in reaches
+  isn't priced. `silo check` puts each drift finding's price beside it, and `--prices` lists every entry's (here: the
+  parked derived history frees 478 lines in 4 files; the capability engine 44 lines).
+- **Realm budgets**: above, in the editor's performance suite.
+- **Leases** (lib `ledger.ts` `dormant`, drift's `lease expired`): a way in nobody decided about is dormant when CI's
+  records (`.silo/evidence/ci/architecture.json`) show its files loaded and its own code never ran — its own code being
+  the functions and classes its way in names (a module's other names run as it loads, which the records can't tell
+  apart, so a handler written inline isn't judged). `silo check` lists them as suggestions, each with its price and
+  both ways out; keeping one is `active` with an `until` 90 days on, and `lease expired` asks again. The first run
+  here: the Insights monitor view and the preview profiler.
+- **`silo remove` / `silo restore`**: remove deletes the files only the entry reaches, takes its way in out of the
+  manifests (lib `features.ts` `withoutWayIn`: a command with its menus and keybindings, a view, a setting), writes the
+  tombstone (`restore`: a checkout of the files from the commit before), and lists what's left by hand — its code in
+  files it shares, where its way in is registered, the docs that name it — leaving the change uncommitted. When it can
+  take out nothing on its own it writes nothing and says what to do (exit 2). restore runs the tombstone, a checkout
+  only, and sets the entry active.
+- **Agents**: CLAUDE.md's *Features* (replacing an approach removes the old one; an experiment starts with an entry; a
+  dormant way in is a decision), and `.github/workflows/ledger.yml` weekly: `silo check`, and one deletion pull
+  request for the first dormant way in `remove` can take out, none while one's open.
+
+Not built: the editor's half of leases — dormant features in the evidence's purple, with their price, Remove and Keep.
 
 Open: **off isn't stopped** (a flag off by default ships but doesn't run: its own status, checked by "never reached");
 **restoring across a move** (a tombstone's paths mapped through the moves `history` detects); **what counts as one

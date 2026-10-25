@@ -144,7 +144,7 @@ test("silo status, then silo check: the ledger's decisions held to the code — 
 
 	assert.equal(set.status, 0, String(set.stderr));
 	assert.match(String(set.stdout), /"old exporter" is removed \(since \d{4}-\d\d-\d\d\)/u);
-	assert.equal(JSON.parse(fs.readFileSync(path.join(ledgered, ".silo/features.json"), "utf8"))["old exporter"].in, "abc1234");
+	assert.equal(JSON.parse(fs.readFileSync(path.join(ledgered, ".silo/features.json")))["old exporter"].in, "abc1234");
 	assert.equal(silo("status", "half", "experiment", "trying", "--repo", ledgered).status, 1, "an experiment needs an end");
 
 	const checked = silo("check", ledgered, "--json");
@@ -158,3 +158,53 @@ test("silo status, then silo check: the ledger's decisions held to the code — 
 	]);
 	assert.match(String(silo("check", ledgered).stdout), /Drift \(3\):\n {2}removed but documented: "old exporter" was removed \(abc1234\), and README\.md still names it/u);
 });
+
+test("prices, dormant ways in, silo remove and silo restore", async () => {
+	const notes = await repository({
+		"2026-10-20": {
+			"README.md": "Notes export to markdown (notes/export.ts).\n",
+			"notes/package.json": JSON.stringify({ "contributes": { "commands": [{ "command": "notes.add", "title": "Add" }, { "command": "notes.export", "title": "Export" }], "keybindings": [{ "command": "notes.export", "key": "ctrl+e" }] } }, undefined, "\t") + "\n",
+			"notes/extension.ts": "import * as vscode from \"vscode\";\nimport { exportAll } from \"./export\";\n\nfunction add(): number {\n\treturn 1;\n}\n\nvscode.commands.registerCommand(\"notes.add\", add);\nvscode.commands.registerCommand(\"notes.export\", exportAll);\n",
+			"notes/export.ts": "export function exportAll(): string {\n\treturn format();\n}\n\nfunction format(): string {\n\treturn \"# notes\";\n}\n",
+			// (CI's records: the suites loaded both files, and ran add — never exportAll)
+			".silo/evidence/ci/architecture.json": JSON.stringify({ "version": 1, "tests": [{ "shard": "smoke-app", "name": "adds" }], "reach": { "notes/extension.ts": { "(top level)": [0], "add": [0] }, "notes/export.ts": { "(top level)": [0] } } })
+		}
+	});
+	const silo = (...args: string[]): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { "encoding": "utf8" });
+	const checked = JSON.parse(String(silo("check", notes, "--json").stdout)) as { "dormant": { "key": string; "price": { "files": string[]; "declarations": string[] } }[] };
+
+	// Dormant: export's file loaded, its code never ran — priced at what deleting it frees: export.ts whole.
+	assert.deepEqual(checked.dormant.map((each) => each.key), ["command|notes.export"]);
+	assert.deepEqual(checked.dormant[0].price.files, ["notes/export.ts"]);
+	assert.deepEqual(checked.dormant[0].price.declarations, ["notes/export.ts#exportAll", "notes/export.ts#format"]);
+	assert.match(String(silo("check", notes).stdout), /Dormant \(1\)[^\n]*\n {2}command notes\.export: deleting it frees 2 declarations, 1 file whole[^\n]*\n {4}keep: silo status "notes\.export" active "<why>" --key "command\|notes\.export" --until \d{4}-\d\d-\d\d; remove: silo remove/u);
+
+	// Removed: the file, its manifest entries, a tombstone — its registration and the README named for doing by hand.
+	const removed = silo("remove", "notes.export", "nobody exports", "--key", "command|notes.export", "--repo", notes);
+
+	assert.equal(removed.status, 0, String(removed.stderr));
+	assert.equal(fs.existsSync(path.join(notes, "notes/export.ts")), false);
+	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(notes, "notes/package.json"))).contributes, { "commands": [{ "command": "notes.add", "title": "Add" }], "keybindings": [] });
+	assert.match(String(removed.stdout), /its way in, to take out by hand: where notes\/extension\.ts states it/u);
+	assert.match(String(removed.stdout), /still named in: README\.md/u);
+
+	const tombstone = JSON.parse(fs.readFileSync(path.join(notes, ".silo/features.json")))["notes.export"];
+
+	assert.equal(tombstone.status, "removed");
+	assert.match(tombstone.restore, /^git checkout [0-9a-f]+ -- notes\/export\.ts$/u);
+
+	// Restored: the file back, the entry active again.
+	const restored = silo("restore", "notes.export", "--repo", notes);
+
+	assert.equal(restored.status, 0, String(restored.stderr));
+	assert.equal(fs.existsSync(path.join(notes, "notes/export.ts")), true);
+	assert.equal(JSON.parse(fs.readFileSync(path.join(notes, ".silo/features.json")))["notes.export"].status, "active");
+
+	// Nothing it can take out on its own (its code shares a file, no manifest entry): no tombstone for what's still there.
+	const shared = silo("remove", "adder", "unused", "--paths", "notes/nowhere.ts", "--repo", notes);
+
+	assert.equal(shared.status, 2, String(shared.stdout));
+	assert.match(String(shared.stdout), /^Nothing of "adder" silo can take out on its own/u);
+	assert.equal(JSON.parse(fs.readFileSync(path.join(notes, ".silo/features.json")))["adder"], undefined);
+});
+
