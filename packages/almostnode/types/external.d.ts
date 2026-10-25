@@ -60,3 +60,13 @@ declare module "string_decoder/lib/string_decoder.js" {
 declare module "assert/build/assert.js" {
 	export { default } from "node:assert";
 }
+
+declare module "assert/build/internal/util/comparisons.js" {
+	const comparisons: { "isDeepEqual": (actual: unknown, expected: unknown) => boolean; "isDeepStrictEqual": (actual: unknown, expected: unknown) => boolean };
+
+	export default comparisons;
+}
+
+declare module "path-browserify" {
+	export { posix as default } from "node:path";
+}

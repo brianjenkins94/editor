@@ -13,25 +13,18 @@ How it's kept:
 
 ## Queue
 
-1. **unenv's own modules, audited.** Each miss so far (EventEmitter as a class; streams; string_decoder; assert with no
-   messages and JSON equality, 2026-10-23) was a module unenv wrote itself rather than ported from Node, and Node's own
-   code from npm replaced it (packages/almostnode/builtins.ts). Go through the rest it serves as they are — util,
-   timers, url, querystring, os, buffer, the stubs — and for each that's hand-rolled where Node's code exists on npm,
-   swap it in, with a test of the behaviour that differed. *Done:* every unenv module almostnode serves is a port of
-   Node's, a stub that says "not implemented", or replaced, and builtins.ts says which.
-
-2. **The feature ledger, steps 2–6** (packages/silo/README.md, *The feature ledger*: build order): prices per area
+1. **The feature ledger, steps 2–6** (packages/silo/README.md, *The feature ledger*: build order): prices per area
    from the import graph; realm byte budgets beside the performance suite's; leases from the traces runs and tests keep
    (dormant: reachable, never reached); `silo remove` and `silo restore`; the agent rules and a weekly `silo check` run.
    Also from step 1: drift in the editor's Problems view, and `silo check` in the lint workflow once it's quiet here.
    *Done:* each, as its step in the README says.
 
-3. **Purity from runs.** Observed purity kept as evidence across runs (silo README, *Purity*: a `purity` kind at
+2. **Purity from runs.** Observed purity kept as evidence across runs (silo README, *Purity*: a `purity` kind at
    function spans, sharing the evidence files and their fading), so runs answer the static check's unknowns and give
    its verdicts confidence ("seen 4,000 times, never impure"). *Done:* a function the check calls unknown, run often
    without writing outside, shows that on its card.
 
-4. **What came from an input, tracked at runtime.** The static floor shares values built only from a file's literals;
+3. **What came from an input, tracked at runtime.** The static floor shares values built only from a file's literals;
    tsval carrying a from-an-input bit with each value (through its value stack, bindings, objects and built-ins) would
    share every value that didn't touch one, a callback's and a parameter's included (RUNTIME-EVIDENCE.md, *Kept across
    reloads*; lib util/silo/purity `determinedValues`, the floor it raises). Measure first: what the floor misses on this
