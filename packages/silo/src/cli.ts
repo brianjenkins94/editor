@@ -6,8 +6,8 @@
  *   silo features [repo] [--json]                      every way into the program, found in its code
  *   silo status <entry> <status> [why] [--key …] [--paths …] [--until …]
  *                                                      a decision about a feature, in the ledger (.silo/features.json)
- *   silo check [repo] [--json]                         the ledger's drift from the code (warnings), and what the runs'
- *                                                        packages did beyond the baseline
+ *   silo check [repo] [--json]                         the ledger's drift from the code, and what the runs' packages did
+ *                                                        beyond the baseline
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
  *                                                        commit messages, which are never read
  *
@@ -339,7 +339,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "check",
-			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, and dead ends (a command or view declared and never registered, a setting never read) — as warnings, each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 when the runs did something beyond the baseline.",
+			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, and dead ends (a command or view declared and never registered, a setting never read) — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag }),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
@@ -347,18 +347,22 @@ export const app = subcommands({
 				const drifted = await ledgerDrift(repo);
 				const found = fs.existsSync(paths.baseline) ? beyondBaseline(loadRuns(paths), loadBaseline(paths).packages) : undefined;
 
+				// (errors since 2026-10-25: every check was quiet here — silo README, *The feature ledger*)
+				if (drifted.length > 0) {
+					process.exitCode = 1;
+				}
+
 				if (config.get("json")) {
 					process.stdout.write(JSON.stringify({ "drift": drifted, "beyondBaseline": found ?? null }, undefined, "\t") + "\n");
-					process.exitCode = (found?.length ?? 0) > 0 ? 1 : 0;
+					process.exitCode = (found?.length ?? 0) > 0 || drifted.length > 0 ? 1 : 0;
 
 					return;
 				}
 
-				// (warnings: each check becomes an error once it's quiet here — silo README, *The feature ledger*)
 				if (drifted.length === 0) {
 					process.stdout.write("The ledger and the code agree.\n");
 				} else {
-					process.stdout.write(`Drift (${drifted.length}, warnings):\n${drifted.map((each) => `  ${each.check}: ${each.message}\n    change the code: ${each.code}; or the decision: ${each.decision}`).join("\n")}\n`);
+					process.stdout.write(`Drift (${drifted.length}):\n${drifted.map((each) => `  ${each.check}: ${each.message}\n    change the code: ${each.code}; or the decision: ${each.decision}`).join("\n")}\n`);
 				}
 
 				if (found === undefined) {

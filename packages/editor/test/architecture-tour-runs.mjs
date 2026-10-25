@@ -1310,6 +1310,35 @@ test("features: a feature's status, set in the editor, goes into the ledger", as
 	}, 30_000);
 });
 
+// The ledger's drift in Problems (packages/silo/README.md, *The feature ledger*: "In the editor"): `silo check`'s checks,
+// held to the workspace by History — a feature stopped while its code is still there is a problem on the ledger, at its
+// entry, until the code or the decision changes.
+test("features: the ledger's drift in Problems — stopped but present, until the decision changes", async () => {
+	const workbench = session.workbench();
+	const ledgerFile = "/workspace/.silo/features.json";
+	const read = () => workbench.evaluate((file) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(file)).then((bytes) => new TextDecoder().decode(bytes)), ledgerFile);
+	const write = (text) => workbench.evaluate(([file, contents]) => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file(file), new TextEncoder().encode(contents)), [ledgerFile, text]);
+	const problems = () => workbench.evaluate((file) => globalThis.__editor.api.languages.getDiagnostics(globalThis.__editor.api.Uri.file(file)).filter((each) => each.source === "silo").map((each) => ({ "line": each.range.start.line, "message": each.message })), ledgerFile);
+	const before = await read();
+	const ledger = JSON.parse(before);
+
+	await write(JSON.stringify({ ...ledger, "calculator": { "status": "stopped", "why": "replaced by the spreadsheet", "since": "2026-10-25", "paths": ["calc.js"] } }, undefined, "\t") + "\n");
+
+	try {
+		const found = await eventually("the drift, in Problems", async () => (await problems()).find((each) => each.message.startsWith("stopped but present: ")), 60_000);
+		const lines = (await read()).split("\n");
+
+		assert.ok(lines[found.line].includes("\"calculator\""), `at its entry: ${JSON.stringify(found)}`);
+		assert.match(found.message, /change the code: .+; or the decision: /u, "both ways out");
+
+		// The decision changes: active again — the problem goes.
+		await write(JSON.stringify({ ...ledger, "calculator": { "status": "active", "why": "kept after all", "since": "2026-10-25", "paths": ["calc.js"] } }, undefined, "\t") + "\n");
+		await eventually("the drift, gone", async () => ((await problems()).length === 0 || undefined), 60_000);
+	} finally {
+		await write(before);
+	}
+});
+
 // Beyond a file's own tests (RUNNING.md, *Unattended runs*: "What runs"): a program's run is kept on each module it
 // imported too, by the declarations it ran there (lib traces' `program`), so editing one re-runs the programs that ran
 // what changed — and only those.

@@ -16,7 +16,7 @@ How it's kept:
 1. **The feature ledger, steps 2–6** (packages/silo/README.md, *The feature ledger*: build order): prices per area
    from the import graph; realm byte budgets beside the performance suite's; leases from the traces runs and tests keep
    (dormant: reachable, never reached); `silo remove` and `silo restore`; the agent rules and a weekly `silo check` run.
-   Also from step 1: drift in the editor's Problems view, and `silo check` in the lint workflow once it's quiet here.
+   (Step 1's drift in Problems and `silo check` in CI's lint: built 2026-10-25.)
    *Done:* each, as its step in the README says.
 
 2. **Purity from runs.** Observed purity kept as evidence across runs (silo README, *Purity*: a `purity` kind at

@@ -567,7 +567,9 @@ removed but documented (a removed entry's id or paths in a `.md`), experiment ex
 command or view declared and never registered, a setting whose name its code never quotes). This repository's ledger
 holds its standing decisions (Run with Inputs removed; derived history, the compiled tier and the capability engine
 parked); its first check found one dead end, `eslint.workingDirectories` — not dead but half-honored then (ESLint
-linted from the workspace root, its default), and honored since 2026-10-24.
+linted from the workspace root, its default), and honored since 2026-10-24. Since 2026-10-25 every check is an error
+(each was quiet here): `silo check` exits 1 on drift and runs in CI's lint job, and the editor shows the same drift in
+Problems, on `.silo/features.json` at the entry it's about (the History extension, which reads the ways in).
 
 Code is easy to add and hard to remove: removing takes an argument, keeping takes none, so a codebase built fast keeps
 everything it tried. A cleanup audit of this repo found almost nothing dead. The weight was code whose reason had lapsed

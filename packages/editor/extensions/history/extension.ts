@@ -9,6 +9,8 @@
  * code didn't) — and a change in that is told too. Evidence is keyed on BABLR spans; the shared evidence store
  * (insights') places them through the editor's resolver, so the join with BABLR happens there, at the edge.
  *
+ * And the feature ledger's drift, in Problems (drift.ts): `silo check`'s checks, against the ways in it reads.
+ *
  * Nothing it finds is kept: it's for the session. Once committed, the commit tells what changed (`silo history`), and what
  * runs say is recomputed from the evidence, which is kept.
  *
@@ -27,6 +29,7 @@ import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
 import * as vscode from "vscode";
+import { ledgerDrift } from "./drift";
 
 /** How long after the last keystroke a burst ends. */
 const IDLE_MS = 1500;
@@ -64,6 +67,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 	const evidence = evidenceStore(vscode, context.subscriptions);
+	const ledger = ledgerDrift(context, root);
 	// What runs last said of each feature, this session (undefined until the first join: that one is told as a summary).
 	let exercised: Map<string, Exercise> | undefined;
 	const replayer = new Replayer(() => Promise.resolve(""), { "analyzer": analyzer, "include": includeByDefault });
@@ -156,6 +160,17 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}
 
+	/** Hold the ledger to the ways in as they're read now. */
+	async function checkLedger(): Promise<void> {
+		if (latest === undefined) {
+			return;
+		}
+
+		const features = featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways })));
+
+		await ledger.check([...features.values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides })));
+	}
+
 	/** Read the program as it stands, and replay it against the last reading: the first is the baseline. */
 	async function step(attempt = 0): Promise<void> {
 		const file = [...edited][0] ?? vscode.window.activeTextEditor?.document.uri.path;
@@ -199,6 +214,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			baseline = true;
 			output.appendLine(`Reading ${String(readings.size)} files: ${String(result.features)} features.`);
 			await exercise();
+			await checkLedger();
 
 			return;
 		}
@@ -208,6 +224,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 
 		await exercise();
+		await checkLedger();
 	}
 
 	const schedule = (delay: number): void => {
@@ -257,6 +274,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	};
 
 	context.subscriptions.push(watcher, watcher.onDidChange(manifestsChanged), watcher.onDidCreate(manifestsChanged), watcher.onDidDelete(manifestsChanged));
+
+	// The ledger, or a doc, changed: its drift may have (a doc naming a removed feature, say).
+	const decided = vscode.workspace.createFileSystemWatcher("**/{features.json,*.md}");
+	const ledgerChanged = (): void => {
+		queue = queue.then(checkLedger).catch(() => undefined);
+	};
+
+	context.subscriptions.push(decided, decided.onDidChange(ledgerChanged), decided.onDidCreate(ledgerChanged), decided.onDidDelete(ledgerChanged));
 
 	// The baseline: the program as it is when the extension starts.
 	queue = queue.then(readManifests).catch(() => undefined);

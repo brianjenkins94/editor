@@ -130,7 +130,7 @@ test("silo install: nothing published in the last `days` days — `latest` is th
 	assert.deepEqual(installCommand("pnpm", ["react"], 7, now), ["add", "react", "--config.minimum-release-age=10080"]);
 });
 
-test("silo status, then silo check: the ledger's decisions held to the code, as warnings", async () => {
+test("silo status, then silo check: the ledger's decisions held to the code — drift fails it", async () => {
 	const ledgered = await repository({
 		"2026-10-20": {
 			"README.md": "The old exporter (old-export.ts) is how files leave.\n",
@@ -150,11 +150,11 @@ test("silo status, then silo check: the ledger's decisions held to the code, as 
 	const checked = silo("check", ledgered, "--json");
 	const { drift } = JSON.parse(String(checked.stdout)) as { "drift": { "check": string; "entry"?: string; "message": string }[] };
 
-	assert.equal(checked.status, 0, "drift warns, it doesn't fail");
+	assert.equal(checked.status, 1, "drift fails it (since 2026-10-25: every check was quiet on this repository)");
 	assert.deepEqual(drift.map((each) => [each.check, each.entry ?? each.message]), [
 		["removed but documented", "old exporter"],
 		["dead end", "command notes.ghost is declared and never registered"],
 		["dead end", "setting notes.unread is declared and its code never reads it"]
 	]);
-	assert.match(String(silo("check", ledgered).stdout), /Drift \(3, warnings\):\n {2}removed but documented: "old exporter" was removed \(abc1234\), and README\.md still names it/u);
+	assert.match(String(silo("check", ledgered).stdout), /Drift \(3\):\n {2}removed but documented: "old exporter" was removed \(abc1234\), and README\.md still names it/u);
 });
