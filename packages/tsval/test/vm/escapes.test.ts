@@ -1,22 +1,40 @@
-import type { EscapeEvent } from "../../src/vm.ts";
+import type { EscapeEvent, VMOptions } from "../../src/vm.ts";
 import assert from "node:assert";
 import { test } from "node:test";
 import ts from "typescript";
+import type { VM } from "../../src/vm.ts";
+import { runToEnd } from "../../src/explore.ts";
 import { createVM } from "../../src/interpret.ts";
 
-/** Run `code`, each escaping write as `function: what` (the function by its name), in order. */
-function escapes(code: string): string[] {
+/** A function's name, as these tests say it. */
+function nameOf(fn: ts.Node): string {
+	const named = fn as { "name"?: ts.Node; "parent"?: ts.Node };
+
+	return named.name !== undefined ? named.name.getText() : named.parent !== undefined && ts.isVariableDeclaration(named.parent) ? named.parent.name.getText() : ts.isConstructorDeclaration(fn) ? "constructor" : "(anonymous)";
+}
+
+/** Run `code`, each escaping write as `function: what` (the function by its name), in order — any other kind of
+ *  impurity as `function: kind what`. */
+function escapes(code: string, options: Partial<VMOptions> = {}): string[] {
 	const seen: string[] = [];
 	const { vm } = createVM(code, {
+		...options,
 		"escapes": (event: EscapeEvent) => {
-			const named = event.function as { "name"?: ts.Node; "parent"?: ts.Node };
-			const name = named.name !== undefined ? named.name.getText() : named.parent !== undefined && ts.isVariableDeclaration(named.parent) ? named.parent.name.getText() : ts.isConstructorDeclaration(event.function) ? "constructor" : "(anonymous)";
-
-			seen.push(`${name}: ${event.what}`);
+			seen.push(`${nameOf(event.function)}: ${event.kind === "write" ? "" : event.kind + " "}${event.what}`);
 		}
 	});
 
 	vm.run();
+
+	return seen;
+}
+
+/** `escapes`, on an event loop: run to its end. */
+async function escapesOnLoop(code: string): Promise<string[]> {
+	const seen: string[] = [];
+	const { vm } = createVM(code, { "eventLoop": { "pace": "fast" }, "escapes": (event: EscapeEvent) => { seen.push(`${nameOf(event.function)}: ${event.kind === "write" ? "" : event.kind + " "}${event.what}`); } });
+
+	await runToEnd(vm);
 
 	return seen;
 }
@@ -67,4 +85,55 @@ test("a write escapes each call on the stack that began after what it wrote was 
 		"function outer() { const local = { n: 0 }; local.n = 1; return read(box); }",
 		"outer();"
 	].join("\n")), ["value: n", "read: n", "outer: n"]);
+});
+
+test("reading the clock or random numbers is nondeterministic; setting a timer, an effect — on the event loop's too", async () => {
+	const code = [
+		"function stamp() { return Date.now(); }",
+		"function roll() { return Math.random(); }",
+		"function today() { return new Date(); }",
+		"function parsed() { return new Date(0).getTime() + Math.max(1, 2); }",
+		"function later(f) { setTimeout(f, 1); }",
+		"stamp(); roll(); today(); parsed(); later(() => {});"
+	].join("\n");
+	const expected = ["stamp: nondeterministic Date.now", "roll: nondeterministic Math.random", "today: nondeterministic Date", "later: effect setTimeout"];
+
+	assert.deepStrictEqual(escapes(code, { "globals": { "setTimeout": setTimeout } }), expected);
+	assert.deepStrictEqual(await escapesOnLoop(code), expected);
+});
+
+test("a host function that isn't a built-in is unwatched, unless the embedder watches it and tells its effects", () => {
+	const pkg = { "join": (a: string, b: string): string => a + "/" + b };
+	const log = (): void => { machine?.impure("effect", "console.log"); };
+	let machine: VM | undefined;
+	const seen: string[] = [];
+	const { vm } = createVM("function where(a) { return pkg.join(a, 'b'); }\nfunction say(a) { log(a); return [a].map(String).join(); }\nwhere('a'); say('x');", {
+		"globals": { "pkg": pkg, "log": log },
+		"watches": new WeakSet([log]),
+		"escapes": (event: EscapeEvent) => { seen.push(`${nameOf(event.function)}: ${event.kind} ${event.what}`); }
+	});
+
+	machine = vm;
+	vm.run();
+	assert.deepStrictEqual(seen, ["where: unwatched join", "say: effect console.log"]);
+});
+
+test("more built-ins write what they're given: Reflect's, a typed array's, a Date's setters", () => {
+	assert.deepStrictEqual(escapes([
+		"function put(o) { Reflect.set(o, 'a', 1); }",
+		"function zero(xs) { xs.fill(0); }",
+		"function noon(d) { d.setHours(12); }",
+		"function fresh() { const d = new Date(0); d.setHours(12); return d; }",
+		"put({}); zero(new Uint8Array(2)); noon(new Date(0)); fresh();"
+	].join("\n")), ["put: Reflect.set", "zero: fill", "noon: setHours"]);
+});
+
+test("called is told each call of a guest function", () => {
+	const counts = new Map<string, number>();
+	const { vm } = createVM("function f(x) { return x + 1; }\nconst g = (x) => f(x) * 2;\nfor (let i = 0; i < 3; i += 1) { g(i); }", {
+		"called": (fn) => { counts.set(nameOf(fn), (counts.get(nameOf(fn)) ?? 0) + 1); }
+	});
+
+	vm.run();
+	assert.deepStrictEqual(Object.fromEntries(counts), { "g": 3, "f": 3 });
 });

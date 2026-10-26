@@ -14,17 +14,17 @@
  *
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
-import type { LoadedPackage, SiteObservation, StatementCoverage } from "@brianjenkins94/editor-api";
+import type { FunctionRun, LoadedPackage, SiteObservation, StatementCoverage } from "@brianjenkins94/editor-api";
 import type { ModuleEvidence } from "@brianjenkins94/editor-api/recorded";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Effect, Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
+import type { Effect, Environment, PurityObservation, PurityReport, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
 import type { VersionsFile } from "./versions";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldBranches, foldPurity, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, versionsPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { Unparsable } from "./bablr";
 import { blobOid, headCommit } from "./git-engine";
@@ -85,9 +85,10 @@ function browserClass(): Omit<Environment, "runtime" | "name"> {
 	return { "engine": engine, "os": os, "cores": navigator.hardwareConcurrency, ...memory === undefined ? {} : { "memoryGb": memory } };
 }
 
-/** What a run observed of the program it ran: the source that ran, each statement's range in it with its count, and
- *  each observed site that ran. */
-interface Coverage { "file": string; "source": string; "statements": StatementCoverage[]; "sites": SiteObservation[] }
+/** What a run observed of the program it ran: the source that ran, each statement's range in it with its count, each
+ *  observed site that ran, and each function it called with how its calls went (a debug session's; a preview's pages
+ *  don't see purity). */
+interface Coverage { "file": string; "source": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "functions"?: FunctionRun[] }
 
 /** Each range in `source` as offsets (its line/character positions, counted in UTF-16 code units). */
 function offsets(source: string, statements: { "start": [number, number]; "end": [number, number] }[]): { "start": number; "end": number }[] {
@@ -187,7 +188,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	// Each run's coverage, until the run ends (the session's coverage comes just before its end): its entry's, and each
 	// other of the program's files that ran (packages/tsval/README.md, *Modules*).
 	const coverage = new Map<string, Coverage[]>();
-	const coverageOf = (each: Partial<Coverage>): Coverage[] => (typeof each.file === "string" && typeof each.source === "string" && Array.isArray(each.statements) ? [{ "file": each.file, "source": each.source, "statements": each.statements, "sites": Array.isArray(each.sites) ? each.sites : [] }] : []);
+	const coverageOf = (each: Partial<Coverage>): Coverage[] => (typeof each.file === "string" && typeof each.source === "string" && Array.isArray(each.statements) ? [{ "file": each.file, "source": each.source, "statements": each.statements, "sites": Array.isArray(each.sites) ? each.sites : [], ...Array.isArray(each.functions) ? { "functions": each.functions } : {} }] : []);
 
 	// And the packages whose code it ran, with their versions (the runtime's folder for each).
 	const packages = new Map<string, LoadedPackage[]>();
@@ -265,6 +266,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	const recordFile = async (envelope: RunEnvelope, file: string, versions: Coverage[]): Promise<void> => {
 		const reached: { "span": string; "count": number }[] = [];
 		const sites: (SiteObservation & { "span": string })[] = [];
+		const functions: PurityReport[] = [];
 
 		for (const covered of versions) {
 			// (an empty source: BABLR has nothing to parse)
@@ -283,6 +285,16 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 							sites.push({ ...site, "span": siteIds[index] });
 						}
 					});
+
+					// Each function by the span standing for it, as a statement's is (the card asks the same: purityAt).
+					const ran = covered.functions ?? [];
+					const functionIds = ran.length === 0 ? [] : await bablr.anchors(covered.source, offsets(covered.source, ran), false, file);
+
+					ran.forEach(({ start: _start, end: _end, first, ...counts }, index) => {
+						if (typeof functionIds[index] === "string") {
+							functions.push({ ...counts, "span": functionIds[index], ...first === undefined ? {} : { "first": { "kind": first.kind, "what": first.what } } });
+						}
+					});
 				} catch (error) {
 					if (!(error instanceof Unparsable)) {
 						throw error;
@@ -294,7 +306,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			}
 		}
 
-		if (reached.length === 0 && sites.length === 0) {
+		if (reached.length === 0 && sites.length === 0 && functions.length === 0) {
 			return;
 		}
 
@@ -302,7 +314,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		const branches = sites.filter((site) => site.site === "branch").map((site) => ({ "span": site.span, "arms": site.arms ?? [] }));
 		const path = evidencePath(envelope.user, envelope.environment, file);
 		const run = { "id": envelope.id, "at": envelope.endedAt };
-		const folded = foldBranches(foldValues(foldReached(parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array())), reached, run), values, run), branches, run);
+		const folded = foldPurity(foldBranches(foldValues(foldReached(parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array())), reached, run), values, run), branches, run), functions, run);
 
 		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(folded)));
 
@@ -452,6 +464,46 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 		await vscode.workspace.fs.writeFile(uri(path), new Uint8Array([...before, ...new TextEncoder().encode(envelopeLine(envelope))]));
 	};
+
+	// How each of `ranges` (functions, in `source`, the text of `file` now) went in every user's runs in every
+	// environment: by the span standing for each, as a run's functions are kept — their counts summed — or null, never run
+	// or never kept (the Margin's purity on a function's card: silo README, *Purity*).
+	vscode.commands.registerCommand("editor.evidence.purity", async (source: unknown, file: unknown, ranges: unknown) => {
+		if (typeof source !== "string" || typeof file !== "string" || !Array.isArray(ranges)) {
+			throw new TypeError("editor.evidence.purity: a source, its file and ranges in it");
+		}
+
+		await writing;
+
+		const relative = repoRelative(file);
+		const ids = await bablr.anchors(source, ranges as { "start": number; "end": number }[], false, relative).catch(() => [] as (string | undefined)[]);
+		const wanted = new Set(ids.filter((id): id is string => id !== undefined));
+
+		if (wanted.size === 0) {
+			return ranges.map(() => null);
+		}
+
+		const folder = uri(`${SILO_DIR}/evidence`);
+		const folders = async (at: vscodeApi.Uri): Promise<string[]> => vscode.workspace.fs.readDirectory(at).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => []);
+		const bySpan = new Map<string, Omit<PurityObservation, "kind" | "key" | "lastRun" | "lastAt">>();
+
+		for (const user of await folders(folder)) {
+			for (const environment of await folders(vscode.Uri.joinPath(folder, user))) {
+				const text = new TextDecoder().decode(await read(`${SILO_DIR}/evidence/${user}/${environment}/${relative}.jsonl`) ?? new Uint8Array());
+
+				for (const observation of parseEvidence(text)) {
+					if (observation.kind === "purity" && wanted.has(observation.span)) {
+						const { "kind": _kind, "key": _key, "lastRun": _lastRun, "lastAt": _lastAt, ...counts } = observation;
+						const known = bySpan.get(observation.span);
+
+						bySpan.set(observation.span, known === undefined ? counts : { ...known, "w": known.w + counts.w, "runs": known.runs + counts.runs, "ever": known.ever + counts.ever, "calls": known.calls + counts.calls, "write": known.write + counts.write, "effect": known.effect + counts.effect, "nondeterministic": known.nondeterministic + counts.nondeterministic, "unwatched": known.unwatched + counts.unwatched, ...known.first ?? counts.first ? { "first": known.first ?? counts.first } : {}, ...known.unseen ?? counts.unseen ? { "unseen": known.unseen ?? counts.unseen } : {} });
+					}
+				}
+			}
+		}
+
+		return ranges.map((_, index) => (ids[index] === undefined ? null : bySpan.get(ids[index]) ?? null));
+	});
 
 	runs.onEnd((run) => {
 		writing = writing.then(async () => record(run)).catch(() => { /* evidence never breaks a run */ });

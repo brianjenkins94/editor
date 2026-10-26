@@ -47,7 +47,7 @@
  * A preview's recorded stops come the same way: `values` on its run's `production` session (the bridge's), each report
  * every hit so far (`replace`).
  */
-import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, ImpureWrite, LiveCall, LivePlace, LiveValue, RunEnd, TestsEvent, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { AskEvent, CapabilityChoice, CoverageEvent, EffectsEvent, EndedEvent, FunctionRun, LiveCall, LivePlace, LiveValue, RunEnd, TestsEvent, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
 import type { PaneMark as ContentMark, PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { EditAnswer, EditButton, EditRequest } from "@brianjenkins94/editor-api/rules";
@@ -100,7 +100,7 @@ interface MarginState {
 	"ask"?: { "line": number; "call": string; "capability": string; "resource": string; "resolved": boolean };
 	"end"?: { "line": number; "kind": string; "message"?: string };
 	"marks": { "line": number; "kind": string; "title"?: string }[];
-	"cards": { "fromLine": number; "toLine": number; "title": string; "purity"?: string; "flagged"?: string }[];
+	"cards": { "fromLine": number; "toLine": number; "title": string; "purity"?: string; "flagged"?: string; "seen"?: string }[];
 	"runLog"?: RunLog;
 	/** The runs kept of the file, oldest first: each one's id, whether it's the one shown, and how it ended (none while it goes). */
 	"runs": { "id": string; "picked": boolean; "state"?: PaneRun["state"] }[];
@@ -126,8 +126,8 @@ const liveSessions = new Set<string>();
 const inputsOf = new Map<string, string[]>();
 /** The statements each session executed, by file (its coverage, [line, character] each): what its code is. */
 const executedOf = new Map<string, Map<string, [[number, number], [number, number]][]>>();
-/** Each file's functions the latest run saw write outside themselves (the coverage event's `impure`), by path. */
-const impureOf = new Map<string, ImpureWrite[]>();
+/** Each file's functions the latest run called, and how their calls went (the coverage event's `functions`), by path. */
+const functionsOf = new Map<string, FunctionRun[]>();
 /** Each session's tests, when it ran a test file (the run contract's `tests`): kept with its run. */
 const testsOf = new Map<string, TestsEvent>();
 /** How many of a run's steps its ball rolls through, at most. */
@@ -571,8 +571,13 @@ async function mockVariable(uri: string, at: Range, cell: { "text": string; "kin
  *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
 interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[]; "purity"?: Purity }
 
-/** A function's purity, as silo judges it statically (the plugin's `_statements`: lib util/silo/purity) — and why not. */
-interface Purity { "verdict": string; "reasons": string[] }
+/** A function's purity, as silo judges it statically (the plugin's `_statements`: lib util/silo/purity) — and why not —
+ *  with the function's range (offsets), and how its calls went in every run kept (`seen`: purityEvidence). */
+interface Purity { "verdict": string; "reasons": string[]; "start": number; "end": number; "seen"?: PuritySeen }
+
+/** How a function's calls went in every user's runs in every environment (the workbench's `editor.evidence.purity`:
+ *  lib util/silo/evidence's purity kind, summed): its calls, and how many were impure each way, since it last changed. */
+interface PuritySeen { "calls": number; "ever": number; "write": number; "effect": number; "nondeterministic": number; "unwatched": number; "first"?: { "kind": string; "what": string }; "unseen"?: string }
 
 /** A step of the program (RUNTIME-EVIDENCE.md, *Projections*): statements written together, a card around them in the margin. */
 interface Step { "fromLine": number; "toLine": number; "title": string; "detail": string; "declares": { "name": string; "type": string | null }[]; "body": boolean; "purity"?: Purity }
@@ -595,7 +600,7 @@ function statementsOf(document: vscode.TextDocument): Promise<Statement[] | unde
 	const statements = Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "statements"?: Statement[] | null; "purity"?: (Purity & { "start": number; "end": number })[] | null } } | undefined>("typescript.tsserverRequest", "_statements", { "file": document.uri })).then((response) => response?.body?.statements?.map((statement) => {
 		const purity = response.body?.purity?.find((each) => statement.start <= each.start && each.end <= statement.end);
 
-		return purity === undefined ? statement : { ...statement, "purity": { "verdict": purity.verdict, "reasons": purity.reasons } };
+		return purity === undefined ? statement : { ...statement, "purity": { "verdict": purity.verdict, "reasons": purity.reasons, "start": purity.start, "end": purity.end } };
 	}) ?? undefined, () => undefined);
 
 	statementsRead.set(uri, { "version": document.version, "statements": statements });
@@ -666,28 +671,106 @@ function stepsOf(document: vscode.TextDocument, statements: Statement[]): Step[]
 	return steps.map(({ fromLine, toLine, title, names, detail, declares, body, purity }) => ({ "fromLine": fromLine, "toLine": toLine, "title": stepTitle(title, names), "detail": detail, "declares": declares, "body": body, ...purity === undefined ? {} : { "purity": purity } }));
 }
 
-/** The latest run's write outside itself by the function a step is, if it made one (on the step's lines as they were
- *  when it ran: a function's own lines). */
-function impureIn(uri: string, step: Step): ImpureWrite | undefined {
-	return impureOf.get(vscode.Uri.parse(uri).path)?.find((each) => step.fromLine <= each.start[0] && each.start[0] <= step.toLine);
+/** The latest run's account of the function a step is, if it called it (on the step's lines as they were when it ran: a
+ *  function's own lines) — the outermost there, a nested function's being its own. */
+function latestIn(uri: string, step: Step): FunctionRun | undefined {
+	return functionsOf.get(vscode.Uri.parse(uri).path)?.filter((each) => step.fromLine <= each.start[0] && each.start[0] <= step.toLine).sort((a, b) => a.start[0] - b.start[0] || a.start[1] - b.start[1])[0];
 }
 
-/** What a function step's card says of its purity: silo's verdict, and — judged pure, yet the latest run saw it write
- *  outside itself — that the judgment broke there (a finding: silo README, *Purity*). Undefined for a step that isn't
- *  one function. */
-function purityText(step: Step, impure: ImpureWrite | undefined): { "text": string; "title": string; "flagged": boolean } | undefined {
+/** Each file's purity evidence, by the document version and the evidence's generation it was read at. */
+const purityRead = new Map<string, { "version": number; "generation": number; "seen": Promise<(PuritySeen | null)[]> }>();
+/** Bumped as evidence is written (a run ended): what's been read of it is stale. */
+let evidenceGeneration = 0;
+
+/** `steps` (of `document`) with how each function step's calls went in the runs kept, where any did (purityEvidence). */
+async function withSeen(document: vscode.TextDocument, steps: Step[]): Promise<Step[]> {
+	const judged = steps.filter((step) => step.purity !== undefined);
+
+	if (judged.length === 0) {
+		return steps;
+	}
+
+	const uri = document.uri.toString();
+	let known = purityRead.get(uri);
+
+	if (known?.version !== document.version || known.generation !== evidenceGeneration) {
+		known = { "version": document.version, "generation": evidenceGeneration, "seen": Promise.resolve(vscode.commands.executeCommand<(PuritySeen | null)[]>("editor.evidence.purity", document.getText(), document.uri.path, judged.map((step) => ({ "start": step.purity!.start, "end": step.purity!.end })))).then((seen) => (Array.isArray(seen) ? seen : []), () => []) };
+		purityRead.set(uri, known);
+	}
+
+	const seen = await known.seen;
+
+	return steps.map((step) => {
+		const found = step.purity === undefined ? undefined : seen[judged.indexOf(step)];
+
+		return found === undefined || found === null || found.calls === 0 ? step : { ...step, "purity": { ...step.purity!, "seen": found } };
+	});
+}
+
+/** An impurity, as a card says it: `wrote total`, `read Date.now()`, `made a fs:read call`, `called console.log()`. */
+function impurityText(first: { "kind": string; "what": string }): string {
+	if (first.kind === "write") {
+		return `wrote ${first.what}`;
+	}
+
+	if (first.kind === "nondeterministic") {
+		return `read ${first.what}()`;
+	}
+
+	return /^(?:fs:|net$|exec$|env$|load$)/u.test(first.what) ? `made a ${first.what} call` : `called ${first.what}()`;
+}
+
+/** A count, as a card says it: `4,000 times`, `once`. */
+function timesText(count: number): string {
+	return count === 1 ? "once" : `${Math.round(count).toLocaleString("en-US")} times`;
+}
+
+/**
+ * What a function step's card says of its purity: silo's verdict, and what runs saw of it (silo README, *Purity*) —
+ * judged pure, yet the latest run (or any kept) saw it impure, that the judgment broke there (a finding); otherwise
+ * how its calls went in every run kept: "seen 4,000 times, never impure", phrased as evidence, not a verdict — and
+ * never that, where it called code the runs can't see into. Undefined for a step that isn't one function.
+ */
+function purityText(step: Step, latest: FunctionRun | undefined): { "text": string; "title": string; "flagged": boolean; "seen"?: string } | undefined {
 	if (step.purity === undefined) {
 		return undefined;
 	}
 
-	const { verdict, reasons } = step.purity;
+	const { verdict, reasons, seen } = step.purity;
 	const why = reasons.length === 0 ? "" : ` — ${reasons.slice(0, 3).join("; ")}${reasons.length > 3 ? "; …" : ""}`;
 
-	if (verdict === "pure" && impure !== undefined) {
-		return { "text": `judged pure, but wrote ${impure.what} (line ${impure.line + 1})`, "title": `Judged pure statically, but the latest run saw it write outside itself: ${impure.what} on line ${impure.line + 1}${impure.count > 1 ? `, and ${impure.count - 1} more` : ""}. An assumption the check makes broke here.`, "flagged": true };
+	if (verdict === "pure" && latest?.first !== undefined) {
+		const impure = latest.write + latest.effect + latest.nondeterministic;
+
+		return { "text": `judged pure, but ${impurityText(latest.first)} (line ${latest.first.line + 1})`, "title": `Judged pure statically, but the latest run saw it ${impurityText(latest.first)} on line ${latest.first.line + 1}${impure > 1 ? `, in ${impure} of its ${latest.calls} calls` : ""}. An assumption the check makes broke here.`, "flagged": true };
 	}
 
-	return { "text": verdict, "title": `Purity: ${verdict}${why}`, "flagged": false };
+	if (seen === undefined) {
+		return { "text": verdict, "title": `Purity: ${verdict}${why}`, "flagged": false };
+	}
+
+	const impure = seen.write + seen.effect + seen.nondeterministic;
+	const runs = seen.ever === 1 ? "one run" : `${seen.ever.toLocaleString("en-US")} runs`;
+
+	if (verdict === "pure" && seen.first !== undefined) {
+		return { "text": `judged pure, but runs saw it ${impurityText(seen.first)}`, "title": `Judged pure statically, but runs saw it ${impurityText(seen.first)} — ${impure} of its ${seen.calls.toLocaleString("en-US")} calls were impure. An assumption the check makes broke here.`, "flagged": true };
+	}
+
+	let said: string;
+	let told: string;
+
+	if (impure > 0) {
+		said = `seen impure: ${impurityText(seen.first ?? { "kind": "write", "what": "outside itself" })}`;
+		told = `Runs saw ${impure.toLocaleString("en-US")} of its ${seen.calls.toLocaleString("en-US")} calls be impure, in ${runs}: it ${impurityText(seen.first ?? { "kind": "write", "what": "outside itself" })} first.`;
+	} else if (seen.unwatched > 0) {
+		said = `seen ${timesText(seen.calls)}, never impure where runs could see`;
+		told = `Runs saw it called ${timesText(seen.calls)}, in ${runs}, and never write outside itself, make an effect or read the clock or random numbers — but ${seen.unwatched.toLocaleString("en-US")} of those calls went into code runs can't see into (${seen.unseen ?? "a host function"}: a package's, say), which could have.`;
+	} else {
+		said = `seen ${timesText(seen.calls)}, never impure`;
+		told = `Runs saw it called ${timesText(seen.calls)}, in ${runs}, and never write outside itself, make an effect or read the clock or random numbers: evidence, not a verdict — a call no run made could still be impure.`;
+	}
+
+	return { "text": `${verdict} · ${said}`, "title": `Purity: ${verdict}${why}\n${told}`, "flagged": false, "seen": said };
 }
 
 /** Whether a step ran, from coverage's marks on its lines (as they're drawn: on the lines their code is on now) — a
@@ -1037,9 +1120,9 @@ function marginState(uri: string, session: Session | undefined, stated: Row[], a
 		...end === undefined ? {} : { "end": { "line": end.line + 1, "kind": end.kind, ...end.message === undefined ? {} : { "message": end.message } } },
 		"marks": [...lineMarks, ...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, ...end.message === undefined ? {} : { "title": end.message } }]].map((mark) => ({ "line": mark.line + 1, "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } })),
 		"cards": steps.map((step) => {
-			const purity = purityText(step, impureIn(uri, step));
+			const purity = purityText(step, latestIn(uri, step));
 
-			return { "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title, ...purity === undefined ? {} : { "purity": step.purity.verdict, ...purity.flagged ? { "flagged": purity.text } : {} } };
+			return { "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title, ...purity === undefined ? {} : { "purity": step.purity.verdict, ...purity.flagged ? { "flagged": purity.text } : {}, ...purity.seen === undefined ? {} : { "seen": purity.seen } } };
 		}),
 		...runLog === undefined ? {} : { "runLog": runLog },
 		"runs": (kept.get(uri) ?? []).map((run) => ({ "id": run.id, "picked": run === session, ...stateOf(run) === undefined ? {} : { "state": stateOf(run) } }))
@@ -1057,7 +1140,7 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	// The program's steps, a card around each (RUNTIME-EVIDENCE.md, *Projections*).
 	const shown = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
-	const steps = read === undefined || shown?.getText() !== text ? [] : stepsOf(shown, read);
+	const steps = read === undefined || shown?.getText() !== text ? [] : await withSeen(shown, stepsOf(shown, read));
 
 	addArgvRow(uri, text, rows);
 
@@ -1083,7 +1166,7 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	];
 	const groups = steps.map((step, index): PaneGroup => {
 		const ran = ranOf(step, lineMarks);
-		const purity = purityText(step, impureIn(uri, step));
+		const purity = purityText(step, latestIn(uri, step));
 
 		return {
 			"id": `step:${index}`,
@@ -1777,6 +1860,24 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 	watcher.onDidChange(reread);
 	watcher.onDidCreate(reread);
 	watcher.onDidDelete(reread);
+
+	// A run's evidence written: what runs saw of each function (its card's purity) is read anew.
+	const evidence = vscode.workspace.createFileSystemWatcher("**/.silo/evidence/**/*.jsonl");
+	let written: ReturnType<typeof setTimeout> | undefined;
+	const reseen = (): void => {
+		clearTimeout(written);
+		written = setTimeout(() => {
+			evidenceGeneration += 1;
+
+			for (const uri of open) {
+				draw(uri);
+			}
+		}, 300);
+	};
+
+	evidence.onDidChange(reseen);
+	evidence.onDidCreate(reseen);
+	evidence.onDidDelete(reseen);
 	/** A capability stop's question, on its line (the `ask` event) — or none (`ask` undefined): it was answered. */
 	const askCame = (session: string, file: string, source: string | undefined, ask: CapabilityAsk | undefined): void => {
 		const uri = uriOf(file);
@@ -1815,8 +1916,8 @@ export function registerMargin(logger?: ObservedExtension["log"]): void {
 
 				for (const report of [body as CoverageEvent, ...(body as CoverageEvent).files ?? []]) {
 					executed.set(report.file, report.statements.filter((statement) => statement.count > 0).map((statement) => [statement.start, statement.end]));
-					// (what the run saw each function write outside itself: the latest run's, for the cards)
-					impureOf.set(report.file, report.impure ?? []);
+					// (how the run's calls of each function went: the latest run's, for the cards)
+					functionsOf.set(report.file, report.functions ?? []);
 				}
 
 				executedOf.set(session.id, executed);

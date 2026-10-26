@@ -147,7 +147,11 @@ before it began — a module's variable, an argument, `this` outside its constru
 through a built-in that mutates what it's given (`push`, `Map.set`, `Object.assign`), once for each call on the stack it
 escapes (a getter's write is its caller's too). Scopes and objects are stamped with the call count as they're made, a
 built-in's fresh array or object included. What a pure function never does: the editor flags one silo judged pure
-(silo README, *Purity*).
+(silo README, *Purity*). Each event has a `kind`: a `write`; a `nondeterministic` read (the clock, random numbers, the
+event loop's included); an `effect` (a timer set, or what the embedder tells through `impure()` for the host functions
+it `watches`: its console, its stand-ins); or `unwatched`, a call into a host function that's neither one of
+ECMAScript's built-ins nor watched — code it can't see into. `called` is told each guest call as it begins: with
+`escapes`, how often a function ran, impure or not.
 
 ## Modules: almostnode resolves, tsval evaluates
 

@@ -8,7 +8,7 @@ import { isUncatchable, TsvalInternalError } from "./errors.ts";
 import type { Choice, Result } from "./event-loop.ts";
 import { arrived, choose, createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGlobals, nextTimer, takeTimer, timerLabel, waitForTurn } from "./event-loop.ts";
 import { syntaxKindName } from "./frontend.ts";
-import { standardGlobals } from "./globals.ts";
+import { STANDARD_GLOBAL_NAMES, standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, isSimpleTree, nodeHandlers, pushHostCall, pushPattern, simpleValue, syntheticHandlers } from "./handlers.ts";
 import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
 import { Scope } from "./scope.ts";
@@ -216,8 +216,15 @@ export interface VMOptions {
 	/** Told each write a call makes that escapes it: to a binding of a scope, or an object, made before the call began (a
 	 *  module's variable, an argument, `this` outside its constructor, what a closure holds) — directly, or by a built-in
 	 *  that mutates its receiver or first argument (`push`, `Map.set`, `Object.assign`). Off by default. See `EscapeEvent`.
-	 *  The callback must not run guest code. */
+	 *  The callback must not run guest code. Told too, for each call on the stack, what else makes a call impure: a
+	 *  nondeterministic read, an effect, and a call into code it can't see into (`EscapeEvent.kind`). */
 	"escapes"?: Escaper;
+	/** With `escapes`, the host functions the embedder watches itself — it tells their effects (`Machine.impure`) — so a
+	 *  call of one isn't `unwatched` (its console, its stand-ins for the file system and the network). */
+	"watches"?: WeakSet<object>;
+	/** Told each call of a guest function as it begins (its node): with `escapes`, how often a function ran, impure or
+	 *  not. Off by default. */
+	"called"?: (fn: ts.Node) => void;
 }
 
 /**
@@ -262,7 +269,20 @@ export type Tracer = (event: TraceEvent) => void;
 /** A write a call made to a binding or object that was there before the call began — what a pure function doesn't do
  *  (silo README, *Purity*): the function whose call it was (`function`, its node), the call's number, what was written
  *  (a binding's name, a property's key, a mutating method's name) and where (`node`, the node being evaluated). */
-export interface EscapeEvent { "function": ts.Node; "call": number; "what": string; "node": ts.Node | null }
+export interface EscapeEvent { "function": ts.Node; "call": number; "kind": ImpureKind; "what": string; "node": ts.Node | null }
+
+/**
+ * What made a call impure, as escapes tells it:
+ * - `write`: to a binding or object that was there before the call began;
+ * - `effect`: something done to the world — a timer set, or what the embedder tells (`Machine.impure`): its console,
+ *   a file read or written, a request;
+ * - `nondeterministic`: a read of the clock or of random numbers (`Date.now()`, `new Date()`, `Math.random()`,
+ *   `performance.now()`, `crypto.randomUUID()`) — seeded under an event loop, so the run repeats, yet not the same
+ *   from one real run to the next;
+ * - `unwatched`: a call into code it can't see into — a host function that isn't one of ECMAScript's built-ins or the
+ *   embedder's watched ones (a package's, almostnode's `path`): it may do any of the others.
+ */
+export type ImpureKind = "write" | "effect" | "nondeterministic" | "unwatched";
 
 export type Escaper = (event: EscapeEvent) => void;
 
@@ -386,6 +406,10 @@ export interface VM {
 	/** An independent copy of the machine state (mid-expression if need be); host objects are shared. */
 	"fork": () => VM;
 
+	/** Something other than a write made each call on the stack impure (VMOptions.escapes): what the embedder watches
+	 *  (VMOptions.watches) tells its effects here — its console's output, a file read, a request. */
+	"impure": (kind: "effect" | "nondeterministic" | "unwatched", what: string) => void;
+
 	/** The call/`new`/tagged-template expression currently invoking a host callable — set only around
 	 *  the host `apply`/`construct`, so a host function can introspect its own callsite. */
 	readonly "callSite": ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression | undefined;
@@ -497,6 +521,14 @@ export class Machine implements VM {
 	private writers: Map<unknown, { "name": string; "first"?: true }> | undefined;
 	/** The host's built-ins that hand back a new array or object. */
 	private freshMakers: Set<unknown> | undefined;
+	/** VMOptions.watches and VMOptions.called. */
+	public watches: WeakSet<object> | undefined;
+	public called: ((fn: ts.Node) => void) | undefined;
+	/** What a host call is to purity, by function (VMOptions.escapes; built once): a nondeterministic read (`clock`; a
+	 *  `Date` only with no arguments), an effect, or a built-in it sees into (`watched`). */
+	private hostKinds: { "clock": Map<unknown, { "name": string; "bare"?: true }>; "effects": Map<unknown, string>; "watched": Set<unknown> } | undefined;
+	/** The event loop's globals this machine was given (its timers, clock and random generator). */
+	private loopFns: Record<string, unknown> | undefined;
 
 	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
 	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
@@ -538,7 +570,8 @@ export class Machine implements VM {
 		if (options.eventLoop !== undefined) {
 			this.loop = createLoop(options.eventLoop);
 			this.loop.wake = () => { wake(this.scheduler); };
-			Object.assign(globals, loopGlobals());
+			this.loopFns = loopGlobals();
+			Object.assign(globals, this.loopFns);
 		}
 
 		this.guestErrors = {};
@@ -572,6 +605,8 @@ export class Machine implements VM {
 		this.observe = options.observe;
 		this.trace = options.trace;
 		this.escapes = options.escapes;
+		this.watches = options.watches;
+		this.called = options.called;
 	}
 
 	/** A statement started (`node`), to its file's coverage: its counts found once per change of file. */
@@ -661,7 +696,7 @@ export class Machine implements VM {
 	 *  on the stack that began after it was made: the call making it, and each caller it escapes too (a function is impure
 	 *  by what it calls, as silo's purity check judges). A constructor writing its own instance, or a field initializer,
 	 *  escapes nothing. */
-	public wrote(target: Scope | object | undefined, what: string): void {
+	public wrote(target: Scope | object | undefined, what: string, kind: ImpureKind = "write"): void {
 		if (this.escapes === undefined) {
 			return;
 		}
@@ -700,8 +735,104 @@ export class Machine implements VM {
 				return;
 			}
 
-			this.escapes({ "function": frame.node, "call": call, "what": what, "node": this.currentNode });
+			this.escapes({ "function": frame.node, "call": call, "kind": kind, "what": what, "node": this.currentNode });
 		}
+	}
+
+	/** Something other than a write made each call on the stack impure (VMOptions.escapes): an effect the embedder
+	 *  watches (`what`: its console's method, a capability), say — told to every call, as a write to the world. */
+	public impure(kind: Exclude<ImpureKind, "write">, what: string): void {
+		this.wrote(undefined, what, kind);
+	}
+
+	/** A host call, as purity sees it (VMOptions.escapes): a nondeterministic read, an effect, or — neither one of
+	 *  ECMAScript's built-ins nor watched by the embedder — code it can't see into. */
+	private watchHost(callee: unknown, args: unknown[]): void {
+		const kinds = this.hostKindsOf();
+		const clock = kinds.clock.get(callee);
+
+		if (clock !== undefined) {
+			if (clock.bare !== true || args.length === 0) {
+				this.wrote(undefined, clock.name, "nondeterministic");
+			}
+
+			return;
+		}
+
+		const effect = kinds.effects.get(callee);
+
+		if (effect !== undefined) {
+			this.wrote(undefined, effect, "effect");
+		} else if (!kinds.watched.has(callee) && !INTRINSICS.has(callee as object) && this.watches?.has(callee as object) !== true) {
+			this.wrote(undefined, (callee as { "name"?: string }).name || "(a host function)", "unwatched");
+		}
+	}
+
+	/** The host's nondeterministic reads, its effects and the built-ins seen into, from this machine's globals and the
+	 *  event loop's (built the first time they're asked for). */
+	private hostKindsOf(): NonNullable<Machine["hostKinds"]> {
+		if (this.hostKinds === undefined) {
+			const globals = this.rootScope.globalObject as Record<string, unknown>;
+			const host = globalThis as unknown as Record<string, Record<string, unknown> | undefined>;
+			const clock = new Map<unknown, { "name": string; "bare"?: true }>();
+			const effects = new Map<unknown, string>();
+			const watched = new Set<unknown>();
+			const functionsOf = (holder: unknown): unknown[] => (holder === null || (typeof holder !== "object" && typeof holder !== "function") ? [] : Object.getOwnPropertyNames(holder).flatMap((name) => {
+				const descriptor = Object.getOwnPropertyDescriptor(holder, name);
+
+				return typeof descriptor?.value === "function" ? [descriptor.value] : [];
+			}));
+
+			for (const name of STANDARD_GLOBAL_NAMES) {
+				const value = (globals[name] ?? (globalThis as Record<string, unknown>)[name]) as { "prototype"?: unknown } | undefined;
+
+				if (typeof value === "function") {
+					watched.add(value);
+					functionsOf(value.prototype).forEach((each) => watched.add(each));
+				}
+
+				functionsOf(value).forEach((each) => watched.add(each));
+			}
+
+			// (the prototypes no global names: typed arrays', iterators')
+			const typedArray = Object.getPrototypeOf(Int8Array) as { "prototype": unknown };
+
+			for (const holder of [typedArray, typedArray.prototype, Object.getPrototypeOf([][Symbol.iterator]()), Object.getPrototypeOf(new Map().entries()), Object.getPrototypeOf(new Set().values()), Object.getPrototypeOf(""[Symbol.iterator]()), Object.getPrototypeOf(/a/u[Symbol.matchAll](""))]) {
+				functionsOf(holder).forEach((each) => watched.add(each));
+			}
+
+			for (const [dates, maths] of [[globalThis.Date, globalThis.Math], [this.loopFns?.["Date"], this.loopFns?.["Math"]]] as [DateConstructor | undefined, Math | undefined][]) {
+				if (dates !== undefined) {
+					clock.set(dates, { "name": "Date", "bare": true });
+					clock.set(dates.now, { "name": "Date.now" });
+				}
+
+				if (maths !== undefined) {
+					clock.set(maths.random, { "name": "Math.random" });
+				}
+			}
+
+			clock.set(host["performance"]?.["now"], { "name": "performance.now" });
+			clock.set(host["crypto"]?.["randomUUID"], { "name": "crypto.randomUUID" });
+			clock.set(host["crypto"]?.["getRandomValues"], { "name": "crypto.getRandomValues" });
+			clock.delete(undefined);
+
+			for (const name of ["setTimeout", "setInterval", "setImmediate", "clearTimeout", "clearInterval", "clearImmediate", "queueMicrotask"]) {
+				for (const fn of [this.loopFns?.[name], (globalThis as Record<string, unknown>)[name]]) {
+					if (typeof fn === "function") {
+						effects.set(fn, name);
+					}
+				}
+			}
+
+			if (typeof globalThis.fetch === "function") {
+				effects.set(globalThis.fetch, "fetch");
+			}
+
+			this.hostKinds = { "clock": clock, "effects": effects, "watched": watched };
+		}
+
+		return this.hostKinds;
 	}
 
 	/** A write to the binding `name` as `scope` sees it (the scope holding it; none — a global): told when escaping. */
@@ -736,8 +867,23 @@ export class Machine implements VM {
 				}
 			}
 
-			for (const name of ["assign", "defineProperty", "defineProperties", "setPrototypeOf", "freeze", "seal"]) {
+			for (const name of ["assign", "defineProperty", "defineProperties", "setPrototypeOf", "freeze", "seal", "preventExtensions"]) {
 				writers.set(object[name], { "name": name, "first": true });
+			}
+
+			for (const name of ["set", "defineProperty", "deleteProperty", "setPrototypeOf", "preventExtensions"]) {
+				writers.set((Reflect as unknown as Record<string, unknown>)[name], { "name": "Reflect." + name, "first": true });
+			}
+
+			// (a typed array's, and a Date's setters)
+			const typed = (Object.getPrototypeOf(Int8Array) as { "prototype": Record<string, unknown> }).prototype;
+
+			for (const name of ["set", "fill", "sort", "reverse", "copyWithin"]) {
+				writers.set(typed[name], { "name": name });
+			}
+
+			for (const name of Object.getOwnPropertyNames(Date.prototype).filter((each) => each.startsWith("set"))) {
+				writers.set((Date.prototype as unknown as Record<string, unknown>)[name], { "name": name });
 			}
 
 			this.writers = writers;
@@ -847,6 +993,10 @@ export class Machine implements VM {
 
 		if (requiring !== undefined && !isConstruct) {
 			return this.fromHost(this.requireFrom(requiring, String(args[0])));
+		}
+
+		if (this.escapes !== undefined) {
+			this.watchHost(callee, args);
 		}
 
 		// The event loop's intrinsics act on this machine (event-loop.ts) — trusted, so ahead of the guard.
@@ -2235,6 +2385,7 @@ export class Machine implements VM {
 			"call": this.nextCall()
 		};
 
+		this.called?.(meta.node);
 		this.frames.push(frame);
 
 		return frame;

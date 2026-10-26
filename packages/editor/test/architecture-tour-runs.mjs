@@ -1642,6 +1642,80 @@ test("purity: a function's verdict on its card, and a pure one a run saw write o
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
 
+// Purity from runs (packages/silo/README.md, *Purity*): what the static check can't decide — a call through `any`, whose
+// code isn't known — runs answer, kept as evidence at the function's span across recorded runs: "seen 1,000 times, never
+// impure", and more as more runs see it, the span the same while the function's own code is; a call into code no run can
+// see into (almostnode's `path`) never says "never impure".
+test("purity from runs: a function the check calls unknown, run often and never impure, says so on its card", async () => {
+	const workbench = session.workbench();
+	const state = () => workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "dispatch.ts").catch(() => undefined));
+	const card = (found, title) => found?.cards.find((each) => each.title === title);
+	const runs = new Set();
+	const run = async (times) => {
+		await workbench.evaluate(async (count) => {
+			const { api } = globalThis.__editor;
+			const uri = api.Uri.file("/workspace/dispatch.ts");
+
+			await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["import path from \"node:path\";", "", "const doubler: any = { \"double\": (x: number) => x * 2 };", "", "function twice(o: any, x: number) {", "\treturn o.double(x);", "}", "", "function joined(parts: string[]) {", "\treturn path.join(...parts);", "}", "", "let total = 0;", "", `for (let i = 0; i < ${count}; i += 1) {`, "\ttotal += twice(doubler, i);", "}", "", "console.log(total, joined([\"a\", \"b\"]));", ""].join("\n")));
+			const editor = await api.window.showTextDocument(uri);
+
+			// (a run takes the open document's text: the rewrite in it first)
+			for (let tries = 0; tries < 100 && !editor.document.getText().includes(`i < ${count};`); tries += 1) {
+				await new Promise((resolve) => {
+					setTimeout(resolve, 100);
+				});
+			}
+		}, times);
+		// (a recorded run — Run, F5, a test's: a save's live run keeps no evidence)
+		await session.request("debug.start", { "program": "/workspace/dispatch.ts" }, 60_000);
+		await eventually("its run, ended", async () => {
+			const ended = (await session.request("runs.list", undefined, 5000)).find((each) => each.title.endsWith("dispatch.ts") && each.state === "exited" && !runs.has(each.id));
+
+			if (ended !== undefined) {
+				runs.add(ended.id);
+			}
+
+			return ended;
+		}, 60_000);
+	};
+
+	await run(1000);
+
+	const first = await eventually("twice's card, with what the run saw", async () => {
+		const current = await state();
+
+		return card(current, "twice")?.seen !== undefined && card(current, "joined")?.seen !== undefined ? current : undefined;
+	}, 60_000);
+
+	assert.equal(card(first, "twice").purity, "unknown", "a call through any: which code runs isn't known statically");
+	assert.equal(card(first, "twice").seen, "seen 1,000 times, never impure");
+	assert.equal(card(first, "twice").flagged, undefined);
+	assert.equal(card(first, "joined").seen, "seen once, never impure where runs could see", "path.join is almostnode's: code a run can't see into");
+
+	// Another run, the loop's count changed but not twice: its evidence adds up at the same span.
+	await run(500);
+
+	let said;
+	const second = await eventually("twice's card, with both runs", async () => {
+		const current = await state();
+
+		said = card(current, "twice")?.seen;
+
+		return said === "seen 1,500 times, never impure" ? current : undefined;
+	}, 60_000).catch((error) => {
+		throw new Error(`${error.message} — it says: ${said}`, { "cause": error });
+	});
+
+	assert.equal(card(second, "twice").purity, "unknown");
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.commands.executeCommand("workbench.action.closeActiveEditor");
+		await api.workspace.fs.delete(api.Uri.file("/workspace/dispatch.ts"));
+	});
+});
+
 // A run that read an input shares its values' types alone — but those built from the file's literals alone it shares as
 // they were (packages/editor/RUNTIME-EVIDENCE.md, *Kept across reloads*; lib util/silo/purity `determinedValues`).
 test("determined values: a run that read a file shares what it computed from its own literals, and not what it read", async () => {

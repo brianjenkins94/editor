@@ -24,9 +24,10 @@ lockfile has it, so "did anyone run a version later found compromised?" is a que
 `queryRuns({ package })`); a package's own `fs` and `child_process` calls are among the run's effects as that
 package's, recorded, not decided (the editor runs it sandboxed already).
 
-**An observation** is a kind, a span, and a summary that stays the same size however many runs feed it. Three kinds are
-kept: `reached` (how often a statement ran), `value` (what passed through: type tags, nullish count) and `branch` (how
-often each arm was taken). `type` (the declared type against the observed values) is computed when it's shown (V3).
+**An observation** is a kind, a span, and a summary that stays the same size however many runs feed it. Four kinds are
+kept: `reached` (how often a statement ran), `value` (what passed through: type tags, nullish count), `branch` (how
+often each arm was taken) and `purity` (a function's calls, and how many wrote outside it, made an effect, read the
+clock or random numbers, or went into code a run can't see into: packages/silo/README.md, *Purity*). `type` (the declared type against the observed values) is computed when it's shown (V3).
 `time` (a function's self and total time, from profiles), `capability` (which scope a call site exercised) and `error`
 (throws and rejections at a span) are kinds the model has room for; none is kept as evidence yet. New kinds are new
 lines with the same envelope and the same span key. Nothing about the store changes when one is added.

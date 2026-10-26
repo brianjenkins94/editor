@@ -405,7 +405,7 @@ doc, a unit test or `.silo/` nothing; anything else (a dependency, a build scrip
 with no record yet its shard. Over the 30 commits before it, with records from one instrumented run: 7 would have run
 every shard, 6 none, the rest some. Not built: outcomes kept for a selection's safety; unit tests' selection.
 
-### Purity: decided statically, checked by runs (designed 2026-10-22, not built)
+### Purity: decided statically, checked by runs (designed 2026-10-22; built 2026-10-24–25)
 
 Which functions are pure, to show later (memoizing, replaying a call safely, explaining a function). Mostly decidable
 statically, under assumptions that are written down:
@@ -480,8 +480,25 @@ argument, a destructured local a part of something handed over), measured again 
 19.7% unknown. The editor shows each top-level function's verdict on its card in the Margin (the capabilities plugin's
 `_statements`). Runs observe it: tsval's `escapes` tells each write a call makes outside itself, the debug worker sends
 each function's first with the file's coverage (`impure`), and a function judged pure that a run saw write outside is
-flagged on its card — "judged pure, but wrote n (line 3)": an assumption broken, a getter's effect, say. Not yet: runs
-answering the unknowns (observed purity as evidence kept across runs, "seen 4,000 times, never impure").
+flagged on its card — "judged pure, but wrote n (line 3)": an assumption broken, a getter's effect, say.
+
+**Built (2026-10-25): purity from runs.** tsval tells, for each call on the stack, four kinds (`EscapeEvent.kind`): a
+`write` outside it; an `effect` (a timer set, and what the embedder watches and tells: the debug worker's console, each
+gated call made, refused or stood in for, a package's call through its own `fs`); a `nondeterministic` read (`Date.now()`,
+`new Date()`, `Math.random()`, `performance.now()`, `crypto`'s, seeded under the event loop yet not the same from one
+real run to the next); and `unwatched`, a call into a host function that's neither one of ECMAScript's built-ins nor
+watched (a package's, almostnode's `path`), which could have been any of them. It counts each function's calls
+(`called`), and its writers table grew Reflect's, a typed array's and a Date's setters. The debug worker reports each
+function that ran (`functions`: calls, and how many were impure each way, the first impurity), at the range the static
+check judges (a function bound to a name by its declaration), and a recorded run's are folded into the evidence files
+as the `purity` kind (lib evidence.ts `foldPurity`; the example above, with `unwatched` and `unseen` beside them), at
+the span standing for the function, fading as the others do. The card reads it summed over every user's and
+environment's runs (the workbench's `editor.evidence.purity`, read anew as evidence is written): "unknown · seen 1,000
+times, never impure"; "never impure where runs could see" when a call went into unwatched code; "seen impure: wrote
+total"; and, judged pure, "judged pure, but runs saw it …". Only recorded runs count — Run, F5, a test file's run — as
+for coverage: a save's live run keeps no evidence (they're many, and nobody chose them). Not seen: a write inside a
+package's own code to what the program handed it is behind `unwatched`; a RegExp's `lastIndex`; a getter on a host
+object.
 
 The same file holds its data-flow sibling, `determinedValues` (2026-10-24): where a run puts values, and which are
 built only from the file's own literals, so a run that read an input shares those as they were (traces' `committable`;

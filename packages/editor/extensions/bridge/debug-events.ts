@@ -124,9 +124,9 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					}
 
 					const coverage = body as CoverageEvent;
-					const files = (coverage.files ?? []).map((other) => ({ "file": other.file, "source": other.source ?? "", "statements": other.statements, "sites": other.sites }));
+					const files = (coverage.files ?? []).map((other) => ({ "file": other.file, "source": other.source ?? "", "statements": other.statements, "sites": other.sites, ...other.functions === undefined ? {} : { "functions": other.functions } }));
 
-					bridgeHub.publish("evidence.observed", { "runId": runId, "file": coverage.file, "source": coverage.source ?? "", "statements": coverage.statements, "sites": coverage.sites, ...files.length === 0 ? {} : { "files": files }, ...coverage.packages === undefined ? {} : { "packages": coverage.packages } });
+					bridgeHub.publish("evidence.observed", { "runId": runId, "file": coverage.file, "source": coverage.source ?? "", "statements": coverage.statements, "sites": coverage.sites, ...coverage.functions === undefined ? {} : { "functions": coverage.functions }, ...files.length === 0 ? {} : { "files": files }, ...coverage.packages === undefined ? {} : { "packages": coverage.packages } });
 					break;
 				}
 

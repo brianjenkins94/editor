@@ -11,7 +11,7 @@
  * `eval` is deliberately absent: direct eval cannot be modeled by an interpreter that is not the
  * host's, and code-from-string is a decision for the host (it may supply its own `eval`).
  */
-const STANDARD_GLOBAL_NAMES = [
+export const STANDARD_GLOBAL_NAMES = [
 	// values
 	"globalThis",
 	"Infinity",

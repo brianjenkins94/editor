@@ -19,10 +19,10 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import type { FsShim } from "@brianjenkins94/almostnode";
-import type { Effect, LoadedPackage, TestReport } from "@brianjenkins94/editor-api";
+import type { Effect, FunctionRun, LoadedPackage, TestReport } from "@brianjenkins94/editor-api";
 import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/editor-api/runtime";
 import type { Told, Traced } from "@brianjenkins94/editor-api/values";
-import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
+import type { EscapeEvent, ImpureKind, LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
@@ -158,6 +158,11 @@ let tallying = false;
 /** A gated call, counted among the run's effects — a package's (`pkg`, its name@version) apart from the program's — with
  *  how it was decided: within the package's baseline, by the policy, or at the call (the person's answer). */
 function tally(capability: string, resource: string, how: Effect["how"], pkg?: string, decided?: Effect["decided"]): void {
+	// (a package's call is an effect of each of the program's calls it's in: the program's own are told at their gate)
+	if (pkg !== undefined) {
+		evaluating?.impure("effect", capability);
+	}
+
 	if (!tallying) {
 		return;
 	}
@@ -807,19 +812,57 @@ const NODE_TEST = "/__editor__/node-test.js";
 let testsRan: TestReport[] = [];
 /** Each running test's coverage counts as it started, by its titles (JSON): what ran since is that test's. */
 const testStarts = new Map<string, Map<ts.SourceFile, number[]>>();
-/** Each function's writes outside itself this run (tsval's `escapes`): the first, and how many — told with its file's
- *  coverage (`impure`), where a function silo judged pure and a run saw do this is flagged. */
-const escaped = new Map<ts.Node, { "what": string; "node": ts.Node | null; "count": number }>();
+/** Each function this run called (tsval's `called`), and what made its calls impure (its `escapes`): how many calls,
+ *  how many of them were each kind of impure, and the first impurity seen — told with its file's coverage
+ *  (`functions`), where a function silo judged pure and a run saw be impure is flagged, and kept as evidence. */
+const functionsRan = new Map<ts.Node, { "calls": number; "kinds": Record<ImpureKind, number>; "last": Partial<Record<ImpureKind, number>>; "first"?: { "kind": ImpureKind; "what": string; "node": ts.Node | null }; "unseen"?: string }>();
 
-/** tsval's `escapes`: a write a call made outside itself, kept by its function. */
-function escapeSeen(event: { "function": ts.Node; "what": string; "node": ts.Node | null }): void {
-	const seen = escaped.get(event.function);
+function functionOf(fn: ts.Node): NonNullable<ReturnType<typeof functionsRan.get>> {
+	let known = functionsRan.get(fn);
 
-	if (seen === undefined) {
-		escaped.set(event.function, { "what": event.what, "node": event.node, "count": 1 });
-	} else {
-		seen.count += 1;
+	if (known === undefined) {
+		known = { "calls": 0, "kinds": { "write": 0, "effect": 0, "nondeterministic": 0, "unwatched": 0 }, "last": {} };
+		functionsRan.set(fn, known);
 	}
+
+	return known;
+}
+
+/** tsval's `called`: a call began. */
+function calledSeen(fn: ts.Node): void {
+	functionOf(fn).calls += 1;
+}
+
+/** tsval's `escapes`: what made a call impure, kept by its function — each kind once a call. */
+function escapeSeen(event: EscapeEvent): void {
+	const seen = functionOf(event.function);
+
+	if (seen.last[event.kind] !== event.call) {
+		seen.last[event.kind] = event.call;
+		seen.kinds[event.kind] += 1;
+	}
+
+	if (event.kind === "unwatched") {
+		seen.unseen ??= event.what;
+	} else {
+		seen.first ??= { "kind": event.kind, "what": event.what, "node": event.node };
+	}
+}
+
+/** The host functions the run's own code is given that this worker watches (tsval's `watches`): its console's, and its
+ *  capability stand-ins — it tells their effects (`impure`). */
+function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object> {
+	const watched = new WeakSet<object>();
+
+	for (const value of holders.flatMap((holder) => Object.values(holder))) {
+		if (typeof value === "function") {
+			watched.add(value);
+		} else if (value !== null && typeof value === "object") {
+			Object.values(value).filter((each) => typeof each === "function").forEach((each) => watched.add(each as object));
+		}
+	}
+
+	return watched;
 }
 
 /** How many tests failed, as node-test.js tells at the end: a run with one fails, as `node --test` does. */
@@ -988,6 +1031,9 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		if (tagged === undefined) {
 			return fn.apply(this, args);
 		}
+
+		// (made, refused or stood in for, it's an effect of each call it's in)
+		evaluating?.impure("effect", tagged.capability);
 
 		const argument = args[tagged.resourceArg];
 		const resource = reachedBy(argument);
@@ -1635,13 +1681,14 @@ async function exploreOrderings(message: Extract<Control, { "type": "explore" }>
 
 function guestConsole(): Record<string, (...args: unknown[]) => void> {
 	// (Not a probe's: it didn't run.)
-	const write = (stream: "stdout" | "stderr") => (...args: unknown[]): void => {
+	const write = (stream: "stdout" | "stderr", method: string) => (...args: unknown[]): void => {
 		if (probing === undefined) {
+			evaluating?.impure("effect", "console." + method);
 			post({ "type": "output", "text": args.map(formatLogArg).join(" "), "stream": stream });
 		}
 	};
 
-	return { "log": write("stdout"), "info": write("stdout"), "debug": write("stdout"), "dir": write("stdout"), "warn": write("stderr"), "error": write("stderr"), "trace": write("stderr") };
+	return Object.fromEntries((["log", "info", "debug", "dir", "warn", "error", "trace"] as const).map((method) => [method, write(["warn", "error", "trace"].includes(method) ? "stderr" : "stdout", method)]));
 }
 
 /** A readable one-line rendering of a runtime value for the Variables pane. */
@@ -2015,16 +2062,18 @@ function fileCoverage(file: ts.SourceFile): CoverageReport {
 		return entry === undefined ? [] : [{ "start": [start.line, start.character] as [number, number], "anchor": rangeOf(statement), ...entry }];
 	});
 
-	// Its functions that wrote outside themselves (tsval's escapes).
-	const impure = [...escaped].filter(([fn]) => fn.getSourceFile() === file).map(([fn, seen]) => {
-		const start = file.getLineAndCharacterOfPosition(fn.getStart(file));
-		const end = file.getLineAndCharacterOfPosition(fn.getEnd());
-		const line = seen.node === null || seen.node.getSourceFile() !== file ? start.line : file.getLineAndCharacterOfPosition(seen.node.getStart(file)).line;
+	// Its functions that ran, and what made them impure (tsval's called and escapes) — each by the range silo's purity
+	// check judges it at: a function bound to a name by its declaration (`const f = () => …`).
+	const functions = [...functionsRan].filter(([fn, seen]) => fn.getSourceFile() === file && seen.calls > 0).map(([fn, seen]): FunctionRun => {
+		const unit = (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) && ts.isVariableDeclaration(fn.parent) && fn.parent.initializer === fn ? fn.parent : fn;
+		const start = file.getLineAndCharacterOfPosition(unit.getStart(file));
+		const end = file.getLineAndCharacterOfPosition(unit.getEnd());
+		const line = seen.first?.node === null || seen.first?.node === undefined || seen.first.node.getSourceFile() !== file ? start.line : file.getLineAndCharacterOfPosition(seen.first.node.getStart(file)).line;
 
-		return { "start": [start.line, start.character] as [number, number], "end": [end.line, end.character] as [number, number], "what": seen.what, "line": line, "count": seen.count };
+		return { "start": [start.line, start.character], "end": [end.line, end.character], "calls": seen.calls, ...seen.kinds, ...seen.first === undefined ? {} : { "first": { "kind": seen.first.kind as Exclude<ImpureKind, "unwatched">, "what": seen.first.what, "line": line } }, ...seen.unseen === undefined ? {} : { "unseen": seen.unseen } };
 	});
 
-	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file), ...profile.length === 0 ? {} : { "profile": profile }, ...impure.length === 0 ? {} : { "impure": impure } };
+	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file), ...profile.length === 0 ? {} : { "profile": profile }, ...functions.length === 0 ? {} : { "functions": functions } };
 }
 
 /** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would, and
@@ -2374,9 +2423,9 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	testsRan = [];
 	testStarts.clear();
 	testsFailed = 0;
-	escaped.clear();
+	functionsRan.clear();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 
 	evaluating = loaded.vm;
 
