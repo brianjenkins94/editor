@@ -16,7 +16,7 @@ import type { WayCode } from "@brianjenkins94/util/silo/ledger";
 import type { Price } from "@brianjenkins94/util/silo/cost";
 import { priceText } from "@brianjenkins94/util/silo/cost";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
-import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, withStatus } from "@brianjenkins94/util/silo/ledger";
 import * as vscode from "vscode";
 
@@ -215,10 +215,11 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri, o
 
 			const status = await Promise.resolve(vscode.commands.executeCommand<{ "head"?: string } | undefined>("editor.git.status")).catch(() => undefined);
 			const tracked = [...await load()];
-			// (its manifests too, which the checks don't read: where its way in is declared)
+			// (its manifests too, which the checks don't read: where its way in is declared — and the feature manifest, which
+			// it's taken out of)
 			const manifests = new Map<string, string>();
 
-			for (const file of tracked.filter((each) => /(?:^|\/)package\.json$/u.test(each) && includeByDefault(each))) {
+			for (const file of [...tracked.filter((each) => /(?:^|\/)package\.json$/u.test(each) && includeByDefault(each)), manifestPath()]) {
 				const text = await textOf(vscode.Uri.joinPath(root, file));
 
 				if (text !== undefined) {

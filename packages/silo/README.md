@@ -684,7 +684,9 @@ in owned once.
 - a path that isn't there;
 - a feature that owns nothing.
 
-A repository without a manifest has none of these checks.
+A repository without a manifest has none of these checks. `silo remove`, and History's Remove, take what they remove
+out of it: the key out of its feature, and the files they delete out of its paths. A feature left owning nothing goes
+too, so the removal passes its own check once what it leaves by hand is done.
 
 **Written by hand isn't the goal.** The goal is a manifest derived from the code alone, knowing nothing about the
 repository beforehand. Until a derivation can produce one, the manifest is what it's measured against: which of its
