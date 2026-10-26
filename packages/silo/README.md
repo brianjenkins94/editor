@@ -776,17 +776,38 @@ instrumented files. Three findings:
 - **Coverage gaps:** the preview page's own taps aren't instrumented, and Preview DevTools and Preview CPU profiles
   have no test, so a run can't give their code an owner.
 
-Next, if this goes on: a way in's reach at runtime, at a handler's grain, not a declaration's. Trigger each one in the harness (its command, its view, its
-setting, its request), and diff its coverage against a run that only boots. A run crosses realms where the graph can't
-(hub subjects, commands by string, messages). Also what composition roots register (`workbench-entry.tsx` registers 14
-features, `main.tsx` 7, the shell 8: each needs a home other than its file), and per-test reach from unit tests. Two
+**Built (2026-10-26): what registers a feature is its code too.** Most of the code no feature reached wasn't
+handlers. It was setup: `activate` calls `registerParseStatus`, which holds the `registerCommand`, and a way in reaches
+what its handler uses, never the function that registers it. So a feature now owns the declaration each of its
+registrations is written in, and what that declaration's own code reaches (`codeOwners`, lib `manifest.ts`). And a
+handler's code is its way's alone: the analyzer leaves what a registration's handler uses out of the declaration around
+it (lib `ts-analysis.ts`), so an `install…` that registers many features leads to its setup, not into all of theirs.
+`silo features --score` shows the result:
+
+| Who owns it | Before | Setup owned, handlers not split | Both |
+|---|---|---|---|
+| one feature | 1,294 (30%) | 866 (20%) | 1,189 (28%) |
+| 2 to 5 (shared) | 543 (13%) | 524 (12%) | 629 (15%) |
+| more than 5 (ambient) | 124 (3%) | 1,170 (27%) | 742 (17%) |
+| none | 2,318 (54%) | 1,719 (40%) | 1,719 (40%) |
+
+Without the split, a composition root's ways in reach everything it registers, and a quarter of the code goes ambient.
+In the editor's own realms (extensions, workbench, shell, app, previews, workers, shared), the unowned halve: 695 of
+1,684 declarations to 341. Of the code that ran in Previews' tests, the share with an owner goes from about 60% to
+about 90%. Most of what's left unowned is the finder's blind spots: the API's routes (372), almostnode's shims (278),
+tsval (109), the admin app (91). Which owner the runs and the reach agree on is still low, because the tests drive more
+than their feature: a prompt's test drives the Rules view too.
+
+Next, if this goes on: give the path-only features their files (their `paths`, which say what no way in reaches), and
+per-way-in runs where reach still can't follow (hub subjects, commands by string). Also homes for what composition roots
+register (`workbench-entry.tsx` registers 14 features, `main.tsx` 7, the shell 8), and per-test reach from unit tests. Two
 cautions about the measure:
 - the manifest is an agent's judgment, not ground truth, and its granularity is one choice of several: `silo`'s eight
   subcommands are eight features here, and could as well be one;
 - tuning a derivation on this one repository is fitting it to the answer, so a derivation's parameters are kept few and
   fixed.
 
-Where: lib `util/silo/manifest.ts` (`manifestDrift`, `parseManifest`, `manifestText`, `manifestWithout`, `scoreGrouping`), read by `silo check`; `derive.ts`, read by `silo features --score`. Not built:
+Where: lib `util/silo/manifest.ts` (`manifestDrift`, `parseManifest`, `manifestText`, `manifestWithout`, `scoreGrouping`, `codeOwners`), read by `silo check`; `derive.ts`, read by `silo features --score`. Not built:
 manifest drift in the editor's Problems (only CI's `silo check` reports it), and a ledger entry naming the manifest's
 feature (they share names by convention, unchecked).
 

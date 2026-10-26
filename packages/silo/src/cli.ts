@@ -45,7 +45,7 @@ import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshot
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
-import { manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
+import { codeOwners, manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { rolldown } from "rolldown";
@@ -170,9 +170,22 @@ function manifestDriftOf(repo: string, ways: Parameters<typeof manifestDrift>[1]
 	return manifestDrift(manifest, { "ways": ways, "exists": exists });
 }
 
+/** How many of the manifest's features own each declaration (lib util/silo/manifest `codeOwners`). */
+interface Ownership {
+	"declarations": number;
+	"one": number;
+	/** Two to five features. */
+	"shared": number;
+	/** More than five: setup, the hub, logging. */
+	"ambient": number;
+	"none": number;
+	/** The folders (three deep) with the most declarations no feature owns. */
+	"unowned": { "folder": string; "declarations": number }[];
+}
+
 /** Each derivation of features from `repo`'s code (lib util/silo/derive), scored against its manifest — by feature and
- *  by area. Throws without a manifest. */
-export async function derivationScores(repo: string): Promise<{ "derivation": string; "features": GroupingScore; "areas": GroupingScore }[]> {
+ *  by area — and who owns the code. Throws without a manifest. */
+export async function derivationScores(repo: string): Promise<{ "derivations": { "derivation": string; "features": GroupingScore; "areas": GroupingScore }[]; "ownership": Ownership }> {
 	const manifest = fs.existsSync(path.join(repo, manifestPath())) ? parseManifest(fs.readFileSync(path.join(repo, manifestPath()))) : undefined;
 
 	if (manifest === undefined) {
@@ -192,12 +205,28 @@ export async function derivationScores(repo: string): Promise<{ "derivation": st
 		...records === undefined ? [] : [["by tests", byTests(ways, graph, testsFromRecords(records))] as [string, Map<string, string>]]
 	];
 
-	return groupings.map(([derivation, grouping]) => ({ "derivation": derivation, "features": scoreGrouping(manifest, grouping), "areas": scoreGrouping(manifest, grouping, { "areas": true }) }));
+	const owners = codeOwners(manifest, features, graph);
+	const declarations = [...graph.fingerprints.keys()];
+	const unowned = new Map<string, number>();
+
+	for (const id of declarations.filter((each) => !owners.has(each))) {
+		const folder = id.split("/").slice(0, 3).join("/");
+
+		unowned.set(folder, (unowned.get(folder) ?? 0) + 1);
+	}
+
+	const counted = (test: (count: number) => boolean): number => declarations.filter((id) => test(owners.get(id)?.size ?? 0)).length;
+
+	return {
+		"derivations": groupings.map(([derivation, grouping]) => ({ "derivation": derivation, "features": scoreGrouping(manifest, grouping), "areas": scoreGrouping(manifest, grouping, { "areas": true }) })),
+		"ownership": { "declarations": declarations.length, "one": counted((count) => count === 1), "shared": counted((count) => count > 1 && count <= 5), "ambient": counted((count) => count > 5), "none": counted((count) => count === 0), "unowned": [...unowned].sort((left, right) => right[1] - left[1]).slice(0, 8).map(([folder, count]) => ({ "folder": folder, "declarations": count })) }
+	};
 }
 
 /** The scores, as a table. */
-function scoresText(scored: Awaited<ReturnType<typeof derivationScores>>): string {
+function scoresText({ "derivations": scored, ownership }: Awaited<ReturnType<typeof derivationScores>>): string {
 	const first = scored[0]?.features;
+	const share = (count: number): string => `${count} (${Math.round(100 * count / ownership.declarations)}%)`;
 	const row = (each: GroupingScore): string => [`${each.groups}`, `${each.placed}/${each.ways}`, `${each.whole}`, `${each.split}`, `${each.merged}`, `${each.splitAndMerged}`, `${each.partly + each.unseen}`, each.precision.toFixed(2), each.recall.toFixed(2), each.f.toFixed(2)].join(" | ");
 
 	return [
@@ -207,6 +236,14 @@ function scoresText(scored: Awaited<ReturnType<typeof derivationScores>>): strin
 		"|---|---|---|---|---|---|---|---|---|---|---|",
 		...scored.map((each) => `| ${each.derivation} | ${row(each.features)} |`),
 		...scored.map((each) => `| ${each.derivation}, by area | ${row(each.areas)} |`),
+		"",
+		`Who owns the code: of its ${ownership.declarations} declarations, what the manifest's features reach from their ways in and from what registers them:`,
+		"",
+		"| One feature | Shared (2–5) | Ambient (more) | None |",
+		"|---|---|---|---|",
+		`| ${[ownership.one, ownership.shared, ownership.ambient, ownership.none].map(share).join(" | ")} |`,
+		"",
+		`Most unowned: ${ownership.unowned.map((each) => `${each.folder} ${each.declarations}`).join(", ")}.`,
 		""
 	].join("\n");
 }
@@ -621,7 +658,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "features",
-			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject; by CI's tests), each grouping scored against the feature manifest (.silo/manifest.json): how many of its features each finds whole, splits or merges, and its precision and recall.",
+			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject; by CI's tests), each grouping scored against the feature manifest (.silo/manifest.json): how many of its features each finds whole, splits or merges, and its precision and recall; and who owns the code: how many of the manifest's features reach each declaration, from their ways in and what registers them.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the feature manifest (silo README, *The feature manifest*)." } }),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
