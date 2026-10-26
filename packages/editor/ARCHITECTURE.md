@@ -426,6 +426,7 @@ flowchart LR
     n_store__silo__gitattributes[".silo/.gitattributes"]
     n_store__silo__gitignore[".silo/.gitignore"]
     n_store__silo_capabilities__file__json[".silo/capabilities/&lt;file&gt;.json"]
+    n_store__silo_evidence____file__json[".silo/evidence/…/&lt;file&gt;.json"]
     n_store__silo_evidence____file__jsonl[".silo/evidence/…/&lt;file&gt;.jsonl"]
     n_store__silo_local____file__bin[".silo/local/…/&lt;file&gt;.bin"]
     n_store__silo_local____file__jsonl[".silo/local/…/&lt;file&gt;.jsonl"]
@@ -490,8 +491,9 @@ flowchart LR
   n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_event_sheet <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet_recognizer_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
-  n_ext_history -->|"reads"| n_store__silo__file__json
+  n_ext_history -->|"reads"| n_store__silo_evidence____file__json
   n_ext_history -->|"reads"| n_store__silo_runs__file__jsonl
+  n_ext_history -->|"reads, writes"| n_store__silo__file__json
   n_ext_history <-.->|"commands"| n_ext_vscode
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
@@ -555,6 +557,7 @@ flowchart LR
   n_workbench -->|"reads, writes"| n_store__silo__gitattributes
   n_workbench -->|"reads, writes"| n_store__silo__gitignore
   n_workbench -->|"reads, writes"| n_store__silo_capabilities__file__json
+  n_workbench -->|"reads, writes"| n_store__silo_evidence____file__json
   n_workbench -->|"reads, writes"| n_store__silo_evidence____file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo_local____file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo_local__file__json
@@ -576,8 +579,9 @@ flowchart LR
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, margin, notes |
 | `.silo/.gitignore` | Workbench | Workbench, bridge, margin |
-| `.silo/<file>.json` | Workbench, capabilities, insights | Dev-server worker, Workbench, bridge, capabilities, history, insights |
+| `.silo/<file>.json` | Workbench, capabilities, history, insights | Dev-server worker, Workbench, bridge, capabilities, history, insights |
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
+| `.silo/evidence/…/<file>.json` | Workbench | Workbench, history |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, margin, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench, margin | Workbench, insights, margin, running |
@@ -900,7 +904,7 @@ to. A command not here is core's own, and an extension that calls one doesn't pa
 | `editor.rules.edit(request)`, `.cancelEdit(id)` | core's Rule view (rule-view.ts) | a rule edited under the Rules tree: as it starts, what it's judged against (a call, a program's `process.argv`, a variable at a place, or the rule alone), its buttons. Answered `{ button, rule }` as pressed, or `null` (closed, cancelled, or replaced by another edit). The caller does what its buttons mean: the Rules tree's open and New Rule, the Margin's Rule… and Mock…, the bridge's preview prompt. `EditRequest`, and a rule's sentence and verdict, are editor-api's `./rules`. Core's, not an extension's view: a webview can't paint in this workbench (the coi-serviceworker keeps one origin; a webview's content needs its own), and nothing native edits predicates |
 | `editor.history.texts(path)` | core's edit history (edit-history.ts) | `string[]`: a file's texts through its recorded edits, oldest first, what a placed rule's place is followed through (the capabilities extension's rules.ts) |
 | `editor.evidence.purity(source, file, ranges)` | core's evidence (evidence.ts) | how each function's calls went in every user's runs (`(PuritySeen \| null)[]`, by range): lib util/silo/evidence's `purity` kind at the span standing for each range, summed — the Margin's "seen 4,000 times, never impure" (packages/silo/README.md, *Purity*) |
-| `editor.git.status`, `.file(path)`, `.commit(message)` | core's git (git-service.ts) | the workspace's changes (`{ files: GitFileChange[] }`, editor-api's `./git`: path, status, staged, unstaged, cosmetic), a file's HEAD text (`{ head, working }`), a commit of everything (`{ oid }`). No change event: a change is a file change, as a watcher sees it (the Source Control view refreshes so) |
+| `editor.git.status`, `.file(path)`, `.commit(message)` | core's git (git-service.ts) | the workspace's changes (`{ files: GitFileChange[], head? }`, editor-api's `./git`: path, status, staged, unstaged, cosmetic; `head`, HEAD's commit), a file's HEAD text (`{ head, working }`), a commit of everything (`{ oid }`). No change event: a change is a file change, as a watcher sees it (the Source Control view refreshes so) |
 | `editor.debugFile(uri?, { cases }?)` | the bridge | Run (▷): a program file in `run.debugger`, an app's file its app (RUNNING.md); `cases`, each a run's arguments, one run after another (the Margin's Mock… of process.argv) |
 | `editor.capability.decide(session, choice, rule?, give?)` | the bridge (capability-stops.ts) | a capability stop answered: `choice` a `CapabilityChoice` (editor-api): allow, skip or deny for this call, this run or always; `rule`, a rule made in the Rule view; `give-once`, `give` in the call's place. What a choice means is the bridge's decider's |
 | `editor.debug.setValue(session, name, value)` | the bridge (debug-control.ts) | at a stop, a variable set to `value`, a literal as code writes it; the run goes on with it (the Margin's Mock… of a variable) |

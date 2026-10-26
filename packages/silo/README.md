@@ -656,7 +656,13 @@ import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the
   dormant way in is a decision), and `.github/workflows/ledger.yml` weekly: `silo check`, and one deletion pull
   request for the first dormant way in `remove` can take out, none while one's open.
 
-Not built: the editor's half of leases — dormant features in the evidence's purple, with their price, Remove and Keep.
+**Built (2026-10-26): leases in the editor.** History (the extension that holds the ledger's drift in Problems) marks
+each dormant way in where it's registered, in the evidence's purple, with a Hint saying its price; the lightbulb offers
+Keep for 90 days (asking why) and Remove (asking why: the files only it reaches deleted, its manifest entries taken out,
+its tombstone, what's left by hand in the History output; nothing committed). Both write what `silo status` and `silo
+remove` write: what's dormant and what a removal is are lib's (`ledger.ts` `dormantWays`, `removalOf`, `removalText`),
+the CLI and the editor running the same code. What's dormant is by CI's records, as `silo check`'s: a repository
+without them has nothing dormant (a run in the editor or a test in it doesn't count yet).
 
 Open: **off isn't stopped** (a flag off by default ships but doesn't run: its own status, checked by "never reached");
 **restoring across a move** (a tombstone's paths mapped through the moves `history` detects); **what counts as one

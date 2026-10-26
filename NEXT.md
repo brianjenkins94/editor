@@ -13,10 +13,7 @@ How it's kept:
 
 ## Queue
 
-1. **Dormant features in the editor.** What `silo check` lists as dormant, shown where the evidence is (the feature
-   ledger's "In the editor": the evidence's purple, with its price, Remove and Keep), so a lease runs out where the code
-   is read rather than only in CI's lint. *Done:* a dormant way in is marked at its registration, and Keep / Remove
-   there write the ledger as `silo status` / `silo remove` would.
+Empty: every item queued is done. What's next is a decision (*Decisions*), or work found while working.
 
 ## Watching
 

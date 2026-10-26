@@ -9,7 +9,8 @@
  * code didn't) — and a change in that is told too. Evidence is keyed on BABLR spans; the shared evidence store
  * (insights') places them through the editor's resolver, so the join with BABLR happens there, at the edge.
  *
- * And the feature ledger's drift, in Problems (drift.ts): `silo check`'s checks, against the ways in it reads.
+ * And the feature ledger (ledger.ts): `silo check`'s drift, in Problems, against the ways in it reads; and its dormant
+ * ways in, in purple where they're registered, with Keep and Remove.
  *
  * Nothing it finds is kept: it's for the session. Once committed, the commit tells what changed (`silo history`), and what
  * runs say is recomputed from the evidence, which is kept.
@@ -29,7 +30,7 @@ import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
 import * as vscode from "vscode";
-import { ledgerDrift } from "./drift";
+import { ledgerView } from "./ledger";
 
 /** How long after the last keystroke a burst ends. */
 const IDLE_MS = 1500;
@@ -67,7 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 	const evidence = evidenceStore(vscode, context.subscriptions);
-	const ledger = ledgerDrift(context, root);
+	const ledger = ledgerView(context, root, output);
 	// What runs last said of each feature, this session (undefined until the first join: that one is told as a summary).
 	let exercised: Map<string, Exercise> | undefined;
 	const replayer = new Replayer(() => Promise.resolve(""), { "analyzer": analyzer, "include": includeByDefault });
@@ -166,9 +167,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		const features = featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways })));
-
-		await ledger.check([...features.values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides })));
+		await ledger.check(featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways }))), latest.graph);
 	}
 
 	/** Read the program as it stands, and replay it against the last reading: the first is the baseline. */
@@ -266,6 +265,18 @@ export function activate(context: vscode.ExtensionContext): void {
 		});
 	}));
 
+	// Code changed outside an editor — a pull, a checkout, a file written by a tool: read the program again.
+	const code = vscode.workspace.createFileSystemWatcher("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}");
+	const codeChanged = (uri: vscode.Uri): void => {
+		const path = relative(uri);
+
+		if (path !== undefined && includeByDefault(path) && !vscode.workspace.textDocuments.some((document) => document.uri.toString() === uri.toString() && document.isDirty)) {
+			schedule(IDLE_MS);
+		}
+	};
+
+	context.subscriptions.push(code, code.onDidCreate(codeChanged), code.onDidChange(codeChanged), code.onDidDelete(codeChanged));
+
 	// A manifest's ways in change with it.
 	const watcher = vscode.workspace.createFileSystemWatcher("**/package.json");
 	const manifestsChanged = (): void => {
@@ -275,8 +286,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(watcher, watcher.onDidChange(manifestsChanged), watcher.onDidCreate(manifestsChanged), watcher.onDidDelete(manifestsChanged));
 
-	// The ledger, or a doc, changed: its drift may have (a doc naming a removed feature, say).
-	const decided = vscode.workspace.createFileSystemWatcher("**/{features.json,*.md}");
+	// The ledger, a doc or CI's records changed: its drift, or what's dormant, may have (a doc naming a removed feature, say).
+	const decided = vscode.workspace.createFileSystemWatcher("**/{features.json,architecture.json,*.md}");
 	const ledgerChanged = (): void => {
 		queue = queue.then(checkLedger).catch(() => undefined);
 	};

@@ -35,7 +35,7 @@ export function unifiedDiff(path: string, before: string, after: string): string
 export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
-	const status = async (): Promise<{ "files": GitFileChange[] }> => {
+	const status = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
 		const current = await engine.status();
 		const byPath = new Map<string, GitFileChange>();
 
@@ -59,7 +59,9 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 			record(change, "unstaged");
 		}
 
-		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)) };
+		const head = await engine.headCommit();
+
+		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)), ...head === undefined ? {} : { "head": head } };
 	};
 
 	serve(hub, "git.status", status);

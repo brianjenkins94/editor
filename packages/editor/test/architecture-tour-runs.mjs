@@ -1339,6 +1339,93 @@ test("features: the ledger's drift in Problems — stopped but present, until th
 	}
 });
 
+// Dormant ways in, where they're registered (packages/silo/README.md, *The feature ledger*: "In the editor"): what `silo
+// check` lists — CI's records load a way in's files and never run its own code — marked in the evidence's purple with
+// its price, Keep and Remove writing the ledger as `silo status` and `silo remove` would.
+test("features: a dormant way in is marked where it's registered, and Keep / Remove write the ledger", async () => {
+	const workbench = session.workbench();
+	const write = (files) => workbench.evaluate(async (entries) => {
+		const { api } = globalThis.__editor;
+
+		for (const [path, text] of entries) {
+			await api.workspace.fs.writeFile(api.Uri.file("/workspace/" + path), new TextEncoder().encode(text));
+		}
+	}, Object.entries(files));
+	const read = (path) => workbench.evaluate((file) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/" + file)).then((bytes) => new TextDecoder().decode(bytes), () => undefined), path);
+	const dormantIn = (path) => workbench.evaluate((file) => globalThis.__editor.api.languages.getDiagnostics(globalThis.__editor.api.Uri.file("/workspace/" + file)).filter((each) => each.source === "silo" && each.message.startsWith("dormant: ")).map((each) => ({ "line": each.range.start.line, "message": each.message })), path);
+	const ledgerBefore = await read(".silo/features.json");
+
+	// Two commands a test loaded the files of and never ran: tidy's handler in the file that registers it, archive's in a
+	// file of its own.
+	await write({
+		"archiver/package.json": JSON.stringify({ "name": "archiver", "contributes": { "commands": [{ "command": "archiver.archive", "title": "Archive" }, { "command": "archiver.tidy", "title": "Tidy" }] } }, undefined, "\t") + "\n",
+		"archiver/archive.ts": "export function archive(): number {\n\treturn 1;\n}\n",
+		"archiver/extension.ts": "import { archive } from \"./archive\";\n\nexport function activate(context: any): void {\n\tcontext.subscriptions.push(vscode.commands.registerCommand(\"archiver.archive\", archive), vscode.commands.registerCommand(\"archiver.tidy\", tidy));\n}\n\nfunction tidy(): number {\n\treturn 2;\n}\n",
+		".silo/evidence/ci/architecture.json": JSON.stringify({ "reach": { "archiver/extension.ts": { "(top level), activate": [1] }, "archiver/archive.ts": { "(top level)": [1] } } }) + "\n"
+	});
+
+	try {
+		await workbench.evaluate(() => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file("/workspace/archiver/extension.ts")));
+
+		const found = await eventually("the two dormant ways in, at their registration", async () => {
+			const each = await dormantIn("archiver/extension.ts");
+
+			return each.length >= 2 ? each : undefined;
+		}, 90_000);
+
+		assert.ok(found.every((each) => each.line === 3), `on the line that registers them: ${JSON.stringify(found)}`);
+		assert.match(found.find((each) => each.message.includes("archiver.archive")).message, /^dormant: command archiver\.archive — CI's runs load its files and never run its code; deleting it frees .*1 file/u, "its price: archive.ts is only its");
+
+		// Purple, beside it: the lightbulb's two ways out.
+		const actions = await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+			const uri = api.Uri.file("/workspace/archiver/extension.ts");
+
+			return (await api.commands.executeCommand("vscode.executeCodeActionProvider", uri, new api.Range(3, 0, 3, 200))).map((action) => action.title);
+		});
+
+		assert.ok(actions.includes("Keep \"archiver.tidy\" for 90 days…") && actions.includes("Remove \"archiver.archive\"…"), JSON.stringify(actions));
+
+		// Keep: an active entry, by its key, that asks again in 90 days — and it's not dormant any more.
+		assert.equal(await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.ledger.keep", "command|archiver.tidy", "the tour's")), true);
+
+		const kept = JSON.parse(await read(".silo/features.json"))["archiver.tidy"];
+
+		assert.deepEqual([kept.status, kept.why, kept.key], ["active", "the tour's", "command|archiver.tidy"]);
+		assert.equal(kept.until, new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10));
+		await eventually("tidy, decided", async () => ((await dormantIn("archiver/extension.ts")).every((each) => !each.message.includes("archiver.tidy")) || undefined), 60_000);
+
+		// Remove: archive.ts, only its, deleted; its manifest entry gone; its tombstone; the registration left by hand.
+		const removed = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.ledger.remove", "command|archiver.archive", "the tour's"));
+
+		assert.equal(removed.nothing, false);
+		assert.deepEqual(removed.files, ["archiver/archive.ts"]);
+		assert.deepEqual(removed.manifests, ["archiver/package.json"]);
+		assert.match(removed.text, /its way in, to take out by hand: where archiver\/extension\.ts states it/u);
+		assert.equal(await read("archiver/archive.ts"), undefined, "deleted");
+		assert.deepEqual(JSON.parse(await read("archiver/package.json")).contributes.commands.map((each) => each.command), ["archiver.tidy"]);
+
+		const tombstone = JSON.parse(await read(".silo/features.json"))["archiver.archive"];
+
+		assert.deepEqual([tombstone.status, tombstone.key, tombstone.paths], ["removed", "command|archiver.archive", ["archiver/archive.ts"]]);
+		assert.match(tombstone.restore ?? "", /^git checkout \S+ -- archiver\/archive\.ts$/u);
+	} finally {
+		await workbench.evaluate(async (ledger) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("workbench.action.closeActiveEditor");
+
+			for (const path of ["archiver", ".silo/evidence/ci"]) {
+				await api.workspace.fs.delete(api.Uri.file("/workspace/" + path), { "recursive": true }).then(() => undefined, () => undefined);
+			}
+
+			if (ledger !== undefined) {
+				await api.workspace.fs.writeFile(api.Uri.file("/workspace/.silo/features.json"), new TextEncoder().encode(ledger));
+			}
+		}, ledgerBefore);
+	}
+});
+
 // Beyond a file's own tests (RUNNING.md, *Unattended runs*: "What runs"): a program's run is kept on each module it
 // imported too, by the declarations it ran there (lib traces' `program`), so editing one re-runs the programs that ran
 // what changed — and only those.
