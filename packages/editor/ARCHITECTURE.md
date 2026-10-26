@@ -473,6 +473,7 @@ flowchart LR
   n_ext_bridge <-.->|"commands"| n_ext_capabilities
   n_ext_bridge <-.->|"commands"| n_ext_cosmetic
   n_ext_bridge <-.->|"commands"| n_ext_event_sheet
+  n_ext_bridge <-.->|"commands"| n_ext_history
   n_ext_bridge <-.->|"commands"| n_ext_insights
   n_ext_bridge <-.->|"commands"| n_ext_margin
   n_ext_bridge <-.->|"commands"| n_ext_notes
@@ -492,12 +493,12 @@ flowchart LR
   n_ext_event_sheet <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet_recognizer_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_history -->|"reads"| n_store__silo_evidence____file__json
+  n_ext_history -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_history -->|"reads"| n_store__silo_runs__file__jsonl
   n_ext_history -->|"reads, writes"| n_store__silo__file__json
   n_ext_history <-.->|"commands"| n_ext_vscode
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
-  n_ext_insights -->|"reads, writes"| n_store__silo__file__json
   n_ext_insights <-.->|"commands"| n_ext_vscode
   n_ext_json_language_features_jsonServerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_margin -->|"reads"| n_store__silo__gitattributes
@@ -579,12 +580,12 @@ flowchart LR
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, margin, notes |
 | `.silo/.gitignore` | Workbench | Workbench, bridge, margin |
-| `.silo/<file>.json` | Workbench, capabilities, history, insights | Dev-server worker, Workbench, bridge, capabilities, history, insights |
+| `.silo/<file>.json` | Workbench, capabilities, history | Dev-server worker, Workbench, bridge, capabilities, history |
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/evidence/…/<file>.json` | Workbench | Workbench, history |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, margin, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
-| `.silo/local/…/<file>.jsonl` | Workbench, margin | Workbench, insights, margin, running |
+| `.silo/local/…/<file>.jsonl` | Workbench, margin | Workbench, history, insights, margin, running |
 | `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge, margin |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/policy/<file>.json` | Workbench, bridge, capabilities | Workbench, bridge, capabilities, tsval |
