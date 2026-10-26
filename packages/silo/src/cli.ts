@@ -26,6 +26,7 @@ import type { Price } from "@brianjenkins94/util/silo/cost";
 import type { Analyzer, DeclarationGraph } from "@brianjenkins94/util/silo/graph";
 import type { Drift, Ledger, LedgerStatus, WayCode } from "@brianjenkins94/util/silo/ledger";
 import type { Step } from "@brianjenkins94/util/silo/history";
+import type { GroupingScore } from "@brianjenkins94/util/silo/manifest";
 import type { Rolldown } from "@brianjenkins94/util/silo/slice";
 import type { TypeScriptModules } from "@brianjenkins94/util/silo/typescript";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -37,13 +38,14 @@ import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
+import { byFile, byFolder, byReach, byTests, testsFromRecords } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
-import { manifestDrift, parseManifest } from "@brianjenkins94/util/silo/manifest";
+import { manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { rolldown } from "rolldown";
@@ -166,6 +168,44 @@ function manifestDriftOf(repo: string, ways: Parameters<typeof manifestDrift>[1]
 	}
 
 	return manifestDrift(manifest, { "ways": ways, "exists": exists });
+}
+
+/** Each derivation of features from `repo`'s code (lib util/silo/derive), scored against its manifest — by feature and
+ *  by area. Throws without a manifest. */
+export async function derivationScores(repo: string): Promise<{ "derivation": string; "features": GroupingScore; "areas": GroupingScore }[]> {
+	const manifest = fs.existsSync(path.join(repo, manifestPath())) ? parseManifest(fs.readFileSync(path.join(repo, manifestPath()))) : undefined;
+
+	if (manifest === undefined) {
+		throw new Error(`no feature manifest to score against (${manifestPath()}: silo README, *The feature manifest*)`);
+	}
+
+	const { features, graph } = await currentProgram(repo);
+	const ways = [...features.values()];
+	const records = fs.existsSync(path.join(repo, CI_RECORDS)) ? fs.readFileSync(path.join(repo, CI_RECORDS)) : undefined;
+	const groupings: [string, Map<string, string>][] = [
+		["by file", byFile(ways)],
+		["by folder", byFolder(ways)],
+		["by reach", byReach(ways, graph)],
+		...records === undefined ? [] : [["by tests", byTests(ways, graph, testsFromRecords(records))] as [string, Map<string, string>]]
+	];
+
+	return groupings.map(([derivation, grouping]) => ({ "derivation": derivation, "features": scoreGrouping(manifest, grouping), "areas": scoreGrouping(manifest, grouping, { "areas": true }) }));
+}
+
+/** The scores, as a table. */
+function scoresText(scored: Awaited<ReturnType<typeof derivationScores>>): string {
+	const first = scored[0]?.features;
+	const row = (each: GroupingScore): string => [`${each.groups}`, `${each.placed}/${each.ways}`, `${each.whole}`, `${each.split}`, `${each.merged}`, `${each.splitAndMerged}`, `${each.partly + each.unseen}`, each.precision.toFixed(2), each.recall.toFixed(2), each.f.toFixed(2)].join(" | ");
+
+	return [
+		first === undefined ? "" : `Features from the code alone, against the manifest's ${first.features} features with ways in (and its areas):`,
+		"",
+		"| Derivation | Groups | Ways in placed | Whole | Split | Merged | Both | Partly or unseen | Precision | Recall | F |",
+		"|---|---|---|---|---|---|---|---|---|---|---|",
+		...scored.map((each) => `| ${each.derivation} | ${row(each.features)} |`),
+		...scored.map((each) => `| ${each.derivation}, by area | ${row(each.areas)} |`),
+		""
+	].join("\n");
 }
 
 /** The steps of a span of the history (its baseline, the commit before it, comes first and tells nothing). */
@@ -578,10 +618,19 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "features",
-			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code.",
-			"config": juvy({ "repo": repoArgument, "json": jsonFlag }),
+			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by CI's tests), each grouping scored against the feature manifest (.silo/manifest.json): how many of its features each finds whole, splits or merges, and its precision and recall.",
+			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the feature manifest (silo README, *The feature manifest*)." } }),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
+
+				if (config.get("score")) {
+					const scored = await derivationScores(repo);
+
+					process.stdout.write(config.get("json") ? JSON.stringify(scored, undefined, "\t") + "\n" : scoresText(scored));
+
+					return;
+				}
+
 				const features = [...(await currentFeatures(repo)).values()];
 
 				process.stdout.write(config.get("json") ? JSON.stringify(features, undefined, "\t") + "\n" : featuresMarkdown(features, { "title": "Features of " + path.basename(repo) }));

@@ -50,7 +50,7 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features`, `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `manifest`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`, `manifest.json`; `local/traces/` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features` (`--score`: derivations against the manifest), `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `manifest`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`, `manifest.json`; `local/traces/` |
 | Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's and the manifest's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
 ## What the prototype had, and where it is now
@@ -700,7 +700,45 @@ are 49 of them, mostly where it has no shape to look for:
 - in the editor, the spell checker, `node --test` in the debugger and the game generator, which register nothing it
   knows.
 
-Where: lib `util/silo/manifest.ts` (`manifestDrift`, `parseManifest`, `manifestText`), read by `silo check`. Not built:
+**Scored (2026-10-26): what the code alone gets.** `silo features --score` groups the ways in four ways and scores
+each grouping against the manifest's 87 features that own ways in (lib `util/silo/derive.ts`, `scoreGrouping` in
+`manifest.ts`). A feature comes out *whole* (one group, nothing else in it), *split* (several groups), *merged* (a group
+shared with another feature) or both. Precision and recall are B-cubed: how much of a way in's group is its feature, and
+how much of its feature is in its group.
+
+| Derivation | Groups | Whole | Split | Merged | Both | Precision | Recall | F |
+|---|---|---|---|---|---|---|---|---|
+| by file (a baseline) | 106 | 15 | 8 | 23 | 41 | 0.67 | 0.52 | 0.58 |
+| by folder (a baseline) | 40 | 8 | 0 | 47 | 32 | 0.33 | 0.68 | 0.45 |
+| by reach | 187 | 13 | 16 | 19 | 39 | 0.80 | 0.39 | 0.52 |
+| by CI's tests (120 of 368 placed) | 20 | 0 | 0 | 25 | 18 | 0.35 | 0.13 | 0.18 |
+
+Nothing beats the file that registers a way in. What that says:
+- **Reach is precise and splits.** The reach of a way in rarely crosses into another feature (0.80), but one feature's
+  ways in reach different code: a command, its view and its setting share a feature, not declarations. And 141 of the
+  368 reach nothing of their own: their handlers are written inline, where they're registered. Its two parameters
+  barely matter (F 0.50–0.55 over ambient 3–40%, join 0.2–0.7).
+- **CI's tests can't tell features apart.** The architecture suites share a boot: 207 declarations are ambient, the 112
+  tests make 34 clusters, and two thirds of the ways in overlap none of them. Unit tests' traces would do better (the
+  2026-10-22 spike, *Which tests reach what*), and they stay on the machine that ran them.
+- **The joins missing are across realms.** Against the manifest's 26 areas instead, every derivation is more precise
+  (0.83 by file, 0.89 by reach) and recall halves: the groups are pieces of one feature, rarely of two. What's missing
+  is the link between the pieces, and the largest part is the hub: 139 of the ways in are hub requests and
+  subscriptions, only 40 in a file of one feature. An agent tool in one realm and the request it makes, served in
+  another, are joined only by a subject string.
+- **Tried, no better** (in a scratch spike, not kept): file groups joined by reach (F 0.55–0.59); grouping by an id's
+  namespace (`notes.`, `margin.`: 0.56); placing a core module where it's defined and a hub subject with the code that
+  calls it (0.58). The last is the right idea and a crude version of it: a subject's callers are often a composition
+  root (the shell, the workbench's entry), which register many features.
+
+Next, if this goes on: subjects as edges (a request joined to where it's served, in the graph, not by file), a home for
+what composition roots register, and per-test reach from unit tests. Two cautions about the measure:
+- the manifest is an agent's judgment, not ground truth, and its granularity is one choice of several: `silo`'s eight
+  subcommands are eight features here, and could as well be one;
+- tuning a derivation on this one repository is fitting it to the answer, so a derivation's parameters are kept few and
+  fixed.
+
+Where: lib `util/silo/manifest.ts` (`manifestDrift`, `parseManifest`, `manifestText`, `manifestWithout`, `scoreGrouping`), read by `silo check`; `derive.ts`, read by `silo features --score`. Not built:
 manifest drift in the editor's Problems (only CI's `silo check` reports it), and a ledger entry naming the manifest's
 feature (they share names by convention, unchecked).
 
