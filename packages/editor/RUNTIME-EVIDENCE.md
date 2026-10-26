@@ -399,32 +399,20 @@ values are told from its trace every quarter second, not only by a timer; and ea
 when its values there weren't kept (`LiveBatch.now`), so the ball follows it past the bounds, and their count goes up
 as it runs. A live run on a save stops at its step budget well inside the second, so it's a Run that's followed.
 
-### Kept across reloads, deduped, and shared as they're committed
+### Kept across reloads and deduped, on this machine
 
-2026-10-22 (lib util/silo/traces; extensions/margin/runs.ts; git-engine.ts `shareRuns`). A finished run is kept as a
-trace (its values, calls, how it ended, what it read, the text it ran) and identified by its code: the BABLR span ids of
-the top-level declarations it executed, each value by the span around it. Span ids ignore whitespace and comments, so a
-reformat, a comment or an edit to a function the run never called leaves it the same run (*3 runs alike*), and an edit
-inside anything it executed makes another. Every run stays on this machine (`.silo/local/traces/<file>.jsonl`), so a
-file's balls come back when it's shown again.
+2026-10-22 (lib util/silo/traces; extensions/margin/runs.ts). A finished run is kept as a trace (its values, calls, how
+it ended, what it read, the text it ran) and identified by its code: the BABLR span ids of the top-level declarations it
+executed, each value by the span around it. Span ids ignore whitespace and comments, so a reformat, a comment or an
+edit to a function the run never called leaves it the same run (*3 runs alike*), and an edit inside anything it executed
+makes another. Every run stays on this machine (`.silo/local/traces/<file>.jsonl`), so a file's balls come back when
+it's shown again.
 
-What git gets is worked out as a commit is made (the editor makes every commit, so the step is its own, a pre-commit
-hook in all but name): for each program file committed, the runs current for the text committed go in
-`.silo/traces/<you>/<file>.jsonl`; a file committed with none, or deleted, takes its shared runs out. So what's
-committed is always the runs of the code beside it.
-
-A value can hold a secret, so a shared run carries its values only when it surely read nothing: no input the runtime
-saw (a call made or given a result), no process.argv, and code that can't read from outside at all (no import or
-require, nothing of process, fetch, sockets, storage or the page). Any other run is shared by its values' types, the
-inputs it read (a URL without its query), and how it ended without the message; its values stay local. (A runtime
-doesn't tell every read: the editor answers a program's workspace reads itself, outside the run's effects, which is why
-the code decides too.)
-
-Values built only from the file's own literals are shared as they were even from a run that read (2026-10-24; lib
-util/silo/purity `determinedValues`, the capabilities plugin's `_determined`): a static floor, decided on the safe side
-(the list is the function's comment), asked for only when such a run is kept and only while the document still holds
-the text that ran. It follows data, not control: which branch ran is shared already, by where the values are. tsval
-tracking what came from an input at runtime would raise the floor (NEXT.md).
+**Never in git** (decided 2026-10-26). A value can hold anything a run read, so traces aren't committed; what runs
+observed is shared as evidence, summed (*The model*: reached, value, branch, purity), and a run's envelope is shared in
+`.silo/runs/` (whose, where, on what code; no values). Sharing them had been built on 2026-10-22, at each commit, with a
+run that read shared by its values' types and a static floor of values built from literals shared as they were; all of
+that went with it, and the runtime taint it was to be raised by wasn't built.
 
 ### Live values, open
 

@@ -42,10 +42,10 @@ async function jsonlUnder(folder: vscode.Uri): Promise<vscode.Uri[]> {
 
 const textOf = async (uri: vscode.Uri): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
-/** The workspace's features from its tests' traces: this machine's (`.silo/local/traces`) and everyone's shared ones
- *  (`.silo/traces/<user>`), each declaration placed in its file as it is now. */
+/** The workspace's features from its tests' traces, this machine's (`.silo/local/traces`): each declaration placed in
+ *  its file as it is now. */
 async function featuresIn(root: vscode.Uri): Promise<{ "features": TestFeature[]; "placed": Map<string, Placed>; "statuses": Map<string, string> }> {
-	const files = [...await jsonlUnder(vscode.Uri.joinPath(root, ".silo/local/traces")), ...await jsonlUnder(vscode.Uri.joinPath(root, ".silo/traces"))];
+	const files = await jsonlUnder(vscode.Uri.joinPath(root, ".silo/local/traces"));
 	const traces: RunTrace[] = (await Promise.all(files.map(async (uri) => parseTraces(await textOf(uri) ?? "")))).flat();
 	const { features } = featuresFromTests(traces);
 	const placed = new Map<string, Placed>();

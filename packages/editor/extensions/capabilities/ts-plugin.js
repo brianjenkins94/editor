@@ -15,8 +15,6 @@
  * - `_types.at` — the type of each of a file's ranges (runtime evidence's declared types; RUNTIME-EVIDENCE.md).
  * - `_statements` — a file's top-level statements as a projection's cards (RUNTIME-EVIDENCE.md, *Projections*), and
  *   each top-level function's purity (silo's: pure, effectful, unknown…), for the card it's on.
- * - `_determined` — where a run puts values in a file, and which are built only from its literals (silo's), for a run
- *   that read an input to share them as they were.
  */
 
 export default function init(modules) {
@@ -208,21 +206,6 @@ export default function init(modules) {
 			}
 
 			return { "response": { "statements": engine.statementsOf(ts, at.program.getTypeChecker(), at.sourceFile), "purity": purity }, "responseRequired": true };
-		});
-
-		// `_determined` — where a file's values go, and which are built only from its literals (none: it can't say).
-		info.session.addProtocolHandler("_determined", function(request) {
-			const at = fileOf(info, request);
-
-			if (engine === undefined || at.sourceFile === undefined) {
-				return { "response": { "places": null }, "responseRequired": true };
-			}
-
-			try {
-				return { "response": { "places": engine.determinedValues(ts, at.program, at.sourceFile) }, "responseRequired": true };
-			} catch {
-				return { "response": { "places": null }, "responseRequired": true };
-			}
 		});
 	}
 

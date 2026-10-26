@@ -154,7 +154,7 @@ What's there: `test`/`it`, `describe`/`suite`, `.skip`, `.todo`, the four hooks,
 **A test is kept as a trace** (lib util/silo/traces' `test`: its id, the test file and its titles joined by ` › `, and
 its outcome) on each file it ran: the top-level declarations it executed there, by BABLR span. So a file's traces say
 which tests reach it, the record selection reads (*Unattended runs*: "What runs"). A file keeps each test's latest,
-apart from its runs. Tests' traces are shared at a commit as runs are: those still current for the committed text.
+apart from its runs. Tests' traces stay on this machine, as runs' do (RUNTIME-EVIDENCE.md, *Kept across reloads*).
 
 **Features from tests** (Insights' Features view, built 2026-10-23; lib util/silo/test-features): the tests grouped by
 the code they ran — not their own file's, which is test code — leaving out code at least half of ten or more tests

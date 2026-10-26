@@ -376,8 +376,8 @@ The design:
 - **It's traces** (built 2026-10-23; editor RUNNING.md, *Tests*). A test is kept as a run is (`traces`' `test`: its
   id, the test file and its titles joined by ` › `, and its outcome), on each file it executed: the top-level
   declarations it ran there, by BABLR span. Keyed by the code's file, it's what selection reads: a diff names files,
-  their traces name the tests. A file keeps each test's latest; shared at a commit while current, `merge=union`, as
-  runs are. An edited declaration gets a new id, so selection looks a change up by the base version's ids. (It was to
+  their traces name the tests. A file keeps each test's latest, on the machine that ran it, as runs' traces are (never
+  in git: decided 2026-10-26). An edited declaration gets a new id, so selection looks a change up by the base version's ids. (It was to
   be a `tested` evidence kind; traces, by the same declarations as runs, replace it.) Tests run on tsval, in the editor
   (decision 3, decided).
 - **Sets, not counters.** A test's reach is written when the set changes, so a run that reaches what it did before
@@ -500,10 +500,8 @@ for coverage: a save's live run keeps no evidence (they're many, and nobody chos
 package's own code to what the program handed it is behind `unwatched`; a RegExp's `lastIndex`; a getter on a host
 object.
 
-The same file holds its data-flow sibling, `determinedValues` (2026-10-24): where a run puts values, and which are
-built only from the file's own literals, so a run that read an input shares those as they were (traces' `committable`;
-the editor's RUNTIME-EVIDENCE.md, *Kept across reloads*). It shares the pure built-ins table, and an object is
-determined only while it holds primitives, takes only determined writes and isn't handed on.
+Its data-flow sibling `determinedValues` (2026-10-24: a static floor for sharing a run's values from a run that read)
+went with shared traces on 2026-10-26: traces stay on the machine that ran them, so there's nothing to make safe.
 
 **Go** (recommended; NEXT.md's decision i — taken). Four functions in five get a definite verdict statically, and the fifth is
 mostly what runs are for: dynamic dispatch, where tsval sees which code ran; and external packages, where a table per

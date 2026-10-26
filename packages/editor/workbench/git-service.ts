@@ -108,12 +108,6 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		hub.publish("git.changed");
 		log.info("git commit (service)", { "oid": made.oid.slice(0, 7), "files": request?.files?.length });
 
-		// Committed all the same, but not silently: its runs weren't shared with it (git-engine.ts shareRuns).
-		if (made.unshared !== undefined) {
-			log.warn("git commit: runs not shared", { "oid": made.oid.slice(0, 7), "why": made.unshared });
-			void vscode.window.showWarningMessage(`Committed ${made.oid.slice(0, 7)}, but its runs weren't shared with it (.silo/traces): ${made.unshared}. Commit again to share them.`);
-		}
-
 		return made;
 	};
 

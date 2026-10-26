@@ -13,14 +13,7 @@ How it's kept:
 
 ## Queue
 
-1. **What came from an input, tracked at runtime.** The static floor shares values built only from a file's literals;
-   tsval carrying a from-an-input bit with each value (through its value stack, bindings, objects and built-ins) would
-   share every value that didn't touch one, a callback's and a parameter's included (RUNTIME-EVIDENCE.md, *Kept across
-   reloads*; lib util/silo/purity `determinedValues`, the floor it raises). Measure first: what the floor misses on this
-   repository's runs that read, and what the bit costs a run that reads nothing. *Done:* a run that read shares each
-   value no input reached, and the cost to runs is in the performance suite.
-
-2. **Dormant features in the editor.** What `silo check` lists as dormant, shown where the evidence is (the feature
+1. **Dormant features in the editor.** What `silo check` lists as dormant, shown where the evidence is (the feature
    ledger's "In the editor": the evidence's purple, with its price, Remove and Keep), so a lease runs out where the code
    is read rather than only in CI's lint. *Done:* a dormant way in is marked at its registration, and Keep / Remove
    there write the ledger as `silo status` / `silo remove` would.
