@@ -739,8 +739,31 @@ Little beats the file that registers a way in. What that says:
   namespace (`notes.`, `margin.`: 0.56); placing a core module where it's defined and a hub subject with the code that
   calls it (0.58).
 
-Next, if this goes on: what composition roots register (`workbench-entry.tsx` registers 14 features, `main.tsx` 7, the
-shell 8: each needs a home other than its file), and per-test reach from unit tests. Two cautions about the measure:
+**As a tree, not a level (spike, not kept).** One flat grouping counts a right answer at another level as wrong, so the
+spike kept each derivation's whole merge tree, from single ways in up, and asked whether each feature is a branch of
+it (its best branch's F1). Of the 63 features with two or more ways in:
+
+| Tree | Clean branches | Mean best F1 | Areas: mean best F1 |
+|---|---|---|---|
+| files (one level) | 10 | 0.67 | 0.59 |
+| folders | 13 | 0.68 | 0.71 |
+| files, then joined by reach | 10 | 0.67 | 0.63 |
+| files, then joined at random | 10 | 0.67 | 0.60 |
+| ways in joined by reach | 4 | 0.58 | 0.48 |
+| ways in joined at random | 0 | 0.41 | 0.34 |
+
+Above the file, reach joins nothing a random join wouldn't. Below it, reach has signal (0.58 against 0.41 at random),
+but less than the file. Of the 50 features that aren't clean branches of the folder tree, 38 are bigger than their best
+branch: split, not merged. That's the layout. Folders here are realms (shell, app, workbench, workers, previews), and 30
+of the 63 features span two realms or more, up to five (*Runtime evidence kept in git*). A tree over the code's own
+structure can't hold a feature that crosses it. Features and realms are two axes, and the edges between realms are what
+the declaration graph doesn't have.
+
+Next, if this goes on: a way in's reach at runtime. Trigger each one in the harness (its command, its view, its
+setting, its request), and diff its coverage against a run that only boots. A run crosses realms where the graph can't
+(hub subjects, commands by string, messages). Also what composition roots register (`workbench-entry.tsx` registers 14
+features, `main.tsx` 7, the shell 8: each needs a home other than its file), and per-test reach from unit tests. Two
+cautions about the measure:
 - the manifest is an agent's judgment, not ground truth, and its granularity is one choice of several: `silo`'s eight
   subcommands are eight features here, and could as well be one;
 - tuning a derivation on this one repository is fitting it to the answer, so a derivation's parameters are kept few and
