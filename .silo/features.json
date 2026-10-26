@@ -22,6 +22,13 @@
       "packages/editor/extensions/history"
     ]
   },
+  "insights.monitor": {
+    "status": "removed",
+    "why": "dormant: CI's runs load its files and never run its code",
+    "since": "2026-10-26",
+    "key": "view|insights.monitor",
+    "paths": []
+  },
   "tsval compiled tier": {
     "status": "parked",
     "why": "until a program is too slow in practice (tsval README, *A compiled tier*)",

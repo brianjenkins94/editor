@@ -8,7 +8,9 @@
     "vscode": "*"
   },
   "browser": "extension.js",
-  "files": ["monitor-view.js"],
+  "files": [
+    "monitor-view.js"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -90,8 +92,16 @@
         },
         "silo.evidence.previews": {
           "type": "string",
-          "enum": ["full", "coverage", "off"],
-          "enumDescriptions": ["Statements, values and branches: everything a tsval run records.", "Statements only: the cheapest, an increment each.", "Nothing: previews run their code as written."],
+          "enum": [
+            "full",
+            "coverage",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Statements, values and branches: everything a tsval run records.",
+            "Statements only: the cheapest, an increment each.",
+            "Nothing: previews run their code as written."
+          ],
           "default": "full",
           "markdownDescription": "How much of a preview's code the dev server instruments for runtime evidence. Wrappers run on the app's hot paths: scale it back if a preview's frame budget is tight. Applies to the next preview started."
         },
@@ -113,11 +123,6 @@
         {
           "id": "insights.features",
           "name": "Features"
-        },
-        {
-          "type": "webview",
-          "id": "insights.monitor",
-          "name": "Monitor"
         }
       ]
     }
