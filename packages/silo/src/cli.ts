@@ -41,8 +41,9 @@ import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
-import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { manifestDrift, parseManifest } from "@brianjenkins94/util/silo/manifest";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { rolldown } from "rolldown";
@@ -140,13 +141,31 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 	const read = (file: string): { "file": string; "text": string } => ({ "file": file, "text": fs.readFileSync(path.join(repo, file)) });
 	const ways = [...(program ?? await currentProgram(repo)).features.values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides }));
 
-	return drift(ledger, {
+	const exists = (each: string): boolean => fs.existsSync(path.join(repo, each));
+
+	return [...drift(ledger, {
 		"today": today,
 		"ways": ways,
-		"exists": (each) => fs.existsSync(path.join(repo, each)),
+		"exists": exists,
 		"docs": files.filter((file) => file.endsWith(".md")).map(read),
 		"code": files.filter((file) => includeByDefault(file) && /\.[cm]?[jt]sx?$/u.test(file)).map(read)
-	});
+	}), ...manifestDriftOf(repo, ways, exists)];
+}
+
+/** The feature manifest's drift from the ways in (lib util/silo/manifest): none without a manifest. Throws for one that
+ *  isn't a manifest. */
+function manifestDriftOf(repo: string, ways: Parameters<typeof manifestDrift>[1]["ways"], exists: (path: string) => boolean): Drift[] {
+	if (!exists(manifestPath())) {
+		return [];
+	}
+
+	const manifest = parseManifest(fs.readFileSync(path.join(repo, manifestPath())));
+
+	if (manifest === undefined) {
+		throw new Error(`${manifestPath()} isn't a manifest: areas of features by name, each with its \`what\``);
+	}
+
+	return manifestDrift(manifest, { "ways": ways, "exists": exists });
 }
 
 /** The steps of a span of the history (its baseline, the commit before it, comes first and tells nothing). */
@@ -375,7 +394,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "check",
-			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, and dead ends (a command or view declared and never registered, a setting never read) — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
+			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, and dead ends (a command or view declared and never registered, a setting never read) — and the feature manifest's (.silo/manifest.json): a way in no feature owns, one owned that's gone or owned twice, a path that isn't there — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "prices": { "format": Boolean, "default": false, "doc": "Every entry's price, too: what deleting its feature would free." } }),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
@@ -401,7 +420,7 @@ export const app = subcommands({
 				}
 
 				if (drifted.length === 0) {
-					process.stdout.write("The ledger and the code agree.\n");
+					process.stdout.write("The ledger, the manifest and the code agree.\n");
 				} else {
 					process.stdout.write(`Drift (${drifted.length}):\n${drifted.map((each) => `  ${each.check}: ${each.message}\n    change the code: ${each.code}; or the decision: ${each.decision}` + (priceOfEntry(each.entry) === undefined ? "" : `\n    deleting it ${priceText(priceOfEntry(each.entry) as Price)}`)).join("\n")}\n`);
 				}

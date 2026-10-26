@@ -1,0 +1,1499 @@
+{
+  "Shell": {
+    "Project picker": {
+      "what": "A projects panel on the left, collapsible to a rail and resizable, for opening a bundled sample project into the editor (the sample catalog is empty today).",
+      "ways": [
+        "button|Collapse project panel",
+        "button|Open project",
+        "button|Toggle project panel",
+        "hub request|project.list",
+        "hub subscription|project.open"
+      ],
+      "paths": [
+        "packages/editor/app/samples.ts"
+      ]
+    },
+    "Repo load from GitHub": {
+      "what": "Type owner/repo, or open an env/<owner>/<repo> address, and that GitHub repo is cloned into the workspace, history and all, and the address bar shows it.",
+      "ways": [
+        "hub subscription|project.openFiles"
+      ],
+      "paths": [
+        "packages/editor/shell/address.ts",
+        "packages/editor/shell/git-clone.ts",
+        "packages/editor/shell/github.ts"
+      ]
+    },
+    "Sign-in and account": {
+      "what": "An optional sign-in (GitHub or email) for private repos and commits, with your account, where you're signed in, signing out everywhere and deleting the account.",
+      "ways": [
+        "button|GitHub"
+      ],
+      "paths": [
+        "packages/editor/shell/account-dialog.tsx",
+        "packages/editor/shell/github-auth.ts",
+        "packages/editor/shell/session.ts"
+      ]
+    },
+    "Commit to GitHub": {
+      "what": "Push the whole workspace back to the repo and branch it was loaded from, with a commit message, from the top bar.",
+      "ways": [
+        "button|Commit"
+      ]
+    },
+    "Playground links": {
+      "what": "Open a TypeScript Playground link here as a real workspace (swap its host for the editor's), and share your workspace as a link the Playground opens too.",
+      "ways": [
+        "button|Share",
+        "hub request|workbench.files",
+        "hub request|workspace.files"
+      ],
+      "paths": [
+        "packages/editor/shared/playground-link.ts"
+      ]
+    },
+    "Docking editors into windows": {
+      "what": "Move a VS Code editor into its own window docked around the editor, and show a docked window (such as a preview) as an editor tab.",
+      "ways": [
+        "hub request|dock.closeEditor",
+        "hub request|dock.hostEditor",
+        "hub request|dock.openWindow",
+        "hub subscription|dock.closeWindow"
+      ],
+      "paths": [
+        "packages/editor/shared/dock-host.ts"
+      ]
+    },
+    "Theme follows your system": {
+      "what": "The editor switches light or dark with the operating system, and the surrounding chrome takes on VS Code's colours.",
+      "ways": [
+        "hub subscription|theme.colorScheme",
+        "hub subscription|theme.colors"
+      ],
+      "paths": [
+        "packages/editor/shared/theme.ts"
+      ]
+    }
+  },
+  "Editor": {
+    "Pane beside every editor": {
+      "what": "A strip of tabbed views beside the code (the Margin and each extension's), level with the lines they describe, or shown instead as VS Code's own code lenses, hints and hovers.",
+      "docs": "packages/editor/ARCHITECTURE.md, *4. Pane views*",
+      "ways": [
+        "agent tool|margin_state",
+        "code lens provider||pane-native.ts",
+        "command|editor.pane.chooseView",
+        "command|editor.pane.native.input",
+        "command|editor.pane.native.more",
+        "command|editor.pane.refresh",
+        "command|editor.pane.toggleNative",
+        "core module|installNativeFace",
+        "core module|installPaneViews",
+        "hover provider||pane-native.ts",
+        "inlay hints provider||pane-native.ts",
+        "text editor decoration type||pane-native.ts"
+      ]
+    },
+    "Rule editor": {
+      "what": "One editor for every rule about what a program may do (allow, deny, give a value), opened under the Rules tree from a stop, the Margin or a preview prompt.",
+      "docs": "packages/editor/RUNNING.md, *Rules*",
+      "ways": [
+        "agent tool|rules_list",
+        "command|editor.rules.cancelEdit",
+        "command|editor.rules.edit"
+      ],
+      "paths": [
+        "packages/editor/workbench/rule-editor.ts"
+      ]
+    },
+    "File and text search": {
+      "what": "Quick Open, Find in Files and extensions' file searches over the workspace, honouring files-to-include and files-to-exclude globs.",
+      "ways": [
+        "search result provider|file"
+      ]
+    },
+    "Packages and types from the CDN": {
+      "what": "Any import type-checks and go-to-definition reaches real package source without installing anything, at dependency versions pinned for everyone.",
+      "ways": [
+        "core module|installTypeAcquisition",
+        "hub request|packages.tarball"
+      ],
+      "paths": [
+        "packages/editor/workbench/node-modules-provider.ts",
+        "packages/editor/workbench/tarballs.ts",
+        "packages/editor/workbench/versions.ts"
+      ]
+    },
+    "Annotations that stay on their code": {
+      "what": "Notes, rules and evidence placed on a piece of code, by the editor or an extension, stay on that code through edits, moves and reformatting.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
+      "ways": [
+        "command|editor.annotations.refer",
+        "command|editor.annotations.resolve",
+        "command|editor.annotations.spans",
+        "hub request|annotations.refer",
+        "hub request|annotations.resolve",
+        "hub request|annotations.spans",
+        "hub request|bablr.follow",
+        "hub request|bablr.pick",
+        "hub request|bablr.refer",
+        "hub request|bablr.resolve",
+        "hub request|bablr.spans"
+      ],
+      "paths": [
+        "packages/bablr-language-ts/lib/anchors.ts",
+        "packages/bablr-language-ts/lib/history-identity.ts",
+        "packages/bablr-language-ts/lib/identity.ts"
+      ]
+    }
+  },
+  "Running and debugging": {
+    "Run from the shell": {
+      "what": "A Run menu in the top bar runs the file in the editor in the debugger, or one of the workspace's scripts and tasks, showing a running service's preview instead of starting it twice.",
+      "docs": "packages/editor/RUNNING.md, *The model*",
+      "ways": [
+        "button|Run"
+      ]
+    },
+    "The workspace terminal": {
+      "what": "A bash-like terminal on the workspace's files with npm, node, git, vite and other commands, which VS Code tasks also run in.",
+      "ways": [
+        "hub request|terminal.run",
+        "hub subscription|`terminal.in.${id}`",
+        "hub subscription|`terminal.stop.${id}`"
+      ],
+      "paths": [
+        "packages/editor/workbench/terminal/"
+      ]
+    },
+    "Run a file in the debugger": {
+      "what": "Run (the editor's play button) runs the open file in the debugger, the one way every program runs, whichever debugger is set to run it.",
+      "docs": "packages/editor/RUNNING.md, *The model*",
+      "ways": [
+        "command|editor.debugFile",
+        "debug adapter tracker provider|*|debug-events.ts",
+        "debug configuration provider|*|debug-events.ts"
+      ]
+    },
+    "Terminal node runs in the debugger": {
+      "what": "Typing `node <file>` in the terminal starts a debug session that prints and reads input in that terminal, and Ctrl-C stops it.",
+      "docs": "packages/editor/RUNNING.md, *The model*",
+      "ways": [
+        "hub subscription|`node.stdin.${runId}`",
+        "hub subscription|debug.launch",
+        "hub subscription|debug.stop"
+      ]
+    },
+    "Stepping debugger with step back": {
+      "what": "Breakpoints, stepping forward and backward, and variables, on a predictable clock whose timer waits can be skipped or made real.",
+      "ways": [
+        "command|tsval.skipWaits",
+        "command|tsval.waitRealTime",
+        "debug adapter descriptor provider|tsval",
+        "debug configuration provider|tsval",
+        "debugger|tsval",
+        "worker||debug-worker.ts"
+      ]
+    },
+    "Explore orderings": {
+      "what": "Runs a program under every ordering of its events and shows the different outcomes, so bugs that depend on order turn up.",
+      "ways": [
+        "command|tsval.explore",
+        "command|tsval.exploreOrderings"
+      ]
+    },
+    "Tests run in the debugger": {
+      "what": "`node --test` runs test files in the debugger with breakpoints and stepping, and remembers which code each test reached.",
+      "docs": "packages/editor/RUNNING.md, *Tests*",
+      "paths": [
+        "packages/editor/extensions/tsval/node-test.js"
+      ]
+    },
+    "Preview's dev server as a debug session": {
+      "what": "A running preview's dev server shows up in Run and Debug with a Stop button, and its output goes to the Debug Console.",
+      "ways": [
+        "debug adapter descriptor provider|production",
+        "debug configuration provider|production",
+        "debugger|production",
+        "hub subscription|`production.exit.${id}`",
+        "hub subscription|`production.exit.${this.id}`",
+        "hub subscription|`production.out.${this.id}`",
+        "hub subscription|production.launch"
+      ]
+    },
+    "Breakpoints in a page's code": {
+      "what": "A breakpoint in a web app's page code records what was in scope each time its line ran and shows it in the margin, and a recorded call can be stepped through again in the debugger.",
+      "docs": "packages/editor/RUNNING.md, *Apps: recorded stops, not live ones*",
+      "ways": [
+        "command|tsval.stepRecordedStop",
+        "hub subscription|stops.preview"
+      ]
+    },
+    "Debug toolbar in the preview title bar": {
+      "what": "The pause, step, restart and stop buttons also appear in the preview window's title bar and control the same session.",
+      "ways": [
+        "debug adapter tracker provider|*|debug-toolbar.ts",
+        "hub subscription|debug.command"
+      ]
+    },
+    "Package scripts as tasks and the run picker": {
+      "what": "Every package.json script is a task you can run, listed in Run Task and in the shell's run picker, and each runs in its own terminal.",
+      "ways": [
+        "hub request|tasks.list",
+        "hub request|tasks.run",
+        "hub subscription|`terminal.exit.${id}`",
+        "hub subscription|`terminal.out.${id}`",
+        "task provider|run"
+      ]
+    },
+    "Agents drive the debugger": {
+      "what": "An AI agent can start, step, pace and stop debug sessions, send them input, set values in them, answer a call's question, set breakpoints, explore orderings, and read what the margin and the Rules view show.",
+      "docs": "packages/editor/RUNNING.md, *The model*",
+      "ways": [
+        "agent tool|debug_breakpoints",
+        "agent tool|debug_explore",
+        "agent tool|debug_list",
+        "agent tool|debug_start",
+        "agent tool|debug_state",
+        "agent tool|debug_step",
+        "agent tool|debug_stop",
+        "command|margin.state",
+        "debug adapter tracker provider|*|debug-control.ts",
+        "hub request|`debug.session.${session.id}.decide`",
+        "hub request|debug.breakpoints",
+        "hub request|debug.explore",
+        "hub request|debug.sessions",
+        "hub request|debug.start",
+        "hub request|prefix + \"pace\"",
+        "hub request|prefix + \"setValue\"",
+        "hub request|prefix + \"state\"",
+        "hub request|prefix + \"stdin\"",
+        "hub request|prefix + \"step\"",
+        "hub request|prefix + \"stop\"",
+        "hub request|subject"
+      ]
+    },
+    "Programs, services and what's running": {
+      "what": "A program started from the terminal, a task or Run runs in the debugger with its output streamed back, and a server it starts opens a preview; a status bar entry lists what's running, stops each, and says how each ended.",
+      "docs": "packages/editor/RUNNING.md, *The model*",
+      "ways": [
+        "agent tool|runs_list",
+        "agent tool|runs_stop",
+        "command|running.show",
+        "hub request|runs.begin",
+        "hub request|runs.list",
+        "hub request|runs.stop",
+        "hub subscription|`debug.declined.${runId}`",
+        "hub subscription|`node.exit.${run.id}`",
+        "hub subscription|`node.exit.${runId}`",
+        "hub subscription|`node.listening.${run.id}`",
+        "hub subscription|`node.listening.${runId}`",
+        "hub subscription|`node.out.${runId}`",
+        "hub subscription|`production.stop.${id}`",
+        "hub subscription|node.exit.*",
+        "hub subscription|node.listening.*",
+        "status bar item|running"
+      ]
+    }
+  },
+  "Live values": {
+    "Live values in the margin": {
+      "what": "Beside the code, each line shows the values it produced when it ran, one column per turn of a loop; you can hold a column or pick a call to look at, and while stopped the latest value appears inline.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live values*",
+      "ways": [
+        "command|margin.hold",
+        "command|margin.paneView",
+        "command|margin.pick",
+        "inline values provider||margin.ts"
+      ]
+    },
+    "Past runs, as balls": {
+      "what": "Each run of a file is kept on this machine, and picking it at the top of the margin shows its values and how it ended.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Runs kept, as balls*",
+      "ways": [
+        "command|margin.pickRun"
+      ]
+    },
+    "Live runs after an edit": {
+      "what": "The file you're editing runs again on save and on a timer so the margin stays current, without asking you anything, and a call these unwatched runs can't make can be pinned to a value it returned before or given a rule.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live runs*",
+      "ways": [
+        "command|margin.pin",
+        "command|margin.unattended",
+        "command|run.live.again",
+        "setting|run.liveRuns",
+        "setting|run.liveRuns.interval"
+      ]
+    },
+    "Mock a value": {
+      "what": "Give the program different command-line arguments, or a variable a different value, either once at a stop or on every run by a rule.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Mocking a value — and one way to run*",
+      "ways": [
+        "command|editor.debug.setValue",
+        "command|margin.mockArgv",
+        "command|margin.mockVariable"
+      ]
+    },
+    "Coverage in the gutter": {
+      "what": "After a run, marks beside each line show whether it ran and how often, and the same colors appear in the scrollbar.",
+      "ways": [
+        "command|coverage.paneView",
+        "core module|installCoverage",
+        "text editor decoration type||coverage.ts"
+      ]
+    }
+  },
+  "Previews": {
+    "Preview windows": {
+      "what": "Running a dev server opens movable windows onto your app, as many per server as you like, hot-reloading on every change and showing your app's console and errors in the editor.",
+      "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
+      "ways": [
+        "agent tool|previews_list",
+        "core module|installConsoleTap",
+        "core module|installShellPreview",
+        "hub request|preview.open",
+        "hub request|preview.windows",
+        "hub subscription|`preview.hmr.${port}`",
+        "hub subscription|debug.state",
+        "hub subscription|preview.close",
+        "hub subscription|preview.open",
+        "hub subscription|preview.ready",
+        "hub subscription|tap.worker.log"
+      ],
+      "paths": [
+        "packages/editor/app/preview.ts",
+        "packages/editor/previews/tap-shared.ts",
+        "packages/editor/previews/worker-tap.ts",
+        "packages/editor/shell/window.ts"
+      ]
+    },
+    "In-browser dev server": {
+      "what": "Your app's dev server (Vite) runs inside the browser on the workspace's files, and a program's own server is served to the preview the same way; an agent can force its cold-start race to check for transform errors.",
+      "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
+      "ways": [
+        "agent tool|previews_provoke",
+        "hub request|\"virtual.request.\" + tab",
+        "hub request|`virtual.debug.${listening}`",
+        "hub request|preview.provoke",
+        "hub request|preview.start",
+        "hub request|preview.stops",
+        "hub request|provoke.round",
+        "hub request|virtual.request"
+      ],
+      "paths": [
+        "packages/editor/shared/virtual-path.ts"
+      ]
+    },
+    "Capability prompts for previews": {
+      "what": "When your app reaches the network, a WebSocket or WebRTC that the policy hasn't decided, its preview window asks you; a preview nobody is watching is answered from what the call returned last time.",
+      "docs": "packages/editor/RUNNING.md, *A call's result*",
+      "ways": [
+        "core module|installSocketGate",
+        "hub request|\"capability.decide.\" + tab",
+        "hub request|\"capability.record.\" + tab",
+        "hub request|capability.prompt",
+        "hub request|capability.watched",
+        "hub request|preview.decide",
+        "hub request|tap.worker.decide"
+      ]
+    },
+    "Preview DevTools": {
+      "what": "Chrome's DevTools docked under a preview window (console, elements, network), and the same DevTools protocol for agents.",
+      "ways": [
+        "agent tool|previews_cdp",
+        "core module|installPreviewCdp",
+        "hub request|PREVIEW_CDP",
+        "hub subscription|PREVIEW_CDP_EVENT + key"
+      ]
+    },
+    "Preview CPU profiles": {
+      "what": "Profile a preview's page on demand, and automatically when it keeps running slow, saving each profile as a .cpuprofile mapped back to the lines you wrote.",
+      "ways": [
+        "agent tool|previews_profile",
+        "core module|installAutoProfiler",
+        "core module|installPreviewProfiler",
+        "core module|installProfileFiles",
+        "hub request|PREVIEW_PROFILE",
+        "hub subscription|PREVIEW_PROFILED"
+      ],
+      "paths": [
+        "packages/editor/extensions/insights/profiles.ts",
+        "packages/editor/workbench/sourcemap.ts"
+      ]
+    }
+  },
+  "Capabilities and rules": {
+    "Answer a call where it stops": {
+      "what": "When a run reaches a call that touches files, the network or commands and nothing has decided it yet, the run stops on that line and asks in the margin: allow, skip or deny, for this call, this run or always, or make a rule.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Capability decisions, on the line*",
+      "ways": [
+        "command|editor.capability.decide",
+        "command|margin.decide",
+        "command|margin.rule",
+        "debug adapter tracker provider|*|capability-stops.ts"
+      ]
+    },
+    "Real effects, decided per call": {
+      "what": "Your policy decides whether each file, network or command call a run or preview makes really happens; what an allowed call returned is recorded so a rule can give it back later, and what each run did is kept.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Capabilities*",
+      "ways": [
+        "hub request|capability.decide",
+        "hub request|capability.record",
+        "hub request|capability.recorded",
+        "hub request|run.effects"
+      ]
+    },
+    "Capability findings in the code": {
+      "what": "Calls that reach the network, files, commands, the environment or eval are underlined in the code and listed in Problems, with the actual URL or path filled in by a background run.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Capabilities*",
+      "ways": [
+        "diagnostic collection|capabilities"
+      ],
+      "paths": [
+        "packages/editor/extensions/tsval/canary.ts"
+      ]
+    },
+    "Capability calls panel": {
+      "what": "A panel lists the program's capability calls and lets you allow, deny or clear each one; a denied call is marked as an error in the code.",
+      "ways": [
+        "command|capabilities.allow",
+        "command|capabilities.clear",
+        "command|capabilities.deny",
+        "command|capabilities.disposition",
+        "diagnostic collection|capabilities-policy",
+        "view|capabilities.calls"
+      ]
+    },
+    "Dependency baseline and exceptions": {
+      "what": "What each dependency's own code can do is recorded when it's added, and the Exceptions view shows anything that goes beyond that and how each run's calls were answered.",
+      "ways": [
+        "setting|silo.baseline",
+        "view|silo.exceptions",
+        "worker||packages-worker.ts"
+      ]
+    },
+    "Rules": {
+      "what": "The Rules view lists every rule as a sentence, in the order rules are checked, where you can add, open, edit and remove them.",
+      "docs": "packages/editor/RUNNING.md, *Rules*",
+      "ways": [
+        "command|silo.rules.given",
+        "command|silo.rules.list",
+        "command|silo.rules.new",
+        "command|silo.rules.open",
+        "command|silo.rules.refresh",
+        "command|silo.rules.remove",
+        "command|silo.rules.set",
+        "view|silo.rules"
+      ]
+    },
+    "Rules placed in the code": {
+      "what": "A rule tied to a line stays with its code through edits, shows as a gutter mark with its sentence on hover, and can be re-placed when its place is lost.",
+      "docs": "packages/editor/RUNNING.md, *A rule placed in the code*",
+      "ways": [
+        "command|silo.rules.files",
+        "command|silo.rules.replace"
+      ],
+      "paths": [
+        "packages/editor/extensions/capabilities/placed-rules.ts"
+      ]
+    }
+  },
+  "Insights": {
+    "What went through this code, on hover": {
+      "what": "Hovering code shows which values passed through it across runs, how often they were empty, what kinds they were next to the declared type, and how often each branch ran.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Second slice: values, branches and types*",
+      "ways": [
+        "hover provider||hover.ts"
+      ]
+    },
+    "What could go, in purple": {
+      "what": "Code the runs show was never needed, such as a `?.` that never met an empty value or a branch never taken, is tinted purple with a quick fix to remove it, and the Suggestions view lists them for every file.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Fourth slice: what could go, in purple, across inputs*",
+      "ways": [
+        "code actions provider||fixes.ts",
+        "command|insights.applySuggestion",
+        "diagnostic collection|evidence",
+        "setting|silo.evidence.minRuns",
+        "setting|silo.evidence.minSeen",
+        "text editor decoration type||fixes.ts",
+        "view|insights.suggestions"
+      ]
+    },
+    "Features from tests": {
+      "what": "The Features view groups the workspace's tests by the code they run, so each group is a feature with its tests and its code, and you can set a feature's status.",
+      "docs": "packages/editor/RUNNING.md, *Tests*",
+      "ways": [
+        "command|insights.features",
+        "command|insights.setStatus",
+        "view|insights.features"
+      ]
+    },
+    "Performance monitor": {
+      "what": "The status bar and a Monitor view of small live charts show the editor's memory, workspace fill, long frames and errors as they happen.",
+      "docs": "packages/editor/ARCHITECTURE.md, *The metrics plane*",
+      "ways": [
+        "command|editor.metrics.read",
+        "status bar item|insights.longFrames",
+        "status bar item|insights.memory",
+        "status bar item|insights.spanErrors",
+        "status bar item|insights.workspace",
+        "view|insights.monitor"
+      ]
+    },
+    "Runtime evidence kept in git": {
+      "what": "What runs and previews observed (which code ran, the values that passed, whether functions stayed pure) is summed and committed beside the code with each run's envelope and the machine it ran on; you choose how much of a preview is recorded.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *The model*",
+      "ways": [
+        "agent tool|runs_ledger",
+        "command|editor.evidence.purity",
+        "core module|installEvidence",
+        "core module|installPageEvidence",
+        "hub request|evidence.level",
+        "hub request|preview.version",
+        "hub request|runs.ledger",
+        "hub subscription|evidence.flush",
+        "hub subscription|evidence.observed",
+        "hub subscription|evidence.preview",
+        "setting|silo.evidence.previews",
+        "setting|silo.machine"
+      ],
+      "paths": [
+        "packages/editor/extensions/tsval/site-sums.ts"
+      ]
+    }
+  },
+  "Code quality": {
+    "ESLint": {
+      "what": "Real ESLint checks your code as you type, with quick fixes, fix-all on save, formatting, and the usual eslint.* settings.",
+      "ways": [
+        "code actions provider||extension.ts",
+        "diagnostic collection|eslint",
+        "diagnostic collection|eslint-config",
+        "document formatting edit provider||extension.ts",
+        "setting|eslint.enable",
+        "setting|eslint.format.enable",
+        "setting|eslint.rules.customizations",
+        "setting|eslint.validate",
+        "setting|eslint.workingDirectories"
+      ]
+    },
+    "Spell check": {
+      "what": "The real cspell engine spell-checks code and prose.",
+      "paths": [
+        "packages/editor/extensions/cspell"
+      ]
+    },
+    "Type queries": {
+      "what": "A `// ^?` comment under an expression shows that expression's type at the end of the comment, as in the TypeScript Playground.",
+      "ways": [
+        "inlay hints provider||extension.ts"
+      ]
+    },
+    "Unparsable files flagged": {
+      "what": "A file the editor can't parse gets a warning in Problems, because notes and evidence can't attach to it until it parses again.",
+      "ways": [
+        "diagnostic collection|BABLR",
+        "hub subscription|parse.status"
+      ]
+    }
+  },
+  "Source control": {
+    "Review panel": {
+      "what": "A changes panel on the right listing changed files, with a side-by-side diff, per-file discard and a commit box, like GitHub Desktop.",
+      "ways": [
+        "button|Close diff",
+        "button|Collapse changes panel",
+        "button|Discard changes",
+        "button|History",
+        "button|Toggle history panel",
+        "hub request|git.commit",
+        "hub request|git.discard",
+        "hub request|git.file",
+        "hub request|git.status",
+        "hub subscription|git.changed"
+      ],
+      "paths": [
+        "packages/editor/shell/git-codehike.tsx"
+      ]
+    },
+    "Your edits since the last commit": {
+      "what": "Every edit burst since the last commit is recorded per file and shown as small chunks grouped by the code they touched, surviving reloads.",
+      "ways": [
+        "button|Your edits",
+        "command|editor.history.texts",
+        "core module|installEditHistory",
+        "hub request|bablr.editGroups",
+        "hub request|history.chunks"
+      ]
+    },
+    "Git in the browser": {
+      "what": "The workspace is a real git repository, with no git binary, which VS Code's Source Control view and extensions read and commit to.",
+      "ways": [
+        "command|editor.git.commit",
+        "command|editor.git.file",
+        "command|editor.git.status",
+        "core module|installGitService"
+      ],
+      "paths": [
+        "packages/editor/workbench/git-engine.ts"
+      ]
+    },
+    "Source Control for git": {
+      "what": "The Source Control view shows staged and unstaged changes with diffs against the last commit, and commits from its input box.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Worked examples (the git/SCM + BABLR stack)*",
+      "ways": [
+        "command|sourceControl.commit",
+        "command|sourceControl.refresh",
+        "source control|git",
+        "text document content provider||extension.ts"
+      ]
+    },
+    "Formatting-only changes marked": {
+      "what": "Each change is judged formatting-only or meaningful; a file whose changes are only whitespace, semicolons or comments gets a badge and a dimmed name in Source Control and the Explorer.",
+      "ways": [
+        "command|cosmetic.list",
+        "command|editor.annotations.classify",
+        "file decoration provider||extension.ts",
+        "hub request|annotations.classify",
+        "hub request|bablr.verdict"
+      ],
+      "paths": [
+        "packages/bablr-language-ts/lib/cosmetic.ts"
+      ]
+    }
+  },
+  "Notes and history": {
+    "Notes on code": {
+      "what": "A note attached to a piece of code follows that code as it moves and changes; when the code is gone, the note waits in Problems to be re-placed or dismissed.",
+      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
+      "ways": [
+        "command|notes.add",
+        "command|notes.confirm",
+        "command|notes.dismiss",
+        "command|notes.placeHere",
+        "command|notes.replace",
+        "comment controller|notes",
+        "diagnostic collection|notes",
+        "status bar item||extension.ts"
+      ]
+    },
+    "What your edits change": {
+      "what": "When you pause typing, the History output says which features your edits added, removed or changed, and whether runs used them.",
+      "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say*",
+      "ways": [
+        "output channel|History"
+      ]
+    },
+    "Feature ledger drift in Problems": {
+      "what": "Where what's been decided about a feature no longer matches the code, a problem says so on the ledger and offers both ways out.",
+      "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes*",
+      "ways": [
+        "diagnostic collection|silo"
+      ]
+    },
+    "Dormant features marked in History": {
+      "what": "A way in whose files CI's runs load and whose code they never run is tinted purple where it's registered, with what deleting it frees, and a choice to keep it for 90 days or remove it.",
+      "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes*",
+      "ways": [
+        "code actions provider||ledger.ts",
+        "command|history.ledger.keep",
+        "command|history.ledger.remove",
+        "diagnostic collection|silo-dormant",
+        "text editor decoration type||ledger.ts"
+      ]
+    }
+  },
+  "Agent tools": {
+    "Agent workspace tools": {
+      "what": "An agent reads, writes, edits, globs and greps the workspace's files, runs shell commands and reads the terminals, and checks status, diffs and commits with git, as on a local machine.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|files_edit",
+        "agent tool|files_glob",
+        "agent tool|files_grep",
+        "agent tool|files_read",
+        "agent tool|files_write",
+        "agent tool|git_commit",
+        "agent tool|git_diff",
+        "agent tool|git_status",
+        "agent tool|terminal_output",
+        "agent tool|terminal_run",
+        "core module|installWorkspaceTools",
+        "hub request|files.edit",
+        "hub request|files.glob",
+        "hub request|files.grep",
+        "hub request|files.read",
+        "hub request|files.write",
+        "hub request|git.diff",
+        "hub request|shell.run",
+        "hub request|terminal.state"
+      ]
+    },
+    "Agent view of the editor": {
+      "what": "An agent reads what's on screen as data: the active file, cursor and open tabs, the Problems view, and the notifications showing.",
+      "ways": [
+        "agent tool|editor_notifications",
+        "agent tool|editor_problems",
+        "agent tool|editor_state",
+        "core module|installEditorState",
+        "hub request|editor.state",
+        "hub request|notifications.list",
+        "hub request|problems.list"
+      ]
+    },
+    "Agent connection": {
+      "what": "Each open tab offers its tools to an agent through debug-mcp, addressed by tab so one agent can drive several, plus a scripting hook for automation on localhost.",
+      "ways": [
+        "core module|installDebugBridge"
+      ],
+      "paths": [
+        "packages/editor/app/tools/host.ts",
+        "packages/editor/app/tools/index.ts",
+        "packages/editor/app/tools/page-tools.ts"
+      ]
+    }
+  },
+  "Game making": {
+    "Event Sheet": {
+      "what": "Shows the game the open file belongs to as a map of its objects, rules, behaviors and components, each of which opens its code, and shows this file's part of the game beside the code.",
+      "ways": [
+        "command|eventSheet.paneView",
+        "view|eventSheet.view",
+        "worker||recognizer-worker.ts"
+      ]
+    },
+    "Build a game by painting a level": {
+      "what": "Start a new game, paint a level on a grid with one-click objects, pick systems, and generate the game's code into the project.",
+      "paths": [
+        "packages/editor/extensions/event-sheet/authoring.ts",
+        "packages/editor/extensions/event-sheet/generator.ts"
+      ]
+    }
+  },
+  "Extension template": {
+    "Plug an interpreter into Run": {
+      "what": "Another extension's debugger can be the one Run starts; its worker reads and writes the workspace through the editor, under the same policy as any run.",
+      "docs": "packages/editor/RUNNING.md, *Another interpreter*",
+      "ways": [
+        "hub request|runtime.fs.attach",
+        "hub subscription|bridge.ready",
+        "setting|run.debugger"
+      ]
+    },
+    "Starter interpreter": {
+      "what": "A template extension you can fork, whose interpreter runs a file when you press Run, and which is rebuilt and reloaded into the editor as you change it.",
+      "docs": "contrib/README.md, *The interpreter — `src/interpreter.ts`*",
+      "ways": [
+        "debug adapter descriptor provider|contrib",
+        "debugger|contrib",
+        "worker||worker.ts"
+      ],
+      "paths": [
+        "contrib/scripts/dev.mjs",
+        "contrib/src/interpreter.ts"
+      ]
+    },
+    "Starter code renderer": {
+      "what": "The template's Reopen Editor With → Rendered view: a custom editor that shows a file rendered and writes your changes back to its text.",
+      "docs": "contrib/README.md, *The renderer — `src/renderer.ts`*",
+      "ways": [
+        "custom editor provider|contrib.renderer"
+      ]
+    }
+  },
+  "Platform": {
+    "Workbench boot": {
+      "what": "The editor page boots VS Code's workbench in a frame, hands it the workspace, and keeps the two talking even when the editor is popped out.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Cross-realm communication*",
+      "ways": [
+        "hub request|workbench.init",
+        "hub subscription|workbench.online",
+        "hub subscription|workbench.openProject",
+        "hub subscription|workbench.save",
+        "url parameter|?pane"
+      ],
+      "paths": [
+        "packages/editor/shared/pane-link.ts",
+        "packages/editor/workbench/Workbench.tsx"
+      ]
+    },
+    "Workspace filesystem": {
+      "what": "One in-memory workspace shared by the editor, terminal, previews and debugger, saved across reloads, where a change made anywhere is seen everywhere.",
+      "docs": "packages/editor/ARCHITECTURE.md, *The workspace filesystem (zen-fs)*",
+      "ways": [
+        "core module|installWorkspaceFs",
+        "hub request|workspace.buffer",
+        "hub subscription|WORKSPACE_CHANGED"
+      ],
+      "paths": [
+        "packages/editor/shared/workspace-changes.ts",
+        "packages/editor/shared/workspace-runtime.ts",
+        "packages/editor/shared/zenfs-vfs.ts"
+      ]
+    },
+    "Runs on a static host": {
+      "what": "A service worker makes the editor work from a plain static site: it supplies the isolation the editor needs (after one reload), serves package files from a CDN and answers preview requests.",
+      "ways": [
+        "url parameter|?coep",
+        "worker||coi-serviceworker.js"
+      ],
+      "paths": [
+        "packages/editor/app/coi.ts",
+        "packages/editor/index.html"
+      ]
+    },
+    "Extensions by URL": {
+      "what": "Load extensions from outside the editor (an interpreter or renderer from editor-contrib) by URL, reloading as they're rebuilt.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Extension points*",
+      "ways": [
+        "url parameter|?extension"
+      ],
+      "paths": [
+        "packages/editor/workbench/extensions.ts"
+      ]
+    },
+    "Live architecture view and metrics": {
+      "what": "A live diagram of the editor's parts and the messages between them, checked against its rules, and per-second memory, timing and traffic numbers for the monitor.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
+      "ways": [
+        "hub request|\"tool.architecture_violations.\" + tab",
+        "hub request|architecture.violations"
+      ],
+      "paths": [
+        "packages/editor/extensions/command-tap.ts",
+        "packages/editor/shared/architecture-model.ts",
+        "packages/editor/shared/architecture-zenfs.ts",
+        "packages/editor/shared/architecture.ts",
+        "packages/editor/shared/editor-metrics.ts"
+      ]
+    }
+  },
+  "Accounts and sign-in": {
+    "Sign in with GitHub": {
+      "what": "Signs a person in to the editor or the admin app with their GitHub account, through a GitHub App that reads only their numeric GitHub id.",
+      "docs": "packages/api/README.md, *A GitHub App, not an OAuth App*",
+      "paths": [
+        "packages/api/src/github.ts",
+        "packages/api/src/signin.ts"
+      ]
+    },
+    "Sign in by email code": {
+      "what": "Signs a person in with a one-time code emailed to their address, which they type in or reach through the email's link.",
+      "docs": "packages/api/README.md, *Email (C2)*",
+      "ways": [
+        "url parameter|?code"
+      ],
+      "paths": [
+        "packages/api/src/email-code.html",
+        "packages/api/src/email-code.txt",
+        "packages/api/src/email.ts"
+      ]
+    },
+    "Sign in with a password, and reset it": {
+      "what": "Lets a person set a password, sign in with their email and password, and reset a forgotten password using a code sent by email.",
+      "docs": "packages/api/README.md, *Passwords and reset (C3, C4)*",
+      "paths": [
+        "packages/api/src/action-code.html",
+        "packages/api/src/action-code.txt",
+        "packages/api/src/action-codes.ts",
+        "packages/api/src/password-hash.ts",
+        "packages/api/src/password.ts"
+      ]
+    },
+    "Two-factor sign-in": {
+      "what": "Adds a second step to sign-in: a code from an authenticator app or an emailed code, plus recovery codes for getting back in.",
+      "docs": "packages/api/README.md, *Two-factor (C5, C6)*",
+      "paths": [
+        "packages/api/src/mfa-state.ts",
+        "packages/api/src/mfa.ts"
+      ]
+    },
+    "Sign in with a passkey": {
+      "what": "Lets a person register passkeys, sign in with one instead of a password, and remove them.",
+      "docs": "packages/api/README.md, *Passkeys*",
+      "paths": [
+        "packages/api/public/passkey.html",
+        "packages/api/public/passkey.js",
+        "packages/api/public/webauthn.js",
+        "packages/api/src/passkeys.ts"
+      ]
+    },
+    "Link sign-in methods and merge accounts": {
+      "what": "Lets a person add a GitHub account or another email address to their account, and merge in a separate account that already had it.",
+      "docs": "packages/api/README.md, *Linking accounts, and roles*",
+      "paths": [
+        "packages/api/src/identities.ts",
+        "packages/api/src/link.ts"
+      ]
+    },
+    "Hosted sign-in and DPoP tokens for client apps": {
+      "what": "Gives every client app one locked-down sign-in page on the API (started by a pushed authorization request), so no app's own page ever sees a password; the app then gets short-lived DPoP-bound access tokens and rotating refresh tokens, plus OAuth metadata and a JWKS.",
+      "docs": "packages/api/README.md, *Tokens and the flow*",
+      "paths": [
+        "packages/api/public/sign-in.css",
+        "packages/api/public/sign-in.html",
+        "packages/api/public/sign-in.js",
+        "packages/api/src/attempt.ts",
+        "packages/api/src/clients.ts",
+        "packages/api/src/grant.ts",
+        "packages/api/src/tokens.ts"
+      ]
+    },
+    "Manage your sign-ins and delete your account": {
+      "what": "Lets a person see the sessions signed in as them, revoke one or all of them, and delete their account; deleted data is purged after a grace period.",
+      "docs": "packages/api/README.md, *Identity and the data we keep*",
+      "paths": [
+        "packages/api/migrations/0005_soft_delete.sql",
+        "packages/api/src/account.ts"
+      ]
+    },
+    "Your account page": {
+      "what": "One Preact account page, shared by the editor and the admin app, for managing ways to sign in, passkeys, two-factor and a password.",
+      "paths": [
+        "packages/account/src/account.tsx",
+        "packages/api/src/account-routes.ts",
+        "packages/theme/src/styles/account.ts"
+      ]
+    },
+    "GitHub API proxy": {
+      "what": "Passes the editor's GitHub API calls and a clone's git reads through to GitHub with the user's GitHub token kept on the server, and never allows a push.",
+      "docs": "packages/api/README.md, *The proxy*",
+      "paths": [
+        "packages/api/src/proxy.ts"
+      ]
+    }
+  },
+  "Admin app": {
+    "Admin: sign-in and roles": {
+      "what": "Gives the admin app its own sign-in, separate from the editor's, and shows each person only the pages their roles allow.",
+      "docs": "packages/api/README.md, *Roles and permissions*",
+      "paths": [
+        "packages/admin/src/logins.ts",
+        "packages/admin/src/main.tsx",
+        "packages/admin/src/session.ts",
+        "packages/api/src/admin.ts",
+        "packages/api/src/rbac.ts"
+      ]
+    },
+    "Admin: overview and users": {
+      "what": "Shows an overview page and the list of accounts, and for each user their identities, sessions and audit rows.",
+      "docs": "packages/api/README.md, *The UI*",
+      "paths": [
+        "packages/admin/src/views.tsx"
+      ]
+    },
+    "Admin: sign-ins and their timelines": {
+      "what": "Lists live sign-ins and lets an admin revoke one or open its timeline: the requests, editor events, audit rows and errors in order.",
+      "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
+      "paths": [
+        "packages/admin/src/timeline.tsx",
+        "packages/admin/src/views.tsx",
+        "packages/api/src/session-events.ts",
+        "packages/api/src/timeline.ts"
+      ]
+    },
+    "Admin: architecture": {
+      "what": "Shows the API as it describes itself: its routes, data stores and tables, the GitHub calls it passes through, who calls it, and what it calls.",
+      "docs": "packages/api/README.md, *The architecture page*",
+      "paths": [
+        "packages/admin/src/architecture.tsx",
+        "packages/api/src/architecture.ts",
+        "packages/theme/src/styles/architecture-view.ts"
+      ]
+    }
+  },
+  "API protection and operations": {
+    "Rate limits": {
+      "what": "Refuses sign-in, token and error-report requests that go over per-IP or per-target limits, before doing the work.",
+      "docs": "packages/api/README.md, *Hardening*",
+      "paths": [
+        "packages/api/src/limits.ts"
+      ]
+    },
+    "Unusual sign-ins": {
+      "what": "Scores each sign-in's requests and client against a learned model of normal behavior (without keeping the actual values), and lists the unusual ones, worst first, in the admin app.",
+      "docs": "packages/api/README.md, *Behavior (B7–B9)*",
+      "paths": [
+        "packages/admin/src/views.tsx",
+        "packages/api/migrations/0006_behavior.sql",
+        "packages/api/src/behavior.ts"
+      ]
+    },
+    "Tamper-evident audit log": {
+      "what": "Records every security event (sign-ins, refusals, account changes) in D1 and in locked R2 copies that can't be changed or deleted, and shows the log in the admin app.",
+      "docs": "packages/api/README.md, *A tamper-evident audit log*",
+      "paths": [
+        "packages/admin/src/views.tsx",
+        "packages/api/src/audit-copies.ts",
+        "packages/api/src/audit.ts",
+        "packages/api/src/refusals.ts"
+      ]
+    },
+    "Kill switch and switches": {
+      "what": "Lets the owner pause the whole API (maintenance mode) or smaller parts of it from the admin app, and the health and status endpoints report it.",
+      "docs": "packages/api/README.md, *The kill switch (O1) and narrower switches (O8)*",
+      "paths": [
+        "packages/admin/src/maintenance.tsx",
+        "packages/api/migrations/0014_maintenance.sql",
+        "packages/api/migrations/0018_switches.sql",
+        "packages/api/src/maintenance.ts"
+      ]
+    },
+    "Traffic and cost guard": {
+      "what": "Shows Cloudflare's traffic analytics (top paths, user agents, status codes) in the admin app, checks the account's spend every hour, and alerts or pauses if usage runs away.",
+      "docs": "packages/api/README.md, *The cost guard (O2)*",
+      "paths": [
+        "packages/admin/src/views.tsx",
+        "packages/api/src/spend.ts",
+        "packages/api/src/traffic.ts"
+      ]
+    },
+    "Tripwire": {
+      "what": "Checks every row a signed-in request reads and treats any row that belongs to another user as an incident, alerting the owner.",
+      "docs": "packages/api/README.md, *The tripwire (O3)*",
+      "paths": [
+        "packages/api/src/tripwire.ts"
+      ]
+    },
+    "Errors with quotable ids": {
+      "what": "Every uncaught error, the API's and the editor's alike, gets an id the person is shown to quote; errors are grouped, and the admin app shows each occurrence with a source-mapped stack and, for a signed-in session, what happened just before.",
+      "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
+      "ways": [
+        "hub subscription|session.event"
+      ],
+      "paths": [
+        "packages/admin/src/errors.tsx",
+        "packages/api/migrations/0016_errors.sql",
+        "packages/api/migrations/0017_editor_errors.sql",
+        "packages/api/src/errors.ts"
+      ]
+    },
+    "Email, inbox and the Mail page": {
+      "what": "Sends the API's email, receives mail for its own addresses, runs a full email sign-in smoke test, sends alerts to the owner, and shows all of this on the admin app's Mail page.",
+      "docs": "packages/api/README.md, *The Mail page*",
+      "paths": [
+        "packages/admin/src/mail.tsx",
+        "packages/api/src/inbox.ts",
+        "packages/api/src/mail-report.ts",
+        "packages/api/src/mail.ts",
+        "packages/api/src/owner-alert.html",
+        "packages/api/src/owner-alert.txt",
+        "packages/api/src/smoke.ts"
+      ]
+    },
+    "Redacted logging": {
+      "what": "Sends all of the API's logs and traces through one allowlist, so nothing personal or secret is ever logged.",
+      "docs": "packages/api/README.md, *Visibility, and the redaction rule*",
+      "paths": [
+        "packages/api/src/log.ts"
+      ]
+    }
+  },
+  "Hosting": {
+    "Sites on unusuallygood.dev": {
+      "what": "Serves the root domain (which redirects to the editor), the editor and the admin app as static Cloudflare sites, so loading a page never runs a Worker.",
+      "docs": "packages/api/README.md, *A7 · production*",
+      "paths": [
+        "packages/admin/deployment.ts",
+        "packages/admin/public/_headers",
+        "packages/site/admin.jsonc",
+        "packages/site/editor.jsonc",
+        "packages/site/public/_redirects",
+        "packages/site/wrangler.jsonc"
+      ]
+    }
+  },
+  "Observability and debug-mcp": {
+    "debug-mcp server": {
+      "what": "Runs a local collector that the editor's hubs connect to over a WebSocket, and offers what they send to an agent as MCP tools over stdio.",
+      "paths": [
+        "packages/debug-mcp/src/bin.ts",
+        "packages/debug-mcp/src/mcp.ts",
+        "packages/debug-mcp/src/server.ts",
+        "packages/debug-mcp/src/store.ts",
+        "packages/debug-mcp/src/tools/context.ts",
+        "packages/debug-mcp/src/tools/index.ts"
+      ]
+    },
+    "Query logs and spans": {
+      "what": "Lets an agent query the live editor's log records and timed spans from all its contexts, or wait until a matching record arrives.",
+      "ways": [
+        "agent tool|logs_query",
+        "agent tool|logs_wait",
+        "agent tool|spans_query",
+        "hub subscription|LOG_BACKLOG",
+        "hub subscription|LOG_SUBJECT + \".>\""
+      ],
+      "paths": [
+        "packages/observability/src/log-subject.ts"
+      ]
+    },
+    "Metrics": {
+      "what": "Samples gauges in every context once a second (memory, frame rate, long frames, durations, data channels) and lets an agent query them.",
+      "ways": [
+        "agent tool|metrics_query",
+        "hub subscription|METRICS_SUBJECT + \".>\""
+      ],
+      "paths": [
+        "packages/observability/src/metrics.ts"
+      ]
+    },
+    "Live architecture and payload capture": {
+      "what": "Reports every context (hubs, workers, extension hosts, webviews, network endpoints) and the traffic between them, with optional capture of message payloads, for an agent and for the editor's architecture view.",
+      "ways": [
+        "agent tool|architecture_state",
+        "agent tool|payloads_capture",
+        "core module|installNetworkProbes",
+        "core module|installWindowMessageProbe",
+        "core module|installWorkerProbe",
+        "hub subscription|ARCH_SUBJECT + \".>\"",
+        "hub subscription|SYNC_SUBJECT"
+      ],
+      "paths": [
+        "packages/observability/src/arch-probes.ts",
+        "packages/observability/src/arch-store.ts",
+        "packages/observability/src/arch.ts",
+        "packages/observability/src/flows.ts"
+      ]
+    },
+    "Connected tabs and hub tree health": {
+      "what": "Finds the editor tabs and preview apps connected right now (flagging ones on an outdated protocol) so tools can target one, and gives a health snapshot of the hub tree.",
+      "ways": [
+        "agent tool|tabs_list",
+        "agent tool|tree_state",
+        "hub subscription|TAB_DISCOVER",
+        "hub subscription|TAB_HERE"
+      ],
+      "paths": [
+        "packages/debug-mcp/src/forward.ts",
+        "packages/observability/src/tabs.ts"
+      ]
+    },
+    "Page tools": {
+      "what": "Lets a page offer its own tools, such as evaluating JavaScript or running a CSS selector in the live page, which debug-mcp passes to an agent for one tab.",
+      "ways": [
+        "agent tool|page_eval",
+        "agent tool|page_query",
+        "hub request|PAGE_TOOL + \".\" + name + \".\" + tab",
+        "hub request|PAGE_TOOLS + \".\" + tab",
+        "hub subscription|PAGE_TOOLS_CHANGED"
+      ],
+      "paths": [
+        "packages/debug-mcp/src/page-tools.ts",
+        "packages/observability/src/page-tools.ts"
+      ]
+    },
+    "Observe an app (opt-in debug link)": {
+      "what": "One call that sends an app's logs, console output and errors onto its hub, keeps a preview app's records under their own scope, and connects to debug-mcp on localhost or when ?debug is set.",
+      "ways": [
+        "url parameter|?debug"
+      ],
+      "paths": [
+        "packages/observability/src/index.ts",
+        "packages/observability/src/scope.ts"
+      ]
+    }
+  },
+  "Hub": {
+    "Composable message hubs": {
+      "what": "A message bus for each window, frame or worker, linked into a tree with permissions on each link, so a message crosses a boundary only when something on the other side wants it; it comes with a simulated network for deterministic tests.",
+      "docs": "packages/hub/README.md, *What it promises*",
+      "paths": [
+        "packages/hub/src/index.ts",
+        "packages/hub/src/network.ts"
+      ]
+    },
+    "Hub request/reply": {
+      "what": "Lets one context serve a named request and another context call it across the hub tree, with timeouts and an error when nobody answers.",
+      "ways": [
+        "hub subscription|RPC_CALL + \".\" + name",
+        "hub subscription|RPC_REPLY + \".\" + id"
+      ],
+      "paths": [
+        "packages/hub/src/index.ts"
+      ]
+    },
+    "Hub links over WebRTC, and tab lobbies": {
+      "what": "Links hubs in two pages over a WebRTC data channel, and groups a browser's open tabs into a lobby with one tab chosen as host.",
+      "docs": "packages/hub/README.md, *Beside the hub*",
+      "paths": [
+        "packages/hub/src/rtc.ts"
+      ]
+    }
+  },
+  "silo": {
+    "silo features": {
+      "what": "Lists every way into a program (commands, views, settings, buttons, agent tools, hub requests and more) by reading its code.",
+      "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
+      "ways": [
+        "cli command|features"
+      ]
+    },
+    "silo history": {
+      "what": "Tells what changed in a program from snapshots of its code along git's first-parent history, never from commit messages.",
+      "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
+      "ways": [
+        "cli command|history"
+      ]
+    },
+    "silo check": {
+      "what": "Reports where the feature ledger or this manifest and the code disagree (a stopped feature still in the code, a removed one still documented, a way in no feature owns) and fails CI on it.",
+      "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
+      "ways": [
+        "cli command|check"
+      ],
+      "paths": [
+        "packages/silo/src/cli.ts"
+      ]
+    },
+    "silo status": {
+      "what": "Records a decision about a feature (active, experimental, stopped and so on) in the shared feature ledger.",
+      "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
+      "ways": [
+        "cli command|status"
+      ]
+    },
+    "silo remove and restore": {
+      "what": "Takes a feature out of the code (the files only it uses, plus its manifest entries) and leaves a tombstone that can bring it back later.",
+      "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
+      "ways": [
+        "cli command|remove",
+        "cli command|restore"
+      ]
+    },
+    "silo coverage": {
+      "what": "Shows what the runs saved in .silo/ executed, commit by commit: what started or stopped running, and what was never reached.",
+      "docs": "packages/silo/README.md, *Which tests reach what (designed 2026-10-22; the record built 2026-10-23)*",
+      "ways": [
+        "cli command|coverage"
+      ]
+    },
+    "silo init": {
+      "what": "Sets up .silo/ in a repository, with its git settings and a baseline of what the code imports.",
+      "ways": [
+        "cli command|init"
+      ]
+    },
+    "silo install": {
+      "what": "Installs dependencies with the project's package manager, skipping anything published in the last week.",
+      "ways": [
+        "cli command|install"
+      ]
+    }
+  },
+  "tsval": {
+    "Run TypeScript in the interpreter": {
+      "what": "Runs TypeScript source straight from its syntax tree, synchronously or async, and returns the value of the last expression.",
+      "docs": "packages/tsval/README.md, *Usage*",
+      "paths": [
+        "packages/tsval/src/frontend.ts",
+        "packages/tsval/src/globals.ts",
+        "packages/tsval/src/handlers.ts",
+        "packages/tsval/src/index.ts",
+        "packages/tsval/src/interpret.ts"
+      ]
+    },
+    "tsval step debugger": {
+      "what": "Steps through a run one step at a time, pauses and resumes it, sets breakpoints, and snapshots or forks the running state.",
+      "docs": "packages/tsval/README.md, *Usage*",
+      "paths": [
+        "packages/tsval/src/frame.ts",
+        "packages/tsval/src/scope.ts",
+        "packages/tsval/src/vm.ts"
+      ]
+    },
+    "Host seams, modules and types": {
+      "what": "Lets a host inspect every value and call that crosses in from the host, watch statements and coverage, hook async calls, resolve imports (almostnode does this in the editor), and optionally add TypeScript's type checker.",
+      "docs": "packages/tsval/README.md, *Host seams*",
+      "paths": [
+        "packages/tsval/src/errors.ts",
+        "packages/tsval/src/modules.ts",
+        "packages/tsval/src/typed.ts",
+        "packages/tsval/src/values.ts"
+      ]
+    },
+    "Explore event-loop schedules": {
+      "what": "Runs a program under every distinct event-loop ordering to find all its possible outcomes and races, each with a schedule that replays it.",
+      "paths": [
+        "packages/tsval/src/event-loop.ts",
+        "packages/tsval/src/explore.ts"
+      ]
+    },
+    "Conformance suites": {
+      "what": "Tests tsval against test262 and TypeScript's own test cases, with scripts to fetch, sample and report on them.",
+      "docs": "packages/tsval/README.md, *Conformance: test262*",
+      "paths": [
+        "packages/tsval/scripts",
+        "packages/tsval/test/differential"
+      ]
+    }
+  },
+  "Language and parsing": {
+    "Parse TypeScript into a lossless CST": {
+      "what": "Our own BABLR grammar for the TypeScript subset tsval runs; it parses source into a syntax tree that keeps every character, as spans (sync or async), and has a command-line parser and a parse version for checking caches.",
+      "paths": [
+        "packages/bablr-language-ts/lib/grammar.ts",
+        "packages/bablr-language-ts/lib/spans.ts",
+        "packages/bablr-language-ts/run.mjs",
+        "packages/bablr/shims/record.js",
+        "packages/bablr/src/index.js",
+        "packages/bablr/vite.config.ts"
+      ]
+    }
+  },
+  "Libraries": {
+    "In-browser Node runtime (almostnode)": {
+      "what": "Runs bundled Node programs, such as language servers, on the browser's main thread, with Node's built-in modules, an in-memory file system, and HTTP servers that a service worker routes requests to.",
+      "docs": "packages/almostnode/README.md, *Node's built-ins: unenv, Node's own code, and ours where we must differ*",
+      "paths": [
+        "packages/almostnode/builtins.ts",
+        "packages/almostnode/config",
+        "packages/almostnode/create-runtime.ts",
+        "packages/almostnode/dev-server.ts",
+        "packages/almostnode/index.ts",
+        "packages/almostnode/runtime-interface.ts",
+        "packages/almostnode/runtime.ts",
+        "packages/almostnode/server-bridge.ts",
+        "packages/almostnode/shims",
+        "packages/almostnode/types",
+        "packages/almostnode/unenv-resolve.ts",
+        "packages/almostnode/utils",
+        "packages/almostnode/virtual-fs.ts"
+      ]
+    },
+    "Editor API: run contract for debuggers": {
+      "what": "What a debugger extension and its worker send and answer during a run: custom debug events (values, coverage, effects, ended, ask and others), requests (decide, stdin, getCoverage), a live-values recorder, recorded values for replay, the workspace's files as almostnode's VirtualFS, and the editor's network probes.",
+      "paths": [
+        "packages/editor-api/src/index.ts",
+        "packages/editor-api/src/probes.ts",
+        "packages/editor-api/src/recorded.ts",
+        "packages/editor-api/src/runtime-vfs.ts",
+        "packages/editor-api/src/values.ts"
+      ]
+    },
+    "Editor API: annotations and pane views": {
+      "what": "Lets an extension attach things to a range of code so they stay with that code as the file changes, and add a tab beside every editor drawn from its own data.",
+      "paths": [
+        "packages/editor-api/src/anchors.ts",
+        "packages/editor-api/src/annotations.ts",
+        "packages/editor-api/src/pane.ts"
+      ]
+    },
+    "Editor API: capability policy and gate": {
+      "what": "Lets an extension read the capability policy and a run's effects, get the gate's verdict, run untrusted code in a locked-down realm, and read or edit rules.",
+      "paths": [
+        "packages/editor-api/src/effects.ts",
+        "packages/editor-api/src/gate.ts",
+        "packages/editor-api/src/gated-eval.ts",
+        "packages/editor-api/src/policy.ts",
+        "packages/editor-api/src/rules.ts"
+      ]
+    },
+    "Editor API: what the editor keeps": {
+      "what": "Lets an extension read the runtime evidence kept for a file, CPU profiles, whether something is a service or a task, how a worker failed, and the editor's git status with BABLR's verdict on each change.",
+      "paths": [
+        "packages/editor-api/src/cpuprofile.ts",
+        "packages/editor-api/src/evidence.ts",
+        "packages/editor-api/src/failures.ts",
+        "packages/editor-api/src/git.ts",
+        "packages/editor-api/src/lifecycle.ts"
+      ]
+    },
+    "Web Awesome lint rules": {
+      "what": "ESLint rules that flag native HTML elements that have a Web Awesome equivalent, and HTML or CSS written inside strings.",
+      "docs": "packages/theme/README.md, *The four lint gaps*",
+      "paths": [
+        "packages/eslint-plugin-webawesome/src/index.js"
+      ]
+    }
+  },
+  "Theme and components": {
+    "Brand theme": {
+      "what": "Sets up Web Awesome with its design tokens adjusted for the brand, following the system's light or dark mode, with or without Web Awesome's native styles, and kept within a size budget.",
+      "docs": "packages/theme/README.md, *Usage*",
+      "paths": [
+        "packages/theme/budget.json",
+        "packages/theme/scripts/web-awesome.mjs",
+        "packages/theme/src/chrome.js",
+        "packages/theme/src/index.js",
+        "packages/theme/src/tokens.ts",
+        "packages/theme/src/web-awesome.ts",
+        "packages/theme/test/budget.mjs"
+      ]
+    },
+    "Theme follows VS Code's color theme": {
+      "what": "Maps the theme onto whichever VS Code color theme is active in the workbench.",
+      "docs": "packages/theme/README.md, *In VS Code's document: `theme/vscode`*",
+      "paths": [
+        "packages/theme/src/vscode-colors.js",
+        "packages/theme/src/vscode-skin.ts",
+        "packages/theme/src/vscode.js"
+      ]
+    },
+    "Web Awesome components through the theme": {
+      "what": "The only way for app code to load the Web Awesome components it is allowed to use.",
+      "docs": "packages/theme/README.md, *Components: `theme/components/*`*",
+      "paths": [
+        "packages/theme/src/components"
+      ]
+    },
+    "Recipes, surface styles and Stitches": {
+      "what": "Gives each part of the app its own styles and the app's shared shapes as recipe classes, all written with Stitches in an ordered set of style layers.",
+      "docs": "packages/theme/README.md, *Recipes and composed components: `theme/recipes`, `theme/app-window`*",
+      "paths": [
+        "packages/theme/src/component.ts",
+        "packages/theme/src/documents.js",
+        "packages/theme/src/recipes.ts",
+        "packages/theme/src/sheet.js",
+        "packages/theme/src/stitches.ts",
+        "packages/theme/src/styles"
+      ]
+    },
+    "Published theme components": {
+      "what": "Components published for use outside the app: the movable, collapsible <app-window> element (and an appWindow() function), plus caption, code, frame and toolbar recipes, each a class you get from a function call.",
+      "docs": "packages/theme/README.md, *Published: `components/<name>`*",
+      "paths": [
+        "components/app-window",
+        "components/caption",
+        "components/code",
+        "components/frame",
+        "components/toolbar",
+        "packages/theme/src/app-window.ts"
+      ]
+    },
+    "VS Code look for Web Awesome": {
+      "what": "A published Web Awesome theme in VS Code's default colors that follows the live color theme when used inside VS Code or a webview.",
+      "docs": "packages/theme/README.md, *The look: Web Awesome as VS Code*",
+      "paths": [
+        "components/vscode-theme",
+        "packages/theme/src/vscode-theme.ts"
+      ]
+    }
+  },
+  "Repository": {
+    "Release pipeline": {
+      "what": "Each push to main tests, builds and publishes every package as a GitHub release tarball and deploys the site, with no npm registry.",
+      "paths": [
+        ".github/workflows/cd.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/contrib.yml",
+        ".github/workflows/production.yml"
+      ]
+    },
+    "Architecture suites and performance budgets": {
+      "what": "Browser suites tour the real editor (runs, previews, capabilities, sessions), record what each test reached for CI's evidence, and hold boot time, hover latency, a large repo's load and memory to budgets.",
+      "paths": [
+        ".github/workflows/architecture.yml",
+        "packages/editor/test/architecture-harness.mjs",
+        "packages/editor/test/performance-budgets.json",
+        "packages/editor/test/performance.mjs"
+      ]
+    },
+    "Weekly ledger cleanup": {
+      "what": "Each week CI runs `silo check` and opens one pull request deleting the first dormant way in that `silo remove` can take out.",
+      "paths": [
+        ".github/workflows/ledger.yml"
+      ]
+    }
+  }
+}

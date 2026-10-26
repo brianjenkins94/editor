@@ -28,6 +28,9 @@ features, and `silo check` (CI's lint) holds the code to it:
 
 - **Replacing an approach removes the old one in the same change** — `silo remove "<name>" "<why>"` (what only it
   reaches, its manifest entries, a tombstone), or delete it and `silo status` it removed with where it went.
+- **A new way in goes in the manifest** — `.silo/manifest.json` names every feature and the ways in it owns (packages/silo/README.md,
+  *The feature manifest*): a new command, view, setting, tool or hub request goes into the feature it serves, or a new
+  one, in the same change; `silo check` fails on one no feature owns.
 - **An experiment starts with an entry** — `silo status "<name>" experiment "<why>" --until <date>`; it expires by
   default, and `silo check` says so.
 - **A dormant way in** (`silo check` lists them: their files load in CI's runs, their code never runs) is a decision to

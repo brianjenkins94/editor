@@ -50,8 +50,8 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features`, `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `cost` | `runs/`, `evidence/`, `traces/`, `policy*`, `features.json` |
-| Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features`, `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `manifest`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`, `manifest.json`; `local/traces/` |
+| Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's and the manifest's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
 ## What the prototype had, and where it is now
 
@@ -667,6 +667,40 @@ without them has nothing dormant (a run in the editor or a test in it doesn't co
 Open: **off isn't stopped** (a flag off by default ships but doesn't run: its own status, checked by "never reached");
 **restoring across a move** (a tombstone's paths mapped through the moves `history` detects); **what counts as one
 feature** (often "a path set people name", not a way in).
+
+### The feature manifest: every feature, named (2026-10-26)
+
+The ledger says what's been decided about a feature. Nothing yet said which features there are: `features` finds the ways
+in (368 here), not what they add up to. `.silo/manifest.json` is that list. It names each feature, by area, and says what
+it does in a sentence. It also says what the feature is: the ways in it owns, by `features`' keys, and its own files
+when no way in leads to it (an HTTP route, a library's export, a published component, a link's hash). For now it's
+written by hand. Agents wrote the first one from the code and the docs: 136 features in 26 areas, each of the 368 ways
+in owned once.
+
+`silo check` keeps it current, and fails, as the ledger's drift does, on:
+- a way in no feature owns: new code goes into the feature it serves, in the same change (CLAUDE.md, *Features*);
+- a key a feature owns that no way in has (it went, moved or was renamed);
+- a key two features own;
+- a path that isn't there;
+- a feature that owns nothing.
+
+A repository without a manifest has none of these checks.
+
+**Written by hand isn't the goal.** The goal is a manifest derived from the code alone, knowing nothing about the
+repository beforehand. Until a derivation can produce one, the manifest is what it's measured against: which of its
+features the derivation finds whole, which it splits, and which it merges. Candidate inputs are features from tests'
+clusters, reach, and manifests' labels for names. What the finder misses shows here as features with only paths. There
+are 49 of them, mostly where it has no shape to look for:
+- the API's HTTP routes (sign-in, accounts, the admin app's pages, operations: 22);
+- libraries' exports (tsval, the hub, editor-api, almostnode, BABLR, debug-mcp: 15);
+- the theme and its published components (6);
+- CI's workflows (3);
+- in the editor, the spell checker, `node --test` in the debugger and the game generator, which register nothing it
+  knows.
+
+Where: lib `util/silo/manifest.ts` (`manifestDrift`, `parseManifest`, `manifestText`), read by `silo check`. Not built:
+manifest drift in the editor's Problems (only CI's `silo check` reports it), and a ledger entry naming the manifest's
+feature (they share names by convention, unchecked).
 
 ### Decided
 
