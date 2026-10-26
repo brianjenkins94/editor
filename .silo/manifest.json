@@ -519,15 +519,6 @@
         "view|insights.suggestions"
       ]
     },
-    "Features from tests": {
-      "what": "The Features view groups the workspace's tests by the code they run, so each group is a feature with its tests and its code, and you can set a feature's status.",
-      "docs": "packages/editor/RUNNING.md, *Tests*",
-      "ways": [
-        "command|insights.features",
-        "command|insights.setStatus",
-        "view|insights.features"
-      ]
-    },
     "Performance monitor": {
       "what": "The status bar and a Monitor view of small live charts show the editor's memory, workspace fill, long frames and errors as they happen.",
       "docs": "packages/editor/ARCHITECTURE.md, *The metrics plane*",
@@ -700,6 +691,20 @@
         "command|history.ledger.remove",
         "diagnostic collection|silo-dormant",
         "text editor decoration type||ledger.ts"
+      ]
+    },
+    "Features map": {
+      "what": "A side bar of the program as its features, in the Insights monitor's cards: a card per area, a block per feature sized by its code, a legend in their colors; clicking one focuses on it and the rest of the workspace steps back (Explorer dots, open editors dimmed, its name in the status bar); a feature's status is set from the Command Palette.",
+      "docs": "packages/silo/README.md, *The feature manifest*",
+      "ways": [
+        "command|history.features",
+        "command|history.features.focus",
+        "command|history.features.open",
+        "command|history.features.setStatus",
+        "command|history.features.unfocus",
+        "file decoration provider||features.ts",
+        "status bar item|history.features",
+        "text editor decoration type||features.ts"
       ]
     }
   },

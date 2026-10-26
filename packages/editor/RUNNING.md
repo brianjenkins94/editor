@@ -156,12 +156,11 @@ its outcome) on each file it ran: the top-level declarations it executed there, 
 which tests reach it, the record selection reads (*Unattended runs*: "What runs"). A file keeps each test's latest,
 apart from its runs. Tests' traces stay on this machine, as runs' do (RUNTIME-EVIDENCE.md, *Kept across reloads*).
 
-**Features from tests** (Insights' Features view, built 2026-10-23; lib util/silo/test-features): the tests grouped by
-the code they ran — not their own file's, which is test code — leaving out code at least half of ten or more tests
-reach (ambient: setup, helpers), joined while their average Jaccard similarity is at least 0.5. A feature is named by
-the suites its tests share, else their commonest title, and lists its tests (as each last came out) and its code where
-it is now; a click goes to it. `insights.features` answers the same as data. A test file run alone and a whole
-suite give the same grouping, since each test's latest trace counts.
+**Tests, by feature** (the features map's data, since 2026-10-26; packages/silo/README.md, *The feature manifest*):
+under each of the manifest's features, the tests whose traces ran code it owns that isn't ambient (owned by more than
+five features), as each last came out. It took over from features from tests (Insights' Features view, 2026-10-23),
+which grouped the tests themselves by the code they ran: the grouping named features after their tests, and the
+manifest names them once, for every view.
 
 ## What can't run this way
 

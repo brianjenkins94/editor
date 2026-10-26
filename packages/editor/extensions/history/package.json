@@ -1,7 +1,7 @@
 {
   "name": "history",
   "displayName": "History",
-  "description": "What your edits change, as you make them: each burst's added, removed and changed features, read by the TypeScript server's own TypeScript and kept in .silo/history/<user>.jsonl.",
+  "description": "What your edits change, as you make them: each burst's added, removed and changed features, read by the TypeScript server's own TypeScript and kept in .silo/history/<user>.jsonl. And the program by feature: which of the manifest's features own each declaration, and each feature's tests, for the features map; and a focus on one feature that marks its files and dims the rest.",
   "publisher": "silo",
   "version": "0.0.1",
   "engines": {
@@ -16,6 +16,48 @@
     "onLanguage:javascriptreact"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "history.features.focus",
+        "title": "Focus on a Feature…",
+        "category": "Features"
+      },
+      {
+        "command": "history.features.unfocus",
+        "title": "Show Every Feature",
+        "category": "Features"
+      },
+      {
+        "command": "history.features.setStatus",
+        "title": "Set Feature Status…",
+        "category": "Features"
+      },
+      {
+        "command": "history.features",
+        "title": "Features, as Data",
+        "category": "Features"
+      },
+      {
+        "command": "history.features.open",
+        "title": "Go to It"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "history.features.unfocus",
+          "when": "history.features.focused"
+        },
+        {
+          "command": "history.features",
+          "when": "false"
+        },
+        {
+          "command": "history.features.open",
+          "when": "false"
+        }
+      ]
+    },
     "typescriptServerPlugins": [
       {
         "name": "history-ts-plugin",

@@ -10,7 +10,8 @@
  * (insights') places them through the editor's resolver, so the join with BABLR happens there, at the edge.
  *
  * And the feature ledger (ledger.ts): `silo check`'s drift, in Problems, against the ways in it reads; and its dormant
- * ways in, in purple where they're registered, with Keep and Remove.
+ * ways in, in purple where they're registered, with Keep and Remove. And the program by feature (features.ts): which
+ * of the manifest's features own each declaration, for core's features map, and a focus on one that dims the rest.
  *
  * Nothing it finds is kept: it's for the session. Once committed, the commit tells what changed (`silo history`), and what
  * runs say is recomputed from the evidence, which is kept.
@@ -30,6 +31,7 @@ import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
 import * as vscode from "vscode";
+import { featuresView } from "./features";
 import { ledgerView } from "./ledger";
 
 /** How long after the last keystroke a burst ends. */
@@ -69,6 +71,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	};
 	const evidence = evidenceStore(vscode, context.subscriptions);
 	const ledger = ledgerView(context, root, output);
+	const byFeature = featuresView(context, root);
 	// What runs last said of each feature, this session (undefined until the first join: that one is told as a summary).
 	let exercised: Map<string, Exercise> | undefined;
 	const replayer = new Replayer(() => Promise.resolve(""), { "analyzer": analyzer, "include": includeByDefault });
@@ -167,7 +170,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		await ledger.check(featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways }))), latest.graph);
+		const features = featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways })));
+
+		await ledger.check(features, latest.graph);
+		await byFeature.show(features, latest.graph);
 	}
 
 	/** Read the program as it stands, and replay it against the last reading: the first is the baseline. */

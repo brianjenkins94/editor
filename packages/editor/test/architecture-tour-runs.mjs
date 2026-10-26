@@ -1271,42 +1271,63 @@ test("selection: a save reruns the tests that executed what changed, and only th
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor"));
 });
 
-// Features from tests (the Features view, in Insights): the kept tests grouped by the code they ran — add's tests one
-// feature, subtract's another — each with its code where it is now.
-test("features: the kept tests group into features by the code they ran", async () => {
-	const features = await eventually("the features", async () => {
-		const found = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.features"));
+// The program by feature (History's, drawn by core as the features map): as the manifest names them. A feature that owns
+// calc.js by its path owns its code, and the tests whose traces ran it, as each last came out.
+const CALCULATOR = { "Calculator": { "Arithmetic": { "what": "Adds and subtracts.", "paths": ["calc.js"] } } };
 
-		return found?.length >= 2 ? found : undefined;
-	});
-	const named = (name) => features.find((feature) => feature.name === name);
+test("features: a feature's code and tests, from the manifest, on the features map", async () => {
+	const workbench = session.workbench();
 
-	assert.deepEqual(named("adds")?.tests.map((test) => test.id).toSorted(), ["calc-add.test.js › adds", "calc.test.js › calc › adds", "calc.test.js › fails"]);
-	assert.equal(named("adds").tests.find((test) => test.id === "calc.test.js › fails").outcome, "fail");
-	assert.deepEqual(named("adds").code.map((code) => [code.file, code.label, code.line]), [["calc.js", "function add(a, b) {", 1]]);
-	assert.deepEqual(named("calc › subtracts")?.code.map((code) => code.label), ["function subtract(a, b) {"]);
+	await workbench.evaluate(async (manifest) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.createDirectory(api.Uri.file("/workspace/.silo"));
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/.silo/manifest.json"), new TextEncoder().encode(JSON.stringify(manifest, undefined, 2) + "\n"));
+	}, CALCULATOR);
+
+	const reading = await eventually("the feature, with its tests", async () => {
+		const found = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.features"));
+
+		return found?.features?.find((each) => each.name === "Arithmetic")?.tests.length >= 4 ? found : undefined;
+	}, 60_000);
+	const index = reading.features.findIndex((each) => each.name === "Arithmetic");
+	const arithmetic = reading.features[index];
+
+	assert.equal(arithmetic.area, "Calculator");
+	assert.deepEqual(reading.code.filter((code) => code.owners.includes(index) && code.name !== "(top)").map((code) => [code.file, code.name, code.owners.length]), [["calc.js", "add", 1], ["calc.js", "subtract", 1]]);
+	assert.deepEqual(arithmetic.tests.map((test) => test.id), ["calc-add.test.js › adds", "calc.test.js › calc › adds", "calc.test.js › calc › subtracts", "calc.test.js › fails"]);
+	assert.equal(arithmetic.tests.find((test) => test.id === "calc.test.js › fails").outcome, "fail");
+
+	// The map, in its side bar: a card per area, a block for each feature in it, its name underlined when it's in focus.
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("features.map.focus"));
+	await eventually("the map's blocks", async () => ((await workbench.evaluate(() => document.querySelectorAll(".fm-root .fm-chart rect").length)) > 0 || undefined), 30_000);
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.features.focus", "Arithmetic")), true);
+	assert.equal((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.features"))).focused, index);
+	await eventually("its name marked in focus", async () => ((await workbench.evaluate(() => document.querySelector(".fm-root span.fm-focused")?.textContent ?? "")).startsWith("Arithmetic") || undefined), 30_000);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.features.unfocus"));
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// A feature's decision, set in the editor (Set Status… on the Features view's item): into the feature ledger,
-// .silo/features.json — shared, so it's committed with the code — by its name and the files its code is in.
+// A feature's decision, set in the editor (Features: Set Feature Status…): into the feature ledger,
+// .silo/features.json — shared, so it's committed with the code — by its name and the files of the code only it owns.
 test("features: a feature's status, set in the editor, goes into the ledger", async () => {
 	const workbench = session.workbench();
 
-	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.setStatus", "calc › subtracts", "parked", "not worked on for now")), true);
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.features.setStatus", "Arithmetic", "parked", "not worked on for now")), true);
 
 	const ledger = JSON.parse(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/.silo/features.json")).then((bytes) => new TextDecoder().decode(bytes))));
 
-	assert.deepEqual({ ...ledger["calc › subtracts"], "since": "" }, { "status": "parked", "why": "not worked on for now", "since": "", "paths": ["calc.js"] });
-	assert.equal((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("insights.features"))).find((feature) => feature.name === "calc › subtracts")?.status, "parked", "the view shows it");
+	assert.deepEqual({ ...ledger["Arithmetic"], "since": "" }, { "status": "parked", "why": "not worked on for now", "since": "", "paths": ["calc.js"] });
+	assert.equal((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("history.features"))).features.find((feature) => feature.name === "Arithmetic")?.status, "parked", "the view shows it");
 
-	// On the architecture view, the ledger is a store Insights writes and reads (waited for: its host's totals go out a
+	// On the architecture view, the ledger is a store History writes and reads (waited for: its host's totals go out a
 	// moment after).
 	const { discoveredStores } = await import("../shared/architecture-model.ts");
 
-	await session.until("Insights writing and reading the ledger", (snapshot) => {
+	await session.until("History writing and reading the ledger", (snapshot) => {
 		const ledger = discoveredStores(snapshot).find((store) => store.store === ".silo/<file>.json");
 
-		return ledger?.writers.includes("ext:insights") === true && ledger.readers.includes("ext:insights");
+		return ledger?.writers.includes("ext:history") === true && ledger.readers.includes("ext:history");
 	}, 30_000);
 });
 

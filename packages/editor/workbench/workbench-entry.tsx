@@ -50,6 +50,7 @@ import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
+import { registerFeaturesMap } from "./features-map";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
@@ -626,6 +627,8 @@ function maybeBoot(): void {
 				installEditorState(workbenchHub, api as typeof import("vscode"));
 				// The Rule view: the rule editor, for whoever edits a rule (`editor.rules.edit`, rule-view.ts).
 				registerRuleView(api as typeof import("vscode"));
+				// The features map: the program as its features, a block each, sized by its code (features-map.ts).
+				registerFeaturesMap(api as typeof import("vscode"));
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// And the bridge's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).

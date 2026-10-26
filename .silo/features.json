@@ -1,4 +1,12 @@
 {
+  "Features from tests": {
+    "status": "removed",
+    "why": "replaced by the features map (core's, workbench/features-map.ts, drawn from History's extensions/history/features.ts): the manifest's features, each with the tests that ran its code",
+    "since": "2026-10-26",
+    "paths": [
+      "packages/editor/extensions/insights/features-view.ts"
+    ]
+  },
   "Run with Inputs": {
     "status": "removed",
     "why": "the margin's Mock… and a rule giving process.argv replaced it (RUNNING.md, *Rules*)",

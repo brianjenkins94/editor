@@ -4,12 +4,11 @@
  * branches, across runs — is hover.ts; what runs say could go — an operator never needed, code never run, in purple —
  * is fixes.ts (found by suggestions.ts), and every file's, in the Suggestions view beside Problems, suggestions-view.ts;
  * all of them read the evidence kept in git through evidence.ts; a slow preview's profile, with where its time went, is
- * profiles.ts; the workspace's tests grouped into features by the code they run, features-view.ts. (Coverage is the notes
- * margin's strip, drawn by core: coverage.ts, through this same evidence store.)
+ * profiles.ts. The program by feature, its tests among them, is the features map (History's, drawn by core).
+ * (Coverage is the notes margin's strip, drawn by core: coverage.ts, through this same evidence store.)
  */
 import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
 import * as vscode from "vscode";
-import { registerFeaturesView } from "./features-view";
 import { registerFixes } from "./fixes";
 import { registerHover } from "./hover";
 import { registerMonitor } from "./monitor";
@@ -23,5 +22,4 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerHover(context, store);
 	registerSuggestionsView(context, registerFixes(context, store));
 	registerProfiles(context);
-	registerFeaturesView(context);
 }
