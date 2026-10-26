@@ -759,7 +759,24 @@ of the 63 features span two realms or more, up to five (*Runtime evidence kept i
 structure can't hold a feature that crosses it. Features and realms are two axes, and the edges between realms are what
 the declaration graph doesn't have.
 
-Next, if this goes on: a way in's reach at runtime. Trigger each one in the harness (its command, its view, its
+**Which code is a feature's: from runs (spike, not kept).** Grouping ways in is judgment, which the manifest gives;
+the code each feature owns needn't be. Static reach from the manifest's ways in gives 30% of the 4,279 declarations one
+feature and 16% several, and 54% none. CI's statement-level reach (the architecture suites' `reach-*` artifacts) was
+tried on Previews. For each of a feature's tests: the statements whose counts rose during it (boot comes before a
+session's first test, so it's left out already), less what rose in half its session's tests, lifted to the
+declarations they're in. Previews' runs give an owner to 155 of the 845 declarations no feature reaches in the
+instrumented files. Three findings:
+- **A test isn't a feature.** About a third of what the runs give (the service worker's routing, almostnode's dev
+  server, the `npm` and `vite` commands) is Previews'. The rest is what the tests also do: the architecture view
+  watching, the capability baseline after an install, the margin's runs, ESLint on an opened file.
+- **Runs barely confirm static reach** (Preview windows 25 of 78, In-browser dev server 29 of 105, Capability prompts 0
+  of 27). A hub way in's static roots are its hub client, not its handler. And its handler is inside a large install
+  function: `installShellPreview` is 29k characters, three quarters of `shell-preview.ts`, and one declaration with one
+  owner. Ownership by top-level declaration is too coarse; the statements are already finer.
+- **Coverage gaps:** the preview page's own taps aren't instrumented, and Preview DevTools and Preview CPU profiles
+  have no test, so a run can't give their code an owner.
+
+Next, if this goes on: a way in's reach at runtime, at a handler's grain, not a declaration's. Trigger each one in the harness (its command, its view, its
 setting, its request), and diff its coverage against a run that only boots. A run crosses realms where the graph can't
 (hub subjects, commands by string, messages). Also what composition roots register (`workbench-entry.tsx` registers 14
 features, `main.tsx` 7, the shell 8: each needs a home other than its file), and per-test reach from unit tests. Two
