@@ -700,7 +700,7 @@ are 49 of them, mostly where it has no shape to look for:
 - in the editor, the spell checker, `node --test` in the debugger and the game generator, which register nothing it
   knows.
 
-**Scored (2026-10-26): what the code alone gets.** `silo features --score` groups the ways in four ways and scores
+**Scored (2026-10-26): what the code alone gets.** `silo features --score` groups the ways in five ways and scores
 each grouping against the manifest's 87 features that own ways in (lib `util/silo/derive.ts`, `scoreGrouping` in
 `manifest.ts`). A feature comes out *whole* (one group, nothing else in it), *split* (several groups), *merged* (a group
 shared with another feature) or both. Precision and recall are B-cubed: how much of a way in's group is its feature, and
@@ -711,9 +711,11 @@ how much of its feature is in its group.
 | by file (a baseline) | 106 | 15 | 8 | 23 | 41 | 0.67 | 0.52 | 0.58 |
 | by folder (a baseline) | 40 | 8 | 0 | 47 | 32 | 0.33 | 0.68 | 0.45 |
 | by reach | 187 | 13 | 16 | 19 | 39 | 0.80 | 0.39 | 0.52 |
+| by file, linked by subjects | 88 | 15 | 7 | 26 | 39 | 0.58 | 0.62 | 0.60 |
+| subject links alone | 330 | 25 | 50 | 0 | 12 | 0.97 | 0.25 | 0.40 |
 | by CI's tests (120 of 368 placed) | 20 | 0 | 0 | 25 | 18 | 0.35 | 0.13 | 0.18 |
 
-Nothing beats the file that registers a way in. What that says:
+Little beats the file that registers a way in. What that says:
 - **Reach is precise and splits.** The reach of a way in rarely crosses into another feature (0.80), but one feature's
   ways in reach different code: a command, its view and its setting share a feature, not declarations. And 141 of the
   368 reach nothing of their own: their handlers are written inline, where they're registered. Its two parameters
@@ -726,13 +728,19 @@ Nothing beats the file that registers a way in. What that says:
   is the link between the pieces, and the largest part is the hub: 139 of the ways in are hub requests and
   subscriptions, only 40 in a file of one feature. An agent tool in one realm and the request it makes, served in
   another, are joined only by a subject string.
+- **Subjects are edges, when they're near.** A hub way in joined to the ways in whose registration quotes its subject
+  (`linkedBySubjects`) is almost never wrong (0.97 alone) and lifts the file grouping to 0.60, the only derivation
+  above the baseline. But only 36 of the 101 literal subjects are quoted in a registration; 49 are quoted only in
+  declarations, and those mislead: a catalog of subjects (`architecture-model.ts`'s `subjects` names 40) and composition
+  roots (the shell's `Shell` quotes 8) join features that aren't one. Followed through what a registration names, the
+  links are 85% right one by one and chain file groups together (F 0.55–0.57); as reach, a shared subject node is one
+  declaration among many and moves nothing (0.51–0.52).
 - **Tried, no better** (in a scratch spike, not kept): file groups joined by reach (F 0.55–0.59); grouping by an id's
   namespace (`notes.`, `margin.`: 0.56); placing a core module where it's defined and a hub subject with the code that
-  calls it (0.58). The last is the right idea and a crude version of it: a subject's callers are often a composition
-  root (the shell, the workbench's entry), which register many features.
+  calls it (0.58).
 
-Next, if this goes on: subjects as edges (a request joined to where it's served, in the graph, not by file), a home for
-what composition roots register, and per-test reach from unit tests. Two cautions about the measure:
+Next, if this goes on: what composition roots register (`workbench-entry.tsx` registers 14 features, `main.tsx` 7, the
+shell 8: each needs a home other than its file), and per-test reach from unit tests. Two cautions about the measure:
 - the manifest is an agent's judgment, not ground truth, and its granularity is one choice of several: `silo`'s eight
   subcommands are eight features here, and could as well be one;
 - tuning a derivation on this one repository is fitting it to the answer, so a derivation's parameters are kept few and

@@ -38,7 +38,7 @@ import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
-import { byFile, byFolder, byReach, byTests, testsFromRecords } from "@brianjenkins94/util/silo/derive";
+import { byFile, byFolder, byReach, byTests, linkedBySubjects, testsFromRecords } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
@@ -182,10 +182,13 @@ export async function derivationScores(repo: string): Promise<{ "derivation": st
 	const { features, graph } = await currentProgram(repo);
 	const ways = [...features.values()];
 	const records = fs.existsSync(path.join(repo, CI_RECORDS)) ? fs.readFileSync(path.join(repo, CI_RECORDS)) : undefined;
+	const textOf = (file: string): string | undefined => (fs.existsSync(path.join(repo, file)) ? fs.readFileSync(path.join(repo, file)) : undefined);
 	const groupings: [string, Map<string, string>][] = [
 		["by file", byFile(ways)],
 		["by folder", byFolder(ways)],
 		["by reach", byReach(ways, graph)],
+		["by file, linked by subjects", linkedBySubjects(byFile(ways), ways, textOf)],
+		["subject links alone", linkedBySubjects(new Map(ways.map((way) => [way.key, way.key])), ways, textOf)],
 		...records === undefined ? [] : [["by tests", byTests(ways, graph, testsFromRecords(records))] as [string, Map<string, string>]]
 	];
 
@@ -618,7 +621,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "features",
-			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by CI's tests), each grouping scored against the feature manifest (.silo/manifest.json): how many of its features each finds whole, splits or merges, and its precision and recall.",
+			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject; by CI's tests), each grouping scored against the feature manifest (.silo/manifest.json): how many of its features each finds whole, splits or merges, and its precision and recall.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the feature manifest (silo README, *The feature manifest*)." } }),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
