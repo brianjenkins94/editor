@@ -65,6 +65,36 @@ How it's kept:
      providers plus `applyEdit`.
    - (d) CI on the pushed branch checks the work.
 
+2. **Make the error reports readable.** Found reviewing the admin app's Errors pages on 2026-10-27, after it rendered
+   again (it was blank 2026-10-21 to 2026-10-27: its CSP refused Stitches' `<style>`, fixed in ed6926e). First, how
+   errors are reported, because it hides most of what happened:
+   - **Redaction eats stack frames.** util/redact's catch-all token rule (16+ characters of `[A-Za-z0-9+/=_-]`, mixed)
+     takes a hashed chunk's path, so `https://editor.unusuallygood.dev/assets/index-CDt7ol2B.js` is stored as
+     `https://editor.unusuallygood.«redacted».js`. Those frames can't be mapped (O7); only unhashed files
+     (`__vscode__/main.js`) are. The email mask takes `…/@scope/pkg.js` frames whole (`«email»:12:66669`). Fix in
+     packages/api's `scrub`: keep each frame's location out of redaction, and redact the rest.
+   - **The workbench's uncaught errors arrive without a stack.** Its own listener (workbench/workbench-entry.tsx,
+     `"uncaught error"`) logs message, file and line, so that copy has no stack and is named `Error`. Its message is
+     sometimes `[object ErrorEvent]` (dev, f2d0cad2): not yet found where.
+   - **Errors while the page unloads are reported.** Production's 20 occurrences, 2026-10-20 to 10-23, are a few
+     signed-out page loads that ended at once (`page.shown`, nothing after): IndexedDB's `The database connection is
+     closing`, and VS Code's log file write failing on it (`Unable to write file 'vscode-log:…'`, `CodeExpectedError:
+     unknown error`). Not reporting after `pagehide` removes them. None since 75bde03.
+   - **The Errors page shows 7 days only** (`/errors?days=7`); the API takes up to 90.
+
+   Then the errors:
+   - **Web Awesome's `adoptedStyleSheets` NotAllowedError** (dev: 34, on every release through f2d0cad2): a `wa-badge`
+     in the Live architecture view, in a document other than the one Lit's sheets were made in. e86501b
+     (`theme/documents`) was meant to end it, but it's reported after it, with no stack (above), and a fresh load
+     doesn't reproduce it. Get the stack first.
+   - **`rpc "git.status" timed out after 15000ms`** (dev: 6, the shell): the review panel's `refresh()` on
+     `git.changed` is `void`ed, so a busy workbench's timeout is an unhandled rejection. Catch it: the next
+     `git.changed` refreshes.
+   - **`Missing method $init on worker thread channel default`** (production: 2, b9ca734, 2026-10-20 only): the
+     editor worker and the page on different monaco-vscode-api versions as 38.0.2 was pinned. Not since.
+   - **`[almostnode] worker_threads.Worker is not implemented`** (dev: 1, e4e927b): synckit's `createSyncFn` under
+     almostnode. Known gap; only if it comes back.
+
 ## Watching
 
 - **CI's smoke-app shard has been cancelled at its 15 minutes on every run since 377b14b (push from the editor)**: four
