@@ -1350,6 +1350,7 @@
 				1,
 				2,
 				3,
+				6,
 				7,
 				9,
 				10,
@@ -7851,6 +7852,7 @@
 		"packages/editor/extensions/cosmetic/extension.ts": {
 			"activate": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -17481,6 +17483,7 @@
 			],
 			"bytesOf": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -17576,6 +17579,7 @@
 			],
 			"observeZenfs": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -17774,6 +17778,7 @@
 			],
 			"storeNode": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -17868,6 +17873,7 @@
 			],
 			"storeShape": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -18267,6 +18273,7 @@
 		"packages/editor/shared/git-hunks.ts": {
 			"alignedRows": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -18342,6 +18349,7 @@
 			],
 			"fnv": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -18417,6 +18425,7 @@
 			],
 			"hunksOf": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -18492,6 +18501,7 @@
 			],
 			"lineDiff": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -19269,6 +19279,7 @@
 			],
 			"touchChanges": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -19364,6 +19375,7 @@
 			],
 			"watchWorkspaceStore": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -19707,6 +19719,7 @@
 		"packages/editor/shell/git-panel.tsx": {
 			"FileRow": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -19790,6 +19803,7 @@
 			],
 			"GitPanel": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -19873,6 +19887,7 @@
 			],
 			"commitLabelOf": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -19959,8 +19974,18 @@
 			]
 		},
 		"packages/editor/shell/git-push.ts": {
+			"GITHUB": [
+				0
+			],
+			"NOT_SIGNED_IN": [
+				0
+			],
 			"identity": [
+				0,
 				57
+			],
+			"known": [
+				0
 			]
 		},
 		"packages/editor/shell/reporting.ts": {
@@ -20070,6 +20095,7 @@
 		},
 		"packages/editor/shell/session.ts": {
 			"viaProxy": [
+				0,
 				57
 			]
 		},
@@ -20127,6 +20153,7 @@
 				12,
 				15,
 				16,
+				17,
 				18,
 				19,
 				20,
@@ -22320,6 +22347,7 @@
 			],
 			"headCommit": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -22403,6 +22431,7 @@
 			],
 			"headContent": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -22483,6 +22512,7 @@
 			],
 			"letterFor": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -22583,6 +22613,7 @@
 			],
 			"status": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -22673,6 +22704,7 @@
 		"packages/editor/workbench/git-review.ts": {
 			"installGitReview": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -22753,6 +22785,7 @@
 		"packages/editor/workbench/git-service.ts": {
 			"installGitService": [
 				0,
+				1,
 				2,
 				5,
 				6,
@@ -22869,6 +22902,7 @@
 		"packages/editor/workbench/node-modules-provider.ts": {
 			"createNodeModulesProvider": [
 				0,
+				1,
 				2,
 				5,
 				10,
@@ -23806,6 +23840,7 @@
 		"packages/editor/workbench/provider-base.ts": {
 			"notFound": [
 				0,
+				1,
 				2,
 				5,
 				10,
@@ -23896,6 +23931,7 @@
 			],
 			"relUnder": [
 				0,
+				1,
 				2,
 				5,
 				10,
@@ -24998,6 +25034,7 @@
 			],
 			"fileType": [
 				0,
+				1,
 				5,
 				10,
 				12,
@@ -25088,6 +25125,7 @@
 			],
 			"installWorkspaceFs": [
 				0,
+				1,
 				2,
 				5,
 				10,
@@ -25179,6 +25217,7 @@
 			],
 			"settled": [
 				0,
+				1,
 				2,
 				5,
 				10,
@@ -25784,6 +25823,7 @@
 				2,
 				3,
 				5,
+				6,
 				7,
 				9,
 				10,
@@ -28275,6 +28315,7 @@
 				2,
 				3,
 				5,
+				6,
 				7,
 				9,
 				10,
@@ -29227,6 +29268,7 @@
 				2,
 				3,
 				5,
+				6,
 				7,
 				9,
 				10,
