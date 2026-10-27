@@ -836,7 +836,7 @@ feature (they share names by convention, unchecked).
   in "Each dependency, seen four ways". Both front ends now record your usage (the import surface); the join is
   what's left.
 - **TypeScript reads the code, everywhere; no oxc.** The editor reads it off its TypeScript server's tree; `silo`
-  bundles TypeScript 7.1 (a nightly, pinned, until 7.1 is released) and reads every project with it, whatever the
+  bundles TypeScript 7.1 (the beta, pinned, until 7.1 is stable) and reads every project with it, whatever the
   project has (no tsconfig: TypeScript's defaults). lib's readings take `ts` as a parameter, so the same code runs on
   6.x and 7.1 (`astOf` adapts 7.1's AST module).
 - **Deobfuscation: later.** It joins the one analysis, in both front ends, when it comes.
