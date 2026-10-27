@@ -64,6 +64,19 @@ How it's kept:
 
 ## Watching
 
+- **CI's smoke-app shard has been cancelled at its 15 minutes on every run since 377b14b (push from the editor)**: four
+  runs, two commits, against 5 minutes on 52a881b. The tours take the time they did before, and lib didn't publish in
+  between, so it's 377b14b. The job slows as it goes: 7 s, 15, 25, 55 and 60 s a test on d593144, against 1–10 s on
+  52a881b, until the three preview-window tests time out (a new window, one dropped on the editor area, one popped
+  out). Its page-time changes:
+  - the shell's `serve` of `git.remote` / `git.identity`, in its mount-once effect;
+  - the git service's second RPC client, and `git.push` / `git.branch` / `git.checkout`;
+  - three page tools.
+
+  Nothing in them explains a growing cost. A local run in CI mode stalled 11–17 minutes between normal tests (this
+  Mac sleeping, likely), so it showed nothing. Next, if it's taken up: bisect on CI, with throwaway branches each
+  reverting one of those. Deploys still go out (cd and production pass).
+
 - **packages/api's "an email account without a password is told to use a code" test failed** in CI once ("a code was
   sent to someone-…@example.com", bc7a208, a workflow-only change; passed on rerun). If it comes back, find what a
   second test's sign-in code reaches in the first's mailbox (a shared mail stub, or an address not unique enough).
