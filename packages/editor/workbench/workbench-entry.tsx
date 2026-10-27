@@ -59,6 +59,7 @@ import { installEditorState } from "./editor-state";
 import { installEvidence } from "./evidence";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import * as gitEngine from "./git-engine";
+import { installGitReview } from "./git-review";
 import { installGitService } from "./git-service";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
@@ -649,7 +650,10 @@ function maybeBoot(): void {
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
 					// shell's review panel, and VS Code's Source Control view (the source-control extension, by the editor.git.* commands). See
 					// git-service.ts / git-engine.ts.
-				installGitService(api as typeof import("vscode"), workbenchHub, paneLog);
+				const git = installGitService(api as typeof import("vscode"), workbenchHub, paneLog);
+
+				// The review: the changes as hunks, with BABLR's verdicts and the features they're in (git-review.ts).
+				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.

@@ -4,14 +4,15 @@
  * (not the vscode SCM viewlet). Built on Web Awesome components (wa-checkbox / wa-textarea / wa-button / wa-badge) and
  * utility classes in a preact tree; what's left in theme/styles/git-panel is the rows' hover/current states and
  * the side-by-side diff renderer's grid. It's a pure hub consumer: it calls
- * `git.status` / `git.file` / `git.commit` (served by git-service.ts in the workbench realm) over the shell hub, and
- * refreshes on `git.changed`. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
+ * `git.status` / `git.review` / `git.commit` / `git.discard` (served by git-service.ts in the workbench realm) over the
+ * shell hub, and refreshes on `git.changed`. What a pick of lines commits or discards is the service's (shared/git-hunks.ts),
+ * as it is for an agent's `git_commit` / `git_discard` by hunk: the panel only says which rows. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
  * decoupling was for. The diff opens in a shell-owned overlay the codehike island mounts into (overlay.body).
  */
-import type { ChangeVerdict, GitFileChange } from "@brianjenkins94/editor-api/git";
+import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
-import type { DiffRowInfo } from "./git-codehike";
+import type { DiffRowInfo, Review, ReviewFile } from "../shared/git-hunks";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { Fragment, render } from "preact";
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
@@ -38,49 +39,17 @@ export interface DiffOverlay { "el": HTMLElement; "title": HTMLElement; "body": 
 /** A node-grouped chunk of "your edits" (from the Automerge tier), as history.chunks returns it. */
 interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
-/** Unified line diff via LCS (fine for the file sizes a review touches). */
-function lineDiff(before: string, after: string): DiffRow[] {
-	const left = before === "" ? [] : before.split("\n");
-	const right = after === "" ? [] : after.split("\n");
-	const leftCount = left.length;
-	const rightCount = right.length;
-	const dp: number[][] = Array.from({ "length": leftCount + 1 }, () => Array.from({ "length": rightCount + 1 }, () => 0));
+/** The plain diff's lines, from the aligned rows: a modified row as its deletion, then its addition. */
+function plainRows(head: string, working: string, rows: DiffRowInfo[]): DiffRow[] {
+	const [headLines, workingLines] = [head.split("\n"), working.split("\n")];
 
-	for (let leftIndex = leftCount - 1; leftIndex >= 0; leftIndex -= 1) {
-		for (let rightIndex = rightCount - 1; rightIndex >= 0; rightIndex -= 1) {
-			dp[leftIndex][rightIndex] = left[leftIndex] === right[rightIndex] ? dp[leftIndex + 1][rightIndex + 1] + 1 : Math.max(dp[leftIndex + 1][rightIndex], dp[leftIndex][rightIndex + 1]);
-		}
-	}
+	return rows.flatMap((row): DiffRow[] => {
+		const [left, right]: DiffRow[] = [{ "t": "del", "text": headLines[row.leftNo - 1] }, { "t": "add", "text": workingLines[row.rightNo - 1] }];
 
-	const rows: DiffRow[] = [];
-	let leftIndex = 0;
-	let rightIndex = 0;
+		const sides: Record<DiffRowInfo["type"], DiffRow[]> = { "ctx": [{ "t": "ctx", "text": workingLines[row.rightNo - 1] }], "add": [right], "del": [left], "mod": [left, right] };
 
-	while (leftIndex < leftCount && rightIndex < rightCount) {
-		if (left[leftIndex] === right[rightIndex]) {
-			rows.push({ "t": "ctx", "text": left[leftIndex] });
-			leftIndex += 1;
-			rightIndex += 1;
-		} else if (dp[leftIndex + 1][rightIndex] >= dp[leftIndex][rightIndex + 1]) {
-			rows.push({ "t": "del", "text": left[leftIndex] });
-			leftIndex += 1;
-		} else {
-			rows.push({ "t": "add", "text": right[rightIndex] });
-			rightIndex += 1;
-		}
-	}
-
-	while (leftIndex < leftCount) {
-		rows.push({ "t": "del", "text": left[leftIndex] });
-		leftIndex += 1;
-	}
-
-	while (rightIndex < rightCount) {
-		rows.push({ "t": "add", "text": right[rightIndex] });
-		rightIndex += 1;
-	}
-
-	return rows;
+		return sides[row.type];
+	});
 }
 
 /** Collapse runs of >8 unchanged lines to a "⋯ N unchanged" divider (keeping 3 lines of context each side). */
@@ -112,88 +81,6 @@ function collapse(rows: DiffRow[]): (DiffRow | { "t": "gap"; "text": string })[]
 	flush();
 
 	return out;
-}
-
-/**
- * Turn the flat LCS diff into the row-aligned form the side-by-side renderer wants, pairing each run of deletions with
- * the additions that follow it (del[k] ↔ add[k]) into `mod` rows; leftovers stay single-sided `del` / `add`.
- */
-function buildRows(before: string, after: string): DiffRowInfo[] {
-	const diff = lineDiff(before, after);
-	const rows: DiffRowInfo[] = [];
-	let leftNo = 0;
-	let rightNo = 0;
-	let cursor = 0;
-
-	while (cursor < diff.length) {
-		if (diff[cursor].t === "ctx") {
-			leftNo += 1;
-			rightNo += 1;
-			rows.push({ "type": "ctx", "leftNo": leftNo, "rightNo": rightNo });
-			cursor += 1;
-		} else {
-			const dels: number[] = [];
-			const adds: number[] = [];
-
-			while (cursor < diff.length && diff[cursor].t === "del") {
-				leftNo += 1;
-				dels.push(leftNo);
-				cursor += 1;
-			}
-
-			while (cursor < diff.length && diff[cursor].t === "add") {
-				rightNo += 1;
-				adds.push(rightNo);
-				cursor += 1;
-			}
-
-			for (let pair = 0; pair < Math.max(dels.length, adds.length); pair += 1) {
-				const deleted = dels[pair];
-				const added = adds[pair];
-
-				if (deleted !== undefined && added !== undefined) {
-					rows.push({ "type": "mod", "leftNo": deleted, "rightNo": added });
-				} else if (deleted !== undefined) {
-					rows.push({ "type": "del", "leftNo": deleted });
-				} else {
-					rows.push({ "type": "add", "rightNo": added });
-				}
-			}
-		}
-	}
-
-	return rows;
-}
-
-/**
- * Reconstruct the blob to COMMIT for a partial selection: HEAD with only the SELECTED changes applied. A deselected
- * row index means "leave this as HEAD" — a deselected add is dropped, a deselected deletion keeps the old line, a
- * deselected modification keeps the old line. Unchanged lines always carry through.
- */
-function committedContent(head: string, working: string, rows: DiffRowInfo[], deselected: ReadonlySet<number>): string {
-	const headLines = head === "" ? [] : head.split("\n");
-	const workingLines = working === "" ? [] : working.split("\n");
-	const out: string[] = [];
-
-	rows.forEach((row, index) => {
-		const selected = !deselected.has(index);
-
-		if (row.type === "ctx") {
-			out.push(workingLines[row.rightNo - 1]);
-		} else if (row.type === "add") {
-			if (selected) {
-				out.push(workingLines[row.rightNo - 1]);
-			}
-		} else if (row.type === "del") {
-			if (!selected) {
-				out.push(headLines[row.leftNo - 1]);
-			}
-		} else {
-			out.push(selected ? workingLines[row.rightNo - 1] : headLines[row.leftNo - 1]);
-		}
-	});
-
-	return out.join("\n");
 }
 
 function langFor(path: string): string {
@@ -427,12 +314,12 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	};
 
 	// Plain unified diff (fallback when the codehike island can't load — e.g. offline: shiki fetches grammars).
-	const renderPlain = (head: string, working: string): void => {
+	const renderPlain = (head: string, working: string, rows: DiffRowInfo[]): void => {
 		const diff = document.createElement("div");
 
 		diff.className = "sxs-plain";
 
-		for (const row of collapse(lineDiff(head, working))) {
+		for (const row of collapse(plainRows(head, working, rows))) {
 			const line = document.createElement("div");
 
 			line.className = "sxs-plain-row " + row.t;
@@ -443,41 +330,37 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		overlay.body.replaceChildren(diff);
 	};
 
-	/** What BABLR says of a change from `before` to `after` (the workbench's classifier: `annotations.classify`). */
-	const classify = async (before: string, after: string): Promise<ChangeVerdict | undefined> => {
-		if (before === "" || after === "") {
-			return undefined;
+	/** The working tree as `git.review` has it, for the files given (default, every change). */
+	const review = async (request: { "paths"?: string[]; "texts"?: boolean; "verdicts"?: boolean }): Promise<ReviewFile[]> => (await rpc.request("git.review", request, { "timeoutMs": 600_000 }) as Review).files;
+
+	/** Which changes are cosmetic, by BABLR (asked after the list shows: it's slow), badged — the latest list's answer only. */
+	const verdicts = useRef(0);
+
+	const classifyAll = async (): Promise<void> => {
+		verdicts.current += 1;
+		const asked = verdicts.current;
+		const files = await review({ "verdicts": true }).catch(() => undefined);
+
+		if (files !== undefined && asked === verdicts.current) {
+			setCosmetic(new Set(files.filter((file) => file.verdict?.verdict === "cosmetic").map((file) => file.path)));
 		}
-
-		const answer = await rpc.request("annotations.classify", { "before": before, "after": after }, { "timeoutMs": 120_000 }).catch(() => undefined) as { "value"?: ChangeVerdict } | undefined;
-
-		return answer?.value;
-	};
-
-	/** Each modified code file's verdict, asked one at a time (BABLR's worker is one): the cosmetic ones badged. */
-	const classifyAll = async (changed: GitFileChange[]): Promise<void> => {
-		const found = new Set<string>();
-
-		for (const file of changed.filter((each) => each.status === "M" && isCodeFile(each))) {
-			const texts = await rpc.request("git.file", { "path": file.path }).catch(() => undefined) as { "head": string; "working": string } | undefined;
-
-			if (texts !== undefined && (await classify(texts.head, texts.working))?.verdict === "cosmetic") {
-				found.add(file.path);
-			}
-		}
-
-		setCosmetic(found);
 	};
 
 	const showDiff = async (path: string): Promise<void> => {
 		setSelected(path);
 
-		const { head, working } = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
+		const [shown] = await review({ "paths": [path], "texts": true });
+
+		if (shown === undefined) {
+			hideOverlay(); // no change left to show
+
+			return;
+		}
+
+		const { head = "", working = "", rows = [] } = shown;
 
 		overlay.title.textContent = path;
 		overlay.el.classList.add("open");
-
-		const rows = buildRows(head, working);
 
 		changedCount.set(path, rows.filter((row) => row.type !== "ctx").length);
 
@@ -507,16 +390,12 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 					force();
 				},
 				"classify": async () => {
-					const verdict = await classify(head, working);
+					const [classified] = await review({ "paths": [path], "verdicts": true }).catch(() => []);
 
-					return { "verdict": verdict?.verdict ?? "none", "changedLines": verdict?.changedLines ?? [] };
+					return { "verdict": classified?.verdict?.verdict ?? "none", "changedLines": classified?.verdict?.changedLines ?? [] };
 				},
 				"onDiscardRows": async (hunkRows) => {
-					const fresh = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
-					const freshRows = buildRows(fresh.head, fresh.working);
-					const reverted = committedContent(fresh.head, fresh.working, freshRows, new Set(hunkRows));
-
-					await rpc.request("git.discard", { "path": path, "content": reverted });
+					await rpc.request("git.discard", { "path": path, "rows": hunkRows });
 				}
 			});
 			codehikeActive.current = true;
@@ -525,7 +404,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 				// eslint-disable-next-line require-atomic-updates -- overlay is the shell's fixed set of elements: nothing swaps it across the await
 				overlay.title.textContent = path + " — diff unavailable";
 			} else {
-				renderPlain(head, working);
+				renderPlain(head, working, rows);
 			}
 		}
 	};
@@ -533,7 +412,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const refresh = async (options?: { "timeoutMs": number }): Promise<void> => {
 		const { "files": next } = await rpc.request("git.status", undefined, options) as { "files": GitFileChange[] };
 
-		void classifyAll(next);
+		void classifyAll();
 		const stillChanged = (path: string): boolean => next.some((file) => file.path === path);
 
 		for (const path of [...deselected]) {
@@ -683,18 +562,9 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		setCommitError(false);
 
 		try {
-			// A partial file sends the exact blob to commit (HEAD + selected hunks); a full file names its path (the
-			// service stages the working copy) or flags a deletion.
-			const payload = await Promise.all(included.map(async (file) => {
-				if (fileState(file.path) !== "partial") {
-					return { "path": file.path, "deleted": file.status === "D" };
-				}
-
-				const { head, working } = await rpc.request("git.file", { "path": file.path }) as { "head": string; "working": string };
-				const rows = buildRows(head, working);
-
-				return { "path": file.path, "content": committedContent(head, working, rows, lineDeselect.get(file.path) ?? new Set()) };
-			}));
+			// A partial file names the changed rows it leaves out (the service commits HEAD with the rest); a full file,
+			// only its path.
+			const payload = included.map((file) => (fileState(file.path) === "partial" ? { "path": file.path, "except": [...lineDeselect.get(file.path) ?? []] } : { "path": file.path }));
 
 			await rpc.request("git.commit", { "message": message, "files": payload });
 

@@ -8,9 +8,11 @@ import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
+import type { DiffRowInfo } from "../shared/git-hunks";
 import type { RemoteResponse } from "../shared/git-remote";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
+import { alignedRows, committedContent, hunksOf, rowsOfHunks } from "../shared/git-hunks";
 import { remoteHttp } from "../shared/git-remote";
 import * as engine from "./git-engine";
 
@@ -31,10 +33,22 @@ export function unifiedDiff(path: string, before: string, after: string): string
 	return patch === undefined ? `--- ${from}\n+++ ${to}\n(more than ${MOST_EDITS} lines differ)\n` : formatPatch(patch, FILE_HEADERS_ONLY);
 }
 
+/** A file in a commit: its whole change, only the hunks given, or all but the changed rows given (the panel's line picks). */
+interface CommitPick { "path": string; "hunks"?: string[]; "except"?: number[] }
+
+/** The changed rows of `rows` that aren't in `picked`. */
+const unpicked = (rows: DiffRowInfo[], picked: ReadonlySet<number>): Set<number> => new Set(rows.flatMap((row, index) => (row.type !== "ctx" && !picked.has(index) ? [index] : [])));
+
 /** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub — and the same as
  *  commands for extensions (ARCHITECTURE.md, *Extension points* 5): `editor.git.status`, `editor.git.file(path)`, `editor.git.commit(message)`.
  *  (An extension learns of a change as VS Code's own git does: a save, or a file watcher — the repository is files too.) */
-export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
+/** What the service reads the working tree with, for whoever joins more to it (git-review.ts). */
+export interface GitReader {
+	"status": () => Promise<{ "files": GitFileChange[]; "head"?: string }>;
+	"file": (path: unknown) => Promise<{ "head": string; "working": string }>;
+}
+
+export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger): GitReader {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
 	const status = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
@@ -97,17 +111,50 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 	serve(hub, "git.file", async (args) => file((args as { "path"?: string } | null)?.path));
 	vscode.commands.registerCommand("editor.git.file", file);
 
-	const commit = async (request: { "message"?: string; "files"?: engine.CommitFile[] } | null): Promise<engine.Committed> => {
+	// A pick as the engine commits it: the working file, a deletion, or the text HEAD becomes with only the picked rows
+	// (undefined when nothing of the file is picked).
+	const toCommit = async (pick: CommitPick, changes: ReadonlyMap<string, GitFileChange>): Promise<engine.CommitFile | undefined> => {
+		const change = changes.get(pick.path);
+
+		if (change === undefined) {
+			throw new Error(`${pick.path} has no change to commit`);
+		}
+
+		const whole = { "path": pick.path, ...change.status === "D" ? { "deleted": true } : {} };
+
+		if (pick.hunks === undefined && pick.except === undefined) {
+			return whole;
+		}
+
+		const { head, working } = await file(pick.path);
+		const rows = alignedRows(head, working);
+		const left = pick.hunks === undefined ? new Set(pick.except) : unpicked(rows, rowsOfHunks(pick.path, hunksOf(pick.path, head, working, rows), pick.hunks));
+
+		if (left.size === 0) {
+			return whole;
+		}
+
+		return unpicked(rows, left).size === 0 ? undefined : { "path": pick.path, "content": committedContent(head, working, rows, left) };
+	};
+
+	const commit = async (request: { "message"?: string; "files"?: CommitPick[] } | null): Promise<engine.Committed> => {
 		const message = request?.message?.trim();
 
 		if (message === undefined || message === "") {
 			throw new Error("Enter a commit message first.");
 		}
 
-		// `files` present → selective commit (the shell's checkbox / line selection); absent → legacy commit-all.
-		const made = request?.files !== undefined
-			? await engine.commitSelection(message, request.files)
-			: await engine.commitAll(message);
+		let made: engine.Committed;
+
+		// `files` present → a selective commit (the panel's picks, an agent's files or hunks); absent → every change.
+		if (request?.files === undefined) {
+			made = await engine.commitAll(message);
+		} else {
+			const changes = new Map((await status()).files.map((change) => [change.path, change]));
+			const picked = await Promise.all(request.files.map(async (pick) => toCommit(pick, changes)));
+
+			made = await engine.commitSelection(message, picked.filter((each) => each !== undefined));
+		}
 
 		hub.publish("git.changed");
 		log.info("git commit (service)", { "oid": made.oid.slice(0, 7), "files": request?.files?.length });
@@ -175,19 +222,23 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		return { ...pushed, "url": url };
 	});
 
-	// Discard a file's working-tree changes: whole file (restore HEAD / delete), or a PARTIAL discard when the shell
-	// sends the exact post-discard `content` (working with the chosen hunks reverted).
+	// Discard a file's working-tree changes: all of them (back to HEAD, or gone), or only the hunks given (`hunks`) or
+	// the changed rows given (`rows`, the panel's).
 	serve(hub, "git.discard", async (args) => {
-		const request = args as { "path"?: string; "content"?: string } | null;
+		const request = args as { "path"?: string; "hunks"?: string[]; "rows"?: number[] } | null;
 
 		if (typeof request?.path !== "string") {
 			throw new TypeError("git.discard needs a path.");
 		}
 
-		if (typeof request.content === "string") {
-			await engine.setWorking(request.path, request.content);
-		} else {
+		if (request.hunks === undefined && request.rows === undefined) {
 			await engine.discardFile(request.path);
+		} else {
+			const { head, working } = await file(request.path);
+			const rows = alignedRows(head, working);
+			const reverted = request.hunks === undefined ? new Set(request.rows) : rowsOfHunks(request.path, hunksOf(request.path, head, working, rows), request.hunks);
+
+			await (unpicked(rows, reverted).size === 0 ? engine.discardFile(request.path) : engine.setWorking(request.path, committedContent(head, working, rows, reverted)));
 		}
 
 		hub.publish("git.changed");
@@ -227,4 +278,6 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 		log.error("git repository unavailable", { "error": thrown instanceof Error ? thrown.message : String(thrown) });
 	});
+
+	return { "status": status, "file": file };
 }

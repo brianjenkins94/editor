@@ -58,6 +58,9 @@ How it's kept:
      `bench/first-push` (2be5c8a with the lost modes, then efaec74) is a scratch branch to delete. Still to decide:
      what becomes of the shell's Commit button (`commitFiles`, one REST commit of the whole workspace) now that a push
      exists.
+   - Review by hunk: done. `git_review` gives the changes as hunks with ids, BABLR's cosmetic verdict per hunk and the
+     features each is in; `git_commit` / `git_discard` take hunk ids. The review panel runs on the same requests
+     (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
    - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
      providers plus `applyEdit`.
    - (d) CI on the pushed branch checks the work.

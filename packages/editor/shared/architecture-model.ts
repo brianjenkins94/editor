@@ -186,7 +186,8 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "git.file", "from": ["shell", "bridge"], "to": ["workbench"] },
 	{ "pattern": "git.commit", "from": ["shell", "bridge", "root"], "to": ["workbench"] },
 	{ "pattern": "git.diff", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "git.discard", "from": ["shell", "root"], "to": ["workbench"] },
+	{ "pattern": "git.review", "from": ["shell", "root"], "to": ["workbench"] },
 	{ "pattern": "git.branch", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.checkout", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.push", "from": ["root", "workbench"], "to": ["workbench"] },
@@ -291,8 +292,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.watched", "from": ["bridge"], "to": ["shell"] },
 	// ── workers ──
 	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"] },
-	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "annotations.classify", "from": ["shell"], "to": ["workbench"] }
+	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] }
 ];
 
 export const channels: ChannelSpec[] = [

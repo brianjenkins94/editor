@@ -31,7 +31,8 @@ Reserve `workbench-entry` (the workbench realm) for host-**boot glue** proper (t
 zen-fs, the terminal process factory, registering extensions) — and for browser-parity shims that have nowhere more
 natural to sit. **The BABLR classifier** was welded into our browser git SCM; since 2026-10-15 its verdict is the
 `cosmetic` extension's badge (a file decoration), on `editor.annotations.classify` (core's BABLR worker and its parse
-cache) and the editor's git commands — decoupled from the git service, which no longer classifies. Reading changes
+cache) and the editor's git commands — decoupled from the git service, which no longer classifies (the review,
+`git.review` in git-review.ts, joins its verdict to git's hunks at the edge). Reading changes
 from desktop's built-in git, and a BABLR of its own there, are what's left for it to run on desktop.
 
 ## The realms
@@ -621,7 +622,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.architecture_violations.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_push.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()`, `tool.terminal_run.*()` |
+| Root | tool | `tool.architecture_violations.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()`, `tool.terminal_run.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -639,7 +640,7 @@ flowchart LR
 | Workbench | editor | `editor.state()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | files | `files.edit()`, `files.glob()`, `files.grep()`, `files.read()`, `files.write()` |
-| Workbench | git | `git.branch()`, `git.checkout()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.push()`, `git.status()` |
+| Workbench | git | `git.branch()`, `git.checkout()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.push()`, `git.review()`, `git.status()` |
 | Workbench | history | `history.chunks()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | notifications | `notifications.list()` |
@@ -696,7 +697,10 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
   (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.) A push (`git.push`, beside
   `git.branch` and `git.checkout`) is the engine's isomorphic-git with the shell's HTTP: its requests cross as
   `git.remote` (shared/git-remote.ts) to the shell, which holds the sign-in and sends them through the API's proxy
-  (shell/git-push.ts); the shell also says who a commit is by (`git.identity`, the signed-in GitHub user).
+  (shell/git-push.ts); the shell also says who a commit is by (`git.identity`, the signed-in GitHub user). What part of
+  a file a commit or a discard takes is the service's too (shared/git-hunks.ts): the panel names the changed rows it
+  leaves out, an agent the hunks it picks, by the ids `git.review` gives them (git-review.ts, which joins BABLR's
+  verdict and the features each hunk's code is in — the git service itself doesn't classify).
 - `bablr-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. Since
   2026-10-15 it's a **standalone extension** (`extensions/cosmetic`): HEAD vs working through the editor's git commands,
   BABLR's verdict through `editor.annotations.classify`, the badge a file decoration VS Code draws wherever the file is
@@ -908,7 +912,7 @@ to. A command not here is core's own, and an extension that calls one doesn't pa
 | Command | Answered by | What it is |
 | --- | --- | --- |
 | `editor.annotations.spans`, `.refer`, `.resolve` | core's BABLR (the bridge registers them) | span annotations (3), through editor-api's `annotations()`, never by hand |
-| `editor.annotations.classify(before, after)` | core's BABLR (bablr.ts: the worker's verdict on its cached parses, the session's answers kept) | what a change from one text to another is (editor-api's `ChangeVerdict`): cosmetic or semantic, the nodes that changed and their lines, through `annotations().classify`. The cosmetic extension's badge; the shell's review panel asks the same (`annotations.classify` on the hub) |
+| `editor.annotations.classify(before, after)` | core's BABLR (bablr.ts: the worker's verdict on its cached parses, the session's answers kept) | what a change from one text to another is (editor-api's `ChangeVerdict`): cosmetic or semantic, the nodes that changed and their lines, through `annotations().classify`. The cosmetic extension's badge; the review (`git.review`, git-review.ts) joins the same verdict to a change's hunks for the shell's review panel and agents |
 | `editor.pane.refresh(view, uri?)` | core's pane (pane-views.ts) | a pane view's content changed (4), through editor-api's `refreshPane()` |
 | `editor.rules.edit(request)`, `.cancelEdit(id)` | core's Rule view (rule-view.ts) | a rule edited under the Rules tree: as it starts, what it's judged against (a call, a program's `process.argv`, a variable at a place, or the rule alone), its buttons. Answered `{ button, rule }` as pressed, or `null` (closed, cancelled, or replaced by another edit). The caller does what its buttons mean: the Rules tree's open and New Rule, the Margin's Rule… and Mock…, the bridge's preview prompt. `EditRequest`, and a rule's sentence and verdict, are editor-api's `./rules`. Core's, not an extension's view: a webview can't paint in this workbench (the coi-serviceworker keeps one origin; a webview's content needs its own), and nothing native edits predicates |
 | `editor.history.texts(path)` | core's edit history (edit-history.ts) | `string[]`: a file's texts through its recorded edits, oldest first, what a placed rule's place is followed through (the capabilities extension's rules.ts) |

@@ -1,4 +1,5 @@
-/** The workspace's git: status, diff, commit, branches, and a push to GitHub (git-service.ts). */
+/** The workspace's git: status, diff, the changes as hunks, commit and discard (whole files or hunks), branches, and a
+ *  push to GitHub (git-service.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -27,17 +28,46 @@ const git: ToolFamily = ({ request }) => [
 		})
 	},
 	{
+		"timeoutMs": 600000,
+		"tool": defineTool({
+			"name": "git_review",
+			"config": {
+				"description": "The working tree's changes as hunks, each with an id that git_commit and git_discard take: per file its status and hunks (the HEAD and working lines each replaces, removed and added). With verdicts, BABLR's verdict on each modified code file and whether each hunk is cosmetic (formatting or comments only; slow, about a second per thousand characters); with owners, the features (from .silo/manifest.json) whose code each hunk is in. Returns { files: [{ path, status, hunks: [{ id, head, working, removed, added, cosmetic?, owners? }], verdict? }], head }.",
+				"inputSchema": {
+					"paths": z.array(z.string()).optional().describe("Only these files (relative to the workspace); default, every change."),
+					"verdicts": z.boolean().optional().describe("Ask BABLR which changes are cosmetic."),
+					"owners": z.boolean().optional().describe("Say which features each hunk's code is in.")
+				}
+			},
+			"handler": async ({ paths, verdicts, owners }, { signal }) => ok(request("git.review", { "paths": paths, "verdicts": verdicts === true, "owners": owners === true }, signal))
+		})
+	},
+	{
 		"timeoutMs": 60000,
 		"tool": defineTool({
 			"name": "git_commit",
 			"config": {
-				"description": "Commit every change, or the files given, with a message. Returns { oid }.",
+				"description": "Commit every change, or the files given — each whole, or only some of its hunks (ids from git_review) — with a message. The working tree keeps what isn't committed. Returns { oid }.",
 				"inputSchema": {
 					"message": z.string().describe("The commit message."),
-					"files": z.array(z.string()).optional().describe("Only these files (relative to the workspace); default, every change.")
+					"files": z.array(z.union([z.string(), z.object({ "path": z.string(), "hunks": z.array(z.string()).optional() })])).optional().describe("Only these files (relative to the workspace), a path for the whole file's change or { path, hunks } for some of it; default, every change.")
 				}
 			},
-			"handler": async ({ message, files }, { signal }) => ok(request("git.commit", { "message": message, ...Array.isArray(files) ? { "files": files.map((file) => ({ "path": String(file) })) } : {} }, signal))
+			"handler": async ({ message, files }, { signal }) => ok(request("git.commit", { "message": message, ...Array.isArray(files) ? { "files": files.map((file) => (typeof file === "string" ? { "path": file } : file)) } : {} }, signal))
+		})
+	},
+	{
+		"timeoutMs": 60000,
+		"tool": defineTool({
+			"name": "git_discard",
+			"config": {
+				"description": "Throw away a file's uncommitted change, back to HEAD (an added file is deleted): all of it, or only the hunks given (ids from git_review). Can't be undone. Returns { ok }.",
+				"inputSchema": {
+					"path": z.string().describe("The file (relative to the workspace)."),
+					"hunks": z.array(z.string()).optional().describe("Only these hunks; default, the whole change.")
+				}
+			},
+			"handler": async ({ path, hunks }, { signal }) => ok(request("git.discard", { "path": path, ...Array.isArray(hunks) ? { "hunks": hunks } : {} }, signal))
 		})
 	},
 	{

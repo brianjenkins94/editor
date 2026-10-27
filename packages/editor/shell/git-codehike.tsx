@@ -27,6 +27,7 @@ import type { ChangeKind } from "@brianjenkins94/editor-api/git";
 import type { AnnotationHandler, HighlightedCode, Tokens } from "codehike/code";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
+import type { DiffRowInfo } from "../shared/git-hunks";
 import { highlight, InnerLine, Pre } from "codehike/code";
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -35,15 +36,6 @@ import "theme/components/dropdown-item";
 
 /** One React root per host element, reused across diff switches (root.render updates in place). */
 const roots = new WeakMap<HTMLElement, Root>();
-
-/** A diff row already aligned by git-panel: `ctx` unchanged, `add`/`del` single-side, `mod` a paired change. */
-export interface DiffRowInfo {
-	"type": "ctx" | "add" | "del" | "mod";
-	/** 1-based HEAD line number, when this row has a left side. */
-	"leftNo"?: number;
-	/** 1-based working-tree line number, when this row has a right side. */
-	"rightNo"?: number;
-}
 
 export interface DiffInput {
 	/** Stable identity for this file (its path) — resets fold/expand state when a different file is opened. */

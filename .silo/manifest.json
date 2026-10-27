@@ -646,6 +646,18 @@
         "packages/editor/shell/git-push.ts"
       ]
     },
+    "Review by hunk": {
+      "what": "The working tree's changes as hunks with ids, each with BABLR's cosmetic verdict and the features whose code it's in; a commit or a discard takes some of a file's hunks, by an agent's ids or the review panel's line picks.",
+      "ways": [
+        "agent tool|git_discard",
+        "agent tool|git_review",
+        "core module|installGitReview",
+        "hub request|git.review"
+      ],
+      "paths": [
+        "packages/editor/shared/git-hunks.ts"
+      ]
+    },
     "Source Control for git": {
       "what": "The Source Control view shows staged and unstaged changes with diffs against the last commit, and commits from its input box.",
       "docs": "packages/editor/ARCHITECTURE.md, *Worked examples (the git/SCM + BABLR stack)*",
