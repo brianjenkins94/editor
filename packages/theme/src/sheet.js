@@ -14,15 +14,37 @@ import { layers } from "./web-awesome";
  *  this needn't load Web Awesome), then the app's. */
 const ORDER = ["@layer vendor;", layers, "@layer app;", "@layer app.base, app.recipes, app.styles, app.overrides;"].join("\n");
 
-/** Put the layer order first in `document`'s head, once. */
-export function layerOrder(document = globalThis.document) {
-	if (document.head.querySelector("style[data-layer-order]") === null) {
-		const order = document.createElement("style");
+/** The documents whose layer order is in an adopted sheet (where their CSP refuses a `<style>`). */
+const adopted = new WeakSet();
 
+/**
+ * Put the layer order first in `document`'s head, once; whether the document takes a `<style>`. Where its CSP refuses
+ * inline styles (the admin app's `style-src 'self'`), the `<style>` gets no sheet, so the order goes in a constructed
+ * sheet adopted ahead of the others instead — the CSSOM, which the CSP allows — and theme/stitches does the same.
+ */
+export function layerOrder(document = globalThis.document) {
+	let order = document.head.querySelector("style[data-layer-order]");
+
+	if (order === null) {
+		order = document.createElement("style");
 		order.dataset.layerOrder = "";
 		order.textContent = ORDER;
 		document.head.prepend(order);
 	}
+
+	if (order.sheet !== null) {
+		return true;
+	}
+
+	if (!adopted.has(document)) {
+		const sheet = new document.defaultView.CSSStyleSheet();
+
+		sheet.replaceSync(ORDER);
+		document.adoptedStyleSheets = [sheet, ...document.adoptedStyleSheets];
+		adopted.add(document);
+	}
+
+	return false;
 }
 
 /**

@@ -20,7 +20,8 @@
  * so with `unlayeredGlobalCss`, the one way out of the layers.
  *
  * It injects into the head of the document it runs in; in VS Code's document, theme/sheet's mirrorStyles copies it into
- * a docked window's.
+ * a docked window's. Where the document's CSP refuses a `<style>` (the admin app's `style-src 'self'`), it inserts into
+ * a constructed sheet, adopted, instead.
  */
 import { createStitches } from "@stitches/core";
 
@@ -43,15 +44,27 @@ export const palette = {
 	"accent2": "var(--wa-color-orange-60)" // secondary series / guide-lines (warm contrast)
 } as const;
 
+/**
+ * Stitches' rules in a constructed sheet, adopted after the layer order's: for a document whose CSP refuses a
+ * `<style>`, which would get no sheet. Stitches makes its sheet with its root's `appendChild(<style>).sheet`, so this
+ * root answers with the constructed one (and has no sheets of its own to reuse).
+ */
+function adoptedRoot(document: Document): object {
+	const sheet = new document.defaultView.CSSStyleSheet();
+
+	document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+
+	return { "styleSheets": [], "appendChild": () => ({ "sheet": sheet }) };
+}
+
+const inline = globalThis.document === undefined || layerOrder(document);
+
 const stitches = createStitches({
 	"theme": {
 		"colors": { ...palette }
-	}
+	},
+	...inline ? {} : { "root": adoptedRoot(document) as DocumentOrShadowRoot }
 });
-
-if (globalThis.document !== undefined) {
-	layerOrder(document);
-}
 
 const inLayer = (layer: string, style: object): any => ({ [`@layer ${layer}`]: style });
 
