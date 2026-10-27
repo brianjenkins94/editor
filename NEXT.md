@@ -13,7 +13,46 @@ How it's kept:
 
 ## Queue
 
-Empty: every item queued is done. What's next is a decision (*Decisions*), or work found while working.
+1. **The refactor bench: refactor this repo in the editor, reading from and committing to GitHub.** It loads: the clone
+   of `brianjenkins94/editor` (2,212 files) arrives in about 2 s, and an editor is open in under 10 s. Its
+   dependencies are in node_modules as npm puts them (ARCHITECTURE.md, *Packages*):
+   - `file:` siblings are linked;
+   - Pages tarballs are unpacked;
+   - registry packages are pinned in `.silo/versions.json` and load from the CDN;
+   - type acquisition reads every package's manifest and tsconfig.
+
+   features-map.ts went from 32 TypeScript errors to 2, and a linked file has one name. Still open:
+   - **Doesn't run in the browser:**
+     - `silo check`: rolldown's native binding;
+     - the theme budget test: `child_process.execFileSync`;
+     - `process.exit`, which the debugger's `process` doesn't have.
+
+     CI on a pushed branch checks the work instead.
+   - **Type gaps left:** features-map.ts's `wa-card` isn't in `HTMLElementTagNameMap` (Web Awesome's element types
+     come from no import), and `registerCustomView`'s callback parameter is `any` (the `@codingame` types behind
+     components/monaco-vscode-api). Not yet looked at.
+   - **The repo's eslint.config.js** fails to load (`filenameOrUrl.startsWith is not a function`), so the preset lints.
+   - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. On a dev build, the page's
+     main thread was busy for minutes after a load: TypeScript resolves the whole monorepo now, and 1,733 packages are
+     pinned for the baseline to read. Not profiled: the long-frame observer couldn't get a turn.
+   - **Bugs found on the way:**
+     - With `2>&1 | tail`, the error printed nothing.
+     - `git log -3` is refused (`-n 3` works).
+     - The editor writes `.silo/baseline.json` and `.silo/capabilities.json` into the loaded repo. They're untracked,
+       so a `git_commit` without files would commit them.
+     - The Margin pane draws inside the references peek.
+
+   The steps left:
+   - (b) Push:
+     - the proxy allows `git-receive-pack`;
+     - the workbench's isomorphic-git pushes through an HTTP client the shell relays, so the key stays in the shell;
+     - new tools: `git_push`, `git_branch` and `git_checkout`;
+     - decide what becomes of the shell's snapshot `commitFiles`.
+
+     Signing in is yours, and the production GitHub App needs to be installed on the repo.
+   - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
+     providers plus `applyEdit`.
+   - (d) CI on the pushed branch checks the work.
 
 ## Watching
 
@@ -46,7 +85,7 @@ Empty: every item queued is done. What's next is a decision (*Decisions*), or wo
 
 ## Decisions
 
-None open (the last ones settled 2026-10-24: their answers are in the docs above them).
+None open (the last ones settled 2026-10-26: their answers are in the docs above them).
 
 ## Parked
 

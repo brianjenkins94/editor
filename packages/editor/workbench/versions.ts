@@ -11,7 +11,12 @@
  * Kept in `.silo/versions.json`, shared — the editor's lockfile, where there's no package-lock.json: a dependency keeps
  * its version until its range changes (only what's new or changed is resolved), so every collaborator loads what the
  * baseline was made from. The preview's dev server reads it from the workspace (its import map pins these versions),
- * and the baseline is synced to it (the capabilities extension's baseline.ts, which watches it).
+ * and the baseline is synced to it (the capabilities extension's baseline.ts, which watches it). The node_modules
+ * overlay and type acquisition read it as `pinned` (the build's own versions until the workspace's are resolved).
+ *
+ * A dependency the registry doesn't have is in it too: a `file:`/`link:` one by the folder it links (`link`), a tarball
+ * URL by that URL (`tarball`), each at the version its package.json says. Those the editor installs itself, on every
+ * sync (install.ts): `npm install` is this sync.
  */
 import type * as vscodeApi from "vscode";
 import { failureText } from "@brianjenkins94/editor-api/failures";
@@ -27,8 +32,53 @@ export const MIN_AGE_DAYS = 7;
  *  depends on (peers and optional ones too) — what the preview pins its dependencies by (esm.sh's `deps`). `platform`:
  *  a build for particular operating systems or CPUs only (its manifest's `os`/`cpu` — a native binary, such as each of
  *  TypeScript 7's `@typescript/typescript-<os>-<arch>`): npm installs only the one for the machine, and none runs in the
- *  browser, so nothing reads it (the baseline skips it). */
-export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true }
+ *  browser, so nothing reads it (the baseline skips it). `link`: a `file:`/`link:` dependency's folder, relative to
+ *  the workspace root — workspace code, not a package to fetch. */
+export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true; "link"?: string }
+
+/** A dependency npm's registry can't serve, so the CDN can't either: a linked folder, or a tarball from elsewhere. The
+ *  editor installs these itself (install.ts). */
+export const installsLocally = (each: Resolved): boolean => each.link !== undefined || (each.tarball !== undefined && !each.tarball.startsWith("https://registry.npmjs.org/"));
+
+/** The version each package the CDN serves loads at, for what fetches them (the node_modules overlay, type
+ *  acquisition): the build's own until the workspace's `.silo/versions.json` is read, then that. Kept up by each sync. */
+export const pinned: Record<string, string> = {};
+
+/** The packages the editor installs itself (installsLocally): nothing may fetch one of them from the CDN — a linked
+ *  one's folder is the workspace's code. Kept up by each sync. */
+export const installedLocally = new Set<string>();
+
+/** `pinned` and `installedLocally`, from `packages` now. */
+function repin(packages: Record<string, Resolved>): void {
+	for (const name of Object.keys(pinned)) {
+		delete pinned[name];
+	}
+
+	installedLocally.clear();
+
+	for (const [name, each] of Object.entries(packages)) {
+		if (installsLocally(each)) {
+			installedLocally.add(name);
+		} else {
+			pinned[name] = each.version;
+		}
+	}
+}
+
+/** `file:../theme` in `dir` → `<dir>/../theme`, normalized, relative to the workspace root. */
+export function linkedFolder(dir: string, range: string): string {
+	const parts: string[] = [];
+
+	for (const part of `${dir}/${range.replace(/^(?:file|link):/u, "")}`.split("/")) {
+		if (part === "..") {
+			parts.pop();
+		} else if (part !== "" && part !== ".") {
+			parts.push(part);
+		}
+	}
+
+	return parts.join("/");
+}
 
 /** What `.silo/versions.json` holds. `format`: 2 since entries say `platform` (an older file's are read again once). */
 export interface VersionsFile { "resolvedAt": string; "minAgeDays": number; "from": "package-lock.json" | "package.json"; "format"?: number; "packages": Record<string, Resolved> }
@@ -160,14 +210,17 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 	return Object.fromEntries(Object.entries(resolved).toSorted(([one], [other]) => one.localeCompare(other)));
 }
 
-/** The packages a lockfile installs (npm's v2/v3 `packages`), each name once — the first, root before nested. */
-export function lockedVersions(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean; "os"?: unknown; "cpu"?: unknown } & Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>>> }): Record<string, Resolved> {
+/** The packages a lockfile installs (npm's v2/v3 `packages`), each name once — the first, root before nested; a linked
+ *  one by its folder (relative to the workspace root: the lockfile is in `dir`), its version still to be read. */
+export function lockedVersions(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean; "os"?: unknown; "cpu"?: unknown } & Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>>> }, dir = ""): Record<string, Resolved> {
 	const locked: Record<string, Resolved> = {};
 
 	for (const [path, entry] of Object.entries(lock.packages ?? {}).toSorted(([one], [other]) => one.split("node_modules/").length - other.split("node_modules/").length)) {
 		const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
 
-		if (path.includes("node_modules/") && entry.version !== undefined && entry.link !== true && !(name in locked)) {
+		if (path.includes("node_modules/") && entry.link === true && entry.resolved !== undefined && !(name in locked)) {
+			locked[name] = { "version": entry.version ?? "0.0.0", "range": `file:${entry.resolved}`, "link": linkedFolder(dir, entry.resolved) };
+		} else if (path.includes("node_modules/") && entry.version !== undefined && entry.link !== true && !(name in locked)) {
 			const dependencies = Object.keys({ ...entry.peerDependencies, ...entry.optionalDependencies, ...entry.dependencies }).toSorted();
 
 			locked[name] = { "version": entry.version, "range": entry.version, ...entry.resolved?.startsWith("https://") === true ? { "tarball": entry.resolved } : {}, "dependencies": dependencies, ...isPlatform(entry) ? { "platform": true as const } : {} };
@@ -175,6 +228,44 @@ export function lockedVersions(lock: { "packages"?: Record<string, { "version"?:
 	}
 
 	return locked;
+}
+
+/** What the manifests (each in its `dir`, root first) depend on: from the registry by range (`roots`), else (`local`) a
+ *  linked folder or a tarball URL, each the first manifest's to name it — but a folder before a tarball: in a monorepo
+ *  whose packages depend on each other's published copies too, the folder is the package's source, which is what gets
+ *  edited. */
+function dependenciesOf(manifests: { "dir": string; "manifest": unknown }[]): { "roots": Record<string, string>; "local": Record<string, Resolved> } {
+	const roots: Record<string, string> = {};
+	const local: Record<string, Resolved> = {};
+
+	for (const { dir, manifest } of manifests) {
+		const { dependencies, devDependencies } = (manifest ?? {}) as Partial<Record<"dependencies" | "devDependencies", Record<string, string>>>;
+
+		for (const [name, range] of Object.entries({ ...devDependencies, ...dependencies })) {
+			if (/^(?:file|link):/u.test(range)) {
+				local[name] = local[name]?.link === undefined ? { "version": "0.0.0", "range": range, "link": linkedFolder(dir, range) } : local[name];
+			} else if (/^https?:\/\//u.test(range)) {
+				local[name] ??= { "version": "0.0.0", "range": range, "tarball": range };
+			} else {
+				roots[name] ??= range;
+			}
+		}
+	}
+
+	return { "roots": roots, "local": local };
+}
+
+/** Of `dependencies`, those the editor installs itself, installed — linked, or fetched and unpacked, as npm would — each
+ *  at its package.json's version (one `known` already, its range unchanged, as it was). */
+async function installOwn(vscode: typeof vscodeApi, root: string, dependencies: Record<string, Resolved>, known: Record<string, Resolved>): ReturnType<typeof import("./install").install> {
+	const ours = Object.fromEntries(Object.entries(dependencies).filter(([, each]) => installsLocally(each)).map(([name, each]): [string, Resolved] => [name, known[name]?.range === each.range ? known[name] : each]));
+	const { install } = await import("./install");
+
+	for (const name of Object.keys(ours)) {
+		installedLocally.add(name);
+	}
+
+	return install(vscode, root, ours);
 }
 
 /** One resolution at a time; one asked for while one runs is run after it. */
@@ -197,23 +288,42 @@ export function syncVersions(vscode: typeof vscodeApi, root = "/workspace"): Pro
 		const read = async (file: vscodeApi.Uri): Promise<unknown> => JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(file))) as unknown;
 		const lock = await read(vscode.Uri.file(`${root}/package-lock.json`)).catch(() => undefined) as Parameters<typeof lockedVersions>[0] | undefined;
 		const files = (await vscode.workspace.findFiles("**/package.json", `{**/node_modules/**,**/${SILO_DIR}/**}`)).toSorted((one, other) => one.path.length - other.path.length);
-		const manifests = (await Promise.all(files.map(async (file) => read(file).catch(() => undefined)))).filter((manifest) => manifest !== undefined) as { "dependencies"?: Record<string, string>; "devDependencies"?: Record<string, string> }[];
-		const roots: Record<string, string> = {};
-
-		for (const manifest of manifests) {
-			for (const [name, range] of Object.entries({ ...manifest.devDependencies, ...manifest.dependencies })) {
-				roots[name] ??= range;
-			}
-		}
+		const { roots, local } = dependenciesOf(await Promise.all(files.map(async (file) => ({ "dir": file.path.slice(root.length + 1, file.path.lastIndexOf("/")), "manifest": await read(file).catch(() => undefined) }))));
 
 		const uri = vscode.Uri.file(`${root}/${versionsPath()}`);
 		const before = await read(uri).catch(() => undefined) as VersionsFile | undefined;
 		// (what was resolved stays, but a root whose range changed: resolved again, with what it now depends on — and a file
 		// from before `platform`: each entry's manifest read again once, its version kept)
-		const kept = Object.entries(before?.from === "package.json" ? before.packages : {}).filter(([name, each]) => roots[name] === undefined || roots[name] === each.range);
+		const kept = Object.entries(before?.from === "package.json" ? before.packages : {}).filter(([name, each]) => (roots[name] ?? local[name]?.range) === undefined || (roots[name] ?? local[name]?.range) === each.range);
 		const known = Object.fromEntries(before?.format === FORMAT ? kept : kept.map(([name, { "dependencies": _, ...each }]) => [name, each]));
-		const packages = lock?.packages === undefined ? await resolveVersions(roots, { "known": known }) : lockedVersions(lock);
-		const now: VersionsFile = { "resolvedAt": new Date().toISOString(), "minAgeDays": MIN_AGE_DAYS, "from": lock?.packages === undefined ? "package.json" : "package-lock.json", "format": FORMAT, "packages": packages };
+		const locked = lock?.packages === undefined ? undefined : lockedVersions(lock);
+		// What the editor installs itself first: a link costs nothing, and TypeScript is waiting on it; the registry's tree
+		// can take a while to resolve.
+		const { installed, wants, changed } = await installOwn(vscode, root, { ...locked, ...local }, known);
+		const from = lock?.packages === undefined ? "package.json" : "package-lock.json";
+		const file = (packages: Record<string, Resolved>): VersionsFile => ({ "resolvedAt": new Date().toISOString(), "minAgeDays": MIN_AGE_DAYS, "from": from, "format": FORMAT, "packages": packages });
+		const linked = { ...before?.packages, ...installed };
+
+		// Said at once — the TypeScript server reads the links from this file (the capabilities tsserver plugin) — before
+		// the registry's tree is resolved and the file written whole.
+		if (JSON.stringify(linked) !== JSON.stringify(before?.packages)) {
+			await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(file(linked), undefined, 2) + "\n"));
+		}
+
+		if (changed) {
+			// (TypeScript may have looked for these before they were there: it resolves again)
+			void vscode.commands.executeCommand("typescript.reloadProjects");
+		}
+
+		// Then the registry's: the roots, and what an unpacked tarball depends on, in turn.
+		const theirs = Object.fromEntries(Object.entries(wants).filter(([name]) => !(name in (locked ?? roots))));
+		const packages = locked === undefined
+			? await resolveVersions({ ...theirs, ...roots }, { "known": { ...known, ...installed } })
+			: await resolveVersions(theirs, { "known": { ...locked, ...installed } });
+
+		repin(packages);
+
+		const now = file(packages);
 
 		if (before !== undefined && before.format === FORMAT && JSON.stringify(before.packages) === JSON.stringify(packages)) {
 			return before;

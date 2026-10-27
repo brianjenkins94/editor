@@ -12,6 +12,8 @@ export interface BashSession {
 export interface SessionState {
 	"cwd": string;
 	"env": Record<string, string>;
+	/** The last statement's exit code, when a line runs a statement at a time (statementsOf): the next one's `$?`. */
+	"status"?: number;
 }
 
 const RS = "\u001E"; // record separator (ASCII RS) — frames the cwd/exit-code probe; ~never appears in real shell output
@@ -30,9 +32,13 @@ const PROBE_RE = new RegExp(`${RS}([^${RS}]*)${RS}([^${RS}]*)${RS}$`, "u");
  * prompt, to `/home/user`. (An interrupted run keeps the cwd it started in: its own `cd`s never reach us.)
  */
 export async function execInSession(session: BashSession, state: SessionState, input: string, signal?: AbortSignal): Promise<{ "stdout": string; "stderr": string; "exitCode": number }> {
-	const result = await session.exec(input + PROBE, { "cwd": state.cwd, "env": { ...state.env, "PWD": state.cwd }, ...signal === undefined ? {} : { "signal": signal } });
+	// (each exec is a shell of its own: the last statement's status is said again, so `node x; echo $?` says node's)
+	const status = state.status === undefined || state.status === 0 ? "" : `(exit ${state.status})\n`;
+	const result = adoptResult(state, await session.exec(status + input + PROBE, { "cwd": state.cwd, "env": { ...state.env, "PWD": state.cwd }, ...signal === undefined ? {} : { "signal": signal } }));
 
-	return adoptResult(state, result);
+	state.status = result.exitCode;
+
+	return result;
 }
 
 /** `execInSession`'s reading of a run's `result`: the cwd from its probe and its env into `state`; its own output and

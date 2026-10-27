@@ -813,7 +813,12 @@ effects. It gets **synchronous files through core** instead, each call answered 
 - **Packages.** A package's published tarball, for one the debugger's `require` finds nothing of (the editor serves
   packages from a CDN, and type acquisition writes only their types), at the version `.silo/versions.json` pins. The
   worker unpacks it into its own memory, never the workspace's buffer: 64 MB is no place for node_modules. A package
-  the policy bans is never fetched.
+  the policy bans is never fetched. What no CDN serves is in the workspace's node_modules already, as npm puts it
+  (workbench/install.ts, run by each sync of the versions, so `npm install` is that sync): a `file:` dependency is a
+  symlink to its folder, which zen-fs follows in every realm, and a tarball from anywhere but npm's registry is
+  unpacked there. A folder wins over a tarball for the same name: it's the source that gets edited. TypeScript in the
+  browser doesn't resolve symlinks (its host's `realpath` only normalizes a path), so the capabilities tsserver plugin
+  answers `realpath` from the versions' `link`s, and a linked file has one name, its folder's.
 - **The gate.** A call is the program's unless it says it's the debugger's own load (the program and what it imports,
   read-only). The program's are decided by the session's policy as tsval decides its own: allowed, skipped, or failing
   with `EACCES`; a live run makes no write. The session is the one the extension named to `connect(name, session)`,

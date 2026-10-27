@@ -5,10 +5,11 @@
  * re-runs the script string through the SAME just-bash session, so a script that calls `node …` hits the node
  * worker and the whole thing composes.
  *
- * `npm install [pkg…]` (and `ci`) declares dependencies in package.json — there is NO tarball fetch or node_modules:
- * the preview dev server resolves every declared dep from esm.sh at runtime (see frameworks/vite-dev-server.ts), so
- * a plain `npm install` is a no-op you never need, and `npm install lodash` just adds it to package.json (the
- * next preview load resolves it). The registry proper is still out of scope.
+ * `npm install [pkg…]` (and `ci`) declares dependencies in package.json. A registry package is never fetched whole:
+ * each place that loads one fetches what it needs as it's used, from the CDN, at the version `.silo/versions.json` pins
+ * (the preview dev server, the node_modules overlay, type acquisition). A plain `npm install` brings that file up to
+ * the manifests and installs what the CDN can't serve — a `file:` dependency linked, a tarball URL unpacked
+ * (workbench/install.ts) — as the editor does by itself when the project opens or a manifest changes.
  *
  * `npm ls` lists what package.json declares; `npm run` with no script lists the scripts; `npm exec` / `npx` run a
  * command this shell has (`npx vite`) and say plainly when a package's own binary can't be (nothing's installed
@@ -122,8 +123,24 @@ async function runScript(name: string, getSession: CommandHost["session"], scrip
 	return inShell(getSession, passed.length > 0 ? `${command} ${passed.map(quote).join(" ")}` : command, ctx, { "npm_lifecycle_event": script });
 }
 
+/** A plain `npm install`: `.silo/versions.json` brought up to the manifests, and what the CDN can't serve installed. */
+async function installed(name: string, api: CommandHost["api"]): Promise<CommandResult> {
+	const { installsLocally, syncVersions } = await import("../../../versions");
+	const versions = await syncVersions(api);
+
+	if (versions === undefined) {
+		return { "stdout": "", "stderr": `${name}: the dependencies couldn't be resolved (the editor's log says why)\n`, "exitCode": 1 };
+	}
+
+	const entries = Object.entries(versions.packages);
+	const linked = entries.filter(([, each]) => each.link !== undefined).map(([dependency, each]) => `  linked ${dependency} → ${each.link}\n`);
+	const unpacked = entries.filter(([, each]) => each.link === undefined && installsLocally(each)).map(([dependency, each]) => `  unpacked ${dependency}@${each.version} from ${each.tarball}\n`);
+
+	return { "stdout": `${linked.join("")}${unpacked.join("")}  ${entries.length} packages pinned in .silo/versions.json; the rest load from the CDN as they're used.\n`, "stderr": "", "exitCode": 0 };
+}
+
 /** npm's subcommands, as `name` (npm, pnpm, yarn) says them in its messages. */
-export function handlers(name: string, getSession: CommandHost["session"]): Record<string, Handler> {
+export function handlers(name: string, getSession: CommandHost["session"], api?: CommandHost["api"]): Record<string, Handler> {
 	const lifecycle = (script: string): Handler => async (config, ctx) => runScript(name, getSession, script, config.get("args") as string[], ctx);
 
 	return {
@@ -131,7 +148,7 @@ export function handlers(name: string, getSession: CommandHost["session"]): Reco
 			const specs = config.get("packages") as string[];
 
 			if (specs.length === 0) {
-				return { "stdout": "  Dependencies resolve on the fly from esm.sh — no install step needed.\n  Run `npm run dev` to start the preview.\n", "stderr": "", "exitCode": 0 };
+				return api === undefined ? { "stdout": "  Dependencies resolve on the fly from esm.sh — no install step needed.\n  Run `npm run dev` to start the preview.\n", "stderr": "", "exitCode": 0 } : installed(name, api);
 			}
 
 			const manifest = await manifestOf(name, ctx);
@@ -212,6 +229,6 @@ export function handlers(name: string, getSession: CommandHost["session"]): Reco
 
 /** The `npm` command. A script runs in the shell itself (the host's `session`, created lazily — see ../../index.ts), with
  *  the shell's Ctrl-C forwarded so it reaches a long-running script (`npm run dev` → the blocking `vite` command). */
-export function create({ session }: CommandHost): Record<string, Handler> {
-	return handlers("npm", session);
+export function create({ session, api }: CommandHost): Record<string, Handler> {
+	return handlers("npm", session, api);
 }

@@ -15,6 +15,9 @@
  * - `_types.at` — the type of each of a file's ranges (runtime evidence's declared types; RUNTIME-EVIDENCE.md).
  * - `_statements` — a file's top-level statements as a projection's cards (RUNTIME-EVIDENCE.md, *Projections*), and
  *   each top-level function's purity (silo's: pure, effectful, unknown…), for the card it's on.
+ *
+ * It also gives the server the workspace's links (`realpathWithLinks`): the dependencies as the project has them are
+ * this extension's subject, and a plugin is the only way into the server's host.
  */
 
 export default function init(modules) {
@@ -220,10 +223,118 @@ export default function init(modules) {
 		return { "path": path, "program": program, "sourceFile": program === undefined ? undefined : program.getSourceFile(path) };
 	}
 
+	/**
+	 * `npm install`'s links, as TypeScript sees them. The editor links a `file:` dependency into node_modules
+	 * (workbench/install.ts), but the browser server's host never resolves a symlink — its `realpath` only normalizes a
+	 * path — so each of a linked package's files would have two names, and a rename in its folder would miss the code
+	 * that imports it by name. This `realpath` answers where a link points, from `.silo/versions.json` (each linked
+	 * package's `link`), so the server treats it as it does npm's links on a disk: the folder's file is the one file.
+	 */
+	const linksAt = new Map(); // a workspace root, as the server names it → { "checked", "stamp", "links": [name, folder][] }
+
+	function linksOf(host, base) {
+		const now = Date.now();
+		let known = linksAt.get(base);
+
+		if (known === undefined || now - known.checked > 2000) {
+			const file = base + "/.silo/versions.json";
+			let stamp;
+
+			try {
+				stamp = host.getModifiedTime ? String(host.getModifiedTime(file)) : undefined;
+			} catch (error) { /* none */ }
+
+			if (known === undefined || stamp !== known.stamp) {
+				let links = [];
+
+				try {
+					const packages = JSON.parse(host.readFile(file) || "{}").packages || {};
+
+					links = Object.entries(packages).filter(function(entry) {
+						return typeof entry[1].link === "string";
+					}).map(function(entry) {
+						return [entry[0], entry[1].link];
+					});
+				} catch (error) { /* none */ }
+
+				known = { "stamp": stamp, "links": links };
+			}
+
+			known.checked = now;
+			linksAt.set(base, known);
+		}
+
+		return known.links;
+	}
+
+	/** Whether the workspace `dir` is in (it, or the nearest folder above it with a `.silo`) has links. */
+	function hasLinks(host, dir) {
+		for (let at = dir; at !== "" && at !== "/"; at = at.slice(0, at.lastIndexOf("/"))) {
+			if (host.fileExists(at + "/.silo/versions.json")) {
+				return linksOf(host, at).length > 0;
+			}
+		}
+
+		return false;
+	}
+
+	function realpathWithLinks(host, original, path) {
+		const at = path.indexOf("/node_modules/");
+
+		if (at !== -1) {
+			const base = path.slice(0, at);
+
+			for (const [name, folder] of linksOf(host, base)) {
+				const from = base + "/node_modules/" + name;
+
+				if (path === from || path.startsWith(from + "/")) {
+					return base + "/" + folder + path.slice(from.length);
+				}
+			}
+		}
+
+		return original(path);
+	}
+
 	return {
 		"create": function(info) {
 			applyConfig(info.config);
 			registerRequests(info);
+
+			// (the host is the server's, shared by every project: patched once; a project binds its host's realpath as it's
+			// made, so this one, made before, is given it too — the next are made with it. A project made — the editor reloads
+			// them when it links something — reads the links afresh.)
+			const host = info.serverHost;
+
+			linksAt.clear();
+
+			if (host !== undefined && host.__withLinks !== true) {
+				const original = typeof host.realpath === "function"
+					? host.realpath.bind(host)
+					: function(path) {
+						return path;
+					};
+
+				host.realpath = function(path) {
+					return realpathWithLinks(host, original, path);
+				};
+
+				host.__withLinks = true;
+
+				// The server loads a plugin after it has made its first project, whose imports are resolved — and kept — with
+				// the old realpath: when the workspace has links, the projects are made again, once, now that it reads them.
+				if (info.project !== undefined && hasLinks(host, info.project.getCurrentDirectory())) {
+					setTimeout(function() {
+						info.project.projectService.reloadProjects();
+					}, 0);
+				}
+			}
+
+			if (host !== undefined && info.project !== undefined) {
+				info.project.realpath = function(path) {
+					return host.realpath(path);
+				};
+			}
 
 			return info.languageService;
 		},

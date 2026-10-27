@@ -26,6 +26,7 @@
  */
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscode from "vscode";
+import { installedLocally } from "./versions";
 
 /** Files whose imports are worth acquiring types for. */
 const RELEVANT = /\.(?:tsx?|jsx?|mts|cts)$/u;
@@ -339,6 +340,11 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	let written = 0; // files ATA has added to the store this session (see the reload in `acquire`)
 
 	const write = async (rel: string, code: string): Promise<void> => {
+		// (a package the editor installs itself is never written over: a linked one's folder is the workspace's code)
+		if (installedLocally.has(packageRootOf(rel) ?? rel)) {
+			return;
+		}
+
 		try {
 			await api.workspace.fs.writeFile(api.Uri.file(`${nodeModules}/${rel}`), new TextEncoder().encode(code));
 			written += 1;
@@ -415,7 +421,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	};
 
 	async function acquirePackage(pkg: string, budget: { "n": number }): Promise<void> {
-		if (seenPackage.has(pkg)) {
+		if (seenPackage.has(pkg) || installedLocally.has(pkg)) {
 			return;
 		}
 
@@ -549,24 +555,30 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
-	// What the PROJECT needs that no source file imports: the root package.json's `@types/*` dependencies (the ambient
-	// `process` of @types/node), tsconfig's `compilerOptions.types`, and the configs a tsconfig `extends`.
+	// What the PROJECT needs that no source file imports: every package.json's `@types/*` dependencies (the ambient
+	// `process` of @types/node), every tsconfig's `compilerOptions.types`, and the configs a tsconfig `extends` — a
+	// monorepo's packages' as well as the root's, hoisted into the root's node_modules.
 	const runProject = async (): Promise<void> => {
 		const root = workspaceFolder.replace(/\/$/u, "");
-		const read = async (path: string): Promise<Record<string, unknown> | undefined> => {
+		const read = async (uri: vscode.Uri): Promise<Record<string, unknown> | undefined> => {
 			try {
-				return parseJsonc(new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.file(root + "/" + path))));
+				return parseJsonc(new TextDecoder().decode(await api.workspace.fs.readFile(uri)));
 			} catch {
 				return undefined;
 			}
 		};
 
-		const [manifest, tsconfig] = await Promise.all([read("package.json"), read("tsconfig.json")]);
-		const declared = Object.keys({ ...manifest?.["dependencies"] as object, ...manifest?.["devDependencies"] as object }).filter((name) => name.startsWith("@types/"));
-		const types = (tsconfig?.["compilerOptions"] as { "types"?: unknown } | undefined)?.types;
-		const listed = Array.isArray(types) ? types.filter((name): name is string => typeof name === "string").map((name) => packageRootOf(name) ?? name) : [];
+		const all = async (name: string): Promise<(Record<string, unknown> | undefined)[]> => Promise.all((await api.workspace.findFiles(new api.RelativePattern(api.Uri.file(root), `**/${name}`), "**/node_modules/**")).map(read));
+
+		const [manifests, tsconfigs] = await Promise.all([all("package.json"), all("tsconfig.json")]);
+		const declared = manifests.flatMap((manifest) => Object.keys({ ...manifest?.["dependencies"] as object, ...manifest?.["devDependencies"] as object })).filter((name) => name.startsWith("@types/"));
+		const listed = tsconfigs.flatMap((tsconfig) => {
+			const types = (tsconfig?.["compilerOptions"] as { "types"?: unknown } | undefined)?.types;
+
+			return Array.isArray(types) ? types.filter((name): name is string => typeof name === "string").map((name) => packageRootOf(name) ?? name) : [];
+		});
 		const packages = [...new Set([...declared, ...listed])];
-		const configs = extendsTargets(tsconfig);
+		const configs = [...new Map(tsconfigs.flatMap((tsconfig) => extendsTargets(tsconfig)).map((target) => [target.join("/"), target])).values()];
 
 		// Apart, so the few config files land (and reload the project) without waiting on a big types crawl.
 		if (configs.length > 0) {
@@ -580,9 +592,14 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let projectTimer: ReturnType<typeof setTimeout> | undefined;
-	// A repo load replaces both manifests: re-read them once it settles.
-	const manifests = api.workspace.createFileSystemWatcher(new api.RelativePattern(api.Uri.file(workspaceFolder), "{package.json,tsconfig.json}"));
-	const scheduleProject = (): void => {
+	// A repo load replaces the manifests: re-read them once it settles.
+	const manifests = api.workspace.createFileSystemWatcher(new api.RelativePattern(api.Uri.file(workspaceFolder), "**/{package.json,tsconfig.json}"));
+	const scheduleProject = (uri?: vscode.Uri): void => {
+		// (what this writes — a package's own package.json, in node_modules — isn't the project's)
+		if (uri?.path.includes("/node_modules/") === true) {
+			return;
+		}
+
 		clearTimeout(projectTimer);
 		projectTimer = setTimeout(() => {
 			void runProject();

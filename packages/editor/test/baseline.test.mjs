@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { packageCaps } from "@brianjenkins94/util/silo/detect";
 import { unpack } from "@brianjenkins94/almostnode/packages";
-import { choose, lockedVersions, resolveVersions } from "../workbench/versions.ts";
+import { choose, installsLocally, linkedFolder, lockedVersions, resolveVersions } from "../workbench/versions.ts";
 
 test("a tarball's files, long paths included — bytes as they are, and what packageCaps makes of them", async () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "baseline-"));
@@ -42,18 +42,29 @@ test("a tarball's files, long paths included — bytes as they are, and what pac
 	}
 });
 
-test("a lockfile's packages: each name once, root before nested, links left out — and what each depends on", () => {
+test("a lockfile's packages: each name once, root before nested, a link by its folder — and what each depends on", () => {
 	assert.deepEqual(lockedVersions({ "packages": {
 		"": { "version": "0.0.0" },
 		"node_modules/a/node_modules/b": { "version": "1.0.0" },
 		"node_modules/b": { "version": "2.0.0", "resolved": "https://registry.npmjs.org/b/-/b-2.0.0.tgz", "dependencies": { "@s/c": "^3" }, "peerDependencies": { "react": "*" } },
 		"node_modules/@s/c": { "version": "3.0.0" },
 		"node_modules/local": { "version": "0.0.1", "link": true },
+		"node_modules/theme": { "resolved": "../theme", "link": true },
 		"packages/app": { "version": "1.0.0" }
-	} }), {
+	} }, "packages/editor"), {
 		"b": { "version": "2.0.0", "range": "2.0.0", "tarball": "https://registry.npmjs.org/b/-/b-2.0.0.tgz", "dependencies": ["@s/c", "react"] },
-		"@s/c": { "version": "3.0.0", "range": "3.0.0", "dependencies": [] }
-	});
+		"@s/c": { "version": "3.0.0", "range": "3.0.0", "dependencies": [] },
+		"theme": { "version": "0.0.0", "range": "file:../theme", "link": "packages/theme" }
+	}, "a link with no folder is left out");
+});
+
+test("a link's folder, relative to the workspace root; what the editor installs itself", () => {
+	assert.equal(linkedFolder("packages/editor", "file:../theme"), "packages/theme");
+	assert.equal(linkedFolder("", "file:./vendor/x/"), "vendor/x");
+	assert.equal(linkedFolder("a/b", "link:../../c"), "c");
+	assert.equal(installsLocally({ "version": "1.0.0", "range": "file:../theme", "link": "packages/theme" }), true);
+	assert.equal(installsLocally({ "version": "0.1.0", "range": "0.1.0", "tarball": "https://brianjenkins94.github.io/lib/util@latest.tgz" }), true, "a tarball elsewhere: no CDN has it");
+	assert.equal(installsLocally({ "version": "2.0.0", "range": "2.0.0", "tarball": "https://registry.npmjs.org/b/-/b-2.0.0.tgz" }), false, "the registry's: the CDN serves it");
 });
 
 test("a range resolved with nothing younger than a week — `latest` the latest a week old", () => {

@@ -27,8 +27,8 @@ export function asNpm(words: string[]): string[] {
 }
 
 /** The npm `name` (pnpm, yarn) speaks for. */
-export function speaking(name: string, { session }: CommandHost): Handler {
-	const npmAs = toCommand({ ...npm, "name": name }, handlers(name, session));
+export function speaking(name: string, { session, api }: CommandHost): Handler {
+	const npmAs = toCommand({ ...npm, "name": name }, handlers(name, session, api));
 
 	return async (config, ctx) => {
 		if (config.get("version") === true) {

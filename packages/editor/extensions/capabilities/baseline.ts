@@ -56,7 +56,7 @@ const SETTLE_MS = 1500;
 const CODE = /\.[cm]?[jt]sx?$/u;
 
 /** What this reads of `.silo/versions.json` (the workbench's versions.ts `VersionsFile`). */
-interface VersionsFile { "from": string; "packages": Record<string, { "version": string; "tarball"?: string; "platform"?: true }> }
+interface VersionsFile { "from": string; "packages": Record<string, { "version": string; "tarball"?: string; "platform"?: true; "link"?: string }> }
 
 /** The package worker, started for one sync: a package's capabilities, by its tarball's URL, and its slices' (null where
  *  none could be built); `end` stops it. */
@@ -266,7 +266,8 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri):
 	const uri = vscode.Uri.joinPath(root, baselinePath());
 	const existing = await readJson(uri) as BaselineFile | undefined;
 	const known = existing?.packages ?? {};
-	const resolved = Object.fromEntries(Object.entries(versions.packages).filter(([, each]) => each.platform !== true));
+	// (a linked package is the workspace's own code, read as the consumer, not a dependency)
+	const resolved = Object.fromEntries(Object.entries(versions.packages).filter(([, each]) => each.platform !== true && each.link === undefined));
 	// (the code's use now — its package entries' caps, the joins, filled below — or undefined while the server can't say)
 	const read = await consumerFor(root, versions);
 	const slices = slicesOf(read, existing, resolved);

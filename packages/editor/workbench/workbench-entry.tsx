@@ -66,6 +66,7 @@ import { installPaneViews } from "./pane-views";
 import { installProfileFiles } from "./profile-files";
 import { registerRuleView } from "./rule-view";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
+import { pinned } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
@@ -558,9 +559,10 @@ function maybeBoot(): void {
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its
 			// sibling here. Priority 0 = below the snapshot.
-			if (moduleVersions !== undefined && Object.keys(moduleVersions).length > 0) {
-				registerFileSystemOverlay(0, createNodeModulesProvider(workspaceFolder ?? "/workspace", moduleVersions));
-			}
+			// Pinned by the build's own versions until the workspace's are resolved (versions.ts's `pinned`, which each sync
+			// keeps up), so a loaded repo's packages load at its versions, not the editor's.
+			Object.assign(pinned, moduleVersions);
+			registerFileSystemOverlay(0, createNodeModulesProvider(workspaceFolder ?? "/workspace", pinned));
 
 			// Open the initial editors now — deferred from boot's defaultLayout because the source files no longer live
 			// in boot's priority-1 seed (that layer now carries only the read-only base). They're in the zen-fs overlay
@@ -606,7 +608,7 @@ function maybeBoot(): void {
 				void announceWorkspaceSettings(api as typeof import("vscode"), workspaceFs);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
-				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
+				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", pinned, (path) => workspaceFs?.has(path) ?? false, paneLog);
 				// The workspace terminal — just-bash on the workspace filesystem, registered as the DEFAULT terminal
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner

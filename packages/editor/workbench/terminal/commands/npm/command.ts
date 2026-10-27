@@ -9,7 +9,7 @@ export default {
 	"streaming": true, // a script may run node or vite
 	"subcommands": {
 		"install": {
-			"summary": "Add packages to package.json (resolved from esm.sh by the preview — there's no install step).",
+			"summary": "Add packages to package.json; alone, pin the dependencies and link or unpack what the CDN can't serve.",
 			"aliases": ["i", "add", "ci"],
 			"options": {
 				"saveDev": { "format": Boolean, "default": false, "short": "D", "doc": "To devDependencies." },
