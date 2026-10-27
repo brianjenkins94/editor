@@ -60,8 +60,10 @@ key, good only at our Worker, which keeps GitHub's token and spends it through a
   CORS is the clients' own origins (src/clients.ts), never `*` or reflected.
 - **unusuallygood.dev** (bought through Cloudflare, 2026-10-15) gets production off the shared `github.io` origin. The
   API is its own origin rather than under the app's path, so the editor's origin serves only static files and none of
-  its requests count against the Worker. The apex 302s to the editor (browsers keep a 301 forever) until there's a
-  landing page; `/tools/` and `/log/` aren't built.
+  its requests count against the Worker. The apex 302s browsers to the editor (browsers keep a 301 forever) until
+  there's a landing page; `/tools/` and `/log/` aren't built. Anything that isn't a browser is asked for $0.01 over x402
+  first (packages/site/src/gate.ts, settled by Coinbase's facilitator to `PAY_TO`, a Coinbase deposit address): an experiment in whether scrapers pay, read from its
+  Workers Logs.
 - **editor-contrib forks** aren't allowed origins: a fork that wants sign-in brings its own Worker and GitHub App.
 
 ### Building in the open

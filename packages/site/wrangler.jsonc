@@ -1,10 +1,19 @@
-// unusuallygood.dev itself (packages/api/README.md, A7): static assets only, so no request runs a Worker or counts against its daily
-// requests. Until it has pages of its own, its `_redirects` send everything to the editor.
+// unusuallygood.dev itself (packages/api/README.md, A7). Until it has pages of its own, its `_redirects` send everything to the
+// editor. src/gate.ts runs first: a browser goes on to those redirects; anything else is asked to pay over x402.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unusuallygood",
+  "main": "src/gate.ts",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": "public" },
+  // The x402 packages use Buffer.
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": true },
+  "observability": { "enabled": true },
+  "vars": {
+    // Where a bot's USDC on Base goes: the Coinbase account's deposit address (not a secret). CDP_API_KEY_ID and
+    // CDP_API_KEY_SECRET are secrets (`wrangler secret put`).
+    "PAY_TO": "0x269D4b4dB64288A742b2181A4EeE4D9b93657aFE"
+  },
   "workers_dev": false,
   "routes": [{ "pattern": "unusuallygood.dev", "custom_domain": true }]
 }

@@ -9,5 +9,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:editor": "wrangler dev --config editor.jsonc"
+  },
+  "dependencies": {
+    "@coinbase/x402": "2.1.0",
+    "@x402/core": "2.28.0",
+    "@x402/evm": "2.28.0",
+    "@x402/hono": "2.28.0",
+    "hono": "4.13.13"
   }
 }

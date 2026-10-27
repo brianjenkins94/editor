@@ -1113,7 +1113,7 @@
   },
   "Hosting": {
     "Sites on unusuallygood.dev": {
-      "what": "Serves the root domain (which redirects to the editor), the editor and the admin app as static Cloudflare sites, so loading a page never runs a Worker.",
+      "what": "Serves the root domain (which redirects browsers to the editor and asks anything else to pay over x402), the editor and the admin app as Cloudflare sites; only the root domain runs a Worker.",
       "docs": "packages/api/README.md, *A7 · production*",
       "paths": [
         "packages/admin/deployment.ts",
@@ -1121,6 +1121,7 @@
         "packages/site/admin.jsonc",
         "packages/site/editor.jsonc",
         "packages/site/public/_redirects",
+        "packages/site/src/gate.ts",
         "packages/site/wrangler.jsonc"
       ]
     }
