@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
-import { fingerprintOf, scrub, SURGE } from "../src/errors.ts";
+import { fingerprintOf, scrub, scrubStack, SURGE } from "../src/errors.ts";
 import { someone, testBrowser } from "./helpers.ts";
 
 // Errors (README.md, O4) in workerd: a request that fails answers with an id the person can quote; the error is
@@ -78,6 +78,10 @@ const toOwner = (): string[] => outbox.filter((message) => message.to === ALERT_
 
 test("scrubbing keeps secrets and addresses out; a fingerprint ignores line numbers but not functions", async () => {
 	assert.equal(scrub("no account for someone@example.com, token ghp_abcdefghijklmnopqrstuvwxyz0123456789AB", 500), "no account for «email», token «redacted»");
+
+	// A stack's frame locations are kept, so they can be mapped: a hashed chunk's name isn't a token, a scoped
+	// package's path isn't an address, and a query is dropped. What's between them is scrubbed as a message is.
+	assert.equal(scrubStack("Error: for someone@example.com\n    at r (https://editor.unusuallygood.dev/assets/index-CDt7ol2B.js:1:11797)\n    at https://localhost:5173/node_modules/.vite/deps/@brianjenkins94_hub.js?v=1a2b3c4d:1113:13\n    at ghp_abcdefghijklmnopqrstuvwxyz0123456789AB (worker.js:1:1)\n    @https://editor.unusuallygood.dev/__vscode__/assets/editor.worker-it7rT9B4.js:12:67730", 4000), "Error: for «email»\n    at r (https://editor.unusuallygood.dev/assets/index-CDt7ol2B.js:1:11797)\n    at https://localhost:5173/node_modules/.vite/deps/@brianjenkins94_hub.js:1113:13\n    at «redacted» (worker.js:1:1)\n    @https://editor.unusuallygood.dev/__vscode__/assets/editor.worker-it7rT9B4.js:12:67730");
 
 	const stack = (line: number): string => `TypeError: x\n    at accountEndpoint (worker.js:${line}:10)\n    at async dispatch (worker.js:${line + 5}:3)`;
 

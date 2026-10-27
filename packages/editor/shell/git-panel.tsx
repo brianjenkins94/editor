@@ -442,13 +442,17 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		});
 	};
 
+	// A refresh nobody waits on: if the workbench is too busy to answer (a large repository loading), the list stays as
+	// it was until the next `git.changed`, rather than the timeout going up as an uncaught error.
+	const refreshLater = (): void => {
+		refresh().catch(() => { /* the next git.changed refreshes */ });
+	};
+
 	// Mount-once wiring: the overlay close button, git.changed refresh, and the initial load.
 	useEffect(() => {
 		overlay.close.addEventListener("click", hideOverlay);
 
-		const off = hub.subscribe("git.changed", () => {
-			void refresh();
-		});
+		const off = hub.subscribe("git.changed", refreshLater);
 
 		// The workbench git service registers late in its boot (and the shell→app→workbench link takes a moment to
 		// form), so the initial load POLLS with a short timeout until the responder answers — instead of one
@@ -581,7 +585,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 			}, 1800);
 		} finally {
 			setCommitting(false);
-			void refresh();
+			refreshLater();
 		}
 	};
 

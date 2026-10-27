@@ -8,7 +8,8 @@ import { redactString } from "@brianjenkins94/util/redact";
  * Errors (README.md, O4): every uncaught error gets an id the person can quote (`E-ABCD-EFGH`, in the
  * 500 they see), and is recorded: grouped by fingerprint (its source, name and top stack frames by function name, so a
  * release's new line numbers don't split a group; util/hash), each occurrence with its route, release, trace id and,
- * signed in, its sign-in and user. Messages and stacks are redacted first (util/redact, and email addresses). A new
+ * signed in, its sign-in and user. Messages and stacks are redacted first (util/redact, and email addresses; a stack's
+ * frame locations are kept, for its source maps). A new
  * group emails the owner (at most one such email an hour), as does a group reaching SURGE occurrences in an hour.
  */
 
@@ -19,6 +20,27 @@ const EMAIL = /[^\s@<>"',;]+@[^\s@<>"',;]+\.[A-Za-z]{2,}/gu;
 
 /** A message or stack, safe to keep: secrets (util/redact) and email addresses masked, at most `max` characters. */
 export const scrub = (text: string, max: number): string => redactString(text).replaceAll(EMAIL, "«email»").slice(0, max);
+
+/** A stack frame's script and its place in it (`https://…/assets/index-CDt7ol2B.js:1:11797`). */
+const LOCATION = /[a-z][\w+.-]*:\/\/[^\s()]+?:\d+:\d+/giu;
+
+/**
+ * A stack, safe to keep: scrubbed as `scrub` does, except its frames' locations, which are kept (their query aside) so
+ * the admin app can map them through the release's source maps (O7). To util/redact a hashed chunk's name reads as a
+ * token (`dev/assets/index-CDt7ol2B`), and a `/@scope/pkg.js` frame as an email address; a script's URL is one of the
+ * site's own files, not something a person typed.
+ */
+export function scrubStack(stack: string, max: number): string {
+	let kept = "";
+	let at = 0;
+
+	for (const match of stack.matchAll(LOCATION)) {
+		kept += scrub(stack.slice(at, match.index), stack.length) + match[0].replace(/\?\S*?(?=:\d+:\d+$)/u, "");
+		at = match.index + match[0].length;
+	}
+
+	return (kept + scrub(stack.slice(at), stack.length)).slice(0, max);
+}
 
 /** An error's id, as shown to the person: `E-` and a code of util/auth/codes' (40 bits). */
 export const newErrorId = (): string => `E-${shown(newCode())}`;
@@ -56,7 +78,7 @@ export async function recordError(env: Bindings, occurrence: Occurrence): Promis
 			ON CONFLICT (fingerprint) DO UPDATE SET last_seen = excluded.last_seen, count = count + 1,
 				releases = CASE WHEN instr(',' || releases || ',', ',' || excluded.releases || ',') > 0 THEN releases ELSE substr(releases || ',' || excluded.releases, -300) END
 			RETURNING first_seen, count`).bind(fingerprint, occurrence.source, occurrence.name.slice(0, 100), message, occurrence.route.slice(0, 200), now, now, occurrence.release),
-		env.DB.prepare("INSERT INTO error_occurrences (id, fingerprint, at, route, release, trace_id, grant_id, user_id, message, stack, ip_hash, breadcrumbs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, fingerprint, now, occurrence.route.slice(0, 200), occurrence.release, occurrence.traceId ?? null, occurrence.grantId ?? null, occurrence.userId ?? null, message, occurrence.stack === undefined ? null : scrub(occurrence.stack, 4000), occurrence.ipHash ?? null, occurrence.breadcrumbs === undefined || occurrence.breadcrumbs.length === 0 ? null : occurrence.breadcrumbs.join(",").slice(0, 500))
+		env.DB.prepare("INSERT INTO error_occurrences (id, fingerprint, at, route, release, trace_id, grant_id, user_id, message, stack, ip_hash, breadcrumbs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, fingerprint, now, occurrence.route.slice(0, 200), occurrence.release, occurrence.traceId ?? null, occurrence.grantId ?? null, occurrence.userId ?? null, message, occurrence.stack === undefined ? null : scrubStack(occurrence.stack, 4000), occurrence.ipHash ?? null, occurrence.breadcrumbs === undefined || occurrence.breadcrumbs.length === 0 ? null : occurrence.breadcrumbs.join(",").slice(0, 500))
 	]);
 	const first = (group?.results[0] as { "first_seen": number } | undefined)?.first_seen === now;
 	const { tellOwner } = await import("./mail.ts");

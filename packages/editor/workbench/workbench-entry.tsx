@@ -155,7 +155,9 @@ serve(workbenchHub, "dock.closeEditor", async (args) => {
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.
 	if (!event.message.includes("ResizeObserver loop")) {
-		paneLog.error("uncaught error", { "message": event.message, "file": event.filename, "line": event.lineno });
+		// With its stack, so its report is named and grouped by where it was thrown, not lumped with every other one
+		// without (packages/api's fingerprint falls back to the route).
+		paneLog.error("uncaught error", { "message": event.message, "file": event.filename, "line": event.lineno, "stack": stackOf(event.error) });
 	}
 });
 window.addEventListener("unhandledrejection", (event) => {
@@ -171,11 +173,26 @@ window.addEventListener("unhandledrejection", (event) => {
 
 	// Capture the STACK, not just the message — a bare message is rarely enough to place a boot-time rejection.
 	// Relays to the $sys.log.> collector (debug-mcp). (This is how the workspace-fs fake-URI `e.with` was traced.)
-	paneLog.error("unhandled rejection", {
-		"reason": reason instanceof Error ? reason.message : String(reason),
-		"stack": reason instanceof Error ? reason.stack : undefined
-	});
+	paneLog.error("unhandled rejection", { "reason": reasonText(reason), "stack": stackOf(reason instanceof ErrorEvent ? reason.error : reason) });
 });
+
+/** A thrown value's stack, if it has one — also an error made in another document (a docked window's), which isn't
+ *  this realm's `Error`. */
+function stackOf(thrown: unknown): string | undefined {
+	const stack = (thrown as { "stack"?: unknown } | null | undefined)?.stack;
+
+	return typeof stack === "string" ? stack : undefined;
+}
+
+/** What a rejection's reason says: an error's message; a failure event's (a worker's, rejected as it came), with where
+ *  — never `[object ErrorEvent]`; else the value. */
+function reasonText(reason: unknown): string {
+	if (reason instanceof ErrorEvent) {
+		return `${reason.message || "a worker failed"}${reason.filename === "" ? "" : ` (${reason.filename}:${reason.lineno})`}`;
+	}
+
+	return reason instanceof Error ? reason.message : failureText(reason);
+}
 
 /** One of the editor's own extensions (`<name>:extension`: its folder, as build.ts built it, and its manifest), registered
  *  from that folder as any extension is (extensions.ts). */

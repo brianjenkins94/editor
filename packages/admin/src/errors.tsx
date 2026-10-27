@@ -141,17 +141,32 @@ function MappedStack({ text, release }: { "text": string; "release": string }) {
 	);
 }
 
-export function ErrorsPage() {
-	const read = useGet("/errors?days=7") as { "data"?: { "days": number; "errors": Group[] }; "problem"?: string };
+/** The windows the list is offered in: a group is kept 90 days after it was last seen, its occurrences 30. */
+const WINDOWS = [7, 30, 90];
+
+/** The groups seen in the last `days` (the address's `?days=`, 7 by default). */
+export function ErrorsPage({ days }: { "days": string }) {
+	const read = useGet(`/errors?days=${encodeURIComponent(days)}`) as { "data"?: { "days": number; "errors": Group[] }; "problem"?: string };
 
 	return (
 		<section class="wa-stack wa-gap-l">
-			<h1 class="wa-heading-xl">Errors</h1>
-			<p class="wa-color-text-quiet">Every uncaught error in the last 7 days, grouped by its name and where in the code it happened. A person who saw one was shown its id: find it here.</p>
+			<div class="wa-split">
+				<h1 class="wa-heading-xl">Errors</h1>
+				<wa-select
+					value={days}
+					aria-label="Window"
+					onChange={(event: Event) => {
+						location.hash = `#/errors?days=${(event.target as HTMLSelectElement).value}`;
+					}}
+				>
+					{WINDOWS.map((window) => <wa-option key={window} value={String(window)}>{`Last ${window} days`}</wa-option>)}
+				</wa-select>
+			</div>
+			<p class="wa-color-text-quiet">{`Every uncaught error in the last ${days} days, grouped by its name and where in the code it happened. A person who saw one was shown its id: find it here.`}</p>
 			<FindById />
 			{read.problem !== undefined && <wa-callout variant="danger">{read.problem}</wa-callout>}
 			{read.data === undefined ? read.problem === undefined && <wa-spinner /> : read.data.errors.length === 0 ? <p class="wa-color-text-quiet">None. 🎉</p> : (
-				<Table head={["Error", "Where", "Last 7 days", "In all", "First seen", "Last seen", "Releases"]}>
+				<Table head={["Error", "Where", `Last ${days} days`, "In all", "First seen", "Last seen", "Releases"]}>
 					{read.data.errors.map((group) => (
 						<tr key={group.fingerprint}>
 							<td><a href={`#/errors/${group.fingerprint}`}><strong>{group.name}</strong></a> <span class="wa-color-text-quiet">{group.message}</span></td>
@@ -251,8 +266,8 @@ export function ErrorOccurrencePage({ id }: { "id": string }) {
 }
 
 /** Which Errors page a path is: the list, an occurrence (by its id), or a group (by its fingerprint). */
-export function errorsPageFor(path: string) {
+export function errorsPageFor(path: string, query: URLSearchParams) {
 	const rest = decodeURIComponent(path.slice("/errors".length).replace(/^\//u, ""));
 
-	return rest === "" ? <ErrorsPage /> : isErrorId(rest) ? <ErrorOccurrencePage id={rest} /> : <ErrorGroupPage fingerprint={rest} />;
+	return rest === "" ? <ErrorsPage days={query.get("days") ?? "7"} /> : isErrorId(rest) ? <ErrorOccurrencePage id={rest} /> : <ErrorGroupPage fingerprint={rest} />;
 }

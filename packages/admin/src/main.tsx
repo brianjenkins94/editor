@@ -149,7 +149,7 @@ function Shell({ me, onSignOut }: { "me": Me; "onSignOut": () => void }) {
 						: path === "/unusual" ? <UnusualPage />
 							: path === "/architecture" ? <ArchitecturePage query={query} />
 								: path === "/mail" ? <MailPage query={query} />
-								: path === "/errors" || path.startsWith("/errors/") ? errorsPageFor(path)
+								: path === "/errors" || path.startsWith("/errors/") ? errorsPageFor(path, query)
 									: path === "/account" ? <AccountPage api={ACCOUNT} />
 								: <Overview switch={me.permissions.includes("maintenance:switch") ? <><KillSwitch maintenance={me.maintenance} /><Switches switches={me.switches} /></> : undefined} />;
 	const link = (href: string, label: string, active: boolean) => <a href={href} data-drawer="close" class={active ? "wa-link-plain active" : "wa-link-plain"}>{label}</a>;

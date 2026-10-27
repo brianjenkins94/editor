@@ -6,7 +6,8 @@
  *   - every realm's uncaught errors (the root forwards them), and the shell's own, signed in or not, each answered with
  *     an id the person is shown, to quote. Signed out, the API keeps nothing of who but a daily IP hash.
  * Not from automation (tests' browsers, `navigator.webdriver`) or a copy of the editor that can't sign in: their errors
- * aren't anyone's to look into.
+ * aren't anyone's to look into. Nor once the page is going (`pagehide`): what fails as it's torn down — IndexedDB's
+ * "The database connection is closing", VS Code's log writes on it — is the leaving, not a fault.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import release from "editor:release";
@@ -34,6 +35,15 @@ export function startReporting(hub: Hub, onReported: (id: string) => void): Repo
 	const recent = new Map<string, number>();
 	let reports = 0;
 	const quiet = navigator.webdriver;
+	let leaving = false;
+
+	window.addEventListener("pagehide", () => {
+		leaving = true;
+	});
+	// (back from the back-forward cache, it's here again)
+	window.addEventListener("pageshow", () => {
+		leaving = false;
+	});
 
 	const event = (happened: Event): void => {
 		breadcrumbs.push(happened.name);
@@ -47,7 +57,7 @@ export function startReporting(hub: Hub, onReported: (id: string) => void): Repo
 		const now = Date.now();
 
 		// The workbench's errors arrive twice (its own listener and the error tap's): once a minute is enough.
-		if (quiet || reports >= REPORTS || now - (recent.get(key) ?? 0) < SAME) {
+		if (quiet || leaving || reports >= REPORTS || now - (recent.get(key) ?? 0) < SAME) {
 			return;
 		}
 
@@ -84,7 +94,7 @@ export function startReporting(hub: Hub, onReported: (id: string) => void): Repo
 		const reason = failure.reason as unknown;
 
 		if (!(reason instanceof Error && (reason.name === "AbortError" || reason.name === "Canceled"))) {
-			report({ "message": reason instanceof Error ? reason.message : String(reason), "stack": reason instanceof Error ? reason.stack : undefined, "source": "shell" });
+			report({ "message": reason instanceof Error || reason instanceof ErrorEvent ? reason.message : String(reason), "stack": reason instanceof Error ? reason.stack : undefined, "source": "shell" });
 		}
 	});
 
