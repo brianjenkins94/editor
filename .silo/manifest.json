@@ -1121,6 +1121,7 @@
         "packages/site/admin.jsonc",
         "packages/site/editor.jsonc",
         "packages/site/public/_redirects",
+        "packages/site/public/robots.txt",
         "packages/site/src/gate.ts",
         "packages/site/wrangler.jsonc"
       ]

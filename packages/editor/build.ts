@@ -649,7 +649,8 @@ async function hostBuild(): Promise<void> {
  * What a static host needs to serve the site well, beside it. The production site (packages/site/editor.jsonc, Workers
  * static assets) reads `_headers` — real cross-origin isolation headers, so the first load needn't wait for the service
  * worker to stamp them — `_redirects`, which serves the editor's page at every `env/<owner>/<repo>` (shell/address.ts), and
- * `.assetsignore`: the package tarballs are the releases' and Pages', not the site's, and source maps are kept apart. GitHub Pages reads none of them;
+ * `.assetsignore`: the package tarballs are the releases' and Pages', not the site's, and source maps are kept apart; and
+ * `robots.txt`, turning crawlers away. GitHub Pages reads none of them;
  * there `404.html` is the editor's page, so a deep link opens the editor (with a 404 status, which the page doesn't mind).
  */
 function staticHostPlugin(): Plugin {
@@ -670,6 +671,9 @@ function staticHostPlugin(): Plugin {
 			// placeholders, not `/env/*`: a splat rewrite 404s under "none".
 			this.emitFile({ "type": "asset", "fileName": "_redirects", "source": ["/ /index.html 200", "/env/:owner/:repo /index.html 200", "/env/:owner/:repo/ /index.html 200", ""].join("\n") });
 			this.emitFile({ "type": "asset", "fileName": ".assetsignore", "source": "packages/\n*.map\n" });
+			// Crawlers that ask are sent to the root domain, which asks them to pay (packages/site/src/gate.ts); the editor stays
+			// static files with no Worker in front, so it can't. Pages serves this at /editor/robots.txt, where nobody looks.
+			this.emitFile({ "type": "asset", "fileName": "robots.txt", "source": "User-agent: *\nDisallow: /\n" });
 		}
 	};
 }

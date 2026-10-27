@@ -61,7 +61,8 @@ function build(env: Env) {
 
 export default {
 	"fetch": function(request: Request, env: Env, context: ExecutionContext) {
-		if (isBrowser(request)) {
+		// robots.txt is free to everyone: it's what invites a crawler here (public/robots.txt), and the editor's turns it away.
+		if (isBrowser(request) || new URL(request.url).pathname === "/robots.txt") {
 			return env.ASSETS.fetch(request);
 		}
 
