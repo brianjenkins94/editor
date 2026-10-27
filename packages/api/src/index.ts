@@ -78,7 +78,7 @@ const limit = (maxSize: number): ReturnType<typeof bodyLimit> => bodyLimit({
 });
 
 // OAuth forms are a few hundred bytes; a commit's blobs can be large (GitHub takes up to 100 MB a blob, the Worker 100
-// MB a request); a clone's upload-pack request is its wants and haves.
+// MB a request); a clone's upload-pack request is its wants and haves; a push's receive-pack request is its pack.
 app.use("/token", limit(4 * 1024));
 app.use("/auth/par", limit(4 * 1024));
 app.use("/auth/email/*", limit(4 * 1024));
@@ -97,7 +97,7 @@ app.use("/sessions/*", limit(4 * 1024));
 app.use("/account/*", limit(4 * 1024));
 app.use("/admin/*", limit(4 * 1024));
 app.use("/github/api/*", limit(32 * 1024 * 1024));
-app.use("/github/git/*", limit(1024 * 1024));
+app.use("/github/git/*", async (context, next) => (context.req.path.endsWith("/git-receive-pack") ? limit(32 * 1024 * 1024) : limit(1024 * 1024))(context, next));
 
 // The app calls from its own origin (GitHub Pages, in dev): its pages' (src/clients.ts), no others, and never
 // with cookies — the credential is the DPoP-bound Authorization header.

@@ -99,7 +99,8 @@ test("a proxied call is its template: the query's names kept, every value left f
 	assert.deepEqual(proxied("api", "GET", "/user", ""), { "template": "GET /user", "rest": "" });
 	assert.equal(proxied("api", "DELETE", "/repos/octo/hello", ""), undefined, "a method the editor doesn't use");
 	assert.equal(proxied("api", "GET", "/repos/octo/hello/git/ref/heads/../../secret", ""), undefined, "a ref can't climb");
-	assert.equal(proxied("git", "GET", "/octo/hello.git/info/refs", "?service=git-receive-pack"), undefined, "never a push");
+	assert.deepEqual(proxied("git", "GET", "/octo/hello.git/info/refs", "?service=git-receive-pack"), { "template": "GET /:owner/:repo.git/info/refs?service", "repository": "octo/hello", "rest": "?service=git-receive-pack" }, "a push's, the same template as a clone's");
+	assert.equal(proxied("git", "GET", "/octo/hello.git/info/refs", "?service=git-upload-archive"), undefined, "no other service");
 });
 
 test("a route that doesn't exist, asked for while signed in, is a probe: 404, recorded with its path hashed", async () => {

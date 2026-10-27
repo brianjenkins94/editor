@@ -43,13 +43,14 @@ How it's kept:
      - The Margin pane draws inside the references peek.
 
    The steps left:
-   - (b) Push:
-     - the proxy allows `git-receive-pack`;
-     - the workbench's isomorphic-git pushes through an HTTP client the shell relays, so the key stays in the shell;
-     - new tools: `git_push`, `git_branch` and `git_checkout`;
-     - decide what becomes of the shell's snapshot `commitFiles`.
-
-     Signing in is yours, and the production GitHub App needs to be installed on the repo.
+   - (b) Push: built. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
+     through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user
+     (`git.identity`). The terminal has `git push` / `switch` / `checkout`, and agents have `git_push`, `git_branch`
+     and `git_checkout`. Checked end to end up to the sign-in (signed out, it says to sign in). Still to do:
+     - the first real push, once you've signed in on editor.unusuallygood.dev with the production GitHub App
+       installed on the repo;
+     - decide what becomes of the shell's Commit button (`commitFiles`, one REST commit of the whole workspace),
+       now that a push exists.
    - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
      providers plus `applyEdit`.
    - (d) CI on the pushed branch checks the work.

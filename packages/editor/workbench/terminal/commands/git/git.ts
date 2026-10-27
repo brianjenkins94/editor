@@ -10,6 +10,7 @@
  */
 import type { Juvy } from "@brianjenkins94/util/juvy";
 import type { CommandHost, CommandResult, Handler } from "../../catalog";
+import { createRpcClient } from "@brianjenkins94/hub";
 import { version } from "isomorphic-git";
 import * as engine from "../../../git-engine";
 import { unifiedDiff } from "../../../git-service";
@@ -143,6 +144,25 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 		hub.publish("git.changed");
 	};
 
+	/** `git switch [-c] <name>`, `git checkout [-b] <name>`. */
+	const switchTo = async (config: Juvy): Promise<Result> => {
+		const name = config.get("name") as string;
+		const create = config.get("create") === true;
+
+		if (name === "") {
+			return fail("fatal: missing branch name", 128);
+		}
+
+		if (!create && !(await engine.branches()).all.includes(name)) {
+			return fail(`fatal: invalid reference: ${name} (git switch -c ${name} makes it; git restore <path> undoes a file's changes)`, 128);
+		}
+
+		await engine.switchBranch(name, create);
+		changed();
+
+		return { "stdout": "", "stderr": `Switched to ${create ? "a new " : ""}branch '${name}'\n`, "exitCode": 0 };
+	};
+
 	// Each handler's failure is git's: `fatal: …`, 128.
 	const guarded = (handler: Handler): Handler => async (config, ctx) => {
 		try {
@@ -244,6 +264,21 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 			const { current, all } = await engine.branches();
 
 			return ok(all.map((each) => `${each === current ? "*" : " "} ${each}\n`).join(""));
+		},
+		"switch": async (config) => switchTo(config),
+		"checkout": async (config) => switchTo(config),
+		"push": async (config) => {
+			if (config.get("remote") !== "origin") {
+				return fail(`fatal: '${config.get("remote") as string}' does not appear to be a git repository — this workspace has origin, where it was loaded from`, 128);
+			}
+
+			const branch = config.get("branch") as string;
+			// (the git service's push: it asks the shell, which has the sign-in, to send it)
+			const pushed = await createRpcClient(hub).request("git.push", { ...branch === "" ? {} : { "ref": branch }, "force": config.get("force") === true }, { "timeoutMs": 300_000 }) as { "ref": string; "ok": boolean; "error"?: string; "url": string };
+
+			return pushed.ok
+				? { "stdout": "", "stderr": `To ${pushed.url}\n   ${pushed.ref} -> ${pushed.ref}\n`, "exitCode": 0 }
+				: fail(`To ${pushed.url}\n ! [rejected]        ${pushed.ref} -> ${pushed.ref} (${pushed.error ?? "refused"})\nerror: failed to push some refs to '${pushed.url}'`);
 		}
 	} satisfies Record<string, Handler>).map(([name, handler]) => [name, guarded(handler)]));
 }

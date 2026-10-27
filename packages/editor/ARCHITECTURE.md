@@ -621,14 +621,14 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.architecture_violations.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()`, `tool.terminal_run.*()` |
+| Root | tool | `tool.architecture_violations.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_push.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()`, `tool.terminal_run.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
 | Shell | capability | `capability.prompt()`, `capability.watched()` |
 | Shell | debug | `debug.state` |
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
-| Shell | git | `git.changed` |
+| Shell | git | `git.changed`, `git.identity()`, `git.remote()` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
 | Shell | session | `session.event` |
 | Shell | theme | `theme.colors` |
@@ -639,7 +639,7 @@ flowchart LR
 | Workbench | editor | `editor.state()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | files | `files.edit()`, `files.glob()`, `files.grep()`, `files.read()`, `files.write()` |
-| Workbench | git | `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.status()` |
+| Workbench | git | `git.branch()`, `git.checkout()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.push()`, `git.status()` |
 | Workbench | history | `history.chunks()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | notifications | `notifications.list()` |
@@ -693,7 +693,10 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
   with two faces: VS Code's Source Control view (`extensions/source-control/`, a browser-only extension, through the
   `editor.git.*` commands; a change is a file change, as its watcher sees it) and the
   shell's GitHub-Desktop review panel (`git-panel`). We do not ship SCM to desktop; desktop already has it.
-  (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.)
+  (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.) A push (`git.push`, beside
+  `git.branch` and `git.checkout`) is the engine's isomorphic-git with the shell's HTTP: its requests cross as
+  `git.remote` (shared/git-remote.ts) to the shell, which holds the sign-in and sends them through the API's proxy
+  (shell/git-push.ts); the shell also says who a commit is by (`git.identity`, the signed-in GitHub user).
 - `bablr-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. Since
   2026-10-15 it's a **standalone extension** (`extensions/cosmetic`): HEAD vs working through the editor's git commands,
   BABLR's verdict through `editor.annotations.classify`, the badge a file decoration VS Code draws wherever the file is

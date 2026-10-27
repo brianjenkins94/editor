@@ -155,7 +155,8 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 	return relay(upstream, [api, `${url.origin}/github/api`], held.release, await called(context, upstream.status));
 }
 
-/** /github/git/<owner>/<repo>.git/… → github.com, for a clone's info/refs and git-upload-pack. */
+/** /github/git/<owner>/<repo>.git/… → github.com, for a clone's info/refs and git-upload-pack, and a push's info/refs and
+ *  git-receive-pack. */
 export async function githubGit(context: Context<AppEnv>): Promise<Response> {
 	const url = new URL(context.req.url);
 	const path = url.pathname.slice("/github/git".length);

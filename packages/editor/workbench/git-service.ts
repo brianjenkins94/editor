@@ -8,8 +8,10 @@ import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
-import { serve } from "@brianjenkins94/hub";
+import type { RemoteResponse } from "../shared/git-remote";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
+import { remoteHttp } from "../shared/git-remote";
 import * as engine from "./git-engine";
 
 const DIR = "/workspace";
@@ -115,6 +117,50 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 	serve(hub, "git.commit", async (args) => commit(args));
 	vscode.commands.registerCommand("editor.git.commit", async (message: unknown) => commit({ "message": typeof message === "string" ? message : undefined }));
+
+	// What only the shell has — the sign-in — asked of it: who a commit is by, and a push's requests (shell/git-push.ts).
+	const shell = createRpcClient(hub);
+
+	engine.setAuthor(async () => await shell.request("git.identity", undefined, { "timeoutMs": 10_000 }) as { "name": string; "email": string } | null ?? undefined);
+
+	// The branches; with a `name`, one made at HEAD (`git branch <name>`).
+	serve(hub, "git.branch", async (args) => {
+		const name = (args as { "name"?: unknown } | null)?.name;
+
+		if (typeof name === "string" && name !== "") {
+			await engine.createBranch(name);
+		}
+
+		return engine.branches();
+	});
+	// Onto another branch — made at HEAD first with `create` (`git switch -c`), the working tree as it is.
+	serve(hub, "git.checkout", async (args) => {
+		const { name, create } = (args ?? {}) as { "name"?: unknown; "create"?: unknown };
+
+		if (typeof name !== "string" || name === "") {
+			throw new TypeError("git.checkout needs a branch name.");
+		}
+
+		await engine.switchBranch(name, create === true);
+		hub.publish("git.changed");
+
+		return engine.branches();
+	});
+	// A branch (the current one, by default) pushed to the repository it was cloned from, through the shell.
+	serve(hub, "git.push", async (args) => {
+		const { ref, force } = (args ?? {}) as { "ref"?: unknown; "force"?: unknown };
+		const url = await engine.githubRemote();
+
+		if (url === undefined) {
+			throw new Error("this workspace wasn't loaded from a GitHub repository, so there's nowhere to push it");
+		}
+
+		const pushed = await engine.push(remoteHttp(async (request) => await shell.request("git.remote", request, { "timeoutMs": 300_000 }) as RemoteResponse), url, typeof ref === "string" && ref !== "" ? ref : undefined, force === true);
+
+		log.info("git push", { "ref": pushed.ref, "ok": pushed.ok });
+
+		return { ...pushed, "url": url };
+	});
 
 	// Discard a file's working-tree changes: whole file (restore HEAD / delete), or a PARTIAL discard when the shell
 	// sends the exact post-discard `content` (working with the chosen hunks reverted).

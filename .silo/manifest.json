@@ -629,6 +629,23 @@
         "packages/editor/workbench/git-engine.ts"
       ]
     },
+    "Push to GitHub": {
+      "what": "A branch of the workspace's git pushed to the GitHub repository it was loaded from, through the editor's sign-in, its commits by the signed-in user; branches made and switched to.",
+      "ways": [
+        "agent tool|git_branch",
+        "agent tool|git_checkout",
+        "agent tool|git_push",
+        "hub request|git.branch",
+        "hub request|git.checkout",
+        "hub request|git.identity",
+        "hub request|git.push",
+        "hub request|git.remote"
+      ],
+      "paths": [
+        "packages/editor/shared/git-remote.ts",
+        "packages/editor/shell/git-push.ts"
+      ]
+    },
     "Source Control for git": {
       "what": "The Source Control view shows staged and unstaged changes with diffs against the last commit, and commits from its input box.",
       "docs": "packages/editor/ARCHITECTURE.md, *Worked examples (the git/SCM + BABLR stack)*",

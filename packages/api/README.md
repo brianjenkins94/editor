@@ -114,8 +114,9 @@ nothing of the editor in it, free of storage and frameworks, the caller supplyin
 
 ### The proxy
 
-Exactly the editor's API calls (src/behavior.ts) and a clone's git reads, never a push (`git-receive-pack` waits for
-commit-back to move to git). It retired `cors.isomorphic-git.org` for signed-in clones. It never forwards our
+Exactly the editor's API calls (src/behavior.ts), a clone's git reads, and a push (`git-receive-pack`: the workspace's
+git pushes through it, packages/editor/shell/git-push.ts, a pack up to 32 MB). It retired `cors.isomorphic-git.org`
+for signed-in clones. It never forwards our
 `Authorization` or `DPoP` upstream, nor GitHub's token-bearing headers back.
 
 ## Sign-in methods

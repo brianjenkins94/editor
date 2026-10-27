@@ -6,14 +6,16 @@
  * a custom shell UI / the RHS revision history later, with the view swapped and the engine untouched. It's also the
  * COARSE (git) tier of the eventual two-tier history (Automerge = fine local edits, git = published commits).
  *
- * Phase 1 is OFFLINE and LOCAL: init / status / stage / commit + HEAD blobs for diff — no network, no auth. Clone
- * (public repos) and push / commit-back (auth, Cloudflare) are later phases; they add functions here, not a rewrite.
+ * Local, but for one thing: init / status / stage / commit / branches + HEAD blobs for diff, and a push. A push's HTTP is
+ * the caller's (`push`'s `http`): the workbench's goes through the shell, which holds the sign-in (shell/git-push.ts).
+ * Who a commit is by is the caller's too (`setAuthor`): the signed-in GitHub user, else a placeholder.
  */
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
-import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
+import type { HttpClient } from "isomorphic-git";
+import { add, branch, checkout, commit, currentBranch, getConfig, push as gitPush, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
 // read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
@@ -24,8 +26,16 @@ import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, 
 
 /** The workspace is the repo root (zen-fs mounts the SingleBuffer here; see workspace-fs.ts). */
 const DIR = "/workspace";
-/** Placeholder identity for local commits (a real signed-in identity arrives with the auth milestone). */
+/** Who a commit is by when nothing says (signed out). */
 const AUTHOR = { "name": "editor", "email": "editor@localhost" };
+
+/** Who a commit is by: asked as each is made (setAuthor). */
+let authorOf: () => Promise<{ "name": string; "email": string } | undefined> = () => Promise.resolve(undefined);
+
+/** Where who a commit is by comes from (git-service.ts: the shell's signed-in GitHub user). */
+export function setAuthor(source: typeof authorOf): void {
+	authorOf = source;
+}
 
 export interface GitChange { "path": string; "status": "A" | "M" | "D" }
 export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
@@ -168,7 +178,7 @@ export interface Committed { "oid": string }
 async function committed(message: string): Promise<Committed> {
 	await stageSiloSeeds();
 
-	return { "oid": await commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR }) };
+	return { "oid": await commit({ "fs": fs, "dir": DIR, "message": message, "author": await authorOf().catch(() => undefined) ?? AUTHOR }) };
 }
 
 /** Commit what's staged, and only that (`git commit`): the new commit (`Committed`). */
@@ -190,12 +200,54 @@ export async function history(depth?: number): Promise<LogEntry[]> {
 
 /** The branches, and which one HEAD is on. */
 export async function branches(): Promise<{ "current": string | undefined; "all": string[] }> {
-	return { "current": await currentBranch({ "fs": fs, "dir": DIR }) ?? undefined, "all": await listBranches({ "fs": fs, "dir": DIR }) };
+	return { "current": await currentBranch({ "fs": fs, "dir": DIR }) || undefined, "all": await listBranches({ "fs": fs, "dir": DIR }) };
 }
 
 /** Make a branch at HEAD (without switching to it, as `git branch <name>` does). */
 export async function createBranch(name: string): Promise<void> {
 	await branch({ "fs": fs, "dir": DIR, "ref": name });
+}
+
+/**
+ * Switch to the branch `name` — made at HEAD first when `create` (`git switch -c`), which leaves the working tree as it
+ * is. An existing one's files are checked out: isomorphic-git refuses when that would overwrite a change.
+ */
+export async function switchBranch(name: string, create = false): Promise<void> {
+	if (create) {
+		await branch({ "fs": fs, "dir": DIR, "ref": name, "checkout": true });
+	} else {
+		await checkout({ "fs": fs, "dir": DIR, "ref": name });
+	}
+}
+
+/** The repository a remote names on github.com — `https://github.com/<owner>/<repo>.git` — whichever way it was cloned
+ *  (straight, through a CORS proxy, or through the API's proxy: `…/github/git/<owner>/<repo>.git`); undefined for a
+ *  remote anywhere else, or none. */
+export async function githubRemote(remote = "origin"): Promise<string | undefined> {
+	const url = await getConfig({ "fs": fs, "dir": DIR, "path": `remote.${remote}.url` }) as string | undefined;
+	const repository = /(?:github\.com|\/github\/git)\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/u.exec(url ?? "")?.[1];
+
+	return repository === undefined ? undefined : `https://github.com/${repository}.git`;
+}
+
+/** What a push did: the branch, and the remote's answer for it (`ok`, or its error). */
+export interface Pushed { "ref": string; "ok": boolean; "error"?: string }
+
+/** Push `ref` (the current branch, by default) to `url` as the same branch, over `http`. A rejected update (not a fast
+ *  forward, a protected branch) is said, not thrown. */
+export async function push(http: HttpClient, url: string, ref?: string, force = false): Promise<Pushed> {
+	const branchName = ref ?? (await currentBranch({ "fs": fs, "dir": DIR }) || undefined);
+
+	if (branchName === undefined) {
+		throw new Error("HEAD is on no branch: name one to push");
+	}
+
+	// (no CORS proxy: a clone signed out names one in the repository's config, which a push would otherwise go through —
+	// the caller's `http` is how it goes)
+	const result = await gitPush({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": branchName, "remoteRef": branchName, "force": force });
+	const answer = result.refs[`refs/heads/${branchName}`];
+
+	return { "ref": branchName, "ok": result.ok && answer?.ok !== false, ...answer?.error === undefined ? {} : { "error": answer.error } };
 }
 
 /** Stage all changes, then commit: the new commit (`Committed`). */

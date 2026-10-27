@@ -16,10 +16,11 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
 import type { VsCodeColors } from "theme/vscode-colors";
+import type { RemoteRequest } from "../shared/git-remote";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { LaunchTarget, RunInfo } from "../shared/runs";
 import type { RepoBinding } from "./github-auth";
-import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, Share2 } from "lucide";
 import { render } from "preact";
@@ -252,6 +253,10 @@ function Shell() {
 		const shellHub = createHub({ "id": "shell" });
 		// The main region is a dock: the editor iframe is its fixed panel, VS Code's new windows dock around it.
 		const dock = createShellDock(dockHost, shellHub);
+
+		// A push from the workspace's git, and who its commits are by: the sign-in's, so the shell's (git-push.ts).
+		serve(shellHub, "git.remote", async (args) => (await import("./git-push")).remote(args as RemoteRequest));
+		serve(shellHub, "git.identity", async () => (await import("./git-push")).identity());
 		const appFrame = dock.editorFrame;
 
 		// A TypeScript Playground link (playground-link.ts) is a one-shot import: it's opened once the app answers below,

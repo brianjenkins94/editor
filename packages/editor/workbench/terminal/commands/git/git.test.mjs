@@ -65,9 +65,23 @@ test("branch, and what isn't here says what to do", async () => {
 	assert.equal((await git("branch")).stdout, "* main\n");
 	await git("branch feature");
 	assert.equal((await git("branch")).stdout, "  feature\n* main\n");
-	assert.match((await git("push")).stderr, /local — the Commit button/u);
+	assert.match((await git("push upstream")).stderr, /has origin, where it was loaded from/u);
+	assert.match((await git("merge")).stderr, /merging isn't here yet/u);
 	assert.match((await git("frobnicate")).stderr, /unknown git command 'frobnicate'/u, "juvy's routing");
 	assert.match((await git("stats")).stderr, /Did you mean 'status'\?/u);
 	assert.match((await git("status --bogus")).stderr, /Unknown option '--bogus'/u, "juvy's parsing");
 	assert.match((await git("--version")).stdout, /^git version isomorphic-git /u);
+});
+
+test("switch and checkout: onto a branch, -c / -b making it first with the changes kept", async () => {
+	fs.writeFileSync("/workspace/app.ts", "export const answer = 44;\n");
+	assert.equal((await git("switch -c refactor")).stderr, "Switched to a new branch 'refactor'\n");
+	assert.equal((await git("branch")).stdout, "  feature\n  main\n* refactor\n");
+	assert.equal(fs.readFileSync("/workspace/app.ts", "utf8"), "export const answer = 44;\n", "the change is still there");
+	await git("commit -a -m 'on refactor'");
+	assert.equal((await git("checkout main")).stderr, "Switched to branch 'main'\n");
+	assert.equal(fs.readFileSync("/workspace/app.ts", "utf8"), "export const answer = 43 + 0;\n", "main's file");
+	assert.match((await git("switch nowhere")).stderr, /invalid reference: nowhere \(git switch -c nowhere makes it/u);
+	assert.equal((await git("checkout -b other")).exitCode, 0);
+	assert.ok(announced.includes("git.changed"));
 });

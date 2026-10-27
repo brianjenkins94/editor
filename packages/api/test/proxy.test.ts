@@ -167,7 +167,7 @@ test("a commit's writes go through: blobs, trees, commits, then moving the ref",
 
 test("anything the editor doesn't call is refused, and audited with its method and its path hashed (what was guessed)", async () => {
 	const before = seen.length;
-	const calls = [["GET", "/github/api/user/emails"], ["GET", "/github/api/repos/octo/hello/collaborators"], ["POST", "/github/api/repos/octo/hello/git/refs/heads/main"], ["GET", "/github/api/repos/octo/hello/git/ref/heads%2F..%2F..%2Fsecret"], ["POST", "/github/git/octo/hello.git/git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs?service=git-receive-pack"], ["GET", "/github/git/octo/hello.git/info/refs"]] as const;
+	const calls = [["GET", "/github/api/user/emails"], ["GET", "/github/api/repos/octo/hello/collaborators"], ["POST", "/github/api/repos/octo/hello/git/refs/heads/main"], ["GET", "/github/api/repos/octo/hello/git/ref/heads%2F..%2F..%2Fsecret"], ["POST", "/github/git/octo/hello.git/git-upload-archive"], ["GET", "/github/git/octo/hello.git/info/refs?service=git-upload-archive"], ["GET", "/github/git/octo/hello.git/info/refs"]] as const;
 
 	// Two sign-ins, fewer than five refusals each: five in ten minutes end a sign-in (the next test).
 	for (const batch of [calls.slice(0, 4), calls.slice(4)]) {
@@ -218,6 +218,20 @@ test("a clone's two requests go to github.com with the token as git's password",
 
 	assert.equal(pack.status, 200);
 	assert.match(lastTo("/octo/hello.git/git-upload-pack")?.body ?? "", /^0032want/u);
+});
+
+test("a push's two requests go to github.com the same way, the pack as it was sent", async () => {
+	const github = fresh();
+	const session = await signedIn(github);
+
+	assert.equal((await session.call("GET", "/github/git/octo/hello.git/info/refs?service=git-receive-pack")).status, 200);
+	assert.equal(lastTo("/octo/hello.git/info/refs")?.headers.authorization, `Basic ${btoa(`x-access-token:${github.accessToken}`)}`);
+
+	const pack = await session.call("POST", "/github/git/octo/hello.git/git-receive-pack", { "headers": { "content-type": "application/x-git-receive-pack-request" }, "body": "0077" + "0".repeat(2 * 1024 * 1024) });
+
+	assert.equal(pack.status, 200, "a pack past a clone request's megabyte");
+	assert.match(lastTo("/octo/hello.git/git-receive-pack")?.body ?? "", /^0077/u);
+	assert.equal((await session.call("POST", "/github/git/octo/hello.git/git-receive-pack", { "headers": { "content-type": "application/x-git-receive-pack-request" }, "body": "0".repeat(33 * 1024 * 1024) })).status, 413, "but not past 32");
 });
 
 test("signed out, there's no proxy", async () => {

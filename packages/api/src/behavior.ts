@@ -18,7 +18,7 @@ export async function keyed(env: Bindings, scope: string, value: string): Promis
 // ── Actions ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The GitHub calls the editor makes (packages/editor/shell/github.ts for the API, a clone's fetch for git), as templates:
+ * The GitHub calls the editor makes (packages/editor/shell/github.ts for the API, a clone's fetch and a push for git), as templates:
  * the proxy allows these and nothing else (src/proxy.ts), and records each call as its template. `:owner` and `:repo` are
  * names, `:ref` a ref or sha (no `..`, so it can't climb out of the repository it names). A git entry also names the
  * query it must have.
@@ -37,7 +37,9 @@ export const PROXIED: { "base": "api" | "git"; "method": string; "template": str
 	{ "base": "api", "method": "PATCH", "template": "/repos/:owner/:repo/git/refs/:ref" },
 	{ "base": "api", "method": "POST", "template": "/repos/:owner/:repo/pages" },
 	{ "base": "git", "method": "GET", "template": "/:owner/:repo.git/info/refs", "search": "?service=git-upload-pack" },
-	{ "base": "git", "method": "POST", "template": "/:owner/:repo.git/git-upload-pack", "search": "" }
+	{ "base": "git", "method": "POST", "template": "/:owner/:repo.git/git-upload-pack", "search": "" },
+	{ "base": "git", "method": "GET", "template": "/:owner/:repo.git/info/refs", "search": "?service=git-receive-pack" },
+	{ "base": "git", "method": "POST", "template": "/:owner/:repo.git/git-receive-pack", "search": "" }
 ];
 
 const PARAMETERS: Record<string, string> = { ":owner": "([\\w.-]+)", ":repo": "([\\w.-]+)", ":ref": "((?!.*\\.\\.)[\\w./-]+)" };
@@ -219,7 +221,7 @@ export function gapOf(milliseconds: number): number {
 const GAPS = 4;
 
 /**
- * What the editor and the admin app do, in order (packages/editor/shell/github.ts, git-clone.ts, session.ts;
+ * What the editor and the admin app do, in order (packages/editor/shell/github.ts, git-clone.ts, git-push.ts, session.ts;
  * packages/admin/src): the model's prior, so it starts from the code rather than from nothing, and so a flow that's in
  * the code is never unusual however few people have used it yet. Each step is counted PRIOR_WEIGHT times: enough that
  * every action in a flow can be scored from the first day (OBSERVED).
@@ -229,6 +231,8 @@ export const FLOWS: string[][] = [
 	[START, "POST /token", "GET /github/api/user"],
 	// Opening a repository: what it is, then a clone.
 	["GET /github/api/user", "GET /github/api/repos/:owner/:repo", "GET /github/git/:owner/:repo.git/info/refs?service", "POST /github/git/:owner/:repo.git/git-upload-pack"],
+	// A push from the workspace's git: what the remote has, then the pack.
+	["GET /github/git/:owner/:repo.git/info/refs?service", "POST /github/git/:owner/:repo.git/git-receive-pack"],
 	// Or through the API: its tree, then each blob.
 	["GET /github/api/repos/:owner/:repo", "GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive", "GET /github/api/repos/:owner/:repo/git/blobs/:ref", "GET /github/api/repos/:owner/:repo/git/blobs/:ref"],
 	// Committing: the branch, its commit, each blob, a tree, the commit, the branch moved.
