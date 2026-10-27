@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { fs } from "@zenfs/core";
 import { Bash } from "just-bash/browser";
 
+import { commit, hashBlob, readTree, resolveRef, updateIndex } from "isomorphic-git";
+
 import { ensureRepo } from "../../../git-engine.ts";
 import { toCommand } from "../../invoke.ts";
 import definition from "./command.ts";
@@ -84,4 +86,17 @@ test("switch and checkout: onto a branch, -c / -b making it first with the chang
 	assert.match((await git("switch nowhere")).stderr, /invalid reference: nowhere \(git switch -c nowhere makes it/u);
 	assert.equal((await git("checkout -b other")).exitCode, 0);
 	assert.ok(announced.includes("git.changed"));
+});
+
+test("a script HEAD has as executable stays so through an edit: the workspace's filesystem keeps no executable bit", async () => {
+	fs.writeFileSync("/workspace/run.sh", "echo one\n");
+	await git("add run.sh");
+	// (as a clone of a repository with an executable script has it: the index says 100755, the file is 0644)
+	await updateIndex({ "fs": fs, "dir": "/workspace", "filepath": "run.sh", "oid": (await hashBlob({ "object": "echo one\n" })).oid, "mode": 0o100755, "add": true });
+	await commit({ "fs": fs, "dir": "/workspace", "message": "a script", "author": { "name": "t", "email": "t@t" } });
+	fs.writeFileSync("/workspace/run.sh", "echo two\n");
+	await git("commit -a -m 'edit the script'");
+	const tree = await readTree({ "fs": fs, "dir": "/workspace", "oid": await resolveRef({ "fs": fs, "dir": "/workspace", "ref": "HEAD" }) });
+
+	assert.equal(tree.tree.find((entry) => entry.path === "run.sh")?.mode, "100755");
 });

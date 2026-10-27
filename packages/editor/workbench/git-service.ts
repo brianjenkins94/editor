@@ -121,7 +121,20 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 	// What only the shell has — the sign-in — asked of it: who a commit is by, and a push's requests (shell/git-push.ts).
 	const shell = createRpcClient(hub);
 
-	engine.setAuthor(async () => await shell.request("git.identity", undefined, { "timeoutMs": 10_000 }) as { "name": string; "email": string } | null ?? undefined);
+	const identity = async (): Promise<{ "name": string; "email": string } | undefined> => {
+		try {
+			return await shell.request("git.identity", undefined, { "timeoutMs": 30_000 }) as { "name": string; "email": string } | null ?? undefined;
+		} catch (error) {
+			log.warn("who a commit is by: unknown, so it's the placeholder's", { "error": error instanceof Error ? error.message : String(error) });
+
+			return undefined;
+		}
+	};
+
+	engine.setAuthor(identity);
+	// Asked now, so the first commit doesn't wait on GitHub (the shell keeps the answer): asked cold, as a page still
+	// loading this repository answered it, it took longer than a commit waited (editor 2be5c8a, by the placeholder).
+	void identity();
 
 	// The branches; with a `name`, one made at HEAD (`git branch <name>`).
 	serve(hub, "git.branch", async (args) => {

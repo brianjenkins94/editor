@@ -15,7 +15,7 @@ import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import type { HttpClient } from "isomorphic-git";
-import { add, branch, checkout, commit, currentBranch, getConfig, push as gitPush, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
+import { add, branch, checkout, commit, currentBranch, getConfig, push as gitPush, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
 // read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
@@ -174,9 +174,40 @@ async function stageSiloSeeds(): Promise<void> {
 /** A commit made: its oid. */
 export interface Committed { "oid": string }
 
-/** The commit, `.silo/`'s seeds staged with it. */
+/**
+ * The workspace's filesystem keeps no executable bit — whatever writes a file there, it's 0644 — so a file can reach the
+ * index as 100644 that HEAD has as 100755 (editor 2be5c8a pushed four scripts that way). Before a commit, a file HEAD has
+ * as executable is given its bit back: a script stays one, edited or not. (A new file can't say it's one.)
+ */
+async function keepExecutables(): Promise<void> {
+	if (await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }).catch(() => undefined) === undefined) {
+		return;
+	}
+
+	const lost: { "path": string; "oid": string }[] = [];
+
+	await walk({
+		"fs": fs,
+		"dir": DIR,
+		"trees": [TREE({ "ref": "HEAD" }), STAGE()],
+		"map": async (path, [head, staged]) => {
+			if (head !== null && staged !== null && await head.type() === "blob" && await head.mode() === 0o100755 && await staged.mode() !== 0o100755) {
+				lost.push({ "path": path, "oid": await staged.oid() });
+			}
+
+			return true;
+		}
+	});
+
+	for (const { path, oid } of lost) {
+		await updateIndex({ "fs": fs, "dir": DIR, "filepath": path, "oid": oid, "mode": 0o100755, "add": true });
+	}
+}
+
+/** The commit, `.silo/`'s seeds staged with it, and HEAD's executables kept so. */
 async function committed(message: string): Promise<Committed> {
 	await stageSiloSeeds();
+	await keepExecutables();
 
 	return { "oid": await commit({ "fs": fs, "dir": DIR, "message": message, "author": await authorOf().catch(() => undefined) ?? AUTHOR }) };
 }

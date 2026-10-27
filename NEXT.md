@@ -43,14 +43,21 @@ How it's kept:
      - The Margin pane draws inside the references peek.
 
    The steps left:
-   - (b) Push: built. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
+   - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
      through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user
      (`git.identity`). The terminal has `git push` / `switch` / `checkout`, and agents have `git_push`, `git_branch`
-     and `git_checkout`. Checked end to end up to the sign-in (signed out, it says to sign in). Still to do:
-     - the first real push, once you've signed in on editor.unusuallygood.dev with the production GitHub App
-       installed on the repo;
-     - decide what becomes of the shell's Commit button (`commitFiles`, one REST commit of the whole workspace),
-       now that a push exists.
+     and `git_checkout`.
+
+     First real push, 2026-10-27, from editor.unusuallygood.dev to `bench/first-push`: a new branch, then a
+     fast-forward. It found two bugs, both fixed:
+     - the first commit was by the placeholder: the identity was asked cold, while the page was still loading, and
+       timed out; it's now asked as the git service starts;
+     - four executable scripts went out as 100644: the workspace's filesystem keeps no executable bit, so HEAD's are
+       now given back before each commit.
+
+     `bench/first-push` (2be5c8a with the lost modes, then efaec74) is a scratch branch to delete. Still to decide:
+     what becomes of the shell's Commit button (`commitFiles`, one REST commit of the whole workspace) now that a push
+     exists.
    - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
      providers plus `applyEdit`.
    - (d) CI on the pushed branch checks the work.
