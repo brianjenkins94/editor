@@ -1,6 +1,6 @@
 /**
  * The workspace as an agent works in it — as it would on a local machine (ARCHITECTURE.md, *Workspace tools*;
- * debug-mcp's files_* and shell tools, tools/):
+ * debug-mcp's files_* tools, app/tools/):
  *
  * - `files.read` { path, offset?, limit? }: a file's text, numbered as `cat -n` numbers it — what's open in an editor,
  *   unsaved edits included, else what's on disk;
@@ -8,9 +8,7 @@
  * - `files.edit` { path, old, new, all? }: an exact string replaced — found once, or every time with `all`;
  * - `files.glob` { pattern, limit? }: the workspace's files a glob matches;
  * - `files.grep` { pattern, glob?, ignoreCase?, limit? }: the lines a regular expression matches, in the files a glob
- *   (default: every file) matches;
- * - `shell.run` { command, cwd?, timeoutMs? }: a command run in the workspace's shell — just-bash, as the terminal runs
- *   it (`node` and `npm` there as they are there) — and what it printed, and its exit code.
+ *   (default: every file) matches.
  *
  * A write or an edit goes through VS Code's documents, as typing would: an open editor shows it, undo takes it back, the
  * edit history records it, and saving runs what saving runs (format on save). Paths are the workspace's: relative to it,
@@ -18,9 +16,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
-import type { NodeRunner } from "./node-runner";
 import { serve } from "@brianjenkins94/hub";
-import { createBashProcess, ESCAPES } from "./terminal";
 
 const ROOT = "/workspace";
 
@@ -35,14 +31,10 @@ const GLOB_RESULTS = 500;
 /** A file grep reads, at most (bigger is data, not code). */
 const GREP_BYTES = 1_000_000;
 
-/** How long a command runs before it's stopped, by default; and what it printed that's kept (the end of it). */
-const SHELL_TIMEOUT = 120_000;
-const SHELL_OUTPUT = 100_000;
-
 /** What `files.*` leave out, unless a glob asks for it. */
 const EXCLUDE = "{**/node_modules/**,**/.git/**}";
 
-export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner: NodeRunner): void {
+export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void {
 	const decoder = new TextDecoder();
 
 	/** `path`'s file: relative to the workspace, or absolute under it. */
@@ -222,53 +214,5 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 		}
 
 		return { "matches": matches, "total": total };
-	});
-
-	serve(hub, "shell.run", async (args, { signal }) => {
-		const { command, cwd, timeoutMs } = (args ?? {}) as { "command"?: unknown; "cwd"?: unknown; "timeoutMs"?: unknown };
-
-		if (typeof command !== "string" || command.trim() === "") {
-			throw new TypeError("shell.run takes { command, cwd?, timeoutMs? }: a command line, as typed in the terminal");
-		}
-
-		const directory = typeof cwd === "string" && cwd !== "" ? uriOf(cwd).path : ROOT;
-		let output = "";
-
-		return new Promise<{ "exitCode": number | null; "output": string; "timedOut": boolean }>((resolve) => {
-			let settled = false;
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const finish = (exitCode: number | null, timedOut: boolean): void => {
-				if (settled) {
-					return;
-				}
-
-				settled = true;
-				clearTimeout(timer);
-
-				// (the shell echoes the command line first: what the command printed is after it)
-				const clean = output.replaceAll(ESCAPES, "").replaceAll("\r\n", "\n");
-				const printed = clean.slice(clean.indexOf("\n") + 1);
-
-				resolve({ "exitCode": exitCode, "output": printed.length > SHELL_OUTPUT ? "…" + printed.slice(-SHELL_OUTPUT) : printed, "timedOut": timedOut });
-			};
-
-			const process = createBashProcess(vscode, runner, hub, (data) => {
-				output += data;
-			}, directory, {
-				"command": command,
-				"exit": (code) => {
-					finish(code, false);
-				}
-			});
-			const stop = (): void => {
-				process.shutdown?.();
-				finish(null, true);
-			};
-
-			timer = setTimeout(stop, typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : SHELL_TIMEOUT);
-
-			signal.addEventListener("abort", stop, { "once": true });
-			process.start();
-		});
 	});
 }

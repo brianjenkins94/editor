@@ -653,9 +653,9 @@ function maybeBoot(): void {
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// And the bridge's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
 				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
-				// The workspace as an agent works in it, as on a local machine — its files read, written, edited, found and
-				// searched; a command run in its shell (workspace-tools.ts; debug-mcp's files_* and shell tools).
-				installWorkspaceTools(api as typeof import("vscode"), workbenchHub, nodeRunner);
+				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;
+				// debug-mcp's files_* tools).
+				installWorkspaceTools(api as typeof import("vscode"), workbenchHub);
 				serveTerminalState(nodeRunner, workbenchHub);
 
 				// Uplink the extension bridge to the page: a workbench hub bridges the bridge (via the extension's

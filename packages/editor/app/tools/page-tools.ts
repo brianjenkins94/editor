@@ -19,11 +19,10 @@ const RESPONDER_MS = 3000;
 const unavailable = (what: string) => (): Promise<never> => Promise.reject(new Error(`a page tool can't ${what}`));
 
 /** The host this tab's tools get: requests into its root hub's tree. */
-export function createToolHost(hub: Hub, { commands = "" }: { "commands"?: string } = {}): ToolHost {
+export function createToolHost(hub: Hub): ToolHost {
 	const rpc = createRpcClient(hub);
 
 	return {
-		"commands": commands,
 		"request": async (name, args, signal, timeoutMs, timeoutMessage) => {
 			try {
 				return await rpc.request(name, args, { "timeoutMs": Infinity, "waitForResponderMs": RESPONDER_MS, "signal": timeoutMs === undefined ? signal : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) });

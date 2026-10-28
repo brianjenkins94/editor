@@ -61,6 +61,10 @@ How it's kept:
    - Review by hunk: done. `git_review` gives the changes as hunks with ids, BABLR's cosmetic verdict per hunk and the
      features each is in; `git_commit` / `git_discard` take hunk ids. The review panel runs on the same requests
      (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
+   - No shell for agents: their shell tool is removed (2026-10-27; ARCHITECTURE.md, *Workspace tools*), so the bench is
+     worked through the editor's tools alone. Until each is a tool, what only the shell did is missing: running tests
+     (`tests_run`, under *Parked*), `git log` (a `git_log`), and a refactor across files, which is (c). A program runs
+     under `debug_start`.
    - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
      providers plus `applyEdit`.
    - (d) CI on the pushed branch checks the work.
@@ -113,8 +117,10 @@ How it's kept:
   next failure, fix that step, then delete this.
 
 - **`TextDocument.save()` returns false** from the extension API in the editor (seen in the architecture harness: the
-  document stays dirty; Ctrl+S saves fine). Find out whether it's the harness or the editor; if the editor, queue the
-  fix.
+  document stays dirty; Ctrl+S saves fine). It's the editor's own path too: `files.edit` (workspace-tools.ts
+  `applyAndSave`) leaves the document dirty and the disk unchanged for 20 s and more (2026-10-27, the tour's *workspace
+  tools*). The shell's `node` had hidden it by reading the open document. An agent's edit is then not on disk, so git
+  sees none of it. Next: find why `save()` refuses, and fix it.
 
 ## Decisions
 

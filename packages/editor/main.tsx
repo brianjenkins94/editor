@@ -9,7 +9,6 @@ import { sampleById, sampleList } from "./app/samples";
 import { createVscodeWindow } from "./app/vscode";
 import { reportArchitecture } from "./shared/architecture";
 import { reportSpanMetrics } from "./shared/editor-metrics";
-import { describeCommands } from "./workbench/terminal/catalog";
 
 // Gain cross-origin isolation (SharedArrayBuffer) before booting. A dev server already sends the COOP/COEP
 // headers; on a static host (GitHub Pages) the coi service worker supplies them after one reload. On the
@@ -92,7 +91,7 @@ if (isolated && window.parent === window) {
 	// cold-start provoke, a preview page's Chrome DevTools Protocol — see tools/).
 	// (tools/: a folder per family, each util/mcp's own tools — loaded after boot, so the MCP SDK and zod stay off its path)
 	void import("./app/tools").then(({ editorTools }) => {
-		servePageTools(rootHub, { "tab": tab, "tools": editorTools(rootHub, { "commands": describeCommands() }) });
+		servePageTools(rootHub, { "tab": tab, "tools": editorTools(rootHub) });
 	});
 
 	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server in the node worker,

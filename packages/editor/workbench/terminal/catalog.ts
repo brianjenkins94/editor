@@ -3,11 +3,10 @@
  * The terminal's own commands, found rather than listed: each is a folder under `commands/`, named after the command,
  * holding everything about it — `command.ts` (what it is: its name, a line saying what it does, whether it streams),
  * `<name>.ts` (the implementation, loaded the first time the command runs) and its tests. Adding a command is adding a
- * folder; everything that enumerates commands derives from here — tab completion, which commands make a line run a
- * statement at a time (session.ts), and the agent's `terminal_run` tool's description (tools/) — so none of them is a
- * list to keep up by hand. What we don't provide is a folder too (vim, python, docker…), a `missing` message saying what
- * to do instead, so "known, and here's how" never reads as "broken". Text in and text out belongs here; what needs
- * structure or the editor's state is a tool (app/tools/host.ts).
+ * folder; everything that enumerates commands derives from here — tab completion and which commands make a line run a
+ * statement at a time (session.ts) — so neither is a list to keep up by hand. What we don't provide is a folder too (vim, python, docker…), a `missing` message saying what
+ * to do instead, so "known, and here's how" never reads as "broken". The terminal is people's; an agent's way in is a tool
+ * (app/tools/host.ts).
  *
  * Only `command.ts` is read here, eagerly — it's a few lines and imports nothing — so anything can ask what the
  * commands are without loading a command (index.ts loads the implementations, lazily).
@@ -22,7 +21,7 @@ import type { BashSession } from "./session";
 export interface CommandDefinition {
 	/** The command's name, and its folder's. */
 	"name": string;
-	/** What it does, in a line: shown to people (`--help`) and to agents (the `terminal_run` tool). */
+	/** What it does, in a line: shown in `--help`. */
 	"summary": string;
 	/** Its options and arguments, as a juvy schema: juvy parses them (strictly), validates them and makes `--help` of
 	 *  them, so the command gets them parsed (invoke.ts). */
@@ -98,10 +97,3 @@ export const PRESENT: readonly CommandDefinition[] = COMMANDS.filter((command) =
 
 /** The commands that stream (see `CommandDefinition.streaming`). */
 export const STREAMING: ReadonlySet<string> = new Set(COMMANDS.filter((command) => command.streaming === true).map((command) => command.name));
-
-/** The commands as a sentence: `node` (…), `npm` (…) — and those that aren't here, so they aren't tried. */
-export function describeCommands(): string {
-	const missing = COMMANDS.filter((command) => command.missing !== undefined).map((command) => command.name);
-
-	return PRESENT.map((command) => `\`${command.name}\` (${command.summary.replace(/\.$/u, "")})`).join(", ") + (missing.length === 0 ? "" : `. Not here: ${missing.join(", ")}`);
-}

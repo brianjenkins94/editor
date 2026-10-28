@@ -30,6 +30,12 @@
       "packages/editor/extensions/history"
     ]
   },
+  "terminal_run": {
+    "status": "removed",
+    "why": "agents act through the editor's typed tools (files_*, git_*, debug_*), not a shell: ARCHITECTURE.md, *Workspace tools*; terminal_output stays, and the terminal is people's",
+    "since": "2026-10-28",
+    "key": "agent tool|terminal_run"
+  },
   "tsval compiled tier": {
     "status": "parked",
     "why": "until a program is too slow in practice (tsval README, *A compiled tier*)",

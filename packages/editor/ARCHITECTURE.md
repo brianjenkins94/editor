@@ -622,7 +622,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.architecture_violations.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()`, `tool.terminal_run.*()` |
+| Root | tool | `tool.architecture_violations.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -649,7 +649,6 @@ flowchart LR
 | Workbench | problems | `problems.list()` |
 | Workbench | production | `production.stop.*` |
 | Workbench | runs | `runs.begin()`, `runs.ledger()`, `runs.list()`, `runs.stop()` |
-| Workbench | shell | `shell.run()` |
 | Workbench | terminal | `terminal.in.*`, `terminal.out.*`, `terminal.run()`, `terminal.state()`, `terminal.stop.*` |
 | Workbench | theme | `theme.colorScheme` |
 | Workbench | workbench | `workbench.files()`, `workbench.openProject` |
@@ -1040,12 +1039,16 @@ no fallback for the old way.
 ## Workspace tools (2026-10-10)
 
 debug-mcp's tools watched and debugged (the editor, problems, runs, previews, the debugger, the Margin), but an agent
-couldn't do the work itself, as it would on a local machine. Now it can: `files_*`, `terminal_run` and `git_*`
-(app/tools/; answered in the workbench by workspace-tools.ts and git-service.ts). What the code doesn't say:
+couldn't do the work itself, as it would on a local machine. Now it can: `files_*` and `git_*` (app/tools/; answered in
+the workbench by workspace-tools.ts and git-service.ts). What the code doesn't say:
 
 - A write or an edit is a `WorkspaceEdit`, so an open editor, undo, the edit history and format on save see it as
   typing, then saved. A read is what's open in an editor (unsaved edits included), else what's on disk.
-- `terminal_run` is core's just-bash, as the terminal runs it (`node` in the debugger, `npm`); each call its own shell.
+- **No shell (2026-10-27).** The agents' shell tool (core's just-bash, a shell per call) was removed: an agent with one
+  used it for everything (grep, sed, `git`) and went around the editor, skipping the WorkspaceEdit, the hunk review and
+  the debugger, and finding just-bash's gaps instead of the editor's. The terminal is for people; `terminal_output`
+  still reads what it printed. What only the shell did (running tests or `node`, `git log`, a refactor across files)
+  is a tool to write, in NEXT.md.
 - `git_diff` is jsdiff's (the `diff` package, already bundled for just-bash) in git's format: isomorphic-git has no
   text diff of its own.
 

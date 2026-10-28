@@ -564,18 +564,13 @@ test("agent tools: the editor, its problems, notifications, rules, terminals and
 	}
 });
 
-// The workspace as an agent works in it (workspace-tools.ts; debug-mcp's files_*, shell and git tools): a file written,
-// run in the shell, edited by an exact string, read back numbered, found and searched, and its change as git's diff.
-test("workspace tools: write, run, edit, read, find, search and diff — as on a local machine", async () => {
+// The workspace as an agent works in it (workspace-tools.ts; debug-mcp's files_* and git tools): a file written, edited
+// by an exact string, read back numbered, found and searched, and its change as git's diff.
+test("workspace tools: write, edit, read, find, search and diff", async () => {
 	const request = (subject, data) => session.request(subject, data, 60_000);
 
 	try {
 		assert.deepEqual(await request("files.write", { "path": "agent/greet.js", "content": "function greet(name) {\n\treturn \"hello, \" + name;\n}\n\nconsole.log(greet(\"workspace\"));\n" }), { "path": "agent/greet.js", "created": true, "lines": 6 });
-
-		const ran = await request("shell.run", { "command": "node greet.js", "cwd": "agent" });
-
-		assert.equal(ran.exitCode, 0);
-		assert.match(ran.output, /hello, workspace/u, "run in the workspace's shell");
 
 		// eslint-disable-next-line no-template-curly-in-string -- the program's text, a template literal in it
 		assert.deepEqual(await request("files.edit", { "path": "agent/greet.js", "old": "\"hello, \" + name", "new": "`hello, ${name}!`" }), { "path": "agent/greet.js", "replaced": 1 });
@@ -585,18 +580,24 @@ test("workspace tools: write, run, edit, read, find, search and diff — as on a
 
 		// eslint-disable-next-line no-template-curly-in-string -- the program's text, a template literal in it
 		assert.deepEqual([read.from, read.to, read.lines, read.content], [2, 2, 6, "2\t\treturn `hello, ${name}!`;"]);
-		assert.match((await request("shell.run", { "command": "node agent/greet.js" })).output, /hello, workspace!/u, "the edit, saved");
-		// (in the order it's printed: the line's other output comes back when the line's done, node's as it runs)
-		assert.equal((await request("shell.run", { "command": "echo first; node agent/greet.js; echo last" })).output.trim(), "first\nhello, workspace!\nlast");
+		// eslint-disable-next-line no-template-curly-in-string -- the program's text, a template literal in it
+		const edited = "function greet(name) {\n\treturn `hello, ${name}!`;\n}\n\nconsole.log(greet(\"workspace\"));\n";
+
+		// (what an agent reads back; on disk it isn't yet: the save doesn't land, NEXT.md *Watching*)
+		assert.equal((await request("files.read", { "path": "agent/greet.js" })).content.replaceAll(/^\d+\t/gmu, ""), edited, "the edit, read back");
 
 		assert.deepEqual((await request("files.glob", { "pattern": "agent/**/*.js" })).files, ["agent/greet.js"]);
 		assert.deepEqual((await request("files.grep", { "pattern": "greet\\(", "glob": "agent/**" })).matches.map(({ line }) => line), [1, 5]);
 		assert.match((await request("git.diff", { "path": "agent/greet.js" })).diff, /^--- \/dev\/null\n\+\+\+ b\/agent\/greet\.js\n@@ -0,0 \+1,5 @@\n\+function greet/u);
 
 		await assert.rejects(request("files.read", { "path": "../etc/passwd" }), /outside the workspace/u);
-		assert.equal((await request("shell.run", { "command": "cat agent/nope" })).exitCode, 1);
+		await assert.rejects(request("files.read", { "path": "agent/nope" }));
 	} finally {
-		await request("shell.run", { "command": "rm -r agent" }).catch(() => undefined);
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/agent"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
 	}
 });
 

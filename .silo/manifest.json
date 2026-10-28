@@ -739,7 +739,7 @@
   },
   "Agent tools": {
     "Agent workspace tools": {
-      "what": "An agent reads, writes, edits, globs and greps the workspace's files, runs shell commands and reads the terminals, and checks status, diffs and commits with git, as on a local machine.",
+      "what": "An agent reads, writes, edits, globs and greps the workspace's files, reads what the terminals printed, and checks status, diffs and commits with git: through the editor, not a shell.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
       "ways": [
         "agent tool|files_edit",
@@ -751,7 +751,6 @@
         "agent tool|git_diff",
         "agent tool|git_status",
         "agent tool|terminal_output",
-        "agent tool|terminal_run",
         "core module|installWorkspaceTools",
         "hub request|files.edit",
         "hub request|files.glob",
@@ -759,7 +758,6 @@
         "hub request|files.read",
         "hub request|files.write",
         "hub request|git.diff",
-        "hub request|shell.run",
         "hub request|terminal.state"
       ]
     },
