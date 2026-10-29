@@ -397,6 +397,7 @@ flowchart LR
         n_ext_capabilities_packages["packages"]
         n_ext_cosmetic["cosmetic"]
         n_ext_cspell_cspell["cspell"]
+        n_ext_eslint["eslint"]
         n_ext_event_sheet["event-sheet"]
         n_ext_event_sheet_recognizer_js["recognizer.js"]
         n_ext_history["history"]
