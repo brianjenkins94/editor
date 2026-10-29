@@ -127,8 +127,9 @@ How it's kept:
   and on 289dadd's run with the same code. Again on 05ce05b: *halt*'s selected run never halted on rates.js (passed on
   rerun and locally) — a second test waiting on a save's selected run. Locally on 2026-10-29 too (selection, then
   *halt*, and the features test after them; passed on rerun). Likely cause: the save itself was dropped (*A person's
-  first Ctrl+S after load*, below): the test presses Ctrl+S and waits for what the save selects. If it comes back,
-  check whether calc.js is still dirty when it times out.
+  first Ctrl+S after load*, below): the test presses Ctrl+S and waits for what the save selects. In CI on 1bdc520f and
+  f2d51e83 too (*an edit to an imported module*, "report.js run again"; passed on rerun). Both selection tests now say,
+  timed out, whether the saved file is still dirty: read that on the next one.
 
 - **tour-capabilities' package prompt timed out waiting for the baseline** once in CI (af79463; passed on rerun). The
   baseline is made as the project opens, from the CDN; the same run's log has CDN fetches failing. If it comes back,

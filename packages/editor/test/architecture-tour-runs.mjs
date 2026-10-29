@@ -17,6 +17,16 @@ import { eventually, inRuleView, session, tour } from "./architecture-tour-sessi
 
 tour("architecture-tour-runs");
 
+/** What a save selects, waited for — or, timed out, whether the file is still dirty: a save VS Code dropped (its code
+ *  actions on save cancelled, NEXT.md *Watching*) selects nothing, and reads differently from a selection that didn't run. */
+async function afterSave(what, path, probe) {
+	return eventually(what, probe, 60_000).catch(async (error) => {
+		const dirty = await session.workbench().evaluate((file) => globalThis.__editor.api.workspace.textDocuments.find((document) => document.uri.path === file)?.isDirty, path);
+
+		throw new Error(`${error.message} (${path} ${dirty === true ? "still dirty: the save didn't land" : "saved"})`);
+	});
+}
+
 // A task — `node <file>` that runs to completion — runs under the tsval debugger (the debug worker), and a
 // capability-gated call pauses it.
 test("node script: a task runs under the tsval debugger", async () => {
@@ -1254,11 +1264,11 @@ test("selection: a save reruns the tests that executed what changed, and only th
 	});
 	await session.page.keyboard.press("ControlOrMeta+s");
 
-	const after = await eventually("calc.test.js run again, after the save", async () => {
+	const after = await afterSave("calc.test.js run again, after the save", "/workspace/calc.js", async () => {
 		const traces = await keptOn("calc.js");
 
 		return testOf(traces, "calc.test.js › calc › subtracts")?.trigger === "edit" ? traces : undefined;
-	}, 60_000);
+	});
 
 	assert.notDeepEqual(testOf(after, "calc.test.js › calc › subtracts").declarations, testOf(before, "calc.test.js › calc › subtracts").declarations, "it ran the edited subtract");
 	// Its file ran, each of its tests with it: adds ran as before, so it's the same trace, counted again.
@@ -1490,11 +1500,11 @@ test("selection: an edit to an imported module reruns the programs that ran what
 		});
 		await session.page.keyboard.press("ControlOrMeta+s");
 
-		const after = await eventually("report.js run again, after the save", async () => {
+		const after = await afterSave("report.js run again, after the save", "/workspace/shapes.js", async () => {
 			const traces = await reachOn("shapes.js");
 
 			return programOf(traces, "report.js")?.trigger === "edit" ? traces : undefined;
-		}, 60_000);
+		});
 
 		assert.notDeepEqual(programOf(after, "report.js").declarations, programOf(before, "report.js").declarations, "it ran the edited area");
 		assert.equal(programOf(after, "fence.js").at, programOf(before, "fence.js").at, "fence.js didn't run: nothing of it reached area");
