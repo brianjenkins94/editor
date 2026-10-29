@@ -405,72 +405,94 @@ doc, a unit test or `.silo/` nothing; anything else (a dependency, a build scrip
 with no record yet its shard. Over the 30 commits before it, with records from one instrumented run: 7 would have run
 every shard, 6 none, the rest some. Not built: outcomes kept for a selection's safety; unit tests' selection.
 
-### Tests by feature, in your face (designed 2026-10-29, for the rewrite)
+### Tests by feature, in your face (designed 2026-10-29)
 
 The user's direction, 2026-10-29: a first-class view of every test, attributed to its feature, that says when a
 feature's tests should run again because you touched its code, and that stops running old tests that have stayed
-green. It's for the rewrite, where features are declared before they're worked on so that code belongs to a feature by
-declaration and not by inference. This code base is too far along to retrofit: here the features map joins tests to
-features through the code their traces ran (the manifest's ownership). What follows is the shape to build there,
-worked out on what exists here (the traces, CI's reach records, `runs_affected` / `runs_tests`).
+green. It's silo's, for any repository and any test runner, in both front ends, as the rest of this design is: the
+editor is its first user, and the editor's rewrite, where features are declared before they're worked on, the first
+to build on it (*Dogfooding in the editor*, at the end).
 
-**A test ledger.** Every run of every test, unit and architecture alike: its commit, outcome, attempt (a pass on a
-retry is a flake, kept as one), duration, and where it ran. That's what "last failed", "flaky", and "green for N runs"
-are read from. CI's is shared, committed as its reach records are; a machine's own runs stay on it, as traces do. It's
-*Which tests reach what*'s "outcomes in the run", which was never built, and decision 8 (a selection's safety) waits on
-it.
+**What a project gives it.** Four things, each read through an adapter, so nothing assumes one stack:
+- **Features**, declared: the feature manifest (`.silo/manifest.json`, *The feature manifest*), and the tests each
+  claims. Declared first, a test belongs to a feature by declaration, not by inference.
+- **Tests and their outcomes**: a test is its file and its titles; outcomes come from the runner's own report (TAP,
+  JUnit XML, a runner's reporter API), so any runner that reports works.
+- **Reach**: what code each test ran, by declaration (a file's top-level name, `Class.member`), with an identity a
+  reformat or a comment doesn't change. Each front end measures it with its own instrumentation; the record is the
+  same.
+- **Changes**: the declarations a diff changed, between a base and HEAD.
 
-**Selection by test, from reach and the ledger.** A test runs when the change reaches its code, it failed or flaked
-lately, it's new, or nothing has recorded what it reaches. Otherwise it **rests**: skipped, and run again by a
-scheduled full run that refreshes every test's reach and outcome. Retiring a test outright is a decision with a reason,
-in the feature ledger, as `silo remove` is; a test never retires itself. Ambient code (what every session runs) selects
-the smoke tests, as CI's selection does now.
+**What silo keeps and decides** (lib `util/silo`, pure: records in, answers out):
+- **A test ledger.** Every run of every test: its commit, outcome, attempt (a pass on a retry is a flake, kept as one),
+  duration, runtime and where it ran. "Last failed", "flaky" and "green for N runs" are read from it. CI's is shared
+  in `.silo/`; a machine's own runs stay on it (`.silo/local/`). It's *Which tests reach what*'s "outcomes in the
+  run", and decision 8 (a selection's safety) waits on it.
+- **Selection by test, from reach and the ledger.** A test runs when the change reaches its code, it failed or flaked
+  lately, it's new, or nothing has recorded what it reaches. Otherwise it **rests**: skipped, and run again by a
+  scheduled full run that refreshes every test's reach and outcome. Retiring a test outright is a decision with a
+  reason, in the feature ledger, as `silo remove` is; a test never retires itself. Ambient code (what nearly every
+  test reaches) selects a project's smoke tests, not all of them.
+- **The states**, one word each, wherever a test or a feature is shown:
+  - **passing**, **failing** and **flaky**;
+  - **touched**: code it ran has changed since it last ran;
+  - **resting**: green a long while and not reached, so skipped until the full run;
+  - **new**: too few runs to trust;
+  - **untraced**: never run here, so what it reaches is unknown.
 
-**The states.** One word each, used everywhere a test or a feature is shown:
-- **passing**, **failing** and **flaky**;
-- **touched**: code it ran has changed since it last ran;
-- **resting**: green a long while and not reached, so skipped until the full run;
-- **new**: too few runs to trust;
-- **untraced**: never run here, so what it reaches is unknown.
-
-**The interface.** The feature is what you look at; its tests are under it. Each feature row has its status, a strip
-of its last runs and its history in a few words ("flaky, last failed 2 days ago", "green 41 runs", "failing since
-b98c0fc2"); opened, each test with its own strip. An edit is what brings a feature forward: every feature whose tests
-ran the changed code turns *touched*, at the top, with "Re-run N", exactly its tests. You don't go looking. The same
-data shows in a status bar count ("2 features touched, 1 failing"), a mark on a feature's own code ("Selection: 2
-tests, touched"), and an agent tool, so an agent sees what you see. Two rows are never hidden:
+**The interface**, the same in every front end. The feature is what you look at; its tests are under it. Each feature
+has its status, a strip of its last runs and its history in a few words ("flaky, last failed 2 days ago", "green 41
+runs", "failing since b98c0fc2"); opened, each test with its own strip. An edit is what brings a feature forward:
+every feature whose tests ran the changed code turns *touched*, first, with "Re-run N", exactly its tests. You don't go
+looking. Two rows are never hidden:
 - **Unattributed**: tests no feature claims and files no feature owns, counted. With features declared first it should
   be empty, so anything in it is a gap.
-- **Declared against observed**: a test that declares one feature but whose traces mostly run another's code. That's
-  how a boundary drawn in the wrong place shows itself.
+- **Declared against observed**: a test that declares one feature but whose reach is mostly another's code. That's how
+  a boundary drawn in the wrong place shows itself.
 
-A sketch of it (2026-10-29) was a list: features as rows, the edit picker lighting up the ones it reached.
+An editor shows it as a panel, a status bar count ("2 features touched, 1 failing"), a mark on a feature's own code and
+an agent tool; the command line as a table and as data for CI. A sketch of it (2026-10-29) was a list: features as
+rows, an edit lighting up the ones it reached.
 
-**What has to be true first.** Tests that don't depend on each other. The tours here share one session in order, and
-some tests lean on what an earlier one left: the calc selection test on the tests run before it, the features tests on
-selection's. Skipping one test inside a tour breaks the ones after it. So either each test sets up its own state, or
-resting works by test file for suites like these and by test for the rest (decision 15).
+**What has to be true first.** Tests that don't lean on each other. A suite whose tests share one session in order,
+some relying on what an earlier one left, breaks when one test inside it rests. So either each test sets up its own
+state, or resting works by test file for suites like that and by test for the rest (decision 15).
 
-**Vouches: a local pass CI can take** (the user's idea, 2026-10-29). Tests run in the editor as part of committing,
-and the commit tells CI they passed. CI decides for itself whether to run them again. It's a deliberate exception to
-*Trust* above (CI counts only its own evidence), so it carries its own:
-- **What a vouch is.** Made at commit time, as the runs shared to git are (the editor's git engine, `shareRuns`), in
-  `.silo/vouches/<user>.jsonl`, a file per person so collaborators' merge (*Design .silo/ for collaborators*). A line
-  per test: its id and outcome, who ran it and when, the editor's and tsval's versions, and what it ran: the BABLR
-  span ids of the declarations its trace executed. It holds only while the commit still has every one of them (the
-  check sharing runs makes, `currentIn`), so code edited after the run makes it lapse, with nothing to forge around.
+**Vouches: a local pass CI can take** (the user's idea, 2026-10-29). Tests run as part of committing, and the commit
+tells CI they passed. CI decides for itself whether to run them again. It's a deliberate exception to *Trust* above
+(CI counts only its own evidence), so it carries its own:
+- **What a vouch is.** Made at commit time by whatever commits (an editor's commit flow, or a git pre-commit hook silo
+  installs), in `.silo/vouches/<user>.jsonl`, a file per person so collaborators' merge (*Design .silo/ for
+  collaborators*). A line per test: its id and outcome, who ran it and when, the runtime and tools it ran on, and the
+  declarations it ran, by identity. It holds only while the commit still has every one of them, so code edited after
+  the run makes it lapse, with nothing to forge around.
 - **What CI does with it.** A selected test runs anyway when it has no current vouch, CI hasn't run it itself within
-  the window (proposed: a week), it failed or flaked lately in CI's ledger, or it's an architecture test (those don't
-  run in the editor). Otherwise CI skips it, recorded as vouched by whom and when, so a vouched pass never reads as
+  the window (proposed: a week), it failed or flaked lately in CI's ledger, or it can't run where vouches are made (a
+  browser suite, say). Otherwise CI skips it, recorded as vouched by whom and when, so a vouched pass never reads as
   CI's.
-- **Audits.** CI runs a few vouched tests anyway, at random. One CI fails that a vouch said passed stops that
-  person's vouches counting for a while, and says so loudly: a local setup that disagrees with CI is a finding.
-- **What it doesn't stop.** A vouch forged on purpose: nothing in a browser can sign one with a key worth trusting.
-  The window, the lapse and the audits bound what a wrong one costs, and whose vouches count is a setting (decision
-  18).
-- **The runtime gap.** The editor runs tests on tsval's `node:test`; CI runs the unit tests on Node. A tsval pass
-  vouches for tsval, so either CI runs them on tsval too (`silo run`'s host), or a vouch counts only for a test that
-  has passed on both (decision 19).
+- **Audits.** CI runs a few vouched tests anyway, at random. One CI fails that a vouch said passed stops that person's
+  vouches counting for a while, and says so loudly: a local setup that disagrees with CI is a finding.
+- **What it doesn't stop.** A vouch forged on purpose: a key in a browser or a laptop isn't one CI can trust. The
+  window, the lapse and the audits bound what a wrong one costs, and whose vouches count is a setting (decision 18).
+- **Different runtimes.** A pass vouches for the runtime it ran on. When the place vouches are made runs tests
+  differently from CI, a vouch counts only for a test whose outcomes have matched across the two before, or CI runs on
+  the same runtime (decision 19).
+
+**How a project's CI uses it.** Any CI, not one vendor's: a step asks silo which tests to run for the change, runs them
+with the project's own runner, and hands the report back for the ledger; committing the shared records is the CI's
+own glue (decision 20).
+
+**Dogfooding in the editor.** The editor is where this is tried first, and what it already has maps onto it:
+- **Reach** is its traces: tests run on tsval's `node:test` in the editor, and their reach is BABLR span ids, kept per
+  file (`.silo/local/traces`). CI's architecture suites have reach records too (`.silo/evidence/ci/architecture.json`)
+  and a selection of their own (packages/editor/test/selection.mjs, by shard), which the generic selection replaces.
+- **Agents** have it already in part: `runs_affected` (the tests a change reaches, stale or not) and `runs_tests`
+  (results as data); the agent tool above is their successor.
+- **Vouches** would be made by its commit flow, as its git engine already shares runs at commit time (`shareRuns`,
+  current by span id: `currentIn`).
+- **Its runtime gap** is decision 19's case: the editor runs tests on tsval, CI runs the unit tests on Node.
+- **Its tours** are the suites that lean on each other (the calc selection test on the tests run before it, the
+  features tests on selection's).
 
 ### Purity: decided statically, checked by runs (designed 2026-10-22; built 2026-10-24–25)
 
@@ -957,6 +979,9 @@ From *Tests by feature* (above), for the rewrite:
     CI runs.
 17. **The audit rate**: how many vouched tests CI runs anyway.
 18. **Whose vouches count**: by default only your own, or the people you list.
-19. **The runtime gap**: CI runs the unit tests on tsval too, or a vouch counts only for tests that have passed on
-    both tsval and Node.
+19. **Different runtimes**: a vouch counts only for tests whose outcomes have matched on both runtimes before, or CI
+    runs on the one vouches are made on (the editor's case: tsval in CI too, through `silo run`'s host).
+20. **CI's entry point**: a silo subcommand any CI calls (reopening decision 9, which kept selection out of the command
+    line while it was only the editor's and its CI's), or a library call each project's CI script makes. And which
+    runner reports silo reads first.
 
