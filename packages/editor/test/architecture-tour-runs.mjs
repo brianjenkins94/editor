@@ -17,13 +17,27 @@ import { eventually, inRuleView, session, tour } from "./architecture-tour-sessi
 
 tour("architecture-tour-runs");
 
-/** What a save selects, waited for — or, timed out, whether the file is still dirty: a save VS Code dropped (its code
- *  actions on save cancelled, NEXT.md *Watching*) selects nothing, and reads differently from a selection that didn't run. */
+/** What a save selects, waited for — or, timed out, what happened instead: whether the file is still dirty (a save VS
+ *  Code dropped selects nothing), the runs since the save (what started, when, and how it ended: none queued, one slow, or
+ *  one that ran without its trace kept) and the traces kept on the file. NEXT.md *Watching*. */
 async function afterSave(what, path, probe) {
-	return eventually(what, probe, 60_000).catch(async (error) => {
-		const dirty = await session.workbench().evaluate((file) => globalThis.__editor.api.workspace.textDocuments.find((document) => document.uri.path === file)?.isDirty, path);
+	const saved = Date.now();
 
-		throw new Error(`${error.message} (${path} ${dirty === true ? "still dirty: the save didn't land" : "saved"})`);
+	return eventually(what, probe, 60_000).catch(async (error) => {
+		const state = await session.workbench().evaluate(async ({ file, since }) => {
+			const { api } = globalThis.__editor;
+			const traces = await Promise.resolve(api.workspace.fs.readFile(api.Uri.file(`/workspace/.silo/local/traces/${file.slice("/workspace/".length)}.jsonl`))).then((bytes) => new TextDecoder().decode(bytes), () => "");
+
+			return {
+				"dirty": api.workspace.textDocuments.find((document) => document.uri.path === file)?.isDirty,
+				"sessions": api.debug.activeDebugSession?.name,
+				"traces": traces.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).map((trace) => `${trace.test?.id ?? trace.program ?? "(own)"} ${trace.trigger} ${trace.at}`).slice(-8),
+				"since": since
+			};
+		}, { "file": path, "since": new Date(saved).toISOString() });
+		const runs = await session.request("runs.list", {}, 10_000).then((listed) => listed.filter((run) => run.startedAt >= saved - 5000).map((run) => `${run.title} ${run.state} +${run.startedAt - saved}ms${run.endedAt === undefined ? "" : ` for ${run.endedAt - run.startedAt}ms`}`), (failed) => [String(failed)]);
+
+		throw new Error(`${error.message} (${path} ${state.dirty === true ? "still dirty: the save didn't land" : "saved"}; runs since the save: ${JSON.stringify(runs)}; debugging ${state.sessions ?? "nothing"}; traces kept on it, latest last: ${JSON.stringify(state.traces)}; saved at ${state.since})`);
 	});
 }
 
