@@ -63,11 +63,35 @@ How it's kept:
      (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
    - No shell for agents: their shell tool is removed (2026-10-27; ARCHITECTURE.md, *Workspace tools*), so the bench is
      worked through the editor's tools alone. Until each is a tool, what only the shell did is missing: running tests
-     (`tests_run`, under *Parked*), `git log` (a `git_log`), and a refactor across files, which is (c). A program runs
+     (`tests_run`, item 2), `git log` (a `git_log`, item 2), and a refactor across files, which is (c). A program runs
      under `debug_start`.
    - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
      providers plus `applyEdit`.
    - (d) CI on the pushed branch checks the work.
+
+2. **Tools agents decide with**, in place of the shell (2026-10-28: what an agent left the editor for in the shell's
+   removal and the save fix). Each is a tool family under app/tools/ (host.ts). In order:
+   - `code_problems_delta`: the diagnostics (TypeScript, ESLint) a change adds or clears against HEAD. A whole-repo
+     `tsc` has about 5,700 errors from environment types, so new ones can't be seen in it.
+   - `tests_affected` (the tests whose traces reach the changed files), then `tests_run`: results as data, each with
+     pass or fail, the assertion's actual and expected, its duration and its flaky history.
+   - `code_reach`, for a symbol, hub subject or way in: who serves and requests it, what only it reaches (`silo
+     remove`'s analysis), and the docs and tests that name it.
+   - Code running, watched without editing it: logpoints in the editor's own code (`debug_logpoint`, its values as
+     data), and VS Code's trace log for one component (`editor_trace`). The save bug took six instrumented reruns
+     where `TextFileEditorModel`'s trace says "cancelled" in one.
+   - Experiments that undo themselves: `workspace_checkpoint` / `workspace_restore` (a throwaway overlay layer), and a
+     dry run on edits (`preview`: the diff and the diagnostics it would add).
+   - `files_edit_many` (one WorkspaceEdit across files, all or nothing, each with the number of matches it expects), and
+     structural `code_query` / `code_rewrite` on the syntax tree in place of regex rewrites.
+   - `git_log`, `git_show` (a file at a revision), `git_blame`; `decisions_for` (the ledger entries, ARCHITECTURE.md
+     sections and NEXT.md items naming a file or symbol); `ci_status` (a commit's runs, and a failed job's log).
+   - `script_run`: JavaScript in the capability-gated eval realm, the workspace read-only, for the computation a script
+     is for (counting, joining JSON). Its capability log shows what it touched.
+
+   Every one: relative to a baseline (HEAD, or the last call); ids that chain from tool to tool, as hunk ids do; output
+   bounded, saying what it left out; and what it couldn't see (TypeScript still initializing, say) said, not passed
+   off as complete.
 
 ## Watching
 
@@ -130,5 +154,5 @@ None open (the last ones settled 2026-10-26: their answers are in the docs above
 
 - **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one): `tsc`,
   `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`, `code_references`,
-  `code_hover`, `code_symbols`, `editor_open`, `tests_run`, `silo_features`, `silo_history`. Conventions when one is
+  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`tests_run` is queued: item 2). Conventions when one is
   asked for: workbench/terminal/catalog.ts, app/tools/host.ts.
