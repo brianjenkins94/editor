@@ -116,11 +116,11 @@ How it's kept:
   The whole tour passes locally (24/24). The assertion now prints the outcome's state, line and output: read it on the
   next failure, fix that step, then delete this.
 
-- **`TextDocument.save()` returns false** from the extension API in the editor (seen in the architecture harness: the
-  document stays dirty; Ctrl+S saves fine). It's the editor's own path too: `files.edit` (workspace-tools.ts
-  `applyAndSave`) leaves the document dirty and the disk unchanged for 20 s and more (2026-10-27, the tour's *workspace
-  tools*). The shell's `node` had hidden it by reading the open document. An agent's edit is then not on disk, so git
-  sees none of it. Next: find why `save()` refuses, and fix it.
+- **A person's first Ctrl+S after load can be dropped**, silently: VS Code abandons a save when its code actions on
+  save are cancelled, and getCodeActions cancels itself when a code action provider is registered while it waits (as
+  extensions starting up do; ESLint's first fix waits seconds for its worker). The agents' `files_edit` / `files_write`
+  try again (workspace-tools.ts `applyAndSave`); a person's save isn't retried. If it's seen, warm ESLint's worker
+  before the first save, or retry in a save participant.
 
 ## Decisions
 

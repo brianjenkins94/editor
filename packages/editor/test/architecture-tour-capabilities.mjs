@@ -583,8 +583,11 @@ test("workspace tools: write, edit, read, find, search and diff", async () => {
 		// eslint-disable-next-line no-template-curly-in-string -- the program's text, a template literal in it
 		const edited = "function greet(name) {\n\treturn `hello, ${name}!`;\n}\n\nconsole.log(greet(\"workspace\"));\n";
 
-		// (what an agent reads back; on disk it isn't yet: the save doesn't land, NEXT.md *Watching*)
-		assert.equal((await request("files.read", { "path": "agent/greet.js" })).content.replaceAll(/^\d+\t/gmu, ""), edited, "the edit, read back");
+		assert.equal(await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			return new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.file("/workspace/agent/greet.js")));
+		}), edited, "the edit, saved");
 
 		assert.deepEqual((await request("files.glob", { "pattern": "agent/**/*.js" })).files, ["agent/greet.js"]);
 		assert.deepEqual((await request("files.grep", { "pattern": "greet\\(", "glob": "agent/**" })).matches.map(({ line }) => line), [1, 5]);

@@ -31,6 +31,9 @@ const GLOB_RESULTS = 500;
 /** A file grep reads, at most (bigger is data, not code). */
 const GREP_BYTES = 1_000_000;
 
+/** Saves tried before an edit says it couldn't be saved (see applyAndSave). */
+const SAVE_ATTEMPTS = 3;
+
 /** What `files.*` leave out, unless a glob asks for it. */
 const EXCLUDE = "{**/node_modules/**,**/.git/**}";
 
@@ -81,7 +84,14 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			throw new Error(`${relative(uri)} couldn't be edited`);
 		}
 
-		await document.save();
+		// VS Code abandons a save, and `save()` answers false, when its code actions on save are cancelled: getCodeActions
+		// cancels itself if a code action provider is registered while it waits, as extensions starting up do, and ESLint's
+		// first fix (its worker starting) is a long wait. That save is tried again, so the edit lands on disk.
+		for (let attempt = 1; !await document.save(); attempt += 1) {
+			if (attempt === SAVE_ATTEMPTS) {
+				throw new Error(`${relative(uri)} was edited, but VS Code didn't save it (${SAVE_ATTEMPTS} tries): the change is in its editor, unsaved`);
+			}
+		}
 	};
 
 	serve(hub, "files.read", async (args) => {
