@@ -152,8 +152,9 @@ How it's kept:
 ## Decisions
 
 - **Tests by feature, for the rewrite** (packages/silo/README.md, *Tests by feature, in your face*; its decisions
-  11–15): the primary view, whether a touched feature reruns on its own, what counts as a feature's tests, how long
-  green rests, and whether tests that lean on each other are made independent first.
+  11–19): the primary view, whether a touched feature reruns on its own, what counts as a feature's tests, how long
+  green rests, and whether tests that lean on each other are made independent first; and for vouches (a local pass
+  CI can take), their window, the audit rate, whose count, and the tsval/Node gap.
 
 ## Parked
 

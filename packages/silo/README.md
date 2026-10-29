@@ -451,6 +451,27 @@ some tests lean on what an earlier one left: the calc selection test on the test
 selection's. Skipping one test inside a tour breaks the ones after it. So either each test sets up its own state, or
 resting works by test file for suites like these and by test for the rest (decision 15).
 
+**Vouches: a local pass CI can take** (the user's idea, 2026-10-29). Tests run in the editor as part of committing,
+and the commit tells CI they passed. CI decides for itself whether to run them again. It's a deliberate exception to
+*Trust* above (CI counts only its own evidence), so it carries its own:
+- **What a vouch is.** Made at commit time, as the runs shared to git are (the editor's git engine, `shareRuns`), in
+  `.silo/vouches/<user>.jsonl`, a file per person so collaborators' merge (*Design .silo/ for collaborators*). A line
+  per test: its id and outcome, who ran it and when, the editor's and tsval's versions, and what it ran: the BABLR
+  span ids of the declarations its trace executed. It holds only while the commit still has every one of them (the
+  check sharing runs makes, `currentIn`), so code edited after the run makes it lapse, with nothing to forge around.
+- **What CI does with it.** A selected test runs anyway when it has no current vouch, CI hasn't run it itself within
+  the window (proposed: a week), it failed or flaked lately in CI's ledger, or it's an architecture test (those don't
+  run in the editor). Otherwise CI skips it, recorded as vouched by whom and when, so a vouched pass never reads as
+  CI's.
+- **Audits.** CI runs a few vouched tests anyway, at random. One CI fails that a vouch said passed stops that
+  person's vouches counting for a while, and says so loudly: a local setup that disagrees with CI is a finding.
+- **What it doesn't stop.** A vouch forged on purpose: nothing in a browser can sign one with a key worth trusting.
+  The window, the lapse and the audits bound what a wrong one costs, and whose vouches count is a setting (decision
+  18).
+- **The runtime gap.** The editor runs tests on tsval's `node:test`; CI runs the unit tests on Node. A tsval pass
+  vouches for tsval, so either CI runs them on tsval too (`silo run`'s host), or a vouch counts only for a test that
+  has passed on both (decision 19).
+
 ### Purity: decided statically, checked by runs (designed 2026-10-22; built 2026-10-24–25)
 
 Which functions are pure, to show later (memoizing, replaying a call safely, explaining a function). Mostly decidable
@@ -932,4 +953,10 @@ From *Tests by feature* (above), for the rewrite:
     Proposed: rest, never retire on its own.
 15. **Tests that lean on each other**: made independent before resting works, or resting by test file for suites that
     share a session.
+16. **A vouch's window**: how long CI takes a vouch without running the test itself (proposed: a week), in days or in
+    CI runs.
+17. **The audit rate**: how many vouched tests CI runs anyway.
+18. **Whose vouches count**: by default only your own, or the people you list.
+19. **The runtime gap**: CI runs the unit tests on tsval too, or a vouch counts only for tests that have passed on
+    both tsval and Node.
 
