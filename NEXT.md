@@ -151,7 +151,9 @@ How it's kept:
 
 ## Decisions
 
-None open (the last ones settled 2026-10-26: their answers are in the docs above them).
+- **Tests by feature, for the rewrite** (packages/silo/README.md, *Tests by feature, in your face*; its decisions
+  11–15): the primary view, whether a touched feature reruns on its own, what counts as a feature's tests, how long
+  green rests, and whether tests that lean on each other are made independent first.
 
 ## Parked
 

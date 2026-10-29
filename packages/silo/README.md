@@ -405,6 +405,52 @@ doc, a unit test or `.silo/` nothing; anything else (a dependency, a build scrip
 with no record yet its shard. Over the 30 commits before it, with records from one instrumented run: 7 would have run
 every shard, 6 none, the rest some. Not built: outcomes kept for a selection's safety; unit tests' selection.
 
+### Tests by feature, in your face (designed 2026-10-29, for the rewrite)
+
+The user's direction, 2026-10-29: a first-class view of every test, attributed to its feature, that says when a
+feature's tests should run again because you touched its code, and that stops running old tests that have stayed
+green. It's for the rewrite, where features are declared before they're worked on so that code belongs to a feature by
+declaration and not by inference. This code base is too far along to retrofit: here the features map joins tests to
+features through the code their traces ran (the manifest's ownership). What follows is the shape to build there,
+worked out on what exists here (the traces, CI's reach records, `runs_affected` / `runs_tests`).
+
+**A test ledger.** Every run of every test, unit and architecture alike: its commit, outcome, attempt (a pass on a
+retry is a flake, kept as one), duration, and where it ran. That's what "last failed", "flaky", and "green for N runs"
+are read from. CI's is shared, committed as its reach records are; a machine's own runs stay on it, as traces do. It's
+*Which tests reach what*'s "outcomes in the run", which was never built, and decision 8 (a selection's safety) waits on
+it.
+
+**Selection by test, from reach and the ledger.** A test runs when the change reaches its code, it failed or flaked
+lately, it's new, or nothing has recorded what it reaches. Otherwise it **rests**: skipped, and run again by a
+scheduled full run that refreshes every test's reach and outcome. Retiring a test outright is a decision with a reason,
+in the feature ledger, as `silo remove` is; a test never retires itself. Ambient code (what every session runs) selects
+the smoke tests, as CI's selection does now.
+
+**The states.** One word each, used everywhere a test or a feature is shown:
+- **passing**, **failing** and **flaky**;
+- **touched**: code it ran has changed since it last ran;
+- **resting**: green a long while and not reached, so skipped until the full run;
+- **new**: too few runs to trust;
+- **untraced**: never run here, so what it reaches is unknown.
+
+**The interface.** The feature is what you look at; its tests are under it. Each feature row has its status, a strip
+of its last runs and its history in a few words ("flaky, last failed 2 days ago", "green 41 runs", "failing since
+b98c0fc2"); opened, each test with its own strip. An edit is what brings a feature forward: every feature whose tests
+ran the changed code turns *touched*, at the top, with "Re-run N", exactly its tests. You don't go looking. The same
+data shows in a status bar count ("2 features touched, 1 failing"), a mark on a feature's own code ("Selection: 2
+tests, touched"), and an agent tool, so an agent sees what you see. Two rows are never hidden:
+- **Unattributed**: tests no feature claims and files no feature owns, counted. With features declared first it should
+  be empty, so anything in it is a gap.
+- **Declared against observed**: a test that declares one feature but whose traces mostly run another's code. That's
+  how a boundary drawn in the wrong place shows itself.
+
+A sketch of it (2026-10-29) was a list: features as rows, the edit picker lighting up the ones it reached.
+
+**What has to be true first.** Tests that don't depend on each other. The tours here share one session in order, and
+some tests lean on what an earlier one left: the calc selection test on the tests run before it, the features tests on
+selection's. Skipping one test inside a tour breaks the ones after it. So either each test sets up its own state, or
+resting works by test file for suites like these and by test for the rest (decision 15).
+
 ### Purity: decided statically, checked by runs (designed 2026-10-22; built 2026-10-24–25)
 
 Which functions are pure, to show later (memoizing, replaying a call safely, explaining a function). Mostly decidable
@@ -873,4 +919,17 @@ From tests and purity (both above):
    editor's (on a save) and CI's.
 10. ~~**How much purity static analysis decides.**~~ Measured 2026-10-24 (*Purity*, above): 80% of functions get a
     definite verdict, 22% of them pure; the unknown 20% are mostly dynamic dispatch and external packages.
+
+From *Tests by feature* (above), for the rewrite:
+
+11. **The primary view**: a list of features (the 2026-10-29 sketch), or a map, as the features map is now: blocks
+    sized by code, colored by their tests' health.
+12. **A touched feature's tests**: run again on their own (a save already reruns what it reached), or a button you
+    press.
+13. **What counts as a feature's tests**: the tests it declares, plus any whose traces run its code; or declared ones
+    only, with the observed ones shown as *declared against observed*.
+14. **Resting**: how long green is long enough (runs, or days), and how often the full run runs (proposed: weekly).
+    Proposed: rest, never retire on its own.
+15. **Tests that lean on each other**: made independent before resting works, or resting by test file for suites that
+    share a session.
 
