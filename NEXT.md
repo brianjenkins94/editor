@@ -62,37 +62,42 @@ How it's kept:
      features each is in; `git_commit` / `git_discard` take hunk ids. The review panel runs on the same requests
      (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
    - No shell for agents: their shell tool is removed (2026-10-27; ARCHITECTURE.md, *Workspace tools*), so the bench is
-     worked through the editor's tools alone. Until each is a tool, what only the shell did is missing: running tests
-     (`runs_tests`, item 2), `git log` (a `git_log`, item 2), and a refactor across files, which is (c). A program runs
-     under `debug_start`.
-   - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
-     providers plus `applyEdit`.
+     worked through the editor's tools alone, and what it still lacks is item 2's list (step (c), the `code_*` tools,
+     is its first). A program runs under `debug_start`.
    - (d) CI on the pushed branch checks the work.
 
-2. **Tools agents decide with**, in place of the shell (2026-10-28: what an agent left the editor for in the shell's
-   removal and the save fix). Each is a tool family under app/tools/ (host.ts). In order:
-   - `code_problems`: done. The TypeScript and ESLint problems a change adds or clears against HEAD, in the changed files
-     and the files importing them (ARCHITECTURE.md, *Workspace tools*).
-   - `runs_affected` and `runs_tests`: done. The tests whose traces reach the changed files, stale or not, and test files
-     run with each test's result as data (RUNNING.md, *Tests*). Not done: a flaky history beyond the last outcome.
-   - `code_reach`: done, for a way in (a hub subject, command, tool, core module…): its feature, where it's registered,
-     what only it reaches (`silo remove`'s plan), and the code, tests and docs naming it. Not done: a plain symbol that
-     isn't a way in (its references are VS Code's, step (c)'s `code_*`).
-   - Code running, watched without editing it: logpoints in the editor's own code (`debug_logpoint`, its values as
+2. **Tools agents decide with**, in place of the shell: one queue with the bench's step (c), in the order refactoring
+   this repo in the editor needs them (2026-10-29). Each is a tool family under app/tools/ (host.ts). Done:
+   `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
+   results as data) and `code_reach` (what a way in reaches); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   *Tests*. In order:
+   - **(c) `code_references`, `code_rename`, `code_move`** (a file moved with its imports) and code actions, on VS
+     Code's providers plus `applyEdit`. This is also `code_reach` for a plain symbol that isn't a way in.
+   - **`git_log`, `git_show`** (a file at a revision), **`git_blame`**.
+   - **`files_edit_many`**: one WorkspaceEdit across files, all or nothing, each with the number of matches it expects.
+   - **Code running, watched without editing it**: logpoints in the editor's own code (`debug_logpoint`, its values as
      data), and VS Code's trace log for one component (`editor_trace`). The save bug took six instrumented reruns
      where `TextFileEditorModel`'s trace says "cancelled" in one.
-   - Experiments that undo themselves: `workspace_checkpoint` / `workspace_restore` (a throwaway overlay layer), and a
-     dry run on edits (`preview`: the diff and the diagnostics it would add).
-   - `files_edit_many` (one WorkspaceEdit across files, all or nothing, each with the number of matches it expects), and
-     structural `code_query` / `code_rewrite` on the syntax tree in place of regex rewrites.
-   - `git_log`, `git_show` (a file at a revision), `git_blame`; `decisions_for` (the ledger entries, ARCHITECTURE.md
-     sections and NEXT.md items naming a file or symbol); `ci_status` (a commit's runs, and a failed job's log).
-   - `script_run`: JavaScript in the capability-gated eval realm, the workspace read-only, for the computation a script
-     is for (counting, joining JSON). Its capability log shows what it touched.
+   - **Experiments that undo themselves**: `workspace_checkpoint` / `workspace_restore` (a throwaway overlay layer), and
+     a dry run on edits (`preview`: the diff and the diagnostics it would add).
+   - **Structural `code_query` / `code_rewrite`** on the syntax tree, in place of regex rewrites.
+   - **`decisions_for`** (the ledger entries, ARCHITECTURE.md sections and NEXT.md items naming a file or symbol) and
+     **`ci_status`** (a commit's runs, and a failed job's log).
+   - **`script_run`**: JavaScript in the capability-gated eval realm, the workspace read-only, for the computation a
+     script is for (counting, joining JSON). Its capability log shows what it touched.
 
    Every one: relative to a baseline (HEAD, or the last call); ids that chain from tool to tool, as hunk ids do; output
    bounded, saying what it left out; and what it couldn't see (TypeScript still initializing, say) said, not passed
    off as complete.
+
+3. **The test ledger** (packages/silo/README.md, *Tests by feature, in your face*): every run of every test, its
+   outcome, attempt, duration, runtime and where it ran, so "last failed", "flaky" and "green for N runs" are read, not
+   remembered. Generic, in lib `util/silo` (records in, answers out), with runner reports read through adapters; this
+   repository's CI first: its architecture shards and unit tests report outcomes, and CI commits the shared ledger as
+   it commits reach records. It's what resting (after 20 green runs; a weekly full run), vouches and a selection's
+   safety (silo's decision 8) wait on, and what would have tracked this week's flakes in place of *Watching*'s prose.
+   Done is: CI records every test's outcome on main, and an answer per test (last failed, flaky, green streak) reads
+   from it.
 
 ## Watching
 
@@ -152,15 +157,16 @@ How it's kept:
 ## Decisions
 
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
-  feature, in your face*; its decisions 11–21): the primary view, whether a touched feature reruns on its own, what
-  counts as a feature's tests, how long green rests, and whether tests that lean on each other are made independent
-  first; for vouches (a local pass CI can take), their window, the audit rate, whose count, and different runtimes;
-  CI's entry point; and what the ledger (`features.json`) holds for a declared feature, and what becomes of the
-  AI-written manifest.
+  feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
+  commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
+  a weekly full run; CI reruns a vouched test after 7 days. Open: decision 15 (tests that lean on each other), 17–19
+  (the audit rate, whose vouches count, different runtimes), 20 (CI's entry point) and 21 (what the ledger holds for a
+  declared feature, and what becomes of the AI-written manifest).
 
 ## Parked
 
 - **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one): `tsc`,
-  `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`, `code_references`,
-  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` is item 2's). Conventions when one is
+  `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`,
+  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` is done; `code_references` is
+  item 2's). Conventions when one is
   asked for: workbench/terminal/catalog.ts, app/tools/host.ts.

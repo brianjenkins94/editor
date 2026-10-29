@@ -434,7 +434,8 @@ to build on it (*Dogfooding in the editor*, at the end).
   run", and decision 8 (a selection's safety) waits on it.
 - **Selection by test, from reach and the ledger.** A test runs when the change reaches its code, it failed or flaked
   lately, it's new, or nothing has recorded what it reaches. Otherwise it **rests**: skipped, and run again by a
-  scheduled full run that refreshes every test's reach and outcome. Retiring a test outright is a decision with a
+  scheduled full run (weekly; a test rests after 20 green runs in a row) that refreshes every test's reach and
+  outcome. Retiring a test outright is a decision with a
   reason, in the feature ledger, as `silo remove` is; a test never retires itself. Ambient code (what nearly every
   test reaches) selects a project's smoke tests, not all of them.
 - **The states**, one word each, wherever a test or a feature is shown:
@@ -448,7 +449,8 @@ to build on it (*Dogfooding in the editor*, at the end).
 has its status, a strip of its last runs and its history in a few words ("flaky, last failed 2 days ago", "green 41
 runs", "failing since b98c0fc2"); opened, each test with its own strip. An edit is what brings a feature forward:
 every feature whose tests ran the changed code turns *touched*, first, with "Re-run N", exactly its tests. You don't go
-looking. Two rows are never hidden:
+looking: the touched tests run in the background when they can, and whatever hasn't run by then runs before the
+commit (decision 12). Two rows are never hidden:
 - **Unattributed**: tests no feature claims and files no feature owns, counted. With features declared first it should
   be empty, so anything in it is a gap.
 - **Declared against observed**: a test that declares one feature but whose reach is mostly another's code. That's how
@@ -471,7 +473,7 @@ tells CI they passed. CI decides for itself whether to run them again. It's a de
   declarations it ran, by identity. It holds only while the commit still has every one of them, so code edited after
   the run makes it lapse, with nothing to forge around.
 - **What CI does with it.** A selected test runs anyway when it has no current vouch, CI hasn't run it itself within
-  the window (proposed: a week), it failed or flaked lately in CI's ledger, or it can't run where vouches are made (a
+  the window (a week), it failed or flaked lately in CI's ledger, or it can't run where vouches are made (a
   browser suite, say). Otherwise CI skips it, recorded as vouched by whom and when, so a vouched pass never reads as
   CI's.
 - **Audits.** CI runs a few vouched tests anyway, at random. One CI fails that a vouch said passed stops that person's
@@ -969,18 +971,19 @@ From tests and purity (both above):
 
 From *Tests by feature* (above), for the rewrite:
 
-11. **The primary view**: a list of features (the 2026-10-29 sketch), or a map, as the features map is now: blocks
-    sized by code, colored by their tests' health.
-12. **A touched feature's tests**: run again on their own (a save already reruns what it reached), or a button you
-    press.
-13. **What counts as a feature's tests**: the tests it declares, plus any whose traces run its code; or declared ones
-    only, with the observed ones shown as *declared against observed*.
-14. **Resting**: how long green is long enough (runs, or days), and how often the full run runs (proposed: weekly).
-    Proposed: rest, never retire on its own.
+11. ~~**The primary view.**~~ Decided 2026-10-29: the list, features as rows with their tests under them, touched
+    ones first.
+12. ~~**A touched feature's tests.**~~ Decided 2026-10-29: they run in the background when they can (tests may be too
+    heavy to run on every save), and whatever hasn't run by then runs before the commit, in the commit flow that makes
+    the vouches. The button stays, for running them by hand.
+13. ~~**What counts as a feature's tests.**~~ Decided 2026-10-29: in the rewrite, everything is declared: a feature's
+    tests are the ones it declares. In the meantime, here, tests are attributed as best they can be (by the code their
+    reach runs), and shown as attributed rather than declared.
+14. ~~**Resting.**~~ Decided 2026-10-29: a test rests after 20 green runs in a row; the full run is weekly. A test never
+    retires on its own.
 15. **Tests that lean on each other**: made independent before resting works, or resting by test file for suites that
     share a session.
-16. **A vouch's window**: how long CI takes a vouch without running the test itself (proposed: a week), in days or in
-    CI runs.
+16. ~~**A vouch's window.**~~ Decided 2026-10-29: 7 days. CI runs a vouched test itself when it hasn't in a week.
 17. **The audit rate**: how many vouched tests CI runs anyway.
 18. **Whose vouches count**: by default only your own, or the people you list.
 19. **Different runtimes**: a vouch counts only for tests whose outcomes have matched on both runtimes before, or CI
