@@ -1386,6 +1386,37 @@ test("eslint: each package's own config, from the working directory eslint.worki
 	}
 });
 
+// A change's problems against HEAD (code-problems.ts; agents' code_problems): a file committed with one error, then
+// changed so it clears that one and breaks the file importing it, while that file's own error stays. (It commits, so it
+// runs last but the conformance check: the workspace has no HEAD before it.)
+test("code problems: what a change adds and clears, against HEAD", async () => {
+	const request = (subject, data) => session.request(subject, data, 240_000);
+
+	try {
+		await request("files.write", { "path": "problems/math.ts", "content": "export function double(n: number): number {\n\treturn n * 2;\n}\n\nexport const wrong: number = \"x\";\n" });
+		await request("files.write", { "path": "problems/use.ts", "content": "import { double } from \"./math\";\n\nexport const four = double(2);\nexport const bad: string = 1;\n" });
+		await request("git.commit", { "message": "problems: the baseline", "files": [{ "path": "problems/math.ts" }, { "path": "problems/use.ts" }] });
+		await request("files.write", { "path": "problems/math.ts", "content": "export function double(text: string): string {\n\treturn text + text;\n}\n" });
+
+		const answer = await request("code.problems", { "paths": ["problems"] });
+		const brief = (problem) => [problem.file, problem.source, problem.code, problem.line];
+
+		assert.deepEqual(answer.checked.typescript, ["problems/math.ts", "problems/use.ts"], JSON.stringify(answer));
+		assert.deepEqual(answer.added.filter(({ source }) => source === "ts").map(brief), [["problems/use.ts", "ts", 2345, 3]], "the importer's call breaks");
+		assert.deepEqual(answer.cleared.filter(({ source }) => source === "ts").map(brief), [["problems/math.ts", "ts", 2322, 5]], "math.ts's own error goes, where HEAD had it");
+		assert.ok(answer.counts.unchanged >= 1, "use.ts's `bad` was there before: " + JSON.stringify(answer.counts));
+		assert.ok(answer.checked.eslint.includes("problems/math.ts"), "ESLint read both sides");
+		// (asked again, the same: HEAD's language service gave the project's documents back as it found them)
+		assert.deepEqual((await request("code.problems", { "paths": ["problems"] })).counts, answer.counts);
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/problems"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });

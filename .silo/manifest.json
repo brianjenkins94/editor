@@ -761,6 +761,16 @@
         "hub request|terminal.state"
       ]
     },
+    "A change's problems": {
+      "what": "The TypeScript and ESLint problems a change made and the ones it fixed, against HEAD: its changed files and the files importing them, each checked now and as HEAD had it, with what wasn't checked said.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|code_problems",
+        "command|_eslint.problems",
+        "core module|installCodeProblems",
+        "hub request|code.problems"
+      ]
+    },
     "Agent view of the editor": {
       "what": "An agent reads what's on screen as data: the active file, cursor and open tabs, the Problems view, and the notifications showing.",
       "ways": [

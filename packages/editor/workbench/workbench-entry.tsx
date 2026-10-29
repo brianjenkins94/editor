@@ -53,6 +53,7 @@ import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { registerFeaturesMap } from "./features-map";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
+import { installCodeProblems } from "./code-problems";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
@@ -671,6 +672,8 @@ function maybeBoot(): void {
 
 				// The review: the changes as hunks, with BABLR's verdicts and the features they're in (git-review.ts).
 				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
+				// A change's problems against HEAD: TypeScript's (the history extension's tsserver plugin) and ESLint's (code-problems.ts).
+				installCodeProblems(api as typeof import("vscode"), workbenchHub, git);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.

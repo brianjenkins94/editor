@@ -28,6 +28,8 @@ const LANGUAGES = ["javascript", "javascriptreact", "typescript", "typescriptrea
 const FIX_ALL = vscode.CodeActionKind.SourceFixAll.append("eslint");
 /** How long edits settle before a document is linted again. */
 const SETTLE_MS = 300;
+/** A diagnostic severity's name, as `_eslint.problems` answers it. */
+const SEVERITY_NAMES: Record<vscode.DiagnosticSeverity, string> = { [vscode.DiagnosticSeverity.Error]: "error", [vscode.DiagnosticSeverity.Warning]: "warning", [vscode.DiagnosticSeverity.Information]: "info", [vscode.DiagnosticSeverity.Hint]: "hint" };
 /** The rules the desktop server marks unnecessary (drawn faded): unused things. */
 const UNUSED_RULES = new Set(["no-unused-imports", "no-unused-private-class-members", "no-unused-vars"]);
 
@@ -398,6 +400,23 @@ export function activate(context: vscode.ExtensionContext): void {
 			clearTimeout(timers.get(document.uri.toString()));
 			timers.delete(document.uri.toString());
 			collection.delete(document.uri);
+		}),
+		// A text's problems as `uri` would show them, customized as the Problems view's are — for core's code-problems.ts,
+		// which asks of a file at HEAD and now; undefined where eslint doesn't lint the file.
+		vscode.commands.registerCommand("_eslint.problems", async (uri: vscode.Uri, text?: string) => {
+			const document = await vscode.workspace.openTextDocument(uri);
+
+			if (!validates(document)) {
+				return undefined;
+			}
+
+			const messages = await worker.lint(document.uri.fsPath, text ?? document.getText(), await workingDirectoryOf(document));
+
+			return messages.flatMap((message) => {
+				const severity = severityOf(message);
+
+				return severity === undefined ? [] : [{ "line": message.line, "column": message.column, "code": message.ruleId, "severity": SEVERITY_NAMES[severity], "message": message.message }];
+			});
 		}),
 		vscode.languages.registerCodeActionsProvider(selector, {
 			"provideCodeActions": async (document, _range, codeContext) => {

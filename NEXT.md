@@ -71,8 +71,8 @@ How it's kept:
 
 2. **Tools agents decide with**, in place of the shell (2026-10-28: what an agent left the editor for in the shell's
    removal and the save fix). Each is a tool family under app/tools/ (host.ts). In order:
-   - `code_problems_delta`: the diagnostics (TypeScript, ESLint) a change adds or clears against HEAD. A whole-repo
-     `tsc` has about 5,700 errors from environment types, so new ones can't be seen in it.
+   - `code_problems`: done. The TypeScript and ESLint problems a change adds or clears against HEAD, in the changed files
+     and the files importing them (ARCHITECTURE.md, *Workspace tools*).
    - `tests_affected` (the tests whose traces reach the changed files), then `tests_run`: results as data, each with
      pass or fail, the assertion's actual and expected, its duration and its flaky history.
    - `code_reach`, for a symbol, hub subject or way in: who serves and requests it, what only it reaches (`silo
