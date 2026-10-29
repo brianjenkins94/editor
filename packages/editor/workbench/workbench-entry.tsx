@@ -70,6 +70,7 @@ import { registerRuleView } from "./rule-view";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
 import { pinned } from "./versions";
 import { Workbench } from "./Workbench";
+import { installTestRuns } from "./test-runs";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
 import { installWorkspaceTools } from "./workspace-tools";
@@ -674,6 +675,8 @@ function maybeBoot(): void {
 				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
 				// A change's problems against HEAD: TypeScript's (the history extension's tsserver plugin) and ESLint's (code-problems.ts).
 				installCodeProblems(api as typeof import("vscode"), workbenchHub, git);
+				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
+				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.

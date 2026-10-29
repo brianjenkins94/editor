@@ -136,6 +136,28 @@ function errorText(error) {
 	return [`${error.name ?? "Error"}: ${error.message}`, ...frames.map((line) => line.trim())].join("\n");
 }
 
+/** A value as an assertion's message would show it, short. */
+function shown(value) {
+	let text;
+
+	try {
+		text = JSON.stringify(value) ?? String(value);
+	} catch {
+		text = String(value);
+	}
+
+	return text.length > 500 ? text.slice(0, 500) + "…" : text;
+}
+
+/** What a failed assertion compared (node:assert's AssertionError), as JSON for the debug worker; undefined otherwise. */
+function assertionOf(error) {
+	if (typeof error !== "object" || error === null || error.code !== "ERR_ASSERTION" || !("actual" in error)) {
+		return undefined;
+	}
+
+	return JSON.stringify({ "actual": shown(error.actual), "expected": shown(error.expected), ...typeof error.operator === "string" ? { "operator": error.operator } : {} });
+}
+
 async function runTest(node, titles, suite, depth) {
 	const skip = node.options.skip;
 	const todo = node.options.todo;
@@ -206,7 +228,7 @@ async function runTest(node, titles, suite, depth) {
 	const outcome = skipped !== undefined ? "skip" : todoed !== undefined ? "todo" : error === undefined ? "pass" : "fail";
 
 	counts[{ "pass": "pass", "fail": "fail", "skip": "skipped", "todo": "todo" }[outcome]] += 1;
-	tell("end", JSON.stringify(titles), outcome, error === undefined ? undefined : errorText(error));
+	tell("end", JSON.stringify(titles), outcome, error === undefined ? undefined : errorText(error), assertionOf(error));
 
 	if (outcome === "pass") {
 		print(depth, `✔ ${node.name}`);

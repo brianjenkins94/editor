@@ -1,4 +1,5 @@
-/** What's running and what ran (`runs.list` / `runs.stop`, runs.ts) and the run ledger (`runs.ledger`, evidence.ts). */
+/** What's running and what ran (`runs.list` / `runs.stop`, runs.ts), the run ledger (`runs.ledger`, evidence.ts), and test
+ *  runs: which a change reaches and their results as data (`tests.affected` / `tests.run`, test-runs.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -41,6 +42,28 @@ const runs: ToolFamily = ({ request }) => [
 				}
 			},
 			"handler": async (query, { signal }) => ok(request("runs.ledger", query, signal))
+		})
+	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
+			"name": "runs_affected",
+			"config": {
+				"description": "The tests a change reaches: those whose last run here ran code in the working tree's changed files (or the files given), by the traces the editor keeps of each test. Each has its last outcome, and stale when it ran code the change has altered since (it hasn't run on this code: run it). untraced lists the test files with no trace at all: what they reach isn't known until they run once, so the list without them isn't complete. Returns { tests: [{ id, file, outcome, at, stale, reaches }], changed, untraced }.",
+				"inputSchema": { "paths": z.array(z.string()).optional().describe("These files instead of the changed ones (relative to the workspace).") }
+			},
+			"handler": async ({ paths }, { signal }) => ok(request("tests.affected", { "paths": paths }, signal))
+		})
+	},
+	{
+		"timeoutMs": 1800000,
+		"tool": defineTool({
+			"name": "runs_tests",
+			"config": {
+				"description": "Run test files (node:test, in the editor's debugger, one file at a time, as node --test does) and get each test's result as data: its outcome, what it threw, what a failed assertion compared (actual, expected, operator), its time, and how it came out before this run (before), so a newly failing test reads apart from one failing all along. Without files, the stale ones runs_affected lists run. A file that failed without a failed test (it didn't load, say) has its output's end. Returns { files: [{ file, exitCode, ms, tests: [{ id, outcome, error?, assertion?, ms?, before? }], output? }], counts: { files, pass, fail, skip } }.",
+				"inputSchema": { "files": z.array(z.string()).optional().describe("The test files to run (relative to the workspace); default, the affected tests' that are stale.") }
+			},
+			"handler": async ({ files }, { signal }) => ok(request("tests.run", { "files": files }, signal))
 		})
 	}
 ];

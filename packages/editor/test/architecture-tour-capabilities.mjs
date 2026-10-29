@@ -1386,6 +1386,55 @@ test("eslint: each package's own config, from the working directory eslint.worki
 	}
 });
 
+// Tests for agents (test-runs.ts; runs_affected, runs_tests): a test file nobody's run is untraced; run, each test's
+// result is data (a failed assertion's sides); its traces then say which tests reach the code, until an edit makes them
+// stale, and running the stale ones says how each came out before.
+test("test runs: which tests a change reaches, and their results as data", async () => {
+	const request = (subject, data) => session.request(subject, data, 240_000);
+
+	try {
+		await request("files.write", { "path": "checks/sum.js", "content": "export function sum(a, b) {\n\treturn a + b;\n}\n" });
+		await request("files.write", { "path": "checks/sum.test.js", "content": "import assert from \"node:assert\";\nimport { test } from \"node:test\";\nimport { sum } from \"./sum.js\";\n\ntest(\"adds\", () => {\n\tassert.equal(sum(1, 2), 3);\n});\n\ntest(\"is wrong\", () => {\n\tassert.equal(sum(1, 1), 3);\n});\n" });
+
+		assert.ok((await request("tests.affected", { "paths": ["checks/sum.js"] })).untraced.includes("checks/sum.test.js"), "never run: untraced");
+
+		const first = await request("tests.run", { "files": ["checks/sum.test.js"] });
+		const [file] = first.files;
+
+		assert.equal(file.exitCode, 1, JSON.stringify(first));
+		assert.deepEqual(file.tests.map(({ id, outcome }) => [id, outcome]), [["checks/sum.test.js › adds", "pass"], ["checks/sum.test.js › is wrong", "fail"]]);
+		assert.deepEqual(file.tests[1].assertion, { "actual": "2", "expected": "3", "operator": "==" }, "the failed assertion's sides");
+		assert.ok(file.tests.every((test) => typeof test.ms === "number"), "each test's time");
+		assert.deepEqual(first.counts, { "files": 1, "pass": 1, "fail": 1, "skip": 0 });
+
+		// (the Margin keeps the run's traces as it ends: once they're there, they say which tests reach sum.js)
+		const traced = await eventually("the tests' traces on sum.js", async () => {
+			const answer = await request("tests.affected", { "paths": ["checks/sum.js"] });
+
+			return answer.tests.length === 2 ? answer : undefined;
+		}, 60_000);
+
+		assert.deepEqual(traced.tests.map(({ id, outcome, stale }) => [id, outcome, stale]), [["checks/sum.test.js › adds", "pass", false], ["checks/sum.test.js › is wrong", "fail", false]]);
+		assert.ok(!traced.untraced.includes("checks/sum.test.js"));
+
+		await request("files.edit", { "path": "checks/sum.js", "old": "return a + b;", "new": "return a + b + 0;" });
+
+		const edited = await request("tests.affected", { "paths": ["checks/sum.js"] });
+
+		assert.ok(edited.tests.every((test) => test.stale), "sum changed under them: " + JSON.stringify(edited.tests));
+
+		const again = await request("tests.run", { "files": ["checks/sum.test.js"] });
+
+		assert.deepEqual(again.files[0].tests.map(({ outcome, before }) => [outcome, before]), [["pass", "pass"], ["fail", "fail"]], "how each came out before");
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/checks"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 // A change's problems against HEAD (code-problems.ts; agents' code_problems): a file committed with one error, then
 // changed so it clears that one and breaks the file importing it, while that file's own error stays. (It commits, so it
 // runs last but the conformance check: the workspace has no HEAD before it.)

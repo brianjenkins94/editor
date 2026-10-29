@@ -771,6 +771,17 @@
         "hub request|code.problems"
       ]
     },
+    "Tests for agents": {
+      "what": "Which tests a change reaches, by the traces of their runs here (stale when they ran code it has altered, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
+      "docs": "packages/editor/RUNNING.md, *Tests*",
+      "ways": [
+        "agent tool|runs_affected",
+        "agent tool|runs_tests",
+        "core module|installTestRuns",
+        "hub request|tests.affected",
+        "hub request|tests.run"
+      ]
+    },
     "Agent view of the editor": {
       "what": "An agent reads what's on screen as data: the active file, cursor and open tabs, the Problems view, and the notifications showing.",
       "ways": [

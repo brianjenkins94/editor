@@ -63,7 +63,7 @@ How it's kept:
      (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
    - No shell for agents: their shell tool is removed (2026-10-27; ARCHITECTURE.md, *Workspace tools*), so the bench is
      worked through the editor's tools alone. Until each is a tool, what only the shell did is missing: running tests
-     (`tests_run`, item 2), `git log` (a `git_log`, item 2), and a refactor across files, which is (c). A program runs
+     (`runs_tests`, item 2), `git log` (a `git_log`, item 2), and a refactor across files, which is (c). A program runs
      under `debug_start`.
    - (c) The `code_*` tools under *Parked* (references, rename, move with imports, code actions), on VS Code's
      providers plus `applyEdit`.
@@ -73,8 +73,8 @@ How it's kept:
    removal and the save fix). Each is a tool family under app/tools/ (host.ts). In order:
    - `code_problems`: done. The TypeScript and ESLint problems a change adds or clears against HEAD, in the changed files
      and the files importing them (ARCHITECTURE.md, *Workspace tools*).
-   - `tests_affected` (the tests whose traces reach the changed files), then `tests_run`: results as data, each with
-     pass or fail, the assertion's actual and expected, its duration and its flaky history.
+   - `runs_affected` and `runs_tests`: done. The tests whose traces reach the changed files, stale or not, and test files
+     run with each test's result as data (RUNNING.md, *Tests*). Not done: a flaky history beyond the last outcome.
    - `code_reach`, for a symbol, hub subject or way in: who serves and requests it, what only it reaches (`silo
      remove`'s analysis), and the docs and tests that name it.
    - Code running, watched without editing it: logpoints in the editor's own code (`debug_logpoint`, its values as
@@ -124,8 +124,10 @@ How it's kept:
 - **tour-runs' selection test timed out** in CI once, waiting for "calc.test.js run again, after the save" (1cc007e;
   passed on rerun; the features test after it failed on the state it left). It passed locally every time this session,
   and on 289dadd's run with the same code. Again on 05ce05b: *halt*'s selected run never halted on rates.js (passed on
-  rerun and locally) — a second test waiting on a save's selected run. If it comes back, find whether the save's
-  selected run waits behind the file's own run or ESLint's fix on save.
+  rerun and locally) — a second test waiting on a save's selected run. Locally on 2026-10-29 too (selection, then
+  *halt*, and the features test after them; passed on rerun). Likely cause: the save itself was dropped (*A person's
+  first Ctrl+S after load*, below): the test presses Ctrl+S and waits for what the save selects. If it comes back,
+  check whether calc.js is still dirty when it times out.
 
 - **tour-capabilities' package prompt timed out waiting for the baseline** once in CI (af79463; passed on rerun). The
   baseline is made as the project opens, from the CDN; the same run's log has CDN fetches failing. If it comes back,
@@ -154,5 +156,5 @@ None open (the last ones settled 2026-10-26: their answers are in the docs above
 
 - **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one): `tsc`,
   `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`, `code_references`,
-  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`tests_run` is queued: item 2). Conventions when one is
+  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` is item 2's). Conventions when one is
   asked for: workbench/terminal/catalog.ts, app/tools/host.ts.

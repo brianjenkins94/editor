@@ -140,6 +140,10 @@ export interface TestReport {
 	"titles": string[];
 	"outcome": "pass" | "fail" | "skip" | "todo";
 	"error"?: string;
+	/** What a failed assertion compared: each side as its message shows it, and how it compared them. */
+	"assertion"?: { "actual": string; "expected": string; "operator"?: string };
+	/** How long it took, by the debugger's clock (not the program's, which the deterministic loop keeps). */
+	"ms"?: number;
 	"files": { "file": string; "statements": [[number, number], [number, number]][] }[];
 }
 

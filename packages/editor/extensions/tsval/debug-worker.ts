@@ -868,16 +868,30 @@ function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object> {
 /** How many tests failed, as node-test.js tells at the end: a run with one fails, as `node --test` does. */
 let testsFailed = 0;
 
-/** node-test.js's `__editorTest`: a test started (`titles`), ended (and how: `outcome`, what it threw), or the file's
- *  tests are done (`titles` then the count that failed). Called from the program's code, with strings only. */
-function testTold(kind: string, titles?: string, outcome?: string, error?: string): void {
+/** When each test started, by the host's clock (the program's runs on the deterministic loop's): its time. */
+const testClock = new Map<string, number>();
+
+/** node-test.js's `__editorTest`: a test started (`titles`), ended (and how: `outcome`, what it threw, and what a failed
+ *  assertion compared, as JSON), or the file's tests are done (`titles` then the count that failed). Called from the
+ *  program's code, with strings only. */
+function testTold(kind: string, titles?: string, outcome?: string, error?: string, assertion?: string): void {
 	if (kind === "start" && titles !== undefined) {
 		testStarts.set(titles, new Map([...current?.coverage ?? []].map(([file, entry]) => [file, [...entry.counts]])));
+		testClock.set(titles, performance.now());
 	} else if (kind === "end" && titles !== undefined) {
 		const started = testStarts.get(titles);
+		const clocked = testClock.get(titles);
 
 		testStarts.delete(titles);
-		testsRan.push({ "titles": JSON.parse(titles) as string[], "outcome": outcome as TestReport["outcome"], ...error === undefined ? {} : { "error": error }, "files": started === undefined ? [] : ranSince(started) });
+		testClock.delete(titles);
+		testsRan.push({
+			"titles": JSON.parse(titles) as string[],
+			"outcome": outcome as TestReport["outcome"],
+			...error === undefined ? {} : { "error": error },
+			...assertion === undefined ? {} : { "assertion": JSON.parse(assertion) as TestReport["assertion"] },
+			...clocked === undefined ? {} : { "ms": Math.round(performance.now() - clocked) },
+			"files": started === undefined ? [] : ranSince(started)
+		});
 	} else if (kind === "done") {
 		testsFailed = Number(titles ?? 0);
 	}

@@ -156,6 +156,14 @@ its outcome) on each file it ran: the top-level declarations it executed there, 
 which tests reach it, the record selection reads (*Unattended runs*: "What runs"). A file keeps each test's latest,
 apart from its runs. Tests' traces stay on this machine, as runs' do (RUNTIME-EVIDENCE.md, *Kept across reloads*).
 
+**For agents** (2026-10-29; workbench/test-runs.ts): `runs_affected` reads the changed files' traces, so the tests a
+change reaches are the ones whose last run here ran code in them. One is *stale* when its trace ran a declaration the
+file no longer has, which is the judgment a save's selection makes. The test files no trace names are listed apart:
+until they've run once, nothing says what they reach. `runs_tests` runs test files as `node --test` does and answers
+each test as data. A failed assertion's sides come as node-test.js shows them; the time is the debug worker's clock,
+since the program's own runs on the deterministic loop; and a test's outcome from before the run is beside it, so a test
+that just broke reads apart from one that was already failing.
+
 **Tests, by feature** (the features map's data, since 2026-10-26; packages/silo/README.md, *The feature manifest*):
 under each of the manifest's features, the tests whose traces ran code it owns that isn't ambient (owned by more than
 five features), as each last came out. It took over from features from tests (Insights' Features view, 2026-10-23),
