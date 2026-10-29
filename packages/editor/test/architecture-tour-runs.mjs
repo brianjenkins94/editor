@@ -22,41 +22,8 @@ tour("architecture-tour-runs");
  *  one that ran without its trace kept) and the traces kept on the file. NEXT.md *Watching*. */
 async function afterSave(what, path, probe) {
 	const saved = Date.now();
-	// (when the save landed — the file no longer dirty — watched beside the wait, for where the time went)
-	let landed;
-	const watching = (async () => {
-		while (landed === undefined && Date.now() - saved < 60_000) {
-			if (await session.workbench().evaluate((file) => globalThis.__editor.api.workspace.textDocuments.find((document) => document.uri.path === file)?.isDirty !== true, path)) {
-				landed = Date.now() - saved;
-			} else {
-				await new Promise((resolve) => {
-					setTimeout(resolve, 100);
-				});
-			}
-		}
-	})();
-	const timings = async () => {
-		await watching;
 
-		// (a selected run isn't in the runs list: its trace, kept as it ends, says when)
-		const kept = await session.workbench().evaluate(async (file) => {
-			const { api } = globalThis.__editor;
-
-			return Promise.resolve(api.workspace.fs.readFile(api.Uri.file(`/workspace/.silo/local/traces/${file.slice("/workspace/".length)}.jsonl`))).then((bytes) => new TextDecoder().decode(bytes), () => "");
-		}, path);
-		const traces = kept.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).filter((trace) => Date.parse(trace.at) >= saved).map((trace) => `${trace.test?.id ?? trace.program ?? "(own)"} ${trace.trigger} +${Date.parse(trace.at) - saved}ms`);
-
-		return `saved +${landed ?? "never"}ms; traces since: ${JSON.stringify(traces)}`;
-	};
-
-	return eventually(what, probe, 60_000).then(async (found) => {
-		// (said in CI, where this takes ten times what it does here: NEXT.md *Watching*)
-		if (process.env.CI !== undefined) {
-			console.log(`[after save] ${what}, +${Date.now() - saved}ms: ${await timings()}`);
-		}
-
-		return found;
-	}, async (error) => {
+	return eventually(what, probe, 60_000).catch(async (error) => {
 		const state = await session.workbench().evaluate(async ({ file, since }) => {
 			const { api } = globalThis.__editor;
 			const traces = await Promise.resolve(api.workspace.fs.readFile(api.Uri.file(`/workspace/.silo/local/traces/${file.slice("/workspace/".length)}.jsonl`))).then((bytes) => new TextDecoder().decode(bytes), () => "");
@@ -1608,7 +1575,8 @@ test("halt: a selected run halts before a call that never ran for real, and a pi
 
 	assert.match(state.end.message, new RegExp(`halted before net ${url.replaceAll(".", "\\.")}: it never ran for real`, "u"));
 	assert.deepEqual(halt?.cells, [`net ${url}`], "the call it halted before, on its line");
-	assert.ok(await workbench.evaluate(() => [...document.querySelectorAll("wa-button, button")].some((button) => button.textContent.trim() === "Pin…")), "Pin… on its line");
+	// (drawn once the Margin has the halt: waited for, as the halt was)
+	await eventually("Pin… on its line", () => workbench.evaluate(() => [...document.querySelectorAll("wa-button, button")].some((button) => button.textContent.trim() === "Pin…") || undefined), 30_000);
 
 	// Pinning a value: a rule in my policy — runs after an edit give the call that value.
 	assert.equal(await workbench.evaluate(([address, line]) => globalThis.__editor.api.commands.executeCommand("margin.pin", "file:///workspace/rates.js", "net", address, line, "2"), [url, halt.line - 1]), true);

@@ -24,6 +24,9 @@ import * as vscode from "vscode";
 /** Saves this close together are one run: the last. */
 const SAVE_DEBOUNCE_MS = 250;
 
+/** The ended sessions remembered, by id (registerLiveRuns' `ended`). */
+const ENDED_KEPT = 200;
+
 /** A run of the same text started this recently (the interval's, or the save before) isn't started again by a save. */
 const SAME_TEXT_MS = 1000;
 
@@ -35,8 +38,9 @@ const runDebugger = (): string => vscode.workspace.getConfiguration("run").get<s
 const readText = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
 /** The test files whose tests, and the programs whose runs, executed code of `path` that `text` no longer has: each
- *  one's trace on it holds a declaration (a BABLR span id) its spans don't. In the order they were kept; none when the
- *  text doesn't parse. */
+ *  one's trace on it holds a declaration (a BABLR span id) its spans don't. In the order they were kept. When the text's
+ *  spans can't be had (it doesn't parse, or BABLR didn't answer), what changed can't be told: every one that ran code of
+ *  it, so none is left out. */
 export async function reachedRuns(path: string, text: string): Promise<string[]> {
 	const root = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(path))?.uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
 
@@ -52,13 +56,8 @@ export async function reachedRuns(path: string, text: string): Promise<string[]>
 	}
 
 	const answer = await annotations(vscode.commands).spans(text).catch(() => undefined);
-
-	if (answer === undefined || !("value" in answer)) {
-		return [];
-	}
-
-	const ids = new Set(answer.value.map((span) => span.id));
-	const files = reached.filter((trace) => trace.declarations.some((id) => !ids.has(id))).map((trace) => vscode.Uri.joinPath(root, trace.test?.id.split(" › ")[0] ?? trace.program ?? "").path);
+	const ids = answer === undefined || !("value" in answer) ? undefined : new Set(answer.value.map((span) => span.id));
+	const files = reached.filter((trace) => ids === undefined || trace.declarations.some((id) => !ids.has(id))).map((trace) => vscode.Uri.joinPath(root, trace.test?.id.split(" › ")[0] ?? trace.program ?? "").path);
 
 	return [...new Set(files)].filter((file) => file !== path);
 }
@@ -74,15 +73,17 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	const last = new Map<string, { "text": string; "at": number }>();
 	/** The files edited since their last live run: what the interval runs (opening a file doesn't run it). */
 	const edited = new Set<string>();
-	/** Every debug session going. */
-	const sessions = new Set<vscode.DebugSession>();
+	/** Every debug session going, by its id: an ended one is known by its id too, so one told ended before it was told
+	 *  started (a short run, on a busy host) isn't kept as going — kept, it would hold up what a save selects for good. */
+	const sessions = new Map<string, vscode.DebugSession>();
+	const ended = new Set<string>();
 	/** The test files and programs a save reached, still to run (one at a time); and the one running now. */
 	let queued: string[] = [];
 	let selected: string | undefined;
 	const enabled = (): boolean => vscode.workspace.getConfiguration("run").get<boolean>("liveRuns", true);
 	const isLive = (session: vscode.DebugSession): boolean => session.configuration["__live"] === true;
 	/** A run of yours of `path` going (anything but a live run): it's what that file's margin shows, so a live run waits. */
-	const yours = (path: string): boolean => [...sessions].some((session) => !isLive(session) && session.configuration["program"] === path);
+	const yours = (path: string): boolean => [...sessions.values()].some((session) => !isLive(session) && session.configuration["program"] === path);
 	const isProgram = (document: vscode.TextDocument): boolean => document.uri.scheme === "file" && PROGRAM.test(document.uri.path);
 
 	const stop = (path: string): void => {
@@ -124,12 +125,18 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			return;
 		}
 
+		// (a run of yours of the next one still going: it waits for that run to end, which goes on with the queue — skipped,
+		// what the save reached would go unrun)
+		if (queued.length > 0 && yours(queued[0])) {
+			return;
+		}
+
 		selected = queued.shift();
 
 		if (selected !== undefined) {
 			const text = await readText(selected);
 
-			// (one that can't run now — a run of yours of it going, say — is skipped)
+			// (one that can't run now — an app's file, say — is skipped)
 			if (text === undefined || !await startPath(selected, text, true)) {
 				selected = undefined;
 				await next();
@@ -168,18 +175,28 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		vscode.debug.onDidStartDebugSession((session) => {
-			sessions.add(session);
+			if (ended.has(session.id)) {
+				return;
+			}
+
+			sessions.set(session.id, session);
 
 			if (isLive(session)) {
 				running.set(String(session.configuration["program"]), session);
 			}
 		}),
 		vscode.debug.onDidTerminateDebugSession((session) => {
-			sessions.delete(session);
+			sessions.delete(session.id);
+			ended.add(session.id);
+
+			// (the latest ended ones are enough: a start told late is told just after its end)
+			if (ended.size > ENDED_KEPT) {
+				ended.delete(ended.values().next().value as string);
+			}
 
 			const path = String(session.configuration["program"]);
 
-			if (running.get(path) === session) {
+			if (running.get(path)?.id === session.id) {
 				running.delete(path);
 			}
 
@@ -187,8 +204,8 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 				selected = undefined;
 			}
 
-			// (whichever live run ended — the saved file's own, or a selected one — the queue goes on)
-			if (isLive(session) && queued.length > 0) {
+			// (whichever run ended — the saved file's own, a selected one, or a run of yours one is waiting for — the queue goes on)
+			if (queued.length > 0) {
 				void next();
 			}
 		}),

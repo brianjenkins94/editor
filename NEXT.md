@@ -122,15 +122,6 @@ How it's kept:
   sent to someone-…@example.com", bc7a208, a workflow-only change; passed on rerun). If it comes back, find what a
   second test's sign-in code reaches in the first's mailbox (a shared mail stub, or an address not unique enough).
 
-- **tour-runs' selection test timed out** in CI once, waiting for "calc.test.js run again, after the save" (1cc007e;
-  passed on rerun; the features test after it failed on the state it left). It passed locally every time this session,
-  and on 289dadd's run with the same code. Again on 05ce05b: *halt*'s selected run never halted on rates.js (passed on
-  rerun and locally) — a second test waiting on a save's selected run. Locally on 2026-10-29 too (selection, then
-  *halt*, and the features test after them; passed on rerun). Likely cause: the save itself was dropped (*A person's
-  first Ctrl+S after load*, below): the test presses Ctrl+S and waits for what the save selects. In CI on 1bdc520f and
-  f2d51e83 too (*an edit to an imported module*, "report.js run again"; passed on rerun). Both selection tests now say,
-  timed out, whether the saved file is still dirty: read that on the next one.
-
 - **tour-capabilities' package prompt timed out waiting for the baseline** once in CI (af79463; passed on rerun). The
   baseline is made as the project opens, from the CDN; the same run's log has CDN fetches failing. If it comes back,
   find whether the baseline waits on a fetch that failed, and make the test (or the baseline) say so.
