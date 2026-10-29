@@ -7,6 +7,8 @@
  *   evidence's purple, a Hint with the price, and the lightbulb's two ways out — Keep for 90 days (`silo status … active
  *   --until`) and Remove (`silo remove`: the files only it reaches, its manifest entries, the tombstone; nothing
  *   committed) — writing what those commands write.
+ * - **What a way in reaches** (`history.reach`, core's `code.reach`, agents' `code_reach`): the feature that owns it, where
+ *   it's registered, what Remove would free (the same plan, nothing written), and everywhere code, tests and docs name it.
  * Its ways in are History's reading (the TypeScript server plugin's, edits included); the docs and code it searches are
  * the workspace's files, read once and kept as they change.
  */
@@ -18,11 +20,18 @@ import { priceText } from "@brianjenkins94/util/silo/cost";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
 import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { featuresOfManifest, parseManifest } from "@brianjenkins94/util/silo/manifest";
 import * as vscode from "vscode";
 
 /** The files drift reads: docs, and code. */
 const READ = "**/*.{md,ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 const EXCLUDE = "**/node_modules/**";
+
+/** The places `history.reach` lists that name a way in, at most. */
+const NAMED = 100;
+
+/** A test file, as node finds them (the terminal's node command's isTestFile): what names a way in from a test. */
+const TEST_FILE = /(?:^|\/)tests?\/|(?:^|[./_-])test[._-]/u;
 
 /** How long Keep keeps a dormant way in before it asks again (the ledger's lease). */
 const KEEP_DAYS = 90;
@@ -106,6 +115,23 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri, o
 		texts.set(ledgerPath(), text);
 	};
 	const ledgerNow = async (): Promise<string | undefined> => texts.get(ledgerPath()) ?? await textOf(ledgerUri);
+	/** The manifests a removal plans against, which the checks don't read: where a way in is declared (package.json), and
+	 *  the feature manifest, which it's taken out of. */
+	const manifestsOf = async (tracked: string[]): Promise<Map<string, string>> => {
+		const manifests = new Map<string, string>();
+
+		for (const file of [...tracked.filter((each) => /(?:^|\/)package\.json$/u.test(each) && includeByDefault(each)), manifestPath()]) {
+			const text = await textOf(vscode.Uri.joinPath(root, file));
+
+			if (text !== undefined) {
+				manifests.set(file, text);
+			}
+		}
+
+		return manifests;
+	};
+	/** A file's 1-based line at `offset`, in its text as read. */
+	const lineAt = (file: string, offset: number): number => (texts.get(file) ?? "").slice(0, offset).split("\n").length;
 
 	/** Each dormant way in's registrations, in purple, in the editors showing them. */
 	const draw = (): void => {
@@ -215,18 +241,7 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri, o
 
 			const status = await Promise.resolve(vscode.commands.executeCommand<{ "head"?: string } | undefined>("editor.git.status")).catch(() => undefined);
 			const tracked = [...await load()];
-			// (its manifests too, which the checks don't read: where its way in is declared — and the feature manifest, which
-			// it's taken out of)
-			const manifests = new Map<string, string>();
-
-			for (const file of [...tracked.filter((each) => /(?:^|\/)package\.json$/u.test(each) && includeByDefault(each)), manifestPath()]) {
-				const text = await textOf(vscode.Uri.joinPath(root, file));
-
-				if (text !== undefined) {
-					manifests.set(file, text);
-				}
-			}
-
+			const manifests = await manifestsOf(tracked);
 			const removal = removalOf({ "name": found.way.id, "why": reason.trim(), "key": found.way.key, "paths": [], "ledger": parseLedger(await ledgerNow()), "features": program.features, "graph": program.graph, "tracked": tracked, "textOf": (file) => texts.get(file) ?? manifests.get(file), "head": status?.head?.slice(0, 7) ?? "HEAD", "today": today() });
 			const said = removalText(found.way.id, removal);
 
@@ -246,6 +261,61 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri, o
 			void vscode.window.showInformationMessage(said.split("\n")[0] + (removal.nothing ? "" : " The rest is in the History output."));
 
 			return { "nothing": removal.nothing, "files": removal.files, "manifests": removal.manifests.map((each) => each.file), "text": said };
+		}),
+		// What a way in reaches, by its key (`hub request|code.problems`) or its id when one way in has it: Remove's plan,
+		// nothing written, and every place that names it. Undefined until History has read the program.
+		vscode.commands.registerCommand("history.reach", async (target: unknown) => {
+			if (program === undefined || typeof target !== "string" || target === "") {
+				return program === undefined ? { "ready": false } : undefined;
+			}
+
+			const ways = [...program.features.values()];
+			const matching = ways.filter((way) => way.key === target || way.id === target);
+
+			if (matching.length !== 1) {
+				const close = matching.length > 1 ? matching : ways.filter((way) => way.key.includes(target) || target.includes(way.id));
+
+				return { "ready": true, "matches": close.slice(0, 20).map((way) => way.key), "found": matching.length };
+			}
+
+			const [way] = matching;
+			const tracked = [...await load()];
+			const manifests = await manifestsOf(tracked);
+			const manifest = parseManifest(manifests.get(manifestPath()) ?? "");
+			const owners = manifest === undefined ? [] : featuresOfManifest(manifest).filter(([, , feature]) => feature.ways?.includes(way.key) === true).map(([area, name]) => `${area} / ${name}`);
+			const removal = removalOf({ "name": way.id, "why": "(what it reaches)", "key": way.key, "paths": [], "ledger": parseLedger(await ledgerNow()), "features": program.features, "graph": program.graph, "tracked": tracked, "textOf": (file) => texts.get(file) ?? manifests.get(file), "head": "HEAD", "today": today() });
+			// (by name: quoted, or as a word where it's an identifier — where it's registered aside)
+			const quoted = new RegExp(/^[A-Za-z_$][\w$]*$/u.test(way.id) ? `\\b${way.id.replaceAll("$", "\\$")}\\b` : `["'\`]${way.id.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}["'\`]`, "u");
+			const named: { "file": string; "line": number; "text": string }[] = [];
+
+			for (const [file, text] of texts) {
+				if (file.endsWith(".md") || !includeByDefault(file) && !TEST_FILE.test(file)) {
+					continue;
+				}
+
+				const registered = way.ranges.filter((range) => range.file === file).map((range) => [lineAt(file, range.start), lineAt(file, range.end)]);
+
+				for (const [index, line] of text.split("\n").entries()) {
+					if (quoted.test(line) && !registered.some(([from, to]) => index + 1 >= from && index + 1 <= to)) {
+						named.push({ "file": file, "line": index + 1, "text": line.trim().slice(0, 200) });
+					}
+				}
+			}
+
+			named.sort((left, right) => left.file.localeCompare(right.file) || left.line - right.line);
+
+			return {
+				"ready": true,
+				"way": { "key": way.key, "facet": way.facet, "id": way.id, "sides": way.sides },
+				"features": owners,
+				"registered": way.ranges.map((range) => `${range.file}:${lineAt(range.file, range.start)}`),
+				"frees": { "declarations": removal.price.declarations.length, "files": removal.price.files, "lines": removal.price.lines, "bytes": removal.price.bytes },
+				"byHand": removal.byHand,
+				"docs": removal.docs,
+				"named": named.filter(({ file }) => !TEST_FILE.test(file)).slice(0, NAMED),
+				"tests": named.filter(({ file }) => TEST_FILE.test(file)).slice(0, NAMED),
+				"counts": { "named": named.filter(({ file }) => !TEST_FILE.test(file)).length, "tests": named.filter(({ file }) => TEST_FILE.test(file)).length }
+			};
 		})
 	);
 

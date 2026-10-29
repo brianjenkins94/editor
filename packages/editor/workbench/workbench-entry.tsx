@@ -54,6 +54,7 @@ import { registerFeaturesMap } from "./features-map";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
 import { installCodeProblems } from "./code-problems";
+import { installCodeReach } from "./code-reach";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
@@ -675,6 +676,8 @@ function maybeBoot(): void {
 				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
 				// A change's problems against HEAD: TypeScript's (the history extension's tsserver plugin) and ESLint's (code-problems.ts).
 				installCodeProblems(api as typeof import("vscode"), workbenchHub, git);
+				// What a way in reaches: the history extension's reading of the program (code-reach.ts).
+				installCodeReach(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the

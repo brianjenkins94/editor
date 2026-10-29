@@ -1,4 +1,4 @@
-/** What the code says of a change: the problems it added and cleared against HEAD (code-problems.ts). */
+/** What the code says: a change's problems against HEAD (code-problems.ts), and what a way in reaches (code-reach.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -17,6 +17,17 @@ const code: ToolFamily = ({ request }) => [
 				}
 			},
 			"handler": async ({ paths, depth, limit }, { signal }) => ok(request("code.problems", { "paths": paths, "depth": depth, "limit": limit }, signal))
+		})
+	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
+			"name": "code_reach",
+			"config": {
+				"description": "What a way into the program reaches — a command, hub request, agent tool, core module, setting, view… (silo's ways in) — before you change, move or remove it: the manifest feature that owns it, where it's registered, what removing it would free (declarations, whole files, lines) and what would be left to take out by hand, the docs naming it, and every place in code and tests that names it (a hub request's requesters, a command's callers). Give its key (`hub request|code.problems`) or its id (`code.problems`); an id more than one way in has, or none, answers with matches to choose from. It's read from the program as it is now, edits included. Returns { way: { key, facet, id, sides }, features, registered, frees: { declarations, files, lines, bytes }, byHand, docs, named: [{ file, line, text }], tests, counts } or { matches }.",
+				"inputSchema": { "target": z.string().describe("A way in's key (facet|id) or its id.") }
+			},
+			"handler": async ({ target }, { signal }) => ok(request("code.reach", { "target": target }, signal))
 		})
 	}
 ];

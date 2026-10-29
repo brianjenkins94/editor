@@ -34,6 +34,9 @@ const GREP_BYTES = 1_000_000;
 /** Saves tried before an edit says it couldn't be saved (see applyAndSave). */
 const SAVE_ATTEMPTS = 3;
 
+/** The files the TypeScript server reads. */
+const CODE_FILE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
+
 /** What `files.*` leave out, unless a glob asks for it. */
 const EXCLUDE = "{**/node_modules/**,**/.git/**}";
 
@@ -128,6 +131,12 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), "text": content }]);
 		} else {
 			await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+
+			// (a new code file, handed to the TypeScript server: in the browser it doesn't see a file made on disk until a
+			// language feature asks of it — NEXT.md, *Watching* — and History, code_problems and code_reach read through it)
+			if (CODE_FILE.test(uri.path)) {
+				await Promise.resolve(vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", uri)).catch(() => undefined);
+			}
 		}
 
 		return { "path": relative(uri), "created": !exists, "lines": content.split("\n").length };

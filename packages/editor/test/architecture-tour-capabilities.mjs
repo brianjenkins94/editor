@@ -1435,6 +1435,46 @@ test("test runs: which tests a change reaches, and their results as data", async
 	}
 });
 
+// What a way in reaches (code-reach.ts, History's ledger.ts `history.reach`; agents' code_reach): an agent tool made in
+// the workspace, the file that names it, and what removing it would free.
+test("code reach: a way in's registration, what names it, and what removing it frees", async () => {
+	const request = (subject, data) => session.request(subject, data, 240_000);
+
+	try {
+		await request("files.write", { "path": "reach/tools.ts", "content": "export const greeting = {\n\t\"name\": \"reach_greet\",\n\t\"description\": \"Say hello.\",\n\t\"handler\": () => hello()\n};\n\nfunction hello(): string {\n\treturn \"hello\";\n}\n" });
+		await request("files.write", { "path": "reach/use.ts", "content": "export const asked = [\"reach_greet\"];\n" });
+
+		let last;
+		const answer = await eventually("History's reading of reach_greet", async () => {
+			last = await request("code.reach", { "target": "reach_greet" });
+
+			return last.way === undefined ? undefined : last;
+		}, 120_000).catch(async (error) => {
+			// (what the TypeScript server's plugin reads, which History's reading is)
+			const server = await session.workbench().evaluate(async () => {
+				const { api } = globalThis.__editor;
+				const read = await Promise.resolve(api.commands.executeCommand("typescript.tsserverRequest", "_history.read", { "root": "/workspace", "known": {} })).catch((failed) => ({ "failed": String(failed) }));
+
+				return { "ready": read?.body?.ready, "paths": (read?.body?.paths ?? []).filter((path) => path.startsWith("reach/")), "count": (read?.body?.paths ?? []).length, "failed": read?.failed };
+			});
+
+			throw new Error(`${error.message}: History last said ${JSON.stringify(last)}; the server's plugin reads ${JSON.stringify(server)}`);
+		});
+
+		assert.deepEqual(answer.way, { "key": "agent tool|reach_greet", "facet": "agent tool", "id": "reach_greet", "sides": answer.way.sides }, JSON.stringify(answer));
+		assert.deepEqual(answer.registered, ["reach/tools.ts:1"]);
+		assert.deepEqual(answer.named.map(({ file, line }) => [file, line]), [["reach/use.ts", 1]], "where it's named, its registration aside");
+		assert.ok(answer.frees.declarations >= 1, "removing it frees its code: " + JSON.stringify(answer.frees));
+		assert.deepEqual((await request("code.reach", { "target": "no_such_way" })).matches, [], "no way in by that name");
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/reach"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 // A change's problems against HEAD (code-problems.ts; agents' code_problems): a file committed with one error, then
 // changed so it clears that one and breaks the file importing it, while that file's own error stays. (It commits, so it
 // runs last but the conformance check: the workspace has no HEAD before it.)

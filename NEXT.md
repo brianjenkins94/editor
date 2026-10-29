@@ -75,8 +75,9 @@ How it's kept:
      and the files importing them (ARCHITECTURE.md, *Workspace tools*).
    - `runs_affected` and `runs_tests`: done. The tests whose traces reach the changed files, stale or not, and test files
      run with each test's result as data (RUNNING.md, *Tests*). Not done: a flaky history beyond the last outcome.
-   - `code_reach`, for a symbol, hub subject or way in: who serves and requests it, what only it reaches (`silo
-     remove`'s analysis), and the docs and tests that name it.
+   - `code_reach`: done, for a way in (a hub subject, command, tool, core module…): its feature, where it's registered,
+     what only it reaches (`silo remove`'s plan), and the code, tests and docs naming it. Not done: a plain symbol that
+     isn't a way in (its references are VS Code's, step (c)'s `code_*`).
    - Code running, watched without editing it: logpoints in the editor's own code (`debug_logpoint`, its values as
      data), and VS Code's trace log for one component (`editor_trace`). The save bug took six instrumented reruns
      where `TextFileEditorModel`'s trace says "cancelled" in one.
@@ -141,6 +142,14 @@ How it's kept:
   at "followed, waiting for its first stop" (`Session.settled`): once it answered 30 ms later with no reason, once never.
   The whole tour passes locally (24/24). The assertion now prints the outcome's state, line and output: read it on the
   next failure, fix that step, then delete this.
+
+- **A file made on disk doesn't join the TypeScript project** (found 2026-10-29) until a language feature asks of it:
+  VS Code's TypeScript extension builds the watchers its browser server asks for from `Uri.file(path)`, and that
+  server names files by URI (`/file/ts-nul-authority/workspace/…`), so it watches nothing; the changes it does pass on
+  are plain paths, which the server doesn't name either. A file a checkout, a pull or the terminal makes has no
+  TypeScript problems, no importers in `code_problems` and no reading in History until it's opened. Agents' `files_write`
+  asks a new code file's symbols, which hands it over; `code_problems` asks the changed files'. The fix is the
+  extension's path mapping in its watcher (the vendored build, components/monaco-vscode-api).
 
 - **A person's first Ctrl+S after load can be dropped**, silently: VS Code abandons a save when its code actions on
   save are cancelled, and getCodeActions cancels itself when a code action provider is registered while it waits (as

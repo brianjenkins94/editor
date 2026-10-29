@@ -771,6 +771,16 @@
         "hub request|code.problems"
       ]
     },
+    "What a way in reaches": {
+      "what": "For a way in (a command, hub request, tool, core module, setting, view), the feature that owns it, where it's registered, what removing it would free and leave by hand, and everywhere code, tests and docs name it: silo remove's plan, written nowhere.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|code_reach",
+        "command|history.reach",
+        "core module|installCodeReach",
+        "hub request|code.reach"
+      ]
+    },
     "Tests for agents": {
       "what": "Which tests a change reaches, by the traces of their runs here (stale when they ran code it has altered, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
       "docs": "packages/editor/RUNNING.md, *Tests*",

@@ -623,7 +623,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.architecture_violations.*()`, `tool.code_problems.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()` |
+| Root | tool | `tool.architecture_violations.*()`, `tool.code_problems.*()`, `tool.code_reach.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -636,7 +636,7 @@ flowchart LR
 | Shell | theme | `theme.colors` |
 | Workbench | annotations | `annotations.classify()`, `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
 | Workbench | architecture | `architecture.violations()` |
-| Workbench | code | `code.problems()` |
+| Workbench | code | `code.problems()`, `code.reach()` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
 | Workbench | editor | `editor.state()` |
@@ -1061,6 +1061,11 @@ the workbench by workspace-tools.ts and git-service.ts). What the code doesn't s
   each changed file's two texts at its path (`_eslint.problems`). A problem is the same at both when its file, source,
   code and message are, since an edit moves lines. The plugin is history's because a plugin only loads from an
   extension in the web worker host: the bridge's, in the local process one, never reached the server's worker.
+- `code_reach` (2026-10-29) is History's reading of the program (ledger.ts `history.reach`): the way in by key or id,
+  the manifest feature owning it, where it's registered, and Remove's plan (`removalOf`, written nowhere) for what it
+  alone reaches and what would be left by hand. Who names it is found by text: quoted, or as a word for an identifier.
+  That's how a hub request's requesters and a command's callers are found, since a subject in a string isn't an edge
+  in the declaration graph.
 
 **Maybe next:** a notes tool: every note in the workspace across files (its text, file, where it's placed now or that
 it's lost), so an agent can read and act on notes without opening each file.
