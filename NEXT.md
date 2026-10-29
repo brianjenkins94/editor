@@ -152,10 +152,11 @@ How it's kept:
 ## Decisions
 
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
-  feature, in your face*; its decisions 11–20): the primary view, whether a touched feature reruns on its own, what
+  feature, in your face*; its decisions 11–21): the primary view, whether a touched feature reruns on its own, what
   counts as a feature's tests, how long green rests, and whether tests that lean on each other are made independent
   first; for vouches (a local pass CI can take), their window, the audit rate, whose count, and different runtimes;
-  and CI's entry point.
+  CI's entry point; and what the ledger (`features.json`) holds for a declared feature, and what becomes of the
+  AI-written manifest.
 
 ## Parked
 

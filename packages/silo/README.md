@@ -414,8 +414,12 @@ editor is its first user, and the editor's rewrite, where features are declared 
 to build on it (*Dogfooding in the editor*, at the end).
 
 **What a project gives it.** Four things, each read through an adapter, so nothing assumes one stack:
-- **Features**, declared: the feature manifest (`.silo/manifest.json`, *The feature manifest*), and the tests each
-  claims. Declared first, a test belongs to a feature by declaration, not by inference.
+- **Features**, declared, in the feature ledger (`.silo/features.json`, *The feature ledger*): what's been decided
+  about each feature, which is what lasts. Declared first, an entry is where a feature starts, before its code: its
+  name, what it's for, its status, the code it owns and the tests it claims, so a test belongs to a feature by
+  declaration, not by inference. (`.silo/manifest.json`, *The feature manifest*, is something else: an AI-written
+  inventory of this repository's features, an oracle for derivations and the rewrite's port list. It came to be
+  treated as the lasting record; what of it moves into the ledger is decision 21.)
 - **Tests and their outcomes**: a test is its file and its titles; outcomes come from the runner's own report (TAP,
   JUnit XML, a runner's reporter API), so any runner that reports works.
 - **Reach**: what code each test ran, by declaration (a file's top-level name, `Class.member`), with an identity a
@@ -984,4 +988,7 @@ From *Tests by feature* (above), for the rewrite:
 20. **CI's entry point**: a silo subcommand any CI calls (reopening decision 9, which kept selection out of the command
     line while it was only the editor's and its CI's), or a library call each project's CI script makes. And which
     runner reports silo reads first.
+21. **The ledger and the manifest**: what a declared feature's ledger entry holds (the code it owns — its ways in and
+    paths, the manifest's columns now — and the tests it claims), and what becomes of the manifest once the ledger
+    declares features: kept as this repository's inventory and port list only, or retired with the rewrite.
 
