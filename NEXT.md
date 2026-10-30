@@ -76,10 +76,6 @@ How it's kept:
    *Tests*. In order:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
-   - **Logpoints in the editor's own code** (`debug_logpoint`, its values as data). `editor_trace` is done (VS Code's
-     own trace log for one component, into the log stream). A logpoint needs a hook where it's set, and the editor runs
-     as bundled code with no DevTools Protocol attached: it would take the coverage build's instrumentation (a hook at
-     every statement, `COVERAGE=1`) carrying an expression to evaluate, in a dev build only.
    - **By hand: the Apps' Actions (read) permission**, dev and production (GitHub → Settings → Developer settings →
      GitHub Apps → Permissions), for `ci_status` on a private repository; each user accepts it at their next sign-in.
 
@@ -157,6 +153,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Parked
 
+- **Logpoints in the editor's own code** (`debug_logpoint`, its values as data; deferred 2026-10-30, not dropped: we
+  may want it once Playwright tests run in the editor, which may mean an in-editor Playwright of our own). A logpoint
+  needs a hook where it's set, and the editor runs as bundled code with no DevTools Protocol attached: it would take
+  the coverage build's instrumentation (a hook at every statement, `COVERAGE=1`) carrying an expression to evaluate,
+  in a dev build only. Meanwhile `editor_trace`, the logs and spans, and `page_eval` cover most of it.
 - **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one): `tsc`,
   `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`,
   `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` and `code_references` are
