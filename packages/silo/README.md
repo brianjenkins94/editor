@@ -384,8 +384,9 @@ The design:
   changes nothing in git. A declaration joins a test's set at once and leaves after N runs in a row without it. The
   count of misses is kept under `local/`. Architecture tests' ambient reach flickers with timing, and this keeps it from
   churning.
-- **Outcomes in the run.** A test run is a run envelope with `tests` (each test's id: pass, fail or skip). Local runs
-  stay local (they're frequent); CI's are shared. The failures over time are what checking a selection's safety needs.
+- **Outcomes in the run.** A test run's outcomes are its runner's report. Local runs stay local (they're frequent).
+  CI's aren't recorded again: they're read from the CI's own history (*Tests by feature*: "A test ledger", built
+  2026-10-29). The failures over time are what checking a selection's safety needs.
 - **Selecting.** A change's declarations (by the base version's spans) select the tests that reached them. Ambient and
   boot code select the smoke suite. A test with no record runs, with its static import reach as the floor. Ambient is
   relative to a suite's other tests, so it's worked out when read, not kept. So are clusters.
@@ -403,7 +404,7 @@ shards; ambient code (boot's test, or 30% of a shard's tests) the smoke shard; a
 shards; a suite file its shard; ARCHITECTURE.md's diagram the tours (the diagram check runs only when they all do); a
 doc, a unit test or `.silo/` nothing; anything else (a dependency, a build script, the workflow) every shard; and a test
 with no record yet its shard. Over the 30 commits before it, with records from one instrumented run: 7 would have run
-every shard, 6 none, the rest some. Not built: outcomes kept for a selection's safety; unit tests' selection.
+every shard, 6 none, the rest some. Not built: unit tests' selection. (The outcomes a selection's safety needs are read from CI's history: *Tests by feature*.)
 
 ### Tests by feature, in your face (designed 2026-10-29)
 
@@ -428,10 +429,15 @@ to build on it (*Dogfooding in the editor*, at the end).
 - **Changes**: the declarations a diff changed, between a base and HEAD.
 
 **What silo keeps and decides** (lib `util/silo`, pure: records in, answers out):
-- **A test ledger.** Every run of every test: its commit, outcome, attempt (a pass on a retry is a flake, kept as one),
-  duration, runtime and where it ran. "Last failed", "flaky" and "green for N runs" are read from it. CI's is shared
-  in `.silo/`; a machine's own runs stay on it (`.silo/local/`). It's *Which tests reach what*'s "outcomes in the
-  run", and decision 8 (a selection's safety) waits on it.
+- **A test ledger, read from the CI's own history** (built 2026-10-29: lib `util/silo/outcomes`). Every run of every
+  test: its commit, outcome, attempt (a pass on a retry after a failure is a flake, kept as one), duration and where it
+  ran. Nothing is recorded for it: a CI already keeps each run, its attempts and each job's log, and the runner's
+  report in a log says how each test came out. A CI adapter reads that history (GitHub Actions' first) and a runner's
+  reader the report (node:test's spec reporter first); `standings` answers per test: its last verdict, when it last
+  failed, its flakes and its streak. It reaches back as far as the CI keeps logs (GitHub's default: 90 days). A
+  machine's own runs are its traces, and stay on it. It's *Which tests reach what*'s "outcomes in the run", and
+  decision 8 (a selection's safety) can be judged from it. In the editor: `node test/outcomes.mjs`, over the
+  architecture shards. Not yet read: its unit tests, which run in lib's shared CI workflow.
 - **Selection by test, from reach and the ledger.** A test runs when the change reaches its code, it failed or flaked
   lately, it's new, or nothing has recorded what it reaches. Otherwise it **rests**: skipped, and run again by a
   scheduled full run (weekly; a test rests after 20 green runs in a row) that refreshes every test's reach and
@@ -963,7 +969,8 @@ From tests and purity (both above):
 6. **Size.** Architecture tests reach about 340 declarations each: across 97 tests, tens of thousands of `tested`
    entries in the evidence files. Accepted until selection runs in CI and has numbers.
 7. ~~**Test identity.**~~ Decided 2026-10-24: its file and full title; a renamed test records again on its next run.
-8. **A selection's safety**, which needs the failure history first: judged once selection has run in CI a while.
+8. **A selection's safety**, which needs the failure history first: judged once selection has run in CI a while. The
+   history is readable now (lib `util/silo/outcomes`, from CI's own runs).
 9. ~~**A subcommand, or not.**~~ Decided 2026-10-24: neither — selection isn't the silo command line's; it's the
    editor's (on a save) and CI's.
 10. ~~**How much purity static analysis decides.**~~ Measured 2026-10-24 (*Purity*, above): 80% of functions get a

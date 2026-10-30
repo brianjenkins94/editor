@@ -90,16 +90,10 @@ How it's kept:
    bounded, saying what it left out; and what it couldn't see (TypeScript still initializing, say) said, not passed
    off as complete.
 
-3. **The test ledger** (packages/silo/README.md, *Tests by feature, in your face*): every run of every test, its
-   outcome, attempt, duration, runtime and where it ran, so "last failed", "flaky" and "green for N runs" are read, not
-   remembered. Generic, in lib `util/silo` (records in, answers out), with runner reports read through adapters; this
-   repository's CI first: its architecture shards and unit tests report outcomes, and CI commits the shared ledger as
-   it commits reach records. It's what resting (after 20 green runs; a weekly full run), vouches and a selection's
-   safety (silo's decision 8) wait on, and what would have tracked this week's flakes in place of *Watching*'s prose.
-   Done is: CI records every test's outcome on main, and an answer per test (last failed, flaky, green streak) reads
-   from it.
-
 ## Watching
+
+How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
+packages/editor (`--all`, `--runs N`, `--json`).
 
 - **Reported errors, as of 2026-10-27** (the admin app's Errors pages; reporting fixed the same day: stack frames kept
   out of redaction, the workbench's errors with their stack, nothing reported once the page is going, a 7/30/90-day
