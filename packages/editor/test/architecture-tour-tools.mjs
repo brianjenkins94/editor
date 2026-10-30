@@ -455,6 +455,40 @@ test("checkpoints: a change tried, previewed, and put back as it was", async () 
 	}
 });
 
+// A script (script-run.ts; agents' script_run): JavaScript for the counting a script is for, the workspace read-only, in the
+// capability-gated realm — what it read and what it was refused, said; no require, nothing outside the workspace; and an
+// endless one stopped, the realm made again for the next.
+test("script run: a count over the workspace's files, and what it touched — the network refused", async () => {
+	const workbench = session.workbench();
+	const request = (subject, args) => session.request(subject, args, 60_000);
+
+	await request("files.write", { "path": "scripted/a.json", "content": "{ \"n\": 2 }\n" });
+	await request("files.write", { "path": "scripted/b.json", "content": "{ \"n\": 3 }\n" });
+
+	try {
+		const counted = await request("script.run", { "code": "const files = await workspace.glob(\"scripted/*.json\");\nlet total = 0;\n\nfor (const file of files) {\n\ttotal += (await workspace.json(file)).n;\n}\n\nconsole.log(\"files\", files.length);\n\nreturn { files, total };" });
+
+		assert.deepEqual(counted.value, { "files": ["scripted/a.json", "scripted/b.json"], "total": 5 }, JSON.stringify(counted));
+		assert.deepEqual(counted.logs, ["files 2"]);
+		assert.deepEqual([counted.touched.read, counted.touched.globs, counted.touched.refused], [["scripted/a.json", "scripted/b.json"], ["scripted/*.json"], []]);
+
+		const fetched = await request("script.run", { "code": "try {\n\tawait fetch(\"https://example.com/\");\n} catch (error) {\n\treturn error.message;\n}" });
+
+		assert.match(fetched.value, /capability 'net:\*' is not available/u, JSON.stringify(fetched));
+		assert.deepEqual(fetched.touched.refused, ["net:*"]);
+		assert.match((await request("script.run", { "code": "return require(\"node:fs\");" })).error, /no require/u);
+		assert.match((await request("script.run", { "code": "return workspace.read(\"/etc/hosts\");" })).error, /outside the workspace/u);
+		assert.match((await request("script.run", { "code": "for (;;) {}", "timeoutMs": 1000 })).error, /timed out after 1000 ms/u);
+		assert.equal((await request("script.run", { "code": "return 1 + 1;" })).value, 2, "a realm again after one was stopped");
+	} finally {
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/scripted"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 // A change's problems against HEAD (code-problems.ts; agents' code_problems): a file committed with one error, then
 // changed so it clears that one and breaks the file importing it, while that file's own error stays. (It commits, so it
 // runs last but the conformance check: the workspace has no HEAD before it.)

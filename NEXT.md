@@ -71,7 +71,8 @@ How it's kept:
    results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, `git_log` / `git_show` /
    `git_blame`, `files_replace` (exact strings across files, all or nothing; a `preview` of its diff), `editor_trace`,
    `workspace_checkpoint` / `workspace_restore`, structural `code_query` / `code_rewrite`, `decisions_for` (what the
-   ledger, the manifest and the docs say of a file or a name) and `ci_status` (a commit's runs, a job's log); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   ledger, the manifest and the docs say of a file or a name), `ci_status` (a commit's runs, a job's log) and
+   `script_run` (JavaScript over the workspace, read-only, in the gated realm); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
    *Tests*. In order:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
@@ -81,8 +82,6 @@ How it's kept:
      every statement, `COVERAGE=1`) carrying an expression to evaluate, in a dev build only.
    - **By hand: the Apps' Actions (read) permission**, dev and production (GitHub → Settings → Developer settings →
      GitHub Apps → Permissions), for `ci_status` on a private repository; each user accepts it at their next sign-in.
-   - **`script_run`**: JavaScript in the capability-gated eval realm, the workspace read-only, for the computation a
-     script is for (counting, joining JSON). Its capability log shows what it touched.
 
    Every one: relative to a baseline (HEAD, or the last call); ids that chain from tool to tool, as hunk ids do; output
    bounded, saying what it left out; and what it couldn't see (TypeScript still initializing, say) said, not passed

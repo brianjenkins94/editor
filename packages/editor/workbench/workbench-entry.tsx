@@ -71,6 +71,7 @@ import { createNodeRunner } from "./node-runner";
 import { installPaneViews } from "./pane-views";
 import { installProfileFiles } from "./profile-files";
 import { registerRuleView } from "./rule-view";
+import { installScriptRun } from "./script-run";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
 import { pinned } from "./versions";
 import { Workbench } from "./Workbench";
@@ -690,6 +691,8 @@ function maybeBoot(): void {
 				installCheckpoints(api as typeof import("vscode"), workbenchHub, git);
 				// How a commit did in CI: its GitHub Actions runs, a job's log, through the shell's sign-in (ci-status.ts).
 				installCiStatus(workbenchHub);
+				// JavaScript for what a script is for, the workspace read-only, in the capability-gated realm (script-run.ts).
+				installScriptRun(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the

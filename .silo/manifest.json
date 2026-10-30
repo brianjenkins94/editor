@@ -793,6 +793,18 @@
         "packages/editor/workbench/ci-status.ts"
       ]
     },
+    "Scripts over the workspace": {
+      "what": "JavaScript an agent runs for counting or joining data across the workspace's files, which it reads but can't change, in a locked-down realm with no network; the answer says what it read and what it was refused.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|script_run",
+        "core module|installScriptRun",
+        "hub request|script.run"
+      ],
+      "paths": [
+        "packages/editor/workbench/script-run.ts"
+      ]
+    },
     "What's been decided about it": {
       "what": "For a file (its path or name) or a name (an identifier, a tool, a hub request, a feature), what's been decided about it before it's changed: the feature ledger's entries naming it or whose paths hold the file, the manifest's features owning it, and each docs line naming it under its heading.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
