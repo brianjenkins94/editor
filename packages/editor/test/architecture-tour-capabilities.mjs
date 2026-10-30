@@ -604,6 +604,38 @@ test("workspace tools: write, edit, read, find, search and diff", async () => {
 	}
 });
 
+// Replacing across files, all or nothing (workspace-tools.ts `files.replace`; agents' files_replace): one replacement
+// that doesn't hold leaves every file as it was; then a change spanning two files is made as one edit, both saved.
+test("workspace tools: a replacement across files, all or nothing", async () => {
+	const request = (subject, data) => session.request(subject, data, 60_000);
+	const disk = (path) => session.workbench().evaluate(async (file) => new TextDecoder().decode(await globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(`/workspace/${file}`))), path);
+
+	try {
+		await request("files.write", { "path": "spans/one.js", "content": "export const greeting = \"hello\";\n" });
+		await request("files.write", { "path": "spans/two.js", "content": "import { greeting } from \"./one.js\";\n\nconsole.log(greeting, greeting);\n" });
+
+		await assert.rejects(request("files.replace", { "edits": [
+			{ "path": "spans/one.js", "old": "\"hello\"", "new": "\"hi\"" },
+			{ "path": "spans/two.js", "old": "greeting, greeting", "new": "greeting", "count": 2 }
+		] }), /nothing was changed: edit 2: its text is in spans\/two\.js 1 times, not 2/u);
+		assert.equal(await disk("spans/one.js"), "export const greeting = \"hello\";\n", "untouched: one replacement didn't hold");
+
+		const done = await request("files.replace", { "edits": [
+			{ "path": "spans/one.js", "old": "greeting", "new": "salute", "all": true },
+			{ "path": "spans/two.js", "old": "greeting", "new": "salute", "all": true }
+		] });
+
+		assert.deepEqual([done.replaced, done.files.map(({ path, replaced }) => [path, replaced])], [4, [["spans/one.js", 1], ["spans/two.js", 3]]]);
+		assert.equal(await disk("spans/two.js"), "import { salute } from \"./one.js\";\n\nconsole.log(salute, salute);\n", "both saved");
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/spans"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 test("capability decisions: Allow this run lets a loop's calls through, until the run ends", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/looped.js";

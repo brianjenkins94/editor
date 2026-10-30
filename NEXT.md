@@ -68,12 +68,11 @@ How it's kept:
 2. **Tools agents decide with**, in place of the shell: one queue with the bench's step (c), in the order refactoring
    this repo in the editor needs them (2026-10-29). Each is a tool family under app/tools/ (host.ts). Done:
    `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
-   results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, and `git_log` / `git_show` /
-   `git_blame`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, `git_log` / `git_show` /
+   `git_blame` and `files_replace` (exact strings across files, all or nothing); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
    *Tests*. In order:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
-   - **`files_edit_many`**: one WorkspaceEdit across files, all or nothing, each with the number of matches it expects.
    - **Code running, watched without editing it**: logpoints in the editor's own code (`debug_logpoint`, its values as
      data), and VS Code's trace log for one component (`editor_trace`). The save bug took six instrumented reruns
      where `TextFileEditorModel`'s trace says "cancelled" in one.

@@ -6,6 +6,9 @@
  *   unsaved edits included, else what's on disk;
  * - `files.write` { path, content }: a file made, or its whole text replaced;
  * - `files.edit` { path, old, new, all? }: an exact string replaced — found once, or every time with `all`;
+ * - `files.replace` { edits: [{ path, old, new, all?, count? }] }: exact strings replaced across files, all or nothing —
+ *   each must be found as it says (once, `count` times, or every time with `all`) and none may overlap another, or
+ *   nothing changes and the answer says each that didn't hold; then one edit, every file saved;
  * - `files.glob` { pattern, limit? }: the workspace's files a glob matches;
  * - `files.grep` { pattern, glob?, ignoreCase?, limit? }: the lines a regular expression matches, in the files a glob
  *   (default: every file) matches.
@@ -49,6 +52,17 @@ export async function saveDocument(document: vscodeApi.TextDocument, file: strin
 			throw new Error(`${file} was edited, but VS Code didn't save it (${SAVE_ATTEMPTS} tries): the change is in its editor, unsaved`);
 		}
 	}
+}
+
+/** Where `old` is in `text`: each start, none overlapping. */
+function occurrences(text: string, old: string): number[] {
+	const at: number[] = [];
+
+	for (let index = text.indexOf(old); index !== -1; index = text.indexOf(old, index + old.length)) {
+		at.push(index);
+	}
+
+	return at;
 }
 
 export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void {
@@ -149,11 +163,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		}
 
 		const { text } = await textOf(uri);
-		const at: number[] = [];
-
-		for (let index = text.indexOf(old); index !== -1; index = text.indexOf(old, index + old.length)) {
-			at.push(index);
-		}
+		const at = occurrences(text, old);
 
 		if (at.length === 0) {
 			throw new Error(`the text to replace isn't in ${relative(uri)} (it must match exactly — whitespace too)`);
@@ -166,6 +176,88 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		await applyAndSave(uri, (document) => at.map((index) => ({ "range": new vscode.Range(document.positionAt(index), document.positionAt(index + old.length)), "text": replacement })));
 
 		return { "path": relative(uri), "replaced": at.length };
+	});
+
+	serve(hub, "files.replace", async (args) => {
+		const { edits } = (args ?? {}) as { "edits"?: unknown };
+
+		if (!Array.isArray(edits) || edits.length === 0) {
+			throw new TypeError("files.replace takes { edits: [{ path, old, new, all?, count? }] }: the exact texts to replace, in which files");
+		}
+
+		// Every edit checked against its file as the editor has it now, before any is made.
+		const texts = new Map<string, string>();
+		const planned: { "uri": vscodeApi.Uri; "start": number; "end": number; "text": string; "edit": number }[] = [];
+		const problems: string[] = [];
+
+		for (const [index, each] of (edits as Record<string, unknown>[]).entries()) {
+			const { path, old, "new": replacement, all, count } = each ?? {};
+			const which = `edit ${String(index + 1)}`;
+
+			if (typeof path !== "string" || typeof old !== "string" || old === "" || typeof replacement !== "string") {
+				problems.push(`${which}: it takes { path, old, new, all?, count? }`);
+				continue;
+			}
+
+			let uri: vscodeApi.Uri;
+
+			try {
+				uri = uriOf(path);
+				texts.set(uri.toString(), texts.get(uri.toString()) ?? (await textOf(uri)).text);
+			} catch (error) {
+				problems.push(`${which}: ${error instanceof Error ? error.message : String(error)}`);
+				continue;
+			}
+
+			const at = occurrences(texts.get(uri.toString()) ?? "", old);
+			const wanted = typeof count === "number" ? count : all === true ? undefined : 1;
+
+			if (at.length === 0) {
+				problems.push(`${which}: its text isn't in ${relative(uri)} (it must match exactly — whitespace too)`);
+			} else if (wanted !== undefined && at.length !== wanted) {
+				problems.push(`${which}: its text is in ${relative(uri)} ${String(at.length)} times, not ${String(wanted)}`);
+			} else {
+				planned.push(...at.map((start) => ({ "uri": uri, "start": start, "end": start + old.length, "text": replacement, "edit": index + 1 })));
+			}
+		}
+
+		// (two edits on the same text: which wins isn't the agent's to guess)
+		planned.sort((left, right) => left.uri.toString().localeCompare(right.uri.toString()) || left.start - right.start);
+
+		for (const [index, each] of planned.entries()) {
+			const before = planned[index - 1];
+
+			if (before !== undefined && before.uri.toString() === each.uri.toString() && each.start < before.end) {
+				problems.push(`edits ${String(before.edit)} and ${String(each.edit)} overlap in ${relative(each.uri)}`);
+			}
+		}
+
+		if (problems.length > 0) {
+			throw new Error(`nothing was changed: ${problems.join("; ")}`);
+		}
+
+		const edit = new vscode.WorkspaceEdit();
+		const documents = new Map<string, vscodeApi.TextDocument>();
+
+		for (const { uri, start, end, text } of planned) {
+			const document = documents.get(uri.toString()) ?? await vscode.workspace.openTextDocument(uri);
+
+			documents.set(uri.toString(), document);
+			edit.replace(uri, new vscode.Range(document.positionAt(start), document.positionAt(end)), text);
+		}
+
+		if (!await vscode.workspace.applyEdit(edit)) {
+			throw new Error("VS Code didn't apply the edit: nothing was changed");
+		}
+
+		for (const document of documents.values()) {
+			await saveDocument(document, relative(document.uri));
+		}
+
+		return {
+			"files": [...documents.values()].map((document) => ({ "path": relative(document.uri), "replaced": planned.filter(({ uri }) => uri.toString() === document.uri.toString()).length })),
+			"replaced": planned.length
+		};
 	});
 
 	serve(hub, "files.glob", async (args) => {
