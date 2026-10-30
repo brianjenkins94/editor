@@ -36,11 +36,11 @@ test("selection: a declaration's tests; ambient code the smoke suite; docs nothi
 	assert.deepEqual(shards([{ "file": "packages/editor/a.ts", "declarations": ["unreached"] }]), ["smoke-app", "performance"], "code no test reached: the floor");
 	assert.deepEqual(shards([{ "file": "packages/editor/RUNNING.md", "declarations": [] }]), []);
 	assert.deepEqual(shards([{ "file": "packages/editor-api/test/gate.test.mjs", "declarations": [] }, { "file": ".silo/features.json", "declarations": [] }, { "file": "packages/theme/budget.json", "declarations": [] }]), [], "unit tests, the ledger, the theme's budget: nothing the suites run");
-	assert.deepEqual(shards([{ "file": "packages/editor/ARCHITECTURE.md", "declarations": ["(diagram)"] }]), ["tour-previews", "tour-runs", "tour-capabilities", "tour-tools"], "its diagram: the tours");
+	assert.deepEqual(shards([{ "file": "packages/editor/ARCHITECTURE.md", "declarations": ["(diagram)"] }]), ["tour-previews", "tour-runs", "tour-selection", "tour-capabilities", "tour-tools"], "its diagram: the tours");
 	assert.deepEqual(shards([{ "file": "packages/editor/ARCHITECTURE.md", "declarations": [] }]), [], "its prose: nothing");
 	assert.deepEqual(shards([{ "file": "packages/editor/test/architecture-tour-previews.mjs", "declarations": [] }]), ["tour-previews"]);
-	assert.deepEqual(shards([{ "file": "pnpm-lock.yaml", "declarations": [] }]), ["smoke-app", "tour-previews", "tour-runs", "tour-capabilities", "tour-tools", "performance"]);
-	assert.deepEqual(shards([{ "file": "packages/editor/test/architecture-harness.mjs", "declarations": [] }]).length, 6, "the harness: every shard");
+	assert.deepEqual(shards([{ "file": "pnpm-lock.yaml", "declarations": [] }]), ["smoke-app", "tour-previews", "tour-runs", "tour-selection", "tour-capabilities", "tour-tools", "performance"]);
+	assert.deepEqual(shards([{ "file": "packages/editor/test/architecture-harness.mjs", "declarations": [] }]).length, 7, "the harness: every shard");
 	assert.deepEqual(shards([{ "file": "packages/editor/a.ts", "declarations": ["add"] }], [...testsNow, { "shard": "tour-capabilities", "name": "new" }]), ["smoke-app", "tour-runs", "tour-capabilities", "performance"], "a test with no record runs");
 	assert.deepEqual(shards([{ "file": "packages/editor/RUNNING.md", "declarations": [] }], [...testsNow, { "shard": "tour-capabilities", "name": "new" }]), [], "a docs change runs nothing, new tests or not");
 });
