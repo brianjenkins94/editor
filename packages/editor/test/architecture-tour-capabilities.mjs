@@ -1545,6 +1545,38 @@ test("code problems: what a change adds and clears, against HEAD", async () => {
 	}
 });
 
+// History for agents (git-service.ts; git_log, git_show, git_blame): a file committed twice and edited again, its log,
+// the file as its first commit had it, and which commit (or the working tree) each line is from.
+test("git history: a file's log, a revision of it, and its blame", async () => {
+	const request = (subject, data) => session.request(subject, data, 120_000);
+
+	try {
+		await request("files.write", { "path": "history/notes.ts", "content": "export const a = 1;\nexport const b = 2;\n" });
+		const first = await request("git.commit", { "message": "history: notes", "files": [{ "path": "history/notes.ts" }] });
+
+		await request("files.edit", { "path": "history/notes.ts", "old": "export const b = 2;", "new": "export const b = 3;\nexport const c = 4;" });
+		const second = await request("git.commit", { "message": "history: b and c", "files": [{ "path": "history/notes.ts" }] });
+
+		await request("files.edit", { "path": "history/notes.ts", "old": "export const c = 4;", "new": "export const c = 5;" });
+
+		const log = await request("git.log", { "path": "history/notes.ts" });
+
+		assert.deepEqual(log.commits.map(({ oid, message }) => [oid, message]), [[second.oid, "history: b and c"], [first.oid, "history: notes"]], JSON.stringify(log));
+		assert.equal((await request("git.show", { "path": "history/notes.ts", "rev": first.oid.slice(0, 8) })).content, "export const a = 1;\nexport const b = 2;\n", "the file at its first commit");
+
+		const blame = await request("git.blame", { "path": "history/notes.ts" });
+
+		assert.deepEqual(blame.runs.map(({ from, to, commit }) => [from, to, commit]), [[1, 1, first.oid.slice(0, 8)], [2, 2, second.oid.slice(0, 8)], [3, 3, "working"]], JSON.stringify(blame));
+		assert.equal(blame.runs[1].message, "history: b and c");
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/history"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });

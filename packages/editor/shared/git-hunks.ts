@@ -215,3 +215,67 @@ export function rowsOfHunks(path: string, hunks: Hunk[], ids: readonly string[])
 
 	return new Set(ids.flatMap((id) => byId.get(id)?.rows ?? []));
 }
+
+/** A version of a file, for blame: the commit it's at (or "working", for the working tree's) and its text. */
+export interface Version { "oid": string; "text": string }
+
+/**
+ * Which version each line of the newest one came from (`versions` newest first: the working tree's or HEAD's, then
+ * each commit that changed the file, back): a line is the newest version's that it's in when the version after it
+ * (older) hasn't it, as a line diff says. A line every version has came from the oldest, or before it (`boundary`:
+ * where the versions given end, a shallow clone's first commit, say). Each line's 1-based number in the newest version.
+ */
+export function blameOf(versions: Version[]): { "line": number; "oid": string; "boundary": boolean }[] {
+	if (versions.length === 0) {
+		return [];
+	}
+
+	const lines = (text: string): string[] => (text === "" ? [] : text.replace(/\n$/u, "").split("\n"));
+	const count = lines(versions[0].text).length;
+	// (each newest line's index in the version being looked at; undefined once it's placed)
+	let at: (number | undefined)[] = Array.from({ "length": count }, (_, index) => index);
+	const placed: (string | undefined)[] = Array.from({ "length": count }, () => undefined);
+
+	for (let index = 0; index + 1 < versions.length; index += 1) {
+		const newer = lines(versions[index].text);
+		const older = lines(versions[index + 1].text);
+		// (a newer line's index in the older version, where it's there unchanged)
+		const back = new Map<number, number>();
+		let [n, o] = [0, 0];
+
+		for (const change of diffArrays(older, newer)) {
+			const length = change.count ?? change.value.length;
+
+			if (change.added === true) {
+				n += length;
+			} else if (change.removed === true) {
+				o += length;
+			} else {
+				for (let step = 0; step < length; step += 1) {
+					back.set(n + step, o + step);
+				}
+
+				n += length;
+				o += length;
+			}
+		}
+
+		at = at.map((where, line) => {
+			if (where === undefined) {
+				return undefined;
+			}
+
+			if (!back.has(where)) {
+				placed[line] = versions[index].oid;
+
+				return undefined;
+			}
+
+			return back.get(where);
+		});
+	}
+
+	const oldest = versions.at(-1)?.oid ?? "";
+
+	return placed.map((oid, line) => ({ "line": line + 1, "oid": oid ?? oldest, "boundary": oid === undefined }));
+}

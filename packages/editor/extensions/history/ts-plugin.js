@@ -445,6 +445,21 @@ export default function init(modules) {
 		let told = 0;
 
 		for (const project of projectService.configuredProjects ? projectService.configuredProjects.values() : []) {
+			// (the file names come from the parsed config, re-read only when its own update level says so, through its
+			// cache of the folders' listings: both, as the server's watcher would on a folder's change)
+			const existence = projectService.configFileExistenceInfoCache && projectService.configFileExistenceInfoCache.get(project.canonicalConfigFilePath);
+			const config = existence && existence.config;
+
+			if (config !== undefined) {
+				if (config.updateLevel === undefined || config.updateLevel < rootNames) {
+					config.updateLevel = rootNames;
+				}
+
+				if (config.cachedDirectoryStructureHost && typeof config.cachedDirectoryStructureHost.clearCache === "function") {
+					config.cachedDirectoryStructureHost.clearCache();
+				}
+			}
+
 			if (project.pendingUpdateLevel === undefined || project.pendingUpdateLevel < rootNames) {
 				project.pendingUpdateLevel = rootNames;
 			}

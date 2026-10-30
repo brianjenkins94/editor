@@ -62,18 +62,17 @@ How it's kept:
      features each is in; `git_commit` / `git_discard` take hunk ids. The review panel runs on the same requests
      (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
    - No shell for agents: their shell tool is removed (2026-10-27; ARCHITECTURE.md, *Workspace tools*), so the bench is
-     worked through the editor's tools alone, and what it still lacks is item 2's list (step (c), the `code_*` tools,
-     is its first). A program runs under `debug_start`.
+     worked through the editor's tools alone, and what it still lacks is item 2's list. A program runs under `debug_start`.
    - (d) CI on the pushed branch checks the work.
 
 2. **Tools agents decide with**, in place of the shell: one queue with the bench's step (c), in the order refactoring
    this repo in the editor needs them (2026-10-29). Each is a tool family under app/tools/ (host.ts). Done:
    `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
-   results as data), `code_reach` (what a way in reaches) and `code_references` / `code_rename` / `code_move`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, and `git_log` / `git_show` /
+   `git_blame`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
    *Tests*. In order:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
-   - **`git_log`, `git_show`** (a file at a revision), **`git_blame`**.
    - **`files_edit_many`**: one WorkspaceEdit across files, all or nothing, each with the number of matches it expects.
    - **Code running, watched without editing it**: logpoints in the editor's own code (`debug_logpoint`, its values as
      data), and VS Code's trace log for one component (`editor_trace`). The save bug took six instrumented reruns

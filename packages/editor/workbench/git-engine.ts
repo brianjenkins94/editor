@@ -15,7 +15,7 @@ import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import type { HttpClient } from "isomorphic-git";
-import { add, branch, checkout, commit, currentBranch, getConfig, push as gitPush, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob } from "isomorphic-git";
+import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, push as gitPush, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
 // read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
@@ -220,10 +220,11 @@ export async function commitIndex(message: string): Promise<Committed> {
 /** One commit, as `git log` shows it. */
 export interface LogEntry { "oid": string; "message": string; "author": { "name": string; "email": string; "timestamp": number; "timezoneOffset": number } }
 
-/** The commits from HEAD back, newest first; at most `depth`. None before the first commit. */
-export async function history(depth?: number): Promise<LogEntry[]> {
+/** The commits from HEAD back, newest first; at most `depth`; only those that changed `path`, when it's given (its
+ *  renames followed). None before the first commit. */
+export async function history(depth?: number, path?: string): Promise<LogEntry[]> {
 	try {
-		return (await log({ "fs": fs, "dir": DIR, ...depth === undefined ? {} : { "depth": depth } })).map(({ oid, "commit": entry }) => ({ "oid": oid, "message": entry.message, "author": entry.author }));
+		return (await log({ "fs": fs, "dir": DIR, ...depth === undefined ? {} : { "depth": depth }, ...path === undefined ? {} : { "filepath": path, "follow": true } })).map(({ oid, "commit": entry }) => ({ "oid": oid, "message": entry.message, "author": entry.author }));
 	} catch {
 		return [];
 	}
@@ -393,12 +394,27 @@ export async function blobText(oid: string): Promise<string | undefined> {
 }
 
 export async function headContent(path: string): Promise<string> {
+	return await fileAt(path, "HEAD") ?? "";
+}
+
+/** `path`'s text at `ref` — a branch, HEAD, or a commit's oid, whole or its beginning — or undefined where `ref` isn't a
+ *  commit here or hasn't the file. */
+export async function fileAt(path: string, ref: string): Promise<string | undefined> {
 	try {
-		const oid = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
+		const oid = /^[\da-f]{4,40}$/u.test(ref) ? await expandOid({ "fs": fs, "dir": DIR, "oid": ref }).catch(async () => resolveRef({ "fs": fs, "dir": DIR, "ref": ref })) : await resolveRef({ "fs": fs, "dir": DIR, "ref": ref });
 		const { blob } = await readBlob({ "fs": fs, "dir": DIR, "oid": oid, "filepath": path });
 
 		return new TextDecoder().decode(blob);
 	} catch {
-		return "";
+		return undefined;
+	}
+}
+
+/** Where a shallow clone's history ends: the commits whose parents it hasn't (`.git/shallow`). None in a whole one. */
+export async function shallowEnds(): Promise<string[]> {
+	try {
+		return (await fs.promises.readFile(DIR + "/.git/shallow", "utf8")).split("\n").filter((line) => line.trim() !== "");
+	} catch {
+		return [];
 	}
 }

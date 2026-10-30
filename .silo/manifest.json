@@ -321,6 +321,7 @@
         "command|margin.pin",
         "command|margin.unattended",
         "command|run.live.again",
+        "command|run.live.state",
         "setting|run.liveRuns",
         "setting|run.liveRuns.interval"
       ]
@@ -747,8 +748,11 @@
         "agent tool|files_grep",
         "agent tool|files_read",
         "agent tool|files_write",
+        "agent tool|git_blame",
         "agent tool|git_commit",
         "agent tool|git_diff",
+        "agent tool|git_log",
+        "agent tool|git_show",
         "agent tool|git_status",
         "agent tool|terminal_output",
         "core module|installWorkspaceTools",
@@ -757,7 +761,10 @@
         "hub request|files.grep",
         "hub request|files.read",
         "hub request|files.write",
+        "hub request|git.blame",
         "hub request|git.diff",
+        "hub request|git.log",
+        "hub request|git.show",
         "hub request|terminal.state"
       ]
     },

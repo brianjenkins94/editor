@@ -623,7 +623,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.architecture_violations.*()`, `tool.code_move.*()`, `tool.code_problems.*()`, `tool.code_reach.*()`, `tool.code_references.*()`, `tool.code_rename.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()` |
+| Root | tool | `tool.architecture_violations.*()`, `tool.code_move.*()`, `tool.code_problems.*()`, `tool.code_reach.*()`, `tool.code_references.*()`, `tool.code_rename.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_blame.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_log.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_show.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -642,7 +642,7 @@ flowchart LR
 | Workbench | editor | `editor.state()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | files | `files.edit()`, `files.glob()`, `files.grep()`, `files.read()`, `files.write()` |
-| Workbench | git | `git.branch()`, `git.checkout()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.push()`, `git.review()`, `git.status()` |
+| Workbench | git | `git.blame()`, `git.branch()`, `git.checkout()`, `git.commit()`, `git.diff()`, `git.discard()`, `git.file()`, `git.log()`, `git.push()`, `git.review()`, `git.show()`, `git.status()` |
 | Workbench | history | `history.chunks()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | notifications | `notifications.list()` |
@@ -1054,6 +1054,11 @@ the workbench by workspace-tools.ts and git-service.ts). What the code doesn't s
   is a tool to write, in NEXT.md.
 - `git_diff` is jsdiff's (the `diff` package, already bundled for just-bash) in git's format: isomorphic-git has no
   text diff of its own.
+- `git_log`, `git_show` and `git_blame` (2026-10-29) read what this clone holds, which is shallow on the bench, and say
+  where it ends (`.git/shallow`). isomorphic-git has no blame, so it's built from the file's versions, newest first
+  (the working tree's, then each commit that changed it): a line belongs to the newest version that has it where the
+  next older one doesn't, by a line diff (shared/git-hunks.ts `blameOf`). A line every version read has is marked
+  boundary: as old as the oldest version, or older.
 - `code_problems` (2026-10-29) compares a change's problems with HEAD's (code-problems.ts). TypeScript's are the
   history extension's tsserver plugin's (`_history.problems`): HEAD is a second language service over the project's
   host, with HEAD's text for the changed files and its own module resolution, so the project's cache is left alone.

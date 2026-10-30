@@ -12,7 +12,7 @@ import type { DiffRowInfo } from "../shared/git-hunks";
 import type { RemoteResponse } from "../shared/git-remote";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
-import { alignedRows, committedContent, hunksOf, rowsOfHunks } from "../shared/git-hunks";
+import { alignedRows, blameOf, committedContent, hunksOf, rowsOfHunks } from "../shared/git-hunks";
 import { remoteHttp } from "../shared/git-remote";
 import * as engine from "./git-engine";
 
@@ -20,6 +20,10 @@ const DIR = "/workspace";
 
 /** Past this many changed lines a diff says so rather than listing them (a rewrite, a generated file). */
 const MOST_EDITS = 5000;
+
+/** The characters `git.show` gives of a file, at most; and the commits `git.blame` reads back through. */
+const MOST_SHOWN = 200_000;
+const BLAME_COMMITS = 200;
 
 /** `before` → `after` as a unified diff of `path`, as `git diff` writes one — jsdiff's (`diff`), three lines of context. */
 export function unifiedDiff(path: string, before: string, after: string): string {
@@ -109,6 +113,86 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 	};
 
 	serve(hub, "git.file", async (args) => file((args as { "path"?: string } | null)?.path));
+
+	// History, as `git log`, `git show <rev>:<path>` and `git blame` say it — what a shallow clone holds of it, and where
+	// that ends, said (agents' git_log, git_show, git_blame).
+	const shortOf = (oid: string): string => oid.slice(0, 8);
+	const summary = (entry: engine.LogEntry): { "oid": string; "short": string; "message": string; "author": string; "date": string } => ({ "oid": entry.oid, "short": shortOf(entry.oid), "message": entry.message.split("\n")[0], "author": entry.author.name, "date": new Date(entry.author.timestamp * 1000).toISOString() });
+	const ends = async (commits: engine.LogEntry[]): Promise<{ "shallow"?: string }> => {
+		const shallow = await engine.shallowEnds();
+		const last = commits.at(-1);
+
+		return last !== undefined && shallow.includes(last.oid) ? { "shallow": `this clone's history ends at ${shortOf(last.oid)}: older commits aren't here` } : {};
+	};
+
+	serve(hub, "git.log", async (args) => {
+		const { path, limit } = (args ?? {}) as { "path"?: unknown; "limit"?: unknown };
+		const most = typeof limit === "number" && limit > 0 ? Math.min(limit, 500) : 20;
+		const commits = await engine.history(most, typeof path === "string" && path !== "" ? path : undefined);
+
+		return { "commits": commits.map(summary), ...await ends(commits) };
+	});
+
+	serve(hub, "git.show", async (args) => {
+		const { path, rev } = (args ?? {}) as { "path"?: unknown; "rev"?: unknown };
+
+		if (typeof path !== "string" || path === "" || typeof rev !== "string" || rev === "") {
+			throw new TypeError("git.show takes { path, rev }: a file, and a commit (its oid, or its beginning), a branch or HEAD");
+		}
+
+		const text = await engine.fileAt(path, rev);
+
+		if (text === undefined) {
+			throw new Error(`${rev} has no ${path} here (or isn't a commit this clone has)`);
+		}
+
+		return { "path": path, "rev": rev, "lines": text.split("\n").length, "content": text.length > MOST_SHOWN ? text.slice(0, MOST_SHOWN) : text, ...text.length > MOST_SHOWN ? { "truncated": true } : {} };
+	});
+
+	serve(hub, "git.blame", async (args) => {
+		const { path, from, to } = (args ?? {}) as { "path"?: unknown; "from"?: unknown; "to"?: unknown };
+
+		if (typeof path !== "string" || path === "") {
+			throw new TypeError("git.blame takes { path, from?, to? }: a file, and the lines (1-based) to say");
+		}
+
+		const commits = await engine.history(BLAME_COMMITS, path);
+		const versions: { "oid": string; "text": string }[] = [{ "oid": "working", "text": await readWorking(path).catch(() => "") }];
+
+		// (each commit's version of it, back until one hasn't it here: renamed before then, or past the clone's start)
+		for (const commit of commits) {
+			const text = await engine.fileAt(path, commit.oid);
+
+			if (text === undefined) {
+				break;
+			}
+
+			versions.push({ "oid": commit.oid, "text": text });
+		}
+
+		const byOid = new Map(commits.map((commit) => [commit.oid, commit]));
+		const first = typeof from === "number" && from > 0 ? from : 1;
+		const last = typeof to === "number" && to >= first ? to : Number.POSITIVE_INFINITY;
+		const runs: { "from": number; "to": number; "commit": string; "boundary"?: boolean; "message"?: string; "author"?: string; "date"?: string }[] = [];
+
+		for (const { line, oid, boundary } of blameOf(versions)) {
+			if (line < first || line > last) {
+				continue;
+			}
+
+			const run = runs.at(-1);
+
+			if (run !== undefined && run.commit === (oid === "working" ? "working" : shortOf(oid)) && run.to === line - 1) {
+				run.to = line;
+			} else {
+				const commit = byOid.get(oid);
+
+				runs.push({ "from": line, "to": line, "commit": oid === "working" ? "working" : shortOf(oid), ...boundary ? { "boundary": true } : {}, ...commit === undefined ? {} : { "message": commit.message.split("\n")[0], "author": commit.author.name, "date": new Date(commit.author.timestamp * 1000).toISOString() } });
+			}
+		}
+
+		return { "path": path, "runs": runs, "versions": versions.length - 1, ...runs.some((run) => run.boundary === true) ? { "boundary": "lines marked boundary are as old as the oldest version read, or older: the history here ends there" } : {}, ...await ends(commits) };
+	});
 	vscode.commands.registerCommand("editor.git.file", file);
 
 	// A pick as the engine commits it: the working file, a deletion, or the text HEAD becomes with only the picked rows

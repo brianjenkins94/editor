@@ -24,6 +24,9 @@ import * as vscode from "vscode";
 /** Saves this close together are one run: the last. */
 const SAVE_DEBOUNCE_MS = 250;
 
+/** What `run.live.state` remembers of what the queue did, at most. */
+const STATE_KEPT = 20;
+
 /** The ended sessions remembered, by id (registerLiveRuns' `ended`). */
 const ENDED_KEPT = 200;
 
@@ -77,6 +80,12 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	 *  started (a short run, on a busy host) isn't kept as going — kept, it would hold up what a save selects for good. */
 	const sessions = new Map<string, vscode.DebugSession>();
 	const ended = new Set<string>();
+	/** What the queue did lately, latest last (`run.live.state`): what a save reached, and what waited or was skipped. */
+	const lately: string[] = [];
+	const said = (what: string): void => {
+		lately.push(`${new Date().toISOString().slice(11, 23)} ${what}`);
+		lately.splice(0, Math.max(0, lately.length - STATE_KEPT));
+	};
 	/** The test files and programs a save reached, still to run (one at a time); and the one running now. */
 	let queued: string[] = [];
 	let selected: string | undefined;
@@ -128,6 +137,8 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		// (a run of yours of the next one still going: it waits for that run to end, which goes on with the queue — skipped,
 		// what the save reached would go unrun)
 		if (queued.length > 0 && yours(queued[0])) {
+			said(`${queued[0]} waits: a run of yours of it is going`);
+
 			return;
 		}
 
@@ -138,6 +149,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 
 			// (one that can't run now — an app's file, say — is skipped)
 			if (text === undefined || !await startPath(selected, text, true)) {
+				said(`${selected} skipped: ${text === undefined ? "it can't be read" : "it couldn't start"}`);
 				selected = undefined;
 				await next();
 			}
@@ -147,6 +159,8 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	/** What a save reached: queued behind what's queued already, each file once. */
 	const select = async (document: vscode.TextDocument): Promise<void> => {
 		const files = await reachedRuns(document.uri.path, document.getText());
+
+		said(`${document.uri.path} saved: reached ${files.length === 0 ? "nothing" : files.join(", ")}`);
 
 		queued = [...new Set([...queued, ...files])].filter((file) => file !== selected);
 		await next();
@@ -247,6 +261,15 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			}, SAVE_DEBOUNCE_MS);
 		}),
 		// Run a file again now (a rule just saved for its calls, say), whatever ran before.
+		// What the live runs' queue holds and did lately, as data (a test that waits on a save's selection says it).
+		vscode.commands.registerCommand("run.live.state", () => ({
+			"queued": [...queued],
+			"selected": selected,
+			"running": [...running.keys()],
+			"starting": [...starting],
+			"yours": [...sessions.values()].filter((session) => !isLive(session)).map((session) => `${String(session.configuration["program"])} (${session.id})`),
+			"lately": [...lately]
+		})),
 		vscode.commands.registerCommand("run.live.again", async (value: unknown) => {
 			const uri = value instanceof vscode.Uri ? value.toString() : value;
 			const document = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);

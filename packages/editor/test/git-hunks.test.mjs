@@ -2,7 +2,7 @@
 // Run: node --import tsx --test test/git-hunks.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alignedRows, committedContent, hunksOf, rowsOfHunks } from "../shared/git-hunks.ts";
+import { alignedRows, blameOf, committedContent, hunksOf, rowsOfHunks } from "../shared/git-hunks.ts";
 
 const HEAD = ["one", "two", "three", "four", "five", "six", "seven"].join("\n");
 const WORKING = ["one", "TWO", "three", "four", "five", "six", "seven", "eight"].join("\n");
@@ -66,4 +66,16 @@ test("a rewrite past the diff's limit is one replacement", () => {
 
 	assert.equal(hunks.length, 1);
 	assert.deepEqual([hunks[0].head.lines, hunks[0].working.lines], [6000, 6000]);
+});
+
+test("blame: each line from the newest version that has it where the older one doesn't; the oldest's are boundary", () => {
+	const lines = blameOf([
+		{ "oid": "working", "text": "a\nB\nc\nd2\n" },
+		{ "oid": "c3", "text": "a\nb\nc\nd2\n" },
+		{ "oid": "c2", "text": "a\nb\nc\nd\n" },
+		{ "oid": "c1", "text": "a\nc\n" }
+	]);
+
+	assert.deepEqual(lines.map(({ line, oid, boundary }) => [line, oid, boundary]), [[1, "c1", true], [2, "working", false], [3, "c1", true], [4, "c3", false]]);
+	assert.deepEqual(blameOf([]), []);
 });

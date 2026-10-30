@@ -1,10 +1,53 @@
-/** The workspace's git: status, diff, the changes as hunks, commit and discard (whole files or hunks), branches, and a
- *  push to GitHub (git-service.ts). */
+/** The workspace's git: status, diff, the changes as hunks, commit and discard (whole files or hunks), branches, a push
+ *  to GitHub, and history — log, a file at a revision, blame (git-service.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
 const git: ToolFamily = ({ request }) => [
+	{
+		"timeoutMs": 60000,
+		"tool": defineTool({
+			"name": "git_log",
+			"config": {
+				"description": "The commits from HEAD back, newest first: every one, or only those that changed a file (its renames followed). Each with its oid, short oid, first line of its message, author and date. A shallow clone's history ends where it ends: `shallow` says so. Returns { commits: [{ oid, short, message, author, date }], shallow? }.",
+				"inputSchema": {
+					"path": z.string().optional().describe("Only the commits that changed this file (relative to the workspace)."),
+					"limit": z.number().optional().describe("How many, at most (default 20, at most 500).")
+				}
+			},
+			"handler": async ({ path, limit }, { signal }) => ok(request("git.log", { "path": path, "limit": limit }, signal))
+		})
+	},
+	{
+		"timeoutMs": 60000,
+		"tool": defineTool({
+			"name": "git_show",
+			"config": {
+				"description": "A file as it was at a revision: a commit's oid (or its beginning), a branch, or HEAD. Returns { path, rev, lines, content, truncated? }.",
+				"inputSchema": {
+					"path": z.string().describe("The file (relative to the workspace)."),
+					"rev": z.string().describe("The commit (oid or its beginning), branch or HEAD.")
+				}
+			},
+			"handler": async ({ path, rev }, { signal }) => ok(request("git.show", { "path": path, "rev": rev }, signal))
+		})
+	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
+			"name": "git_blame",
+			"config": {
+				"description": "Which commit last changed each line of a file, as runs of lines: each run's lines (1-based), the commit (`working` for an uncommitted change), its message's first line, author and date. A run marked boundary is as old as the oldest version this clone has, or older. Returns { path, runs: [{ from, to, commit, message?, author?, date?, boundary? }], versions, shallow? }.",
+				"inputSchema": {
+					"path": z.string().describe("The file (relative to the workspace)."),
+					"from": z.number().optional().describe("The first line to say (1-based)."),
+					"to": z.number().optional().describe("The last line to say.")
+				}
+			},
+			"handler": async ({ path, from, to }, { signal }) => ok(request("git.blame", { "path": path, "from": from, "to": to }, signal))
+		})
+	},
 	{
 		"timeoutMs": 60000,
 		"tool": defineTool({

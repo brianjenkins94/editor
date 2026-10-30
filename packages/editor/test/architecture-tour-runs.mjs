@@ -30,6 +30,7 @@ async function afterSave(what, path, probe) {
 
 			return {
 				"dirty": api.workspace.textDocuments.find((document) => document.uri.path === file)?.isDirty,
+				"queue": await Promise.resolve(api.commands.executeCommand("run.live.state")).catch((failed) => String(failed)),
 				"sessions": api.debug.activeDebugSession?.name,
 				"traces": traces.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).map((trace) => `${trace.test?.id ?? trace.program ?? "(own)"} ${trace.trigger} ${trace.at}`).slice(-8),
 				"since": since
@@ -37,7 +38,7 @@ async function afterSave(what, path, probe) {
 		}, { "file": path, "since": new Date(saved).toISOString() });
 		const runs = await session.request("runs.list", {}, 10_000).then((listed) => listed.filter((run) => run.startedAt >= saved - 5000).map((run) => `${run.title} ${run.state} +${run.startedAt - saved}ms${run.endedAt === undefined ? "" : ` for ${run.endedAt - run.startedAt}ms`}`), (failed) => [String(failed)]);
 
-		throw new Error(`${error.message} (${path} ${state.dirty === true ? "still dirty: the save didn't land" : "saved"}; runs since the save: ${JSON.stringify(runs)}; debugging ${state.sessions ?? "nothing"}; traces kept on it, latest last: ${JSON.stringify(state.traces)}; saved at ${state.since})`);
+		throw new Error(`${error.message} (${path} ${state.dirty === true ? "still dirty: the save didn't land" : "saved"}; runs since the save: ${JSON.stringify(runs)}; debugging ${state.sessions ?? "nothing"}; traces kept on it, latest last: ${JSON.stringify(state.traces)}; saved at ${state.since}; the live runs' queue: ${JSON.stringify(state.queue)})`);
 	});
 }
 
