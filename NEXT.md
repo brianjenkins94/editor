@@ -70,7 +70,8 @@ How it's kept:
    `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
    results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, `git_log` / `git_show` /
    `git_blame`, `files_replace` (exact strings across files, all or nothing; a `preview` of its diff), `editor_trace`,
-   `workspace_checkpoint` / `workspace_restore` and structural `code_query` / `code_rewrite`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   `workspace_checkpoint` / `workspace_restore`, structural `code_query` / `code_rewrite` and `decisions_for` (what the
+   ledger, the manifest and the docs say of a file or a name); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
    *Tests*. In order:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
@@ -78,8 +79,10 @@ How it's kept:
      own trace log for one component, into the log stream). A logpoint needs a hook where it's set, and the editor runs
      as bundled code with no DevTools Protocol attached: it would take the coverage build's instrumentation (a hook at
      every statement, `COVERAGE=1`) carrying an expression to evaluate, in a dev build only.
-   - **`decisions_for`** (the ledger entries, ARCHITECTURE.md sections and NEXT.md items naming a file or symbol) and
-     **`ci_status`** (a commit's runs, and a failed job's log).
+   - **`ci_status`** (a commit's runs, and a failed job's log): to decide first. With the user's sign-in it means
+     read-only Actions routes (runs, jobs, logs) in the production API's proxy allowlist (packages/api
+     `src/behavior.ts`), which widens what the API does with a GitHub token; unauthenticated, a public repository's
+     runs only, at GitHub's anonymous rate limit.
    - **`script_run`**: JavaScript in the capability-gated eval realm, the workspace read-only, for the computation a
      script is for (counting, joining JSON). Its capability log shows what it touched.
 

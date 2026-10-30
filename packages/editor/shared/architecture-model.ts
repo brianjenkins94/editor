@@ -269,6 +269,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "problems.list", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "files.*", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "code.*", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "decisions.for", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "tests.*", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "notifications.list", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "rules.state", "from": ["root"], "to": ["bridge"] },

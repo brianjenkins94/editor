@@ -9,6 +9,9 @@
  *   committed) — writing what those commands write.
  * - **What a way in reaches** (`history.reach`, core's `code.reach`, agents' `code_reach`): the feature that owns it, where
  *   it's registered, what Remove would free (the same plan, nothing written), and everywhere code, tests and docs name it.
+ * - **What's been decided about a file or a name** (`history.decisions`, core's `decisions.for`, agents' `decisions_for`):
+ *   the ledger's entries naming it (or whose paths hold the file), the manifest's features owning it, and each line of
+ *   the docs naming it, under its heading — NEXT.md's items, the design sections — so a reason isn't re-derived.
  * Its ways in are History's reading (the TypeScript server plugin's, edits included); the docs and code it searches are
  * the workspace's files, read once and kept as they change.
  */
@@ -27,8 +30,9 @@ import * as vscode from "vscode";
 const READ = "**/*.{md,ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 const EXCLUDE = "**/node_modules/**";
 
-/** The places `history.reach` lists that name a way in, at most. */
+/** The places `history.reach` lists that name a way in, at most; and the doc lines `history.decisions` lists. */
 const NAMED = 100;
+const DOC_LINES = 60;
 
 /** A test file, as node finds them (the terminal's node command's isTestFile): what names a way in from a test. */
 const TEST_FILE = /(?:^|\/)tests?\/|(?:^|[./_-])test[._-]/u;
@@ -261,6 +265,41 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri, o
 			void vscode.window.showInformationMessage(said.split("\n")[0] + (removal.nothing ? "" : " The rest is in the History output."));
 
 			return { "nothing": removal.nothing, "files": removal.files, "manifests": removal.manifests.map((each) => each.file), "text": said };
+		}),
+		// What's been decided about a file (a path, or a file's name) or a name (an identifier, a feature, a way in's id).
+		vscode.commands.registerCommand("history.decisions", async (target: unknown) => {
+			if (typeof target !== "string" || target.trim() === "") {
+				return undefined;
+			}
+
+			const wanted = target.trim().replace(/^\/workspace\//u, "");
+			const isPath = wanted.includes("/") || /\.[a-z]+$/u.test(wanted);
+			const names = isPath ? [...new Set([wanted, wanted.split("/").at(-1) ?? wanted])] : [wanted];
+			const words = names.map((name) => new RegExp(`(?<![\\w$/.-])${name.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![\\w$])`, "u"));
+			const said = (text: string | undefined): boolean => text !== undefined && words.some((word) => word.test(text));
+			const holds = (paths: string[] | undefined): boolean => isPath && (paths ?? []).some((each) => wanted === each.replace(/\/+$/u, "") || wanted.startsWith(each.replace(/\/+$/u, "") + "/"));
+
+			await load();
+
+			const ledger = parseLedger(await ledgerNow());
+			const entries = Object.entries(ledger).filter(([name, entry]) => said(name) || said(entry.why) || said(entry.key) || holds(entry.paths)).map(([name, entry]) => ({ "name": name, ...entry }));
+			const manifest = parseManifest(await textOf(vscode.Uri.joinPath(root, manifestPath())) ?? "");
+			const features = manifest === undefined ? [] : featuresOfManifest(manifest).filter(([, , feature]) => holds(feature.paths) || (feature.ways ?? []).some((key) => said(key))).map(([area, name, feature]) => ({ "feature": `${area} / ${name}`, "what": feature.what, ...feature.docs === undefined ? {} : { "docs": feature.docs } }));
+			const docs: { "doc": string; "line": number; "heading": string; "text": string }[] = [];
+
+			for (const [file, text] of [...texts].filter(([path]) => path.endsWith(".md")).sort(([left], [right]) => left.localeCompare(right))) {
+				let heading = "";
+
+				for (const [index, line] of text.split("\n").entries()) {
+					if (/^#{1,6} /u.test(line)) {
+						heading = line.replace(/^#+ /u, "");
+					} else if (said(line)) {
+						docs.push({ "doc": file, "line": index + 1, "heading": heading, "text": line.trim().slice(0, 240) });
+					}
+				}
+			}
+
+			return { "target": wanted, "ledger": entries, "features": features, "docs": docs.slice(0, DOC_LINES), "counts": { "docs": docs.length } };
 		}),
 		// What a way in reaches, by its key (`hub request|code.problems`) or its id when one way in has it: Remove's plan,
 		// nothing written, and every place that names it. Undefined until History has read the program.

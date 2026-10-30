@@ -780,6 +780,15 @@
         "hub request|code.problems"
       ]
     },
+    "What's been decided about it": {
+      "what": "For a file (its path or name) or a name (an identifier, a tool, a hub request, a feature), what's been decided about it before it's changed: the feature ledger's entries naming it or whose paths hold the file, the manifest's features owning it, and each docs line naming it under its heading.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|decisions_for",
+        "command|history.decisions",
+        "hub request|decisions.for"
+      ]
+    },
     "What a way in reaches": {
       "what": "For a way in (a command, hub request, tool, core module, setting, view), the feature that owns it, where it's registered, what removing it would free and leave by hand, and everywhere code, tests and docs name it: silo remove's plan, written nowhere.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",

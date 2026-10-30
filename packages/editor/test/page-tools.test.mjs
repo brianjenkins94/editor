@@ -15,6 +15,7 @@ import { connectTestClient } from "../../debug-mcp/src/testing.ts";
 import { OBSERVABILITY_PROTOCOL, servePageToolSet, TAB_DISCOVER, TAB_HERE } from "../../observability/src/index.ts";
 import code from "../app/tools/code/tools.ts";
 import debug from "../app/tools/debug/tools.ts";
+import decisions from "../app/tools/decisions/tools.ts";
 import editor from "../app/tools/editor/tools.ts";
 import files from "../app/tools/files/tools.ts";
 import git from "../app/tools/git/tools.ts";
@@ -27,7 +28,7 @@ import terminal from "../app/tools/terminal/tools.ts";
 import workspace from "../app/tools/workspace/tools.ts";
 
 /** Every family's tools, as the tab serves them (tools/index.ts finds the families; Node can't read its glob). */
-const FAMILIES = [code, debug, editor, files, git, margin, previews, rules, runs, terminal, workspace];
+const FAMILIES = [code, debug, decisions, editor, files, git, margin, previews, rules, runs, terminal, workspace];
 
 let debugMcp;
 let mcp;
@@ -92,7 +93,7 @@ test("the editor's tools are listed while its tab is connected, each named <fami
 		return listed.includes("debug_start") ? listed : undefined;
 	});
 
-	for (const name of ["debug_start", "debug_list", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "debug_explore", "margin_state", "editor_state", "editor_trace", "editor_problems", "editor_notifications", "code_problems", "code_reach", "code_references", "code_rename", "code_move", "code_query", "code_rewrite", "files_read", "files_write", "files_edit", "files_replace", "files_glob", "files_grep", "terminal_output", "workspace_checkpoint", "workspace_restore", "runs_affected", "runs_tests", "git_status", "git_diff", "git_log", "git_show", "git_blame", "git_review", "git_commit", "git_discard", "git_branch", "git_checkout", "git_push", "rules_list", "previews_list", "previews_provoke", "previews_cdp", "previews_profile", "runs_list", "runs_stop", "runs_ledger"]) {
+	for (const name of ["debug_start", "debug_list", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "debug_explore", "margin_state", "editor_state", "editor_trace", "editor_problems", "editor_notifications", "code_problems", "code_reach", "decisions_for", "code_references", "code_rename", "code_move", "code_query", "code_rewrite", "files_read", "files_write", "files_edit", "files_replace", "files_glob", "files_grep", "terminal_output", "workspace_checkpoint", "workspace_restore", "runs_affected", "runs_tests", "git_status", "git_diff", "git_log", "git_show", "git_blame", "git_review", "git_commit", "git_discard", "git_branch", "git_checkout", "git_push", "rules_list", "previews_list", "previews_provoke", "previews_cdp", "previews_profile", "runs_list", "runs_stop", "runs_ledger"]) {
 		assert.ok(names.includes(name), name + " in " + names.join(", "));
 	}
 

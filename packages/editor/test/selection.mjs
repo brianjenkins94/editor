@@ -32,6 +32,7 @@ export const SHARDS = [
 	{ "shard": "tour-previews", "files": ["test/architecture-tour-previews.mjs"] },
 	{ "shard": "tour-runs", "files": ["test/architecture-tour-runs.mjs"] },
 	{ "shard": "tour-capabilities", "files": ["test/architecture-tour-capabilities.mjs"] },
+	{ "shard": "tour-tools", "files": ["test/architecture-tour-tools.mjs"] },
 	// (alone, so nothing else shares the CPU while it measures; never instrumented)
 	{ "shard": "performance", "files": ["test/performance.mjs"] }
 ];

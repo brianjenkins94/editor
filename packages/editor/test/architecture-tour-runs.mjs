@@ -1763,8 +1763,15 @@ test("purity: a function's verdict on its card, and a pure one a run saw write o
 	assert.equal(card(found, "add").purity, "pure");
 	assert.equal(card(found, "add").flagged, undefined, "a pure function the run saw keep to itself");
 	assert.equal(card(found, "read").purity, "pure", "judged pure statically: a getter's effects are assumed away");
-	// (the getter's line: a save's ESLint fixes may have spread it over several)
-	assert.match(card(found, "read").flagged, /^judged pure, but wrote n \(line [23]\)$/u, "the run saw it write outside itself, through the getter");
+	// (the getter's line as the file has it: a save's ESLint fixes may have spread it over several)
+	const written = await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const lines = new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.file("/workspace/getter.ts"))).split("\n");
+
+		return lines.findIndex((line) => line.includes("counter.n += 1")) + 1;
+	});
+
+	assert.equal(card(found, "read").flagged, `judged pure, but wrote n (line ${String(written)})`, "the run saw it write outside itself, through the getter");
 
 	// A statement inside another (the getter's, inside box's) on its own line, not stacked under the outer one's: when the
 	// save spread the getter over lines, its row is beside its line.
