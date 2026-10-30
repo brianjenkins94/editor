@@ -824,9 +824,12 @@ function Shell() {
 			const caught = pulled.outcome === "fast-forwarded" ? `Caught up with GitHub (${String(pulled.files?.length ?? 0)} files). ` : "";
 			// (a commit of every change reads every file's status: on this repository, 2,212 files with the page busy after its
 			// load, more than a minute — as git_review's and git_commit's tools allow)
-			const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": unknown[] };
+			const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": { "path": string }[] };
+			// (`.silo/`'s own .gitignore and .gitattributes alone are nothing to commit: they go only with something else
+			// under `.silo/`, git-engine.ts `stageSiloSeeds`)
+			const committing = files.filter(({ path }) => path !== ".silo/.gitignore" && path !== ".silo/.gitattributes");
 
-			if (files.length > 0) {
+			if (committing.length > 0) {
 				made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 600_000 }) as { "oid": string }).oid.slice(0, 7);
 				setCommitMessage("");
 			}
@@ -838,7 +841,7 @@ function Shell() {
 			}
 
 			setCommitResult(caught + (made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}`));
-			span.info("committed and pushed", { "files": files.length, "ref": pushed.ref, "pulled": pulled.outcome, ...made === undefined ? {} : { "sha": made } });
+			span.info("committed and pushed", { "files": committing.length, "ref": pushed.ref, "pulled": pulled.outcome, ...made === undefined ? {} : { "sha": made } });
 		} catch (error) {
 			const said = error instanceof Error ? error.message : "Commit failed";
 

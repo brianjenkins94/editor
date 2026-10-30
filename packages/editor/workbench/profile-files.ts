@@ -23,7 +23,6 @@ import type { RunRegistry } from "./runs";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { PREVIEW_PROFILED } from "../shared/preview-profile";
 import { VIRTUAL_RE } from "../shared/virtual-path";
-import { ensureSiloFiles } from "./evidence";
 import { inlineSourceMap, originalPosition } from "./sourcemap";
 
 /** Where profiles are saved, and how many of the newest stay. */
@@ -82,7 +81,7 @@ export function installProfileFiles(vscode: typeof vscodeApi, hub: Hub, runs: Ru
 
 		void (async () => {
 			try {
-				await ensureSiloFiles(vscode);
+				// (local: `.git/info/exclude` keeps `.silo/local/` out of git, so nothing of `.silo/`'s own is written for it)
 				await vscode.workspace.fs.writeFile(vscode.Uri.file(`${PROFILES}/${name}`), new TextEncoder().encode(JSON.stringify(await sourceMapped(profile, port, run.cwd))));
 
 				// The newest stay (names end in their time, so they sort by it within a window); the rest go.

@@ -21,7 +21,7 @@
 import type * as vscodeApi from "vscode";
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { keptAt } from "@brianjenkins94/editor-api/git";
-import { GITIGNORE, SILO_DIR, versionsPath, withLines } from "@brianjenkins94/util/silo/layout";
+import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
 
 /** The youngest a version may be, in days. */
@@ -293,16 +293,6 @@ export function syncVersions(vscode: typeof vscodeApi, root = "/workspace"): Pro
 
 		const at = await keptAt(versionsPath(), async (path) => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${root}/${path}`))).then(() => true, () => false));
 		const uri = vscode.Uri.file(`${root}/${at}`);
-
-		// (a local copy is git's to ignore: `.silo/.gitignore`'s `/local/` first — evidence.ts writes it too, lazily)
-		if (at !== versionsPath()) {
-			const seed = vscode.Uri.file(`${root}/${SILO_DIR}/.gitignore`);
-			const updated = withLines(await vscode.workspace.fs.readFile(seed).then((bytes) => new TextDecoder().decode(bytes), () => ""), GITIGNORE);
-
-			if (updated !== undefined) {
-				await vscode.workspace.fs.writeFile(seed, new TextEncoder().encode(updated));
-			}
-		}
 		const before = await read(uri).catch(() => undefined) as VersionsFile | undefined;
 		// (what was resolved stays, but a root whose range changed: resolved again, with what it now depends on — and a file
 		// from before `platform`: each entry's manifest read again once, its version kept)

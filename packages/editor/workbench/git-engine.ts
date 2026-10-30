@@ -15,7 +15,7 @@
 import { Buffer } from "node:buffer";
 import { KEPT, localOf } from "@brianjenkins94/editor-api/git";
 import { fs } from "@zenfs/core";
-import { GITIGNORE, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
+import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import type { HttpClient } from "isomorphic-git";
 import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 
@@ -47,19 +47,27 @@ export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
  *  workbench-entry.tsx), since isomorphic-git reads it straight off the filesystem. */
 export const DEFAULT_GITIGNORE = "node_modules/\n";
 
+/** The line in `.git/info/exclude` — git's own ignore for one machine, never committed — that keeps `.silo/local/` out of
+ *  git in a repository that has no `.silo/.gitignore` (2026-10-30: the editor adds that only with something else under
+ *  `.silo/`). */
+const LOCAL_EXCLUDE = `/${LOCAL_DIR}/`;
+
 /** `.silo/` is in git (RUNTIME-EVIDENCE.md): silo's policy, the runs and their evidence travel with the repo, and
  *  `.silo/.gitignore` keeps out only what stays on the machine. The editor used to list `.silo/` in `.git/info/exclude`;
- *  take that line back out of a repo that still has it — idempotent, run on every repo the workspace becomes
- *  (ensureRepo; a clone load in workbench-entry.tsx). And the files the editor makes that the repository hasn't taken
- *  (`keepLocal`) go to their local copies. */
+ *  take that line back out of a repo that still has it, and list `.silo/local/` there instead (`LOCAL_EXCLUDE`) —
+ *  idempotent, run on every repo the workspace becomes (ensureRepo; a clone load in workbench-entry.tsx). And the files
+ *  the editor makes that the repository hasn't taken (`keepLocal`) go to their local copies. */
 export async function includeSilo(): Promise<void> {
 	const file = DIR + "/.git/info/exclude";
 
-	if (fs.existsSync(file)) {
-		const lines = (await fs.promises.readFile(file, "utf8")).split("\n");
+	if (fs.existsSync(DIR + "/.git")) {
+		const lines = fs.existsSync(file) ? (await fs.promises.readFile(file, "utf8")).split("\n") : [];
+		const kept = lines.filter((line) => line !== ".silo/");
+		const wanted = kept.includes(LOCAL_EXCLUDE) ? kept : [...kept.filter((line, at) => line !== "" || at < kept.length - 1), LOCAL_EXCLUDE, ""];
 
-		if (lines.includes(".silo/")) {
-			await fs.promises.writeFile(file, lines.filter((line) => line !== ".silo/").join("\n"));
+		if (wanted.join("\n") !== lines.join("\n")) {
+			await fs.promises.mkdir(DIR + "/.git/info", { "recursive": true });
+			await fs.promises.writeFile(file, wanted.join("\n"));
 		}
 	}
 
@@ -73,16 +81,6 @@ export async function includeSilo(): Promise<void> {
  * its local copy, where git doesn't see it.
  */
 async function keepLocal(): Promise<void> {
-	// (what makes a local copy local: `.silo/.gitignore`'s `/local/`, there before anything is moved or written)
-	if (fs.existsSync(`${DIR}/${SILO_DIR}`)) {
-		const seed = `${DIR}/${SILO_DIR}/.gitignore`;
-		const updated = withLines(fs.existsSync(seed) ? await fs.promises.readFile(seed, "utf8") : "", GITIGNORE);
-
-		if (updated !== undefined) {
-			await fs.promises.writeFile(seed, updated);
-		}
-	}
-
 	for (const name of KEPT) {
 		const shared = `${SILO_DIR}/${name}`;
 
@@ -163,8 +161,9 @@ export async function status(): Promise<GitStatus> {
 /** Stage every working-tree change (adds + removals) — the commit-all path for phase 1. */
 export async function stageAll(): Promise<void> {
 	const { unstaged } = await status();
+	const withSilo = unstaged.some(({ path }) => path.startsWith(`${SILO_DIR}/`) && !SEEDS.includes(path));
 
-	for (const change of unstaged) {
+	for (const change of unstaged.filter(({ path }) => withSilo || !SEEDS.includes(path))) {
 		if (change.status === "D") {
 			await remove({ "fs": fs, "dir": DIR, "filepath": change.path });
 		} else {
@@ -197,13 +196,21 @@ async function readText(path: string): Promise<string | undefined> {
 	}
 }
 
+/** `.silo/`'s own two files: what keeps `/local/` out of git, and its JSONL merged by line. */
+const SEEDS = [`${SILO_DIR}/.gitignore`, `${SILO_DIR}/.gitattributes`];
+
 /**
  * The editor's pre-commit step (it makes every commit: the Source Control view's, Commit All, the terminal's `git
- * commit`): `.silo/`'s own `.gitignore` and `.gitattributes` go with it, so `/local/` — a run's traces and values,
- * this machine's alone (RUNTIME-EVIDENCE.md, *Kept across reloads*) — stays out of git wherever `.silo/` is committed.
+ * commit`): when it commits something under `.silo/`, `.silo/`'s own `.gitignore` and `.gitattributes` go with it, so
+ * `/local/` — a run's traces and values, this machine's alone (RUNTIME-EVIDENCE.md, *Kept across reloads*) — stays out
+ * of git wherever `.silo/` is committed. A commit with nothing else there doesn't add them (2026-10-30).
  */
 async function stageSiloSeeds(): Promise<void> {
-	for (const seed of [`${SILO_DIR}/.gitignore`, `${SILO_DIR}/.gitattributes`]) {
+	if (!(await status()).staged.some(({ path }) => path.startsWith(`${SILO_DIR}/`) && !SEEDS.includes(path))) {
+		return;
+	}
+
+	for (const seed of SEEDS) {
 		if (await readText(seed) !== undefined) {
 			await add({ "fs": fs, "dir": DIR, "filepath": seed }).catch(() => undefined);
 		}
@@ -434,6 +441,10 @@ export async function fastForward(branchName: string, to: string): Promise<Pulle
 /** Stage all changes, then commit: the new commit (`Committed`). */
 export async function commitAll(message: string): Promise<Committed> {
 	await stageAll();
+
+	if ((await status()).staged.length === 0) {
+		throw new Error("nothing to commit");
+	}
 
 	return committed(message);
 }

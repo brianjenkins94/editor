@@ -306,14 +306,7 @@ export async function writeStaticSurface(surface: StaticSurface): Promise<void> 
 		sorted.capabilities[path] = [...surface.capabilities[path]].sort((left, right) => (left.capability + left.callee + left.resource).localeCompare(right.capability + right.callee + right.resource));
 	}
 
-	const at = await keptAt(capabilitiesPath(), async (path) => await readText(fileIn(root, path)) !== undefined);
-
-	// (a local copy is git's to ignore: `.silo/.gitignore`'s `/local/` first)
-	if (at !== capabilitiesPath()) {
-		await ensureGitignore(root);
-	}
-
-	await writeText(fileIn(root, at), JSON.stringify(sorted, null, "\t") + "\n");
+	await writeText(fileIn(root, await keptAt(capabilitiesPath(), async (path) => await readText(fileIn(root, path)) !== undefined)), JSON.stringify(sorted, null, "\t") + "\n");
 }
 
 // ── observed facts: the rollup + each run's effects ────────────────────────────────────────────────────────────────

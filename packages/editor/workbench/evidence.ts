@@ -138,7 +138,8 @@ let siloFiles: Promise<void> | undefined;
 /**
  * `.silo/`'s own two files, before anything is written into it: `.gitignore` (silo's GITIGNORE — `/local/` stays on this
  * machine) and `.gitattributes` (silo's GITATTRIBUTES — its JSONL merges by line). Lines already there are kept. Once a
- * session; profile-files.ts calls it too, since a profile can be the first thing saved there.
+ * session, before a run's envelope and evidence are written (what's only this machine's, `.silo/local/`, needs neither:
+ * git-engine.ts's `.git/info/exclude` line keeps it out).
  */
 export async function ensureSiloFiles(vscode: typeof vscodeApi): Promise<void> {
 	siloFiles ??= (async () => {

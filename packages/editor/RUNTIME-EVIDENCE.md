@@ -59,7 +59,10 @@ The files the editor makes for a project — `versions.json` (the versions it pi
 baseline) and `capabilities.json` (the static surface) — are the repository's at `.silo/` once it has committed them,
 and in `.silo/local/` until then (2026-10-30; editor-api's git.ts `keptAt`), so loading a repository doesn't put them
 in its next commit. A repository shares one by committing it at its `.silo/` path; one an earlier editor left there
-untracked moves to `.silo/local/` as the workspace opens (git-engine.ts `includeSilo`).
+untracked moves to `.silo/local/` as the workspace opens (git-engine.ts `includeSilo`). `.silo/local/` is kept out of
+git by `.git/info/exclude` (git's own ignore for one machine, never committed), and `.silo/`'s own `.gitignore` and
+`.gitattributes` go into a commit only with something else under `.silo/`: a repository the editor merely loaded gets
+nothing of `.silo/` in its commits.
 
 - **Conflict-free by partition.** Each user and environment writes only its own files. One user on two branches does
   touch the same files; with one sorted line per span, git's built-in `merge=union` keeps both sides without any setup,
