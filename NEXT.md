@@ -77,7 +77,8 @@ How it's kept:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
    - **By hand: the Apps' Actions (read) permission**, dev and production (GitHub → Settings → Developer settings →
-     GitHub Apps → Permissions), for `ci_status` on a private repository; each user accepts it at their next sign-in.
+     GitHub Apps → Permissions), for `ci_status` on a private repository; each installation's owner then approves it
+     (GitHub asks them; until then their installation keeps the old permissions, and `ci_status` says 403's why).
 
    Every one: relative to a baseline (HEAD, or the last call); ids that chain from tool to tool, as hunk ids do; output
    bounded, saying what it left out; and what it couldn't see (TypeScript still initializing, say) said, not passed

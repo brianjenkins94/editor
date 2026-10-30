@@ -124,7 +124,8 @@ aren't allowed, since the shell's Commit button pushes too (2026-10-30). It neve
 
 CI's reads are there too (2026-10-30, agents' `ci_status`): a commit's runs, a run's jobs and a job's log, never a
 rerun or a cancel. A log is a redirect to GitHub's storage by a signed URL; the proxy follows it itself, without the
-token. They need the Apps' **Actions: read** permission (each user accepts it when it's added); without it GitHub
+token. They need the Apps' **Actions: read** permission (once it's added, each installation's owner approves it);
+without it GitHub
 answers 403 for a private repository, which `ci_status` says.
 
 ## Sign-in methods
