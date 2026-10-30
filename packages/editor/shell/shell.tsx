@@ -780,10 +780,13 @@ function Shell() {
 		}
 	};
 
-	// Commit the workspace's changes and push them: the workbench's git (git-service.ts `git.commit` with every change,
-	// then `git.push` of the current branch, through this shell's sign-in: git-push.ts), as agents' git_commit and
-	// git_push do and the review panel commits a part of. With nothing changed, it pushes what's committed and not yet
-	// pushed. A push refused after the commit says so: the commit is made, and pushing again is the button again.
+	// Commit the workspace's changes and push them: the workbench's git (git-service.ts `git.pull`, `git.commit` with
+	// every change, then `git.push` of the current branch, through this shell's sign-in: git-push.ts), as agents'
+	// git_pull, git_commit and git_push do and the review panel commits a part of. First the branch is brought up to
+	// GitHub's when that's a fast-forward (CI commits to main too), so the push is one; when it can't be — the two have
+	// each moved on, or GitHub changed a file changed here — nothing is committed, and it says why. With nothing changed,
+	// it pushes what's committed and not yet pushed. A push refused after the commit says so: the commit is made, and
+	// pushing again is the button again.
 	const commit = async (): Promise<void> => {
 		const rpc = rpcRef.current;
 		const message = commitMessage.trim();
@@ -808,6 +811,17 @@ function Shell() {
 		let made: string | undefined;
 
 		try {
+			const pulled = await rpc.request("git.pull", {}, { "timeoutMs": 300_000 }) as { "ref": string; "outcome": string; "files"?: string[]; "conflicts"?: string[] };
+
+			if (pulled.outcome === "diverged") {
+				throw new Error(`GitHub's ${pulled.ref} and this workspace's have each moved on, so it can't catch up: that's a rebase or a merge`);
+			}
+
+			if (pulled.outcome === "conflicts") {
+				throw new Error(`GitHub changed files you've changed here, so it can't catch up: ${(pulled.conflicts ?? []).join(", ")}`);
+			}
+
+			const caught = pulled.outcome === "fast-forwarded" ? `Caught up with GitHub (${String(pulled.files?.length ?? 0)} files). ` : "";
 			const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 20_000 }) as { "files": unknown[] };
 
 			if (files.length > 0) {
@@ -821,8 +835,8 @@ function Shell() {
 				throw new Error(`GitHub refused the push to ${pushed.ref}${pushed.error === undefined ? "" : `: ${pushed.error}`}`);
 			}
 
-			setCommitResult(made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}`);
-			span.info("committed and pushed", { "files": files.length, "ref": pushed.ref, ...made === undefined ? {} : { "sha": made } });
+			setCommitResult(caught + (made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}`));
+			span.info("committed and pushed", { "files": files.length, "ref": pushed.ref, "pulled": pulled.outcome, ...made === undefined ? {} : { "sha": made } });
 		} catch (error) {
 			const said = error instanceof Error ? error.message : "Commit failed";
 

@@ -6,8 +6,9 @@
  * a custom shell UI / the RHS revision history later, with the view swapped and the engine untouched. It's also the
  * COARSE (git) tier of the eventual two-tier history (Automerge = fine local edits, git = published commits).
  *
- * Local, but for one thing: init / status / stage / commit / branches + HEAD blobs for diff, and a push. A push's HTTP is
- * the caller's (`push`'s `http`): the workbench's goes through the shell, which holds the sign-in (shell/git-push.ts).
+ * Local, but for two things: init / status / stage / commit / branches + HEAD blobs for diff, and a push and a
+ * fast-forward. Their HTTP is the caller's (`push`'s and `pull`'s `http`): the workbench's goes through the shell,
+ * which holds the sign-in (shell/git-push.ts).
  * Who a commit is by is the caller's too (`setAuthor`): the signed-in GitHub user, else a placeholder.
  */
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
@@ -15,7 +16,7 @@ import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import type { HttpClient } from "isomorphic-git";
-import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, push as gitPush, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob } from "isomorphic-git";
+import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
 // read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
@@ -280,6 +281,116 @@ export async function push(http: HttpClient, url: string, ref?: string, force = 
 	const answer = result.refs[`refs/heads/${branchName}`];
 
 	return { "ref": branchName, "ok": result.ok && answer?.ok !== false, ...answer?.error === undefined ? {} : { "error": answer.error } };
+}
+
+/**
+ * What bringing a branch up to the remote's did (`git pull --ff-only`): `up to date`, nothing new there; `ahead`, only
+ * this workspace has commits the other hasn't (a push is a fast-forward); `fast-forwarded`, the branch moved `from` →
+ * `to` and the `files` the remote changed written; or nothing done, `diverged` (each has commits the other hasn't:
+ * a rebase or a merge, not this) or `conflicts` (the remote changed files this workspace has changes to).
+ */
+export interface Pulled {
+	"ref": string;
+	"outcome": "up to date" | "ahead" | "fast-forwarded" | "diverged" | "conflicts";
+	"from"?: string;
+	"to"?: string;
+	"files"?: string[];
+	"conflicts"?: string[];
+}
+
+/** Fetch `ref` (the current branch, by default) from `url` over `http`, and fast-forward to it if it can
+ *  (`fastForward`). A shallow clone fetches what it lacks down to what it has. */
+export async function pull(http: HttpClient, url: string, ref?: string): Promise<Pulled> {
+	const branchName = ref ?? (await currentBranch({ "fs": fs, "dir": DIR }) || undefined);
+
+	if (branchName === undefined) {
+		throw new Error("HEAD is on no branch: name one to bring up to date");
+	}
+
+	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": branchName, "remoteRef": branchName, "singleBranch": true, "tags": false });
+
+	if (fetched.fetchHead === null) {
+		throw new Error(`the remote has no branch ${branchName}`);
+	}
+
+	return fastForward(branchName, fetched.fetchHead);
+}
+
+/**
+ * Move `branchName` (HEAD's) to `to` when that's a fast-forward, keeping the working tree's changes: the files that
+ * changed between the two are written and staged as `to` has them, then the branch moved. Refused — nothing touched —
+ * when a file it would write has a change here (staged, unstaged or untracked), as `git merge --ff-only` refuses.
+ */
+export async function fastForward(branchName: string, to: string): Promise<Pulled> {
+	const from = await resolveRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}` });
+	const descends = async (oid: string, ancestor: string): Promise<boolean> => isDescendent({ "fs": fs, "dir": DIR, "oid": oid, "ancestor": ancestor, "depth": -1 }).catch(() => false);
+
+	if (from === to) {
+		return { "ref": branchName, "outcome": "up to date" };
+	}
+
+	if (await descends(from, to)) {
+		return { "ref": branchName, "outcome": "ahead", "from": from, "to": to };
+	}
+
+	if (!await descends(to, from)) {
+		return { "ref": branchName, "outcome": "diverged", "from": from, "to": to };
+	}
+
+	// (each file that differs between the two commits: what `to` has of it, or nothing — a subtree they share, skipped)
+	const changed: { "path": string; "oid"?: string; "mode"?: number }[] = [];
+
+	await walk({
+		"fs": fs,
+		"dir": DIR,
+		"trees": [TREE({ "ref": from }), TREE({ "ref": to })],
+		"map": async (path, [ours, theirs]) => {
+			const [oursOid, theirsOid] = [await ours?.oid(), await theirs?.oid()];
+
+			if (path === ".") {
+				return true;
+			}
+
+			if (oursOid === theirsOid && await ours?.mode() === await theirs?.mode()) {
+				return null;
+			}
+
+			if (await theirs?.type() === "blob") {
+				changed.push({ "path": path, "oid": theirsOid, "mode": await theirs?.mode() });
+			} else if (await ours?.type() === "blob") {
+				changed.push({ "path": path });
+			}
+
+			return true;
+		}
+	});
+
+	const { staged, unstaged } = await status();
+	const here = new Set([...staged, ...unstaged].map((change) => change.path));
+	const conflicts = changed.filter(({ path }) => here.has(path)).map(({ path }) => path);
+
+	if (conflicts.length > 0) {
+		return { "ref": branchName, "outcome": "conflicts", "from": from, "to": to, "conflicts": conflicts };
+	}
+
+	for (const { path, oid, mode } of changed) {
+		const full = `${DIR}/${path}`;
+
+		if (oid === undefined) {
+			await fs.promises.unlink(full).catch(() => undefined);
+			await remove({ "fs": fs, "dir": DIR, "filepath": path });
+		} else {
+			const { blob } = await readBlob({ "fs": fs, "dir": DIR, "oid": oid });
+
+			await fs.promises.mkdir(full.slice(0, full.lastIndexOf("/")), { "recursive": true });
+			await fs.promises.writeFile(full, blob);
+			await updateIndex({ "fs": fs, "dir": DIR, "filepath": path, "oid": oid, ...mode === undefined ? {} : { "mode": mode }, "add": true });
+		}
+	}
+
+	await writeRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}`, "value": to, "force": true });
+
+	return { "ref": branchName, "outcome": "fast-forwarded", "from": from, "to": to, "files": changed.map(({ path }) => path) };
 }
 
 /** Stage all changes, then commit: the new commit (`Committed`). */

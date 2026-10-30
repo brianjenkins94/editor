@@ -631,14 +631,16 @@
       ]
     },
     "Push to GitHub": {
-      "what": "A branch of the workspace's git pushed to the GitHub repository it was loaded from, through the editor's sign-in, its commits by the signed-in user; branches made and switched to.",
+      "what": "A branch of the workspace's git pushed to the GitHub repository it was loaded from, through the editor's sign-in, its commits by the signed-in user, and brought up to the repository's first when that's a fast-forward; branches made and switched to.",
       "ways": [
         "agent tool|git_branch",
         "agent tool|git_checkout",
+        "agent tool|git_pull",
         "agent tool|git_push",
         "hub request|git.branch",
         "hub request|git.checkout",
         "hub request|git.identity",
+        "hub request|git.pull",
         "hub request|git.push",
         "hub request|git.remote"
       ],

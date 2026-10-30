@@ -141,6 +141,17 @@ const git: ToolFamily = ({ request }) => [
 	{
 		"timeoutMs": 300000,
 		"tool": defineTool({
+			"name": "git_pull",
+			"config": {
+				"description": "Bring a branch (the current one, by default) up to the GitHub repository's when that's a fast-forward (git pull --ff-only), through the editor's sign-in: the commits GitHub has that the workspace hasn't, their files written, the working tree's own changes kept. Nothing is touched when it can't: outcome \"diverged\" (each has commits the other hasn't) or \"conflicts\" (GitHub changed files changed here, listed). Returns { ref, outcome: \"up to date\" | \"ahead\" | \"fast-forwarded\" | \"diverged\" | \"conflicts\", from?, to?, files?, conflicts?, url }.",
+				"inputSchema": { "ref": z.string().optional().describe("The branch; default, the current one.") }
+			},
+			"handler": async ({ ref }, { signal }) => ok(request("git.pull", { "ref": ref }, signal))
+		})
+	},
+	{
+		"timeoutMs": 300000,
+		"tool": defineTool({
 			"name": "git_push",
 			"config": {
 				"description": "Push a branch (the current one, by default) to the GitHub repository the workspace was loaded from, as the same branch — through the editor's sign-in, so the page must be signed in with GitHub. A rejected update (not a fast-forward, a protected branch) comes back as ok: false. Returns { ref, ok, error?, url }.",

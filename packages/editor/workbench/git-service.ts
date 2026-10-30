@@ -290,6 +290,29 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 		return engine.branches();
 	});
+	const remote = remoteHttp(async (request) => await shell.request("git.remote", request, { "timeoutMs": 300_000 }) as RemoteResponse);
+
+	// A branch (the current one, by default) brought up to the repository's, when that's a fast-forward: what GitHub has
+	// that this workspace hasn't, its files written over a working tree whose changes are elsewhere (git-engine.ts `pull`).
+	serve(hub, "git.pull", async (args) => {
+		const { ref } = (args ?? {}) as { "ref"?: unknown };
+		const url = await engine.githubRemote();
+
+		if (url === undefined) {
+			throw new Error("this workspace wasn't loaded from a GitHub repository, so there's nothing to bring it up to");
+		}
+
+		const pulled = await engine.pull(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined);
+
+		if (pulled.outcome === "fast-forwarded") {
+			hub.publish("git.changed");
+		}
+
+		log.info("git pull", { "ref": pulled.ref, "outcome": pulled.outcome, "files": pulled.files?.length });
+
+		return { ...pulled, "url": url };
+	});
+
 	// A branch (the current one, by default) pushed to the repository it was cloned from, through the shell.
 	serve(hub, "git.push", async (args) => {
 		const { ref, force } = (args ?? {}) as { "ref"?: unknown; "force"?: unknown };
@@ -299,7 +322,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 			throw new Error("this workspace wasn't loaded from a GitHub repository, so there's nowhere to push it");
 		}
 
-		const pushed = await engine.push(remoteHttp(async (request) => await shell.request("git.remote", request, { "timeoutMs": 300_000 }) as RemoteResponse), url, typeof ref === "string" && ref !== "" ? ref : undefined, force === true);
+		const pushed = await engine.push(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined, force === true);
 
 		log.info("git push", { "ref": pushed.ref, "ok": pushed.ok });
 

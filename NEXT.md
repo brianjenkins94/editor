@@ -46,7 +46,8 @@ How it's kept:
    - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
      through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user
      (`git.identity`). The terminal has `git push` / `switch` / `checkout`, and agents have `git_push`, `git_branch`
-     and `git_checkout`.
+     and `git_checkout`, and `git_pull`: a fast-forward to GitHub's branch when it can be one, keeping the working
+     tree's changes (git-engine.ts `fastForward`), which the Commit button does before it commits.
 
      First real push, 2026-10-27, from editor.unusuallygood.dev to `bench/first-push`: a new branch, then a
      fast-forward. It found two bugs, both fixed:
