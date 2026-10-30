@@ -55,9 +55,9 @@ How it's kept:
      - four executable scripts went out as 100644: the workspace's filesystem keeps no executable bit, so HEAD's are
        now given back before each commit.
 
-     `bench/first-push` (2be5c8a with the lost modes, then efaec74) is a scratch branch to delete. Still to decide:
-     what becomes of the shell's Commit button (`commitFiles`, one REST commit of the whole workspace) now that a push
-     exists.
+     The shell's Commit button commits and pushes (2026-10-30): the workbench's `git.commit` with every change, then
+     `git.push` of the current branch, in place of `commitFiles`'s one REST commit of the whole workspace. The scratch
+     branch `bench/first-push` is deleted.
    - Review by hunk: done. `git_review` gives the changes as hunks with ids, BABLR's cosmetic verdict per hunk and the
      features each is in; `git_commit` / `git_discard` take hunk ids. The review panel runs on the same requests
      (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.

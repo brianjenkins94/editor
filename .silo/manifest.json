@@ -36,7 +36,7 @@
       ]
     },
     "Commit to GitHub": {
-      "what": "Push the whole workspace back to the repo and branch it was loaded from, with a commit message, from the top bar.",
+      "what": "Commit every change in the workspace with a message and push it to the repo it was loaded from, on the branch it's on, from the top bar.",
       "ways": [
         "button|Commit"
       ]

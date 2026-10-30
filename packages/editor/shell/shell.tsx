@@ -212,6 +212,8 @@ function Shell() {
 	const [committing, setCommitting] = useState(false);
 	const [commitError, setCommitError] = useState<string | undefined>(undefined);
 	const [commitResult, setCommitResult] = useState<string | undefined>(undefined);
+	// (the branch a push goes to: the workspace's own, asked as the popover opens — a checkout since the load moves it)
+	const [commitBranch, setCommitBranch] = useState<string | undefined>(undefined);
 	// Share popover (the top-bar Share button): the workspace as a playground link, copied as it opens.
 	const [shareOpen, setShareOpen] = useState(false);
 	const [share, setShare] = useState<{ "url"?: string; "skipped"?: string[]; "copied"?: boolean; "error"?: string } | undefined>(undefined);
@@ -778,18 +780,19 @@ function Shell() {
 		}
 	};
 
-	// Commit the current workspace back to the bound repo: ask the app for the files (the pane holds the FS), convert
-	// to the Git Data write shape (repo-relative paths; text inline, binary as base64 blobs), and push.
+	// Commit the workspace's changes and push them: the workbench's git (git-service.ts `git.commit` with every change,
+	// then `git.push` of the current branch, through this shell's sign-in: git-push.ts), as agents' git_commit and
+	// git_push do and the review panel commits a part of. With nothing changed, it pushes what's committed and not yet
+	// pushed. A push refused after the commit says so: the commit is made, and pushing again is the button again.
 	const commit = async (): Promise<void> => {
-		const binding = boundRepo;
+		const rpc = rpcRef.current;
+		const message = commitMessage.trim();
 
-		if (binding === undefined) {
+		if (boundRepo === undefined || rpc === undefined) {
 			setCommitError("Load a repo first");
 
 			return;
 		}
-
-		const message = commitMessage.trim();
 
 		if (message === "") {
 			setCommitError("Enter a commit message");
@@ -801,29 +804,30 @@ function Shell() {
 		setCommitError(undefined);
 		setCommitResult(undefined);
 
-		const span = githubLog.span("github.commit", { "repo": binding.owner + "/" + binding.repo, "branch": binding.branch });
+		const span = githubLog.span("github.commit", { "repo": boundRepo.owner + "/" + boundRepo.repo });
+		let made: string | undefined;
 
 		try {
-			const { files } = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
-			const prefix = "/workspace/";
-			const { bytesToBase64, connectGitHub } = await import("./github");
-			const writes = files.map((file) => {
-				const path = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.path;
+			const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 20_000 }) as { "files": unknown[] };
 
-				// A NUL byte means binary (git's own heuristic) → upload as a base64 blob; otherwise inline as text.
-				return file.bytes.includes(0)
-					? { "path": path, "base64": bytesToBase64(file.bytes) }
-					: { "path": path, "content": new TextDecoder().decode(file.bytes) };
-			});
+			if (files.length > 0) {
+				made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 60_000 }) as { "oid": string }).oid.slice(0, 7);
+				setCommitMessage("");
+			}
 
-			const sha = await (await connectGitHub()).commitFiles(binding.owner, binding.repo, { "branch": binding.branch, "message": message, "files": writes });
+			const pushed = await rpc.request("git.push", {}, { "timeoutMs": 300_000 }) as { "ref": string; "ok": boolean; "error"?: string };
 
-			setCommitResult(sha.slice(0, 7));
-			setCommitMessage("");
-			span.info("committed", { "files": writes.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0), "sha": sha.slice(0, 7) });
+			if (!pushed.ok) {
+				throw new Error(`GitHub refused the push to ${pushed.ref}${pushed.error === undefined ? "" : `: ${pushed.error}`}`);
+			}
+
+			setCommitResult(made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}`);
+			span.info("committed and pushed", { "files": files.length, "ref": pushed.ref, ...made === undefined ? {} : { "sha": made } });
 		} catch (error) {
-			setCommitError(error instanceof Error ? error.message : "Commit failed");
-			span.error("commit failed", { "error": errText(error), "status": statusOf(error) });
+			const said = error instanceof Error ? error.message : "Commit failed";
+
+			setCommitError(made === undefined ? said : `Committed ${made}, but not pushed: ${said}`);
+			span.error("commit or push failed", { "error": errText(error), "status": statusOf(error), ...made === undefined ? {} : { "sha": made } });
 		} finally {
 			span.end();
 			setCommitting(false);
@@ -844,7 +848,7 @@ function Shell() {
 		}
 
 		if (boundRepo === undefined) {
-			return <span class="wa-caption-2xs">Load a repo first — commits push back to the repo the workspace came from.</span>;
+			return <span class="wa-caption-2xs">Load a repo first — a commit is pushed to the repo the workspace came from.</span>;
 		}
 
 		return (
@@ -865,7 +869,7 @@ function Shell() {
 
 					{" "}
 
-					<strong>{boundRepo.branch}</strong>
+					<strong>{commitBranch ?? boundRepo.branch}</strong>
 				</span>
 
 				<wa-input
@@ -886,12 +890,12 @@ function Shell() {
 
 				{commitResult !== undefined && (
 					<span class={"wa-caption-2xs " + ghOk()}>
-						{`Committed ${commitResult}`}
+						{commitResult}
 					</span>
 				)}
 
 				<div class="wa-cluster wa-gap-xs">
-					<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit"}</wa-button>
+					<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit and push"}</wa-button>
 				</div>
 			</>
 		);
@@ -1154,7 +1158,7 @@ function Shell() {
 					id="shell-commit"
 					appearance="plain"
 					size="small"
-					title={boundRepo !== undefined ? "Commit to " + boundRepo.owner + "/" + boundRepo.repo : "Commit"}
+					title={boundRepo !== undefined ? "Commit and push to " + boundRepo.owner + "/" + boundRepo.repo : "Commit and push"}
 					aria-label="Commit"
 				>
 					<Icon node={GitCommit} />
@@ -1169,6 +1173,11 @@ function Shell() {
 							setCommitError(undefined);
 							setCommitResult(undefined);
 							setCommitOpen(true);
+							void rpcRef.current?.request("git.branch", undefined, { "timeoutMs": 10_000 }).then((branches) => {
+								setCommitBranch((branches as { "current"?: string }).current);
+							}, () => {
+								setCommitBranch(undefined);
+							});
 						}
 					}}
 					onwa-hide={(event: Event) => {
@@ -1178,7 +1187,7 @@ function Shell() {
 					}}
 				>
 					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="Commit to GitHub">
-						<span class="wa-font-weight-semibold wa-font-size-s">Commit</span>
+						<span class="wa-font-weight-semibold wa-font-size-s">Commit and push</span>
 
 						{commitBody()}
 					</div>

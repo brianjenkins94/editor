@@ -58,23 +58,6 @@ export interface TreeEntry {
 	"size"?: number;
 }
 
-/** A file to write. Text goes inline into the tree; binary (`base64`) is uploaded as a blob first. */
-export interface FileWrite {
-	"path": string;
-	"content"?: string;
-	"base64"?: string;
-	/** Git file mode; defaults to a normal file (100644). Use 100755 for an executable. */
-	"mode"?: string;
-}
-
-export interface CommitOptions {
-	"branch": string;
-	"message": string;
-	"files": FileWrite[];
-	/** Force-move the ref (non-fast-forward). Off by default. */
-	"force"?: boolean;
-}
-
 /** `Content-Type` + JSON body, in the shape fido's post/patch/put expect as their options argument. */
 function jsonBody(payload: unknown): { "headers": Record<string, string>; "body": string } {
 	return { "headers": { "Content-Type": "application/json" }, "body": JSON.stringify(payload) };
@@ -85,17 +68,6 @@ export function base64ToBytes(base64: string): Uint8Array {
 	const binary = atob(base64.replace(/\n/gu, ""));
 
 	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-/** Encode raw bytes to base64 (for committing a binary file as a blob). */
-export function bytesToBase64(bytes: Uint8Array): string {
-	let binary = "";
-
-	for (const byte of bytes) {
-		binary += String.fromCharCode(byte);
-	}
-
-	return btoa(binary);
 }
 
 /** Decode a base64 blob to UTF-8 text. */
@@ -230,42 +202,6 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 
 				return { "path": entry.path, "bytes": bytes };
 			}));
-		},
-
-		/**
-		 * Commit a set of files to a branch via the Git Data API and move the ref: read the branch tip, build a new
-		 * tree over the base tree (text inline, binary as uploaded blobs), create the commit, then update the ref.
-		 * Returns the new commit sha.
-		 */
-		"commitFiles": async function(owner: string, repo: string, options: CommitOptions): Promise<string> {
-			const ref = "heads/" + options.branch;
-			const base = "/repos/" + owner + "/" + repo;
-
-			// 1. current tip of the branch → its tree
-			const head = await run<{ "object": { "sha": string } }>(gh.get(base + "/git/ref/" + ref));
-			const baseSha = head.object.sha;
-			const baseCommit = await run<{ "tree": { "sha": string } }>(gh.get(base + "/git/commits/" + baseSha));
-
-			// 2. tree entries — inline text; upload binary as blobs and reference their sha
-			const tree = await Promise.all(options.files.map(async (file) => {
-				const entry = { "path": file.path, "mode": file.mode ?? "100644", "type": "blob" as const };
-
-				if (file.base64 !== undefined) {
-					const blob = await run<{ "sha": string }>(gh.post(base + "/git/blobs", jsonBody({ "content": file.base64, "encoding": "base64" })));
-
-					return { ...entry, "sha": blob.sha };
-				}
-
-				return { ...entry, "content": file.content ?? "" };
-			}));
-
-			// 3. new tree → commit → move the ref
-			const newTree = await run<{ "sha": string }>(gh.post(base + "/git/trees", jsonBody({ "base_tree": baseCommit.tree.sha, "tree": tree })));
-			const commit = await run<{ "sha": string }>(gh.post(base + "/git/commits", jsonBody({ "message": options.message, "tree": newTree.sha, "parents": [baseSha] })));
-
-			await run(gh.patch(base + "/git/refs/" + ref, jsonBody({ "sha": commit.sha, "force": options.force ?? false })));
-
-			return commit.sha;
 		},
 
 		/** A repository's Actions runs, the newest first: a commit's (`commit`), or a branch's. */

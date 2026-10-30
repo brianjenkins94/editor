@@ -45,64 +45,6 @@ test("the client goes where it's pointed: GitHub's paths under the API's proxy w
 	assert.deepEqual(requested, ["https://api.example.dev/github/api/user"]);
 });
 
-test("commitFiles runs the Git Data flow in order, inlining text and uploading binary as a blob", async () => {
-	const { provider, calls } = fakeProvider([
-		[{ "method": "GET", "path": "/git/ref/heads/main" }, () => ({ "json": { "object": { "sha": "BASE" } } })],
-		[{ "method": "GET", "path": "/git/commits/BASE" }, () => ({ "json": { "tree": { "sha": "BASETREE" } } })],
-		[{ "method": "POST", "path": "/git/blobs" }, (body) => ({ "status": 201, "json": { "sha": "BLOB:" + body.encoding } })],
-		[{ "method": "POST", "path": "/git/trees" }, () => ({ "status": 201, "json": { "sha": "NEWTREE" } })],
-		[{ "method": "POST", "path": "/git/commits" }, () => ({ "status": 201, "json": { "sha": "NEWCOMMIT" } })],
-		[{ "method": "PATCH", "path": "/git/refs/heads/main" }, (body) => ({ "json": { "object": { "sha": body.sha } } })]
-	]);
-	const gh = createGitHub(provider);
-
-	const sha = await gh.commitFiles("me", "games", {
-		"branch": "main",
-		"message": "add example",
-		"files": [
-			{ "path": "games/example/game.ts", "content": "export const x = 1;\n" },
-			{ "path": "games/example/assets/sprites/boulder.png", "base64": "iVBORw0KGgo=" }
-		]
-	});
-
-	assert.equal(sha, "NEWCOMMIT", "returns the new commit sha");
-
-	// The flow happens in dependency order.
-	const order = calls.map((call) => call.method + " " + call.path.replace(/^\/repos\/me\/games/u, ""));
-
-	assert.deepEqual(order, [
-		"GET /git/ref/heads/main",
-		"GET /git/commits/BASE",
-		"POST /git/blobs", // only the binary file needs a blob
-		"POST /git/trees",
-		"POST /git/commits",
-		"PATCH /git/refs/heads/main"
-	]);
-
-	// The tree is built over the base tree; text is inline, binary references the uploaded blob.
-	const treeCall = calls.find((call) => call.path.endsWith("/git/trees"));
-
-	assert.equal(treeCall.body.base_tree, "BASETREE", "tree extends the base tree (not a full replace)");
-
-	const byPath = new Map(treeCall.body.tree.map((entry) => [entry.path, entry]));
-
-	assert.equal(byPath.get("games/example/game.ts").content, "export const x = 1;\n", "text is inlined");
-	assert.equal(byPath.get("games/example/game.ts").sha, undefined, "text carries no blob sha");
-	assert.equal(byPath.get("games/example/assets/sprites/boulder.png").sha, "BLOB:base64", "binary references the base64 blob");
-	assert.equal(byPath.get("games/example/assets/sprites/boulder.png").content, undefined, "binary is not inlined");
-
-	// The commit parents the old tip; the ref is moved to the new commit.
-	const commitCall = calls.find((call) => call.path.endsWith("/git/commits") && call.method === "POST");
-
-	assert.deepEqual(commitCall.body.parents, ["BASE"]);
-	assert.equal(commitCall.body.tree, "NEWTREE");
-
-	const patchCall = calls.find((call) => call.method === "PATCH");
-
-	assert.equal(patchCall.body.sha, "NEWCOMMIT");
-	assert.equal(patchCall.body.force, false);
-});
-
 test("readTree requests the recursive tree; getRepo returns undefined on 404 but throws otherwise", async () => {
 	const { provider, calls } = fakeProvider([
 		[{ "method": "GET", "path": "/git/trees/HEAD" }, () => ({ "json": { "sha": "T", "tree": [{ "path": "a", "type": "blob", "sha": "s", "mode": "100644" }], "truncated": false } })],
