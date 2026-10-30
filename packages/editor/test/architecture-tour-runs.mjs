@@ -17,11 +17,46 @@ import { eventually, inRuleView, session, tour } from "./architecture-tour-sessi
 
 tour("architecture-tour-runs");
 
+/**
+ * Replace `find` with `replace` in `path`, shown in an editor, as typing would, then save it with Ctrl+S, as a person
+ * does (a save's selection follows the key, not the API). The edit is tried again until the text has it: an editor not
+ * ready yet declines it (`editor.edit` answers false), and then there's nothing to save and nothing is selected.
+ */
+async function editAndSave(path, find, replace) {
+	const workbench = session.workbench();
+
+	await eventually(`the edit in ${path}`, () => workbench.evaluate(async ([file, from, to]) => {
+		const { api } = globalThis.__editor;
+		const editor = await api.window.showTextDocument(api.Uri.file(file));
+		const text = editor.document.getText();
+
+		if (text.includes(to) && !text.includes(from)) {
+			return true;
+		}
+
+		const at = text.indexOf(from);
+
+		if (at === -1) {
+			return undefined;
+		}
+
+		const applied = await editor.edit((builder) => {
+			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + from.length)), to);
+		});
+
+		return applied && editor.document.getText().includes(to) ? true : undefined;
+	}, [path, find, replace]), 30_000);
+	// (the editor focused first, as typing there would leave it)
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.action.focusActiveEditorGroup"));
+	await session.page.keyboard.press("ControlOrMeta+s");
+}
+
 /** What a save selects, waited for — or, timed out, what happened instead: whether the file is still dirty (a save VS
  *  Code dropped selects nothing), the runs since the save (what started, when, and how it ended: none queued, one slow, or
  *  one that ran without its trace kept) and the traces kept on the file. NEXT.md *Watching*. */
 async function afterSave(what, path, probe) {
 	const saved = Date.now();
+	const before = await session.workbench().evaluate((file) => globalThis.__editor.api.workspace.textDocuments.find((document) => document.uri.path === file)?.getText(), path);
 
 	return eventually(what, probe, 60_000).catch(async (error) => {
 		const state = await session.workbench().evaluate(async ({ file, since }) => {
@@ -30,6 +65,7 @@ async function afterSave(what, path, probe) {
 
 			return {
 				"dirty": api.workspace.textDocuments.find((document) => document.uri.path === file)?.isDirty,
+				"disk": await Promise.resolve(api.workspace.fs.readFile(api.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined),
 				"queue": await Promise.resolve(api.commands.executeCommand("run.live.state")).catch((failed) => String(failed)),
 				"sessions": api.debug.activeDebugSession?.name,
 				"traces": traces.split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).map((trace) => `${trace.test?.id ?? trace.program ?? "(own)"} ${trace.trigger} ${trace.at}`).slice(-8),
@@ -38,7 +74,9 @@ async function afterSave(what, path, probe) {
 		}, { "file": path, "since": new Date(saved).toISOString() });
 		const runs = await session.request("runs.list", {}, 10_000).then((listed) => listed.filter((run) => run.startedAt >= saved - 5000).map((run) => `${run.title} ${run.state} +${run.startedAt - saved}ms${run.endedAt === undefined ? "" : ` for ${run.endedAt - run.startedAt}ms`}`), (failed) => [String(failed)]);
 
-		throw new Error(`${error.message} (${path} ${state.dirty === true ? "still dirty: the save didn't land" : "saved"}; runs since the save: ${JSON.stringify(runs)}; debugging ${state.sessions ?? "nothing"}; traces kept on it, latest last: ${JSON.stringify(state.traces)}; saved at ${state.since}; the live runs' queue: ${JSON.stringify(state.queue)})`);
+		const landed = state.dirty === true ? "still dirty: the save didn't land" : state.disk === before ? "saved, with the edit on disk" : "not dirty, but the disk hasn't the text the editor had: the edit or the save went astray";
+
+		throw new Error(`${error.message} (${path} ${landed}; runs since the save: ${JSON.stringify(runs)}; debugging ${state.sessions ?? "nothing"}; traces kept on it, latest last: ${JSON.stringify(state.traces)}; saved at ${state.since}; the live runs' queue: ${JSON.stringify(state.queue)})`);
 	});
 }
 
@@ -1265,19 +1303,8 @@ test("selection: a save reruns the tests that executed what changed, and only th
 		return testOf(traces, "calc-add.test.js › adds") === undefined || testOf(traces, "calc.test.js › calc › subtracts") === undefined ? undefined : traces;
 	}, 60_000);
 
-	// subtract edited and saved (the editor focused first, as typing there would leave it).
-	await workbench.evaluate(async () => {
-		const { api } = globalThis.__editor;
-		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/calc.js"));
-		const text = editor.document.getText();
-		const at = text.indexOf("return a - b;");
-
-		await editor.edit((builder) => {
-			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "return a - b;".length)), "return a - b + 0;");
-		});
-		await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
-	});
-	await session.page.keyboard.press("ControlOrMeta+s");
+	// subtract edited and saved.
+	await editAndSave("/workspace/calc.js", "return a - b;", "return a - b + 0;");
 
 	const after = await afterSave("calc.test.js run again, after the save", "/workspace/calc.js", async () => {
 		const traces = await keptOn("calc.js");
@@ -1503,17 +1530,7 @@ test("selection: an edit to an imported module reruns the programs that ran what
 		assert.notDeepEqual(programOf(before, "report.js").declarations, programOf(before, "fence.js").declarations, "each ran its own function of it");
 
 		// area edited and saved.
-		await workbench.evaluate(async () => {
-			const { api } = globalThis.__editor;
-			const editor = await api.window.showTextDocument(api.Uri.file("/workspace/shapes.js"));
-			const at = editor.document.getText().indexOf("3 * r * r");
-
-			await editor.edit((builder) => {
-				builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "3 * r * r".length)), "Math.PI * r * r");
-			});
-			await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
-		});
-		await session.page.keyboard.press("ControlOrMeta+s");
+		await editAndSave("/workspace/shapes.js", "3 * r * r", "Math.PI * r * r");
 
 		const after = await afterSave("report.js run again, after the save", "/workspace/shapes.js", async () => {
 			const traces = await reachOn("shapes.js");
@@ -1554,18 +1571,7 @@ test("halt: a selected run halts before a call that never ran for real, and a pi
 	await eventually("rates.test.js's test kept on rates.js", async () => (await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/.silo/local/traces/rates.js.jsonl")).then((bytes) => new TextDecoder().decode(bytes), () => ""))).includes("rates.test.js › rate") || undefined, 60_000);
 
 	// rate() now fetches — a call no run ever made for real — and the save selects rates.test.js, which ran rate.
-	await workbench.evaluate(async (address) => {
-		const { api } = globalThis.__editor;
-		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/rates.js"));
-		const text = editor.document.getText();
-		const at = text.indexOf("return 2;");
-
-		await editor.edit((builder) => {
-			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "return 2;".length)), `const response = await fetch("${address}");\n\n\treturn Number(await response.text());`);
-		});
-		await api.commands.executeCommand("workbench.action.focusActiveEditorGroup");
-	}, url);
-	await session.page.keyboard.press("ControlOrMeta+s");
+	await editAndSave("/workspace/rates.js", "return 2;", `const response = await fetch("${url}");\n\n\treturn Number(await response.text());`);
 
 	const state = await eventually("the selected run halted on rates.js", async () => {
 		const found = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("margin.state", "rates.js").catch(() => undefined));
