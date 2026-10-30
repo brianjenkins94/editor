@@ -1435,6 +1435,45 @@ test("test runs: which tests a change reaches, and their results as data", async
 	}
 });
 
+// Refactoring for agents (code-refactor.ts; code_references, code_rename, code_move): a function found where it's used,
+// renamed everywhere, and its file moved with both importers' imports kept right — each file saved.
+test("refactoring: references, a rename everywhere, and a move with its imports", async () => {
+	const request = (subject, data) => session.request(subject, data, 240_000);
+	const disk = (path) => session.workbench().evaluate(async (file) => {
+		const { api } = globalThis.__editor;
+
+		return Promise.resolve(api.workspace.fs.readFile(api.Uri.file(`/workspace/${file}`))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
+	}, path);
+
+	try {
+		await request("files.write", { "path": "ref/geometry.ts", "content": "export function area(r: number): number {\n\treturn 3 * r * r;\n}\n" });
+		await request("files.write", { "path": "ref/use.ts", "content": "import { area } from \"./geometry\";\n\nexport const four = area(2);\n" });
+		await request("files.write", { "path": "ref/also.ts", "content": "import { area } from \"./geometry\";\n\nexport const nine = area(3);\n" });
+
+		const found = await request("code.references", { "path": "ref/geometry.ts", "line": 1, "name": "area" });
+
+		assert.deepEqual(found.places.map(({ file, line }) => `${file}:${String(line)}`).sort(), ["ref/also.ts:1", "ref/also.ts:3", "ref/geometry.ts:1", "ref/use.ts:1", "ref/use.ts:3"], JSON.stringify(found));
+
+		const renamed = await request("code.rename", { "path": "ref/geometry.ts", "line": 1, "name": "area", "to": "areaOf" });
+
+		assert.deepEqual(renamed.files.sort(), ["ref/also.ts", "ref/geometry.ts", "ref/use.ts"]);
+		assert.equal(await disk("ref/use.ts"), "import { areaOf } from \"./geometry\";\n\nexport const four = areaOf(2);\n", "renamed, and saved");
+
+		const moved = await request("code.move", { "from": "ref/geometry.ts", "to": "ref/shapes/geometry.ts" });
+
+		assert.deepEqual(moved.updated.sort(), ["ref/also.ts", "ref/use.ts"], JSON.stringify(moved));
+		assert.equal(await disk("ref/geometry.ts"), undefined, "gone from where it was");
+		assert.match(await disk("ref/shapes/geometry.ts"), /export function areaOf/u);
+		assert.match(await disk("ref/use.ts"), /from "\.\/shapes\/geometry"/u, "its importer follows it");
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/ref"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 // What a way in reaches (code-reach.ts, History's ledger.ts `history.reach`; agents' code_reach): an agent tool made in
 // the workspace, the file that names it, and what removing it would free.
 test("code reach: a way in's registration, what names it, and what removing it frees", async () => {

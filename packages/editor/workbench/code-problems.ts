@@ -16,6 +16,7 @@ import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import type { GitReader } from "./git-service";
+import type { TypeScriptProjects } from "./ts-projects";
 import { serve } from "@brianjenkins94/hub";
 
 const ROOT = "/workspace";
@@ -138,7 +139,7 @@ async function eslintProblems(vscode: typeof vscodeApi, heads: Map<GitFileChange
 	return { "head": head, "now": now, "linted": linted };
 }
 
-export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: GitReader): void {
+export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: GitReader, projects: TypeScriptProjects): void {
 	serve(hub, "code.problems", async (args) => {
 		const { paths, depth, limit } = (args ?? {}) as { "paths"?: unknown; "depth"?: unknown; "limit"?: unknown };
 		const only = Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "").replace(/\/$/u, "")) : undefined;
@@ -149,6 +150,9 @@ export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: Git
 			heads.set(change, change.status === "A" ? null : (await git.file(change.path)).head);
 		}
 
+		// (the projects told first, so they hold the files made since: ts-projects.ts)
+		await projects.refresh();
+
 		// (each one's symbols asked, so the TypeScript server holds its project: opening a document doesn't hand it to the
 		// server, a language feature's request does)
 		await Promise.all(changes.filter((change) => change.status !== "D").map(async (change) => Promise.resolve(vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", vscode.Uri.file(`${ROOT}/${change.path}`))).then(() => undefined, () => undefined)));
@@ -156,7 +160,7 @@ export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: Git
 		const typescript = await typescriptProblems(vscode, heads, depth === 0 ? 0 : 1, typeof limit === "number" && limit > 0 ? limit : 100);
 		const eslint = await eslintProblems(vscode, heads);
 		const { added, cleared, unchanged } = problemsDelta([...typescript.head, ...eslint.head], [...typescript.now, ...eslint.now]);
-		const projects = typescript.compared?.projects ?? [];
+		const compared = typescript.compared?.projects ?? [];
 
 		return {
 			"added": added.slice(0, LISTED),
@@ -164,15 +168,15 @@ export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: Git
 			"counts": { "added": added.length, "cleared": cleared.length, "unchanged": unchanged },
 			"checked": {
 				"changed": changes.map(({ path, status }) => `${status} ${path}`),
-				"typescript": [...new Set(projects.flatMap(({ checked }) => checked.map(({ file }) => relative(file))))].sort((left, right) => left.localeCompare(right)),
+				"typescript": [...new Set(compared.flatMap(({ checked }) => checked.map(({ file }) => relative(file))))].sort((left, right) => left.localeCompare(right)),
 				"eslint": eslint.linted
 			},
 			// What it didn't look at, so an empty `added` isn't read as more than it is.
 			"unchecked": {
 				...typescript.compared === undefined && changes.length > 0 ? { "typescript": "the TypeScript server didn't answer (still starting, or no project holds these files)" } : {},
 				...typescript.compared?.error === undefined ? {} : { "typescript": `the comparison failed: ${typescript.compared.error}` },
-				"importers": projects.flatMap(({ "unchecked": over }) => over.map(relative)),
-				"furtherImporters": projects.reduce((total, { beyond }) => total + beyond, 0),
+				"importers": compared.flatMap(({ "unchecked": over }) => over.map(relative)),
+				"furtherImporters": compared.reduce((total, { beyond }) => total + beyond, 0),
 				"noProject": (typescript.compared?.outside ?? []).map(relative)
 			}
 		};

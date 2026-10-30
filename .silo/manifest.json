@@ -781,6 +781,19 @@
         "hub request|code.reach"
       ]
     },
+    "Refactoring for agents": {
+      "what": "An agent finds where a name is used, renames it everywhere, and moves a file with every import of it kept right, as TypeScript resolves them: one edit the editor sees as typing, every file saved, nothing asked.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|code_move",
+        "agent tool|code_references",
+        "agent tool|code_rename",
+        "core module|installCodeRefactor",
+        "hub request|code.move",
+        "hub request|code.references",
+        "hub request|code.rename"
+      ]
+    },
     "Tests for agents": {
       "what": "Which tests a change reaches, by the traces of their runs here (stale when they ran code it has altered, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
       "docs": "packages/editor/RUNNING.md, *Tests*",

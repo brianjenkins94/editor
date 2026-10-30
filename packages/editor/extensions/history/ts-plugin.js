@@ -4,11 +4,16 @@
  * ts-analysis, the same reading `silo history --analyzer typescript` does with TypeScript 7). No copy of TypeScript, no
  * oxc: the engine (history-engine.js, served beside this file) is built with `typescript` external, and we hand it ours.
  *
- * Two requests (through `typescript.tsserverRequest`):
+ * Four requests (through `typescript.tsserverRequest`):
  *
- * - `_history.read`: the extension says which reading of each file it has (a revision number this plugin gave it); the
+ * - `_history.read`: the extension says which reading of each file it has (and `rescan`, when files were made or
+ *   deleted since: the projects read their files again first) (a revision number this plugin gave it); the
  *   answer is every file whose reading is newer — it changed, or a file it resolves names into did — and every file
  *   there is now. Readings are kept here between requests, so an answer costs only what changed.
+ * - `_history.files`, core's (ts-projects.ts): files were made or deleted, so each configured project reads its root
+ *   files again (the browser server isn't told: its watchers watch nothing).
+ * - `_history.fileRename`, core's (code-refactor.ts): the edits moving a file makes, TypeScript's
+ *   `getEditsForFileRename` (every import of it, and its own relative imports), as each file's spans and new text.
  * - `_history.problems`, core's (code-problems.ts): TypeScript's diagnostics for the files a change touches, now and at
  *   HEAD, so core can say which the change added and which it cleared. Its arguments: `files` (each changed file, as the
  *   server names it, and its text at HEAD, or null when HEAD hasn't it), `depth` (rings of importers checked besides: 0
@@ -93,6 +98,11 @@ export default function init(modules) {
 	function read(info, args) {
 		if (engine === undefined) {
 			return { "ready": false, "error": engineError };
+		}
+
+		// (files made or deleted on disk since the last reading: the projects read their files again first)
+		if (args.rescan === true) {
+			filesChanged(info.project.projectService);
 		}
 
 		const root = String(args.root || "/workspace").replace(/\/+$/u, "");
@@ -377,6 +387,7 @@ export default function init(modules) {
 			}
 
 			const importers = importersOf(program);
+
 			function importing(names) {
 				return names.flatMap(function(name) {
 					return [...importers.get(name) || []];
@@ -423,6 +434,72 @@ export default function init(modules) {
 		};
 	}
 
+	// `_history.files`: files made or deleted on disk, told to the projects (the browser server isn't: ts-projects.ts).
+	/**
+	 * Every configured project's root files read again from its tsconfig, at its next update, as the server's own watcher
+	 * does on a change in a folder it includes (`RootNamesAndUpdate`): a file made joins its project, a deleted one
+	 * leaves. The program updates as it does for an edit, not from scratch. How many projects were told.
+	 */
+	function filesChanged(projectService) {
+		const rootNames = ts.ProgramUpdateLevel === undefined ? 1 : ts.ProgramUpdateLevel.RootNamesAndUpdate;
+		let told = 0;
+
+		for (const project of projectService.configuredProjects ? projectService.configuredProjects.values() : []) {
+			if (project.pendingUpdateLevel === undefined || project.pendingUpdateLevel < rootNames) {
+				project.pendingUpdateLevel = rootNames;
+			}
+
+			project.markAsDirty();
+			told += 1;
+		}
+
+		return { "projects": told };
+	}
+
+	// `_history.fileRename`: the edits a file's move makes, its importers' and its own.
+	/**
+	 * What moving `from` to `to` (workspace paths) changes in the code: TypeScript's edits for the rename
+	 * (`getEditsForFileRename`) — every import of it, in each project holding it, and its own relative imports, at its
+	 * old path — as each file's spans and their new text, by workspace path. `outside` when no project holds `from`.
+	 */
+	function fileRename(projectService, args) {
+		const from = typeof args.from === "string" ? args.from : "";
+		const to = typeof args.to === "string" ? args.to : "";
+		const edits = new Map();
+		let held = false;
+
+		for (const project of projectsOf(projectService)) {
+			const service = project.getLanguageService();
+			const program = service.getProgram();
+			const old = program === undefined ? undefined : serverNameOf(program, from);
+
+			if (old === undefined || program.getSourceFile(old) === undefined) {
+				continue;
+			}
+
+			held = true;
+
+			for (const change of service.getEditsForFileRename(old, serverNameOf(program, to), {}, { "allowTextChangesInNewFiles": true })) {
+				const file = workspacePathOf(change.fileName);
+				const known = edits.get(file) || new Map();
+
+				// (the same edit from two projects, once)
+				for (const text of change.textChanges) {
+					known.set(`${String(text.span.start)}:${String(text.span.length)}`, { "start": text.span.start, "length": text.span.length, "text": text.newText });
+				}
+
+				edits.set(file, known);
+			}
+		}
+
+		return {
+			"edits": [...edits].map(function(entry) {
+				return { "file": entry[0], "changes": [...entry[1].values()] };
+			}),
+			...held ? {} : { "outside": true }
+		};
+	}
+
 	return {
 		"create": function(info) {
 			if (!registered && info.session !== undefined && typeof info.session.addProtocolHandler === "function") {
@@ -434,6 +511,20 @@ export default function init(modules) {
 				info.session.addProtocolHandler("_history.problems", function(request) {
 					try {
 						return { "response": compare(info.project.projectService, (request && request.arguments) || {}), "responseRequired": true };
+					} catch (error) {
+						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
+					}
+				});
+				info.session.addProtocolHandler("_history.files", function() {
+					try {
+						return { "response": filesChanged(info.project.projectService), "responseRequired": true };
+					} catch (error) {
+						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
+					}
+				});
+				info.session.addProtocolHandler("_history.fileRename", function(request) {
+					try {
+						return { "response": fileRename(info.project.projectService, (request && request.arguments) || {}), "responseRequired": true };
 					} catch (error) {
 						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
 					}

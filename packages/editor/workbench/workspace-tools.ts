@@ -31,14 +31,25 @@ const GLOB_RESULTS = 500;
 /** A file grep reads, at most (bigger is data, not code). */
 const GREP_BYTES = 1_000_000;
 
-/** Saves tried before an edit says it couldn't be saved (see applyAndSave). */
+/** Saves tried before an edit says it couldn't be saved (see saveDocument). */
 const SAVE_ATTEMPTS = 3;
-
-/** The files the TypeScript server reads. */
-const CODE_FILE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 
 /** What `files.*` leave out, unless a glob asks for it. */
 const EXCLUDE = "{**/node_modules/**,**/.git/**}";
+
+/**
+ * Save `document`, as the workspace's tools save an edit: VS Code abandons a save, and `save()` answers false, when its
+ * code actions on save are cancelled — getCodeActions cancels itself if a code action provider is registered while it
+ * waits, as extensions starting up do, and ESLint's first fix (its worker starting) is a long wait. That save is tried
+ * again, so the edit lands on disk; one that still doesn't throws, naming `file`.
+ */
+export async function saveDocument(document: vscodeApi.TextDocument, file: string): Promise<void> {
+	for (let attempt = 1; !await document.save(); attempt += 1) {
+		if (attempt === SAVE_ATTEMPTS) {
+			throw new Error(`${file} was edited, but VS Code didn't save it (${SAVE_ATTEMPTS} tries): the change is in its editor, unsaved`);
+		}
+	}
+}
 
 export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void {
 	const decoder = new TextDecoder();
@@ -87,14 +98,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			throw new Error(`${relative(uri)} couldn't be edited`);
 		}
 
-		// VS Code abandons a save, and `save()` answers false, when its code actions on save are cancelled: getCodeActions
-		// cancels itself if a code action provider is registered while it waits, as extensions starting up do, and ESLint's
-		// first fix (its worker starting) is a long wait. That save is tried again, so the edit lands on disk.
-		for (let attempt = 1; !await document.save(); attempt += 1) {
-			if (attempt === SAVE_ATTEMPTS) {
-				throw new Error(`${relative(uri)} was edited, but VS Code didn't save it (${SAVE_ATTEMPTS} tries): the change is in its editor, unsaved`);
-			}
-		}
+		await saveDocument(document, relative(uri));
 	};
 
 	serve(hub, "files.read", async (args) => {
@@ -131,12 +135,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), "text": content }]);
 		} else {
 			await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
-
-			// (a new code file, handed to the TypeScript server: in the browser it doesn't see a file made on disk until a
-			// language feature asks of it — NEXT.md, *Watching* — and History, code_problems and code_reach read through it)
-			if (CODE_FILE.test(uri.path)) {
-				await Promise.resolve(vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", uri)).catch(() => undefined);
-			}
 		}
 
 		return { "path": relative(uri), "created": !exists, "lines": content.split("\n").length };

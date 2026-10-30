@@ -79,6 +79,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	let baseline = false;
 	let steps = 0;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	/** Whether a code file was made or deleted since the last reading: its projects read their files again first. */
+	let rescan = false;
 	let queue = Promise.resolve();
 
 	const relative = (uri: vscode.Uri): string | undefined => (uri.scheme === root.scheme && uri.path.startsWith(root.path + "/") ? uri.path.slice(root.path.length + 1) : undefined);
@@ -179,7 +181,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	/** Read the program as it stands, and replay it against the last reading: the first is the baseline. */
 	async function step(attempt = 0): Promise<void> {
 		const file = [...edited][0] ?? vscode.window.activeTextEditor?.document.uri.path;
-		const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: ReadAnswer } | undefined>("typescript.tsserverRequest", "_history.read", { "root": root.path, "known": Object.fromEntries([...readings].map(([path, reading]) => [path, reading.revision])), ...file === undefined ? {} : { "file": file } })).catch(() => undefined);
+		const asked = rescan;
+		const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: ReadAnswer } | undefined>("typescript.tsserverRequest", "_history.read", { "root": root.path, "known": Object.fromEntries([...readings].map(([path, reading]) => [path, reading.revision])), ...file === undefined ? {} : { "file": file }, ...asked ? { "rescan": true } : {} })).catch(() => undefined);
 		const answer = response?.body;
 
 		if (answer?.ready !== true) {
@@ -193,6 +196,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			return;
+		}
+
+		if (asked) {
+			rescan = false;
 		}
 
 		for (const [path, reading] of Object.entries<{ "analysis": FileAnalysis; "revision": number }>(answer.files ?? {})) {
@@ -281,7 +288,13 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
-	context.subscriptions.push(code, code.onDidCreate(codeChanged), code.onDidChange(codeChanged), code.onDidDelete(codeChanged));
+	// (a file made or deleted: the server's projects read their files again first — in the browser it isn't told of one)
+	const filesChanged = (uri: vscode.Uri): void => {
+		rescan = true;
+		codeChanged(uri);
+	};
+
+	context.subscriptions.push(code, code.onDidCreate(filesChanged), code.onDidChange(codeChanged), code.onDidDelete(filesChanged));
 
 	// A manifest's ways in change with it.
 	const watcher = vscode.workspace.createFileSystemWatcher("**/package.json");

@@ -55,6 +55,7 @@ import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
 import { installCodeProblems } from "./code-problems";
 import { installCodeReach } from "./code-reach";
+import { installCodeRefactor } from "./code-refactor";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
@@ -72,6 +73,7 @@ import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./ter
 import { pinned } from "./versions";
 import { Workbench } from "./Workbench";
 import { installTestRuns } from "./test-runs";
+import { keepTypeScriptProjects } from "./ts-projects";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
 import { installWorkspaceTools } from "./workspace-tools";
@@ -674,10 +676,14 @@ function maybeBoot(): void {
 
 				// The review: the changes as hunks, with BABLR's verdicts and the features they're in (git-review.ts).
 				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
+				// The TypeScript server's projects told of files made or deleted on disk, which it isn't in the browser (ts-projects.ts).
+				const typescriptProjects = keepTypeScriptProjects(api as typeof import("vscode"));
 				// A change's problems against HEAD: TypeScript's (the history extension's tsserver plugin) and ESLint's (code-problems.ts).
-				installCodeProblems(api as typeof import("vscode"), workbenchHub, git);
+				installCodeProblems(api as typeof import("vscode"), workbenchHub, git, typescriptProjects);
 				// What a way in reaches: the history extension's reading of the program (code-reach.ts).
 				installCodeReach(api as typeof import("vscode"), workbenchHub);
+				// References, rename, and a move with its imports: VS Code's providers, as WorkspaceEdits (code-refactor.ts).
+				installCodeRefactor(api as typeof import("vscode"), workbenchHub, typescriptProjects);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the

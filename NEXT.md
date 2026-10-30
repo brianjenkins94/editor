@@ -69,10 +69,10 @@ How it's kept:
 2. **Tools agents decide with**, in place of the shell: one queue with the bench's step (c), in the order refactoring
    this repo in the editor needs them (2026-10-29). Each is a tool family under app/tools/ (host.ts). Done:
    `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
-   results as data) and `code_reach` (what a way in reaches); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   results as data), `code_reach` (what a way in reaches) and `code_references` / `code_rename` / `code_move`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
    *Tests*. In order:
-   - **(c) `code_references`, `code_rename`, `code_move`** (a file moved with its imports) and code actions, on VS
-     Code's providers plus `applyEdit`. This is also `code_reach` for a plain symbol that isn't a way in.
+   - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
+     ARCHITECTURE.md, *Workspace tools*).
    - **`git_log`, `git_show`** (a file at a revision), **`git_blame`**.
    - **`files_edit_many`**: one WorkspaceEdit across files, all or nothing, each with the number of matches it expects.
    - **Code running, watched without editing it**: logpoints in the editor's own code (`debug_logpoint`, its values as
@@ -138,9 +138,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
   VS Code's TypeScript extension builds the watchers its browser server asks for from `Uri.file(path)`, and that
   server names files by URI (`/file/ts-nul-authority/workspace/…`), so it watches nothing; the changes it does pass on
   are plain paths, which the server doesn't name either. A file a checkout, a pull or the terminal makes has no
-  TypeScript problems, no importers in `code_problems` and no reading in History until it's opened. Agents' `files_write`
-  asks a new code file's symbols, which hands it over; `code_problems` asks the changed files'. The fix is the
-  extension's path mapping in its watcher (the vendored build, components/monaco-vscode-api).
+  TypeScript problems, no importers in `code_problems` and no reading in History until it's opened. Worked around
+  since 2026-10-29: core watches for code files made or deleted and tells the projects (ts-projects.ts,
+  `_history.files`). The fix is the extension's path mapping in its watcher (the vendored build,
+  components/monaco-vscode-api).
 
 - **A person's first Ctrl+S after load can be dropped**, silently: VS Code abandons a save when its code actions on
   save are cancelled, and getCodeActions cancels itself when a code action provider is registered while it waits (as
@@ -161,6 +162,6 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 - **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one): `tsc`,
   `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`,
-  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` is done; `code_references` is
-  item 2's). Conventions when one is
+  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` and `code_references` are
+  done). Conventions when one is
   asked for: workbench/terminal/catalog.ts, app/tools/host.ts.
