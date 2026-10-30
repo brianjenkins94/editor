@@ -136,8 +136,9 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 		}
 	});
 
-	/** Await a fido call and normalize both outcomes (thrown retried-GET error, or a resolved !ok response). */
-	async function run<T>(pending: Promise<Response>): Promise<T> {
+	/** Await a fido call and normalize both outcomes (thrown retried-GET error, or a resolved !ok response); the body as
+	 *  JSON, or as `read` reads it. */
+	async function run<T>(pending: Promise<Response>, read: (response: Response) => Promise<unknown> = async (response) => response.json()): Promise<T> {
 		let response: Response;
 
 		try {
@@ -159,7 +160,7 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 			throw new GitHubError(response.status, response.statusText, body);
 		}
 
-		return (response.status === 204 ? undefined : await response.json()) as T;
+		return (response.status === 204 ? undefined : await read(response)) as T;
 	}
 
 	/** Like `run`, but a 404 resolves to undefined (for existence checks) instead of throwing. */
@@ -267,6 +268,27 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 			return commit.sha;
 		},
 
+		/** A repository's Actions runs, the newest first: a commit's (`commit`), or a branch's. */
+		// eslint-disable-next-line ts/naming-convention -- GitHub's wire fields
+		"runs": function(owner: string, repo: string, options: { "commit"?: string; "branch"?: string; "limit"?: number } = {}): Promise<{ "total_count": number; "workflow_runs": Record<string, unknown>[] }> {
+			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/runs", {
+				...options.commit === undefined ? {} : { "head_sha": options.commit },
+				...options.branch === undefined ? {} : { "branch": options.branch },
+				"per_page": options.limit ?? 20
+			}));
+		},
+
+		/** A run's jobs (its latest attempt's), each with its steps. */
+		// eslint-disable-next-line ts/naming-convention -- GitHub's wire fields
+		"runJobs": function(owner: string, repo: string, runId: number): Promise<{ "total_count": number; "jobs": Record<string, unknown>[] }> {
+			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/runs/" + String(runId) + "/jobs", { "per_page": 100 }));
+		},
+
+		/** A job's log, as text (GitHub answers with its storage's signed URL, which the proxy follows). */
+		"jobLog": function(owner: string, repo: string, jobId: number): Promise<string> {
+			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/jobs/" + String(jobId) + "/logs"), async (response) => response.text());
+		},
+
 		/**
 		 * Enable GitHub Pages, built by Actions (the model here: the repo's own pages.yml deploys `docs/`). A 409
 		 * means Pages is already on — treated as success.
@@ -291,4 +313,40 @@ export type GitHub = ReturnType<typeof createGitHub>;
  */
 export async function connectGitHub(): Promise<GitHub> {
 	return await viaProxy() ? createGitHub(dpopFetch, PROXY) : createGitHub();
+}
+
+/**
+ * `github.actions` (the workbench's `ci.status`, ci-status.ts): a repository's Actions runs (a commit's, or a branch's),
+ * a run's jobs, or a job's log, as this sign-in sees them: through the API's proxy signed in with GitHub, else straight
+ * to GitHub with no credential (a public repository's, and no logs). GitHub's refusal is answered, not thrown, with
+ * whether this is signed in, so the reader can say why.
+ */
+export async function actions(request: unknown): Promise<unknown> {
+	const { repository, commit, branch, run, job, limit } = (request ?? {}) as { "repository"?: unknown; "commit"?: unknown; "branch"?: unknown; "run"?: unknown; "job"?: unknown; "limit"?: unknown };
+	const [owner, repo, ...more] = typeof repository === "string" ? repository.split("/") : [];
+
+	if (owner === undefined || repo === undefined || more.length > 0) {
+		throw new TypeError("github.actions takes { repository: \"owner/repo\", commit?, branch?, run?, job? }");
+	}
+
+	const signedIn = await viaProxy();
+	const gh = await connectGitHub();
+
+	try {
+		if (typeof job === "number") {
+			return { "signedIn": signedIn, "log": await gh.jobLog(owner, repo, job) };
+		}
+
+		if (typeof run === "number") {
+			return { "signedIn": signedIn, ...await gh.runJobs(owner, repo, run) };
+		}
+
+		return { "signedIn": signedIn, ...await gh.runs(owner, repo, { ...typeof commit === "string" ? { "commit": commit } : {}, ...typeof branch === "string" ? { "branch": branch } : {}, ...typeof limit === "number" ? { "limit": limit } : {} }) };
+	} catch (error) {
+		if (error instanceof GitHubError) {
+			return { "signedIn": signedIn, "refused": { "status": error.status, "message": error.message } };
+		}
+
+		throw error;
+	}
 }

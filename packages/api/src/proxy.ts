@@ -120,7 +120,9 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 	const path = url.pathname.slice("/github/api".length);
 	const method = context.req.method;
 
-	if (proxied("api", method, path, url.search) === undefined) {
+	const call = proxied("api", method, path, url.search);
+
+	if (call === undefined) {
 		return deny(context);
 	}
 
@@ -137,8 +139,11 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 	}
 
 	const { api } = github(context.env);
-	const upstream = await fetch(`${api}${path}${url.search}`, {
+	const answered = await fetch(`${api}${path}${url.search}`, {
 		"method": method,
+		// (a call that follows: its redirect is GitHub's storage, another host, followed below without the token — not by
+		// fetch, which keeps the headers it was given)
+		...call.follows === true ? { "redirect": "manual" as const } : {},
 		"headers": {
 			"authorization": `Bearer ${bearer}`,
 			"accept": context.req.header("accept") ?? "application/vnd.github+json",
@@ -151,6 +156,14 @@ export async function githubApi(context: Context<AppEnv>): Promise<Response> {
 		await held.release();
 		throw error;
 	});
+	const location = answered.headers.get("location");
+	// (GitHub's storage, by the signed URL it gave: once, a plain GET, nothing of the sign-in's)
+	const upstream = call.follows === true && answered.status >= 300 && answered.status < 400 && location !== null
+		? await fetch(new URL(location, api), { "headers": { "user-agent": "editor-api" } }).catch(async (error: unknown) => {
+			await held.release();
+			throw error;
+		})
+		: answered;
 
 	return relay(upstream, [api, `${url.origin}/github/api`], held.release, await called(context, upstream.status));
 }

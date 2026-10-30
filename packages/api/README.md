@@ -121,6 +121,11 @@ git pushes through it, packages/editor/shell/git-push.ts, a pack up to 32 MB). I
 for signed-in clones. It never forwards our
 `Authorization` or `DPoP` upstream, nor GitHub's token-bearing headers back.
 
+CI's reads are there too (2026-10-30, agents' `ci_status`): a commit's runs, a run's jobs and a job's log, never a
+rerun or a cancel. A log is a redirect to GitHub's storage by a signed URL; the proxy follows it itself, without the
+token. They need the Apps' **Actions: read** permission (each user accepts it when it's added); without it GitHub
+answers 403 for a private repository, which `ci_status` says.
+
 ## Sign-in methods
 
 Built ourselves (C0–C7, 2026-10-17; linking and passkeys 2026-10-18). Better Auth's plugins and Pilcrow's auth book
@@ -366,7 +371,7 @@ Done 2026-10-15; A7 repeats it for production.
      `https://editor-api-dev.<subdomain>.workers.dev/auth/github/callback` and `http://localhost:8787/auth/github/callback`.
    - **Expire user authorization tokens: on** (under "Optional features", on by default; it offers only "Opt-out").
      Authorization during installation, device flow: off. Setup URL empty. Webhook **Active off**.
-   - Repository permissions: Contents and Pages (read and write), Metadata (read). Account: none, in particular no email
+   - Repository permissions: Contents and Pages (read and write), Actions and Metadata (read). Account: none, in particular no email
      addresses. Installable only on this account.
    - The Client ID (`Iv23…`) goes in wrangler.jsonc's `GITHUB_CLIENT_ID`. Generate a client secret straight into
      `npx wrangler secret put GITHUB_CLIENT_SECRET --env dev`. No private key: user tokens need none.

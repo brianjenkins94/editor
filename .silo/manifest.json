@@ -780,6 +780,19 @@
         "hub request|code.problems"
       ]
     },
+    "How a commit did in CI": {
+      "what": "For a commit (HEAD by default), its GitHub Actions runs on the workspace's origin, the jobs of each that didn't pass with their failed steps, and a job's log up to its first error with the tests it failed, through the editor's sign-in.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|ci_status",
+        "core module|installCiStatus",
+        "hub request|ci.status",
+        "hub request|github.actions"
+      ],
+      "paths": [
+        "packages/editor/workbench/ci-status.ts"
+      ]
+    },
     "What's been decided about it": {
       "what": "For a file (its path or name) or a name (an identifier, a tool, a hub request, a feature), what's been decided about it before it's changed: the feature ledger's entries naming it or whose paths hold the file, the manifest's features owning it, and each docs line naming it under its heading.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
@@ -1067,7 +1080,7 @@
       ]
     },
     "GitHub API proxy": {
-      "what": "Passes the editor's GitHub API calls and a clone's git reads through to GitHub with the user's GitHub token kept on the server, and never allows a push.",
+      "what": "Passes the editor's GitHub API calls, a clone's git reads, a push, and CI's reads (a commit's runs, a run's jobs, a job's log) through to GitHub with the user's GitHub token kept on the server, and refuses anything else.",
       "docs": "packages/api/README.md, *The proxy*",
       "paths": [
         "packages/api/src/proxy.ts"

@@ -20,10 +20,11 @@ export async function keyed(env: Bindings, scope: string, value: string): Promis
 /**
  * The GitHub calls the editor makes (packages/editor/shell/github.ts for the API, a clone's fetch and a push for git), as templates:
  * the proxy allows these and nothing else (src/proxy.ts), and records each call as its template. `:owner` and `:repo` are
- * names, `:ref` a ref or sha (no `..`, so it can't climb out of the repository it names). A git entry also names the
- * query it must have.
+ * names, `:ref` a ref or sha (no `..`, so it can't climb out of the repository it names), `:id` a number. A git entry also
+ * names the query it must have. The Actions reads are a commit's runs, a run's jobs and a job's log (agents' `ci_status`);
+ * a log is a redirect to GitHub's storage, which the proxy follows without the token (`follows`).
  */
-export const PROXIED: { "base": "api" | "git"; "method": string; "template": string; "search"?: string }[] = [
+export const PROXIED: { "base": "api" | "git"; "method": string; "template": string; "search"?: string; "follows"?: true }[] = [
 	{ "base": "api", "method": "GET", "template": "/user" },
 	{ "base": "api", "method": "POST", "template": "/user/repos" },
 	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo" },
@@ -36,23 +37,27 @@ export const PROXIED: { "base": "api" | "git"; "method": string; "template": str
 	{ "base": "api", "method": "POST", "template": "/repos/:owner/:repo/git/commits" },
 	{ "base": "api", "method": "PATCH", "template": "/repos/:owner/:repo/git/refs/:ref" },
 	{ "base": "api", "method": "POST", "template": "/repos/:owner/:repo/pages" },
+	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/actions/runs" },
+	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/actions/runs/:id" },
+	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/actions/runs/:id/jobs" },
+	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/actions/jobs/:id/logs", "follows": true },
 	{ "base": "git", "method": "GET", "template": "/:owner/:repo.git/info/refs", "search": "?service=git-upload-pack" },
 	{ "base": "git", "method": "POST", "template": "/:owner/:repo.git/git-upload-pack", "search": "" },
 	{ "base": "git", "method": "GET", "template": "/:owner/:repo.git/info/refs", "search": "?service=git-receive-pack" },
 	{ "base": "git", "method": "POST", "template": "/:owner/:repo.git/git-receive-pack", "search": "" }
 ];
 
-const PARAMETERS: Record<string, string> = { ":owner": "([\\w.-]+)", ":repo": "([\\w.-]+)", ":ref": "((?!.*\\.\\.)[\\w./-]+)" };
+const PARAMETERS: Record<string, string> = { ":owner": "([\\w.-]+)", ":repo": "([\\w.-]+)", ":ref": "((?!.*\\.\\.)[\\w./-]+)", ":id": "(\\d+)" };
 
 /** Each template as the pattern it matches, its parameters capturing. */
-const MATCHERS = PROXIED.map((entry) => ({ ...entry, "pattern": new RegExp(`^${entry.template.split(/(:owner|:repo|:ref)/u).map((part) => PARAMETERS[part] ?? part.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("")}$`, "u") }));
+const MATCHERS = PROXIED.map((entry) => ({ ...entry, "pattern": new RegExp(`^${entry.template.split(/(:owner|:repo|:ref|:id)/u).map((part) => PARAMETERS[part] ?? part.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("")}$`, "u") }));
 
 /**
  * A proxied call as the editor makes it: its template (with the query's parameter names, never their values), the
  * repository it's about (`owner/repo`), and the rest of its values (a ref, the query), each to be hashed apart, so the
  * calls about one repository can be found by hashing its name. Undefined: not a call the editor makes.
  */
-export function proxied(base: "api" | "git", method: string, path: string, search: string): { "template": string; "repository"?: string; "rest": string } | undefined {
+export function proxied(base: "api" | "git", method: string, path: string, search: string): { "template": string; "repository"?: string; "rest": string; "follows"?: true } | undefined {
 	for (const entry of MATCHERS) {
 		const match = entry.base === base && entry.method === method && (entry.search === undefined || entry.search === search) ? entry.pattern.exec(path) : null;
 
@@ -60,7 +65,7 @@ export function proxied(base: "api" | "git", method: string, path: string, searc
 			const names = [...new URLSearchParams(search).keys()];
 			const [owner, repo, ...rest] = match.slice(1);
 
-			return { "template": `${method} ${entry.template}${names.length === 0 ? "" : `?${names.join("&")}`}`, ...repo === undefined ? {} : { "repository": `${owner}/${repo}` }, "rest": [...rest, search].filter((value) => value !== "").join("\n") };
+			return { "template": `${method} ${entry.template}${names.length === 0 ? "" : `?${names.join("&")}`}`, ...repo === undefined ? {} : { "repository": `${owner}/${repo}` }, "rest": [...rest, search].filter((value) => value !== "").join("\n"), ...entry.follows === true ? { "follows": true } : {} };
 		}
 	}
 

@@ -54,6 +54,7 @@ import { registerFeaturesMap } from "./features-map";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
 import { installCheckpoints } from "./checkpoints";
+import { installCiStatus } from "./ci-status";
 import { installCodeProblems } from "./code-problems";
 import { installCodeReach } from "./code-reach";
 import { installCodeRefactor } from "./code-refactor";
@@ -687,6 +688,8 @@ function maybeBoot(): void {
 				installCodeRefactor(api as typeof import("vscode"), workbenchHub, typescriptProjects);
 				// Experiments that undo themselves: the working tree noted, and put back (checkpoints.ts).
 				installCheckpoints(api as typeof import("vscode"), workbenchHub, git);
+				// How a commit did in CI: its GitHub Actions runs, a job's log, through the shell's sign-in (ci-status.ts).
+				installCiStatus(workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the

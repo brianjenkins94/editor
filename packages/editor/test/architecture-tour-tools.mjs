@@ -377,6 +377,45 @@ test("decisions: a file's ledger entries, and the docs' lines naming it", async 
 	}
 });
 
+// How a commit did in CI (ci-status.ts; agents' ci_status): with no github.com origin, it says so, and with no commit;
+// with one, the shell
+// asks GitHub (github.actions), signed out here, so with no credential — and GitHub's refusal of a repository that
+// isn't there (or its anonymous rate limit) comes back said, with why. The workspace's git config is put back.
+test("ci status: a workspace's commit asked of GitHub Actions, and a refusal said with why", async () => {
+	const request = (subject, data) => session.request(subject, data, 120_000);
+	const CONFIG = ".git/config";
+	const config = (text) => session.workbench().evaluate(async ({ path, next }) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file(`/workspace/${path}`);
+		const before = await Promise.resolve(api.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => null);
+
+		if (next !== undefined) {
+			await (next === null ? api.workspace.fs.delete(uri) : api.workspace.fs.writeFile(uri, new TextEncoder().encode(next))).then(() => undefined, () => undefined);
+		}
+
+		return before;
+	}, { "path": CONFIG, "next": text });
+	const before = await config(undefined);
+
+	await assert.rejects(request("ci.status", {}), /no github\.com origin/u, "no origin: said");
+
+	try {
+		await config(`${before ?? ""}\n[remote "origin"]\n\turl = https://github.com/brianjenkins94/no-such-repository-for-the-tour.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`);
+
+		// (the tour's workspace has no commit of its own: HEAD can't be the default, so a commit is named)
+		await assert.rejects(request("ci.status", {}), /no commit yet/u, "no HEAD: said");
+
+		const commit = "f".repeat(40);
+		const answer = await request("ci.status", { "commit": commit });
+
+		assert.equal(answer.repository, "brianjenkins94/no-such-repository-for-the-tour", JSON.stringify(answer));
+		assert.equal(answer.commit, commit);
+		assert.match(answer.error, /signed out .* sign in with GitHub/u, JSON.stringify(answer));
+	} finally {
+		await config(before);
+	}
+});
+
 // Experiments that undo themselves (checkpoints.ts; workspace_checkpoint, workspace_restore): the working tree noted,
 // a file edited, one deleted and one made, a replacement previewed without changing anything, and all of it put back.
 test("checkpoints: a change tried, previewed, and put back as it was", async () => {

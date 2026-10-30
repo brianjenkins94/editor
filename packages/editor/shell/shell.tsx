@@ -257,6 +257,8 @@ function Shell() {
 		// A push from the workspace's git, and who its commits are by: the sign-in's, so the shell's (git-push.ts).
 		serve(shellHub, "git.remote", async (args) => (await import("./git-push")).remote(args as RemoteRequest));
 		serve(shellHub, "git.identity", async () => (await import("./git-push")).identity());
+		// CI's runs, jobs and logs, as the sign-in sees them (github.ts `actions`; the workbench's ci.status).
+		serve(shellHub, "github.actions", async (args) => (await import("./github")).actions(args));
 		const appFrame = dock.editorFrame;
 
 		// A TypeScript Playground link (playground-link.ts) is a one-shot import: it's opened once the app answers below,

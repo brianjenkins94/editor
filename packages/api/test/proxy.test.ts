@@ -49,6 +49,21 @@ const mock = createServer((request, response) => {
 			return;
 		}
 
+		// (a job's log is a redirect to GitHub's storage, another host, by a signed URL. The harness's network follows a
+		// redirect itself, whatever the Worker asked, so what's checked is what reaches the storage either way)
+		if (/^\/repos\/octo\/hello\/actions\/jobs\/\d+\/logs$/u.test(request.url ?? "")) {
+			response.writeHead(302, { "location": `http://localhost:${(mock.address() as AddressInfo).port}/storage/job.txt?sig=signed` }).end();
+
+			return;
+		}
+
+		if (request.url?.startsWith("/storage/")) {
+			response.setHeader("content-type", "text/plain");
+			response.end("2026-10-30T00:00:00.0000000Z the job's log\n");
+
+			return;
+		}
+
 		if (request.url?.startsWith("/repos/octo/hello/git/trees/")) {
 			response.setHeader("link", `<http://${request.headers.host}/repos/octo/hello/git/trees/main?page=2>; rel="next"`);
 		}
@@ -163,6 +178,28 @@ test("a commit's writes go through: blobs, trees, commits, then moving the ref",
 		assert.equal(response.status, 200, path);
 		assert.equal(lastTo(path)?.body, "{\"x\":1}");
 	}
+});
+
+test("CI's reads go through: a commit's runs, a run's jobs, and a job's log, its storage redirect followed without the token", async () => {
+	const github = fresh();
+	const session = await signedIn(github);
+
+	for (const path of ["/repos/octo/hello/actions/runs?head_sha=abc&per_page=20", "/repos/octo/hello/actions/runs/7", "/repos/octo/hello/actions/runs/7/jobs"]) {
+		const response = await session.call("GET", `/github/api${path}`);
+
+		assert.equal(response.status, 200, path);
+		assert.equal(lastTo(path.split("?")[0])?.headers.authorization, `Bearer ${github.accessToken}`, path);
+	}
+
+	const log = await session.call("GET", "/github/api/repos/octo/hello/actions/jobs/42/logs");
+
+	assert.equal(log.status, 200);
+	assert.equal(await log.text(), "2026-10-30T00:00:00.0000000Z the job's log\n");
+	assert.equal(lastTo("/repos/octo/hello/actions/jobs/42/logs")?.headers.authorization, `Bearer ${github.accessToken}`, "the log's own call has the token");
+	assert.equal(lastTo("/storage/")?.url, "/storage/job.txt?sig=signed", "the redirect, followed");
+	assert.equal(lastTo("/storage/")?.headers.host, `localhost:${(mock.address() as AddressInfo).port}`);
+	assert.equal(lastTo("/storage/")?.headers.authorization, undefined, "and the storage gets nothing of the sign-in's");
+	assert.equal((await session.call("POST", "/github/api/repos/octo/hello/actions/runs/7/cancel")).status, 403, "only reads: no cancelling, rerunning or anything else");
 });
 
 test("anything the editor doesn't call is refused, and audited with its method and its path hashed (what was guessed)", async () => {

@@ -623,7 +623,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.architecture_violations.*()`, `tool.code_move.*()`, `tool.code_problems.*()`, `tool.code_query.*()`, `tool.code_reach.*()`, `tool.code_references.*()`, `tool.code_rename.*()`, `tool.code_rewrite.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.decisions_for.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.editor_trace.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_replace.*()`, `tool.files_write.*()`, `tool.git_blame.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_log.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_show.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()`, `tool.workspace_checkpoint.*()`, `tool.workspace_restore.*()` |
+| Root | tool | `tool.architecture_violations.*()`, `tool.ci_status.*()`, `tool.code_move.*()`, `tool.code_problems.*()`, `tool.code_query.*()`, `tool.code_reach.*()`, `tool.code_references.*()`, `tool.code_rename.*()`, `tool.code_rewrite.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.decisions_for.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.editor_trace.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_replace.*()`, `tool.files_write.*()`, `tool.git_blame.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_log.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_show.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()`, `tool.workspace_checkpoint.*()`, `tool.workspace_restore.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -631,11 +631,13 @@ flowchart LR
 | Shell | debug | `debug.state` |
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed`, `git.identity()`, `git.remote()` |
+| Shell | github | `github.actions()` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
 | Shell | session | `session.event` |
 | Shell | theme | `theme.colors` |
 | Workbench | annotations | `annotations.classify()`, `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
 | Workbench | architecture | `architecture.violations()` |
+| Workbench | ci | `ci.status()` |
 | Workbench | code | `code.move()`, `code.problems()`, `code.query()`, `code.reach()`, `code.references()`, `code.rename()`, `code.rewrite()` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | decisions | `decisions.for()` |
@@ -1081,6 +1083,12 @@ the workbench by workspace-tools.ts and git-service.ts). What the code doesn't s
   changed. It returns the ledger's entries that name it or whose paths hold the file, the manifest's features owning
   it, and each docs line naming it, under its heading (NEXT.md's items and the design sections among them), so a
   reason is read rather than worked out again. A path is matched as itself and by its file name, a name as a word.
+- `ci_status` (2026-10-30; ci-status.ts) is how a commit did on GitHub Actions, HEAD by default. It returns the
+  commit's runs, and for each run that didn't pass, its jobs and their failed steps. Given a job, it returns that job's
+  log up to its first `##[error]`, its error lines, and the tests its node:test report failed (lib's
+  `nodeTestOutcomes`, the test ledger's reader). The shell asks GitHub (`github.actions`), through the API's proxy
+  when signed in with GitHub, whose allowlist has these reads and no rerun or cancel. Signed out, it asks GitHub
+  directly with no credential, which gives a public repository's runs and no logs. A refusal says which case it is.
 - `code_references`, `code_rename` and `code_move` (2026-10-29; code-refactor.ts) take a place as a file, a line and
   the name on it, since that's how an agent knows it, rather than a column. References and rename are VS Code's
   providers (TypeScript's answers); a move's edits are TypeScript's `getEditsForFileRename`, through history's plugin
