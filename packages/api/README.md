@@ -118,7 +118,8 @@ nothing of the editor in it, free of storage and frameworks, the caller supplyin
 
 Exactly the editor's API calls (src/behavior.ts), a clone's git reads, and a push (`git-receive-pack`: the workspace's
 git pushes through it, packages/editor/shell/git-push.ts, a pack up to 32 MB). It retired `cors.isomorphic-git.org`
-for signed-in clones. It never forwards our
+for signed-in clones. A commit goes only that way: the Git Data API's writes (a blob, a tree, a commit, a ref moved)
+aren't allowed, since the shell's Commit button pushes too (2026-10-30). It never forwards our
 `Authorization` or `DPoP` upstream, nor GitHub's token-bearing headers back.
 
 CI's reads are there too (2026-10-30, agents' `ci_status`): a commit's runs, a run's jobs and a job's log, never a

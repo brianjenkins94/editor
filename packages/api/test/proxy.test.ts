@@ -169,15 +169,17 @@ test("a query passes through, and pagination links point back at the proxy", asy
 	assert.equal(response.headers.get("link"), `<${base.origin}/github/api/repos/octo/hello/git/trees/main?page=2>; rel="next"`);
 });
 
-test("a commit's writes go through: blobs, trees, commits, then moving the ref", async () => {
+test("a commit is a push: the Git Data API's writes are refused, and none reaches GitHub", async () => {
 	const session = await signedIn(fresh());
+	const before = seen.length;
 
 	for (const [method, path] of [["POST", "/repos/octo/hello/git/blobs"], ["POST", "/repos/octo/hello/git/trees"], ["POST", "/repos/octo/hello/git/commits"], ["PATCH", "/repos/octo/hello/git/refs/heads/main"]] as const) {
 		const response = await session.call(method, `/github/api${path}`, { "headers": { "content-type": "application/json" }, "body": "{\"x\":1}" });
 
-		assert.equal(response.status, 200, path);
-		assert.equal(lastTo(path)?.body, "{\"x\":1}");
+		assert.equal(response.status, method === "PATCH" ? 404 : 403, `${method} ${path}`);
 	}
+
+	assert.deepEqual(seen.slice(before).filter((request) => request.url.includes("/git/")), [], "nothing of them reached GitHub");
 });
 
 test("CI's reads go through: a commit's runs, a run's jobs, and a job's log, its storage redirect followed without the token", async () => {

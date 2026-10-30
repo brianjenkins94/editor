@@ -98,7 +98,7 @@ test("a proxied call is its template: the query's names kept, every value left f
 	assert.deepEqual(proxied("api", "GET", "/repos/octo/hello/git/trees/main", "?recursive=1"), { "template": "GET /repos/:owner/:repo/git/trees/:ref?recursive", "repository": "octo/hello", "rest": "main\n?recursive=1" });
 	assert.deepEqual(proxied("api", "GET", "/user", ""), { "template": "GET /user", "rest": "" });
 	assert.equal(proxied("api", "DELETE", "/repos/octo/hello", ""), undefined, "a method the editor doesn't use");
-	assert.equal(proxied("api", "GET", "/repos/octo/hello/git/ref/heads/../../secret", ""), undefined, "a ref can't climb");
+	assert.equal(proxied("api", "GET", "/repos/octo/hello/git/trees/heads/../../secret", ""), undefined, "a ref can't climb");
 	assert.deepEqual(proxied("git", "GET", "/octo/hello.git/info/refs", "?service=git-receive-pack"), { "template": "GET /:owner/:repo.git/info/refs?service", "repository": "octo/hello", "rest": "?service=git-receive-pack" }, "a push's, the same template as a clone's");
 	assert.equal(proxied("git", "GET", "/octo/hello.git/info/refs", "?service=git-upload-archive"), undefined, "no other service");
 });
@@ -285,7 +285,7 @@ test("a sign-in doing what the editor does scores lower than one jumping about, 
 		const odd = await client();
 		const signed = await signedIn(odd);
 
-		for (const [method, path] of [["GET", "/github/api/repos/octo/hello/git/blobs/a"], ["POST", "/github/api/user/repos"], ["GET", "/github/api/repos/octo/hello/git/trees/main?recursive=1"], ["GET", "/sessions"], ["GET", "/github/api/repos/octo/hello/git/commits/a"]] as const) {
+		for (const [method, path] of [["GET", "/github/api/repos/octo/hello/git/blobs/a"], ["POST", "/github/api/user/repos"], ["GET", "/github/api/repos/octo/hello/git/trees/main?recursive=1"], ["GET", "/sessions"], ["GET", "/github/api/repos/octo/hello"]] as const) {
 			await odd.send(method, path, { "accessToken": signed.access_token });
 		}
 

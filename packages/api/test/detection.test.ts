@@ -184,7 +184,7 @@ test("every call through the proxy is recorded — reads and writes, as template
 	const holder = await key();
 	const { accessToken, grantId } = await signedIn(holder);
 
-	await (await holder.send("POST", "/github/api/repos/octo/hello/git/blobs", { "token": accessToken, "body": "{}" })).text();
+	await (await holder.send("POST", "/github/api/repos/octo/hello/pages", { "token": accessToken, "body": "{}" })).text();
 	await (await holder.send("GET", "/github/api/repos/octo/hello/git/trees/main?recursive=1", { "token": accessToken })).text();
 	await (await holder.send("GET", "/github/git/octo/hello.git/info/refs?service=git-upload-pack", { "token": accessToken })).text();
 
@@ -195,7 +195,7 @@ test("every call through the proxy is recorded — reads and writes, as template
 	const repo = `repo#${await hashed("octo/hello")}`;
 
 	assert.deepEqual(calls, [
-		{ "detail": `POST /repos/:owner/:repo/git/blobs ${repo}`, "reason": "GitHub 200, 11 bytes" },
+		{ "detail": `POST /repos/:owner/:repo/pages ${repo}`, "reason": "GitHub 200, 11 bytes" },
 		{ "detail": `GET /repos/:owner/:repo/git/trees/:ref?recursive ${repo} #${await hashed("main\n?recursive=1")}`, "reason": "GitHub 200, 11 bytes" },
 		{ "detail": `GET /:owner/:repo.git/info/refs?service ${repo} #${await hashed("?service=git-upload-pack")}`, "reason": "GitHub 200, 11 bytes" }
 	]);

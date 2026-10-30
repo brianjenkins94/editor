@@ -103,7 +103,7 @@ app.use("/github/git/*", async (context, next) => (context.req.path.endsWith("/g
 // with cookies — the credential is the DPoP-bound Authorization header.
 app.use(cors({
 	"origin": (requested, context) => (allowedOrigins(context.env).includes(requested) ? requested : null),
-	"allowMethods": ["GET", "POST", "PATCH"],
+	"allowMethods": ["GET", "POST"],
 	"allowHeaders": ["authorization", "content-type", "dpop", "accept", "x-github-api-version"],
 	// And GitHub's, through the proxy: what fido paginates (link) and backs off by (retry-after, x-ratelimit-*).
 	"exposeHeaders": ["dpop-nonce", "www-authenticate", "link", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "x-ratelimit-used"],
@@ -202,7 +202,7 @@ app.route("/account", accountRoutes(session));
 app.route("/admin", admin);
 
 // GitHub, for a signed-in browser (src/proxy.ts): the API calls the editor makes, and a clone's fetch.
-app.on(["GET", "POST", "PATCH"], "/github/api/*", pausable("github-proxy"), session, rateLimit("PROXY_BY_USER", byUser), githubApi);
+app.on(["GET", "POST"], "/github/api/*", pausable("github-proxy"), session, rateLimit("PROXY_BY_USER", byUser), githubApi);
 
 app.on(["GET", "POST"], "/github/git/*", pausable("github-proxy"), session, rateLimit("PROXY_BY_USER", byUser), githubGit);
 

@@ -21,7 +21,8 @@ export async function keyed(env: Bindings, scope: string, value: string): Promis
  * The GitHub calls the editor makes (packages/editor/shell/github.ts for the API, a clone's fetch and a push for git), as templates:
  * the proxy allows these and nothing else (src/proxy.ts), and records each call as its template. `:owner` and `:repo` are
  * names, `:ref` a ref or sha (no `..`, so it can't climb out of the repository it names), `:id` a number. A git entry also
- * names the query it must have. The Actions reads are a commit's runs, a run's jobs and a job's log (agents' `ci_status`);
+ * names the query it must have. A commit is the workspace's git, pushed (`git-receive-pack`); the Git Data API's writes
+ * aren't here since the shell's Commit button pushes too (2026-10-30). The Actions reads are a commit's runs, a run's jobs and a job's log (agents' `ci_status`);
  * a log is a redirect to GitHub's storage, which the proxy follows without the token (`follows`).
  */
 export const PROXIED: { "base": "api" | "git"; "method": string; "template": string; "search"?: string; "follows"?: true }[] = [
@@ -30,12 +31,6 @@ export const PROXIED: { "base": "api" | "git"; "method": string; "template": str
 	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo" },
 	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/git/trees/:ref" },
 	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/git/blobs/:ref" },
-	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/git/commits/:ref" },
-	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/git/ref/:ref" },
-	{ "base": "api", "method": "POST", "template": "/repos/:owner/:repo/git/blobs" },
-	{ "base": "api", "method": "POST", "template": "/repos/:owner/:repo/git/trees" },
-	{ "base": "api", "method": "POST", "template": "/repos/:owner/:repo/git/commits" },
-	{ "base": "api", "method": "PATCH", "template": "/repos/:owner/:repo/git/refs/:ref" },
 	{ "base": "api", "method": "POST", "template": "/repos/:owner/:repo/pages" },
 	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/actions/runs" },
 	{ "base": "api", "method": "GET", "template": "/repos/:owner/:repo/actions/runs/:id" },
@@ -240,11 +235,8 @@ export const FLOWS: string[][] = [
 	["GET /github/git/:owner/:repo.git/info/refs?service", "POST /github/git/:owner/:repo.git/git-receive-pack"],
 	// Or through the API: its tree, then each blob.
 	["GET /github/api/repos/:owner/:repo", "GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive", "GET /github/api/repos/:owner/:repo/git/blobs/:ref", "GET /github/api/repos/:owner/:repo/git/blobs/:ref"],
-	// Committing: the branch, its commit, each blob, a tree, the commit, the branch moved.
-	["GET /github/api/repos/:owner/:repo/git/ref/:ref", "GET /github/api/repos/:owner/:repo/git/commits/:ref", "POST /github/api/repos/:owner/:repo/git/blobs", "POST /github/api/repos/:owner/:repo/git/blobs", "POST /github/api/repos/:owner/:repo/git/trees", "POST /github/api/repos/:owner/:repo/git/commits", "PATCH /github/api/repos/:owner/:repo/git/refs/:ref"],
-	// A new repository, its first commit, then published.
-	["GET /github/api/user", "POST /github/api/user/repos", "GET /github/api/repos/:owner/:repo/git/ref/:ref"],
-	["PATCH /github/api/repos/:owner/:repo/git/refs/:ref", "POST /github/api/repos/:owner/:repo/pages"],
+	// A new repository, then published.
+	["GET /github/api/user", "POST /github/api/user/repos", "POST /github/api/repos/:owner/:repo/pages"],
 	// Your sign-ins, and your account.
 	["GET /sessions", "POST /sessions/:id/revoke"],
 	["GET /sessions", "POST /sessions/revoke-all"],
