@@ -790,6 +790,17 @@
         "hub request|code.reach"
       ]
     },
+    "Experiments that undo themselves": {
+      "what": "An agent notes the working tree, tries a change, sees what it breaks, and puts every file back as it was if it doesn't hold; and previews a replacement across files as a diff before making it.",
+      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+      "ways": [
+        "agent tool|workspace_checkpoint",
+        "agent tool|workspace_restore",
+        "core module|installCheckpoints",
+        "hub request|workspace.checkpoint",
+        "hub request|workspace.restore"
+      ]
+    },
     "Refactoring for agents": {
       "what": "An agent finds where a name is used, renames it everywhere, and moves a file with every import of it kept right, as TypeScript resolves them: one edit the editor sees as typing, every file saved, nothing asked.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",

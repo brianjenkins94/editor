@@ -242,6 +242,8 @@ export const subjects: SubjectFamily[] = [
 	// ── the workspace ──
 	{ "pattern": "workspace.changed", "from": ["workbench", "node"], "to": ["workbench", "node"] },
 	{ "pattern": "workspace.buffer", "from": ["node"], "to": ["workbench"] },
+	{ "pattern": "workspace.checkpoint", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "workspace.restore", "from": ["root"], "to": ["workbench"] },
 	// ── running node ──
 	{ "pattern": "node.out.*", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "node.exit.*", "from": ["bridge", "workbench"], "to": ["workbench", "bridge"] },

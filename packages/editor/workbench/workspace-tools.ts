@@ -6,9 +6,10 @@
  *   unsaved edits included, else what's on disk;
  * - `files.write` { path, content }: a file made, or its whole text replaced;
  * - `files.edit` { path, old, new, all? }: an exact string replaced — found once, or every time with `all`;
- * - `files.replace` { edits: [{ path, old, new, all?, count? }] }: exact strings replaced across files, all or nothing —
- *   each must be found as it says (once, `count` times, or every time with `all`) and none may overlap another, or
- *   nothing changes and the answer says each that didn't hold; then one edit, every file saved;
+ * - `files.replace` { edits: [{ path, old, new, all?, count? }], preview? }: exact strings replaced across files, all or
+ *   nothing — each must be found as it says (once, `count` times, or every time with `all`) and none may overlap
+ *   another, or nothing changes and the answer says each that didn't hold; then one edit, every file saved. With
+ *   `preview`, the diff it would make, and nothing changed;
  * - `files.glob` { pattern, limit? }: the workspace's files a glob matches;
  * - `files.grep` { pattern, glob?, ignoreCase?, limit? }: the lines a regular expression matches, in the files a glob
  *   (default: every file) matches.
@@ -20,6 +21,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import { serve } from "@brianjenkins94/hub";
+import { unifiedDiff } from "./git-service";
 
 const ROOT = "/workspace";
 
@@ -179,7 +181,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 	});
 
 	serve(hub, "files.replace", async (args) => {
-		const { edits } = (args ?? {}) as { "edits"?: unknown };
+		const { edits, preview } = (args ?? {}) as { "edits"?: unknown; "preview"?: unknown };
 
 		if (!Array.isArray(edits) || edits.length === 0) {
 			throw new TypeError("files.replace takes { edits: [{ path, old, new, all?, count? }] }: the exact texts to replace, in which files");
@@ -234,6 +236,27 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 
 		if (problems.length > 0) {
 			throw new Error(`nothing was changed: ${problems.join("; ")}`);
+		}
+
+		// (a preview: each file as the edit would leave it, as git's diff, and nothing changed)
+		if (preview === true) {
+			const diffs: string[] = [];
+
+			for (const key of [...new Set(planned.map(({ uri }) => uri.toString()))]) {
+				const text = texts.get(key) ?? "";
+				const mine = planned.filter(({ uri }) => uri.toString() === key);
+				let after = "";
+				let from = 0;
+
+				for (const { start, end, "text": replacement } of mine) {
+					after += text.slice(from, start) + replacement;
+					from = end;
+				}
+
+				diffs.push(unifiedDiff(relative(mine[0].uri), text, after + text.slice(from)));
+			}
+
+			return { "preview": true, "replaced": planned.length, "diff": diffs.join("") };
 		}
 
 		const edit = new vscode.WorkspaceEdit();

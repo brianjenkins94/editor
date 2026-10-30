@@ -54,7 +54,7 @@ const files: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "files_replace",
 			"config": {
-				"description": "Replace exact strings across files, all or nothing: each replacement must be found as it says — once (the default), `count` times, or every time with `all` — and none may overlap another, or nothing changes and the answer says each one that didn't hold. Then it's one edit (an open editor shows it, one undo takes it back) and every file is saved. Use it for a change that spans files (a signature and its callers); for a rename or a move, code_rename and code_move. Returns { files: [{ path, replaced }], replaced }.",
+				"description": "Replace exact strings across files, all or nothing: each replacement must be found as it says — once (the default), `count` times, or every time with `all` — and none may overlap another, or nothing changes and the answer says each one that didn't hold. Then it's one edit (an open editor shows it, one undo takes it back) and every file is saved. Use it for a change that spans files (a signature and its callers); for a rename or a move, code_rename and code_move. With preview, the diff it would make and nothing changed; to see what it would break first, workspace_checkpoint, make it, code_problems, then workspace_restore if need be. Returns { files: [{ path, replaced }], replaced }, or { preview, replaced, diff }.",
 				"inputSchema": {
 					"edits": z.array(z.object({
 						"path": z.string().describe("The file, relative to the workspace or absolute under it."),
@@ -62,10 +62,11 @@ const files: ToolFamily = ({ request }) => [
 						"new": z.string().describe("What replaces it."),
 						"all": z.boolean().optional().describe("Replace every occurrence, however many."),
 						"count": z.number().optional().describe("How many times it must be found (default 1).")
-					})).describe("The replacements, in any order.")
+					})).describe("The replacements, in any order."),
+					"preview": z.boolean().optional().describe("Say the diff it would make, and change nothing.")
 				}
 			},
-			"handler": async ({ edits }, { signal }) => ok(request("files.replace", { "edits": edits }, signal))
+			"handler": async ({ edits, preview }, { signal }) => ok(request("files.replace", { "edits": edits, "preview": preview }, signal))
 		})
 	},
 	{

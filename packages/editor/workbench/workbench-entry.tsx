@@ -53,6 +53,7 @@ import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { registerFeaturesMap } from "./features-map";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
+import { installCheckpoints } from "./checkpoints";
 import { installCodeProblems } from "./code-problems";
 import { installCodeReach } from "./code-reach";
 import { installCodeRefactor } from "./code-refactor";
@@ -684,6 +685,8 @@ function maybeBoot(): void {
 				installCodeReach(api as typeof import("vscode"), workbenchHub);
 				// References, rename, and a move with its imports: VS Code's providers, as WorkspaceEdits (code-refactor.ts).
 				installCodeRefactor(api as typeof import("vscode"), workbenchHub, typescriptProjects);
+				// Experiments that undo themselves: the working tree noted, and put back (checkpoints.ts).
+				installCheckpoints(api as typeof import("vscode"), workbenchHub, git);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the

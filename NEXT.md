@@ -69,7 +69,8 @@ How it's kept:
    this repo in the editor needs them (2026-10-29). Each is a tool family under app/tools/ (host.ts). Done:
    `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
    results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, `git_log` / `git_show` /
-   `git_blame`, `files_replace` (exact strings across files, all or nothing) and `editor_trace`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   `git_blame`, `files_replace` (exact strings across files, all or nothing; a `preview` of its diff), `editor_trace` and
+   `workspace_checkpoint` / `workspace_restore`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
    *Tests*. In order:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
@@ -77,8 +78,6 @@ How it's kept:
      own trace log for one component, into the log stream). A logpoint needs a hook where it's set, and the editor runs
      as bundled code with no DevTools Protocol attached: it would take the coverage build's instrumentation (a hook at
      every statement, `COVERAGE=1`) carrying an expression to evaluate, in a dev build only.
-   - **Experiments that undo themselves**: `workspace_checkpoint` / `workspace_restore` (a throwaway overlay layer), and
-     a dry run on edits (`preview`: the diff and the diagnostics it would add).
    - **Structural `code_query` / `code_rewrite`** on the syntax tree, in place of regex rewrites.
    - **`decisions_for`** (the ledger entries, ARCHITECTURE.md sections and NEXT.md items naming a file or symbol) and
      **`ci_status`** (a commit's runs, and a failed job's log).

@@ -1572,6 +1572,45 @@ test("code reach: a way in's registration, what names it, and what removing it f
 	}
 });
 
+// Experiments that undo themselves (checkpoints.ts; workspace_checkpoint, workspace_restore): the working tree noted,
+// a file edited, one deleted and one made, a replacement previewed without changing anything, and all of it put back.
+test("checkpoints: a change tried, previewed, and put back as it was", async () => {
+	const request = (subject, data) => session.request(subject, data, 60_000);
+	const disk = (path) => session.workbench().evaluate(async (file) => {
+		const { api } = globalThis.__editor;
+
+		return Promise.resolve(api.workspace.fs.readFile(api.Uri.file(`/workspace/${file}`))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
+	}, path);
+
+	try {
+		await request("files.write", { "path": "tried/edited.js", "content": "export const value = 1;\n" });
+		await request("files.write", { "path": "tried/kept.js", "content": "export const kept = true;\n" });
+
+		const { id } = await request("workspace.checkpoint", { "label": "before the experiment" });
+
+		await request("files.edit", { "path": "tried/edited.js", "old": "= 1", "new": "= 2" });
+		await request("files.write", { "path": "tried/made.js", "content": "export const made = true;\n" });
+		await session.workbench().evaluate(() => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file("/workspace/tried/kept.js")));
+
+		const preview = await request("files.replace", { "edits": [{ "path": "tried/edited.js", "old": "= 2", "new": "= 3" }], "preview": true });
+
+		assert.match(preview.diff, /-export const value = 2;\n\+export const value = 3;/u);
+		assert.equal(await disk("tried/edited.js"), "export const value = 2;\n", "a preview changes nothing");
+
+		const restored = await request("workspace.restore", { "id": id });
+
+		assert.deepEqual([restored.restored, restored.removed], [["tried/edited.js", "tried/kept.js"], ["tried/made.js"]], JSON.stringify(restored));
+		assert.deepEqual([await disk("tried/edited.js"), await disk("tried/kept.js"), await disk("tried/made.js")], ["export const value = 1;\n", "export const kept = true;\n", undefined]);
+		await assert.rejects(request("workspace.restore", { "id": "nope" }), /no checkpoint nope here/u);
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/tried"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 // A change's problems against HEAD (code-problems.ts; agents' code_problems): a file committed with one error, then
 // changed so it clears that one and breaks the file importing it, while that file's own error stays. (It commits, so it
 // runs last but the conformance check: the workspace has no HEAD before it.)
