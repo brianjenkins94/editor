@@ -7,6 +7,10 @@
  * - `code.references` { path, line, name }: where the name on that line (1-based) is used, each place's file, line,
  *   column and line of text, its declaration included.
  * - `code.rename` { path, line, name, to }: the rename TypeScript makes of it, everywhere it's used.
+ * - `code.query` { pattern, paths? }: where a structural pattern matches (`$X` one node, `$$$` a run of a list:
+ *   extensions/history/patterns.ts), in the files TypeScript's projects hold — each match's place, text and bindings.
+ * - `code.rewrite` { pattern, replace, paths?, preview? }: each outermost match replaced by `replace`, its metavariables
+ *   filled in, as one edit (every file saved), or with `preview` the diff it would make.
  * - `code.move` { from, to }: a file moved, with every import of it and its own relative imports changed to match —
  *   TypeScript's edits for the move (history's tsserver plugin, `_history.fileRename`), applied with the move as one
  *   WorkspaceEdit, so nothing asks first (VS Code's own update on a move prompts by default).
@@ -18,12 +22,25 @@ import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import type { TypeScriptProjects } from "./ts-projects";
 import { serve } from "@brianjenkins94/hub";
+import { unifiedDiff } from "./git-service";
 import { saveDocument } from "./workspace-tools";
 
 const ROOT = "/workspace";
 
-/** The places `code.references` lists at most (`total` is all of them). */
+/** The places `code.references` and `code.query` list at most (`total` is all of them). */
 const LISTED = 500;
+
+/** How often, and how far apart, history's plugin is asked while its engine is still loading. */
+const TRIES = 5;
+const TRY_MS = 1500;
+
+/** What history's plugin answers of a structural pattern (`_history.query`). */
+interface Queried {
+	"ready"?: boolean;
+	"error"?: string;
+	"searched"?: number;
+	"files"?: { "file": string; "matches": { "line": number; "column": number; "text": string; "bindings": Record<string, string> }[]; "edits"?: { "start": number; "end": number; "text": string }[] }[];
+}
 
 /** A place in a file: its 1-based line and column, and that line's text. */
 interface Place { "file": string; "line": number; "column": number; "text": string }
@@ -123,6 +140,82 @@ export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, projects
 		const changes = edit.entries().reduce((total, [, edits]) => total + edits.length, 0);
 
 		return { "renamed": name, "to": to, "changes": changes, "files": await applyAndSaveAll(edit, edit.entries().map(([uri]) => uri)) };
+	});
+
+	/** history's plugin's answer for a structural pattern (asked again while its engine loads); throws on its error. */
+	const queried = async (args: { "pattern": string; "paths"?: unknown; "replace"?: string }): Promise<Required<Pick<Queried, "files" | "searched">>> => {
+		await projects.refresh();
+
+		const ask = async (): Promise<Queried | undefined> => (await Promise.resolve(vscode.commands.executeCommand<{ "body"?: Queried } | undefined>("typescript.tsserverRequest", "_history.query", args)).catch(() => undefined))?.body;
+		let answer = await ask();
+
+		for (let tried = 1; (answer === undefined || answer.ready === false) && answer?.error === undefined && tried < TRIES; tried += 1) {
+			await new Promise((resolve) => {
+				setTimeout(resolve, TRY_MS);
+			});
+			answer = await ask();
+		}
+
+		if (answer?.error !== undefined) {
+			throw new Error(answer.error);
+		}
+
+		if (answer?.ready !== true) {
+			throw new Error("the TypeScript server didn't answer (still starting): ask again shortly");
+		}
+
+		return { "files": answer.files ?? [], "searched": answer.searched ?? 0 };
+	};
+
+	serve(hub, "code.query", async (args) => {
+		const { pattern, paths } = (args ?? {}) as { "pattern"?: unknown; "paths"?: unknown };
+
+		if (typeof pattern !== "string" || pattern.trim() === "") {
+			throw new TypeError("code.query takes { pattern, paths? }: code, `$X` for any one node, `$$$` for any run of a list");
+		}
+
+		const { files, searched } = await queried({ "pattern": pattern, ...Array.isArray(paths) ? { "paths": paths } : {} });
+		const matches = files.flatMap(({ file, "matches": found }) => found.map((match) => ({ "file": file, ...match })));
+
+		return { "matches": matches.slice(0, LISTED), "total": matches.length, "searched": searched };
+	});
+
+	serve(hub, "code.rewrite", async (args) => {
+		const { pattern, replace, paths, preview } = (args ?? {}) as { "pattern"?: unknown; "replace"?: unknown; "paths"?: unknown; "preview"?: unknown };
+
+		if (typeof pattern !== "string" || pattern.trim() === "" || typeof replace !== "string") {
+			throw new TypeError("code.rewrite takes { pattern, replace, paths?, preview? }: the pattern, and the code each match becomes ($X for what it bound)");
+		}
+
+		const { files, searched } = await queried({ "pattern": pattern, "replace": replace, ...Array.isArray(paths) ? { "paths": paths } : {} });
+		const edit = new vscode.WorkspaceEdit();
+		const touched: vscodeApi.Uri[] = [];
+		const diffs: string[] = [];
+		let changes = 0;
+
+		for (const { file, edits = [] } of files) {
+			const uri = vscode.Uri.file(`${ROOT}/${file}`);
+			const document = await vscode.workspace.openTextDocument(uri);
+			const text = document.getText();
+			let after = "";
+			let from = 0;
+
+			for (const { start, end, "text": replacement } of [...edits].sort((left, right) => left.start - right.start)) {
+				edit.replace(uri, new vscode.Range(document.positionAt(start), document.positionAt(end)), replacement);
+				after += text.slice(from, start) + replacement;
+				from = end;
+				changes += 1;
+			}
+
+			diffs.push(unifiedDiff(file, text, after + text.slice(from)));
+			touched.push(uri);
+		}
+
+		if (preview === true || changes === 0) {
+			return { "preview": preview === true, "changes": changes, "diff": diffs.join(""), "searched": searched };
+		}
+
+		return { "changes": changes, "files": await applyAndSaveAll(edit, touched), "searched": searched };
 	});
 
 	serve(hub, "code.move", async (args) => {

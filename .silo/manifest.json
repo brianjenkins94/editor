@@ -806,12 +806,16 @@
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
       "ways": [
         "agent tool|code_move",
+        "agent tool|code_query",
         "agent tool|code_references",
         "agent tool|code_rename",
+        "agent tool|code_rewrite",
         "core module|installCodeRefactor",
         "hub request|code.move",
+        "hub request|code.query",
         "hub request|code.references",
-        "hub request|code.rename"
+        "hub request|code.rename",
+        "hub request|code.rewrite"
       ]
     },
     "Tests for agents": {

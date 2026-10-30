@@ -623,7 +623,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.architecture_violations.*()`, `tool.code_move.*()`, `tool.code_problems.*()`, `tool.code_reach.*()`, `tool.code_references.*()`, `tool.code_rename.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.editor_trace.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_replace.*()`, `tool.files_write.*()`, `tool.git_blame.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_log.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_show.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()`, `tool.workspace_checkpoint.*()`, `tool.workspace_restore.*()` |
+| Root | tool | `tool.architecture_violations.*()`, `tool.code_move.*()`, `tool.code_problems.*()`, `tool.code_query.*()`, `tool.code_reach.*()`, `tool.code_references.*()`, `tool.code_rename.*()`, `tool.code_rewrite.*()`, `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.editor_trace.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_replace.*()`, `tool.files_write.*()`, `tool.git_blame.*()`, `tool.git_branch.*()`, `tool.git_checkout.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_discard.*()`, `tool.git_log.*()`, `tool.git_push.*()`, `tool.git_review.*()`, `tool.git_show.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_affected.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.runs_tests.*()`, `tool.terminal_output.*()`, `tool.workspace_checkpoint.*()`, `tool.workspace_restore.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -636,7 +636,7 @@ flowchart LR
 | Shell | theme | `theme.colors` |
 | Workbench | annotations | `annotations.classify()`, `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
 | Workbench | architecture | `architecture.violations()` |
-| Workbench | code | `code.move()`, `code.problems()`, `code.reach()`, `code.references()`, `code.rename()` |
+| Workbench | code | `code.move()`, `code.problems()`, `code.query()`, `code.reach()`, `code.references()`, `code.rename()`, `code.rewrite()` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
 | Workbench | editor | `editor.state()`, `editor.trace()` |
@@ -1091,6 +1091,10 @@ the workbench by workspace-tools.ts and git-service.ts). What the code doesn't s
   status sees it, in this page's memory (nothing under `.git/`), and put it back as one WorkspaceEdit. A restore after
   a commit refuses: it would have to undo the commit. A dry run is `files_replace`'s `preview` (the diff), or checkpoint,
   change, `code_problems`, restore.
+- `code_query` / `code_rewrite` (2026-10-30) match a pattern written as code against TypeScript's tree, node for node
+  (extensions/history/patterns.ts: `$X` one node, `$$$` a run of a list, a string by its value), in history's plugin
+  over the files its projects hold (`_history.query`). The matcher is in history's engine because that's where the
+  server's `ts` is; it's plain over `ts` passed in, so its tests use Node's.
 
 **Maybe next:** a notes tool: every note in the workspace across files (its text, file, where it's placed now or that
 it's lost), so an agent can read and act on notes without opening each file.

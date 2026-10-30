@@ -1532,6 +1532,41 @@ test("refactoring: references, a rename everywhere, and a move with its imports"
 	}
 });
 
+// Structural search and rewrite (patterns.ts, history's `_history.query`; code_query, code_rewrite): one shape written
+// two ways found in two files, its rewrite previewed, then made.
+test("structural search: a shape found however it's spelled, and rewritten", async () => {
+	const request = (subject, data) => session.request(subject, data, 240_000);
+	const disk = (path) => session.workbench().evaluate(async (file) => new TextDecoder().decode(await globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(`/workspace/${file}`))), path);
+
+	try {
+		await request("files.write", { "path": "shape/one.ts", "content": "export const has = (list: string[], item: string): boolean => list.indexOf(item) !== -1;\n" });
+		await request("files.write", { "path": "shape/two.ts", "content": "const names = ['a', 'b'];\n\nexport const found = names.indexOf( 'a' )   !==   -1; // spaced out\nexport const position = names.indexOf('b');\n" });
+
+		const query = await request("code.query", { "pattern": "$A.indexOf($B) !== -1", "paths": ["shape"] });
+
+		assert.deepEqual(query.matches.map(({ file, line, bindings }) => [file, line, bindings]), [["shape/one.ts", 1, { "A": "list", "B": "item" }], ["shape/two.ts", 3, { "A": "names", "B": "'a'" }]], JSON.stringify(query));
+
+		const preview = await request("code.rewrite", { "pattern": "$A.indexOf($B) !== -1", "replace": "$A.includes($B)", "paths": ["shape"], "preview": true });
+
+		assert.equal(preview.changes, 2);
+		assert.match(preview.diff, /\+export const found = names\.includes\('a'\); \/\/ spaced out/u);
+		assert.match(await disk("shape/two.ts"), /indexOf\( 'a' \)/u, "a preview changes nothing");
+
+		const done = await request("code.rewrite", { "pattern": "$A.indexOf($B) !== -1", "replace": "$A.includes($B)", "paths": ["shape"] });
+
+		assert.deepEqual(done.files.sort(), ["shape/one.ts", "shape/two.ts"]);
+		assert.equal(await disk("shape/one.ts"), "export const has = (list: string[], item: string): boolean => list.includes(item);\n");
+		// (the save's ESLint fix may requote it: either quotes)
+		assert.match(await disk("shape/two.ts"), /names\.indexOf\(["']b["']\)/u, "a different shape left alone");
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/shape"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 // What a way in reaches (code-reach.ts, History's ledger.ts `history.reach`; agents' code_reach): an agent tool made in
 // the workspace, the file that names it, and what removing it would free.
 test("code reach: a way in's registration, what names it, and what removing it frees", async () => {

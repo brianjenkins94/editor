@@ -75,6 +75,36 @@ const code: ToolFamily = ({ request }) => [
 			},
 			"handler": async ({ from, to }, { signal }) => ok(request("code.move", { "from": from, "to": to }, signal))
 		})
+	},
+	{
+		"timeoutMs": 300000,
+		"tool": defineTool({
+			"name": "code_query",
+			"config": {
+				"description": "Find code by its shape, not its text: a pattern is code, matched node for node on TypeScript's tree, whitespace and comments aside. `$X` matches any one node (and the same text wherever else $X is written); `$$$` or `$$$X` any run of a list (arguments, statements). E.g. `request(\"shell.run\", $$$)`, `$A.indexOf($B) !== -1`, `if ($C) { $$$ }`. Searches the workspace files TypeScript's projects hold (`searched` says how many). Returns { matches: [{ file, line, column, text, bindings }], total, searched }.",
+				"inputSchema": {
+					"pattern": z.string().describe("One expression or statement, with $X / $$$ metavariables."),
+					"paths": z.array(z.string()).optional().describe("Only these files or folders (relative to the workspace).")
+				}
+			},
+			"handler": async ({ pattern, paths }, { signal }) => ok(request("code.query", { "pattern": pattern, "paths": paths }, signal))
+		})
+	},
+	{
+		"timeoutMs": 300000,
+		"tool": defineTool({
+			"name": "code_rewrite",
+			"config": {
+				"description": "Rewrite code by its shape: each match of a pattern (as code_query matches it) replaced by a template, its $X / $$$X filled in with what they bound — e.g. pattern `$A.indexOf($B) !== -1`, replace `$A.includes($B)`. Outermost matches only; one edit, every file saved. Use preview first to see the diff. Check with code_problems after. Returns { changes, files, searched }, or { preview, changes, diff, searched }.",
+				"inputSchema": {
+					"pattern": z.string().describe("One expression or statement, with $X / $$$ metavariables."),
+					"replace": z.string().describe("The code each match becomes; $X and $$$X stand for what they bound."),
+					"paths": z.array(z.string()).optional().describe("Only these files or folders (relative to the workspace)."),
+					"preview": z.boolean().optional().describe("Say the diff it would make, and change nothing.")
+				}
+			},
+			"handler": async ({ pattern, replace, paths, preview }, { signal }) => ok(request("code.rewrite", { "pattern": pattern, "replace": replace, "paths": paths, "preview": preview }, signal))
+		})
 	}
 ];
 

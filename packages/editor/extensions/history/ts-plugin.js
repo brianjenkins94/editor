@@ -4,7 +4,7 @@
  * ts-analysis, the same reading `silo history --analyzer typescript` does with TypeScript 7). No copy of TypeScript, no
  * oxc: the engine (history-engine.js, served beside this file) is built with `typescript` external, and we hand it ours.
  *
- * Four requests (through `typescript.tsserverRequest`):
+ * Five requests (through `typescript.tsserverRequest`):
  *
  * - `_history.read`: the extension says which reading of each file it has (and `rescan`, when files were made or
  *   deleted since: the projects read their files again first) (a revision number this plugin gave it); the
@@ -12,6 +12,8 @@
  *   there is now. Readings are kept here between requests, so an answer costs only what changed.
  * - `_history.files`, core's (ts-projects.ts): files were made or deleted, so each configured project reads its root
  *   files again (the browser server isn't told: its watchers watch nothing).
+ * - `_history.query`, core's (code-refactor.ts): where a structural pattern matches (the engine's patterns.ts), in the
+ *   workspace files the projects hold, and with `replace` its rewrite's edits.
  * - `_history.fileRename`, core's (code-refactor.ts): the edits moving a file makes, TypeScript's
  *   `getEditsForFileRename` (every import of it, and its own relative imports), as each file's spans and new text.
  * - `_history.problems`, core's (code-problems.ts): TypeScript's diagnostics for the files a change touches, now and at
@@ -471,6 +473,58 @@ export default function init(modules) {
 		return { "projects": told };
 	}
 
+	// `_history.query`: where a structural pattern matches, and its rewrite's edits.
+	/**
+	 * Every workspace file the projects hold (in `paths`, files or folders, when given) where `pattern` matches
+	 * (patterns.ts): each match's line, column, first line of text and bindings, and with `replace`, the rewrite's edits
+	 * (outermost matches). `searched` is how many files were looked at: only what the projects hold.
+	 */
+	function query(projectService, args) {
+		if (engine === undefined) {
+			return { "ready": false, ...engineError === undefined ? {} : { "error": engineError } };
+		}
+
+		const pattern = engine.patternNode(ts, String(args.pattern || ""));
+		const paths = Array.isArray(args.paths) ? args.paths.map(function(each) {
+			return String(each).replace(/^\/workspace\//u, "").replace(/\/+$/u, "");
+		}) : undefined;
+		const seen = new Set();
+		const files = [];
+
+		for (const project of projectsOf(projectService)) {
+			const program = project.getLanguageService().getProgram();
+
+			for (const source of program === undefined ? [] : program.getSourceFiles()) {
+				const path = workspacePathOf(source.fileName);
+				const file = path.startsWith("/workspace/") ? path.slice("/workspace/".length) : undefined;
+
+				if (file === undefined || source.isDeclarationFile || /(?:^|\/)node_modules\//u.test(file) || seen.has(file) || (paths !== undefined && !paths.some(function(each) {
+					return file === each || file.startsWith(each + "/");
+				}))) {
+					continue;
+				}
+
+				seen.add(file);
+
+				const matched = engine.matchPattern(ts, pattern, source);
+
+				if (matched.length > 0) {
+					files.push({
+						"file": file,
+						"matches": matched.map(function(match) {
+							const at = source.getLineAndCharacterOfPosition(match.start);
+
+							return { "line": at.line + 1, "column": at.character + 1, "text": source.text.slice(match.start, match.end).split("\n")[0].slice(0, 200), "bindings": match.bindings };
+						}),
+						...typeof args.replace === "string" ? { "edits": engine.rewrites(matched, args.replace) } : {}
+					});
+				}
+			}
+		}
+
+		return { "ready": true, "files": files, "searched": seen.size };
+	}
+
 	// `_history.fileRename`: the edits a file's move makes, its importers' and its own.
 	/**
 	 * What moving `from` to `to` (workspace paths) changes in the code: TypeScript's edits for the rename
@@ -535,6 +589,13 @@ export default function init(modules) {
 						return { "response": filesChanged(info.project.projectService), "responseRequired": true };
 					} catch (error) {
 						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
+					}
+				});
+				info.session.addProtocolHandler("_history.query", function(request) {
+					try {
+						return { "response": query(info.project.projectService, (request && request.arguments) || {}), "responseRequired": true };
+					} catch (error) {
+						return { "response": { "error": String(error && error.message || error) }, "responseRequired": true };
 					}
 				});
 				info.session.addProtocolHandler("_history.fileRename", function(request) {
