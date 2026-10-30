@@ -8,7 +8,7 @@
  * When each version was published is deps.dev's (`api.deps.dev`, which also says which one npm's `latest` tag is); a
  * version's own dependencies, npm's registry's manifest of it. Both allow cross-origin reads.
  *
- * Kept in `.silo/versions.json`, shared — the editor's lockfile, where there's no package-lock.json: a dependency keeps
+ * Kept in `.silo/versions.json`, shared, when the repository has it there, else in `.silo/local/` (editor-api's `keptAt`) — the editor's lockfile, where there's no package-lock.json: a dependency keeps
  * its version until its range changes (only what's new or changed is resolved), so every collaborator loads what the
  * baseline was made from. The preview's dev server reads it from the workspace (its import map pins these versions),
  * and the baseline is synced to it (the capabilities extension's baseline.ts, which watches it). The node_modules
@@ -20,7 +20,8 @@
  */
 import type * as vscodeApi from "vscode";
 import { failureText } from "@brianjenkins94/editor-api/failures";
-import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
+import { keptAt } from "@brianjenkins94/editor-api/git";
+import { GITIGNORE, SILO_DIR, versionsPath, withLines } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
 
 /** The youngest a version may be, in days. */
@@ -290,7 +291,18 @@ export function syncVersions(vscode: typeof vscodeApi, root = "/workspace"): Pro
 		const files = (await vscode.workspace.findFiles("**/package.json", `{**/node_modules/**,**/${SILO_DIR}/**}`)).toSorted((one, other) => one.path.length - other.path.length);
 		const { roots, local } = dependenciesOf(await Promise.all(files.map(async (file) => ({ "dir": file.path.slice(root.length + 1, file.path.lastIndexOf("/")), "manifest": await read(file).catch(() => undefined) }))));
 
-		const uri = vscode.Uri.file(`${root}/${versionsPath()}`);
+		const at = await keptAt(versionsPath(), async (path) => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${root}/${path}`))).then(() => true, () => false));
+		const uri = vscode.Uri.file(`${root}/${at}`);
+
+		// (a local copy is git's to ignore: `.silo/.gitignore`'s `/local/` first — evidence.ts writes it too, lazily)
+		if (at !== versionsPath()) {
+			const seed = vscode.Uri.file(`${root}/${SILO_DIR}/.gitignore`);
+			const updated = withLines(await vscode.workspace.fs.readFile(seed).then((bytes) => new TextDecoder().decode(bytes), () => ""), GITIGNORE);
+
+			if (updated !== undefined) {
+				await vscode.workspace.fs.writeFile(seed, new TextEncoder().encode(updated));
+			}
+		}
 		const before = await read(uri).catch(() => undefined) as VersionsFile | undefined;
 		// (what was resolved stays, but a root whose range changed: resolved again, with what it now depends on — and a file
 		// from before `platform`: each entry's manifest read again once, its version kept)

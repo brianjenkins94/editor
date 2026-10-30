@@ -55,6 +55,12 @@ layout is silo's (lib `util/silo/layout.ts`): runs in `.silo/runs/<user>.jsonl`,
 `.silo/evidence/<user>/<env>/<file>.jsonl`, a line per (span, kind); `.silo/local/` (raw profiles, value samples, every
 run's trace) stays on the machine.
 
+The files the editor makes for a project — `versions.json` (the versions it pins), `baseline.json` (the dependency
+baseline) and `capabilities.json` (the static surface) — are the repository's at `.silo/` once it has committed them,
+and in `.silo/local/` until then (2026-10-30; editor-api's git.ts `keptAt`), so loading a repository doesn't put them
+in its next commit. A repository shares one by committing it at its `.silo/` path; one an earlier editor left there
+untracked moves to `.silo/local/` as the workspace opens (git-engine.ts `includeSilo`).
+
 - **Conflict-free by partition.** Each user and environment writes only its own files. One user on two branches does
   touch the same files; with one sorted line per span, git's built-in `merge=union` keeps both sides without any setup,
   and the reader folds duplicate lines for a span (largest `lastRun` wins, counts combine).

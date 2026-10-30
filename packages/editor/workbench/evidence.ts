@@ -23,6 +23,7 @@ import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
 import type { VersionsFile } from "./versions";
+import { keptAt } from "@brianjenkins94/editor-api/git";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldPurity, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, versionsPath, withLines } from "@brianjenkins94/util/silo/layout";
@@ -179,7 +180,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			throw new TypeError("packages.tarball: a name and a version");
 		}
 
-		const pinned = await vscode.workspace.fs.readFile(vscode.Uri.file(`/workspace/${versionsPath()}`)).then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as VersionsFile).packages[name], () => undefined);
+		const pinned = await vscode.workspace.fs.readFile(vscode.Uri.file(`/workspace/${await keptAt(versionsPath(), async (path) => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`/workspace/${path}`))).then(() => true, () => false))}`)).then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as VersionsFile).packages[name], () => undefined);
 
 		return tarball(name, version, pinned?.version === version ? pinned.tarball : undefined);
 	});

@@ -18,7 +18,8 @@ How it's kept:
    dependencies are in node_modules as npm puts them (ARCHITECTURE.md, *Packages*):
    - `file:` siblings are linked;
    - Pages tarballs are unpacked;
-   - registry packages are pinned in `.silo/versions.json` and load from the CDN;
+   - registry packages are pinned in `versions.json` (in `.silo/local/` until the repository commits it) and load from
+     the CDN;
    - type acquisition reads every package's manifest and tsconfig.
 
    features-map.ts went from 32 TypeScript errors to 2, and a linked file has one name. Still open:
@@ -38,8 +39,6 @@ How it's kept:
    - **Bugs found on the way:**
      - With `2>&1 | tail`, the error printed nothing.
      - `git log -3` is refused (`-n 3` works).
-     - The editor writes `.silo/baseline.json` and `.silo/capabilities.json` into the loaded repo. They're untracked,
-       so a `git_commit` without files would commit them.
      - The Margin pane draws inside the references peek.
 
    The steps left:

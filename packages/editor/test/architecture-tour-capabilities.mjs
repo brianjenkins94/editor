@@ -251,7 +251,8 @@ test("package prompt: whose call, and why it's asked; Allow always is about that
 	const remove = (path) => workbench.evaluate((file) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(file), { "recursive": true }).then(() => undefined, () => undefined), path);
 
 	// (the baseline made, as the project opened: what the prompt says is what it says of the package)
-	await eventually("the baseline", () => workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/.silo/baseline.json")).then(() => true, () => undefined)), 120_000);
+	// (the tour's repository hasn't committed one, so the editor keeps it locally: editor-api's git.ts `keptAt`)
+	await eventually("the baseline", () => workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/.silo/local/baseline.json")).then(() => true, () => undefined)), 120_000);
 	await write("/workspace/node_modules/sneaky/package.json", JSON.stringify({ "name": "sneaky", "version": "1.0.0", "main": "index.js" }));
 	await write("/workspace/node_modules/sneaky/index.js", "const fs = require(\"node:fs\");\n\nmodule.exports = () => fs.writeFileSync(\"/workspace/sneaky-out.txt\", \"x\");\n");
 	await write("/workspace/package-call.js", "require(\"sneaky\")();\nconsole.log(\"wrote\");\n");

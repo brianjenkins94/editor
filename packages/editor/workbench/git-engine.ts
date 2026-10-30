@@ -13,8 +13,9 @@
  */
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
+import { KEPT, localOf } from "@brianjenkins94/editor-api/git";
 import { fs } from "@zenfs/core";
-import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
+import { GITIGNORE, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import type { HttpClient } from "isomorphic-git";
 import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 
@@ -49,18 +50,55 @@ export const DEFAULT_GITIGNORE = "node_modules/\n";
 /** `.silo/` is in git (RUNTIME-EVIDENCE.md): silo's policy, the runs and their evidence travel with the repo, and
  *  `.silo/.gitignore` keeps out only what stays on the machine. The editor used to list `.silo/` in `.git/info/exclude`;
  *  take that line back out of a repo that still has it — idempotent, run on every repo the workspace becomes
- *  (ensureRepo; a clone load in workbench-entry.tsx). */
+ *  (ensureRepo; a clone load in workbench-entry.tsx). And the files the editor makes that the repository hasn't taken
+ *  (`keepLocal`) go to their local copies. */
 export async function includeSilo(): Promise<void> {
 	const file = DIR + "/.git/info/exclude";
 
-	if (!fs.existsSync(file)) {
-		return;
+	if (fs.existsSync(file)) {
+		const lines = (await fs.promises.readFile(file, "utf8")).split("\n");
+
+		if (lines.includes(".silo/")) {
+			await fs.promises.writeFile(file, lines.filter((line) => line !== ".silo/").join("\n"));
+		}
 	}
 
-	const lines = (await fs.promises.readFile(file, "utf8")).split("\n");
+	await keepLocal();
+}
 
-	if (lines.includes(".silo/")) {
-		await fs.promises.writeFile(file, lines.filter((line) => line !== ".silo/").join("\n"));
+/**
+ * The files the editor makes for a project (editor-api's git.ts `KEPT`: versions, baseline, capabilities) are the
+ * repository's at `.silo/` once it has committed them, and local until then (`keptAt`). One at `.silo/` that git has
+ * neither in HEAD nor staged — an editor before 2026-10-30 wrote them there, and every commit took them — is moved to
+ * its local copy, where git doesn't see it.
+ */
+async function keepLocal(): Promise<void> {
+	// (what makes a local copy local: `.silo/.gitignore`'s `/local/`, there before anything is moved or written)
+	if (fs.existsSync(`${DIR}/${SILO_DIR}`)) {
+		const seed = `${DIR}/${SILO_DIR}/.gitignore`;
+		const updated = withLines(fs.existsSync(seed) ? await fs.promises.readFile(seed, "utf8") : "", GITIGNORE);
+
+		if (updated !== undefined) {
+			await fs.promises.writeFile(seed, updated);
+		}
+	}
+
+	for (const name of KEPT) {
+		const shared = `${SILO_DIR}/${name}`;
+
+		if (!fs.existsSync(`${DIR}/${shared}`)) {
+			continue;
+		}
+
+		const [row] = await statusMatrix({ "fs": fs, "dir": DIR, "filepaths": [shared] }).catch(() => [[shared, 0, 2, 0] as const]);
+
+		if (row !== undefined && row[1] === 0 && row[3] === 0) {
+			const local = `${DIR}/${localOf(shared)}`;
+
+			await fs.promises.mkdir(local.slice(0, local.lastIndexOf("/")), { "recursive": true });
+			await fs.promises.writeFile(local, await fs.promises.readFile(`${DIR}/${shared}`));
+			await fs.promises.unlink(`${DIR}/${shared}`);
+		}
 	}
 }
 

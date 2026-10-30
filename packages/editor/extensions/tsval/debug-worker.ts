@@ -396,6 +396,16 @@ function packageOf(dir: string): string {
 	return ran.version === undefined ? ran.name : `${ran.name}@${ran.version}`;
 }
 
+/** A file the editor keeps for the project, as text: `.silo/<name>` when the repository has it, else its local copy
+ *  (editor-api's git.ts `keptAt`) — through the editor's runtime, as the debugger's own read. */
+function keptText(name: string): string {
+	try {
+		return new TextDecoder().decode(editorLink?.fs.readFile(`/workspace/.silo/${name}`, { "load": true }));
+	} catch {
+		return new TextDecoder().decode(editorLink?.fs.readFile(`/workspace/.silo/local/${name}`, { "load": true }));
+	}
+}
+
 /** The dependency baseline (`.silo/baseline.json`, read as a run starts): what the part of each package the code uses
  *  could reach when it began to (the join, its `consumer`), and what each package's own code could do when the library
  *  was added (its `packages`) — what grew since isn't settled: it asks, unless the policy allows it. Undefined when
@@ -406,9 +416,7 @@ let baseline: { "consumer"?: Record<string, WsConsumer>; "packages"?: BaselinePa
 /** The baseline as it is now, through the editor's runtime (read as the debugger's own: neither decided nor counted). */
 function readBaseline(): typeof baseline {
 	try {
-		const text = new TextDecoder().decode(editorLink?.fs.readFile("/workspace/.silo/baseline.json", { "load": true }));
-
-		return JSON.parse(text) as typeof baseline;
+		return JSON.parse(keptText("baseline.json")) as typeof baseline;
 	} catch {
 		return undefined;
 	}
@@ -427,8 +435,7 @@ const installed = new Map<string, string>();
 /** The pinned versions as they are now, through the editor's runtime (the debugger's own read). */
 function readPins(): Record<string, string> {
 	try {
-		const text = new TextDecoder().decode(editorLink?.fs.readFile("/workspace/.silo/versions.json", { "load": true }));
-		const { packages } = JSON.parse(text) as { "packages"?: Record<string, { "version": string }> };
+		const { packages } = JSON.parse(keptText("versions.json")) as { "packages"?: Record<string, { "version": string }> };
 
 		return Object.fromEntries(Object.entries(packages ?? {}).map(([name, { version }]) => [name, version]));
 	} catch {

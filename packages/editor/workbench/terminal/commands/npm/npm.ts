@@ -6,7 +6,7 @@
  * worker and the whole thing composes.
  *
  * `npm install [pkg…]` (and `ci`) declares dependencies in package.json. A registry package is never fetched whole:
- * each place that loads one fetches what it needs as it's used, from the CDN, at the version `.silo/versions.json` pins
+ * each place that loads one fetches what it needs as it's used, from the CDN, at the version `.silo/versions.json` (or its local copy) pins
  * (the preview dev server, the node_modules overlay, type acquisition). A plain `npm install` brings that file up to
  * the manifests and installs what the CDN can't serve — a `file:` dependency linked, a tarball URL unpacked
  * (workbench/install.ts) — as the editor does by itself when the project opens or a manifest changes.
@@ -136,7 +136,7 @@ async function installed(name: string, api: CommandHost["api"]): Promise<Command
 	const linked = entries.filter(([, each]) => each.link !== undefined).map(([dependency, each]) => `  linked ${dependency} → ${each.link}\n`);
 	const unpacked = entries.filter(([, each]) => each.link === undefined && installsLocally(each)).map(([dependency, each]) => `  unpacked ${dependency}@${each.version} from ${each.tarball}\n`);
 
-	return { "stdout": `${linked.join("")}${unpacked.join("")}  ${entries.length} packages pinned in .silo/versions.json; the rest load from the CDN as they're used.\n`, "stderr": "", "exitCode": 0 };
+	return { "stdout": `${linked.join("")}${unpacked.join("")}  ${entries.length} packages pinned in versions.json (.silo/, or .silo/local/ until the repository commits it); the rest load from the CDN as they're used.\n`, "stderr": "", "exitCode": 0 };
 }
 
 /** npm's subcommands, as `name` (npm, pnpm, yarn) says them in its messages. */

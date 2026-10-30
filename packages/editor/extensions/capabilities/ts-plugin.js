@@ -228,8 +228,13 @@ export default function init(modules) {
 	 * (workbench/install.ts), but the browser server's host never resolves a symlink — its `realpath` only normalizes a
 	 * path — so each of a linked package's files would have two names, and a rename in its folder would miss the code
 	 * that imports it by name. This `realpath` answers where a link points, from `.silo/versions.json` (each linked
-	 * package's `link`), so the server treats it as it does npm's links on a disk: the folder's file is the one file.
+	 * package's `link`; `.silo/local/versions.json` when the repository hasn't it: editor-api's git.ts `keptAt`), so the
+	 * server treats it as it does npm's links on a disk: the folder's file is the one file.
 	 */
+	function versionsIn(host, base) {
+		return host.fileExists(base + "/.silo/versions.json") ? base + "/.silo/versions.json" : base + "/.silo/local/versions.json";
+	}
+
 	const linksAt = new Map(); // a workspace root, as the server names it → { "checked", "stamp", "links": [name, folder][] }
 
 	function linksOf(host, base) {
@@ -237,7 +242,7 @@ export default function init(modules) {
 		let known = linksAt.get(base);
 
 		if (known === undefined || now - known.checked > 2000) {
-			const file = base + "/.silo/versions.json";
+			const file = versionsIn(host, base);
 			let stamp;
 
 			try {
@@ -270,7 +275,7 @@ export default function init(modules) {
 	/** Whether the workspace `dir` is in (it, or the nearest folder above it with a `.silo`) has links. */
 	function hasLinks(host, dir) {
 		for (let at = dir; at !== "" && at !== "/"; at = at.slice(0, at.lastIndexOf("/"))) {
-			if (host.fileExists(at + "/.silo/versions.json")) {
+			if (host.fileExists(at + "/.silo/versions.json") || host.fileExists(at + "/.silo/local/versions.json")) {
 				return linksOf(host, at).length > 0;
 			}
 		}

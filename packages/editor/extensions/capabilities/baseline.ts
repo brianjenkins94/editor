@@ -29,6 +29,7 @@
 import type { Surface, SurfaceEntry, WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages, InstalledPackages } from "@brianjenkins94/util/silo/evidence";
 import { failureText, watchWorker } from "@brianjenkins94/editor-api/failures";
+import { keptAt, localOf } from "@brianjenkins94/editor-api/git";
 import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 import { add, consumerOf, surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { JOIN, joinedBefore, joinsWanted, syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
@@ -257,13 +258,14 @@ function consumerNow(existing: BaselineFile | undefined, read: Record<string, Ws
  * calls are the policy's to decide. False when the consumer couldn't be read yet (the server isn't up): ask again.
  */
 async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri): Promise<boolean> {
-	const versions = await readJson(vscode.Uri.joinPath(root, versionsPath())) as VersionsFile | undefined;
+	const there = async (path: string): Promise<boolean> => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.joinPath(root, path))).then(() => true, () => false);
+	const versions = await readJson(vscode.Uri.joinPath(root, await keptAt(versionsPath(), there))) as VersionsFile | undefined;
 
 	if (versions === undefined) {
 		return true; // not resolved yet: its writing syncs this
 	}
 
-	const uri = vscode.Uri.joinPath(root, baselinePath());
+	const uri = vscode.Uri.joinPath(root, await keptAt(baselinePath(), there));
 	const existing = await readJson(uri) as BaselineFile | undefined;
 	const known = existing?.packages ?? {};
 	// (a linked package is the workspace's own code, read as the consumer, not a dependency)
@@ -337,7 +339,8 @@ export function keepBaseline(context: vscode.ExtensionContext): void {
 		});
 	};
 
-	const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, versionsPath()));
+	// (the versions, wherever they're kept: `.silo/`, or `.silo/local/`)
+	const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, `{${versionsPath()},${localOf(versionsPath())}}`));
 	// The consumer changes with the code — however it changes (a save, the terminal, a checkout): synced once the
 	// writes settle and the TypeScript server has seen them.
 	const code = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"));

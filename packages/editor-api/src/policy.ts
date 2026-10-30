@@ -39,6 +39,7 @@ import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/p
 import * as vscode from "vscode";
 import { recordEffect } from "./effects.ts";
 import { recordingKey } from "./gate.ts";
+import { keptAt, localOf } from "./git.ts";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -266,7 +267,8 @@ export interface StaticSurface {
 	"capabilities": Record<string, StaticEntry[]>;
 }
 
-/** Read `.silo/capabilities.json` (the committed STATIC surface), empty if absent/malformed. */
+/** Read `.silo/capabilities.json` (the STATIC surface; its local copy when the repository hasn't it: git.ts `keptAt`),
+ *  empty if absent/malformed. */
 export async function loadStaticSurface(): Promise<StaticSurface> {
 	const root = siloRoot();
 
@@ -274,7 +276,7 @@ export async function loadStaticSurface(): Promise<StaticSurface> {
 		return { "version": 1, "capabilities": {} };
 	}
 
-	const text = await readText(fileIn(root, capabilitiesPath()));
+	const text = await readText(fileIn(root, capabilitiesPath())) ?? await readText(fileIn(root, localOf(capabilitiesPath())));
 
 	if (text !== undefined) {
 		try {
@@ -304,7 +306,14 @@ export async function writeStaticSurface(surface: StaticSurface): Promise<void> 
 		sorted.capabilities[path] = [...surface.capabilities[path]].sort((left, right) => (left.capability + left.callee + left.resource).localeCompare(right.capability + right.callee + right.resource));
 	}
 
-	await writeText(fileIn(root, capabilitiesPath()), JSON.stringify(sorted, null, "\t") + "\n");
+	const at = await keptAt(capabilitiesPath(), async (path) => await readText(fileIn(root, path)) !== undefined);
+
+	// (a local copy is git's to ignore: `.silo/.gitignore`'s `/local/` first)
+	if (at !== capabilitiesPath()) {
+		await ensureGitignore(root);
+	}
+
+	await writeText(fileIn(root, at), JSON.stringify(sorted, null, "\t") + "\n");
 }
 
 // ── observed facts: the rollup + each run's effects ────────────────────────────────────────────────────────────────

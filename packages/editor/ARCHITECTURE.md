@@ -824,7 +824,7 @@ effects. It gets **synchronous files through core** instead, each call answered 
 - **A read** is an open editor's text when it's open, else what's on disk; **a write** is the workspace's, so editors,
   Source Control and watchers see it. Paths are `/workspace`'s, failing as node's do.
 - **Packages.** A package's published tarball, for one the debugger's `require` finds nothing of (the editor serves
-  packages from a CDN, and type acquisition writes only their types), at the version `.silo/versions.json` pins. The
+  packages from a CDN, and type acquisition writes only their types), at the version `versions.json` pins (`.silo/`'s, or its local copy: RUNTIME-EVIDENCE.md, *Storage in git*). The
   worker unpacks it into its own memory, never the workspace's buffer: 64 MB is no place for node_modules. A package
   the policy bans is never fetched. What no CDN serves is in the workspace's node_modules already, as npm puts it
   (workbench/install.ts, run by each sync of the versions, so `npm install` is that sync): a `file:` dependency is a

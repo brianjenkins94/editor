@@ -17,6 +17,7 @@
  */
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages, Effect, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
+import { localOf } from "@brianjenkins94/editor-api/git";
 import { parseRuns } from "@brianjenkins94/util/silo/evidence";
 import { baselinePath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
@@ -41,7 +42,7 @@ async function load(root: vscode.Uri): Promise<{ "runs": RunEnvelope[]; "baselin
 	const folder = vscode.Uri.joinPath(root, SILO_DIR, "runs");
 	const names = await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).then((entries) => entries.map(([name]) => name), () => [] as string[]);
 	const runs = (await Promise.all(names.filter((name) => name.endsWith(".jsonl")).map(async (name) => parseRuns(await textOf(vscode.Uri.joinPath(folder, name)) ?? "")))).flat();
-	const baseline = await textOf(vscode.Uri.joinPath(root, baselinePath()));
+	const baseline = await textOf(vscode.Uri.joinPath(root, baselinePath())) ?? await textOf(vscode.Uri.joinPath(root, localOf(baselinePath())));
 
 	return { "runs": runs, ...baseline === undefined ? {} : { "baseline": JSON.parse(baseline) as { "consumer"?: Record<string, WsConsumer>; "packages"?: BaselinePackages } } };
 }
@@ -144,7 +145,7 @@ export function registerExceptions(context: vscode.ExtensionContext): void {
 		}
 	};
 
-	const watcher = vscode.workspace.createFileSystemWatcher(`**/${SILO_DIR}/{baseline.json,runs/*.jsonl}`);
+	const watcher = vscode.workspace.createFileSystemWatcher(`**/${SILO_DIR}/{baseline.json,local/baseline.json,runs/*.jsonl}`);
 	const again = (): void => {
 		void refresh().catch(() => undefined);
 	};
