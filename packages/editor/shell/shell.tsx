@@ -822,10 +822,12 @@ function Shell() {
 			}
 
 			const caught = pulled.outcome === "fast-forwarded" ? `Caught up with GitHub (${String(pulled.files?.length ?? 0)} files). ` : "";
-			const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 20_000 }) as { "files": unknown[] };
+			// (a commit of every change reads every file's status: on this repository, 2,212 files with the page busy after its
+			// load, more than a minute — as git_review's and git_commit's tools allow)
+			const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": unknown[] };
 
 			if (files.length > 0) {
-				made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 60_000 }) as { "oid": string }).oid.slice(0, 7);
+				made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 600_000 }) as { "oid": string }).oid.slice(0, 7);
 				setCommitMessage("");
 			}
 

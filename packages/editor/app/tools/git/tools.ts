@@ -49,7 +49,7 @@ const git: ToolFamily = ({ request }) => [
 		})
 	},
 	{
-		"timeoutMs": 60000,
+		"timeoutMs": 120000,
 		"tool": defineTool({
 			"name": "git_status",
 			"config": {
@@ -86,7 +86,7 @@ const git: ToolFamily = ({ request }) => [
 		})
 	},
 	{
-		"timeoutMs": 60000,
+		"timeoutMs": 600000,
 		"tool": defineTool({
 			"name": "git_commit",
 			"config": {
