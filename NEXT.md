@@ -69,13 +69,14 @@ How it's kept:
    this repo in the editor needs them (2026-10-29). Each is a tool family under app/tools/ (host.ts). Done:
    `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
    results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, `git_log` / `git_show` /
-   `git_blame` and `files_replace` (exact strings across files, all or nothing); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
+   `git_blame`, `files_replace` (exact strings across files, all or nothing) and `editor_trace`; ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
    *Tests*. In order:
    - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
      ARCHITECTURE.md, *Workspace tools*).
-   - **Code running, watched without editing it**: logpoints in the editor's own code (`debug_logpoint`, its values as
-     data), and VS Code's trace log for one component (`editor_trace`). The save bug took six instrumented reruns
-     where `TextFileEditorModel`'s trace says "cancelled" in one.
+   - **Logpoints in the editor's own code** (`debug_logpoint`, its values as data). `editor_trace` is done (VS Code's
+     own trace log for one component, into the log stream). A logpoint needs a hook where it's set, and the editor runs
+     as bundled code with no DevTools Protocol attached: it would take the coverage build's instrumentation (a hook at
+     every statement, `COVERAGE=1`) carrying an expression to evaluate, in a dev build only.
    - **Experiments that undo themselves**: `workspace_checkpoint` / `workspace_restore` (a throwaway overlay layer), and
      a dry run on edits (`preview`: the diff and the diagnostics it would add).
    - **Structural `code_query` / `code_rewrite`** on the syntax tree, in place of regex rewrites.

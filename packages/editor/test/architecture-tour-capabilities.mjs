@@ -636,6 +636,32 @@ test("workspace tools: a replacement across files, all or nothing", async () => 
 	}
 });
 
+// VS Code's own trace, for one component (editor-state.ts `editor.trace`; agents' editor_trace): the text file model's,
+// while an agent's edit saves — what it said at trace, in the editor's log stream.
+test("editor trace: a component's trace log, for a while, in the log stream", async () => {
+	const request = (subject, data) => session.request(subject, data, 60_000);
+
+	try {
+		await request("files.write", { "path": "traced/note.js", "content": "export const note = 1;\n" });
+
+		const started = await request("editor.trace", { "component": "text file model", "seconds": 20 });
+
+		assert.equal(started.tracing, "text file model");
+		await assert.rejects(request("editor.trace", { "component": "extension host", "seconds": 5 }), /a trace is going until/u, "one at a time");
+		await request("files.edit", { "path": "traced/note.js", "old": "= 1", "new": "= 2" });
+
+		const said = await eventually("the text file model's save, at trace", () => session.notable().filter((line) => line.includes("[text file model]") && line.includes("doSave")).slice(0, 3).join("\n") || undefined, 20_000);
+
+		assert.match(said, /traced\/note\.js|doSave/u);
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/traced"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 test("capability decisions: Allow this run lets a loop's calls through, until the run ends", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/looped.js";

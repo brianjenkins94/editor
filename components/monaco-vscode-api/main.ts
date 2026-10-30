@@ -11,7 +11,7 @@ import {
 	IStorageService,
 	LogLevel
 } from "@codingame/monaco-vscode-api";
-import { ICommandService, IExtensionService, IViewsService } from "@codingame/monaco-vscode-api/services";
+import { ICommandService, IExtensionService, ILogService, IViewsService } from "@codingame/monaco-vscode-api/services";
 import { StorageScope, StorageTarget } from "@codingame/monaco-vscode-api/vscode/vs/platform/storage/common/storage";
 import { BrowserAuxiliaryWindowService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/auxiliaryWindow/browser/auxiliaryWindowService";
 import getAuthenticationServiceOverride from "@codingame/monaco-vscode-authentication-service-override";
@@ -26,7 +26,7 @@ import getKeybindingsServiceOverride, { initUserKeybindings } from "@codingame/m
 import getLanguageDetectionWorkerServiceOverride from "@codingame/monaco-vscode-language-detection-worker-service-override";
 import getLanguagesServiceOverride from "@codingame/monaco-vscode-languages-service-override";
 import getLifecycleServiceOverride from "@codingame/monaco-vscode-lifecycle-service-override";
-import getLogServiceOverride from "@codingame/monaco-vscode-log-service-override";
+import getLogServiceOverride, { AbstractLogger, registerAdditionalLogger } from "@codingame/monaco-vscode-log-service-override";
 import getMarkersServiceOverride from "@codingame/monaco-vscode-markers-service-override";
 import getModelServiceOverride from "@codingame/monaco-vscode-model-service-override";
 import getNotificationServiceOverride from "@codingame/monaco-vscode-notifications-service-override";
@@ -631,6 +631,91 @@ async function hideViewContainers(ids: string[]): Promise<void> {
 /** Every registered extension's contribution under `key` in its manifest (`contributes[key]`) — whichever extension host
  *  it runs in, built in or loaded from outside — with the extension's id. A key VS Code doesn't know (the editor's own:
  *  `paneViews`) is kept in the manifest all the same. */
+/** A trace window going (`traceLog`): what it keeps and where it goes, and when it closes; one at a time. */
+let tracing: { "matches": (message: string) => boolean; "forward": (level: string, message: string) => void; "until": number } | undefined;
+
+/** A value in a log message, as text. */
+function shown(value: unknown): string {
+	if (typeof value === "string") {
+		return value;
+	}
+
+	try {
+		return value instanceof Error ? value.message : JSON.stringify(value) ?? String(value);
+	} catch {
+		return String(value);
+	}
+}
+
+/**
+ * One more logger in the window log (the log service override's own hook, registered before the services start): it
+ * hands on what a trace window keeps, whatever its level, and is silent otherwise. (The log service itself is a delayed
+ * instance behind a proxy, so wrapping it reaches nothing the components call.)
+ */
+class TraceSink extends AbstractLogger {
+	public trace(message: string, ...args: unknown[]): void {
+		this.say("trace", message, args);
+	}
+
+	public debug(message: string, ...args: unknown[]): void {
+		this.say("debug", message, args);
+	}
+
+	public info(message: string, ...args: unknown[]): void {
+		this.say("info", message, args);
+	}
+
+	public warn(message: string, ...args: unknown[]): void {
+		this.say("warn", message, args);
+	}
+
+	public error(message: string | Error, ...args: unknown[]): void {
+		this.say("error", message, args);
+	}
+
+	public flush(): void { /* nothing kept */ }
+
+	private say(level: string, message: unknown, args: unknown[]): void {
+		const window = tracing;
+
+		if (window !== undefined) {
+			const text = [message, ...args].map(shown).join(" ");
+
+			if (window.matches(text)) {
+				window.forward(level, text);
+			}
+		}
+	}
+}
+
+registerAdditionalLogger(new TraceSink());
+
+/**
+ * VS Code's log at trace for `ms`, each message `matches` keeps handed to `forward` (its level and its text): what a
+ * component says only at trace — `[text file model] doSave(3) - exit - …` — that the default level leaves out. The
+ * level is set back after. One window at a time: another while one is going says until when. Resolves when it closes.
+ */
+export async function traceLog(matches: (message: string) => boolean, forward: (level: string, message: string) => void, ms: number): Promise<void> {
+	if (tracing !== undefined) {
+		throw new Error(`a trace is going until ${new Date(tracing.until).toISOString()}`);
+	}
+
+	const log = await getService(ILogService);
+	const before = log.getLevel();
+
+	tracing = { "matches": matches, "forward": forward, "until": Date.now() + ms };
+	log.setLevel(LogLevel.Trace);
+
+	try {
+		await new Promise((resolve) => {
+			setTimeout(resolve, ms);
+		});
+	} finally {
+		log.setLevel(before);
+		tracing = undefined;
+	}
+}
+
 export async function extensionContributions(key: string): Promise<{ "extension": string; "value": unknown }[]> {
 	const extensions = await getService(IExtensionService);
 

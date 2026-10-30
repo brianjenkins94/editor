@@ -820,8 +820,10 @@
         "agent tool|editor_notifications",
         "agent tool|editor_problems",
         "agent tool|editor_state",
+        "agent tool|editor_trace",
         "core module|installEditorState",
         "hub request|editor.state",
+        "hub request|editor.trace",
         "hub request|notifications.list",
         "hub request|problems.list"
       ]

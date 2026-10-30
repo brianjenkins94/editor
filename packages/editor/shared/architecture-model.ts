@@ -263,6 +263,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "margin.state", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "editor.state", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "editor.trace", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "problems.list", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "files.*", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "code.*", "from": ["root"], "to": ["workbench"] },

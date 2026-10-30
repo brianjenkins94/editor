@@ -7,14 +7,18 @@
  * - `problems.list` { file?, limit? }: the Problems view's diagnostics, each with its source (TypeScript, eslint, notes,
  *   a capability tripwire), severity, range and message;
  * - `notifications.list`: the notifications showing — the toasts and the notification center's — which the extension API
- *   can't list (the component reads the notification service's model).
+ *   can't list (the component reads the notification service's model);
+ * - `editor.trace` { component, seconds? }: VS Code's own log at trace, for a while, for one component — the messages
+ *   naming it (`text file model`, `extension host`) — forwarded into the editor's log stream (source `vscode-trace`),
+ *   where logs_query and logs_wait read it. It answers at once; the window closes on its own.
  *
  * Lines and columns are 1-based, as an agent reads code. Runs in the workbench realm (core), with its own extension API.
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
 import { serve } from "@brianjenkins94/hub";
-import { shownNotifications } from "@brianjenkins94/monaco-vscode-api/main";
+import { shownNotifications, traceLog } from "@brianjenkins94/monaco-vscode-api/main";
 
 /** A selection's text, at most this long (a whole file selected isn't what the tool is for). */
 const MAX_SELECTED = 500;
@@ -24,7 +28,11 @@ const PROBLEMS = 200;
 
 const SEVERITIES = ["error", "warning", "info", "hint"] as const;
 
-export function installEditorState(hub: Hub, vscode: typeof vscodeApi): void {
+/** How long a trace window stays open, by default and at most. */
+const TRACE_SECONDS = 30;
+const TRACE_MOST = 300;
+
+export function installEditorState(hub: Hub, vscode: typeof vscodeApi, log: Logger): void {
 	const at = (position: vscodeApi.Position): { "line": number; "column": number } => ({ "line": position.line + 1, "column": position.character + 1 });
 	/** A file's path in the workspace — relative, as the tools take it — or its URI when it isn't a file. */
 	const pathOf = (uri: vscodeApi.Uri): string => (uri.scheme === "file" ? vscode.workspace.asRelativePath(uri, false) : uri.toString());
@@ -77,4 +85,23 @@ export function installEditorState(hub: Hub, vscode: typeof vscodeApi): void {
 	});
 
 	serve(hub, "notifications.list", async () => shownNotifications());
+
+	serve(hub, "editor.trace", (args) => {
+		const { component, seconds } = (args ?? {}) as { "component"?: unknown; "seconds"?: unknown };
+
+		if (typeof component !== "string" || component.trim() === "") {
+			throw new TypeError("editor.trace takes { component, seconds? }: the text its messages carry (\"text file model\", say)");
+		}
+
+		const lasting = Math.min(typeof seconds === "number" && seconds > 0 ? seconds : TRACE_SECONDS, TRACE_MOST);
+		const wanted = component.trim().toLowerCase();
+		// (opened now and closed on its own; one already going is said by the answer's error)
+		const window = traceLog((message) => message.toLowerCase().includes(wanted), (level, message) => {
+			log.info(message, { "source": "vscode-trace", "level": level, "component": component });
+		}, lasting * 1000);
+
+		return Promise.race([window.then(() => ({ "closed": true })), new Promise((resolve) => {
+			setTimeout(resolve, 50);
+		}).then(() => ({ "tracing": component, "until": new Date(Date.now() + lasting * 1000).toISOString(), "read": `logs_query or logs_wait with source vscode-trace (or the text "${component}")` }))]);
+	});
 }

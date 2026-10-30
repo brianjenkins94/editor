@@ -91,7 +91,7 @@ test("the editor's tools are listed while its tab is connected, each named <fami
 		return listed.includes("debug_start") ? listed : undefined;
 	});
 
-	for (const name of ["debug_start", "debug_list", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "debug_explore", "margin_state", "editor_state", "editor_problems", "editor_notifications", "code_problems", "code_reach", "code_references", "code_rename", "code_move", "files_read", "files_write", "files_edit", "files_replace", "files_glob", "files_grep", "terminal_output", "runs_affected", "runs_tests", "git_status", "git_diff", "git_log", "git_show", "git_blame", "git_review", "git_commit", "git_discard", "git_branch", "git_checkout", "git_push", "rules_list", "previews_list", "previews_provoke", "previews_cdp", "previews_profile", "runs_list", "runs_stop", "runs_ledger"]) {
+	for (const name of ["debug_start", "debug_list", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "debug_explore", "margin_state", "editor_state", "editor_trace", "editor_problems", "editor_notifications", "code_problems", "code_reach", "code_references", "code_rename", "code_move", "files_read", "files_write", "files_edit", "files_replace", "files_glob", "files_grep", "terminal_output", "runs_affected", "runs_tests", "git_status", "git_diff", "git_log", "git_show", "git_blame", "git_review", "git_commit", "git_discard", "git_branch", "git_checkout", "git_push", "rules_list", "previews_list", "previews_provoke", "previews_cdp", "previews_profile", "runs_list", "runs_stop", "runs_ledger"]) {
 		assert.ok(names.includes(name), name + " in " + names.join(", "));
 	}
 

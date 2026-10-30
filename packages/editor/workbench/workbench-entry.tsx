@@ -649,7 +649,7 @@ function maybeBoot(): void {
 				// The pane's views (pane-views.ts): its tabs — the Margin's (extensions/margin) and each extension's — and what
 				// each draws beside the code.
 				installPaneViews(api as typeof import("vscode"));
-				installEditorState(workbenchHub, api as typeof import("vscode"));
+				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 				// The Rule view: the rule editor, for whoever edits a rule (`editor.rules.edit`, rule-view.ts).
 				registerRuleView(api as typeof import("vscode"));
 				// The features map: the program as its features, a block each, sized by its code (features-map.ts).
