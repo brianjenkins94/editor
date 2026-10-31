@@ -536,11 +536,10 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 				throw notFound();
 			}
 
-			return fs.readdirSync(resource.path).map((name) => {
-				const child = resource.path.replace(/\/$/u, "") + "/" + name;
-
-				return [name, fileType(fs.statSync(child))];
-			});
+			// Each entry's type as zen-fs's listing found it (it stats every entry to list it), rather than a walk from the
+			// root again for each — a quarter of a load's main thread, VS Code listing folders. A link is followed, as `stat`
+			// follows it (a `file:` sibling's folder reads as a folder).
+			return fs.readdirSync(resource.path, { "withFileTypes": true }).map((entry): [string, FileType] => [entry.name, fileType(entry.isSymbolicLink() ? fs.statSync(resource.path.replace(/\/$/u, "") + "/" + entry.name) : entry)]);
 		}),
 
 		"writeFile": (resource, content): Promise<void> => settled(() => {

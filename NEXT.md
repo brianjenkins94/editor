@@ -44,6 +44,13 @@ How it's kept:
      zen-fs's own path cache — StoreFS's id tables, off for shared buffers (`no_id_tables`) — asked of upstream (not
      in our patch, 2026-10-30); meanwhile the provider's readdir stats every child for VS Code's listings. zen-fs 2.8's SingleBuffer v2 doesn't change this (measured; it
      also loses files across realms without our lock). BABLR isn't reached in those 4 minutes.
+     Profiled again 2026-10-31 (a first load of this repository, 4 minutes, the main thread's samples attributed to
+     their owners): ~75% is zen-fs resolving paths, almost all of it asked by VS Code's file service through the
+     workspace provider (workspace-fs.ts) — `readdir` 52 s (zen-fs stats each entry to list it, and the provider stat'd
+     each child again), `stat` 19 s, `readFile` 3 s — then persistence's write-back 14 s and the load's writes 7 s. Git
+     (~1 s), type acquisition (<1 s), the hub (4 s) and observability (2 s) are small. The provider's second stat is
+     gone (zen-fs 190 s → 150 s). Next: the file store's work in a worker — the provider's calls and the write-back —
+     the main thread passing messages over the shared buffer.
    - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
      through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user
      (`git.identity`). The terminal has `git push` / `switch` / `checkout`, and agents have `git_push`, `git_branch`
