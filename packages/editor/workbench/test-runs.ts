@@ -42,8 +42,25 @@ const READY_MS = 300_000;
 /** How long a file's run may do nothing (no session, output, question or `busy`) before it's ended as stuck. */
 const STALL_MS = 120_000;
 
+/** How long working out the affected tests may take — their traces, BABLR's spans, a search of the workspace — before a
+ *  run goes on without (named files: how each test came out before) or says so (none named). */
+const AFFECTED_MS = 60_000;
+
 /** A run's output kept, at most (its end): enough to see why a file failed to load. */
 const OUTPUT = 4000;
+
+/** `work`, or a rejection with `message` once `ms` pass without it. */
+async function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	try {
+		return await Promise.race([work, new Promise<never>((_resolve, reject) => {
+			timer = setTimeout(() => { reject(new Error(message)); }, ms);
+		})]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 /** The question a run's capability stop asks (observability's PageToolAsk). */
 interface Asked { "message": string; "key": string; "scope": string; "request": Record<string, unknown> }
@@ -250,10 +267,13 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		}
 
 		const listed = Array.isArray(files) ? files.filter((file): file is string => typeof file === "string").map((file) => file.replace(/^\/workspace\//u, "")) : [];
-		const before = onlyAffected === true || listed.length === 0 ? await affected() : undefined;
+		// (no stall clock runs yet, and any of its steps can wait without end while the page is loading: a deadline)
+		const tooLong = `working out the affected tests took over ${String(AFFECTED_MS / 1000)} s (their traces, BABLR's spans, the workspace's files)`;
+		const before = onlyAffected === true || listed.length === 0 ? await within(affected(), AFFECTED_MS, tooLong) : undefined;
 		const chosen = listed.length > 0 ? listed : [...new Set((before?.tests ?? []).filter((test) => test.stale).map((test) => test.file))];
-		// (how each test came out last, before this run: a test newly failing reads differently from one failing all along)
-		const last = new Map((before ?? await affected(chosen)).tests.map((test) => [test.id, test.outcome]));
+		// (how each test came out last, before this run: a test newly failing reads differently from one failing all along —
+		// without, when that can't be known in time)
+		const last = new Map((before ?? await within(affected(chosen), AFFECTED_MS, tooLong).catch(() => ({ "tests": [] as Affected[] }))).tests.map((test) => [test.id, test.outcome]));
 		const ran = [];
 
 		for (const file of chosen) {
