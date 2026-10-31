@@ -252,6 +252,11 @@ export async function startSession(options = {}) {
 
 	const page = await context.newPage();
 
+	// ARCH_CPU_THROTTLE=N: the page's CPU N times slower (Chromium's throttling) — CI's slower runners, here.
+	if (process.env.ARCH_CPU_THROTTLE !== undefined) {
+		await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { "rate": Number(process.env.ARCH_CPU_THROTTLE) });
+	}
+
 	// COVERAGE=1: the session's realms, where each test's coverage is read (build/coverage.ts instruments them).
 	if (process.env.COVERAGE === "1") {
 		(globalThis.__coverageSessions ??= new Set()).add({ "page": page, "context": context });
