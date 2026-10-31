@@ -1031,6 +1031,9 @@ function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object> {
 
 /** How many tests failed, as node-test.js tells at the end: a run with one fails, as `node --test` does. */
 let testsFailed = 0;
+/** Whether node-test.js has told that the file's tests are all done: past it, only what Node counts as keeping a process
+ *  alive keeps the run going (advanceFrom). */
+let testsDone = false;
 
 /** When each test started, by the host's clock (the program's runs on the deterministic loop's): its time. */
 const testClock = new Map<string, number>();
@@ -1058,6 +1061,7 @@ function testTold(kind: string, titles?: string, outcome?: string, error?: strin
 		});
 	} else if (kind === "done") {
 		testsFailed = Number(titles ?? 0);
+		testsDone = true;
 	}
 }
 
@@ -2397,6 +2401,16 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 			// Async work pending and none ready (tsval's steppedAsync): let it settle, then go on — a continue to its next
 			// stop, a step to the next statement that runs (in whichever job runs next).
 			while (!base.finished && base.idle) {
+				// A test file's tests all done, and nothing left that Node counts as keeping a process alive — no ref'd timer,
+				// server or stdin — only promises that nothing here will settle (a package's): it ends, as `node --test` does.
+				// (Before then a pending promise may be a request in flight, which the browser shows no handle for.)
+				if (testsDone && held.size === 0 && !readsStdin() && ![...base.loop?.timers.values() ?? []].some((timer) => timer.ref)) {
+					finish(0);
+					done = true;
+
+					return;
+				}
+
 				// Out of work but serving: the session is idle — a request (or a timer it sets) goes on from here.
 				if (held.size > 0 || readsStdin()) {
 					post({ "type": "serving", "ports": [...listening] });
@@ -2612,6 +2626,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	testsRan = [];
 	testStarts.clear();
 	testsFailed = 0;
+	testsDone = false;
 	functionsRan.clear();
 
 	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });

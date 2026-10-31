@@ -199,7 +199,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			} else if (event.event === "ask") {
 				const { line, callee, capability, resource, "file": where = `${ROOT}/${file}` } = event.body as { "line": number; "callee": string; "capability": string; "resource": string; "file"?: string };
 				const scope = scopeOf(capability, resource);
-				const key = `runs_tests:${scope}`;
+				// (a temporary file's name is made fresh each run — mkdtemp's — so its approval is for the run's temporary files:
+				// keyed by the path, a re-run with it approved would ask again about a name it hasn't seen)
+				const key = `runs_tests:${scope.replace(/^(fs:\w+:\/tmp\/).*$/u, "$1*")}`;
 
 				if (approved.includes(key)) {
 					void Promise.resolve(vscode.commands.executeCommand("editor.capability.decide", event.session.id, "allow-once")).catch(stop);

@@ -407,3 +407,21 @@ test("module.createRequire: from a path, a file: URL's text, or a URL object, as
 
 	assert.deepEqual(runtime.require("./main.js"), Array.from({ "length": 3 }, () => "/workspace/node_modules/greet/index.js"));
 });
+
+test("a package's code has Node's Buffer as a global, though the realm it runs in has none (a browser worker's)", () => {
+	const host = globalThis as { "Buffer"?: unknown };
+	const kept = host.Buffer;
+
+	delete host.Buffer;
+
+	try {
+		const runtime = runtimeWith({
+			"/workspace/node_modules/bytes/package.json": JSON.stringify({ "name": "bytes", "main": "index.js" }),
+			"/workspace/node_modules/bytes/index.js": "module.exports = (text) => Buffer.from(text).toString('hex');"
+		});
+
+		assert.equal((runtime.require("bytes", "/workspace", "package") as (text: string) => string)("hi"), "6869");
+	} finally {
+		host.Buffer = kept;
+	}
+});

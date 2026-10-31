@@ -925,7 +925,7 @@ function createRequire(
 			const importMetaUrl = "file://" + resolvedPath;
 			// (top-level await: the module's body is an async function, and import() waits for it)
 			const awaits = code.startsWith(ASYNC_MODULE);
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch) {
+			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer) {
 var exports = $exports;
 var require = $require;
 var module = $module;
@@ -936,6 +936,8 @@ var console = $console;
 var import_meta = $importMeta;
 var __dynamicImport = $dynamicImport;
 var fetch = $fetch;
+// Node's Buffer is a global its modules use without requiring it (isomorphic-git, zen-fs): theirs too
+var Buffer = $Buffer;
 // Set up global.process and globalThis.process for code that accesses them directly
 var global = globalThis;
 globalThis.process = $process;
@@ -968,7 +970,8 @@ ${code}
 				consoleWrapper,
 				{ "url": importMetaUrl, "dirname": dirname, "filename": resolvedPath, "resolve": importMetaResolve(moduleRequire) },
 				dynamicImport,
-				options.globalFor?.("fetch", program ? "program" : "package", dirname) ?? globalThis.fetch
+				options.globalFor?.("fetch", program ? "program" : "package", dirname) ?? globalThis.fetch,
+				UnenvBuffer
 			);
 
 			// An ES module's static imports are evaluated before it, as Node does; one still evaluating (its top level
@@ -1575,7 +1578,7 @@ export class Runtime {
     // Use the same wrapper pattern as loadModule for consistency
 		try {
 			const importMetaUrl = "file://" + filename;
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch) {
+			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer) {
 var exports = $exports;
 var require = $require;
 var module = $module;
@@ -1586,6 +1589,8 @@ var console = $console;
 var import_meta = $importMeta;
 var __dynamicImport = $dynamicImport;
 var fetch = $fetch;
+// Node's Buffer is a global its modules use without requiring it (isomorphic-git, zen-fs): theirs too
+var Buffer = $Buffer;
 // Set up global.process and globalThis.process for code that accesses them directly
 var global = globalThis;
 globalThis.process = $process;
@@ -1612,7 +1617,8 @@ ${code}
 				consoleWrapper,
 				{ "url": importMetaUrl, "dirname": dirname, "filename": filename, "resolve": importMetaResolve(require) },
 				dynamicImport,
-				this.options.globalFor?.("fetch", "program", dirname) ?? globalThis.fetch
+				this.options.globalFor?.("fetch", "program", dirname) ?? globalThis.fetch,
+				UnenvBuffer
 			);
 
 			module.loaded = true;
