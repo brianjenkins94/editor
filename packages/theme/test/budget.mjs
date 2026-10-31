@@ -13,7 +13,6 @@
  *
  *     node --test packages/theme/test/budget.mjs
  */
-import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import { test } from "node:test";
 import * as url from "node:url";
@@ -22,8 +21,34 @@ import ts from "typescript";
 const budget = JSON.parse(fs.readFileSync(new URL("../budget.json", import.meta.url)));
 const root = url.fileURLToPath(new URL("../../../", import.meta.url));
 
+/**
+ * The paths git tracks, as `git ls-files` lists them: read from its index (.git/index, versions 2 and 3 — git's default,
+ * and isomorphic-git's), not by running git, so this runs where there are no processes to spawn too (the editor's
+ * debugger, NEXT.md item 1). An entry is 62 bytes of stat, object id and flags (two more when version 3 marks it
+ * extended), then its path, NUL-padded to a multiple of 8; a path in conflict has an entry per stage.
+ */
+function trackedPaths(index) {
+	if (index.toString("latin1", 0, 4) !== "DIRC" || ![2, 3].includes(index.readUInt32BE(4))) {
+		throw new Error("budget.mjs reads git index versions 2 and 3: .git/index is " + index.readUInt32BE(4));
+	}
+
+	const paths = new Set();
+	let offset = 12;
+
+	for (let entry = index.readUInt32BE(8); entry > 0; entry -= 1) {
+		const flags = index.readUInt16BE(offset + 60);
+		const start = offset + 62 + (flags & 0x4000 ? 2 : 0);
+		const end = index.indexOf(0, start);
+
+		paths.add(index.toString("utf8", start, end));
+		offset += Math.ceil((end - offset + 1) / 8) * 8;
+	}
+
+	return [...paths];
+}
+
 /** The repo's own files (tracked, not the vendored monaco-vscode-api), relative to its root. */
-const files = childProcess.execFileSync("git", ["ls-files", "-z"], { "cwd": root, "encoding": "utf8" }).split("\0").filter((file) => file !== "" && !file.startsWith("components/monaco-vscode-api/") && fs.existsSync(root + file));
+const files = trackedPaths(fs.readFileSync(root + ".git/index")).filter((file) => !file.startsWith("components/monaco-vscode-api/") && fs.existsSync(root + file));
 const read = (file) => fs.readFileSync(root + file, "utf8");
 const sources = files.filter((file) => /\.[cm]?[jt]sx?$/u.test(file));
 
