@@ -700,8 +700,14 @@ async function start(): Promise<void> {
 }
 
 /** An editor's frame, shown or taken down to match its file's pane. */
+/** An editor inside another — a peek's (references, definition), an inline diff's — which VS Code makes with a
+ *  parent (`EmbeddedCodeEditorWidget.getParentEditor`): no pane of its own, which would draw inside the peek. */
+function embedded(editor: monaco.editor.ICodeEditor): boolean {
+	return typeof (editor as { "getParentEditor"?: unknown }).getParentEditor === "function";
+}
+
 function sync(editor: monaco.editor.ICodeEditor): void {
-	const pane = panes.get(editor.getModel()?.uri.toString() ?? "");
+	const pane = embedded(editor) ? undefined : panes.get(editor.getModel()?.uri.toString() ?? "");
 	let frame = frames.get(editor);
 
 	if (pane === undefined) {

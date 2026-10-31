@@ -1061,6 +1061,13 @@ test("terminal: node runs in the debugger with its args, cwd and env — output 
 		await type("bye\r");
 		await eventually("the run over", async () => ((await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node ../argv.js one two" && run.state === "exited") || undefined));
 		assert.ok(!(await screen()).includes("running in the Debug Console"), "no pointer elsewhere: it's here");
+
+		// Into a pipe, its output — stderr too, with 2>&1 — is the shell's to pass on (session.ts outputCaptured): tail
+		// keeps the last line, the error, and the first never reaches the terminal.
+		await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file("/workspace/piped.js"), new TextEncoder().encode("console.log(\"the first line, piped\");\nconsole.error(\"the error line, piped\");\n")));
+		assert.equal(await session.request("terminal.run", { "id": id, "command": "node /workspace/piped.js 2>&1 | tail -n 1", "cwd": "/workspace" }, 10_000), true);
+		await eventually("the error, through tail", async () => ((await screen()).includes("the error line, piped") || undefined));
+		assert.ok(!(await screen()).includes("the first line, piped"), "tail kept only the last line: node's output went into the pipe");
 	} finally {
 		await workbench.evaluate(async (terminal) => {
 			const { api } = globalThis.__editor;
@@ -1068,6 +1075,7 @@ test("terminal: node runs in the debugger with its args, cwd and env — output 
 			globalThis.__terminalOff?.();
 			globalThis.__architecture.hub.publish(`terminal.stop.${terminal}`, {});
 			await api.workspace.fs.delete(api.Uri.file("/workspace/argv.js")).then(() => undefined, () => undefined);
+			await api.workspace.fs.delete(api.Uri.file("/workspace/piped.js")).then(() => undefined, () => undefined);
 			await api.workspace.fs.delete(api.Uri.file("/workspace/sub"), { "recursive": true }).then(() => undefined, () => undefined);
 		}, id);
 	}

@@ -11,6 +11,7 @@
  */
 import type { Juvy } from "@brianjenkins94/util/juvy";
 import type { CommandHost, Handler } from "../../catalog";
+import type { NodeOutput } from "../../../node-runner";
 
 import { lifecycleOfSource } from "@brianjenkins94/editor-api/lifecycle";
 
@@ -82,9 +83,14 @@ export function invocationOf(config: Juvy): NodeInvocation {
 	return { "file": program[0], "args": program.slice(1) };
 }
 
-export function create({ runner, writeLive, terminal }: CommandHost): Handler {
+export function create({ runner, writeLive, captured, terminal }: CommandHost): Handler {
 	return async (config, ctx) => {
 		const invocation = invocationOf(config);
+		// (into a pipe or a file — `node x 2>&1 | tail` — its output is collected and handed back through the shell; to the
+		// terminal, written live)
+		const collected = { "out": "", "err": "" };
+		const output: NodeOutput = captured() ? (stream, data) => { collected[stream === "err" ? "err" : "out"] += data; } : writeLive;
+		const result = (exitCode: number, stderr = ""): { "stdout": string; "stderr": string; "exitCode": number } => ({ "stdout": collected.out, "stderr": collected.err + stderr, "exitCode": exitCode });
 
 		if ("unsupported" in invocation) {
 			return { "stdout": "", "stderr": invocation.unsupported + "\n", "exitCode": invocation.exitCode };
@@ -101,7 +107,7 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 			let exitCode = 0;
 
 			for (const file of files) {
-				writeLive("out", `▶ ${file}\n`);
+				output("out", `▶ ${file}\n`);
 
 				const ran = await runFile(file, [], `node --test ${file}`);
 
@@ -112,7 +118,7 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 				}
 			}
 
-			return { "stdout": "", "stderr": "", "exitCode": exitCode };
+			return result(exitCode);
 		}
 
 		// Code runs from a file of its own, removed once it's run.
@@ -193,7 +199,7 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 			const ended = (exitCode: number): { "stdout": string; "stderr": string; "exitCode": number } => {
 				run.end(exitCode, controller.signal.aborted);
 
-				return { "stdout": "", "stderr": "", "exitCode": exitCode };
+				return result(exitCode);
 			};
 
 			const listening = (port: number): void => {
@@ -203,7 +209,7 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 			try {
 				// In the debugger, as every Run is — breakpoints, step-back, capability stops — its output here, its stdin from
 				// here, the arguments after the file. (`npm run dev` → `vite` is a separate command, the dev server's.)
-				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": writeLive, "signal": controller.signal, "args": programArgs, "onListening": listening });
+				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": output, "signal": controller.signal, "args": programArgs, "onListening": listening });
 
 				if (debugged.attached) {
 					return ended(debugged.exitCode);
@@ -213,12 +219,12 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 				// way*: a gap is a bug to fix, not a second way to run).
 				run.end(1);
 
-				return { "stdout": "", "stderr": `node: couldn't start the debugger for ${target}\n`, "exitCode": 1 };
+				return result(1, `node: couldn't start the debugger for ${target}\n`);
 			} catch (error) {
 				// The worker unreachable — surface it rather than hanging the shell.
 				run.end(1);
 
-				return { "stdout": "", "stderr": `node: ${error instanceof Error ? error.message : String(error)}\n`, "exitCode": 1 };
+				return result(1, `node: ${error instanceof Error ? error.message : String(error)}\n`);
 			}
 		}
 	};

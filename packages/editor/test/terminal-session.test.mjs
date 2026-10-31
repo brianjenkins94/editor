@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Bash, defineCommand } from "just-bash";
 
-import { execInSession, statementsOf } from "../workbench/terminal/session.ts";
+import { execInSession, outputCaptured, statementsOf } from "../workbench/terminal/session.ts";
 
 /** A long-running command, like `vite`: runs until Ctrl-C, then exits 130. */
 const waiter = defineCommand("waiter", async (_args, ctx) => {
@@ -95,4 +95,14 @@ test("statementsOf: a streaming line's statements, and the lines run whole", () 
 	assert.equal(statementsOf("node server.js & echo started", STREAMING), undefined, "a background job");
 	assert.equal(statementsOf("node x.js || exit 1; echo after", STREAMING), undefined, "exit would end only its statement");
 	assert.equal(statementsOf("echo 'unclosed; node x.js", STREAMING), undefined, "an unclosed quote");
+});
+
+test("outputCaptured: a statement's output into a pipe or a file, and only stderr moved, or nothing", () => {
+	for (const captured of ["node x.js 2>&1 | tail", "node x.js | grep y", "node x.js > out.txt", "node x.js >> out.txt", "node x.js &> log", "node x.js 1> out.txt"]) {
+		assert.equal(outputCaptured(captured), true, captured);
+	}
+
+	for (const live of ["node x.js", "node x.js 2>&1", "node x.js 2> err.txt", "node x.js || echo failed", "node -e \"console.log('a | b > c')\""]) {
+		assert.equal(outputCaptured(live), false, live);
+	}
 });

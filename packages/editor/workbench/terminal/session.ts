@@ -65,6 +65,39 @@ function namesStreaming(input: string, streaming: ReadonlySet<string>): boolean 
 	return input.split(/[\s;&|]+/u).some((word) => streaming.has(word));
 }
 
+/**
+ * Whether `statement`'s output goes somewhere other than the terminal: into a pipe (`| tail`) or a file (`> out.txt`,
+ * `&> log`), outside quotes. A streaming command's output there is handed back through the shell, as any command's,
+ * rather than written live — or `node x 2>&1 | tail` gives `tail` nothing, and its error goes nowhere to be seen.
+ * `2> err.txt` and `2>&1` alone move only stderr, so the output still goes to the terminal.
+ */
+export function outputCaptured(statement: string): boolean {
+	let quote: "'" | "\"" | undefined;
+
+	for (let index = 0; index < statement.length; index += 1) {
+		const character = statement[index];
+		const before = statement[index - 1];
+
+		if (quote !== undefined) {
+			if (character === "\\" && quote === "\"") {
+				index += 1;
+			} else if (character === quote) {
+				quote = undefined;
+			}
+		} else if (character === "\\") {
+			index += 1;
+		} else if (character === "'" || character === "\"") {
+			quote = character;
+		} else if (character === "|" && statement[index + 1] !== "|" && before !== "|") {
+			return true;
+		} else if (character === ">" && before !== ">" && (before === undefined || !/\d/u.test(before) || before === "1") && statement[index + 1] !== "&") {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 /** First words a line run statement by statement would mean something else with: compound commands (their bodies span
  *  statements), and builtins that act on the line's shell itself (`exit` would end only its statement). */
 const WHOLE = new Set(["if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac", "select", "function", "time", "exit", "return", "exec", "trap", "set", "shopt", "source", ".", "eval"]);

@@ -46,6 +46,8 @@ export interface SubcommandDefinition {
 	"options"?: Schema;
 	"stopEarly"?: boolean;
 	"aliases"?: string[];
+	/** The option a bare `-<number>` gives, as git's `-3` is `-n 3` (`git log -3`): juvy knows no such flag. */
+	"numberIs"?: string;
 	/** It isn't here: this says what to do instead (`git push` → the Commit button). */
 	"missing"?: string;
 }
@@ -58,6 +60,9 @@ export interface CommandHost {
 	"hub": Hub;
 	/** Write to this terminal now, as it's produced (stderr in red). */
 	"writeLive": NodeOutput;
+	/** Whether the statement running goes into a pipe or a file (session.ts `outputCaptured`): then a streaming command
+	 *  hands its output back through the shell instead of writing it live. */
+	"captured": () => boolean;
 	/** This terminal's number: what it runs is attributed to it (runs.ts). */
 	"terminal": number;
 	/** The shell itself, to run a line in (`npm run` runs its script there). */

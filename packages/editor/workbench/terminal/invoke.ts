@@ -57,7 +57,12 @@ export function toCommand(definition: CommandDefinition, implementation: Impleme
 						: () => Promise.resolve({ "stdout": "", "stderr": `${definition.name} ${name}: ${subcommand.missing}\n`, "exitCode": 1 }), subcommand.aliases))
 				});
 
-		await run(app, { "argv": args, "exit": false, "process": proc });
+		// (a subcommand's bare `-<number>` as the option it stands for: `git log -3` is `git log -n 3`)
+		const numbered = definition.subcommands?.[args[0] ?? ""]?.numberIs;
+		const short = numbered === undefined ? undefined : (definition.subcommands?.[args[0]]?.options?.[numbered] as { "short"?: string } | undefined)?.short;
+		const argv = short === undefined ? args : args.flatMap((arg, at) => (at > 0 && /^-\d+$/u.test(arg) ? [`-${short}`, arg.slice(1)] : [arg]));
+
+		await run(app, { "argv": argv, "exit": false, "process": proc });
 
 		const exitCode = Number(proc.exitCode ?? 0);
 

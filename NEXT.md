@@ -36,10 +36,6 @@ How it's kept:
    - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. On a dev build, the page's
      main thread was busy for minutes after a load: TypeScript resolves the whole monorepo now, and 1,733 packages are
      pinned for the baseline to read. Not profiled: the long-frame observer couldn't get a turn.
-   - **Bugs found on the way:**
-     - With `2>&1 | tail`, the error printed nothing.
-     - `git log -3` is refused (`-n 3` works).
-     - The Margin pane draws inside the references peek.
 
    The steps left:
    - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes

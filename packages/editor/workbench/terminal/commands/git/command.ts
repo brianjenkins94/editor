@@ -17,6 +17,7 @@ export default {
 		},
 		"log": {
 			"summary": "The commits, newest first.",
+			"numberIs": "maxCount",
 			"options": {
 				"oneline": { "format": Boolean, "default": false, "doc": "One line a commit." },
 				"maxCount": { "format": String, "default": "", "short": "n", "doc": "At most this many." }

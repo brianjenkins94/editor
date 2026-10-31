@@ -1182,6 +1182,42 @@ test("search: findFiles keeps to its glob, and to files.exclude unless told not 
 
 // A default config the editor supplies (tsconfig.json) is the repo's to replace: deleted, the default shows through;
 // written again, the new one is the workspace's — not refused because the default under it is read-only.
+// A peek (references, definition) shows the code in an editor of its own inside the one it's on: the Margin is the
+// editor's, not the peek's (components/monaco-vscode-api/pane.ts `embedded`) — it drew a second pane inside the peek.
+test("margin: a references peek shows the code, with no pane of its own inside it", async () => {
+	const workbench = session.workbench();
+	const file = "/workspace/peek.js";
+
+	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file(path), new TextEncoder().encode("function twice(n) {\n\treturn n * 2;\n}\n\nconsole.log(twice(2));\n")), file);
+
+	try {
+		await session.request("debug.start", { "program": file, "breakpoints": [] }, 60_000);
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+			const editor = await api.window.showTextDocument(api.Uri.file(path));
+
+			editor.selection = new api.Selection(0, 10, 0, 10);
+		}, file);
+		await eventually("the Margin beside it", () => workbench.evaluate(() => document.querySelector(".notes-margin") !== null || undefined), 30_000);
+		await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.action.referenceSearch.trigger"));
+		await eventually("the peek, with the code in it", () => workbench.evaluate(() => document.querySelector(".peekview-widget .monaco-editor") !== null || undefined), 30_000);
+		// (a moment for a pane to draw, as the editor's did)
+		await new Promise((resolve) => {
+			setTimeout(resolve, 1500);
+		});
+		assert.equal(await workbench.evaluate(() => document.querySelectorAll(".peekview-widget .notes-margin").length), 0, "no Margin inside the peek");
+		assert.ok(await workbench.evaluate(() => document.querySelector(".notes-margin") !== null), "the editor's own, still there");
+	} finally {
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("closeReferenceSearch").then(() => undefined, () => undefined);
+			await api.commands.executeCommand("workbench.action.closeActiveEditor");
+			await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+		}, file);
+	}
+});
+
 test("defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it", async () => {
 	const found = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

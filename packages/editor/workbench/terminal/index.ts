@@ -30,7 +30,7 @@ import { COMMANDS, PRESENT, STREAMING } from "./catalog";
 import { createWorkspaceTerminalFs } from "./fs";
 import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./integration";
 import { toCommand } from "./invoke";
-import { execInSession, statementsOf } from "./session";
+import { execInSession, outputCaptured, statementsOf } from "./session";
 
 type VscodeApi = typeof import("vscode");
 
@@ -109,6 +109,10 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		fire(text.replace(/\r?\n/gu, "\r\n"));
 	};
 
+	// Whether the statement running goes into a pipe or a file (session.ts outputCaptured): a streaming command's output
+	// is then the shell's to pass on.
+	let captured = false;
+
 	// Live output from a streaming process (node): written to the terminal as it arrives, stderr in red.
 	const writeLive: NodeOutput = (stream, data) => {
 		const text = data.replace(/\r?\n/gu, "\r\n");
@@ -120,7 +124,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
 		sessionPromise ??= import("just-bash/browser").then((module) => {
-			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "terminal": terminal, "session": getSession, "history": () => history };
+			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "captured": () => captured, "terminal": terminal, "session": getSession, "history": () => history };
 			const theirs = new Set(module.getCommandNames());
 			// Ours, each loaded the first time it runs (just-bash's lazy command), through juvy (invoke.ts): its options parsed
 			// and `--help` made from its definition, and a missing one's message said. (One that isn't here stays out of the way of
@@ -198,6 +202,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 					// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a custom
 					// command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
+					captured = outputCaptured(statements[index].text);
+
 					const result = await execInSession(session, state, statements[index].text, signal);
 
 					({ exitCode } = result);

@@ -36,6 +36,7 @@ test("status, add, commit, log: a first commit", async () => {
 	assert.match((await git("commit -m 'the first'")).stdout, /^\[main [0-9a-f]{7}\] the first\n 2 files changed\n$/u);
 	assert.match((await git("log --oneline")).stdout, /^[0-9a-f]{7} the first\n$/u);
 	assert.match((await git("log -n 1")).stdout, /^commit [0-9a-f]{40}\nAuthor: editor <editor@localhost>\n/u);
+	assert.equal((await git("log -1 --oneline")).stdout, (await git("log -n 1 --oneline")).stdout, "git's -<number>: -n <number>");
 	assert.match((await git("status")).stdout, /nothing to commit, working tree clean/u);
 	assert.ok(announced.length >= 2, "add and commit say the repository changed");
 });
