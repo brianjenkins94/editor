@@ -9,18 +9,28 @@ import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
 // curated catalog, packages/theme/README.md, *Only through the theme*), and Web Awesome's whole catalog, so webawesome/known-components tells a component's tag
 // from a utility class. (Web Awesome resolved as the editor's code resolves it.)
 const THEME_COMPONENTS = readdirSync(new URL("packages/theme/src/components", import.meta.url)).filter((file) => file.endsWith(".js")).map((file) => file.slice(0, -".js".length));
-const WEB_AWESOME_COMPONENTS = readdirSync(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js"))));
+// Web Awesome's installed dist/ — or none where it isn't installed: in the editor, which serves a registry package from
+// the CDN as it's used, so none is on disk. There the two rules that read its files (known-components, known-classes)
+// are off, and every other rule applies.
+const WEB_AWESOME = (() => {
+	try {
+		return path.dirname(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js"))));
+	} catch {
+		return undefined;
+	}
+})();
+const WEB_AWESOME_COMPONENTS = WEB_AWESOME === undefined ? [] : readdirSync(path.join(WEB_AWESOME, "components"));
 
 // The class names something styles (packages/theme/README.md, *Class names, a closed set*; webawesome/known-classes): Web Awesome's utilities (and the families it
 // matches by prefix, `[class*='wa-stack']`) from its installed CSS, and every class the theme's Stitches styles declare
 // (its recipes, its surfaces' styles).
-const WEB_AWESOME_STYLES = path.join(path.dirname(path.dirname(path.dirname(createRequire(new URL("packages/editor/package.json", import.meta.url)).resolve("@awesome.me/webawesome/dist/components/button/button.js")))), "styles");
+const WEB_AWESOME_STYLES = WEB_AWESOME === undefined ? undefined : path.join(WEB_AWESOME, "styles");
 const cssFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((file) => String(file).endsWith(".css")).map((file) => readFileSync(path.join(folder, String(file)), "utf8"));
 const classesIn = (text) => [...text.replaceAll(/\/\*[\s\S]*?\*\//gu, "").matchAll(/\.(-?[_a-zA-Z][\w-]*)/gu)].map((match) => match[1]);
 // And the classes Stitches styles: a selector key in a `css({…})` / `globalCss({…})` object (`"&.open"`).
 const sourceFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((file) => /\.tsx?$/u.test(String(file)) && !String(file).includes("node_modules")).map((file) => readFileSync(path.join(folder, String(file)), "utf8"));
 const stitchesClasses = (text) => (/\b(?:css|globalCss|unlayeredGlobalCss|stylesheet|recipe)\(\{/u.test(text) ? [...text.matchAll(/"([^"\n]*?[&\s>~+,]?\.[_a-zA-Z][\w-]*[^"\n]*)":\s*\{/gu)].flatMap((match) => classesIn(match[1])) : []);
-const KNOWN_CLASSES = [...new Set([
+const KNOWN_CLASSES = WEB_AWESOME_STYLES === undefined ? [] : [...new Set([
 	...cssFiles(WEB_AWESOME_STYLES),
 	...cssFiles(url.fileURLToPath(new URL("packages/theme/src", import.meta.url)))
 ].flatMap(classesIn).concat(["packages/editor", "packages/theme/src"].flatMap((folder) => sourceFiles(url.fileURLToPath(new URL(folder, import.meta.url)))).flatMap(stitchesClasses)))];
@@ -32,7 +42,7 @@ const KNOWN_ELSEWHERE = [
 	"^(?:live-values-split|live-values-menu-item|more)$", // the tours read an ask's split buttons by these; pane-native.ts reads `more`
 	"^gp-expand$" // git-panel.tsx finds a row's expander by it
 ];
-const WEB_AWESOME_PREFIXES = [...new Set(cssFiles(path.join(WEB_AWESOME_STYLES, "utilities")).flatMap((text) => [...text.matchAll(/\[class\*=['"](wa-[a-z-]+)['"]\]/gu)].map((match) => match[1])))];
+const WEB_AWESOME_PREFIXES = WEB_AWESOME_STYLES === undefined ? [] : [...new Set(cssFiles(path.join(WEB_AWESOME_STYLES, "utilities")).flatMap((text) => [...text.matchAll(/\[class\*=['"](wa-[a-z-]+)['"]\]/gu)].map((match) => match[1])))];
 
 // The editor's folders are its realms (packages/editor/ARCHITECTURE.md): a realm imports another realm's code only
 // through shared/. A relative import that climbs out of its folder and into another realm's is an error. The
@@ -89,8 +99,10 @@ export default [
 			"webawesome/no-css-imports": "error",
 			"webawesome/css-in-js-tokens": "error",
 			"webawesome/through-theme": "error",
-			"webawesome/known-components": ["error", { "allowed": THEME_COMPONENTS, "catalog": WEB_AWESOME_COMPONENTS }],
-			"webawesome/known-classes": ["error", { "known": KNOWN_CLASSES, "prefixes": WEB_AWESOME_PREFIXES, "allow": KNOWN_ELSEWHERE, "wrappers": { "element": 1 } }]
+			...WEB_AWESOME === undefined ? {} : {
+				"webawesome/known-components": ["error", { "allowed": THEME_COMPONENTS, "catalog": WEB_AWESOME_COMPONENTS }],
+				"webawesome/known-classes": ["error", { "known": KNOWN_CLASSES, "prefixes": WEB_AWESOME_PREFIXES, "allow": KNOWN_ELSEWHERE, "wrappers": { "element": 1 } }]
+			}
 		}
 	},
 	{
