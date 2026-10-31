@@ -29,13 +29,26 @@ How it's kept:
      - `process.exit`, which the debugger's `process` doesn't have.
 
      CI on a pushed branch checks the work instead.
-   - **Type gaps left:** features-map.ts's `wa-card` isn't in `HTMLElementTagNameMap` (Web Awesome's element types
-     come from no import), and `registerCustomView`'s callback parameter is `any` (the `@codingame` types behind
-     components/monaco-vscode-api). Not yet looked at.
-   - **The repo's eslint.config.js** fails to load (`filenameOrUrl.startsWith is not a function`), so the preset lints.
-   - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. On a dev build, the page's
-     main thread was busy for minutes after a load: TypeScript resolves the whole monorepo now, and 1,733 packages are
-     pinned for the baseline to read. Not profiled: the long-frame observer couldn't get a turn.
+   - **Type gaps left** (seen again 2026-10-30, the repository loaded locally): features-map.ts's `wa-card` isn't in
+     `HTMLElementTagNameMap` (ts 2345, L157) though it imports `theme/components/card`, whose types re-export
+     `@awesome.me/webawesome`'s, so they don't resolve from packages/theme in the browser; `registerCustomView`'s
+     callback parameter is `any` (ts 7044, L123: the `@codingame` types behind components/monaco-vscode-api, whose
+     build isn't in git); and eslint.config.js's `@brianjenkins94/util/eslint` has no declaration file (ts 7016).
+   - **The repo's eslint.config.js** gets past `createRequire(new URL(…))` now (almostnode, cb5922d0) and stops at
+     `Cannot find module '@awesome.me/webawesome/dist/components/button/button.js'`: it lists Web Awesome's
+     components from its installed files, and a registry package isn't on disk in the editor (the CDN serves it as
+     it's used, and ESLint's worker has no network). So the preset lints. Either the workspace has the files a
+     config reads (an install of what it resolves), or the config reads them another way.
+   - **cspell** flags ordinary code words in this repository (`const`, `config`, `readdir`: 130 of them): its
+     programming dictionaries aren't loading for it.
+   - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. Profiled 2026-10-30 (the
+     harness's Chromium, a DevTools CPU profile of the load): the main thread is busy 100% for the 4 minutes measured.
+     Half of it was isomorphic-git parsing .git/index again for every file statusMatrix checked, a read bumping zen-fs's
+     ctime: fixed by mounting without access times (b7430d91). What's left is zen-fs's own path lookups (StoreFS
+     `findInode` decodes each parent's listing per lookup: `_struct`, `decodeDirListing`, ~170 s of 240), most of it
+     async calls whose caller the profile doesn't show; the rest the file provider's stat/readdir/readFile for VS Code.
+     Next: who makes those lookups (a logpoint on zen-fs's async entry points, as found the index's), then fewer of
+     them or a path cache in the zen-fs patch. BABLR isn't reached in those 4 minutes (no request sent).
 
    The steps left:
    - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
