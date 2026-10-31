@@ -344,13 +344,35 @@ const stdin = ((): { "on": (event: string, listener: (...args: unknown[]) => voi
  * builtin (there is no real module system in the worker) BEFORE reaching a capability breakpoint — the whole point of
  * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
  */
+/** `process.exit(code)` out of the program (capabilitySurface): the run ends there with `code`, as node's does — not a
+ *  crash. Caught where a run's end is decided, as an unattended run's halt is. */
+const EXITED = Symbol("process.exit");
+
+/** The program's `process`, for the exit code it sets (`process.exitCode`) when it finishes on its own. */
+let guestProcess: { "exitCode"?: number } | undefined;
+
 function capabilitySurface(fileName: string, args: string[], real?: Runtime, where: { "cwd"?: string; "env"?: Record<string, string> } = {}): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const standins = gated(capabilityStandins(), real, where.cwd ?? "/workspace");
 	// What a script reads of its process: its arguments (a run's inputs), the directory it was started in and its
 	// environment (a terminal's — RUNNING.md, *Output goes where it was started*), and its stdin — nothing it can do.
 	// (Its version is the one almostnode's process reports, packages/almostnode/shims/process.ts, so a run reads the same
 	// version whichever runtime it's in.)
-	const process = { "argv": ["node", fileName, ...args], "env": { ...where.env }, "platform": "browser", "version": "v20.0.0", "versions": { "node": "20.0.0" }, "cwd": () => where.cwd ?? "/workspace", "stdin": stdin };
+	// And how it ends: `exit(code)` there and then, or `exitCode` once it's done, as node's.
+	const process = {
+		"argv": ["node", fileName, ...args],
+		"env": { ...where.env },
+		"platform": "browser",
+		"version": "v20.0.0",
+		"versions": { "node": "20.0.0" },
+		"cwd": () => where.cwd ?? "/workspace",
+		"stdin": stdin,
+		"exitCode": undefined as number | undefined,
+		"exit": (code?: number): never => {
+			throw Object.assign(new Error(`process.exit(${String(code ?? process.exitCode ?? 0)})`), { [UNCATCHABLE]: true, [EXITED]: code ?? process.exitCode ?? 0 });
+		}
+	};
+
+	guestProcess = process;
 
 	return { "globals": { ...standins.globals, "console": guestConsole(), "process": process }, "modules": standins.modules };
 }
@@ -2256,6 +2278,14 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 				}
 			}
 		} catch (error) {
+			// The program called process.exit: it ends there, with its code.
+			if (typeof error === "object" && error !== null && EXITED in error) {
+				finish(Number((error as { [EXITED]: unknown })[EXITED]) || 0);
+				done = true;
+
+				return;
+			}
+
 			// An unattended run halted before a call that never ran for real: it stops there, saying why — not a crash.
 			if (typeof error === "object" && error !== null && HALTED in error) {
 				finish(0, stoppedAt(base, `halted before ${String((error as { [HALTED]: unknown })[HALTED])}: it never ran for real, so there's nothing to give it — Rule… or Pin… on its line`));
@@ -2287,7 +2317,7 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 				post({ "type": "output", "text": "→ " + format(base.completion), "stream": "console" });
 			}
 
-			finish();
+			finish(Number(guestProcess?.exitCode ?? 0) || 0);
 			done = true;
 
 			return;

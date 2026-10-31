@@ -1068,6 +1068,23 @@ test("terminal: node runs in the debugger with its args, cwd and env — output 
 		assert.equal(await session.request("terminal.run", { "id": id, "command": "node /workspace/piped.js 2>&1 | tail -n 1", "cwd": "/workspace" }, 10_000), true);
 		await eventually("the error, through tail", async () => ((await screen()).includes("the error line, piped") || undefined));
 		assert.ok(!(await screen()).includes("the first line, piped"), "tail kept only the last line: node's output went into the pipe");
+
+		// process.exit ends the run there with its code, past a try/catch (node's can't be caught); process.exitCode is what
+		// a run that finishes on its own ends with.
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+			const write = (path, text) => api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(text));
+
+			await write("/workspace/exits.js", "console.log(\"before exit\");\ntry {\n\tprocess.exit(3);\n} catch {\n\tconsole.log(\"caught exit\");\n}\nconsole.log(\"after exit\");\n");
+			await write("/workspace/sets-code.js", "process.exitCode = 2;\nconsole.log(\"set its code\");\n");
+		});
+		assert.equal(await session.request("terminal.run", { "id": id, "command": "node /workspace/exits.js; echo \"exited $?\"; node /workspace/sets-code.js; echo \"ended $?\"", "cwd": "/workspace" }, 10_000), true);
+		await eventually("both runs' ends", async () => ((await screen()).includes("ended 2") || undefined));
+
+		const ends = await screen();
+
+		assert.ok(ends.includes("before exit") && ends.includes("exited 3") && ends.includes("set its code"), ends.slice(-400));
+		assert.ok(!ends.includes("caught exit") && !ends.includes("after exit"), "nothing after process.exit ran: " + ends.slice(-400));
 	} finally {
 		await workbench.evaluate(async (terminal) => {
 			const { api } = globalThis.__editor;
@@ -1076,6 +1093,8 @@ test("terminal: node runs in the debugger with its args, cwd and env — output 
 			globalThis.__architecture.hub.publish(`terminal.stop.${terminal}`, {});
 			await api.workspace.fs.delete(api.Uri.file("/workspace/argv.js")).then(() => undefined, () => undefined);
 			await api.workspace.fs.delete(api.Uri.file("/workspace/piped.js")).then(() => undefined, () => undefined);
+			await api.workspace.fs.delete(api.Uri.file("/workspace/exits.js")).then(() => undefined, () => undefined);
+			await api.workspace.fs.delete(api.Uri.file("/workspace/sets-code.js")).then(() => undefined, () => undefined);
 			await api.workspace.fs.delete(api.Uri.file("/workspace/sub"), { "recursive": true }).then(() => undefined, () => undefined);
 		}, id);
 	}
