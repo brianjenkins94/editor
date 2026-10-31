@@ -15,7 +15,8 @@
  *   its question (`ask`) — which runs_tests puts to the person through debug-mcp (BERNARD, JUDICIAL, then them), and
  *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace and the
  *   debugger), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
- *   nothing for STALL_MS — no debug session, no output, no question — is stuck: it's ended, and says where (`stalled`).
+ *   nothing for STALL_MS — no debug session, no output, no question, no word it's computing (the run contract's `busy`)
+ *   — is stuck: it's ended, and says where (`stalled`).
  */
 import type { TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
@@ -38,7 +39,7 @@ const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 /** How long a run waits for the editor to come up before it says what it's waiting on. */
 const READY_MS = 300_000;
 
-/** How long a file's run may do nothing (no session, output or question) before it's ended as stuck. */
+/** How long a file's run may do nothing (no session, output, question or `busy`) before it's ended as stuck. */
 const STALL_MS = 120_000;
 
 /** A run's output kept, at most (its end): enough to see why a file failed to load. */
@@ -218,6 +219,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		try {
 			const debugged = await runner.debug(`${ROOT}/${file}`, ROOT, {}, {
 				"runId": run.id,
+				// (unattended, as `node --test` is: a breakpoint left in a test would pause it with nobody to continue)
+				"noDebug": true,
 				"signal": controller.signal,
 				"onOutput": (_stream, text) => {
 					output = (output + text).slice(-OUTPUT);

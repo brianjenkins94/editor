@@ -197,6 +197,10 @@ export interface ListeningEvent { "port": number }
 /** The `idle` event. */
 export type IdleEvent = Record<string, never>;
 
+/** The `busy` event: the program is computing — told every few seconds while it runs code without stopping or printing,
+ *  so what waits on a run (a test run's stall check) can tell a long computation from a run that's stuck. */
+export type BusyEvent = Record<string, never>;
+
 /** Every event, by its name. */
 export interface Events {
 	"values": ValuesEvent;
@@ -208,6 +212,7 @@ export interface Events {
 	"tests": TestsEvent;
 	"listening": ListeningEvent;
 	"idle": IdleEvent;
+	"busy": BusyEvent;
 }
 
 /** The `decide` request: the call made (`allow`), failed as a refused call does (`deny`), not made — the program going on

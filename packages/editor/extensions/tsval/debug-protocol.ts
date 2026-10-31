@@ -113,7 +113,9 @@ export type WorkerEvent =
 	/** A server the program started listens on `port` (it answers the preview there). */
 	| { "type": "listening"; "port": number }
 	/** Out of work, serving: the session is idle until a request (or a timer) comes. */
-	| { "type": "serving"; "ports": number[] };
+	| { "type": "serving"; "ports": number[] }
+	/** The program is computing, every few seconds while it runs code (the run contract's `busy`). */
+	| { "type": "busy" };
 
 /** Coverage, and the observed sites, as the run contract has them (@brianjenkins94/editor-api): the body of the
  *  adapter's `getCoverage` reply and of its `coverage` event. */

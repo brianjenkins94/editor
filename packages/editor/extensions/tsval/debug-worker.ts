@@ -227,6 +227,7 @@ let probing: { "capability": string; "resource"?: string } | undefined;
 function observeSite(node: ts.Node, site: Parameters<typeof addObservation>[2], value: unknown): void {
 	if (probing === undefined) {
 		addObservation(recording, node, site, value);
+		computing();
 	}
 }
 
@@ -992,9 +993,27 @@ function functionOf(fn: ts.Node): NonNullable<ReturnType<typeof functionsRan.get
 	return known;
 }
 
+/** How often the run says it's computing (the run contract's `busy`), and when it last did. A long computation blocks
+ *  this worker, so it's said from inside it — as calls are made and values go through sites (a loop with no calls of
+ *  its own), the clock looked at once in BUSY_EVERY of them. */
+const BUSY_MS = 10_000;
+const BUSY_EVERY = 256;
+let busyTicks = 0;
+let busyTold = 0;
+
+function computing(): void {
+	busyTicks += 1;
+
+	if (busyTicks % BUSY_EVERY === 0 && performance.now() - busyTold > BUSY_MS) {
+		busyTold = performance.now();
+		post({ "type": "busy" });
+	}
+}
+
 /** tsval's `called`: a call began. */
 function calledSeen(fn: ts.Node): void {
 	functionOf(fn).calls += 1;
+	computing();
 }
 
 /** tsval's `escapes`: what made a call impure, kept by its function — each kind once a call. */
@@ -1700,9 +1719,10 @@ function runOn(base: Vm): void {
 			if (passHooks(base)) {
 				return;
 			}
-		} else if (!capabilityAt(place) || userStopAt(place) || askAt(base, place) !== undefined) {
+		} else if (stopsAt(base, place)) {
 			// (A capability line whose calls the policy now lets pass — allowed always since it was armed, or its resource
-			// allowed once known — isn't a stop: go on, unless the user has a breakpoint there too.)
+			// allowed once known — isn't a stop: go on, unless the user has a breakpoint there too. Nor is a line armed for
+			// a policy since changed.)
 			return;
 		}
 	}
@@ -2175,6 +2195,15 @@ function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityA
 function onBreakpointHook(vm: Vm): void {
 	if (control === undefined) {
 		return; // no shared control word (shouldn't happen post-launch) — resume rather than hang
+	}
+
+	const place = placeOf(vm);
+
+	// Only the user's breakpoints pause here. A capability line is armed to ask before its call, which a stop here can't
+	// (nor fork to see what the line reaches): the call itself still meets the gate. And a rule's sets wait for the
+	// statement's end, which is past this stack.
+	if (place === undefined || !userStopAt(place)) {
+		return;
 	}
 
 	// Set WAITING before posting, so an adapter that stores 1 + notifies before we reach `wait` isn't lost:
@@ -2775,8 +2804,10 @@ function decide(message: Extract<Control, { "type": "decide" }>): void {
 		policy = now;
 		capabilityLines = new Map([...programFiles].map(([name, file]) => [name, new Set(capabilityBreakLines(file, now))]));
 
-		for (const vm of history) {
-			arm(vm);
+		for (const vm of new Set([current, ...history])) {
+			if (vm !== undefined) {
+				arm(vm);
+			}
 		}
 	}
 

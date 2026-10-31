@@ -317,7 +317,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 
 		context.subscriptions.push(
 			{ "dispose": bridgeHub.subscribe("debug.launch", (data) => {
-				const info = data as { "runId": string; "file": string; "args"?: string[]; "cwd"?: string; "env"?: Record<string, string> };
+				const info = data as { "runId": string; "file": string; "args"?: string[]; "cwd"?: string; "env"?: Record<string, string>; "noDebug"?: boolean };
 
 				// Can't track session end → decline: the terminal says the debugger couldn't take it.
 				if (!canTrack) {
@@ -331,7 +331,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 					// output and stdin (RUNNING.md, *Output goes where it was started*) — with the command line's arguments (none: a
 					// rule's, the margin's Mock), its directory and its environment. Focus stays there: no Run and Debug view, no
 					// Debug Console opened (a breakpoint still stops it, and shows where).
-					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true });
+					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true, ...info.noDebug === true ? { "noDebug": true } : {} });
 
 					if (started !== true) {
 						bridgeHub.publish(`debug.declined.${info.runId}`, {}); // start failed → the terminal says so

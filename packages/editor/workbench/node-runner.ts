@@ -21,6 +21,9 @@ export interface NodeRunHooks {
 	"signal"?: AbortSignal;
 	/** The run started a server on `port`. */
 	"onListening"?: (port: number) => void;
+	/** Run without stopping at breakpoints (VS Code's `noDebug`): an unattended run — nobody there to continue it. Its
+	 *  gated calls still stop, as the policy says. */
+	"noDebug"?: boolean;
 }
 
 /** A response relayed back from an http server running in the worker (the preview bridge). */
@@ -146,7 +149,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			hooks.signal.addEventListener("abort", onAbort, { "once": true });
 		}
 
-		hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args } });
+		hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args }, ...hooks.noDebug === true ? { "noDebug": true } : {} });
 	});
 
 	const runs = createRunRegistry(hub);

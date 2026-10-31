@@ -114,6 +114,11 @@ class Session {
 				this.state = "running";
 				break;
 
+			// (computing, without a stop: running, not still starting)
+			case "busy":
+				this.state = "running";
+				break;
+
 			case "idle":
 				this.settle("idle");
 				break;

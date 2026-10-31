@@ -697,6 +697,10 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				break;
 
 			// Out of work, serving (a server, a stdin reader): idle — a request goes on from here (the run contract's `idle`).
+			case "busy":
+				this.tell("busy", {});
+				break;
+
 			case "serving":
 				this.endAction();
 				this.settle("idle");
