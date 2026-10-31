@@ -299,6 +299,14 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 	const store = defaultContext.mounts.get(buffer !== undefined ? "/workspace" : "/");
 
+	// No atime (POSIX's noatime): zen-fs otherwise marks a file read as changed — its atime — and writes that back on
+	// close with a new ctime, so a file only read looks changed to git. isomorphic-git then re-read .git/index for every
+	// file it checked (2,212 for this repository: the page busy for minutes after a load) and re-hashed every file a
+	// worker had read. Every realm that mounts the store says the same (zenfs-vfs.ts).
+	for (const each of [store, localStore]) {
+		(each as { "attributes"?: Map<string, unknown> } | undefined)?.attributes?.set("no_atime", undefined);
+	}
+
 	observeStores(sink, store, localStore, buffer !== undefined, () => caller);
 
 	// Paths seeded read-only (managed configs like tsconfig.json, the baked type surface, ambient files). The

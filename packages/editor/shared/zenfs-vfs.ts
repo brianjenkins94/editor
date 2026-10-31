@@ -134,6 +134,10 @@ async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
 	mounted = true;
 	const store = await resolveMountConfig({ "backend": SingleBuffer, "buffer": buffer });
 
+	// No atime, as the workbench mounts it (workspace-fs.ts): a read here mustn't change a file's ctime, or git takes
+	// every file this realm reads for a changed one.
+	store.attributes.set("no_atime", undefined);
+
 	connectStore(store);
 	connection.architecture?.record(connection.architecture.self, ZENFS_NODE, "lifecycle", "mount " + WORKSPACE_MOUNT + " (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
 
