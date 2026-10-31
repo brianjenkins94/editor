@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/playwright",
+  "version": "0.0.0",
+  "description": "The editor's own Playwright, in the browser: Page, Locator and expect over a locator engine that runs where the page's DOM is (a preview's frame), for .locator calls and Playwright tests run in the editor's debugger.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./engine": "./src/engine.ts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-force-exit \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "playwright": "^1.63.0"
+  }
+}
