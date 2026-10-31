@@ -298,8 +298,23 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	// A manifest's ways in change with it.
 	const watcher = vscode.workspace.createFileSystemWatcher("**/package.json");
-	const manifestsChanged = (): void => {
-		queue = queue.then(readManifests).catch(() => undefined);
+	let manifestsDue = false;
+	const manifestsChanged = (uri: vscode.Uri): void => {
+		// (a dependency's own package.json isn't the program's — readManifests leaves node_modules out — and type acquisition
+		// writes hundreds as a load settles: each was a walk of the whole workspace, a second apart, for minutes)
+		if (uri.path.includes("/node_modules/")) {
+			return;
+		}
+
+		// (a burst of them: one reading, after it)
+		if (!manifestsDue) {
+			manifestsDue = true;
+			queue = queue.then(async () => {
+				manifestsDue = false;
+				await readManifests();
+			}).catch(() => undefined);
+		}
+
 		schedule(IDLE_MS);
 	};
 
