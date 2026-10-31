@@ -44,12 +44,22 @@ export function unenvModuleFor(specifier: string, importer: string): string | un
 	return NODE_CODE.some(within) ? NODE_CODE_IMPORTS[specifier] : undefined;
 }
 
+/** Node's code on npm that reads Node's `global` as it loads, where a browser's realm has only `globalThis`: util's
+ *  parseArgs (@pkgjs/parseargs), whose primordials copy the built-ins off it. */
+const READS_GLOBAL = /[\\/]node_modules[\\/]@pkgjs[\\/]parseargs[\\/]internal[\\/]primordials\.js$/u;
+
+/** `code` of module `id`, reading `globalThis` where it read Node's `global` (READS_GLOBAL) — else undefined (as it is). */
+export function globalThisFor(code: string, id: string): string | undefined {
+	return READS_GLOBAL.test(id) ? code.replace(/\bglobal\[/gu, "globalThis[") : undefined;
+}
+
 /** A Vite/rolldown plugin resolving unenv's, and Node's code's, imports of Node's built-ins to almostnode's modules
- *  (unenvModuleFor). */
-export function unenvResolve(): { "name": string; "enforce": "pre"; "resolveId": (source: string, importer?: string) => string | undefined } {
+ *  (unenvModuleFor), and giving Node's code `globalThis` where it reads `global` (globalThisFor). */
+export function unenvResolve(): { "name": string; "enforce": "pre"; "resolveId": (source: string, importer?: string) => string | undefined; "transform": (code: string, id: string) => string | undefined } {
 	return {
 		"name": "almostnode-unenv-resolve",
 		"enforce": "pre",
-		"resolveId": (source, importer) => (importer === undefined ? undefined : unenvModuleFor(source, importer))
+		"resolveId": (source, importer) => (importer === undefined ? undefined : unenvModuleFor(source, importer)),
+		"transform": (code, id) => globalThisFor(code, id)
 	};
 }

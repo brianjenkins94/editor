@@ -2633,7 +2633,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 		loadedRuntime = await runtimeReady(message.workspace);
 		modules = programModules(loadedRuntime);
 	} catch (error) {
-		post({ "type": "output", "text": `The program's modules can't be loaded: ${String(error)}`, "stream": "stderr" });
+		// (with where: a load failing inside the runtime names no file of the program's)
+		post({ "type": "output", "text": `The program's modules can't be loaded: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}`, "stream": "stderr" });
 		finish(1);
 
 		return;

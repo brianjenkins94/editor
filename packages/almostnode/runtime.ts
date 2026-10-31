@@ -521,6 +521,15 @@ function createRequire(
 		}
 	};
 
+	/** `dir` with its links followed (as it is, when the file system can't say). */
+	const realDirOf = (dir: string): string => {
+		try {
+			return vfs.realpathSync(dir);
+		} catch {
+			return dir;
+		}
+	};
+
 	const resolveModule = (id: string, fromDir: string, installed = false): string => {
     // Handle node: protocol prefix (Node.js 16+)
 		if (id.startsWith("node:")) {
@@ -578,9 +587,11 @@ function createRequire(
 		}
 
 		if (id.startsWith("./") || id.startsWith("../") || id.startsWith("/")) {
+			// (up from a linked package's folder: from where it really is, as Node resolves a module's real path — a
+			// sibling in a monorepo, reaching its neighbours)
 			const resolved = id.startsWith("/")
 				? id
-				: pathShim.resolve(fromDir, id);
+				: pathShim.resolve(id.startsWith("../") && fromDir.includes("/node_modules/") ? realDirOf(fromDir) : fromDir, id);
 
       // Try exact path
 			if (vfs.existsSync(resolved)) {
@@ -738,6 +749,19 @@ function createRequire(
 						} catch {
               // resolveExports throws if no match found, try next
 						}
+					}
+
+					// A linked package whose build isn't there (a sibling in a monorepo, its dist ignored by git) loads from
+					// what its `source` condition names, when it names one: nothing else reads that condition.
+					try {
+						const source = resolveExports(pkg, moduleId, { "conditions": ["source"] })?.[0];
+						const resolvedSource = source === undefined ? null : tryResolveFile(pathShim.join(pkgRoot, source));
+
+						if (resolvedSource) {
+							return resolvedSource;
+						}
+					} catch {
+						// (no `source` either)
 					}
 				}
 
@@ -1044,40 +1068,58 @@ ${code}
 
     // Special handling for 'module' - provide a working createRequire
 		if (id === "module") {
-			return {
-				...builtinModules["module"] as Record<string, unknown>,
-				"createRequire": (filenameOrUrl: string | URL) => {
-					// A path, a file: URL's text, or a URL object, as Node's takes them (`createRequire(new URL("x/package.json",
-					// import.meta.url))`, which the editor's own eslint.config.js does)
-					const given = typeof filenameOrUrl === "string" ? filenameOrUrl : String(filenameOrUrl.href);
-					let fromPath = given;
+			// A require resolving from `fromPath`'s directory, as one of the program's or a package's
+			const requireFrom = (fromPath: string): RequireFunction => {
+				const newRequire = createRequire(
+					vfs,
+					fsShim,
+					process,
+					pathShim.dirname(fromPath),
+					moduleCache,
+					options,
+					processedCodeCache,
+					isProgram(fromPath) ? "program" : "package"
+				);
 
-					if (given.startsWith("file://")) {
-						fromPath = decodeURIComponent(given.slice(7)); // Remove 'file://'
-            // Handle Windows-style file:///C:/ URLs (though unlikely in our env)
-						if (fromPath.startsWith("/") && fromPath[2] === ":") {
-							fromPath = fromPath.slice(1);
-						}
+				newRequire.cache = moduleCache;
+
+				return newRequire;
+			};
+			// The requiring module's file, else the program's directory (a parent-less call, as Node's REPL makes)
+			const parentPath = (parent?: { "filename"?: unknown }): string => typeof parent?.filename === "string" ? parent.filename : pathShim.join(process.cwd(), "[eval]");
+			// A path, a file: URL's text, or a URL object, as Node's takes them (`createRequire(new URL("x/package.json",
+			// import.meta.url))`, which the editor's own eslint.config.js does)
+			const createRequireAt = (filenameOrUrl: string | URL): RequireFunction => {
+				const given = typeof filenameOrUrl === "string" ? filenameOrUrl : String(filenameOrUrl.href);
+				let fromPath = given;
+
+				if (given.startsWith("file://")) {
+					fromPath = decodeURIComponent(given.slice(7)); // Remove 'file://'
+          // Handle Windows-style file:///C:/ URLs (though unlikely in our env)
+					if (fromPath.startsWith("/") && fromPath[2] === ":") {
+						fromPath = fromPath.slice(1);
 					}
-
-          // Get directory from the path
-					const fromDir = pathShim.dirname(fromPath);
-          // Return a require function that resolves from this directory
-					const newRequire = createRequire(
-						vfs,
-						fsShim,
-						process,
-						fromDir,
-						moduleCache,
-						options,
-						processedCodeCache,
-						isProgram(fromPath) ? "program" : "package"
-					);
-
-					newRequire.cache = moduleCache;
-
-					return newRequire;
 				}
+
+				return requireFrom(fromPath);
+			};
+			const shared = builtinModules["module"] as Record<string, unknown>;
+			// Node's Module, with the loader's own two: what a sandbox wraps (just-bash's DefenseInDepthBox won't start
+			// without them). This runtime's requires don't go through them, so a wrapper sees only the calls made to them.
+			const Module = {
+				...shared["Module"] as Record<string, unknown>,
+				"createRequire": createRequireAt,
+				"_load": (request: string, parent?: { "filename"?: unknown }): unknown => requireFrom(parentPath(parent))(request),
+				"_resolveFilename": (request: string, parent?: { "filename"?: unknown }): string => requireFrom(parentPath(parent)).resolve(request)
+			};
+
+			return {
+				...shared,
+				"Module": Module,
+				"default": Module,
+				"_load": Module._load,
+				"_resolveFilename": Module._resolveFilename,
+				"createRequire": createRequireAt
 			};
 		}
 

@@ -7,8 +7,9 @@
  *   - Node's own code, from npm: assert (`assert`), stream and stream/promises (`readable-stream`: Node's lib/stream.js
  *     and its internals), string_decoder, events' EventEmitter (`events`: unenv's is a class, which code written for Node
  *     can't `EventEmitter.call(this)`), util's inspect, format, formatWithOptions, stripVTControlCharacters
- *     (`node-inspect-extracted`: Node's lib/internal/util/inspect.js — unenv's inspect was JSON) and isDeepStrictEqual
- *     (assert's comparisons), path and path/posix (`path-browserify`: Node's lib/path.js — pathe took a backslash for a
+ *     (`node-inspect-extracted`: Node's lib/internal/util/inspect.js — unenv's inspect was JSON), isDeepStrictEqual
+ *     (assert's comparisons) and parseArgs (`@pkgjs/parseargs`: Node's lib/internal/util/parse_args — unenv's isn't
+ *     implemented, and command-line parsers are built on it), path and path/posix (`path-browserify`: Node's lib/path.js — pathe took a backslash for a
  *     separator — resolving against the program's directory, its format as Node's is now).
  *   - unenv's ports of Node's code: querystring and url (Node 22.7's lib), punycode (the package Node bundles), buffer
  *     (feross/buffer, the browser's Buffer: Node's own is native), constants (Node's values).
@@ -92,6 +93,7 @@ import * as utilTypesShim from "./shims/util-types";
 import * as vmShim from "./shims/vm";
 import * as zlibShim from "./shims/zlib";
 import nodeAssert from "assert/build/assert.js";
+import { parseArgs } from "@pkgjs/parseargs";
 import comparisons from "assert/build/internal/util/comparisons.js";
 import events from "events/events.js";
 import { format, formatWithOptions, inspect, stripVTControlCharacters } from "node-inspect-extracted";
@@ -182,10 +184,10 @@ function cwd(): string {
  *  the runtime makes (its console), unenv filling in what they lack. */
 export function nodeBuiltins(own: { "console": Namespace }): Record<string, unknown> {
 	// util: Node's inspect and format (node-inspect-extracted: Node's lib/internal/util/inspect.js) and Node's deep
-	// equality (assert's, as `assert` itself), over unenv's — whose inspect was JSON, whose format knew %s and %j, and
-	// whose isDeepStrictEqual took two different Maps as equal.
+	// equality (assert's, as `assert` itself) and argument parsing, over unenv's — whose inspect was JSON, whose format
+	// knew %s and %j, whose isDeepStrictEqual took two different Maps as equal, and whose parseArgs threw.
 	const types = oursOver(utilTypesShim as unknown as Namespace, unenvUtilTypes);
-	const util = { ...unenvWith(unenvUtil, utilShim as unknown as Namespace, ["callbackify"]), "inspect": inspect, "format": format, "formatWithOptions": formatWithOptions, "stripVTControlCharacters": stripVTControlCharacters, "isDeepStrictEqual": comparisons.isDeepStrictEqual, "types": types };
+	const util = { ...unenvWith(unenvUtil, utilShim as unknown as Namespace, ["callbackify"]), "inspect": inspect, "format": format, "formatWithOptions": formatWithOptions, "stripVTControlCharacters": stripVTControlCharacters, "isDeepStrictEqual": comparisons.isDeepStrictEqual, "parseArgs": parseArgs, "types": types };
 	// path: Node's posix path (path-browserify: Node's lib/path.js), resolving against the program's directory, over
 	// unenv's (pathe, which took a backslash for a separator) for what it lacks — win32 among it: pathe's, posix-like
 	// (a program here runs on posix).

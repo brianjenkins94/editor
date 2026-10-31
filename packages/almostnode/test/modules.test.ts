@@ -48,6 +48,52 @@ test("resolve: a built-in by its name, a package's file, a program file — Type
 	assert.throws(() => runtime.resolve("./missing"), /Cannot find module/u);
 });
 
+test("resolve: a package whose built entry isn't there loads from its `source` condition — its build, when it's there", () => {
+	const exports = { ".": { "source": "./src/index.js", "default": "./dist/index.js" } };
+	const unbuilt = runtimeWith({
+		"/workspace/node_modules/sibling/package.json": JSON.stringify({ "name": "sibling", "exports": exports }),
+		"/workspace/node_modules/sibling/src/index.js": "module.exports = 'source';"
+	});
+	const built = runtimeWith({
+		"/workspace/node_modules/sibling/package.json": JSON.stringify({ "name": "sibling", "exports": exports }),
+		"/workspace/node_modules/sibling/src/index.js": "module.exports = 'source';",
+		"/workspace/node_modules/sibling/dist/index.js": "module.exports = 'built';"
+	});
+
+	assert.deepEqual(unbuilt.resolve("sibling"), { "kind": "package", "filename": "/workspace/node_modules/sibling/src/index.js" });
+	assert.deepEqual(built.resolve("sibling"), { "kind": "package", "filename": "/workspace/node_modules/sibling/dist/index.js" });
+});
+
+test("a linked package's imports up out of it resolve from where it really is, as Node's do", () => {
+	// (a monorepo's sibling, linked into node_modules: its neighbour is beside its real folder)
+	class Linked extends VirtualFS {
+		public override realpathSync(path: string): string {
+			return path.startsWith("/workspace/node_modules/sibling") ? path.replace("/workspace/node_modules/sibling", "/workspace/packages/sibling") : super.realpathSync(path);
+		}
+	}
+
+	const vfs = new Linked();
+	const files = {
+		"/workspace/node_modules/sibling/package.json": JSON.stringify({ "name": "sibling", "main": "src/index.js" }),
+		"/workspace/node_modules/sibling/src/index.js": "module.exports = require('../../neighbour/lib.js');",
+		"/workspace/packages/neighbour/lib.js": "module.exports = 'neighbour';"
+	};
+
+	for (const [path, text] of Object.entries(files)) {
+		vfs.mkdirSync(path.slice(0, path.lastIndexOf("/")), { "recursive": true });
+		vfs.writeFileSync(path, text);
+	}
+
+	assert.equal(new Runtime(vfs, { "cwd": "/workspace" }).execute("module.exports = require('sibling');", "/workspace/main.js").exports, "neighbour");
+});
+
+test("module's Module has the loader's _load and _resolveFilename, from the parent's directory, and they can be wrapped", () => {
+	const runtime = runtimeWith({ ...PACKAGE });
+	const said = runtime.execute(`const module_ = require("module"); const { Module } = module_; const parent = { "filename": "/workspace/main.js" }; const before = Module._load; Object.defineProperty(Module, "_load", { ...Object.getOwnPropertyDescriptor(Module, "_load"), "value": (...args) => before(...args) }); module.exports = [Module._resolveFilename("greet", parent), Module._load("greet", parent).hello("ada"), module_.default === Module, typeof Module.createRequire("/workspace/main.js")("greet").hello];`, "/workspace/module.js").exports;
+
+	assert.deepEqual(said, ["/workspace/node_modules/greet/index.js", "hello, ada", true, "function"]);
+});
+
 test("evaluateProgram: the program's files are the host's to evaluate, from their source — packages are almostnode's", () => {
 	const evaluated: string[] = [];
 	const runtime = runtimeWith({

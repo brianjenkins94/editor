@@ -5,8 +5,11 @@
  * raise it. Node's names are this Node's own.
  */
 import * as assert from "node:assert/strict";
+// eslint-disable-next-line ts/no-restricted-imports -- almostnode doesn't depend on util (its fs wrapper); a test reads a package's file
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
+import { createContext, runInContext } from "node:vm";
 
 import "./extensionless.mjs";
 
@@ -109,6 +112,28 @@ test("util is Node's: inspect, format and deep equality as Node's say them", () 
 	const said = runtime.execute(`const util = require("util"); module.exports = [util.inspect(new Map([[1, { "a": [1, 2, { "b": 3 }] }]])), util.inspect("str"), util.inspect([1, , 3]), util.inspect(123n), util.inspect(require("buffer").Buffer.from("hi")), util.format("%s %d %i %j %%", "a", 1.5, 2.7, { "x": 1 }), util.format(1, 2, "x"), util.isDeepStrictEqual(new Map([[1, 2]]), new Map([[1, 3]]))];`, "/util.js").exports;
 
 	assert.deepEqual(said, ["Map(1) { 1 => { a: [ 1, 2, [Object] ] } }", "'str'", "[ 1, <1 empty item>, 3 ]", "123n", "<Buffer 68 69>", "a 1.5 2 {\"x\":1} %", "1 2 x", false]);
+});
+
+test("util.parseArgs is Node's: options, positionals and its complaint about an unknown option", () => {
+	const runtime = new Runtime(new VirtualFS());
+	const said = runtime.execute(`const { parseArgs } = require("node:util"); const parsed = parseArgs({ "args": ["-a", "--port", "5173", "x"], "options": { "a": { "type": "boolean", "short": "a" }, "port": { "type": "string" } }, "allowPositionals": true }); let complaint; try { parseArgs({ "args": ["--bogus"], "options": {} }); } catch (error) { complaint = error.code; } module.exports = [{ ...parsed.values }, parsed.positionals, complaint];`, "/args.js").exports;
+
+	assert.deepEqual(said, [{ "a": true, "port": "5173" }, ["x"], "ERR_PARSE_ARGS_UNKNOWN_OPTION"]);
+});
+
+test("util.parseArgs loads where there's no Node `global`: bundled, its primordials read globalThis (unenvResolve)", async () => {
+	const { globalThisFor } = await import("../unenv-resolve.ts");
+	const require = createRequire(import.meta.url);
+	// (not in its exports: beside its manifest)
+	const file = require.resolve("@pkgjs/parseargs/package.json").replace(/package\.json$/u, "internal/primordials.js");
+	const code = globalThisFor(readFileSync(file, "utf8"), file)!;
+	// (a realm like a worker's: a globalThis, and no global)
+	const context = createContext({ "module": { "exports": {} } });
+
+	runInContext(code, context);
+
+	assert.equal(typeof (context.module as { "exports": { "ArrayPrototypeMap"?: unknown } }).exports.ArrayPrototypeMap, "function");
+	assert.equal(globalThisFor("global[name]", "/x/node_modules/other/index.js"), undefined, "only the file that needs it");
 });
 
 test("util.types: Node's answers — a boxed primitive is an object, typed arrays by their kind", () => {
