@@ -395,3 +395,15 @@ test("browserField: false resolves a package as Node does — its main, not its 
 	assert.equal(runtimeWith(files).execute("module.exports = require('dual');", "/workspace/main.js").exports, "browser", "by default, the browser build");
 	assert.equal(runtimeWith(files, { "browserField": false }).execute("module.exports = require('dual');", "/workspace/main.js").exports, "node");
 });
+
+test("module.createRequire: from a path, a file: URL's text, or a URL object, as Node's", () => {
+	const runtime = runtimeWith({
+		...PACKAGE,
+		"/workspace/main.js": [
+			"const { createRequire } = require('module');",
+			"module.exports = [createRequire('/workspace/sub/x.js'), createRequire('file:///workspace/sub/x.js'), createRequire(new URL('./sub/x.js', 'file:///workspace/main.js'))].map((each) => each.resolve('greet'));"
+		].join("\n")
+	}, { "evaluateProgram": evaluate });
+
+	assert.deepEqual(runtime.require("./main.js"), Array.from({ "length": 3 }, () => "/workspace/node_modules/greet/index.js"));
+});

@@ -1043,12 +1043,14 @@ ${code}
 		if (id === "module") {
 			return {
 				...builtinModules["module"] as Record<string, unknown>,
-				"createRequire": (filenameOrUrl: string) => {
-          // Convert file:// URL to path
-					let fromPath = filenameOrUrl;
+				"createRequire": (filenameOrUrl: string | URL) => {
+					// A path, a file: URL's text, or a URL object, as Node's takes them (`createRequire(new URL("x/package.json",
+					// import.meta.url))`, which the editor's own eslint.config.js does)
+					const given = typeof filenameOrUrl === "string" ? filenameOrUrl : String(filenameOrUrl.href);
+					let fromPath = given;
 
-					if (filenameOrUrl.startsWith("file://")) {
-						fromPath = filenameOrUrl.slice(7); // Remove 'file://'
+					if (given.startsWith("file://")) {
+						fromPath = decodeURIComponent(given.slice(7)); // Remove 'file://'
             // Handle Windows-style file:///C:/ URLs (though unlikely in our env)
 						if (fromPath.startsWith("/") && fromPath[2] === ":") {
 							fromPath = fromPath.slice(1);
