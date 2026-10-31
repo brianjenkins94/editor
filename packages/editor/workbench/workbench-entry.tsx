@@ -24,6 +24,7 @@ import { failureText } from "@brianjenkins94/editor-api/failures";
 import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
+import { fs as workspaceStore } from "@zenfs/core";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
@@ -362,16 +363,21 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 		}
 	}
 
+	// Written straight into the workspace's store, all at once: its change watcher (workspace-changes.ts) reports them
+	// to VS Code as one batch, as it does isomorphic-git's and the terminal's writes. Through VS Code's file service each
+	// file cost a stat to validate it, two mkdirp walks of its folders and a listing of its folder — each a path walk in
+	// zen-fs, the listings quadratic in a folder's size (288 files in one of this repository's): the page was busy for
+	// minutes loading a repository of ~2,000 files.
 	for (const file of files) {
 		const dir = file.path.slice(0, file.path.lastIndexOf("/"));
 
 		if (dir.length > 0 && !madeDirs.has(dir)) {
 			madeDirs.add(dir);
-			await vscode.workspace.fs.createDirectory(vscode.Uri.file(dir)).then(undefined, () => { /* exists */ });
+			workspaceStore.mkdirSync(dir, { "recursive": true });
 		}
 
 		// Binary files (from a GitHub repo) arrive as bytes; text samples as a string to encode.
-		await vscode.workspace.fs.writeFile(vscode.Uri.file(file.path), file.bytes ?? encoder.encode(file.contents ?? ""));
+		workspaceStore.writeFileSync(file.path, file.bytes ?? encoder.encode(file.contents ?? ""));
 	}
 
 	if (replace) {

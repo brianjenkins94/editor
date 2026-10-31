@@ -42,15 +42,16 @@ How it's kept:
    - **cspell** flags ordinary code words in this repository (`const`, `config`, `readdir`: 130 of them): its
      programming dictionaries aren't loading for it.
    - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. Profiled 2026-10-30 (the
-     harness's Chromium, a DevTools CPU profile of the load): the main thread is busy 100% for the 4 minutes measured.
-     Half of it was isomorphic-git parsing .git/index again for every file statusMatrix checked, a read bumping zen-fs's
-     ctime: fixed by mounting without access times (b7430d91). What's left is zen-fs's own path lookups (StoreFS
-     `findInode` decodes each parent's listing per lookup: `_struct`, `decodeDirListing`, ~170 s of 240), most of it
-     async calls whose caller the profile doesn't show; the rest the file provider's stat/readdir/readFile for VS Code.
-     Next: who makes those lookups (a logpoint on zen-fs's async entry points, as found the index's), then fewer of
-     them or a path cache in the zen-fs patch. BABLR isn't reached in those 4 minutes (no request sent).
-
-   The steps left:
+     harness's Chromium, a DevTools CPU profile of the load; logpoints on zen-fs's lookups and the file provider for
+     who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every
+     file it checked, a read bumping zen-fs's ctime (b7430d91); and the load writing each file through VS Code's file
+     service — a validation stat, two mkdirp walks and a listing of its folder per file, quadratic in a folder's size —
+     now straight into the store, one batch to VS Code (provider calls 18.9k → 4.8k in the first 2 minutes). Still busy:
+     each zen-fs lookup walks from the root, decoding every parent's listing (StoreFS with `no_id_tables`), ~10 per file
+     written (the write, and the change watcher's checks around it), plus isomorphic-git's status walks. Next, by gain:
+     a path cache in the zen-fs patch (invalidated across realms), the watcher reusing what a write knows rather than
+     statting again, fewer status walks during a load. zen-fs 2.8's SingleBuffer v2 doesn't change this (measured; it
+     also loses files across realms without our lock). BABLR isn't reached in those 4 minutes.
    - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
      through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user
      (`git.identity`). The terminal has `git push` / `switch` / `checkout`, and agents have `git_push`, `git_branch`
