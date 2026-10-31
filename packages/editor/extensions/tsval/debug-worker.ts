@@ -22,7 +22,7 @@ import type { FsShim } from "@brianjenkins94/almostnode";
 import type { Effect, FunctionRun, LoadedPackage, TestReport } from "@brianjenkins94/editor-api";
 import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/editor-api/runtime";
 import type { Told, Traced } from "@brianjenkins94/editor-api/values";
-import type { EscapeEvent, ImpureKind, LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
+import type { EscapeEvent, HostGuard, ImpureKind, LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Outcome } from "@brianjenkins94/playwright";
@@ -269,6 +269,111 @@ function probeResource(vm: Vm, place: Place, capability: string): string | undef
 	probed.set(vm, (known ?? new Map()).set(key, resource));
 
 	return resource;
+}
+
+/** The functions the program was given — its built-in modules (node:fs and the rest, the capability stand-ins among them)
+ *  and globals, two levels into each (`fs.promises.mkdir`): what a capability stop's call has to be one of to be one
+ *  (lineReaches). Set as a run starts. */
+let programFunctions = new WeakSet<object>();
+
+/** Every function in `holders`' values, `depth` levels down. */
+function functionsIn(holders: Record<string, unknown>[], depth = 2): WeakSet<object> {
+	const found = new WeakSet<object>();
+	const seen = new Set<unknown>();
+	const visit = (value: unknown, left: number): void => {
+		if (value === null || (typeof value !== "object" && typeof value !== "function") || seen.has(value)) {
+			return;
+		}
+
+		seen.add(value);
+
+		if (typeof value === "function") {
+			found.add(value);
+		}
+
+		if (left > 0) {
+			for (const key of Object.keys(value)) {
+				try {
+					visit((value as Record<string, unknown>)[key], left - 1);
+				} catch { /* a getter that throws: nothing of the program's there */ }
+			}
+		}
+	};
+
+	for (const holder of holders) {
+		for (const value of Object.values(holder)) {
+			visit(value, depth);
+		}
+	}
+
+	return found;
+}
+
+/** Each stop's line, as lineReaches found it, by machine and call. */
+const linesReached = new WeakMap<Vm, Map<ts.CallExpression, boolean | undefined>>();
+
+/**
+ * Whether `call` — the capability-shaped call a stop at `place` is for — is a call of one of the program's own
+ * built-ins (programFunctions): a fork run to it, whose host guard sees the callee as it's about to be called and ends
+ * the fork there, so nothing on the line happens twice (a package's objects aren't forked). A call that only looks like
+ * one — `fs.mkdir` on a package's own `fs` (zen-fs's in-memory one), a canary's stand-ins — reaches nothing of the
+ * program's, and isn't a stop: what a package itself reaches, it reaches through node:fs, where the package gate decides.
+ * The fork stops where the line does: a line done without the guard seeing the call made it of a guest function (the
+ * program's own code: not a built-in either). Undefined when the fork can't say (the line threw, or ran too long).
+ */
+function lineReaches(vm: Vm, place: Place, call: ts.CallExpression): boolean | undefined {
+	const known = linesReached.get(vm) ?? new Map<ts.CallExpression, boolean | undefined>();
+
+	linesReached.set(vm, known);
+
+	if (known.has(call)) {
+		return known.get(call);
+	}
+
+	const fork = vm.fork() as Vm & { "hostGuard"?: HostGuard };
+	const depth = vm.frames.length;
+	const outer = (vm as Vm & { "hostGuard"?: HostGuard }).hostGuard;
+	let reached: boolean | undefined;
+
+	fork.breakpoints.clear();
+	fork.hostGuard = {
+		...outer,
+		"beforeCall": (callee, thisArg, isConstruct, site) => {
+			if (site.node === call) {
+				reached = programFunctions.has(callee);
+
+				throw PROBED;
+			}
+
+			return outer?.beforeCall?.(callee, thisArg, isConstruct, site) ?? callee;
+		}
+	};
+	// (stand-ins called on the way are their inert selves, as on any probe's fork)
+	probing = { "capability": "" };
+
+	try {
+		// (the guard ends it at the call, by throwing)
+		for (let steps = 0; steps < 20_000 && !fork.finished && !fork.idle; steps += 1) {
+			fork.step();
+
+			const here = placeOf(fork);
+
+			if (fork.finished || fork.idle || fork.frames.length < depth || (fork.frames.length === depth && (here?.file !== place.file || here.line !== place.line))) {
+				// (the line done, and the call — if it was made — never a host function's)
+				reached ??= false;
+
+				break;
+			}
+		}
+	} catch {
+		// PROBED (the call reached), or the line threw first: either way, what was found is what there is.
+	} finally {
+		probing = undefined;
+	}
+
+	known.set(call, reached);
+
+	return reached;
 }
 
 /** Start recording `vm`'s observations into `sums`. */
@@ -1633,7 +1738,8 @@ function askAt(vm: Vm, place: Place): CapabilityAsk | undefined {
 	for (const call of calls) {
 		const hit = classifyCall(call, []);
 
-		if (hit !== undefined) {
+		// (shaped like a capability call, on something that isn't one of the program's built-ins: not one)
+		if (hit !== undefined && lineReaches(vm, place, call) !== false) {
 			const before = resourceOf(vm, call.arguments[hit.argIndex], file);
 			// Computed on the line: what it will be, from a fork run to the call.
 			const probe = before.resolved ? undefined : probeResource(vm, place, hit.capability);
@@ -1713,6 +1819,7 @@ async function exploreOrderings(message: Extract<Control, { "type": "explore" }>
 		// Each run from scratch: its own modules (the program's evaluated again), its own stand-ins.
 		loaded.clearCache();
 		programBuiltins = surface.modules;
+		programFunctions = functionsIn([surface.modules, surface.globals]);
 		const write = (...args: unknown[]): void => {
 			output.push(args.map(formatLogArg).join(" "));
 		};
@@ -2495,6 +2602,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined ? loadedRuntime : undefined, whereOf(message));
 
 	programBuiltins = surface.modules;
+	programFunctions = functionsIn([surface.modules, surface.globals]);
 	runtime?.clearCache();
 	packagesRan.clear();
 	baseline = readBaseline();
