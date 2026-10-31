@@ -209,6 +209,17 @@
         "packages/editor/extensions/tsval/node-test.js"
       ]
     },
+    "Playwright tests in the debugger": {
+      "what": "A Playwright test file (`@playwright/test`) runs in the debugger against the preview you have open: its locators, actions and expect are the editor's own Playwright (packages/playwright), each op run on the preview's page, and its tests told and traced as node:test's are.",
+      "docs": "packages/editor/RUNNING.md, *Tests*",
+      "paths": [
+        "packages/editor/extensions/tsval/playwright-test.js",
+        "packages/playwright"
+      ],
+      "ways": [
+        "hub request|playwright.run"
+      ]
+    },
     "Preview's dev server as a debug session": {
       "what": "A running preview's dev server shows up in Run and Debug with a Stop button, and its output goes to the Debug Console.",
       "ways": [

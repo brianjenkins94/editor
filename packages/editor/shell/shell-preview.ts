@@ -17,7 +17,7 @@
  *   • `preview.hmr.<port>` → post the HMR update into every window of the port (its injected client applies it).
  * Each iframe's injected console tap posts `{channel:"obs-log"}` up here; we reshape onto `$sys.log.<window>`.
  */
-import type { AskedWhy } from "@brianjenkins94/editor-api/runtime";
+import type { AskedWhy, PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub, LinkPermissions } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { DevtoolsPanel } from "./preview-devtools";
@@ -771,6 +771,29 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 
 		return { "id": surface.id, "port": surface.port, "window": surface.index, ...servers.get(surface.port)?.url === undefined ? {} : { "server": servers.get(surface.port).url }, ...page === "" ? {} : { "page": previewPageOf(page)?.url ?? page }, "poppedOut": surface.popup !== undefined, "devtools": surface.devtools !== undefined, "usedAt": new Date(surface.usedAt).toISOString() };
 	}));
+
+	// A Playwright call from a test in the debugger (packages/playwright; editor-api's PlaywrightCall): run on the page
+	// of the preview window it names, else the one used last — the preview you have open. With none open, an op isn't
+	// done yet (its locator waits for one, and its timeout says why).
+	serve(hub, "playwright.run", async (args) => {
+		const { call, "args": given = [], "window": named } = args as PlaywrightCall;
+		const surface = named === undefined ? windowFor(undefined) : surfaces.get(named);
+		const page = surface === undefined ? null : pageOf(surface);
+
+		if (page === null) {
+			const missing = named === undefined ? "no preview window is open" : `no preview window ${named}`;
+
+			if (call === "run") {
+				return { "done": false, "why": missing };
+			}
+
+			throw new Error(missing);
+		}
+
+		const { windowDriver } = await import("@brianjenkins94/playwright");
+
+		return (windowDriver(page)[call] as (...rest: unknown[]) => Promise<unknown>)(...given);
+	});
 
 	// The app opened a page of a server as a new window (`window.open`, a `target="_blank"` link — the tap hands it up
 	// instead of opening a browser tab): another preview window, onto that page. Only a page of a server that's running

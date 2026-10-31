@@ -67,13 +67,9 @@ How it's kept:
      worked through the editor's tools alone (ARCHITECTURE.md, *Workspace tools*, has them all). A program runs under
      `debug_start`.
    - (d) CI on the pushed branch checks the work.
-2. **Playwright tests in the editor's debugger** (packages/playwright/README.md). The engine, `Page`, `Locator` and
-   `expect` are done and held to Playwright in Chromium (2026-10-31). Next:
-   - `@playwright/test` (and `playwright`) as a program module in the debugger, as `node:test` is: `test`, `describe`,
-     `beforeEach` with a `page` fixture, reporting through `__editorTest`;
-   - its driver: a request from the debug worker to the shell (`playwright.run`), run against the preview you have open
-     (the most recently used preview window), in the manifest as a hub request;
-   - then, maybe, an agent tool for a `.locator` call on that preview.
+2. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
+   the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or
+   action on a preview window (`playwright.run`, with its `window`) is what's left, when an agent needs one.
 
 ## Watching
 

@@ -44,6 +44,48 @@ test("previews: two dev servers side by side", async () => {
 // A preview run's runtime evidence (RUNTIME-EVIDENCE.md, the third slice): its pages count what its modules did, an HMR
 // edit brings a second version of one, and when it stops, both versions are folded into the file's evidence — the
 // statements the edit didn't touch counted across both — and the run's envelope lists both.
+// Playwright tests in the debugger (packages/playwright; playwright-test.js): a test file's `page` drives the preview
+// you have open — its locators found on the preview's page in the shell (`playwright.run`), its click a real one there,
+// its expect waiting — and each test's result is data, as node:test's are.
+test("playwright: a test file in the debugger drives the preview you have open", async () => {
+	const request = (subject, data) => session.request(subject, data, 240_000);
+
+	try {
+		await request("files.write", { "path": "checks/app.spec.mjs", "content": [
+			"import { expect, test } from \"@playwright/test\";",
+			"",
+			"test.describe(\"the app\", () => {",
+			"\ttest(\"its button counts\", async ({ page }) => {",
+			"\t\tawait expect(page.getByRole(\"heading\", { \"level\": 1 })).toContainText(\"App\");",
+			"\t\tconst button = page.getByRole(\"button\");",
+			"\t\tconst before = await button.textContent();",
+			"",
+			"\t\tawait button.click();",
+			"\t\tawait expect(button).not.toHaveText(before);",
+			"\t});",
+			"",
+			"\ttest(\"isn't there\", async ({ page }) => {",
+			"\t\tawait expect(page.getByText(\"Nothing like this\")).toBeVisible({ \"timeout\": 500 });",
+			"\t});",
+			"});",
+			""
+		].join("\n") });
+
+		const ran = await request("tests.run", { "files": ["checks/app.spec.mjs"] });
+		const [file] = ran.files;
+
+		assert.deepEqual(file.tests.map(({ id, outcome }) => [id, outcome]), [["checks/app.spec.mjs › the app › its button counts", "pass"], ["checks/app.spec.mjs › the app › isn't there", "fail"]], JSON.stringify(ran));
+		assert.match(file.tests[1].error, /toBeVisible\(\) failed/u, "what didn't hold");
+		assert.equal(file.exitCode, 1);
+	} finally {
+		await session.workbench().evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file("/workspace/checks"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 test("evidence: a preview run, across a hot update", async () => {
 	const write = (files) => session.workbench().evaluate(async (all) => {
 		const { api } = globalThis.__editor;

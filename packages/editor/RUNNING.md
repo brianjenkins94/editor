@@ -151,6 +151,15 @@ worker each test's start and end; the statements that ran in between, hooks and 
 What's there: `test`/`it`, `describe`/`suite`, `.skip`, `.todo`, the four hooks, a test's context (`diagnostic`,
 `skip`, `todo`, `test`, `after`, `assert`) and callback tests. Not yet: `mock`, snapshots, `only` filtering, timeouts.
 
+**`@playwright/test` is the editor's too** (2026-10-31; extensions/tsval/playwright-test.js): Playwright's test API
+over node-test.js, so a Playwright test is told and traced as any other. Its `page` drives the preview you have open
+(the preview window used last): packages/playwright's `Page`, `Locator` and `expect`, run in the debug worker (not
+stepped), each of a locator's ops run on the preview's page by the shell (`playwright.run`, served by
+shell-preview.ts). An action waits for its element there as Playwright's do, and an `expect` until it holds. What's
+there: `test` with `page` and `browserName`, `.skip` (declared, or called in a test), `.fixme`, `.describe` and its
+modifiers, the four hooks, `step`, `info`. Not yet: `test.extend`, `test.use`'s options, other browsers, contexts,
+`request`, timeouts, and `playwright` itself (a browser launched).
+
 **A test is kept as a trace** (lib util/silo/traces' `test`: its id, the test file and its titles joined by ` › `, and
 its outcome) on each file it ran: the top-level declarations it executed there, by BABLR span. So a file's traces say
 which tests reach it, the record selection reads (*Unattended runs*: "What runs"). A file keeps each test's latest,

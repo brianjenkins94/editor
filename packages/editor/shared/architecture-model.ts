@@ -280,6 +280,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "terminal.state", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "runs.ledger", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "preview.windows", "from": ["root", "workbench"], "to": ["shell"] },
+	{ "pattern": "playwright.run", "from": ["debug-worker"], "to": ["shell"] },
 	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "debug.session.*.decide", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "debug.session.*.setValue", "from": ["root"], "to": ["bridge"] },

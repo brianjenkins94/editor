@@ -25,6 +25,7 @@ import type { Told, Traced } from "@brianjenkins94/editor-api/values";
 import type { EscapeEvent, ImpureKind, LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
+import type { Outcome } from "@brianjenkins94/playwright";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
@@ -36,6 +37,7 @@ import { revive } from "@brianjenkins94/editor-api/recorded";
 import { connectRuntime, layered } from "@brianjenkins94/editor-api/runtime";
 
 import { LiveRecord } from "@brianjenkins94/editor-api/values";
+import { expect as playwrightExpect, Page } from "@brianjenkins94/playwright";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
 import { covers, settledReach } from "@brianjenkins94/util/silo/evidence";
 import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
@@ -45,6 +47,7 @@ import { capabilityBreakLines, classifyCall, shouldBreak } from "./capability-ca
 import { replayGuard, replayProgram } from "./replay-run";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 import nodeTestSource from "./node-test.js?raw";
+import playwrightTestSource from "./playwright-test.js?raw";
 
 // This worker's link into the editor's runtime (editor-api's workspace runtime), the port the adapter hands over first
 // thing: a server the program starts answers the preview through it, and its log and spans — a step's, its uncaught
@@ -836,6 +839,33 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
  *  as the program's code — a test's awaits on the run's event loop — and nothing tells it as one of the program's files
  *  (its coverage, values and evidence aren't the program's). */
 const NODE_TEST = "/__editor__/node-test.js";
+/** Where `@playwright/test` is served from (playwright-test.js), as NODE_TEST is: Playwright's test API over node:test. */
+const PLAYWRIGHT_TEST = "/__editor__/playwright-test.js";
+/** The editor's modules a program imports as its own code, by the specifier it imports, and their sources. */
+const EDITOR_MODULES = new Map([["node:test", NODE_TEST], ["@playwright/test", PLAYWRIGHT_TEST]]);
+const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource], [PLAYWRIGHT_TEST, playwrightTestSource]]);
+
+/** playwright-test.js's host half (`__editorPlaywright`): a page per test, driving the preview you have open through
+ *  the shell (editor-api's `playwright`), and expect — packages/playwright's, run here, not stepped. */
+const editorPlaywright = {
+	"page": () => {
+		const call = async (name: "run" | "goto" | "url" | "title", ...args: unknown[]): Promise<unknown> => {
+			if (editorLink === undefined) {
+				throw new Error("no editor to drive a preview in");
+			}
+
+			return editorLink.playwright({ "call": name, "args": args });
+		};
+
+		return new Page({
+			"run": async (op) => call("run", op) as Promise<Outcome>,
+			"goto": async (url) => { await call("goto", url); },
+			"url": async () => call("url") as Promise<string>,
+			"title": async () => call("title") as Promise<string>
+		});
+	},
+	"expect": playwrightExpect
+};
 
 /** The tests a test file's run ran, as each ended (node-test.js tells each start and end). */
 let testsRan: TestReport[] = [];
@@ -928,7 +958,7 @@ function testTold(kind: string, titles?: string, outcome?: string, error?: strin
 
 /** The statements that ran since `started` (each file's counts then), in each of the program's files. */
 function ranSince(started: Map<ts.SourceFile, number[]>): TestReport["files"] {
-	return [...current?.coverage ?? []].filter(([file]) => file.fileName !== NODE_TEST).flatMap(([file, entry]) => {
+	return [...current?.coverage ?? []].filter(([file]) => !EDITOR_SOURCES.has(file.fileName)).flatMap(([file, entry]) => {
 		const before = started.get(file) ?? [];
 		const at = (offset: number): [number, number] => {
 			const { line, character } = file.getLineAndCharacterOfPosition(offset);
@@ -945,14 +975,14 @@ function programModules(loaded: Runtime): ModuleLoader {
 	const vfs = loaded.getVFS();
 
 	return {
-		// (`node:test` is node-test.js, run as the program's own code: NODE_TEST)
-		"resolve": (specifier, fromDir) => (specifier === "node:test" ? { "kind": "program", "filename": NODE_TEST } : loaded.resolve(specifier, fromDir)),
+		// (`node:test` is node-test.js, and `@playwright/test` playwright-test.js, run as the program's own code: EDITOR_MODULES)
+		"resolve": (specifier, fromDir) => (EDITOR_MODULES.has(specifier) ? { "kind": "program", "filename": EDITOR_MODULES.get(specifier) } : loaded.resolve(specifier, fromDir)),
 		"require": (specifier, fromDir) => loaded.require(specifier, fromDir, "program"),
-		"source": (filename) => (filename === NODE_TEST ? nodeTestSource : vfs.readFileSync(filename, "utf8")),
+		"source": (filename) => EDITOR_SOURCES.get(filename) ?? vfs.readFileSync(filename, "utf8"),
 		"cached": (filename) => loaded.cached(filename),
 		"register": (filename, module) => {
 			// Another of the program's files, about to run: its capability stops armed first.
-			if (filename !== NODE_TEST) {
+			if (!EDITOR_SOURCES.has(filename)) {
 				noteProgramFile(filename, () => vfs.readFileSync(filename, "utf8"));
 			}
 
@@ -2006,7 +2036,7 @@ function flushLive(): void {
 	for (const [file, record] of live) {
 		const batch = record.drain();
 
-		if (batch !== undefined && file.fileName !== NODE_TEST) {
+		if (batch !== undefined && !EDITOR_SOURCES.has(file.fileName)) {
 			// Another of the program's files: which, and its text the first time (what its values' ranges are in).
 			const other = file === sourceFile ? {} : { "file": file.fileName, ...toldSource.has(file.fileName) ? {} : { "source": file.text } };
 
@@ -2061,7 +2091,7 @@ function coverageReport(): CoverageReport {
 	others.delete(sourceFile);
 
 	for (const file of others) {
-		if (file.fileName === NODE_TEST) {
+		if (EDITOR_SOURCES.has(file.fileName)) {
 			others.delete(file);
 		}
 	}
@@ -2476,7 +2506,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	testsFailed = 0;
 	functionsRan.clear();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 
 	evaluating = loaded.vm;
 

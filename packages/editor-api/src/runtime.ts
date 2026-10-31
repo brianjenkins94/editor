@@ -65,7 +65,7 @@ export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?:
 
 	const unlink = hub.link(portTransport(port), { "peer": id,
 "permissions": {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcCallSubject("playwright.run"), rpcReplySubject("node")],
 		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
 	} });
 
@@ -537,6 +537,10 @@ export interface RuntimeDecision { "kind": "fs" | "exec" | "net"; "method"?: str
 /** What the editor decided: whether the call may be made, and how (an Effect's `decided`). */
 export interface RuntimeVerdict { "allow": boolean; "decided": NonNullable<Effect["decided"]> }
 
+/** A Playwright call on a preview window's page (packages/playwright's `Driver`: `run` an op, `goto`, `url`, `title`),
+ *  served by the shell — on `window` (a preview window's id), else the one used last: the preview you have open. */
+export interface PlaywrightCall { "call": "run" | "goto" | "url" | "title"; "args"?: unknown[]; "window"?: string }
+
 /** A worker's link into the editor's runtime. */
 export interface RuntimeConnection {
 	/** The workspace's files (once `ready`). */
@@ -555,6 +559,8 @@ export interface RuntimeConnection {
 	"serve": (port: number, handler: (request: RuntimeRequest) => Promise<RuntimeResponse>) => () => void;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
 	"log": Observed["log"];
+	/** A preview's page, driven: a Playwright call there (PlaywrightCall), answered when it's done (once `ready`). */
+	"playwright": (call: PlaywrightCall) => Promise<unknown>;
 }
 
 /** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect(name, session)`'s), as
@@ -577,9 +583,10 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 	});
 
 	const mailbox = createMailbox();
+	const rpc = createRpcClient(hub);
 	let attached = false;
 	// (once the editor has said who the worker is: a call made before goes out under the name its answer isn't sent to)
-	const ready = link.ready.then(async () => createRpcClient(hub).request("runtime.fs.attach", { "mailbox": mailbox }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 })).then(() => { attached = true; });
+	const ready = link.ready.then(async () => rpc.request("runtime.fs.attach", { "mailbox": mailbox }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 })).then(() => { attached = true; });
 	const call = (meta: Record<string, unknown>, payload?: Uint8Array): Decoded => {
 		if (!attached) {
 			throw Object.assign(new Error("the workspace runtime isn't connected yet: await its `ready`"), { "code": "ENOTCONN" });
@@ -610,6 +617,11 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 		"decide": (decision) => call({ "op": "decide", "call": decision }).meta as RuntimeVerdict,
 		"tarball": (name, version) => call({ "op": "tarball", "name": name, "version": version }).payload,
 		"log": log,
+		"playwright": async (playwright) => {
+			await ready;
+
+			return rpc.request("playwright.run", playwright, { "timeoutMs": 60_000, "waitForResponderMs": 10_000 });
+		},
 		"serve": (listening, handler) => {
 			const answer = exchanges(async (request) => {
 				const path = request.url.split("?")[0];

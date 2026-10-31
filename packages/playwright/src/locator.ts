@@ -193,7 +193,7 @@ export class Locator extends Finder {
 		return new Locator(this.driver, this.page, [...this.steps, ...steps], `${this.description}.${more}`);
 	}
 
-	public toString(): string {
+	public override toString(): string {
 		return this.description;
 	}
 
