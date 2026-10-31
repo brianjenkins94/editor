@@ -23,7 +23,7 @@ import "theme/documents";
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
-import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, rpcCallSubject, serve } from "@brianjenkins94/hub";
 import { fs as workspaceStore } from "@zenfs/core";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
@@ -60,6 +60,7 @@ import { installCodeProblems } from "./code-problems";
 import { installCodeReach } from "./code-reach";
 import { installCodeRefactor } from "./code-refactor";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
+import { markReady } from "./readiness";
 import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
 import { installEvidence } from "./evidence";
@@ -587,6 +588,7 @@ function maybeBoot(): void {
 
 				return undefined;
 			});
+			markReady("workspace");
 			// Filesystem overlays, layered UNDER the seeded snapshot (they only answer paths the in-memory
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its
@@ -634,6 +636,15 @@ function maybeBoot(): void {
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
 				markApiReady(); // let a queued openProject (picker) proceed
 				markBridgeReady();
+				markReady("api");
+				// A debug run can start once tsval is active and the bridge answers the workspace runtime's link (readiness.ts).
+				void (async () => {
+					await (api as typeof import("vscode")).extensions.getExtension("brianjenkins94.tsval")?.activate();
+
+					while (!await workbenchHub.whenInterested(rpcCallSubject("runtime.fs.attach"), 60_000)) { /* still coming up */ }
+
+					markReady("debugger");
+				})().catch((error: unknown) => { bootSpan.error("the debugger didn't come up", { "error": errText(error) }); });
 				// Workspace settings persisted in the store (a loaded repo's .vscode/, or the user's own) were invisible
 				// when the configuration service read them at startup — the store mounts after boot, and restoring it
 				// fires no change events. Announce them now so they apply. (Writes after boot fire events themselves.)

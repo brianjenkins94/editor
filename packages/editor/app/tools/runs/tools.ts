@@ -1,8 +1,10 @@
 /** What's running and what ran (`runs.list` / `runs.stop`, runs.ts), the run ledger (`runs.ledger`, evidence.ts), and test
  *  runs: which a change reaches and their results as data (`tests.affected` / `tests.run`, test-runs.ts). */
-import type { ToolFamily } from "../host";
+import type { PageToolAsk } from "@brianjenkins94/observability";
+import type { PageToolContext, ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
+import { Ask } from "../host";
 
 const runs: ToolFamily = ({ request }) => [
 	{
@@ -60,10 +62,19 @@ const runs: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "runs_tests",
 			"config": {
-				"description": "Run test files (node:test, in the editor's debugger, one file at a time, as node --test does) and get each test's result as data: its outcome, what it threw, what a failed assertion compared (actual, expected, operator), its time, and how it came out before this run (before), so a newly failing test reads apart from one failing all along. Without files, the stale ones runs_affected lists run. A file that failed without a failed test (it didn't load, say) has its output's end. Returns { files: [{ file, exitCode, ms, tests: [{ id, outcome, error?, assertion?, ms?, before? }], output? }], counts: { files, pass, fail, skip } }.",
+				"description": "Run test files (node:test, in the editor's debugger, one file at a time, as node --test does) and get each test's result as data: its outcome, what it threw, what a failed assertion compared (actual, expected, operator), its time, and how it came out before this run (before), so a newly failing test reads apart from one failing all along. Without files, the stale ones runs_affected lists run. A file that failed without a failed test (it didn't load, say) has its output's end; a gated call the policy leaves undecided (fs, fetch, …) is asked of the person first — BERNARD's redline only as a break-glass, JUDICIAL if it's set — and the call re-invoked with the approval allows it, this once. Returns { files: [{ file, exitCode, ms, tests: [{ id, outcome, error?, assertion?, ms?, before? }], output? }], counts: { files, pass, fail, skip } }.",
 				"inputSchema": { "files": z.array(z.string()).optional().describe("The test files to run (relative to the workspace); default, the affected tests' that are stale.") }
 			},
-			"handler": async ({ files }, { signal }) => ok(request("tests.run", { "files": files }, signal))
+			"handler": async ({ files }, context) => {
+				const ran = await request("tests.run", { "files": files, "approved": (context as PageToolContext).approved }, context.signal) as { "ask"?: PageToolAsk["ask"] };
+
+				// (a gated call the policy leaves undecided: asked of the person — BERNARD, JUDICIAL, then them — before it runs)
+				if (ran.ask !== undefined) {
+					throw new Ask(ran.ask);
+				}
+
+				return ok(ran);
+			}
 		})
 	}
 ];

@@ -12,7 +12,8 @@
  * (`files_read`, `editor_problems`), one action per tool: a tool that would take an `action` argument is one tool per
  * action, so the list reads as a table of contents. `tab` says which page serves a tool; `window`, which preview.
  */
-import type { McpTool } from "@brianjenkins94/util/mcp/tool";
+import type { PageToolAsk } from "@brianjenkins94/observability";
+import type { McpTool, ToolContext } from "@brianjenkins94/util/mcp/tool";
 
 /** A tool, and how long a caller waits for it unless the call says (`timeoutMs`; default 30000). */
 export interface EditorTool {
@@ -29,3 +30,17 @@ export interface ToolHost {
 
 /** A family's `tools.ts`: its default export. */
 export type ToolFamily = (host: ToolHost) => EditorTool[];
+
+/** A tool's context in the tab: util/mcp's, and the questions the person has approved for this call (their keys). */
+export type PageToolContext = ToolContext & { "approved": string[] };
+
+/** Thrown by a tool to ask the person before it acts (observability's PageToolAsk): debug-mcp decides it — BERNARD,
+ *  JUDICIAL — or asks, and the tool is called again with it among `approved`. `context.confirm` throws it too. */
+export class Ask extends Error {
+	public readonly ask: PageToolAsk["ask"];
+
+	public constructor(ask: PageToolAsk["ask"]) {
+		super(ask.message);
+		this.ask = ask;
+	}
+}

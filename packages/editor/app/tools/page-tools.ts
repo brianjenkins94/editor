@@ -7,10 +7,10 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { PageTool } from "@brianjenkins94/observability";
-import type { ToolContext } from "@brianjenkins94/util/mcp/tool";
-import type { EditorTool, ToolHost } from "./host";
+import type { EditorTool, PageToolContext, ToolHost } from "./host";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { z } from "zod";
+import { Ask } from "./host";
 
 /** A service that isn't up fails fast, instead of waiting out the whole call. */
 const RESPONDER_MS = 3000;
@@ -44,18 +44,34 @@ export function toPageTools(tools: EditorTool[]): PageTool[] {
 		"description": tool.config.description,
 		"inputSchema": z.toJSONSchema(z.object(tool.config.inputSchema as z.ZodRawShape)),
 		...timeoutMs === undefined ? {} : { "timeoutMs": timeoutMs },
-		"handler": async (args, { signal }) => {
-			const context: ToolContext = {
+		"handler": async (args, { signal, approved }) => {
+			const context: PageToolContext = {
 				"signal": signal,
+				"approved": approved,
 				"elicit": unavailable("ask for input"),
-				"confirm": unavailable("ask for confirmation"),
+				// (asked of the person through debug-mcp: the tool's answer is the question, until it's approved)
+				"confirm": async (message, key = message) => {
+					if (approved.includes(key)) {
+						return true;
+					}
+
+					throw new Ask({ "message": message, "key": key });
+				},
 				"addTool": () => { throw new Error("a page tool can't add tools"); },
 				"updateTool": () => { throw new Error("a page tool can't update tools"); },
 				"progress": () => undefined,
 				"confidence": () => undefined
 			};
 
-			return tool.handler(args, context);
+			try {
+				return await tool.handler(args, context);
+			} catch (error) {
+				if (error instanceof Ask) {
+					return { "ask": error.ask };
+				}
+
+				throw error;
+			}
 		}
 	}));
 }

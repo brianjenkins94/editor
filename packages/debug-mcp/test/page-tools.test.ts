@@ -210,3 +210,57 @@ test("a read that misses a tab leaves its tools alone — only a tab that's gone
 	await toolsWhen((names) => !names.includes("flaky_tool"));
 });
 
+
+test("a page tool that asks first: decided as util/mcp's broker decides — BERNARD's redline, JUDICIAL, else the person by MRTR", async () => {
+	// A tool asking before each gated call it reaches: what's approved goes on, the first that isn't is the question.
+	const hub = createHub({ "id": "asks" });
+	const seen: string[][] = [];
+
+	hub.subscribe(TAB_DISCOVER, (data) => {
+		hub.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": "t7", "url": "", "title": "", "visible": true, "focused": false });
+	});
+	servePageToolSet(hub, "t7", [{
+		"name": "gated_run",
+		"description": "Reaches its scopes, asking first.",
+		"inputSchema": { "type": "object", "properties": { "scopes": { "type": "array", "items": { "type": "string" } } } },
+		"handler": (args, { approved }) => {
+			seen.push(approved);
+
+			const asked = (args["scopes"] as string[]).find((scope) => !approved.includes("gated:" + scope));
+
+			return asked === undefined ? { "ran": args["scopes"] } : { "ask": { "message": `Reach ${asked}?`, "key": "gated:" + asked, "scope": asked } };
+		}
+	}]);
+	await connectTab(hub);
+	await toolsWhen((names) => names.includes("gated_run"));
+
+	const scopes = ["fs:write:/p", "net:example.com"];
+	const first = await call("gated_run", { "scopes": scopes, "tab": "t7" });
+
+	assert.match(String(first.value), /CONFIRMATION REQUIRED — nothing was executed[\s\S]*Reach fs:write:\/p\?[\s\S]*"_approved": \["gated:fs:write:\/p"\]/u, "the first question, for the person");
+
+	const second = await call("gated_run", { "scopes": scopes, "tab": "t7", "_approved": ["gated:fs:write:/p"] });
+
+	assert.match(String(second.value), /Reach net:example\.com\?[\s\S]*"_approved": \["gated:fs:write:\/p","gated:net:example\.com"\]/u, "approved, it goes on to the next");
+	assert.deepEqual((await call("gated_run", { "scopes": scopes, "tab": "t7", "_approved": ["gated:fs:write:/p", "gated:net:example.com"] })).value, { "ran": scopes });
+	assert.deepEqual(seen.at(-1), ["gated:fs:write:/p", "gated:net:example.com"], "the page is told what was approved");
+
+	// BERNARD: a redlined scope is asked as a break-glass, whatever JUDICIAL says.
+	process.env["JUDICIAL"] = "allow";
+
+	try {
+		assert.match(String((await call("gated_run", { "scopes": ["fs:write:/repo/.git/config"], "tab": "t7" })).value), /BERNARD REDLINE — fs:write:\/repo\/\.git\/config[\s\S]*break-glass/u);
+		assert.deepEqual((await call("gated_run", { "scopes": scopes, "tab": "t7" })).value, { "ran": scopes }, "JUDICIAL=allow: nobody's asked");
+		process.env["JUDICIAL"] = "deny";
+
+		const denied = await call("gated_run", { "scopes": scopes, "tab": "t7" });
+
+		assert.equal(denied.isError, true);
+		assert.match(String(denied.value), /fs:write:\/p denied — JUDICIAL/u);
+	} finally {
+		delete process.env["JUDICIAL"];
+	}
+
+	sockets.pop()?.close();
+	await toolsWhen((names) => !names.includes("gated_run"));
+});

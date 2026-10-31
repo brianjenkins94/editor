@@ -9,7 +9,12 @@
  *   until they run, so an answer without them isn't the whole of it.
  * - `tests.run` { files?, affected? }: test files run one at a time, as `node --test` runs each (in the debugger), and
  *   each test's result: its outcome, what it threw, what a failed assertion compared, its time, and how it came out
- *   last before this run. `affected` runs the files of the affected tests that are stale.
+ *   last before this run. `affected` runs the files of the affected tests that are stale. A capability stop (a gated
+ *   call the policy leaves undecided) isn't left waiting on a person who isn't watching: one `approved` names (its
+ *   key, `runs_tests:<scope>`) is allowed, this once; the first that isn't ends the run there, and the run answers with
+ *   its question (`ask`) — which runs_tests puts to the person through debug-mcp (BERNARD, JUDICIAL, then them), and
+ *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace and the
+ *   debugger), and says what it's still waiting on if that takes longer than READY_MS.
  */
 import type { TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
@@ -21,6 +26,7 @@ import type { NodeRunner } from "./node-runner";
 import { serve } from "@brianjenkins94/hub";
 import { localTracesPath } from "@brianjenkins94/util/silo/layout";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
+import { waitFor } from "./readiness";
 import { isTestFile } from "./terminal/commands/node/node";
 
 const ROOT = "/workspace";
@@ -28,8 +34,27 @@ const ROOT = "/workspace";
 /** The files a test's trace can be on. */
 const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 
+/** How long a run waits for the editor to come up before it says what it's waiting on. */
+const READY_MS = 300_000;
+
 /** A run's output kept, at most (its end): enough to see why a file failed to load. */
 const OUTPUT = 4000;
+
+/** The question a run's capability stop asks (observability's PageToolAsk). */
+interface Asked { "message": string; "key": string; "scope": string; "request": Record<string, unknown> }
+
+/** A gated call's silo scope (lib util/silo/enforce): `fs:<op>:<path>`, `net:<host>`, `exec:<program>`. */
+function scopeOf(capability: string, resource: string): string {
+	if (capability === "net") {
+		try {
+			return `net:${new URL(resource).host}`;
+		} catch {
+			return `net:${resource === "" ? "*" : resource}`;
+		}
+	}
+
+	return `${capability}:${resource === "" ? "*" : resource}`;
+}
 
 /** A test a change reaches. */
 interface Affected {
@@ -111,8 +136,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return affected(Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "")) : undefined);
 	});
 
-	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. */
-	const runFile = async (file: string, signal: AbortSignal): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "output": string; "attached": boolean }> => {
+	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A
+	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). */
+	const runFile = async (file: string, signal: AbortSignal, approved: string[]): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "output": string; "attached": boolean; "asked"?: Asked }> => {
 		const controller = new AbortController();
 		const stop = (): void => {
 			controller.abort();
@@ -122,10 +148,28 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stop);
 		let reported: TestsEvent | undefined;
+		let asked: Asked | undefined;
 		let output = "";
 		const listening = vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
-			if (event.event === "tests" && event.session.configuration["__runId"] === run.id) {
+			if (event.session.configuration["__runId"] !== run.id) {
+				return;
+			}
+
+			if (event.event === "tests") {
 				reported = event.body as TestsEvent;
+			} else if (event.event === "ask") {
+				const { line, callee, capability, resource, "file": where = `${ROOT}/${file}` } = event.body as { "line": number; "callee": string; "capability": string; "resource": string; "file"?: string };
+				const scope = scopeOf(capability, resource);
+				const key = `runs_tests:${scope}`;
+
+				if (approved.includes(key)) {
+					void Promise.resolve(vscode.commands.executeCommand("editor.capability.decide", event.session.id, "allow-once")).catch(stop);
+				} else {
+					const at = `${where.replace(/^\/workspace\//u, "")}:${String(line + 1)}`;
+
+					asked = { "message": `A test run (${file}) reaches ${scope} at ${at}: \`${callee}\`. Allow it for runs_tests?`, "key": key, "scope": scope, "request": { "kind": scope.slice(0, scope.indexOf(":")), "scope": scope, "resource": resource, "call": callee, "at": at } };
+					stop();
+				}
 			}
 		});
 		const started = performance.now();
@@ -141,7 +185,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			run.end(debugged.attached ? debugged.exitCode : 1, controller.signal.aborted);
 
-			return { "exitCode": debugged.attached ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached };
+			return { "exitCode": debugged.attached ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked } };
 		} finally {
 			listening.dispose();
 			signal.removeEventListener("abort", stop);
@@ -149,7 +193,15 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	};
 
 	serve(hub, "tests.run", async (args, { signal }) => {
-		const { files, "affected": onlyAffected } = (args ?? {}) as { "files"?: unknown; "affected"?: unknown };
+		const { files, "affected": onlyAffected, approved } = (args ?? {}) as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown };
+		const approvals = Array.isArray(approved) ? approved.filter((key): key is string => typeof key === "string") : [];
+		// (the editor up first: a run started before the debugger can take it waits out its timeout, saying nothing)
+		const waiting = await waitFor(["workspace", "debugger"], READY_MS, signal);
+
+		if (waiting.length > 0) {
+			throw new Error(`the editor is still starting — after ${String(READY_MS / 1000)} s, waiting on ${waiting.join(" and ")} (readiness.ts)`);
+		}
+
 		const listed = Array.isArray(files) ? files.filter((file): file is string => typeof file === "string").map((file) => file.replace(/^\/workspace\//u, "")) : [];
 		const before = onlyAffected === true || listed.length === 0 ? await affected() : undefined;
 		const chosen = listed.length > 0 ? listed : [...new Set((before?.tests ?? []).filter((test) => test.stale).map((test) => test.file))];
@@ -162,7 +214,12 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				break;
 			}
 
-			const result = await runFile(file, signal);
+			const result = await runFile(file, signal, approvals);
+
+			// (a question for the person: the run ends here, to be run again once it's answered)
+			if (result.asked !== undefined) {
+				return { "ask": result.asked };
+			}
 
 			ran.push({
 				"file": file,

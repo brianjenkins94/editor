@@ -15,8 +15,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PageToolSpec } from "../../observability/src/page-tools.ts";
 import type { DebugMcp } from "./server.ts";
 import { defineTool, fail, ok, removeTool, toolNames, updateTool } from "@brianjenkins94/util/mcp/tool";
+import { judicial, redline } from "@brianjenkins94/util/silo/enforce/decide";
 import { z } from "zod";
-import { PAGE_TOOL, PAGE_TOOL_NAME, PAGE_TOOLS, PAGE_TOOLS_CHANGED } from "../../observability/src/page-tools.ts";
+import { askOf, PAGE_TOOL, PAGE_TOOL_NAME, PAGE_TOOLS, PAGE_TOOLS_CHANGED } from "../../observability/src/page-tools.ts";
 import { callTab } from "./forward.ts";
 
 const REFRESH_MS = 200;
@@ -130,19 +131,59 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 					"description": `${String(spec.description)} (Served by a connected page; pass \`tab\` when several serve it.)`,
 					"inputSchema": { ...shapeOf(spec.inputSchema ?? {}), "tab": z.string().optional().describe("The tab serving this tool (from tabs_list). Omit for the editor tab, or when only one tab serves it.") }
 				},
-				"handler": async (args) => {
-					const { tab, "_approved": _ignored, ...rest } = (args ?? {}) as Record<string, unknown> & { "tab"?: string };
+				"handler": async (args, context) => {
+					const { tab, ...rest } = (args ?? {}) as Record<string, unknown> & { "tab"?: string };
+					// What the page is told was approved: each question it asked that this call's approvals answer (util/mcp keeps
+					// them — `_approved` — to itself; `confirm` says yes to one of them), or JUDICIAL allowed.
+					const approved: string[] = [];
 					const tabs = servedBy.get(name) ?? [];
 					// The call's own timeout, else the tool's, else ours — and a moment more, so a tool that times out its own
 					// work says so itself.
 					const timeoutMs = (typeof rest["timeoutMs"] === "number" ? rest["timeoutMs"] : spec.timeoutMs ?? CALL_MS) + GRACE_MS;
 
 					try {
-						const answer = await callTab(debugMcp, PAGE_TOOL + "." + name, tab ?? (tabs.length === 1 ? tabs[0] : undefined), rest, timeoutMs);
+						for (;;) {
+							const answer = await callTab(debugMcp, PAGE_TOOL + "." + name, tab ?? (tabs.length === 1 ? tabs[0] : undefined), { ...rest, "_approved": approved }, timeoutMs);
+							const ask = askOf(answer);
 
-						// A tool written with util/mcp (the editor's) answers with its own ToolResult; any other answer is the value.
-						return isToolResult(answer) ? answer : await ok(answer);
+							if (ask === undefined) {
+								// A tool written with util/mcp (the editor's) answers with its own ToolResult; any other answer is the value.
+								return isToolResult(answer) ? answer : await ok(answer);
+							}
+
+							if (approved.includes(ask.key)) {
+								return fail(`the page asked again what was approved (${ask.key})`);
+							}
+
+							// The page asks before it acts: decided as util/mcp's broker decides a tool's own gated calls (BERNARD's
+							// redline only ever a deliberate break-glass, then JUDICIAL), else the person's, by MRTR — `confirm`
+							// throws into a re-invoke-with-approval result, and on the re-invocation says yes, so the page is asked
+							// again with it approved.
+							if (ask.scope !== undefined && redline(ask.scope)) {
+								await context.confirm(`⛔ BERNARD REDLINE — ${ask.scope}\n\n${ask.message}\n\nThis is on the catastrophic list, never a routine grant: approve it ONLY as a deliberate, one-time break-glass.`, ask.key);
+							} else if (ask.scope !== undefined) {
+								const verdict = judicial({ ...ask.request, "scope": ask.scope, "tool": name });
+
+								if (verdict?.behavior === "deny") {
+									return fail(`${ask.scope} denied — JUDICIAL: ${verdict.message ?? "deny"}`);
+								}
+
+								if (verdict?.behavior !== "allow") {
+									await context.confirm(ask.message, ask.key);
+								}
+							} else {
+								await context.confirm(ask.message, ask.key);
+							}
+
+							// (allowed — JUDICIAL's, or already approved: asked again, with it)
+							approved.push(ask.key);
+						}
 					} catch (error) {
+						// (util/mcp's confirmation, unapproved: it makes it the re-invoke-with-approval result)
+						if (error instanceof Error && error.name === "ConfirmationRequired") {
+							throw error;
+						}
+
 						return fail(error instanceof Error ? error.message : String(error));
 					}
 				}

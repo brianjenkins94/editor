@@ -171,7 +171,11 @@ file no longer has, which is the judgment a save's selection makes. The test fil
 until they've run once, nothing says what they reach. `runs_tests` runs test files as `node --test` does and answers
 each test as data. A failed assertion's sides come as node-test.js shows them; the time is the debug worker's clock,
 since the program's own runs on the deterministic loop; and a test's outcome from before the run is beside it, so a test
-that just broke reads apart from one that was already failing.
+that just broke reads apart from one that was already failing. A run waits for the editor to be up first (workbench/readiness.ts: the
+workspace mounted, and the debugger able to take a run), and says what it's still waiting on after 5 minutes. A gated
+call the policy leaves undecided doesn't wait on a person who isn't watching: the run ends there and asks it through
+debug-mcp, as util/mcp's broker asks its own tools' (BERNARD's redline only as a break-glass, JUDICIAL if it's set,
+else the person by MRTR); re-invoked with the approval, the run allows that call once and goes on.
 
 **Tests, by feature** (the features map's data, since 2026-10-26; packages/silo/README.md, *The feature manifest*):
 under each of the manifest's features, the tests whose traces ran code it owns that isn't ambient (owned by more than
