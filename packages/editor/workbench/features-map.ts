@@ -120,7 +120,7 @@ export function registerFeaturesMap(vscode: typeof vscodeApi): void {
 		"name": "Features",
 		"icon": ICON,
 		"location": ViewContainerLocation.Sidebar,
-		"renderBody": (container) => {
+		"renderBody": (container: HTMLElement) => {
 			let reading: Reading = { "revision": -1 };
 			let disposed = false;
 			const root = document.createElement("div");

@@ -29,16 +29,11 @@ How it's kept:
      - `process.exit`, which the debugger's `process` doesn't have.
 
      CI on a pushed branch checks the work instead.
-   - **Type gaps left** (seen again 2026-10-30, the repository loaded locally): features-map.ts's `wa-card` isn't in
-     `HTMLElementTagNameMap` (ts 2345, L157) though it imports `theme/components/card`, whose types re-export
-     `@awesome.me/webawesome`'s, so they don't resolve from packages/theme in the browser; `registerCustomView`'s
-     callback parameter is `any` (ts 7044, L123: the `@codingame` types behind components/monaco-vscode-api, whose
-     build isn't in git); and eslint.config.js's `@brianjenkins94/util/eslint` has no declaration file (ts 7016).
-   - **The repo's eslint.config.js** gets past `createRequire(new URL(…))` now (almostnode, cb5922d0) and stops at
-     `Cannot find module '@awesome.me/webawesome/dist/components/button/button.js'`: it lists Web Awesome's
-     components from its installed files, and a registry package isn't on disk in the editor (the CDN serves it as
-     it's used, and ESLint's worker has no network). So the preset lints. Either the workspace has the files a
-     config reads (an install of what it resolves), or the config reads them another way.
+   - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —
+     go-to-definition reaches theme's card.d.ts and from it Web Awesome's in the root node_modules, and the file has no
+     2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's
+     types, and never told after (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing
+     that. eslint.config.js's `@brianjenkins94/util/eslint` has no declaration file (ts 7016, a suggestion here).
    - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. Profiled 2026-10-30 (the
      harness's Chromium, a DevTools CPU profile of the load; logpoints on zen-fs's lookups and the file provider for
      who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every

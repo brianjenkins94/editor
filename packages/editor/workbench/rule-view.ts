@@ -124,7 +124,7 @@ export function registerRuleView(vscode: typeof vscodeApi): void {
 		"canToggleVisibility": true,
 		// Shown while a rule's edited in it, gone again when it's done.
 		"hideByDefault": true,
-		"renderBody": (container) => {
+		"renderBody": (container: HTMLElement) => {
 			ruleViewStyles();
 			root = element("div", "rule-view");
 			container.append(root);
