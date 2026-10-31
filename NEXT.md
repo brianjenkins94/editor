@@ -46,11 +46,13 @@ How it's kept:
      who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every
      file it checked, a read bumping zen-fs's ctime (b7430d91); and the load writing each file through VS Code's file
      service — a validation stat, two mkdirp walks and a listing of its folder per file, quadratic in a folder's size —
-     now straight into the store, one batch to VS Code (provider calls 18.9k → 4.8k in the first 2 minutes). Still busy:
+     now straight into the store, one batch to VS Code (provider calls 18.9k → 4.8k in the first 2 minutes); the change
+     watcher's stat before a write's own touch, the boot seed's per-file folder check, and overlapping git status walks
+     (one shared). An address's load now settles in ~3½ minutes rather than past 4 (zen-fs 193 s → 169 s). Still busy:
      each zen-fs lookup walks from the root, decoding every parent's listing (StoreFS with `no_id_tables`), ~10 per file
      written (the write, and the change watcher's checks around it), plus isomorphic-git's status walks. Next, by gain:
-     a path cache in the zen-fs patch (invalidated across realms), the watcher reusing what a write knows rather than
-     statting again, fewer status walks during a load. zen-fs 2.8's SingleBuffer v2 doesn't change this (measured; it
+     zen-fs's own path cache — StoreFS's id tables, off for shared buffers (`no_id_tables`) — asked of upstream (not
+     in our patch, 2026-10-30); meanwhile the provider's readdir stats every child for VS Code's listings. zen-fs 2.8's SingleBuffer v2 doesn't change this (measured; it
      also loses files across realms without our lock). BABLR isn't reached in those 4 minutes.
    - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
      through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user

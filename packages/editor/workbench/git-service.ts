@@ -55,7 +55,7 @@ export interface GitReader {
 export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger): GitReader {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
-	const status = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
+	const walk = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
 		const current = await engine.status();
 		const byPath = new Map<string, GitFileChange>();
 
@@ -82,6 +82,30 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		const head = await engine.headCommit();
 
 		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)), ...head === undefined ? {} : { "head": head } };
+	};
+
+	// One walk for askers that overlap: the Source Control view and the review panel each ask as the working tree
+	// changes, and a walk is a lookup of every file in zen-fs. A walk that began after the last change answers whoever
+	// asks while it runs; one asked after a change, or once it's done, walks again.
+	let changes = 0;
+	let walking: { "since": number; "result": Promise<{ "files": GitFileChange[]; "head"?: string }> } | undefined;
+
+	const status = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
+		if (walking?.since === changes) {
+			return walking.result;
+		}
+
+		const result = walk();
+		const current = { "since": changes, "result": result };
+
+		walking = current;
+		void result.finally(() => {
+			if (walking === current) {
+				walking = undefined;
+			}
+		}).catch(() => undefined);
+
+		return result;
 	};
 
 	serve(hub, "git.status", status);
@@ -356,6 +380,8 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 	// Tell the shell to refresh when the working tree changes (saves, and picker-driven writes).
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const schedule = (): void => {
+		changes += 1;
+
 		if (timer !== undefined) {
 			clearTimeout(timer);
 		}

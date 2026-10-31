@@ -168,9 +168,18 @@ const relative = (path: string): string => path.replace(/^\/workspace\//u, "");
  *  seed makes, its folders included: deleting one of these needs a tombstone to stay deleted. */
 function seedFiles(files: WorkbenchFile[], readonlyPaths: Set<string>): Set<string> {
 	const seeded = new Set<string>();
+	// (each folder made once: asking whether it exists is a whole path lookup in zen-fs, for every file of a repository
+	// the address loads)
+	const made = new Set<string>();
 
 	for (const file of files) {
-		ensureParent(file.path);
+		const dir = file.path.slice(0, file.path.lastIndexOf("/"));
+
+		if (!made.has(dir)) {
+			made.add(dir);
+			ensureParent(file.path);
+		}
+
 		fs.writeFileSync(file.path, file.contents);
 
 		for (let { path } = file; path.startsWith("/workspace/"); path = path.slice(0, path.lastIndexOf("/"))) {

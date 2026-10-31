@@ -128,11 +128,23 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 		}
 	};
 
+	/** What this burst already has for `path` (mount-relative), if anything. */
+	const pendingOf = (path: unknown): WorkspaceChangeType | undefined => batch.get(prefix + (path === "/" ? "" : String(path)));
+
 	for (const method of ["touch", "touchSync"]) {
 		const original = target[method];
 
 		if (typeof original === "function") {
 			target[method] = function watchedTouch(this: unknown, ...args: unknown[]): unknown {
+				// (a path this burst already has as added or changed — a write's own touch, as every write makes — reports
+				// nothing new: no stat to decide it, which is a whole path lookup in zen-fs; a repository's load made one
+				// for every file it wrote)
+				const pending = pendingOf(args[0]);
+
+				if (pending === "added" || pending === "changed") {
+					return (original as (...parameters: unknown[]) => unknown).apply(this, args);
+				}
+
 				const changed = touchChanges(statBefore(args[0]), args[1]);
 
 				return wrap(original as (...parameters: unknown[]) => unknown, () => (changed ? one("changed")(args) : [])).apply(this, args);
