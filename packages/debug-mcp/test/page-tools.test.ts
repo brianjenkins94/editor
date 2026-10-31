@@ -264,3 +264,27 @@ test("a page tool that asks first: decided as util/mcp's broker decides — BERN
 	sockets.pop()?.close();
 	await toolsWhen((names) => !names.includes("gated_run"));
 });
+
+test("a tab that goes away mid-call fails the call then, rather than at its timeout", async () => {
+	const hub = createHub({ "id": "leaving" });
+
+	hub.subscribe(TAB_DISCOVER, (data) => {
+		hub.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": "t8", "url": "", "title": "", "visible": true, "focused": false });
+	});
+	servePageToolSet(hub, "t8", [{ "name": "never_answers", "description": "Runs until its tab goes.", "inputSchema": { "type": "object" }, "timeoutMs": 600_000, "handler": async () => new Promise(() => { /* never */ }) }]);
+	await connectTab(hub);
+	await toolsWhen((names) => names.includes("never_answers"));
+
+	const started = Date.now();
+	const calling = call("never_answers", { "tab": "t8" });
+
+	await new Promise((resolve) => { setTimeout(resolve, 500); });
+	sockets.pop()?.close();
+
+	const answer = await calling;
+
+	assert.equal(answer.isError, true);
+	assert.match(String(answer.value), /tab t8 went away during the call/u);
+	assert.ok(Date.now() - started < 10_000, `failed in ${String(Date.now() - started)}ms, not at its 10-minute timeout`);
+	await toolsWhen((names) => !names.includes("never_answers"));
+});

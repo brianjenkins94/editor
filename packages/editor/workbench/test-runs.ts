@@ -14,7 +14,8 @@
  *   key, `runs_tests:<scope>`) is allowed, this once; the first that isn't ends the run there, and the run answers with
  *   its question (`ask`) — which runs_tests puts to the person through debug-mcp (BERNARD, JUDICIAL, then them), and
  *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace and the
- *   debugger), and says what it's still waiting on if that takes longer than READY_MS.
+ *   debugger), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
+ *   nothing for STALL_MS — no debug session, no output, no question — is stuck: it's ended, and says where (`stalled`).
  */
 import type { TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
@@ -23,7 +24,7 @@ import type * as vscodeApi from "vscode";
 import type { Bablr } from "./bablr";
 import type { GitReader } from "./git-service";
 import type { NodeRunner } from "./node-runner";
-import { serve } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { localTracesPath } from "@brianjenkins94/util/silo/layout";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
 import { waitFor } from "./readiness";
@@ -36,6 +37,9 @@ const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 
 /** How long a run waits for the editor to come up before it says what it's waiting on. */
 const READY_MS = 300_000;
+
+/** How long a file's run may do nothing (no session, output or question) before it's ended as stuck. */
+const STALL_MS = 120_000;
 
 /** A run's output kept, at most (its end): enough to see why a file failed to load. */
 const OUTPUT = 4000;
@@ -67,6 +71,7 @@ interface Affected {
 }
 
 export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitReader, bablr: Bablr, runner: NodeRunner): void {
+	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
 	const tracesOf = async (path: string): Promise<RunTrace[]> => parseTraces(await read(localTracesPath(path)) ?? "").filter((trace) => trace.test !== undefined);
@@ -137,8 +142,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	});
 
 	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A
-	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). */
-	const runFile = async (file: string, signal: AbortSignal, approved: string[]): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "output": string; "attached": boolean; "asked"?: Asked }> => {
+	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). One that
+	 *  does nothing for STALL_MS ends too (`stalled`: where it was). */
+	const runFile = async (file: string, signal: AbortSignal, approved: string[]): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "output": string; "attached": boolean; "asked"?: Asked; "stalled"?: string }> => {
 		const controller = new AbortController();
 		const stop = (): void => {
 			controller.abort();
@@ -149,11 +155,44 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stop);
 		let reported: TestsEvent | undefined;
 		let asked: Asked | undefined;
+		let stalled: string | undefined;
 		let output = "";
+		let session: vscodeApi.DebugSession | undefined;
+		let active = performance.now();
+		const starting = vscode.debug.onDidStartDebugSession((started) => {
+			if (started.configuration["__runId"] === run.id) {
+				session = started;
+				active = performance.now();
+			}
+		});
+		// (stuck: where it is — no session yet, or the session's state, line and code — and the run ended)
+		const watching = setInterval(() => {
+			if (performance.now() - active < STALL_MS || stalled !== undefined) {
+				return;
+			}
+
+			stalled = `nothing for ${String(STALL_MS / 1000)} s: no debug session started`;
+
+			if (session === undefined) {
+				stop();
+
+				return;
+			}
+
+			void rpc.request(`debug.session.${session.id}.state`, undefined, { "timeoutMs": 5000 }).then((state) => {
+				const { "state": now, reason, line, code } = state as { "state"?: string; "reason"?: string; "line"?: number; "code"?: string };
+
+				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session ${now ?? "?"}${reason === undefined ? "" : ` (${reason})`}${line === undefined ? "" : ` at line ${String(line)}${code === undefined ? "" : `: ${code.trim()}`}`}`;
+			}, () => {
+				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session didn't say where it is`;
+			}).finally(stop);
+		}, 5000);
 		const listening = vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
 			if (event.session.configuration["__runId"] !== run.id) {
 				return;
 			}
+
+			active = performance.now();
 
 			if (event.event === "tests") {
 				reported = event.body as TestsEvent;
@@ -180,13 +219,16 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				"signal": controller.signal,
 				"onOutput": (_stream, text) => {
 					output = (output + text).slice(-OUTPUT);
+					active = performance.now();
 				}
 			});
 
 			run.end(debugged.attached ? debugged.exitCode : 1, controller.signal.aborted);
 
-			return { "exitCode": debugged.attached ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked } };
+			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
 		} finally {
+			clearInterval(watching);
+			starting.dispose();
 			listening.dispose();
 			signal.removeEventListener("abort", stop);
 		}
@@ -226,6 +268,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				"exitCode": result.exitCode,
 				"ms": result.ms,
 				...result.attached ? {} : { "error": "the debugger couldn't take it" },
+				...result.stalled === undefined ? {} : { "stalled": result.stalled },
 				"tests": result.tests.map((test) => {
 					const id = [file, ...test.titles].join(" › ");
 
