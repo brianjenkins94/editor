@@ -21,19 +21,22 @@ import {
 	DiagnosticSeverity,
 	TextDocumentSyncKind
 } from "vscode-languageserver/browser";
+import { DICTIONARIES, servedName } from "./dictionaries";
 
-// Where server-host writes the dictionary into the VFS. cspell reads it through almostnode's fs shim.
-const DICT_PATH = "/dicts/en_US.trie.gz";
 
-// Minimal cspell settings: just the one English dictionary, resolved from the VFS. We deliberately skip
-// getDefaultSettings() (it eagerly references all ~59 bundled dicts); cspell fail-softs on the few default
-// dictionaries it still probes and checks against en_US alone.
+// cspell's dictionaries for code (dictionaries.ts), each read from where server-host wrote it in the VFS: the ones for
+// every language always, the rest for theirs. We deliberately skip getDefaultSettings() (it eagerly references all ~59
+// bundled dicts) and config search: these alone.
 const settings = {
 	"version": "0.2" as const,
 	"language": "en",
-	"dictionaryDefinitions": [{ "name": "en_US", "path": DICT_PATH }],
-	"dictionaries": ["en_US"]
+	"dictionaryDefinitions": DICTIONARIES.map((dictionary) => ({ "name": dictionary.name, "path": "/dicts/" + servedName(dictionary) })),
+	"dictionaries": DICTIONARIES.filter((dictionary) => dictionary.languages === undefined).map((dictionary) => dictionary.name),
+	"languageSettings": DICTIONARIES.filter((dictionary) => dictionary.languages !== undefined).map((dictionary) => ({ "languageId": (dictionary.languages ?? []).join(","), "dictionaries": [dictionary.name] }))
 };
+
+// Each open document's language, from its open: a change doesn't say it, and its dictionaries depend on it.
+const languages = new Map<string, string>();
 
 // In the worker (shared globalThis) this is the DedicatedWorkerGlobalScope the client talks to.
 const connection = createConnection(new BrowserMessageReader(globalThis as unknown as Worker), new BrowserMessageWriter(globalThis as unknown as Worker));
@@ -64,17 +67,18 @@ async function check(uri: string, languageId: string, text: string): Promise<voi
 connection.onInitialize(() => ({ "capabilities": { "textDocumentSync": TextDocumentSyncKind.Full } }));
 
 connection.onDidOpenTextDocument((params) => {
+	languages.set(params.textDocument.uri, params.textDocument.languageId);
 	check(params.textDocument.uri, params.textDocument.languageId, params.textDocument.text).catch(() => undefined);
 });
 connection.onDidChangeTextDocument((params) => {
 	const last = params.contentChanges.at(-1);
 	const text = last !== undefined && "text" in last ? last.text : "";
 
-	// languageId isn't sent on change; cspell only needs it to pick language settings, and "plaintext" checks
-	// prose in any file, which is the behavior we want for a spell-checker.
-	check(params.textDocument.uri, "plaintext", text).catch(() => undefined);
+	// (languageId isn't sent on change: the one it opened with)
+	check(params.textDocument.uri, languages.get(params.textDocument.uri) ?? "plaintext", text).catch(() => undefined);
 });
 connection.onDidCloseTextDocument((params) => {
+	languages.delete(params.textDocument.uri);
 	connection.sendDiagnostics({ "uri": params.textDocument.uri, "diagnostics": [] }).catch(() => undefined);
 });
 

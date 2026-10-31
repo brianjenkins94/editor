@@ -552,6 +552,49 @@ test("git history: a file's log, a revision of it, and its blame", async () => {
 	}
 });
 
+// cspell checks code with cspell's own dictionaries for it (extensions/cspell/dictionaries.ts): code words — TypeScript's,
+// Node's, npm's, software terms — aren't flagged, a misspelling is; and an edit keeps the file's language, so they stay
+// unflagged after one.
+test("cspell: code words pass, a misspelling doesn't — after an edit too", async () => {
+	const workbench = session.workbench();
+	const file = "/workspace/spelling.ts";
+	const flagged = () => workbench.evaluate((path) => globalThis.__editor.api.languages.getDiagnostics(globalThis.__editor.api.Uri.file(path)).filter((diagnostic) => diagnostic.source === "cspell").map((diagnostic) => diagnostic.message), file);
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode("import { readdirSync } from \"node:fs\";\n\n// Read the README's config, as JSON: a mispelled word here.\nexport const entries = readdirSync(\".\").filter((name) => name.endsWith(\".json\"));\n"));
+		await api.window.showTextDocument(api.Uri.file(path));
+	}, file);
+
+	try {
+		const first = await eventually("cspell's word on it", async () => ((await flagged()).length > 0 ? flagged() : undefined), 60_000);
+
+		assert.deepEqual(first, ["Unknown word: \"mispelled\""], "only the misspelling: " + JSON.stringify(first));
+
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+			const editor = api.window.visibleTextEditors.find((each) => each.document.uri.path === path);
+
+			await editor.edit((builder) => {
+				builder.insert(new api.Position(4, 0), "export const tsconfig = \"tsconfig.json\";\n");
+			});
+		}, file);
+		await eventually("cspell's word after the edit", async () => {
+			const after = await flagged();
+
+			return after.length === 1 && after[0] === "Unknown word: \"mispelled\"" ? after : undefined;
+		}, 30_000);
+	} finally {
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+			await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+		}, file);
+	}
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });

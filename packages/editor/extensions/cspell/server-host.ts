@@ -16,9 +16,8 @@ import { createRuntime, VirtualFS } from "@brianjenkins94/almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string (bundledNodeServer in build.ts); run below.
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import serverNodeCode from "cspell:server-node";
+import { DICTIONARIES, servedName } from "./dictionaries";
 
-// Kept in one place, matched by server-node's DICT_PATH.
-const DICT_PATH = "/dicts/en_US.trie.gz";
 
 async function main(): Promise<void> {
 	const vfs = new VirtualFS();
@@ -27,17 +26,21 @@ async function main(): Promise<void> {
 	// served module, not a data: URL like the manager extension), so a relative asset resolves correctly. Held
 	// in a variable so vite treats it as a runtime fetch, not a `new URL(literal, import.meta.url)` asset import.
 	const here = import.meta.url;
-	const dictUrl = new URL("./dicts/en_US.trie.gz", here);
-	const trie = await fetch(dictUrl).then((response) => {
-		if (!response.ok) {
-			throw new Error(`dict fetch ${response.status} ${dictUrl.href}`);
-		}
-
-		return response.arrayBuffer();
-	});
 
 	vfs.mkdirSync("/dicts", { "recursive": true });
-	vfs.writeFileSync(DICT_PATH, new Uint8Array(trie));
+	// (every dictionary, at /dicts/<its served name>, where server-node's settings name it)
+	await Promise.all(DICTIONARIES.map(async (dictionary) => {
+		const dictUrl = new URL("./dicts/" + servedName(dictionary), here);
+		const bytes = await fetch(dictUrl).then((response) => {
+			if (!response.ok) {
+				throw new Error(`dict fetch ${response.status} ${dictUrl.href}`);
+			}
+
+			return response.arrayBuffer();
+		});
+
+		vfs.writeFileSync("/dicts/" + servedName(dictionary), new Uint8Array(bytes));
+	}));
 	vfs.writeFileSync("/server-node.ts", serverNodeCode);
 
 	// No `useWorker` → the in-realm Runtime (this worker IS the realm). dangerouslyAllowSameOrigin is required

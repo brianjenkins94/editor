@@ -39,8 +39,6 @@ How it's kept:
      components from its installed files, and a registry package isn't on disk in the editor (the CDN serves it as
      it's used, and ESLint's worker has no network). So the preset lints. Either the workspace has the files a
      config reads (an install of what it resolves), or the config reads them another way.
-   - **cspell** flags ordinary code words in this repository (`const`, `config`, `readdir`: 130 of them): its
-     programming dictionaries aren't loading for it.
    - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. Profiled 2026-10-30 (the
      harness's Chromium, a DevTools CPU profile of the load; logpoints on zen-fs's lookups and the file provider for
      who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every

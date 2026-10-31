@@ -11,6 +11,7 @@ import * as fs from "@brianjenkins94/util/fs";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, createLogger } from "vite";
+import { DICTIONARIES, servedName } from "./extensions/cspell/dictionaries";
 import { coveragePlugin } from "./build/coverage";
 import { eslintToolchain } from "./build/eslint-toolchain";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
@@ -207,14 +208,16 @@ function bundledNodeServer(name: string, file = "server-node.ts", id = "server-n
 	return bundledModule("extensions/" + name, file, id, "es", nodeBuiltins);
 }
 
-/** Emit the cspell English dictionary (gzipped trie) at a fixed, unhashed URL server-host fetches at runtime. */
+/** Emit cspell's dictionaries (extensions/cspell/dictionaries.ts) at fixed, unhashed URLs server-host fetches at runtime. */
 function cspellDict(): Plugin {
 	return {
 		"name": "cspell-dict",
 		"generateBundle": function() {
-			const dictDir = path.dirname(createRequire(import.meta.url).resolve("@cspell/dict-en_us/cspell-ext.json"));
+			for (const dictionary of DICTIONARIES) {
+				const packageDir = path.dirname(createRequire(import.meta.url).resolve(dictionary.package + "/cspell-ext.json"));
 
-			this.emitFile({ "type": "asset", "fileName": "lsp/dicts/en_US.trie.gz", "source": fs.readFileSync(path.join(dictDir, "en_US.trie.gz"), { "encoding": null }) });
+				this.emitFile({ "type": "asset", "fileName": "lsp/dicts/" + servedName(dictionary), "source": fs.readFileSync(path.join(packageDir, dictionary.file), { "encoding": null }) });
+			}
 		}
 	};
 }
