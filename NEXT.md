@@ -80,7 +80,20 @@ How it's kept:
      worked through the editor's tools alone (ARCHITECTURE.md, *Workspace tools*, has them all). A program runs under
      `debug_start`.
    - (d) CI on the pushed branch checks the work.
-2. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
+2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger). Passing
+   in Brave, 2026-10-31: architecture-model, git-fast-forward, sourcemap, span-annotations, and the terminal's ps, less,
+   git and history. Still failing, by cause:
+   - **runs_tests blocks its caller until it's done**: an agent sees nothing for up to 30 minutes (the MCP call's
+     limit) — a call to a tab that went away, or a run stuck before its stall clock starts, looked like the agent
+     hanging. It should answer at once with a run id and report as it goes.
+   - **tsval: one file imported by two paths** — `open`'s function declarations see code.ts's `opener` as undefined
+     when the test imports code.ts as `./code.ts` and open.ts as `../code/code` (code.test.mjs's `open` test).
+   - **terminal-session**: just-bash starts now (almostnode's Module._load), but its commands exit 1.
+   - The rest not looked at since: collab-identity, event-sheet, game-anchors, game-rules (BABLR, likely fixed with
+     span-annotations), node.test (util.parseArgs, likely fixed), npm.test's load TypeError, page-tools' stall,
+     preview-instrument's empty evidence, replay's null for 99, silo-kept's versions.json test (fails under Node too).
+   - Can't run in a browser: baseline (execFileSync).
+3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
    the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or
    action on a preview window (`playwright.run`, with its `window`) is what's left, when an agent needs one.
 
