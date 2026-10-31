@@ -108,6 +108,15 @@ packages/editor (`--all`, `--runs N`, `--json`).
   taken up: a CPU profile of a slow runner's run (CI), or throttling the workers too. Deploys still go out (cd and
   production pass).
 
+- **The workspace store's ceiling** (2026-10-31): it's one fixed 64 MB SharedArrayBuffer (workspace-fs.ts
+  `BUFFER_BYTES`), and zen-fs's SingleBuffer takes ~2.5× the files' size (this repository's 9 MB tree wrote 22.5 MB;
+  live, 26 MB of files — tree 8.5, types in node_modules 12.7, .git 3.2, .silo 1.3 — take 54 MB). So ~25–30 MB of
+  files is the practical limit; this repository is near it. A bigger buffer costs nothing until it's used (measured in
+  V8: a 512 MB SingleBuffer mounted and filled with this tree used the memory a 64 MB one did), so raising the constant
+  is the cheap fix — not done yet (2026-10-31, decided to wait). zen-fs can't grow a buffer in place (it reads the size
+  once); a growable SAB would need that upstream. The fill gauge (editor-metrics.ts `workspaceFill`) reads the
+  allocator's high-water mark, freed space included, so it overstates how full the store is.
+
 - **A repository load the browser closed on is kept half-written** (2026-10-31): a load's files are written back to
   IndexedDB in debounced batches (workspace-fs.ts `flush`), and a browser closed in the middle keeps what landed — here
   `.git/HEAD`, `.git/config` and acquired types, no working tree. The shell's note of what it loaded (`shell:githubRepo`
