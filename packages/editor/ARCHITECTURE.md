@@ -1049,6 +1049,9 @@ debug-mcp's tools watched and debugged (the editor, problems, runs, previews, th
 couldn't do the work itself, as it would on a local machine. Now it can: `files_*` and `git_*` (app/tools/; answered in
 the workbench by workspace-tools.ts and git-service.ts). What the code doesn't say:
 
+- Every tool answers relative to a baseline (HEAD, or its last call), with ids that chain from tool to tool, as hunk
+  ids do; bounds its output and says what it left out; and says what it couldn't see (TypeScript still initializing,
+  say) rather than passing an answer off as complete.
 - A write or an edit is a `WorkspaceEdit`, so an open editor, undo, the edit history and format on save see it as
   typing, then saved. A read is what's open in an editor (unsaved edits included), else what's on disk.
 - **No shell (2026-10-27).** The agents' shell tool (core's just-bash, a shell per call) was removed: an agent with one

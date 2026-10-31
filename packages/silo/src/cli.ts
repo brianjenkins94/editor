@@ -48,7 +48,12 @@ import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRec
 import { codeOwners, manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
-import { rolldown } from "rolldown";
+
+/** rolldown, for the baseline's slices (the two commands that make one): loaded when one's asked for, not as the CLI
+ *  starts — its native binding doesn't load where there's no native code (the editor's debugger), and nothing else needs it. */
+async function rolldownForSlices(): Promise<Rolldown> {
+	return (await import("rolldown")).rolldown as unknown as Rolldown;
+}
 
 /** The repository a path is in. */
 function repoOf(directory: string): string {
@@ -361,7 +366,7 @@ export const app = subcommands({
 
 				await ensureSiloDir(paths);
 
-				const { created, baseline, changed, used } = await ensureBaseline(paths, paths.root, await bundledTypeScript(), rolldown as unknown as Rolldown);
+				const { created, baseline, changed, used } = await ensureBaseline(paths, paths.root, await bundledTypeScript(), await rolldownForSlices());
 				const packages = Object.keys(baseline.packages).length;
 				const imports = Object.values(baseline.consumer).reduce((count, workspace) => count + Object.keys(workspace).length, 0);
 				const relative = path.relative(process.cwd(), paths.baseline);
@@ -410,7 +415,7 @@ export const app = subcommands({
 
 				await ensureSiloDir(paths);
 
-				const { created, baseline, changed, used } = await ensureBaseline(paths, paths.root, await bundledTypeScript(), rolldown as unknown as Rolldown);
+				const { created, baseline, changed, used } = await ensureBaseline(paths, paths.root, await bundledTypeScript(), await rolldownForSlices());
 				const relative = path.relative(process.cwd(), paths.baseline);
 				const where = relative.startsWith("..") ? paths.baseline : relative;
 

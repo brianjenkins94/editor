@@ -23,12 +23,9 @@ How it's kept:
    - type acquisition reads every package's manifest and tsconfig.
 
    features-map.ts went from 32 TypeScript errors to 2, and a linked file has one name. Still open:
-   - **Doesn't run in the browser:**
-     - `silo check`: rolldown's native binding;
-     - the theme budget test: `child_process.execFileSync`;
-     - `process.exit`, which the debugger's `process` doesn't have.
-
-     CI on a pushed branch checks the work instead.
+   - **Doesn't run in the browser:** `silo check`. rolldown no longer stops it (the CLI loads it only for a baseline's
+     slices), but its analysis is TypeScript 7, native only on npm until its wasm build is published
+     (typescript-go#4733). CI on a pushed branch checks it instead. (`process.exit` and the theme budget test run now.)
    - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —
      go-to-definition reaches theme's card.d.ts and from it Web Awesome's in the root node_modules, and the file has no
      2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's
@@ -67,24 +64,9 @@ How it's kept:
      features each is in; `git_commit` / `git_discard` take hunk ids. The review panel runs on the same requests
      (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
    - No shell for agents: their shell tool is removed (2026-10-27; ARCHITECTURE.md, *Workspace tools*), so the bench is
-     worked through the editor's tools alone, and what it still lacks is item 2's list. A program runs under `debug_start`.
+     worked through the editor's tools alone (ARCHITECTURE.md, *Workspace tools*, has them all). A program runs under
+     `debug_start`.
    - (d) CI on the pushed branch checks the work.
-
-2. **Tools agents decide with**, in place of the shell: one queue with the bench's step (c), in the order refactoring
-   this repo in the editor needs them (2026-10-29). Each is a tool family under app/tools/ (host.ts). Done:
-   `code_problems` (a change's problems against HEAD), `runs_affected` / `runs_tests` (the tests a change reaches, and
-   results as data), `code_reach` (what a way in reaches), `code_references` / `code_rename` / `code_move`, `git_log` / `git_show` /
-   `git_blame`, `files_replace` (exact strings across files, all or nothing; a `preview` of its diff), `editor_trace`,
-   `workspace_checkpoint` / `workspace_restore`, structural `code_query` / `code_rewrite`, `decisions_for` (what the
-   ledger, the manifest and the docs say of a file or a name), `ci_status` (a commit's runs, a job's log) and
-   `script_run` (JavaScript over the workspace, read-only, in the gated realm); ARCHITECTURE.md, *Workspace tools*, and RUNNING.md,
-   *Tests*. In order:
-   - **(c) code actions** (`code_references`, `code_rename` and `code_move`, a file moved with its imports, are done:
-     ARCHITECTURE.md, *Workspace tools*).
-
-   Every one: relative to a baseline (HEAD, or the last call); ids that chain from tool to tool, as hunk ids do; output
-   bounded, saying what it left out; and what it couldn't see (TypeScript still initializing, say) said, not passed
-   off as complete.
 
 ## Watching
 
