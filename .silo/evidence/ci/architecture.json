@@ -34398,6 +34398,7 @@
 		},
 		"packages/editor/workbench/readiness.ts": {
 			"markReady": [
+				0,
 				13
 			],
 			"waitFor": [
