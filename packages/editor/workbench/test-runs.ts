@@ -17,6 +17,11 @@
  *   debugger), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
  *   nothing for STALL_MS — no debug session, no output, no question, no word it's computing (the run contract's `busy`)
  *   — is stuck: it's ended, and says where (`stalled`).
+ *
+ *   A run is the editor's, not its call's: the call answers within ANSWER_MS — the run's results, or, while it goes on,
+ *   its id, what it's doing and for how long, and the files done so far (`running`) — and `{ run }` waits on it again.
+ *   So a run that's slow, stuck before a file's clock starts, or in a tab that went away reads as that to an agent,
+ *   rather than as its tool call never coming back.
  */
 import type { TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
@@ -28,6 +33,7 @@ import type { NodeRunner } from "./node-runner";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { localTracesPath } from "@brianjenkins94/util/silo/layout";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
+import { after, every } from "./clock";
 import { waitFor } from "./readiness";
 import { isTestFile } from "./terminal/commands/node/node";
 
@@ -38,6 +44,13 @@ const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 
 /** How long a run waits for the editor to come up before it says what it's waiting on. */
 const READY_MS = 300_000;
+
+/** How long a call waits on its run before it answers with where the run is (it goes on, asked again by its id): well
+ *  inside what an agent's tool call waits for, so a run that's slow, stuck or gone reads as that and not as silence. */
+const ANSWER_MS = 50_000;
+
+/** Runs kept to be asked about by id: the latest. */
+const KEPT = 20;
 
 /** How long a file's run may do nothing (no session, output, question or `busy`) before it's ended as stuck. */
 const STALL_MS = 120_000;
@@ -51,19 +64,34 @@ const OUTPUT = 4000;
 
 /** `work`, or a rejection with `message` once `ms` pass without it. */
 async function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
+	let cancel = (): void => undefined;
 
 	try {
 		return await Promise.race([work, new Promise<never>((_resolve, reject) => {
-			timer = setTimeout(() => { reject(new Error(message)); }, ms);
+			cancel = after(ms, () => { reject(new Error(message)); });
 		})]);
 	} finally {
-		clearTimeout(timer);
+		cancel();
 	}
 }
 
 /** The question a run's capability stop asks (observability's PageToolAsk). */
 interface Asked { "message": string; "key": string; "scope": string; "request": Record<string, unknown> }
+
+/** A test file's result, as a run answers it. */
+interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[] }
+
+/** A run of test files (tests.run): what it was asked, what it's doing, each file's result as it comes, and its end. */
+interface Batch {
+	"id": string;
+	"args": Record<string, unknown>;
+	"now"?: { "doing": string; "since": number };
+	"ran": Ran[];
+	"controller": AbortController;
+	"done": Promise<void>;
+	"result"?: Record<string, unknown>;
+	"error"?: Error;
+}
 
 /** A gated call's silo scope (lib util/silo/enforce): `fs:<op>:<path>`, `net:<host>`, `exec:<program>`. */
 function scopeOf(capability: string, resource: string): string {
@@ -184,7 +212,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			}
 		});
 		// (stuck: where it is — no session yet, or the session's state, line and code — and the run ended)
-		const watching = setInterval(() => {
+		const watching = every(5000, () => {
 			if (performance.now() - active < STALL_MS || stalled !== undefined) {
 				return;
 			}
@@ -204,7 +232,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			}, () => {
 				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session didn't say where it is`;
 			}).finally(stop);
-		}, 5000);
+		});
 		const listening = vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
 			if (event.session.configuration["__runId"] !== run.id) {
 				return;
@@ -249,17 +277,28 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
 		} finally {
-			clearInterval(watching);
+			watching();
 			starting.dispose();
 			listening.dispose();
 			signal.removeEventListener("abort", stop);
 		}
 	};
 
-	serve(hub, "tests.run", async (args, { signal }) => {
-		const { files, "affected": onlyAffected, approved } = (args ?? {}) as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown };
+	const counted = (ran: Ran[]): { "files": number; "pass": number; "fail": number; "skip": number } => {
+		const outcomes = ran.flatMap((file) => file.tests.map((test) => test.outcome));
+
+		return { "files": ran.length, "pass": outcomes.filter((outcome) => outcome === "pass").length, "fail": outcomes.filter((outcome) => outcome === "fail").length, "skip": outcomes.filter((outcome) => outcome === "skip" || outcome === "todo").length };
+	};
+
+	/** A run of test files, to its end: what it's doing (`batch.now`) and each file's result as it comes (`batch.ran`). */
+	const runBatch = async (batch: Batch): Promise<Record<string, unknown>> => {
+		const { files, "affected": onlyAffected, approved } = batch.args as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown };
 		const approvals = Array.isArray(approved) ? approved.filter((key): key is string => typeof key === "string") : [];
+		const { signal } = batch.controller;
+
 		// (the editor up first: a run started before the debugger can take it waits out its timeout, saying nothing)
+		batch.now = { "doing": "waiting for the editor to be up (its workspace and debugger)", "since": performance.now() };
+
 		const waiting = await waitFor(["workspace", "debugger"], READY_MS, signal);
 
 		if (waiting.length > 0) {
@@ -269,17 +308,21 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		const listed = Array.isArray(files) ? files.filter((file): file is string => typeof file === "string").map((file) => file.replace(/^\/workspace\//u, "")) : [];
 		// (no stall clock runs yet, and any of its steps can wait without end while the page is loading: a deadline)
 		const tooLong = `working out the affected tests took over ${String(AFFECTED_MS / 1000)} s (their traces, BABLR's spans, the workspace's files)`;
+
+		batch.now = { "doing": "working out the affected tests", "since": performance.now() };
+
 		const before = onlyAffected === true || listed.length === 0 ? await within(affected(), AFFECTED_MS, tooLong) : undefined;
 		const chosen = listed.length > 0 ? listed : [...new Set((before?.tests ?? []).filter((test) => test.stale).map((test) => test.file))];
 		// (how each test came out last, before this run: a test newly failing reads differently from one failing all along —
 		// without, when that can't be known in time)
 		const last = new Map((before ?? await within(affected(chosen), AFFECTED_MS, tooLong).catch(() => ({ "tests": [] as Affected[] }))).tests.map((test) => [test.id, test.outcome]));
-		const ran = [];
 
-		for (const file of chosen) {
+		for (const [index, file] of chosen.entries()) {
 			if (signal.aborted) {
 				break;
 			}
+
+			batch.now = { "doing": `running ${file} (${String(index + 1)} of ${String(chosen.length)})`, "since": performance.now() };
 
 			const result = await runFile(file, signal, approvals);
 
@@ -288,7 +331,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				return { "ask": result.asked };
 			}
 
-			ran.push({
+			batch.ran.push({
 				"file": file,
 				"exitCode": result.exitCode,
 				"ms": result.ms,
@@ -304,12 +347,72 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			});
 		}
 
-		const outcomes = ran.flatMap((file) => file.tests.map((test) => test.outcome));
-
 		return {
-			"files": ran,
-			"counts": { "files": ran.length, "pass": outcomes.filter((outcome) => outcome === "pass").length, "fail": outcomes.filter((outcome) => outcome === "fail").length, "skip": outcomes.filter((outcome) => outcome === "skip" || outcome === "todo").length },
+			"files": batch.ran,
+			"counts": counted(batch.ran),
 			...chosen.length === 0 ? { "nothing": listed.length === 0 ? "no affected test is stale: name files to run them anyway" : "no files" } : {}
 		};
+	};
+
+	/** The runs, by id, to be asked about again: the latest KEPT. */
+	const batches = new Map<string, Batch>();
+	const startBatch = (args: Record<string, unknown>): Batch => {
+		const batch: Batch = { "id": crypto.randomUUID().slice(0, 8), "args": args, "ran": [], "controller": new AbortController(), "done": Promise.resolve() };
+
+		batch.done = runBatch(batch).then((result) => {
+			batch.result = result;
+		}, (error: unknown) => {
+			batch.error = error instanceof Error ? error : new Error(String(error));
+		}).finally(() => {
+			batch.now = undefined;
+		});
+		batches.set(batch.id, batch);
+
+		for (const id of [...batches.keys()].slice(0, Math.max(0, batches.size - KEPT))) {
+			batches.delete(id);
+		}
+
+		return batch;
+	};
+
+	serve(hub, "tests.run", async (args, { signal }) => {
+		const given = (args ?? {}) as Record<string, unknown>;
+		const { run, approved, answerMs } = given;
+		let batch = typeof run === "string" ? batches.get(run) : undefined;
+
+		if (typeof run === "string" && batch === undefined) {
+			throw new Error(`no test run ${run} here (this page keeps its latest ${String(KEPT)}; a reload forgets them)`);
+		}
+
+		// (its question answered: the same files again, from the start, with the approval)
+		const asked = (batch?.result as { "ask"?: Asked } | undefined)?.ask;
+
+		if (batch !== undefined && asked !== undefined && Array.isArray(approved) && approved.includes(asked.key)) {
+			batch = startBatch({ ...batch.args, "approved": approved });
+		}
+
+		batch ??= startBatch(given);
+
+		// The call waits on the run for ANSWER_MS at most: the run goes on without it, and is asked again by its id. (The
+		// call going away — cancelled, its tab reloaded — leaves the run as it is.)
+		let cancel = (): void => undefined;
+		const answered = await Promise.race([batch.done.then(() => true), new Promise<boolean>((resolve) => {
+			// (a worker's timer, as the run's other deadlines: a hidden tab's own are held back — clock.ts; sooner when
+			// asked: a test of the answer a run gives before it's done)
+			cancel = after(typeof answerMs === "number" ? Math.min(answerMs, ANSWER_MS) : ANSWER_MS, () => { resolve(false); });
+			signal.addEventListener("abort", () => { resolve(false); }, { "once": true });
+		})]);
+
+		cancel();
+
+		if (!answered) {
+			return { "run": batch.id, "running": batch.now === undefined ? "ending" : `${batch.now.doing}, for ${String(Math.round((performance.now() - batch.now.since) / 1000))} s`, "files": batch.ran, "counts": counted(batch.ran) };
+		}
+
+		if (batch.error !== undefined) {
+			throw batch.error;
+		}
+
+		return { "run": batch.id, ...batch.result };
 	});
 }

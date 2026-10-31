@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { eventually, session, tour } from "./architecture-tour-session.mjs";
+import { eventually, session, testsRun, tour } from "./architecture-tour-session.mjs";
 
 tour("architecture-tour-tools");
 
@@ -184,7 +184,13 @@ test("test runs: which tests a change reaches, and their results as data", async
 
 		assert.ok((await request("tests.affected", { "paths": ["checks/sum.js"] })).untraced.includes("checks/sum.test.js"), "never run: untraced");
 
-		const first = await request("tests.run", { "files": ["checks/sum.test.js"] });
+		// (a run that isn't done when its call answers says what it's doing, and is waited on again by its id)
+		const early = await request("tests.run", { "files": ["checks/sum.test.js"], "answerMs": 1 });
+
+		assert.equal(typeof early.running, "string", JSON.stringify(early));
+		assert.equal(typeof early.run, "string");
+
+		const first = await testsRun(request, { "run": early.run });
 		const [file] = first.files;
 
 		assert.equal(file.exitCode, 1, JSON.stringify(first));
@@ -209,7 +215,7 @@ test("test runs: which tests a change reaches, and their results as data", async
 
 		assert.ok(edited.tests.every((test) => test.stale), "sum changed under them: " + JSON.stringify(edited.tests));
 
-		const again = await request("tests.run", { "files": ["checks/sum.test.js"] });
+		const again = await testsRun(request, { "files": ["checks/sum.test.js"] });
 
 		assert.deepEqual(again.files[0].tests.map(({ outcome, before }) => [outcome, before]), [["pass", "pass"], ["fail", "fail"]], "how each came out before");
 	} finally {

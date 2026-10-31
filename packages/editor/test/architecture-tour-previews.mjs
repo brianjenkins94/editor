@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { alive, hasLabel } from "./architecture-harness.mjs";
-import { eventually, pressInRuleView, ruleStatus, session, tour } from "./architecture-tour-session.mjs";
+import { eventually, pressInRuleView, ruleStatus, session, testsRun, tour } from "./architecture-tour-session.mjs";
 
 tour("architecture-tour-previews", { "debugMcp": true, "debugMcpPort": 7398 });
 
@@ -71,7 +71,7 @@ test("playwright: a test file in the debugger drives the preview you have open",
 			""
 		].join("\n") });
 
-		const ran = await request("tests.run", { "files": ["checks/app.spec.mjs"] });
+		const ran = await testsRun(request, { "files": ["checks/app.spec.mjs"] });
 		const [file] = ran.files;
 
 		assert.deepEqual(file.tests.map(({ id, outcome }) => [id, outcome]), [["checks/app.spec.mjs › the app › its button counts", "pass"], ["checks/app.spec.mjs › the app › isn't there", "fail"]], JSON.stringify(ran));

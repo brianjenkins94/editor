@@ -51,6 +51,18 @@ export function eventually(what, probe, timeoutMs = 30_000) {
 	return session.eventually(what, probe, timeoutMs);
 }
 
+/** A test run (`tests.run`) to its end: asked again by its id while it answers that it's still running (test-runs.ts
+ *  answers within a minute, done or not). */
+export async function testsRun(request, args) {
+	let answer = await request("tests.run", args);
+
+	while (typeof answer.running === "string") {
+		answer = await request("tests.run", { "run": answer.run });
+	}
+
+	return answer;
+}
+
 /** The Rules tree's rule rows (VS Code's own tree view, the capabilities extension's): each one's label, as shown. */
 export function ruleRows(workbench) {
 	return workbench.evaluate(() => {

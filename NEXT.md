@@ -83,9 +83,13 @@ How it's kept:
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger). Passing
    in Brave, 2026-10-31: architecture-model, git-fast-forward, sourcemap, span-annotations, and the terminal's ps, less,
    git and history. Still failing, by cause:
-   - **runs_tests blocks its caller until it's done**: an agent sees nothing for up to 30 minutes (the MCP call's
-     limit) — a call to a tab that went away, or a run stuck before its stall clock starts, looked like the agent
-     hanging. It should answer at once with a run id and report as it goes.
+   - **A hidden tab's timers don't run** (measured in Brave, 2026-10-31: a 10 s setTimeout in the editor's page hadn't
+     fired after 91 s; a worker's 70 s wait took 70.0 s; the page still answers messages). So while nobody's looking
+     at the editor's tab — an agent driving it — what waits on the page's timers stops: its logs stop arriving (their
+     flush), runs don't end, hub requests' timeouts never fire. runs_tests' own deadlines (its answer, the stall check,
+     the waits for the editor and for the affected tests) are a worker's now (workbench/clock.ts), so it answers within
+     50 s either way — a 70 s test in the hidden tab answered `running` at 48 s, 103 s, 160 s, and never ended. Next:
+     the rest of the page's timers, or keeping the tab from being held back.
    - **tsval: one file imported by two paths** — `open`'s function declarations see code.ts's `opener` as undefined
      when the test imports code.ts as `./code.ts` and open.ts as `../code/code` (code.test.mjs's `open` test).
    - **terminal-session**: just-bash starts now (almostnode's Module._load), but its commands exit 1.

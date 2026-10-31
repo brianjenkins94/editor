@@ -58,15 +58,19 @@ const runs: ToolFamily = ({ request }) => [
 		})
 	},
 	{
-		"timeoutMs": 1800000,
+		// (a run answers within 50 s — done, or where it is — so a call never waits out an agent's tool limit in silence)
+		"timeoutMs": 120000,
 		"tool": defineTool({
 			"name": "runs_tests",
 			"config": {
-				"description": "Run test files (node:test, in the editor's debugger, one file at a time, as node --test does) and get each test's result as data: its outcome, what it threw, what a failed assertion compared (actual, expected, operator), its time, and how it came out before this run (before), so a newly failing test reads apart from one failing all along. Without files, the stale ones runs_affected lists run. A file that failed without a failed test (it didn't load, say) has its output's end; a gated call the policy leaves undecided (fs, fetch, …) is asked of the person first — BERNARD's redline only as a break-glass, JUDICIAL if it's set — and the call re-invoked with the approval allows it, this once. Returns { files: [{ file, exitCode, ms, tests: [{ id, outcome, error?, assertion?, ms?, before? }], output? }], counts: { files, pass, fail, skip } }.",
-				"inputSchema": { "files": z.array(z.string()).optional().describe("The test files to run (relative to the workspace); default, the affected tests' that are stale.") }
+				"description": "Run test files (node:test, in the editor's debugger, one file at a time, as node --test does) and get each test's result as data: its outcome, what it threw, what a failed assertion compared (actual, expected, operator), its time, and how it came out before this run (before), so a newly failing test reads apart from one failing all along. Without files, the stale ones runs_affected lists run. A file that failed without a failed test (it didn't load, say) has its output's end; a gated call the policy leaves undecided (fs, fetch, …) is asked of the person first — BERNARD's redline only as a break-glass, JUDICIAL if it's set — and the call re-invoked with the approval allows it, this once. Answers within a minute: a run not done by then answers { run, running (what it's doing, for how long), files so far } and goes on — call again with that run to wait for more (a dropped call leaves the run going; runs_stop stops a file's run). Returns { run, files: [{ file, exitCode, ms, tests: [{ id, outcome, error?, assertion?, ms?, before? }], output?, stalled? }], counts: { files, pass, fail, skip } }.",
+				"inputSchema": {
+					"files": z.array(z.string()).optional().describe("The test files to run (relative to the workspace); default, the affected tests' that are stale."),
+					"run": z.string().optional().describe("A run this tool answered `running` for: wait on it again instead of starting one.")
+				}
 			},
-			"handler": async ({ files }, context) => {
-				const ran = await request("tests.run", { "files": files, "approved": (context as PageToolContext).approved }, context.signal) as { "ask"?: PageToolAsk["ask"] };
+			"handler": async ({ files, run }, context) => {
+				const ran = await request("tests.run", { "files": files, "run": run, "approved": (context as PageToolContext).approved }, context.signal) as { "ask"?: PageToolAsk["ask"] };
 
 				// (a gated call the policy leaves undecided: asked of the person — BERNARD, JUDICIAL, then them — before it runs)
 				if (ran.ask !== undefined) {

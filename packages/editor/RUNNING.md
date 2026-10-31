@@ -175,7 +175,11 @@ that just broke reads apart from one that was already failing. A run waits for t
 workspace mounted, and the debugger able to take a run), and says what it's still waiting on after 5 minutes. A gated
 call the policy leaves undecided doesn't wait on a person who isn't watching: the run ends there and asks it through
 debug-mcp, as util/mcp's broker asks its own tools' (BERNARD's redline only as a break-glass, JUDICIAL if it's set,
-else the person by MRTR); re-invoked with the approval, the run allows that call once and goes on.
+else the person by MRTR); re-invoked with the approval, the run allows that call once and goes on. And a call answers
+within 50 seconds, done or not (2026-10-31): a run still going answers with its id, what it's doing and for how long,
+and the files done so far, and `runs_tests` with that `run` waits on it again. A run is the editor's, not its call's,
+so an agent whose call went to a reloaded tab, or whose run is stuck, hears so in under a minute, not after its own
+30-minute tool limit.
 
 **Tests, by feature** (the features map's data, since 2026-10-26; packages/silo/README.md, *The feature manifest*):
 under each of the manifest's features, the tests whose traces ran code it owns that isn't ambient (owned by more than
