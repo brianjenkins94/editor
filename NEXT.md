@@ -88,10 +88,15 @@ How it's kept:
      part): just-bash's sandbox loses its context at its first await and refuses every command —
      terminal-session (3 of 5). Node's carries it through promise continuations; here that would be tsval's, as it
      runs them. Many libraries lean on it.
-   - **A fresh `runs_tests` call carrying `_approved` hangs** (2026-11-01, Brave): no answer in its 121 s, the tab gone
-     from `tabs_list` and debug-mcp reconnecting, and the page booting again in the next minutes. game-rules, which
-     reaches no capability, does it with `_approved: ["runs_tests:fs:write:/tmp/*"]`; the same call without it answers
-     in 32 s, and approving only when asked, by `run`, works. Not found yet: whether the page or debug-mcp goes first.
+   - **The editor's page hangs in Brave, then a call to it gets no answer** (2026-11-01). Not `_approved`: util/mcp
+     keeps that to itself, and the page is asked the same either way. The page's main thread stops — no logs or
+     metrics, `page_eval` unanswered, the tab gone from `tabs_list`, Brave unable to screenshot it — and since 15:50,
+     within 10–40 s of every boot, with no run going (the last log, "the Margin is up", arrives ~38 s late). Earlier the
+     same page ran tests for minutes first. Claude in Chrome's actions reload a hung tab, so they can't watch it. In a
+     fresh tab (18:40) it didn't come back: up for minutes and three reloads, the Live architecture view open and
+     active, collab-identity 6/6 and game-rules 4/4 by `runs_tests`, the renderer flat at ~3.1 GB across reloads (so not
+     a leak across them). Not found: what stopped the old tab. Every boot, still: "the Margin is up" reaches debug-mcp
+     ~35 s after it's logged, and `git.identity` and `runtime.fs.attach` time out (30 s, no responder).
    - Not looked at since: npm.test's load TypeError, page-tools' stall, preview-instrument's empty evidence, replay's
      null for 99, silo-kept's versions.json test (fails under Node too).
    - Can't run in a browser: baseline (execFileSync).
