@@ -4,7 +4,7 @@
  * Wraps VirtualFS to provide Node.js compatible API
  */
 
-import { FS_ASYNC, FS_SYNC } from "./fs-capabilities";
+import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "./fs-capabilities";
 import type { FSWatcher, Stats, VirtualFS, WatchEventType, WatchListener } from "../virtual-fs";
 import { uint8ToBase64, uint8ToHex } from "../utils/binary-encoding";
 import { createNodeError } from "../virtual-fs";
@@ -918,8 +918,19 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 	// almostnode only reports (op, method, path); the host decides. On a desktop CLI these hit the real disk —
 	// reads OUTSIDE the workspace (e.g. ~/.ssh) are the exfiltration axis, writes/deletes the tamper axis. The
 	// host is expected to fast-path workspace reads so this stays cheap (reads are frequent). `afterFs` is told what
-	// each call returned (a read's contents), for the host to record — what a run read, given back in a debugger.
+	// each call returned (a read's contents), for the host to record — what a run read, given back in a debugger. A copy
+	// or a rename is asked about both its paths: its source as its op, where it lands as FS_DESTINATION's.
 	if (beforeFs !== undefined || afterFs !== undefined) {
+		const ask = (op: "read" | "write", method: string, args: unknown[]): void => {
+			beforeFs?.(op, method, String(args[0]));
+
+			const landing = FS_DESTINATION[method];
+
+			if (landing !== undefined) {
+				beforeFs?.(landing, method, String(args[1]));
+			}
+		};
+
 		const record = shim as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
 
 		for (const [method, op] of Object.entries(FS_SYNC)) {
@@ -927,7 +938,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 
 			if (typeof original === "function") {
 				record[method] = (...args: unknown[]) => {
-					beforeFs?.(op, method, String(args[0]));
+					ask(op, method, args);
 
 					const result = original.apply(shim, args);
 
@@ -945,7 +956,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 
 			if (typeof original === "function") {
 				promisesRecord[method] = async (...args: unknown[]) => {
-					beforeFs?.(op, method, String(args[0]));
+					ask(op, method, args);
 
 					const result = await original.apply(promises, args);
 

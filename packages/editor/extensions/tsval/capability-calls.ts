@@ -15,7 +15,7 @@
  * caught here, unlike the canary; a later refinement can resolve it.)
  */
 import type { Policy } from "@brianjenkins94/util/silo/policy";
-import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
+import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { effectiveDisposition, givenResult, isDangerous } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 
@@ -37,20 +37,20 @@ interface Matcher {
 }
 
 /** Bare-identifier callees (`fetch(...)`) and the fido/http verb surface → net. */
-const IDENTIFIER_MATCHERS: Record<string, Matcher> = {
-	"fetch": { "capability": "net", "arg": 0 }
+const IDENTIFIER_MATCHERS: Record<string, Matcher[]> = {
+	"fetch": [{ "capability": "net", "arg": 0 }]
 };
 
 /** Method callees (`fs.writeFile(...)`, `child_process.spawn(...)`, or a destructured `writeFile(...)`), keyed by
  *  the method/function name — the node fs surface (almostnode's own gate table, so the squiggles see every method the
- *  runtime gates) + child_process. */
-const NAME_MATCHERS: Record<string, Matcher> = {
-	...Object.fromEntries(Object.entries({ ...FS_SYNC, ...FS_ASYNC }).map(([method, op]) => [method, { "capability": "fs:" + op, "arg": 0 }])),
-	"spawn": { "capability": "exec", "arg": 0 },
-	"spawnSync": { "capability": "exec", "arg": 0 },
-	"exec": { "capability": "exec", "arg": 0 },
-	"execSync": { "capability": "exec", "arg": 0 },
-	"execFile": { "capability": "exec", "arg": 0 }
+ *  runtime gates; a copy or a rename by both its paths) + child_process. */
+const NAME_MATCHERS: Record<string, Matcher[]> = {
+	...Object.fromEntries(Object.entries({ ...FS_SYNC, ...FS_ASYNC }).map(([method, op]) => [method, [{ "capability": "fs:" + op, "arg": 0 }, ...FS_DESTINATION[method] === undefined ? [] : [{ "capability": "fs:" + FS_DESTINATION[method], "arg": 1 }]]])),
+	"spawn": [{ "capability": "exec", "arg": 0 }],
+	"spawnSync": [{ "capability": "exec", "arg": 0 }],
+	"exec": [{ "capability": "exec", "arg": 0 }],
+	"execSync": [{ "capability": "exec", "arg": 0 }],
+	"execFile": [{ "capability": "exec", "arg": 0 }]
 };
 
 /** Render a callee for display: `fetch` or `fs.writeFile` (`?` for a dynamic receiver). */
@@ -66,35 +66,35 @@ export function renderCallee(callee: ts.Expression): string {
 	return "?";
 }
 
-/** Match a call's callee to a capability matcher (identifier or `.method`), or undefined. */
-function matcherFor(callee: ts.Expression): Matcher | undefined {
+/** Match a call's callee to its capability matchers (identifier or `.method`), or undefined. */
+function matchersFor(callee: ts.Expression): Matcher[] | undefined {
+	// (own entries only: a callee named `toString` isn't the table's prototype's)
+	const own = (table: Record<string, Matcher[]>, name: string): Matcher[] | undefined => (Object.hasOwn(table, name) ? table[name] : undefined);
+
 	if (ts.isIdentifier(callee)) {
-		return IDENTIFIER_MATCHERS[callee.text] ?? NAME_MATCHERS[callee.text];
+		return own(IDENTIFIER_MATCHERS, callee.text) ?? own(NAME_MATCHERS, callee.text);
 	}
 
 	if (ts.isPropertyAccessExpression(callee)) {
-		return NAME_MATCHERS[callee.name.text];
+		return own(NAME_MATCHERS, callee.name.text);
 	}
 }
 
-/** Classify a host call at runtime into a capability hit (with the evaluated resource), or undefined if it isn't a
- *  capability call. `args` are the arguments AS EVALUATED (what the debugger's beforeCall already has). */
-export function classifyCall(node: ts.CallExpression, args: readonly unknown[]): CapabilityHit | undefined {
-	const matcher = matcherFor(node.expression);
+/** Classify a host call at runtime into its capability hits (with the evaluated resources) — one per path a copy or a
+ *  rename reaches, else one — or none if it isn't a capability call. `args` are the arguments AS EVALUATED (what the
+ *  debugger's beforeCall already has). */
+export function classifyCall(node: ts.CallExpression, args: readonly unknown[]): CapabilityHit[] {
+	return (matchersFor(node.expression) ?? []).map((matcher) => {
+		const resource = args[matcher.arg];
 
-	if (matcher === undefined) {
-		return undefined;
-	}
-
-	const resource = args[matcher.arg];
-
-	return {
-		"capability": matcher.capability,
-		"resource": typeof resource === "string" ? resource : "",
-		"callee": renderCallee(node.expression),
-		"dangerous": isDangerous(matcher.capability),
-		"argIndex": matcher.arg
-	};
+		return {
+			"capability": matcher.capability,
+			"resource": typeof resource === "string" ? resource : "",
+			"callee": renderCallee(node.expression),
+			"dangerous": isDangerous(matcher.capability),
+			"argIndex": matcher.arg
+		};
+	});
 }
 
 /**
@@ -122,9 +122,8 @@ export function capabilityBreakLines(sourceFile: ts.SourceFile, policy: Policy):
 
 	(function visit(node: ts.Node): void {
 		if (ts.isCallExpression(node)) {
-			const hit = classifyCall(node, []); // no runtime args at arm time — resource comes from a literal below
-
-			if (hit !== undefined) {
+			// (no runtime args at arm time — resource comes from a literal below)
+			for (const hit of classifyCall(node, [])) {
 				const argNode = node.arguments[hit.argIndex];
 				const resource = argNode !== undefined && ts.isStringLiteralLike(argNode) ? argNode.text : "";
 

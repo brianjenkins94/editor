@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
+import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import ts from "typescript";
 
 import { capabilityStandins } from "../extensions/tsval/canary.ts";
@@ -26,12 +26,22 @@ function call(source) {
 
 test("every method almostnode gates is a capability call — including rm, rename, copyFile", () => {
 	for (const [method, op] of Object.entries({ ...FS_SYNC, ...FS_ASYNC })) {
-		assert.equal(classifyCall(call(`fs.${method}("/p")`), ["/p"])?.capability, "fs:" + op, method);
+		assert.equal(classifyCall(call(`fs.${method}("/p")`), ["/p"])[0]?.capability, "fs:" + op, method);
 	}
 
-	assert.deepEqual(classifyCall(call("fs.rmSync(\"/etc\")"), ["/etc"]), { "capability": "fs:write", "resource": "/etc", "callee": "fs.rmSync", "dangerous": true, "argIndex": 0 });
-	assert.equal(classifyCall(call("renameSync(a, b)"), ["/a", "/b"])?.capability, "fs:write", "a destructured call too");
-	assert.equal(classifyCall(call("fs.watch(\"/p\")"), ["/p"]), undefined, "an ungated method isn't one");
+	assert.deepEqual(classifyCall(call("fs.rmSync(\"/etc\")"), ["/etc"]), [{ "capability": "fs:write", "resource": "/etc", "callee": "fs.rmSync", "dangerous": true, "argIndex": 0 }]);
+	assert.equal(classifyCall(call("renameSync(a, b)"), ["/a", "/b"])[0]?.capability, "fs:write", "a destructured call too");
+	assert.deepEqual(classifyCall(call("fs.watch(\"/p\")"), ["/p"]), [], "an ungated method isn't one");
+	assert.deepEqual(classifyCall(call("toString(\"/p\")"), ["/p"]), [], "nor a name the table's prototype has");
+});
+
+test("a copy is a read of its source and a write where it lands; a rename, a write at both", () => {
+	const paths = (code, args) => classifyCall(call(code), args).map((hit) => `${hit.capability} ${hit.resource}`);
+
+	assert.deepEqual(paths("fs.copyFileSync(\"/home/.ssh/id\", \"/tmp/id\")", ["/home/.ssh/id", "/tmp/id"]), ["fs:read /home/.ssh/id", "fs:write /tmp/id"]);
+	assert.deepEqual(paths("fs.promises.cp(a, b)", ["/a", "/b"]), ["fs:read /a", "fs:write /b"]);
+	assert.deepEqual(paths("rename(a, b)", ["/a", "/b"]), ["fs:write /a", "fs:write /b"]);
+	assert.deepEqual(Object.keys(FS_DESTINATION).sort(), ["copyFile", "copyFileSync", "cp", "cpSync", "rename", "renameSync"]);
 });
 
 test("the canary stands in for every gated method, inertly", async () => {

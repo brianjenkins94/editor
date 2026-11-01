@@ -30,7 +30,7 @@ import type { Policy } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 
-import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
+import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { unpack } from "@brianjenkins94/almostnode/packages";
 import { policySkips, recordingKey, requestOf, triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
 import { revive } from "@brianjenkins94/editor-api/recorded";
@@ -799,8 +799,27 @@ function packageBuiltin(id: string, from: string): unknown {
 						throw Object.assign(new Error(`EACCES: ${pkg} may not ${capability} ${resource} (${verdict.decided === "policy" ? "the policy" : "refused at the call"})`), { "code": "EACCES" });
 					}
 
+					// A copy's or a rename's other path, where it lands: decided as its first is.
+					const landingOp = kind === "fs" ? FS_DESTINATION[property as string] : undefined;
+					const landing = landingOp === undefined ? undefined : { "capability": "fs:" + landingOp, "resource": reachedBy(args[1]) };
+					const landed = landing === undefined ? undefined : packageVerdict(dir, landing.capability, { "kind": "fs", "method": property as string, "op": landingOp, "args": [landing.resource] });
+
+					if (landing !== undefined && landed?.allow !== true) {
+						tally(landing.capability, landing.resource, "denied", pkg, landed?.decided);
+
+						throw Object.assign(new Error(`EACCES: ${pkg} may not ${landing.capability} ${landing.resource} (${landed?.decided === "policy" ? "the policy" : "refused at the call"})`), { "code": "EACCES" });
+					}
+
 					// (a write decided here is let through the runtime's guard, as a program's allowed one is: madeFor)
-					const writing = verdict.allow && capability === "fs:write";
+					const writing = verdict.allow && (capability === "fs:write" || landing !== undefined);
+					// (what came of it, told of each path it reached)
+					const told = (how: Effect["how"]): void => {
+						tally(capability, resource, how, pkg, verdict.decided);
+
+						if (landing !== undefined) {
+							tally(landing.capability, landing.resource, how, pkg, landed?.decided);
+						}
+					};
 
 					if (writing) {
 						allowingWrites += 1;
@@ -811,21 +830,21 @@ function packageBuiltin(id: string, from: string): unknown {
 
 						if (typeof (result as { "then"?: unknown } | null)?.then === "function") {
 							return (result as Promise<unknown>).then((settled) => {
-								tally(capability, resource, "made", pkg, verdict.decided);
+								told("made");
 
 								return settled;
 							}, (error: unknown) => {
-								tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict.decided);
+								told(refused(error) ? "denied" : "made");
 
 								throw error;
 							});
 						}
 
-						tally(capability, resource, "made", pkg, verdict.decided);
+						told("made");
 
 						return result;
 					} catch (error) {
-						tally(capability, resource, refused(error) ? "denied" : "made", pkg, verdict.decided);
+						told(refused(error) ? "denied" : "made");
 
 						throw error;
 					} finally {
@@ -1277,6 +1296,30 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			return fn.apply(this, args);
 		}
 
+		// A copy's or a rename's other path, where it lands, is decided too. Its stop asked about its first path the policy
+		// gates — its source, when that's gated — so the answer there is this path's only when the source wasn't; else the
+		// policy alone decides it, and a call it won't let land isn't made.
+		const landing = tagged.landing === undefined ? undefined : { "capability": tagged.landing, "resource": reachedBy(args[1]) };
+
+		if (landing !== undefined) {
+			const askedHere = allowNext && verdictOf(policy, tagged.capability, resource, liveRun) === "allow";
+			const landingVerdict = askedHere ? "allow" : verdictOf(policy, landing.capability, landing.resource, liveRun);
+
+			if (askedHere) {
+				allowNext = false;
+			}
+
+			if (landingVerdict === "skip") {
+				return skipped(landing.capability, landing.resource, fn.apply(this, args), "policy");
+			}
+
+			if (landingVerdict === "deny") {
+				tally(landing.capability, landing.resource, "denied", undefined, "policy");
+
+				throw Object.assign(new Error(`EACCES: permission denied — ${landing.capability} ${landing.resource} isn't allowed (the policy decides it, and it wasn't asked)`), { "code": "EACCES" });
+			}
+		}
+
 		// Skipped (by the policy, or a live run's: not made, the run going on — as at its stop), made, or refused — as any
 		// debugger's calls through the runtime's files are (gate.ts).
 		const verdict = verdictOf(policy, tagged.capability, resource, liveRun);
@@ -1311,8 +1354,9 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			allowNext = false;
 		}
 
-		// A relative path is the program's directory's (its process.cwd(): a terminal's), as node resolves it.
-		const made = madeArgs(tagged.capability, args, tagged.resourceArg, cwd);
+		// A relative path is the program's directory's (its process.cwd(): a terminal's), as node resolves it — where a copy
+		// lands too.
+		const made = madeArgs(tagged.capability, landing === undefined ? args : madeArgs(landing.capability, args, 1, cwd), tagged.resourceArg, cwd);
 
 		// (a workspace file's call the editor makes, and keeps among the run's effects itself — but one into the run's own
 		// layer, which the editor never sees)
@@ -1320,6 +1364,10 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			tally(tagged.capability, resource, "made", undefined, "layer");
 		} else if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
 			tally(tagged.capability, resource, "made", undefined, decided);
+		}
+
+		if (landing !== undefined && !(programFs !== undefined && editorKeeps(landing.capability, made[1]))) {
+			tally(landing.capability, landing.resource, "made", undefined, decided);
 		}
 
 		return madeFor(tagged.capability, resource, () => effect(...made), requestOf(tagged.capability, args));
@@ -1763,10 +1811,15 @@ function askAt(vm: Vm, place: Place): CapabilityAsk | undefined {
 	})(file);
 
 	for (const call of calls) {
-		const hit = classifyCall(call, []);
+		const hits = classifyCall(call, []);
 
 		// (shaped like a capability call, on something that isn't one of the program's built-ins: not one)
-		if (hit !== undefined && lineReaches(vm, place, call) !== false) {
+		if (hits.length === 0 || lineReaches(vm, place, call) === false) {
+			continue;
+		}
+
+		// (a copy or a rename by each of its paths: the first the policy gates is asked)
+		for (const hit of hits) {
 			const before = resourceOf(vm, call.arguments[hit.argIndex], file);
 			// Computed on the line: what it will be, from a fork run to the call.
 			const probe = before.resolved ? undefined : probeResource(vm, place, hit.capability);

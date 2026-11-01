@@ -88,9 +88,10 @@ How it's kept:
      part): just-bash's sandbox loses its context at its first await and refuses every command —
      terminal-session (3 of 5). Node's carries it through promise continuations; here that would be tsval's, as it
      runs them. Many libraries lean on it.
-   - **The fs gate asks about a call's first path only**: `cp`, `copyFile` and `rename` are asked as writes of their
-     source, and their destination isn't asked at all (collab-identity's `cp` asked to write the folder it copies).
-     A copy reads its source and writes its destination; the table (fs-capabilities.ts) says one op per method.
+   - **A fresh `runs_tests` call carrying `_approved` hangs** (2026-11-01, Brave): no answer in its 121 s, the tab gone
+     from `tabs_list` and debug-mcp reconnecting, and the page booting again in the next minutes. game-rules, which
+     reaches no capability, does it with `_approved: ["runs_tests:fs:write:/tmp/*"]`; the same call without it answers
+     in 32 s, and approving only when asked, by `run`, works. Not found yet: whether the page or debug-mcp goes first.
    - Not looked at since: npm.test's load TypeError, page-tools' stall, preview-instrument's empty evidence, replay's
      null for 99, silo-kept's versions.json test (fails under Node too).
    - Can't run in a browser: baseline (execFileSync).

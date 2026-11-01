@@ -162,7 +162,6 @@ test("fs.promises.readlink and symlink are there, and say what a file system wit
 });
 
 test("behind the gate, fs works as without it: lstat (which asks stat), and a folder copied and removed with its contents", async () => {
-	const { FS_ASYNC, FS_SYNC } = await import("../shims/fs-capabilities.ts");
 	const vfs = new VirtualFS();
 	const asked: string[] = [];
 
@@ -183,8 +182,28 @@ module.exports = (async () => {
 })();`, "/gated.js").exports as Promise<unknown>);
 
 	assert.deepEqual(result, [true, ["ref: refs/heads/main\n", true], false, false]);
-	assert.ok(asked.includes("write cp") && asked.includes("write rm") && asked.includes("write cpSync"), asked.join(", "));
-	assert.deepEqual([FS_ASYNC["cp"], FS_SYNC["cpSync"]], ["write", "write"]);
+	assert.ok(asked.includes("write rm"), asked.join(", "));
+});
+
+test("the gate asks about both of a copy's paths — it reads one and writes the other — and both of a rename's", async () => {
+	const vfs = new VirtualFS();
+	const asked: string[] = [];
+
+	vfs.writeFileSync("/secret.txt", "s");
+
+	const runtime = new Runtime(vfs, { "beforeFs": (op, method, path) => { asked.push(`${op} ${method} ${path}`); } });
+
+	await (runtime.execute(`const fs = require("fs");
+fs.copyFileSync("/secret.txt", "/a.txt");
+fs.renameSync("/a.txt", "/b.txt");
+module.exports = fs.promises.cp("/b.txt", "/c.txt").then(() => fs.promises.rename("/c.txt", "/d.txt"));`, "/copies.js").exports as Promise<void>);
+
+	assert.deepEqual(asked, [
+		"read copyFileSync /secret.txt", "write copyFileSync /a.txt",
+		"write renameSync /a.txt", "write renameSync /b.txt",
+		"read cp /b.txt", "write cp /c.txt",
+		"write rename /c.txt", "write rename /d.txt"
+	]);
 });
 
 test("util.types: Node's answers — a boxed primitive is an object, typed arrays by their kind", () => {

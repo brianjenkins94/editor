@@ -1151,7 +1151,8 @@ files (the gap between them is the signal), is editor-api's policy.ts and util/s
 - **One fs table.** Which `fs` methods read and which write is `@brianjenkins94/almostnode/fs-capabilities`, the table
   the runtime shim gates by. `classifyCall`'s matchers, the canary's stand-ins, the debug worker and decide.ts all
   derive from it, so the editor never misses a method the runtime asks about (as `rm`, `rename` and `copyFile` once
-  were).
+  were). A copy or a rename is asked about at both its paths (`FS_DESTINATION`: where it lands is a write), so
+  `classifyCall` gives a hit per path.
 - **One policy model.** `@brianjenkins94/util/silo/policy` is the single source of dispositions and matching (shared
   with silo); editor-api's `./policy` is the single source of `.silo/` I/O. The extension's policy.ts only adds the
   panel's base-file I/O: the panel edits the shared contract, and silo never writes it.

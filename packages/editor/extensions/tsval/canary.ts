@@ -21,7 +21,7 @@
  */
 import type { HostCallSite } from "@brianjenkins94/tsval";
 import type { CapabilityHit } from "./capability-calls";
-import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
+import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { createVM } from "@brianjenkins94/tsval";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
@@ -50,22 +50,30 @@ export interface CanaryObservation {
 const CAPABILITY = Symbol("capabilities.canary.capability");
 /** Which argument index carries the resource (URL / path / command). Default 0. */
 const RESOURCE_ARG = Symbol("capabilities.canary.resourceArg");
+/** A copy's or a rename's other path: what it does where it lands, its second argument (FS_DESTINATION). */
+const LANDING = Symbol("capabilities.canary.landing");
 
-type Tagged = ((...args: unknown[]) => unknown) & { [CAPABILITY]?: string; [RESOURCE_ARG]?: number };
+type Tagged = ((...args: unknown[]) => unknown) & { [CAPABILITY]?: string; [RESOURCE_ARG]?: number; [LANDING]?: string };
 
-/** Tag a stand-in with its capability (and optionally which arg is the resource). */
-function tag<T extends (...args: never[]) => unknown>(capability: string, fn: T, resourceArg = 0): T {
+/** Tag a stand-in with its capability (and optionally which arg is the resource, and what it does at its second). */
+function tag<T extends (...args: never[]) => unknown>(capability: string, fn: T, resourceArg = 0, landing?: string): T {
 	(fn as Tagged)[CAPABILITY] = capability;
 	(fn as Tagged)[RESOURCE_ARG] = resourceArg;
+
+	if (landing !== undefined) {
+		(fn as Tagged)[LANDING] = landing;
+	}
 
 	return fn;
 }
 
-/** The capability a stand-in stands for, and which of its arguments is the resource — undefined for one untagged. */
-export function standinCapability(fn: unknown): { "capability": string; "resourceArg": number } | undefined {
+/** The capability a stand-in stands for, and which of its arguments is the resource — and, for a copy or a rename, the
+ *  capability of its second argument, where it lands — undefined for one untagged. */
+export function standinCapability(fn: unknown): { "capability": string; "resourceArg": number; "landing"?: string } | undefined {
 	const capability = typeof fn === "function" ? (fn as Tagged)[CAPABILITY] : undefined;
+	const landing = capability === undefined ? undefined : (fn as Tagged)[LANDING];
 
-	return capability === undefined ? undefined : { "capability": capability, "resourceArg": (fn as Tagged)[RESOURCE_ARG] ?? 0 };
+	return capability === undefined ? undefined : { "capability": capability, "resourceArg": (fn as Tagged)[RESOURCE_ARG] ?? 0, ...landing === undefined ? {} : { "landing": landing } };
 }
 
 /** A stand-in's result as a rule gives it (RUNNING.md, *A call's result*), in the shape the call returns — `real` is
@@ -151,17 +159,15 @@ export function inert(): unknown {
  *  effects are the almostnode "production" path's job, not tsval's.) */
 export function capabilityStandins(): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const noop = (): void => { /* inert */ };
-	// Every method almostnode gates, as an inert stand-in: reads find nothing, writes do nothing.
+	// Every method almostnode gates, as an inert stand-in: reads find nothing, writes (a copy or a rename's too) do nothing.
 	const fsResults: Record<string, () => unknown> = { "readdir": () => [], "readdirSync": () => [], "existsSync": () => false, "createReadStream": inert, "createWriteStream": inert };
+	const resultOf = (method: string, op: string): () => unknown => fsResults[method] ?? (op === "read" && FS_DESTINATION[method] === undefined ? () => "" : noop);
+	const landingOf = (method: string): string | undefined => (FS_DESTINATION[method] === undefined ? undefined : "fs:" + FS_DESTINATION[method]);
 	const fsMock = Object.fromEntries([
-		...Object.entries(FS_SYNC).map(([method, op]) => [method, tag("fs:" + op, fsResults[method] ?? (op === "read" ? () => "" : noop))]),
+		...Object.entries(FS_SYNC).map(([method, op]) => [method, tag("fs:" + op, resultOf(method, op), 0, landingOf(method))]),
 		...Object.entries(FS_ASYNC).map(([method, op]) => [
 			method,
-			tag("fs:" + op, () => {
-				const result: () => unknown = fsResults[method] ?? (op === "read" ? () => "" : noop);
-
-				return Promise.resolve(result());
-			})
+			tag("fs:" + op, () => Promise.resolve(resultOf(method, op)()), 0, landingOf(method))
 		])
 	]);
 	const childProcessMock = {
@@ -210,27 +216,28 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 
 		// One classifier for everyone: the shared AST classifier decides capability + resource-arg; the tag is only
 		// a fallback for aliasing the AST can't see. (The debugger uses classifyCall alone — it has no tags.)
-		const hit = classifyCall(site.node, site.args) ?? tagHit(callee, site);
+		// (a copy or a rename: one observation per path it reaches)
+		const classified = classifyCall(site.node, site.args);
+		const fallback = tagHit(callee, site);
+		const hits = classified.length > 0 ? classified : fallback === undefined ? [] : [fallback];
 
-		if (hit === undefined) {
-			return;
+		for (const hit of hits) {
+			const argNode = site.node.arguments[hit.argIndex];
+			const resource = site.args[hit.argIndex];
+			const observed = typeof resource === "string";
+			const staticLiteral = argNode !== undefined && ts.isStringLiteralLike(argNode) ? argNode.text : undefined;
+
+			observations.push({
+				"capability": hit.capability,
+				"callee": hit.callee,
+				"value": observed ? resource : "",
+				"observed": observed,
+				"static": staticLiteral,
+				"start": site.node.getStart(sourceFile),
+				"end": site.node.getEnd(),
+				"dangerous": hit.dangerous
+			});
 		}
-
-		const argNode = site.node.arguments[hit.argIndex];
-		const resource = site.args[hit.argIndex];
-		const observed = typeof resource === "string";
-		const staticLiteral = argNode !== undefined && ts.isStringLiteralLike(argNode) ? argNode.text : undefined;
-
-		observations.push({
-			"capability": hit.capability,
-			"callee": hit.callee,
-			"value": observed ? resource : "",
-			"observed": observed,
-			"static": staticLiteral,
-			"start": site.node.getStart(sourceFile),
-			"end": site.node.getEnd(),
-			"dangerous": hit.dangerous
-		});
 	};
 
 	const loaded = createVM(src, {
