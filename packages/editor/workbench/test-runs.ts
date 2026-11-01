@@ -33,7 +33,6 @@ import type { NodeRunner } from "./node-runner";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { localTracesPath } from "@brianjenkins94/util/silo/layout";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
-import { after, every } from "./clock";
 import { waitFor } from "./readiness";
 import { isTestFile } from "./terminal/commands/node/node";
 
@@ -64,14 +63,14 @@ const OUTPUT = 4000;
 
 /** `work`, or a rejection with `message` once `ms` pass without it. */
 async function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
-	let cancel = (): void => undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	try {
 		return await Promise.race([work, new Promise<never>((_resolve, reject) => {
-			cancel = after(ms, () => { reject(new Error(message)); });
+			timer = setTimeout(() => { reject(new Error(message)); }, ms);
 		})]);
 	} finally {
-		cancel();
+		clearTimeout(timer);
 	}
 }
 
@@ -212,7 +211,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			}
 		});
 		// (stuck: where it is — no session yet, or the session's state, line and code — and the run ended)
-		const watching = every(5000, () => {
+		const watching = setInterval(() => {
 			if (performance.now() - active < STALL_MS || stalled !== undefined) {
 				return;
 			}
@@ -232,7 +231,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			}, () => {
 				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session didn't say where it is`;
 			}).finally(stop);
-		});
+		}, 5000);
 		const listening = vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
 			if (event.session.configuration["__runId"] !== run.id) {
 				return;
@@ -277,7 +276,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
 		} finally {
-			watching();
+			clearInterval(watching);
 			starting.dispose();
 			listening.dispose();
 			signal.removeEventListener("abort", stop);
@@ -395,15 +394,14 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		// The call waits on the run for ANSWER_MS at most: the run goes on without it, and is asked again by its id. (The
 		// call going away — cancelled, its tab reloaded — leaves the run as it is.)
-		let cancel = (): void => undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		const answered = await Promise.race([batch.done.then(() => true), new Promise<boolean>((resolve) => {
-			// (a worker's timer, as the run's other deadlines: a hidden tab's own are held back — clock.ts; sooner when
-			// asked: a test of the answer a run gives before it's done)
-			cancel = after(typeof answerMs === "number" ? Math.min(answerMs, ANSWER_MS) : ANSWER_MS, () => { resolve(false); });
+			// (sooner when asked: a test of the answer a run gives before it's done)
+			timer = setTimeout(() => { resolve(false); }, typeof answerMs === "number" ? Math.min(answerMs, ANSWER_MS) : ANSWER_MS);
 			signal.addEventListener("abort", () => { resolve(false); }, { "once": true });
 		})]);
 
-		cancel();
+		clearTimeout(timer);
 
 		if (!answered) {
 			return { "run": batch.id, "running": batch.now === undefined ? "ending" : `${batch.now.doing}, for ${String(Math.round((performance.now() - batch.now.since) / 1000))} s`, "files": batch.ran, "counts": counted(batch.ran) };

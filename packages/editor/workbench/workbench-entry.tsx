@@ -12,6 +12,8 @@
  * `workbench.view.*` commands through it). Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
+// (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
+import "../shared/hidden-timers";
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";

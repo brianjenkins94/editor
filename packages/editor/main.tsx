@@ -1,4 +1,6 @@
 /** @jsxImportSource preact */
+// (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
+import "./shared/hidden-timers";
 import type { Preview } from "./app/preview";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";

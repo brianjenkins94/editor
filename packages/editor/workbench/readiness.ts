@@ -9,8 +9,6 @@
  *   (on the page's own thread) can be minutes from that.
  */
 
-import { after } from "./clock";
-
 export const STAGES = ["workspace", "api", "debugger"] as const;
 
 export type Stage = typeof STAGES[number];
@@ -47,11 +45,10 @@ export async function whenReady(stage: Stage): Promise<void> {
 /** Wait for `stages` until `timeoutMs`: the ones still missing then (none, when all came). */
 export async function waitFor(stages: readonly Stage[], timeoutMs: number, signal?: AbortSignal): Promise<Stage[]> {
 	const deadline = new Promise<void>((resolve) => {
-		// (a worker's timer: a hidden tab's own are held back — clock.ts)
-		const cancel = after(timeoutMs, resolve);
+		const timer = setTimeout(resolve, timeoutMs);
 
 		signal?.addEventListener("abort", () => {
-			cancel();
+			clearTimeout(timer);
 			resolve();
 		}, { "once": true });
 	});
