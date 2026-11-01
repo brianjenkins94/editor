@@ -161,6 +161,32 @@ test("fs.promises.readlink and symlink are there, and say what a file system wit
 	assert.deepEqual(codes, ["EINVAL", "ENOENT", "ENOSYS"]);
 });
 
+test("behind the gate, fs works as without it: lstat (which asks stat), and a folder copied and removed with its contents", async () => {
+	const { FS_ASYNC, FS_SYNC } = await import("../shims/fs-capabilities.ts");
+	const vfs = new VirtualFS();
+	const asked: string[] = [];
+
+	vfs.mkdirSync("/repo/.git/objects", { "recursive": true });
+	vfs.writeFileSync("/repo/.git/HEAD", "ref: refs/heads/main\n");
+
+	const runtime = new Runtime(vfs, { "beforeFs": (op, method) => { asked.push(`${op} ${method}`); } });
+	const result = await (runtime.execute(`const { promises, cpSync, rmSync, existsSync } = require("fs");
+module.exports = (async () => {
+	const file = (await promises.lstat("/repo/.git/HEAD")).isFile();
+	await promises.cp("/repo", "/clone", { "recursive": true });
+	cpSync("/repo", "/again", { "recursive": true });
+	const copied = [await promises.readFile("/clone/.git/HEAD", "utf8"), existsSync("/again/.git/objects")];
+	await promises.rm("/clone", { "recursive": true, "force": true });
+	await promises.rm("/missing", { "force": true });
+	rmSync("/again", { "recursive": true });
+	return [file, copied, existsSync("/clone"), existsSync("/again")];
+})();`, "/gated.js").exports as Promise<unknown>);
+
+	assert.deepEqual(result, [true, ["ref: refs/heads/main\n", true], false, false]);
+	assert.ok(asked.includes("write cp") && asked.includes("write rm") && asked.includes("write cpSync"), asked.join(", "));
+	assert.deepEqual([FS_ASYNC["cp"], FS_SYNC["cpSync"]], ["write", "write"]);
+});
+
 test("util.types: Node's answers — a boxed primitive is an object, typed arrays by their kind", () => {
 	const runtime = new Runtime(new VirtualFS());
 	const said = runtime.execute(`const types = require("util/types"); module.exports = [types.isBooleanObject(true), types.isBooleanObject(new Boolean(true)), types.isUint8Array(new Uint8Array()), types.isUint8Array(new Uint16Array()), types.isAsyncFunction(async () => 1), types.isGeneratorFunction(function* () {}), types.isNativeError(new TypeError()), types.isBoxedPrimitive(Object(1n)), types.isArrayBufferView(new DataView(new ArrayBuffer(1))), require("util").types.isDate(new Date())];`, "/types.js").exports;

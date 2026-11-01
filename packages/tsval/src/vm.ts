@@ -2074,8 +2074,14 @@ export class Machine implements VM {
 
 		const delta = this.values.length - job.base;
 
+		// (a splice-combine handler's depth, `base`, moves with it — else a `return await x` resumed under a caller's
+		// pending operands, `f(await g())`, splices from past its own value and returns undefined)
 		for (const frame of job.frames) {
 			frame.valuesBase += delta;
+
+			if (frame.kind === undefined && frame.base !== undefined) {
+				frame.base += delta;
+			}
 		}
 
 		this.frames.push(...job.frames);

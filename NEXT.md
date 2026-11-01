@@ -82,14 +82,15 @@ How it's kept:
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within 50 s, done or not, and is waited on again by its run id). Passing in Brave, 2026-11-01: architecture-model,
-   code, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the terminal's git,
-   history, less, node and ps. Still failing, by cause:
+   code, collab-identity, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the
+   terminal's git, history, less, node and ps. Still failing, by cause:
    - **AsyncLocalStorage doesn't carry across an await** (almostnode's holds its store only for `run`'s synchronous
      part): just-bash's sandbox loses its context at its first await and refuses every command —
      terminal-session (3 of 5). Node's carries it through promise continuations; here that would be tsval's, as it
      runs them. Many libraries lean on it.
-   - **almostnode's fs.promises lacks `cp`**, and something reads `.replace` of undefined: collab-identity (3 of 6).
-     No links at all in its file systems (readlink/symlink say so).
+   - **The fs gate asks about a call's first path only**: `cp`, `copyFile` and `rename` are asked as writes of their
+     source, and their destination isn't asked at all (collab-identity's `cp` asked to write the folder it copies).
+     A copy reads its source and writes its destination; the table (fs-capabilities.ts) says one op per method.
    - Not looked at since: npm.test's load TypeError, page-tools' stall, preview-instrument's empty evidence, replay's
      null for 99, silo-kept's versions.json test (fails under Node too).
    - Can't run in a browser: baseline (execFileSync).

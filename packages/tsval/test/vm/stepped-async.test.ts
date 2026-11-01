@@ -105,6 +105,21 @@ test("stepped async: a fork at a stop resumes its own pending work, apart from t
 	assert.deepStrictEqual(lines, ["stop here", 1, "stop here", 1], "the original's own count, not the fork's");
 });
 
+test("stepped async: `return await x` resumed under its caller's pending operands returns x", async () => {
+	const { lines, globals } = logged();
+	const src = [
+		"async function inner() { await null; return 'v'; }",
+		"async function middle() { return await inner(); }",
+		"const same = (value) => value;",
+		"async function outer() { log(same(await middle())); log('x' + (await middle())); }",
+		"outer();"
+	].join("\n");
+	const { vm } = createVM(src, { "globals": globals, "steppedAsync": true });
+
+	await toEnd(vm);
+	assert.deepStrictEqual(lines, ["v", "xv"]);
+});
+
 test("without steppedAsync: async code runs on the host's promise queue, as before", async () => {
 	const { lines, globals } = logged();
 	const { vm } = createVM("async function main() { await null; log('later'); }\nmain();\nlog('now');", { "globals": globals });

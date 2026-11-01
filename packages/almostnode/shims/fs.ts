@@ -40,6 +40,7 @@ export interface FsShim {
 	"fdatasyncSync": (fd: number) => void;
 	"mkdtempSync": (prefix: string) => string;
 	"rmSync": (path: string, options?: { "recursive"?: boolean; "force"?: boolean }) => void;
+	"cpSync": (src: PathLike, dest: PathLike, options?: { "recursive"?: boolean; "force"?: boolean }) => void;
 	"watch": ((filename: string, options?: { "persistent"?: boolean; "recursive"?: boolean }, listener?: WatchListener) => FSWatcher) & ((filename: string, listener?: WatchListener) => FSWatcher);
 	"readFile": ((path: string, callback: (err: Error | null, data?: Uint8Array) => void) => void) & ((path: string, options: { "encoding": string }, callback: (err: Error | null, data?: string) => void) => void);
 	"stat": (path: string, callback: (err: Error | null, stats?: Stats) => void) => void;
@@ -69,6 +70,8 @@ export interface FsPromises {
 	"access": (path: PathLike, mode?: number) => Promise<void>;
 	"realpath": (path: PathLike) => Promise<string>;
 	"copyFile": (src: PathLike, dest: PathLike) => Promise<void>;
+	"rm": (path: PathLike, options?: { "recursive"?: boolean; "force"?: boolean }) => Promise<void>;
+	"cp": (src: PathLike, dest: PathLike, options?: { "recursive"?: boolean; "force"?: boolean }) => Promise<void>;
 }
 
 export interface FsConstants {
@@ -254,8 +257,56 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 		return resolvedPath;
 	};
 
+	/** Remove `path`, a folder's contents first when `recursive`; nothing there is fine when `force` — Node's rm. */
+	const rm = (pathLike: unknown, options?: { "recursive"?: boolean; "force"?: boolean }): void => {
+		const path = resolvePath(pathLike);
+
+		if (!vfs.existsSync(path)) {
+			if (options?.force) { return; }
+			throw createNodeError("ENOENT", "rm", path);
+		}
+
+		if (!vfs.statSync(path).isDirectory()) {
+			vfs.unlinkSync(path);
+		} else if (options?.recursive) {
+			for (const entry of vfs.readdirSync(path)) {
+				rm(path.endsWith("/") ? path + entry : path + "/" + entry, options);
+			}
+
+			vfs.rmdirSync(path);
+		} else {
+			throw createNodeError("EISDIR", "rm", path);
+		}
+	};
+
+	/** Copy `src` to `dest`, a folder's contents too when `recursive` (into `dest`, made as needed) — Node's cp. */
+	const cp = (srcLike: unknown, destLike: unknown, options?: { "recursive"?: boolean; "force"?: boolean }): void => {
+		const src = resolvePath(srcLike);
+		const dest = resolvePath(destLike);
+
+		if (!vfs.statSync(src).isDirectory()) {
+			if (options?.force !== false || !vfs.existsSync(dest)) {
+				vfs.writeFileSync(dest, vfs.readFileSync(src));
+			}
+
+			return;
+		}
+
+		if (!options?.recursive) {
+			throw createNodeError("EISDIR", "cp", src);
+		}
+
+		vfs.mkdirSync(dest, { "recursive": true });
+
+		for (const entry of vfs.readdirSync(src)) {
+			cp(`${src.replace(/\/$/u, "")}/${entry}`, `${dest.replace(/\/$/u, "")}/${entry}`, options);
+		}
+	};
+
 	const promises: FsPromises = {
 		"mkdtemp": async (prefix: string): Promise<string> => mkdtemp(prefix),
+		"rm": async (pathLike: PathLike, options?: { "recursive"?: boolean; "force"?: boolean }): Promise<void> => { rm(pathLike, options); },
+		"cp": async (src: PathLike, dest: PathLike, options?: { "recursive"?: boolean; "force"?: boolean }): Promise<void> => { cp(src, dest, options); },
 		// (no links in this file system: a path that's there isn't one — Node's EINVAL — and one can't be made, said as
 		// it's asked; isomorphic-git binds both as it starts)
 		"readlink": async (pathLike: PathLike): Promise<string> => {
@@ -727,35 +778,9 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 
 		"mkdtempSync": mkdtemp,
 
-		"rmSync": function(pathLike: unknown, options?: { "recursive"?: boolean; "force"?: boolean }): void {
-			const path = resolvePath(pathLike);
+		"rmSync": rm,
 
-			if (!vfs.existsSync(path)) {
-				if (options?.force) { return; }
-				throw createNodeError("ENOENT", "rm", path);
-			}
-
-			const stats = vfs.statSync(path);
-
-			if (stats.isDirectory()) {
-				if (options?.recursive) {
-          // Recursively delete directory contents
-					const entries = vfs.readdirSync(path);
-
-					for (const entry of entries) {
-						const entryPath = path.endsWith("/") ? path + entry : path + "/" + entry;
-
-						this.rmSync(entryPath, options);
-					}
-
-					vfs.rmdirSync(path);
-				} else {
-					throw createNodeError("EISDIR", "rm", path);
-				}
-			} else {
-				vfs.unlinkSync(path);
-			}
-		},
+		"cpSync": cp,
 
 		"unlinkSync": function(pathLike: unknown): void {
 			const path = resolvePath(pathLike);
@@ -904,7 +929,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 				record[method] = (...args: unknown[]) => {
 					beforeFs?.(op, method, String(args[0]));
 
-					const result = original(...args);
+					const result = original.apply(shim, args);
 
 					afterFs?.(op, method, String(args[0]), result);
 
@@ -922,7 +947,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 				promisesRecord[method] = async (...args: unknown[]) => {
 					beforeFs?.(op, method, String(args[0]));
 
-					const result = await original(...args);
+					const result = await original.apply(promises, args);
 
 					afterFs?.(op, method, String(args[0]), result);
 
