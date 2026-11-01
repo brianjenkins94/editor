@@ -136,6 +136,31 @@ test("util.parseArgs loads where there's no Node `global`: bundled, its primordi
 	assert.equal(globalThisFor("global[name]", "/x/node_modules/other/index.js"), undefined, "only the file that needs it");
 });
 
+test("fs.promises.mkdtemp makes a new folder by its prefix, as mkdtempSync does — and both are writes to the gate", async () => {
+	const { FS_ASYNC, FS_SYNC } = await import("../shims/fs-capabilities.ts");
+	const vfs = new VirtualFS();
+
+	vfs.mkdirSync("/tmp", { "recursive": true });
+
+	const runtime = new Runtime(vfs);
+	const made = await (runtime.execute(`module.exports = require("fs").promises.mkdtemp("/tmp/run-");`, "/mkdtemp.js").exports as Promise<string>);
+
+	assert.match(made, /^\/tmp\/run-[a-z0-9]{6}$/u);
+	assert.ok(vfs.statSync(made).isDirectory());
+	assert.deepEqual([FS_ASYNC["mkdtemp"], FS_SYNC["mkdtempSync"]], ["write", "write"]);
+});
+
+test("fs.promises.readlink and symlink are there, and say what a file system without links does", async () => {
+	const vfs = new VirtualFS();
+
+	vfs.writeFileSync("/file.txt", "x");
+
+	const runtime = new Runtime(vfs);
+	const codes = await (runtime.execute(`const { promises } = require("fs"); const code = (call) => call.then(() => "ok", (error) => error.code); module.exports = Promise.all([code(promises.readlink("/file.txt")), code(promises.readlink("/missing")), code(promises.symlink("/file.txt", "/link"))]);`, "/links.js").exports as Promise<string[]>);
+
+	assert.deepEqual(codes, ["EINVAL", "ENOENT", "ENOSYS"]);
+});
+
 test("util.types: Node's answers — a boxed primitive is an object, typed arrays by their kind", () => {
 	const runtime = new Runtime(new VirtualFS());
 	const said = runtime.execute(`const types = require("util/types"); module.exports = [types.isBooleanObject(true), types.isBooleanObject(new Boolean(true)), types.isUint8Array(new Uint8Array()), types.isUint8Array(new Uint16Array()), types.isAsyncFunction(async () => 1), types.isGeneratorFunction(function* () {}), types.isNativeError(new TypeError()), types.isBoxedPrimitive(Object(1n)), types.isArrayBufferView(new DataView(new ArrayBuffer(1))), require("util").types.isDate(new Date())];`, "/types.js").exports;

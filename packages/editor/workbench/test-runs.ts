@@ -242,8 +242,10 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			if (event.event === "tests") {
 				reported = event.body as TestsEvent;
 			} else if (event.event === "ask") {
-				const { line, callee, capability, resource, "file": where = `${ROOT}/${file}` } = event.body as { "line": number; "callee": string; "capability": string; "resource": string; "file"?: string };
-				const scope = scopeOf(capability, resource);
+				const { line, callee, capability, resource, resolved, "file": where = `${ROOT}/${file}` } = event.body as { "line": number; "callee": string; "capability": string; "resource": string; "resolved"?: boolean; "file"?: string };
+				// (a path not known before its line runs — `path.join(dir, name)` — is asked about as the test file's: keyed by
+				// the expression, each such call was its own question, and each answer started the run over)
+				const scope = resolved === false ? scopeOf(capability, `<as ${file} works it out>`) : scopeOf(capability, resource);
 				// (a temporary file's name is made fresh each run — mkdtemp's — so its approval is for the run's temporary files:
 				// keyed by the path, a re-run with it approved would ask again about a name it hasn't seen)
 				const key = `runs_tests:${scope.replace(/^(fs:\w+:\/tmp\/).*$/u, "$1*")}`;
@@ -253,7 +255,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				} else {
 					const at = `${where.replace(/^\/workspace\//u, "")}:${String(line + 1)}`;
 
-					asked = { "message": `A test run (${file}) reaches ${scope} at ${at}: \`${callee}\`. Allow it for runs_tests?`, "key": key, "scope": scope, "request": { "kind": scope.slice(0, scope.indexOf(":")), "scope": scope, "resource": resource, "call": callee, "at": at } };
+					asked = { "message": resolved === false ? `A test run (${file}) reaches ${capability} at ${at}: \`${callee}\` (${resource}), a path it works out as it runs. Allow ${capability} for the paths ${file} works out, for runs_tests?` : `A test run (${file}) reaches ${scope} at ${at}: \`${callee}\`. Allow it for runs_tests?`, "key": key, "scope": scope, "request": { "kind": scope.slice(0, scope.indexOf(":")), "scope": scope, "resource": resource, "call": callee, "at": at } };
 					stop();
 				}
 			}

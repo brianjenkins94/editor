@@ -60,6 +60,9 @@ export interface FsPromises {
 	"lstat": (path: PathLike) => Promise<Stats>;
 	"readdir": (path: PathLike) => Promise<string[]>;
 	"mkdir": (path: PathLike, options?: { "recursive"?: boolean }) => Promise<void>;
+	"mkdtemp": (prefix: string) => Promise<string>;
+	"readlink": (path: PathLike) => Promise<string>;
+	"symlink": (target: string, path: PathLike) => Promise<void>;
 	"unlink": (path: PathLike) => Promise<void>;
 	"rmdir": (path: PathLike) => Promise<void>;
 	"rename": (oldPath: PathLike, newPath: PathLike) => Promise<void>;
@@ -242,7 +245,27 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 		"X_OK": 1
 	};
 
+	/** A new folder named `prefix` and six random characters, as Node's mkdtemp makes one. */
+	const mkdtemp = (prefix: string): string => {
+		const resolvedPath = resolvePath(`${prefix}${Math.random().toString(36).slice(2, 8)}`);
+
+		vfs.mkdirSync(resolvedPath, { "recursive": true });
+
+		return resolvedPath;
+	};
+
 	const promises: FsPromises = {
+		"mkdtemp": async (prefix: string): Promise<string> => mkdtemp(prefix),
+		// (no links in this file system: a path that's there isn't one — Node's EINVAL — and one can't be made, said as
+		// it's asked; isomorphic-git binds both as it starts)
+		"readlink": async (pathLike: PathLike): Promise<string> => {
+			const path = resolvePath(pathLike);
+
+			throw createNodeError(vfs.existsSync(path) ? "EINVAL" : "ENOENT", "readlink", path);
+		},
+		"symlink": async (_target: string, pathLike: PathLike): Promise<void> => {
+			throw createNodeError("ENOSYS", "symlink", resolvePath(pathLike));
+		},
 		"readFile": function(pathLike: unknown, encodingOrOptions?: string | { "encoding"?: string | null }): Promise<Buffer | string> {
 			return new Promise((resolve, reject) => {
 				try {
@@ -702,16 +725,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
       // No-op - our virtual FS doesn't have disk buffering
 		},
 
-		"mkdtempSync": function(prefix: string): string {
-      // Generate a unique suffix
-			const suffix = Math.random().toString(36).slice(2, 8);
-			const tempDir = `${prefix}${suffix}`;
-			const resolvedPath = resolvePath(tempDir);
-
-			vfs.mkdirSync(resolvedPath, { "recursive": true });
-
-			return resolvedPath;
-		},
+		"mkdtempSync": mkdtemp,
 
 		"rmSync": function(pathLike: unknown, options?: { "recursive"?: boolean; "force"?: boolean }): void {
 			const path = resolvePath(pathLike);

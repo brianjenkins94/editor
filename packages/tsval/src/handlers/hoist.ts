@@ -236,7 +236,8 @@ export function bindImport(vm: Machine, scope: Scope, node: ts.ImportDeclaration
 	} else if (bindings && isNamedImports(bindings)) {
 		for (const element of bindings.elements) {
 			if (!element.isTypeOnly) {
-				bind(element.name.text, vm.fromHost(ns[(element.propertyName ?? element.name).text]));
+				// (live: read from the namespace as it's used — a module still being evaluated fills it in later)
+				scope.declareImport(element.name.text, ns, (element.propertyName ?? element.name).text, (value) => vm.fromHost(value));
 			}
 		}
 	}

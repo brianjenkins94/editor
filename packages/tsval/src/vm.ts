@@ -1697,7 +1697,8 @@ export class Machine implements VM {
 			}
 
 			for (const [name, binding] of scope.bindings) {
-				ns.bindings.set(name, { "value": clone(binding.value), "kind": binding.kind, "initialized": binding.initialized });
+				// (an import's namespace is the exporting module's, shared: it's that module's state, not this scope's)
+				ns.bindings.set(name, { "value": clone(binding.value), "kind": binding.kind, "initialized": binding.initialized, ...binding.from === undefined ? {} : { "from": binding.from } });
 			}
 
 			return ns;

@@ -72,7 +72,7 @@ export interface NodeError extends Error {
 }
 
 export function createNodeError(
-	code: "ENOENT" | "ENOTDIR" | "EISDIR" | "EEXIST" | "ENOTEMPTY",
+	code: "ENOENT" | "ENOTDIR" | "EISDIR" | "EEXIST" | "ENOTEMPTY" | "EINVAL" | "ENOSYS",
 	syscall: string,
 	path: string,
 	message?: string
@@ -82,7 +82,9 @@ export function createNodeError(
 		"ENOTDIR": -20,
 		"EISDIR": -21,
 		"EEXIST": -17,
-		"ENOTEMPTY": -39
+		"ENOTEMPTY": -39,
+		"EINVAL": -22,
+		"ENOSYS": -38
 	};
 
 	const messages: Record<string, string> = {
@@ -90,7 +92,9 @@ export function createNodeError(
 		"ENOTDIR": "not a directory",
 		"EISDIR": "is a directory",
 		"EEXIST": "file already exists",
-		"ENOTEMPTY": "directory not empty"
+		"ENOTEMPTY": "directory not empty",
+		"EINVAL": "invalid argument",
+		"ENOSYS": "function not implemented"
 	};
 
 	const err = new Error(

@@ -96,6 +96,17 @@ test("a cycle sees the partial exports, as Node's does", async () => {
 	assert.deepStrictEqual(await run({ ...files, "/w/main.js": "require('./a');\n" }, "/w/main.js"), ["early"]);
 });
 
+test("an ES module's imports are live: one bound while its module is still being evaluated sees the value once it's there", async () => {
+	// (main imports a; a imports b; b imports a back, before a's exports are there — and calls it later, from a function)
+	const files = {
+		"/w/main.ts": "import { a } from './a';\nimport { fromB } from './b';\nlog(a());\nlog(fromB());\n",
+		"/w/a.ts": "import { fromB } from './b';\nexport function a() { return 'a, then ' + typeof fromB; }\n",
+		"/w/b.ts": "import { a } from './a';\nexport function fromB() { return typeof a; }\n"
+	};
+
+	assert.deepStrictEqual(await run(files, "/w/main.ts"), ["a, then function", "function"]);
+});
+
 test("a module that threw leaves the cache: required again, it's tried again", async () => {
 	const files = {
 		"/w/main.js": "let tries = 0;\nglobalThis.count = () => ++tries;\ntry { require('./flaky'); } catch (error) { log('threw: ' + error.message); }\nlog(require('./flaky').ok);\n",

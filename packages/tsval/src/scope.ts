@@ -23,6 +23,10 @@ export interface Binding {
 	"kind": BindingKind;
 	/** false while in the Temporal Dead Zone (declared but not yet initialized). */
 	"initialized": boolean;
+	/** An import's: read from the exporting module's namespace each time, as ES modules' imports are live — one bound
+	 *  while that module is still being evaluated (a cycle) sees its value once it's there. `enter` is the machine's
+	 *  host-to-guest crossing (its guard). */
+	"from"?: { "namespace": Record<string, unknown>; "key": string; "enter": (value: unknown) => unknown };
 }
 
 export class Scope {
@@ -148,6 +152,11 @@ export class Scope {
 		this.bindings.set(name, { "value": undefined, "kind": kind, "initialized": kind === "param" });
 	}
 
+	/** Declare an import: `name` reads `key` of `namespace` each time (Binding.from), and can't be assigned. */
+	public declareImport(name: string, namespace: Record<string, unknown>, key: string, enter: (value: unknown) => unknown): void {
+		this.bindings.set(name, { "value": undefined, "kind": "const", "initialized": true, "from": { "namespace": namespace, "key": key, "enter": enter } });
+	}
+
 	/** Provide the value for a previously-declared binding, leaving the TDZ. */
 	public initialize(name: string, value: unknown): void {
 		const binding = this.bindings.get(name);
@@ -180,6 +189,10 @@ export class Scope {
 		if (binding) {
 			if (!binding.initialized) {
 				throw new ReferenceError(`Cannot access '${name}' before initialization`);
+			}
+
+			if (binding.from !== undefined) {
+				return binding.from.enter(binding.from.namespace[binding.from.key]);
 			}
 
 			return binding.value;

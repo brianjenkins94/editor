@@ -80,15 +80,18 @@ How it's kept:
      worked through the editor's tools alone (ARCHITECTURE.md, *Workspace tools*, has them all). A program runs under
      `debug_start`.
    - (d) CI on the pushed branch checks the work.
-2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger). Passing
-   in Brave, 2026-10-31: architecture-model, git-fast-forward, sourcemap, span-annotations, and the terminal's ps, less,
-   git and history. Still failing, by cause:
-   - **tsval: one file imported by two paths** — `open`'s function declarations see code.ts's `opener` as undefined
-     when the test imports code.ts as `./code.ts` and open.ts as `../code/code` (code.test.mjs's `open` test).
-   - **terminal-session**: just-bash starts now (almostnode's Module._load), but its commands exit 1.
-   - The rest not looked at since: collab-identity, event-sheet, game-anchors, game-rules (BABLR, likely fixed with
-     span-annotations), node.test (util.parseArgs, likely fixed), npm.test's load TypeError, page-tools' stall,
-     preview-instrument's empty evidence, replay's null for 99, silo-kept's versions.json test (fails under Node too).
+2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
+   within 50 s, done or not, and is waited on again by its run id). Passing in Brave, 2026-11-01: architecture-model,
+   code, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the terminal's git,
+   history, less, node and ps. Still failing, by cause:
+   - **AsyncLocalStorage doesn't carry across an await** (almostnode's holds its store only for `run`'s synchronous
+     part): just-bash's sandbox loses its context at its first await and refuses every command —
+     terminal-session (3 of 5). Node's carries it through promise continuations; here that would be tsval's, as it
+     runs them. Many libraries lean on it.
+   - **almostnode's fs.promises lacks `cp`**, and something reads `.replace` of undefined: collab-identity (3 of 6).
+     No links at all in its file systems (readlink/symlink say so).
+   - Not looked at since: npm.test's load TypeError, page-tools' stall, preview-instrument's empty evidence, replay's
+     null for 99, silo-kept's versions.json test (fails under Node too).
    - Can't run in a browser: baseline (execFileSync).
 3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
    the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or

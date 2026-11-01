@@ -5,7 +5,7 @@
 //
 // Invariants: rebase/force-push immune (id is content-derived); new-commit/base-jump carries; merge carries with no
 // lineage walk; reset-away nodes orphan cleanly (never misattach); a semantic edit to the annotated span orphans it
-// (→ flag) while edits elsewhere carry. Run: node --test (needs bablr/dist built).
+// (→ flag) while edits elsewhere carry. Run: node --test (needs bablr/dist built; the editor's debugger loads its source).
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import * as nodefs from "node:fs";
@@ -14,7 +14,7 @@ import * as path from "node:path";
 import test from "node:test";
 import * as gitmod from "isomorphic-git";
 // eslint-disable-next-line antfu/no-import-dist -- exercise the shipped artifact (dist is gitignored, local/CI-built)
-import { nodeAtoms, reidentify } from "../../bablr/dist/index.js";
+import { nodeAtoms, reidentify } from "@brianjenkins94/bablr";
 
 const git = gitmod.default ?? gitmod;
 const FILE = "src/level.ts";
