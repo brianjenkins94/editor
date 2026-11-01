@@ -62,6 +62,9 @@ function workerLog(): RuntimeConnection["log"] {
 
 type Vm = LoadedVM["vm"];
 
+/** The step under way's span (advanceFrom's): a run's end closes it before it says so (finish). */
+let stepSpan: { "end": () => void } | undefined;
+
 /** A span's cross-context trace context: the hub envelope of a control message that triggers work carries the
  *  adapter action's, so this worker's span continues the adapter's trace (see continueSpan). */
 interface TraceContext { "traceId": string; "parentSpanId": string }
@@ -2294,6 +2297,9 @@ function fileCoverage(file: ts.SourceFile): CoverageReport {
 function finish(exitCode = 0, crash?: Crash): void {
 	clearInterval(liveTimer);
 	flushLive();
+	// (the step's span closed first: once it's told the run ended the adapter ends this worker, and anything it sent
+	// after that is lost — the span's close was, every run)
+	stepSpan?.end();
 
 	tellEffects();
 
@@ -2422,6 +2428,8 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 	current = base;
 	evaluating = base; // (a program file a package requires is evaluated on the machine running)
 	const span = trace !== undefined ? workerLog().continueSpan(trace, "step", { "action": action }) : workerLog().span("step", { "action": action });
+
+	stepSpan = span;
 
 	try {
 		try {
