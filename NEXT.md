@@ -139,6 +139,15 @@ How it's kept:
      tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
      editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
      when it's next.
+   - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
+     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_problems` (Problems shows the
+     current set, not a change's), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
+     alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`
+     and `runs_ledger` (the tests-by-feature list would be their view), `workspace_checkpoint` and `workspace_restore`,
+     `editor_trace`, `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable
+     view; the monitor has rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`,
+     `runs_tests` and `script_run` have the terminal (`git`, `node --test`, `node`), which agents gave up on 2026-10-27;
+     `page_eval` and `page_query`, the browser's devtools.
 
 ## Watching
 
