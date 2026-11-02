@@ -31,7 +31,7 @@ async function main(): Promise<void> {
 
 	const mcp = createMcpServer(debugMcp);
 
-	await mcp.connect(new StdioServerTransport());
+	await mcp.connect(debugMcp.agent.observe(new StdioServerTransport()));
 	console.error("[debug-mcp] MCP server ready on stdio");
 
 	let closing = false;

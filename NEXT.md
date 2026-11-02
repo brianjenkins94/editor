@@ -258,6 +258,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Parked
 
+- **What the agent is doing, in the editor** (2026-11-02): a view of the agent's work as it happens — the files it reads
+  and edits, the command it runs, failures — as [claude-files-pane](https://github.com/Marius-Adam/claude-files-pane)
+  shows beside Claude's chat, drawn from debug-mcp's `agent` spans (the editor's tools at its transport, the rest from
+  Claude Code's hooks: packages/debug-mcp/agent-hook.mjs). Parked until the spans have run a while.
 - **Logpoints in the editor's own code** (`debug_logpoint`, its values as data; deferred 2026-10-30, not dropped: we
   may want it once Playwright tests run in the editor, item 2). A logpoint
   needs a hook where it's set, and the editor runs as bundled code with no DevTools Protocol attached: it would take

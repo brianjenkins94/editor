@@ -5,7 +5,9 @@
  * observability namespace and files every record into the store. Because routing is interest-based, the pages
  * forward their span/log traffic here precisely because this collector subscribed to it, and nothing else.
  */
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { AgentCalls, AgentToolCall } from "./agent.ts";
 import type { Hub, RpcClient } from "@brianjenkins94/hub";
 import type { WebSocket } from "ws";
 
@@ -20,7 +22,9 @@ import { METRICS_SUBJECT, MetricsHistory } from "../../observability/src/metrics
 import type { TabInfo } from "../../observability/src/tabs.ts";
 import { discoverTabs, markOutdated, TAB_HERE } from "../../observability/src/tabs.ts";
 
+import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
+import { agentCalls } from "./agent.ts";
 import { RecordStore } from "./store.ts";
 
 /** Reserved observability namespace — must match `@brianjenkins94/observability`'s `LOG_SUBJECT` (kept as its
@@ -79,15 +83,48 @@ export interface DebugMcp {
 	 *  rejects if it fails to bind (typically EADDRINUSE — another debug-mcp already owns the port). Await before
 	 *  announcing "listening". */
 	"whenListening": Promise<number>;
+	/** The agent's tool calls, as spans on the `agent` source (agent.ts). */
+	"agent": AgentCalls;
 	"close": () => Promise<void>;
+}
+
+/** A tool call the agent's client reports (`POST /agent/tool`): from a program on this machine — a hook — never a page,
+ *  which would send an Origin. */
+function agentReport(agent: AgentCalls, request: IncomingMessage, response: ServerResponse): void {
+	if (request.method !== "POST" || request.url !== "/agent/tool" || request.headers.origin !== undefined) {
+		response.writeHead(request.headers.origin === undefined ? 404 : 403).end();
+
+		return;
+	}
+
+	let body = "";
+
+	request.setEncoding("utf8");
+	request.on("data", (chunk: string) => {
+		body += chunk;
+
+		if (body.length > 65_536) {
+			request.destroy();
+		}
+	});
+	request.on("end", () => {
+		try {
+			agent.report(JSON.parse(body) as AgentToolCall);
+			response.writeHead(204).end();
+		} catch {
+			response.writeHead(400).end();
+		}
+	});
 }
 
 /** Start the debug-mcp WS server on `port` and return its hub, store, rpc client, and a close handle. */
 export function createDebugMcp(options: { "port": number; "max"?: number; "origins"?: string[] } = { "port": 7378 }): DebugMcp {
 	const hub = createHub({ "id": "debug-mcp" });
 	const store = new RecordStore({ "max": options.max });
-	const server = new WebSocketServer({ "port": options.port });
 	const links = new Set<WebSocket>();
+	const agent = agentCalls(store, () => links.size > 0);
+	const http = createServer((request, response) => { agentReport(agent, request, response); });
+	const server = new WebSocketServer({ "server": http });
 	/** Tabs already warned about being newer than this debug-mcp. */
 	const warnedOutdated = new Set<string>();
 	let capturing = false;
@@ -113,6 +150,8 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			failListening(error);
 		}
 	});
+	// (the WebSocket server re-emits the HTTP server's `listening` and `error`, which the hook's reports share the port of)
+	http.listen(options.port);
 
 	// Everything is filed by the link it arrived on — each connected tab is one — so two tabs' same-named contexts
 	// stay apart. A tab's id (what the tools take) maps to its link once it answers discovery.
@@ -270,12 +309,17 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			return marked;
 		}),
 		"whenListening": whenListening,
+		"agent": agent,
 		"close": () => new Promise<void>((resolve) => {
 			for (const socket of links) {
 				socket.close();
 			}
 
-			server.close(() => { resolve(); });
+			agent.dispose();
+			server.close(() => {
+				http.close(() => { resolve(); });
+				http.closeAllConnections();
+			});
 		})
 	};
 }
