@@ -95,8 +95,11 @@ How it's kept:
      same page ran tests for minutes first. Claude in Chrome's actions reload a hung tab, so they can't watch it. In a
      fresh tab (18:40) it didn't come back: up for minutes and three reloads, the Live architecture view open and
      active, collab-identity 6/6 and game-rules 4/4 by `runs_tests`, the renderer flat at ~3.1 GB across reloads (so not
-     a leak across them). Not found: what stopped the old tab. Every boot, still: "the Margin is up" reaches debug-mcp
-     ~35 s after it's logged, and `git.identity` and `runtime.fs.attach` time out (30 s, no responder).
+     a leak across them). Not found: what stopped the old tab. The boot's two 30 s stalls are one fixed, one left: the
+     workspace kept a `file:` sibling's link as its files, so each boot restored ~1,800 of them, install deleted and
+     linked them again, and the flush put ~12k (Margin up 67 s → 22 s, no rpc timing out). Left: the restore, 3,124
+     files in ~15 s, is quadratic in zen-fs SingleBuffer — each new id's lookup misses its index and scans every
+     block; trusting a current index's miss is 27 s → 3.8 s for 4,800 files in Node, but that's the patch's own code.
    - Not looked at since: npm.test's load TypeError, page-tools' stall, preview-instrument's empty evidence, replay's
      null for 99, silo-kept's versions.json test (fails under Node too).
    - Can't run in a browser: baseline (execFileSync).

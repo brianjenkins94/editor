@@ -355,7 +355,15 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	// costs one put, and it doesn't matter which realm wrote.
 	const dirty = new Set<string>();
 	let flushTimer: ReturnType<typeof setTimeout> | undefined;
+	// A symlink isn't kept, nor what's under it: install.ts makes the link again each boot. Kept through the link, a
+	// `file:` sibling's files came back at the next boot as a folder where the link goes — which install deleted and
+	// linked again, and the flush kept again: ~1,800 files restored, deleted and re-put every boot, half its main thread.
+	const linked = (path: string): boolean => fs.lstatSync(path).isSymbolicLink();
 	const filesUnder = (path: string): string[] => {
+		if (linked(path)) {
+			return [];
+		}
+
 		if (!fs.statSync(path).isDirectory()) {
 			return [path];
 		}
@@ -381,7 +389,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			const objects = db.transaction(PERSIST_STORE, "readwrite").objectStore(PERSIST_STORE);
 
 			for (const path of batch) {
-				if (fs.existsSync(path)) {
+				if (fs.existsSync(path) && !linked(path)) {
 					for (const file of filesUnder(path)) {
 						const contents = fs.readFileSync(file);
 
