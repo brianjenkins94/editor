@@ -1895,6 +1895,36 @@ export class Machine implements VM {
 
 	// --- stepped async (VMOptions.steppedAsync) --------------------------------
 
+	/**
+	 * An async function's promise resolved with what it returned. A thenable is adopted as the spec has it, its `then`
+	 * called a job later — but, with VMOptions.asyncContext, in the async context of the `return`, as Node's is: the
+	 * host's own job runs in whichever context its turn finds, which may be a package's left behind (just-bash's
+	 * sandbox, whose `Promise.prototype.then` drops a callback its finished command registered — an interrupted
+	 * command's promise, returned rather than awaited, then never reached its caller).
+	 */
+	public resolveAsync(resolve: (value: unknown) => void, reject: (reason: unknown) => void, value: unknown): void {
+		const hooks = this.asyncContext;
+		const then = hooks === undefined || !isThenable(value) ? undefined : (value as { "then": unknown }).then;
+
+		if (hooks === undefined || typeof then !== "function") {
+			resolve(value);
+
+			return;
+		}
+
+		const context = hooks.capture();
+
+		void Promise.resolve().then(() => {
+			hooks.enter(context);
+
+			try {
+				Reflect.apply(then, value, [resolve, reject]);
+			} catch (error) {
+				reject(error);
+			}
+		});
+	}
+
 	/** Stepped async: an async function call on the main stack — its async frame (which settles its promise), then its
 	 *  call. Returns nothing: the promise reaches the caller when the body first suspends, or completes. */
 	public enterAsync(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): void {
@@ -2246,7 +2276,7 @@ export class Machine implements VM {
 
 				if (!result.paused) {
 					activeFiber.done = true;
-					resolve(result.value);
+					this.resolveAsync(resolve, reject, result.value);
 
 					return;
 				}

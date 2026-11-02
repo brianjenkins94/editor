@@ -156,6 +156,30 @@ test("stepped async: an await, a promise callback and a timer resume in the host
 	assert.deepStrictEqual(lines.map(String).sort((a, b) => a.localeCompare(b)), ["a a", "a again a", "b b", "c b", "main undefined", "top undefined"]);
 });
 
+test("stepped async: a returned thenable is adopted in the async context of the return, not one a host left behind", async () => {
+	const { lines, globals } = logged();
+	let current: unknown;
+	const seen: unknown[] = [];
+	const src = [
+		// `leaveSoon` leaves another context behind in a host job that runs before the adoption's
+		"async function helper() { leaveSoon(); return { then(resolve) { seen(); resolve('adopted'); } }; }",
+		"enterWith('mine'); helper().then((value) => log(value)); enterWith(undefined);"
+	].join("\n");
+	const { vm } = createVM(src, {
+		"globals": {
+			...globals,
+			"enterWith": (context: unknown) => { current = context; },
+			"leaveSoon": () => { queueMicrotask(() => { current = "left behind"; }); },
+			"seen": () => { seen.push(current); }
+		},
+		"eventLoop": { "pace": "fast" },
+		"asyncContext": { "capture": () => current, "enter": (context) => { current = context; } }
+	});
+
+	await toEnd(vm);
+	assert.deepStrictEqual([seen, lines], [["mine"], ["adopted"]]);
+});
+
 test("without steppedAsync: async code runs on the host's promise queue, as before", async () => {
 	const { lines, globals } = logged();
 	const { vm } = createVM("async function main() { await null; log('later'); }\nmain();\nlog('now');", { "globals": globals });

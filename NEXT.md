@@ -83,14 +83,9 @@ How it's kept:
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within 50 s, done or not, and is waited on again by its run id). Passing in Brave, 2026-11-01: architecture-model,
    code, collab-identity, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the
-   terminal's git, history, less, node and ps. Still failing, by cause:
-   - **An async function's `return p` of an interrupted command's promise never settles** (terminal-session: its
-     first test passes, then the second waits forever). AsyncLocalStorage carries across awaits now, and a run has a
-     global of its own (2026-11-02: almostnode's async_hooks.ts and run-global.ts, tsval's `asyncContext` and
-     `sharedGlobals`), so just-bash's sandbox works and its Proxies are the run's, not the debugger's. Left, found in a
-     probe in the editor: terminal-session's `interrupted` helper returns `execInSession(…)`'s promise after a Ctrl-C;
-     that promise settles (exit 124), but the helper's own never does — `return await` instead settles, and so does
-     the same chain with a host promise in place of just-bash's, in the editor and in tsval under Node.
+   terminal's git, history, less, node and ps; terminal-session since 2026-11-02 (just-bash's sandbox: its context
+   carried across awaits, a run's own global, a returned promise adopted in the return's context). Still failing, by
+   cause:
    - **The editor's page hangs in Brave, then a call to it gets no answer** (2026-11-01). Not `_approved`: util/mcp
      keeps that to itself, and the page is asked the same either way. The page's main thread stops — no logs or
      metrics, `page_eval` unanswered, the tab gone from `tabs_list`, Brave unable to screenshot it — and since 15:50,

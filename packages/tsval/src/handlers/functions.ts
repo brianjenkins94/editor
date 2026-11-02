@@ -402,7 +402,7 @@ function asyncFrame(vm: Machine, frame: AsyncFrame): void {
 
 	vm.frames.pop();
 	vm.values.length = frame.valuesBase;
-	frame.resolve(value);
+	vm.resolveAsync(frame.resolve, frame.reject, value);
 
 	if (frame.delivered !== true) {
 		frame.delivered = true;
