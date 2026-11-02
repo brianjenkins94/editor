@@ -294,6 +294,22 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	// The files on screen, as last shown: a change to the visible editors shows only a file that's come into view. Each
+	// thread has an input editor of its own (a `commentinput` document) that counts as visible, so showing every file on
+	// each change made new threads, new inputs, another change — the threads remade ~60 times a second, never clickable.
+	let onScreen = new Set<string>();
+	const showNewlyVisible = (): void => {
+		const now = new Set(vscode.window.visibleTextEditors.filter((editor) => editor.document.uri.scheme === "file").map((editor) => editor.document.uri.toString()));
+
+		for (const editor of vscode.window.visibleTextEditors) {
+			if (now.has(editor.document.uri.toString()) && !onScreen.has(editor.document.uri.toString())) {
+				void show(editor.document);
+			}
+		}
+
+		onScreen = now;
+	};
+
 	/** The note a command was given: a thread's, a lost note's (its id), or the one being placed. */
 	const noteOf = (arg: unknown): { "note": Note; "owner": string; "resolved"?: Resolved } | undefined => {
 		if (typeof arg === "string") {
@@ -435,7 +451,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				return [replace, dismiss];
 			})
 		}, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
-		vscode.window.onDidChangeVisibleTextEditors(showAll),
+		vscode.window.onDidChangeVisibleTextEditors(showNewlyVisible),
 		// Saved: code moved into this file is on disk now, where a note that lost its place elsewhere looks for it.
 		vscode.workspace.onDidSaveTextDocument(showAll),
 		vscode.workspace.onDidChangeTextDocument((event) => {
@@ -452,5 +468,5 @@ export function activate(context: vscode.ExtensionContext): void {
 		watcher.onDidDelete(showAll)
 	);
 
-	showAll();
+	showNewlyVisible();
 }

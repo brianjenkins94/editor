@@ -37,18 +37,21 @@ export const marginStyles = stylesheet({
 	".notes-margin-sash:hover, .notes-margin-sash.dragging": {
 		"background": "var(--wa-color-focus)"
 	},
-	// The gutter column, left of the code (its own overlay): a mark per line, the consumer's to style.
+	// The gutter column, left of the code (its own overlay): a mark per line, the consumer's to style. Clicks go through
+	// it to the lane under it — VS Code's own there (a comment thread's icon, folding) — but for its marks' titles.
 	".notes-margin-gutter": {
 		"position": "absolute",
 		"top": "0",
-		"overflow": "hidden"
+		"overflow": "hidden",
+		"pointerEvents": "none"
 	},
 	// A mark as VS Code draws its change bar in this lane (dirtydiffDecorator.css: 5px in, scm.diffDecorationsGutterWidth's
 	// default 3px wide), so the column looks native.
 	".notes-margin-mark": {
 		"position": "absolute",
 		"left": "5px",
-		"width": "3px"
+		"width": "3px",
+		"pointerEvents": "auto"
 	},
 	".notes-margin-cell": {
 		"position": "absolute",
