@@ -24,7 +24,8 @@ const FLOORS: Record<string, number> = {
 	"async_hooks": 7,
 	// (9, not 11: almostnode's transcode only copied and its resolveObjectURL was always undefined — unenv's say they
 	// aren't implemented instead of answering wrongly)
-	"buffer": 9,
+	// (8: Node 26 took SlowBuffer out of buffer, and _createSocketHandle out of dgram — names of Node's ours had)
+	"buffer": 8,
 	"child_process": 6,
 	"cluster": 12,
 	"console": 25,
@@ -32,7 +33,7 @@ const FLOORS: Record<string, number> = {
 	"crypto": 23,
 	// (1, 14: since 2026-10-24 what unenv's mocks pretended — a socket that sent nothing, a serialized value an empty
 	// buffer — says it isn't implemented)
-	"dgram": 1,
+	"dgram": 0,
 	"diagnostics_channel": 5,
 	"dns": 37,
 	"dns/promises": 33,
