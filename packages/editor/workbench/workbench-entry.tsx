@@ -513,7 +513,7 @@ function maybeBoot(): void {
 
 	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
 	// what booting the workbench did and how long it took. Ended once monaco is online.
-	const bootSpan = paneLog.span("workbench-boot", { "files": files.length, "openEditors": openEditors.length });
+	const bootSpan = paneLog.span("editor.workbench.workbench-entry.boot", { "files": files.length, "openEditors": openEditors.length });
 	// The zen-fs workspace store, mounted after boot; its `has` probe lets ATA skip already-present files.
 	let workspaceFs: WorkspaceFs | undefined;
 

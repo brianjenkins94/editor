@@ -495,7 +495,7 @@ function Shell() {
 
 		void (async () => {
 			const session = await import("./session");
-			const span = githubLog.span("github.session");
+			const span = githubLog.span("editor.shell.githubSession");
 
 			try {
 				if (await session.completeSignIn()) {
@@ -699,7 +699,7 @@ function Shell() {
 		setLoadingRepo(true);
 		setLoadError(undefined);
 
-		const span = githubLog.span("github.loadRepo", { "repo": input.trim() });
+		const span = githubLog.span("editor.shell.githubLoadRepo", { "repo": input.trim() });
 
 		try {
 			const [, owner, repo] = match;
@@ -807,7 +807,7 @@ function Shell() {
 		setCommitError(undefined);
 		setCommitResult(undefined);
 
-		const span = githubLog.span("github.commit", { "repo": boundRepo.owner + "/" + boundRepo.repo });
+		const span = githubLog.span("editor.shell.githubCommit", { "repo": boundRepo.owner + "/" + boundRepo.repo });
 		let made: string | undefined;
 
 		try {

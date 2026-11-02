@@ -1043,6 +1043,92 @@ crossings into core's own UI: about 2.2k lines, and the decider's ~650 while it 
 or `shared/` (only the bridge, core's, may; tsval its two files). A feature that moves takes its tests, and core keeps
 no fallback for the old way.
 
+## The rewrite, in place (2026-11-02)
+
+The editor's composition is rewritten feature by feature, in this repository. That's the shell, the workbench, the
+composition roots and the extensions: about 20k lines of glue. almostnode, the BABLR packages, tsval, the site and the
+API's apps are fine as they are. Why in place, the user's decision: the secrets, deploys, CI and configuration stay as
+they are, untouched, and the rewrite is done *in the editor*, by people or by agents over debug-mcp. So the rewrite is
+also how the editor becomes the place this repository is worked on. Something the rewrite needs that the editor can't
+do yet is the editor's gap: it goes in NEXT.md, not around the editor from a local shell.
+
+**A feature at a time**, each in one change or a short run of them:
+
+1. **Declared** in the ledger before its code is touched: its name, what it's for, the ways in and paths it owns, the
+   tests it claims (packages/silo/README.md, decision 21).
+2. **Its comments become notes** (below).
+3. **Ported** to the standard (below), its tests claimed by it and green.
+4. **The old code removed** in the same change (CLAUDE.md, *Features*): there's never a second copy of a feature, so
+   nothing switches between an old and a new one.
+
+**Comments become notes.** About 16% of packages/editor's lines (outside tests) are comments. Each one is:
+- dropped, when it says what the code says;
+- kept, when it's for a tool: `eslint-disable`, `@ts-expect-error`, a license;
+- a note, when it's a why, a gotcha or a history, on the declaration or statement it sits on (*Durable annotations on
+  spans* in RUNTIME-EVIDENCE.md; `pickAnchor` for the span);
+- a note citing a doc, when it points at one (`FILE.md, *Section*`).
+
+Agents read notes where they'd have read the comments: `decisions_for` returns a file's or a name's notes beside the
+ledger, the manifest and the docs. `files_read` can show them inline, where the comment was. `files_edit` says when an
+edit leaves a note without its code. A file BABLR can't parse can't hold notes, so what of the scope it parses is
+measured first (BABLR's grammar has gaps on module code).
+
+**What's self-explanatory: the zero-knowledge pass.** Per feature, a fixed set of questions: what it's for, its ways
+in, what owns a given piece, why it's the way it is, what removing it takes. They're drawn from the manifest (what) and
+the ledger and docs (why), which are the answers. Agents answer them through the editor's tools in three conditions:
+- the code alone, comments stripped;
+- the code as it is;
+- the code, comments stripped, with notes through the tools.
+
+The first against the second is what comments carry today. The third against the second is whether notes lose any of
+it. Each question the code alone gets wrong is fixed one of three ways: the code says it (a name, a structure), a note
+(a why the code can't), or a doc (it spans many places). A feature's pass runs again when it's ported.
+
+**How the code looks** is written from the gaps the pass finds, each rule beside what checks it (ESLint, `silo check`,
+or the pass). Likely: folders are realms; a feature is an extension (*Features as extensions*, above) and registers its
+own ways in (composition roots registering for many features are what the manifest's derivations couldn't follow:
+packages/silo/README.md, *The feature manifest*); no prose comments, only the kind tools read. One small feature is
+ported first as the worked example the rules point at.
+
+**The architecture, reassessed.** A feature's boundaries are drawn before it's declared, so the extensions are looked
+at again first, one feature to an extension. Every reason above for something staying where it is ("running stays in
+the bridge", "the Rule view is core's") is checked again: it may no longer hold. Found 2026-11-02, as candidates, not
+decisions:
+- **insights** is two features: the editor's own monitor (the metrics plane in the status bar and its cards), and what
+  runs say about a program (hover, suggestions and their fixes, profiles).
+- **history** is three: derived history (each pause replayed, what it changed told), the feature ledger (`silo check`'s
+  drift in Problems, Remove and Keep, `history.reach`, `history.decisions`), and the features map's data and focus. They
+  share one TypeScript server plugin, which only a web worker host extension can load: whether one plugin can serve
+  separate extensions decides the split.
+- **the bridge** is three: the crossing into core (the uplink, the annotation commands, metrics, parse status), the run
+  UI (debug control, events and toolbar, tasks, launch, the production adapter, replay, recorded stops; it registers
+  `tsval.stepRecordedStop`), and the capability decider (S5, deferred).
+- **margin** is one 1,953-line file, and coverage, a pane view of its own, shares the extension.
+- **tsval** holds capabilities' Resolve step (canary.ts, capability-calls.ts).
+- **workbench/** (14k lines) draws other features' views (the features map, the Rule view) and answers agents' tools
+  (ci-status, code-*, script-run): core because they must be, or because it was nearest.
+
+**Visibility: anything we'd ever debug, without a profiler.** What exists: the metrics plane, span rates and latencies
+from every context's `→ x` / `← x (12ms)` records, the workspace's fill, and each zen-fs store operation counted as an
+architecture edge by caller with its bytes (`observeZenfs`). What it didn't show: the repository's load (NEXT.md item 1)
+was explained by CPU profiles and hand-placed logpoints counting the provider's calls (~190,000 for 14,000 paths) and
+finding who walked the tree. So every boundary between the filesystems is a span: VS Code's file service into the
+workspace provider and the node_modules provider, zen-fs (its operations timed, not only counted, and its path
+lookups), the IndexedDB write-back, the change stream, isomorphic-git's reads, the terminal's fs, runtime-fs, and
+almostnode's. Each with its caller, operation, duration, bytes and parent span, so one call can be followed down through
+the layers. Aggregates are always on (per source and name, as span metrics are); single spans are kept on demand, as
+`editor_trace` keeps VS Code's log. The test it passes: the questions of 2026-10-30 and 31 (calls per path, who walks
+the tree, what the write-back costs) answered from `metrics_query` and `logs_query` alone. The other realms' boundaries
+(the hub, the workers, BABLR, TypeScript's servers) are held to the same test as their features are ported.
+
+**Progress is the ledger**: each feature's step above, shown in the features map, with its pass's score. No new silo
+subcommand.
+
+**Open:**
+- **Whose a migrated note is.** Notes are kept per author, and only a note's author rewrites it when its code moves. A
+  comment's note could be the repository's (an owner of its own), or its `git blame` author's.
+- **Decision 21** (packages/silo/README.md): what a declared feature's ledger entry holds. Step 1 waits on it.
+
 ## Workspace tools (2026-10-10)
 
 debug-mcp's tools watched and debugged (the editor, problems, runs, previews, the debugger, the Margin), but an agent

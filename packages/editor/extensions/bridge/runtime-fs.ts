@@ -230,7 +230,7 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 			const bound = from === undefined ? undefined : runtimeSession(from);
 			const stop = answerMailbox(mailbox, async (meta, payload) => {
 				// eslint-disable-next-line ts/no-base-to-string -- a call's fields come off the mailbox unknown: logged as String() makes them
-				const span = log.span("runtime.fs", { "op": String(meta["op"]), "path": String(meta["path"]), ...bound === undefined ? {} : { "session": bound } });
+				const span = log.span("editor.extensions.bridge.runtime-fs.fs", { "op": String(meta["op"]), "path": String(meta["path"]), ...bound === undefined ? {} : { "session": bound } });
 
 				try {
 					const { how, ...answered } = await answer(bound, meta, payload);

@@ -506,7 +506,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	/** Acquire `packages` (and `configs`, tsconfigs to extend); the last run in flight reloads the TS projects if anything
 	 *  landed. */
 	const acquire = (what: Record<string, unknown>, packages: string[], configs: [string, string][] = []): void => {
-		const span = log.span("ata", { ...what, "imports": packages.length });
+		const span = log.span("editor.workbench.ata.acquire", { ...what, "imports": packages.length });
 		const budget = { "n": MAX_NETWORK };
 		const writtenBefore = written;
 

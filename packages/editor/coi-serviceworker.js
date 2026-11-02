@@ -308,7 +308,7 @@ async function fetchCdn(pathname, requestUrl) {
 	let version = requestUrl.searchParams.get("v");
 	let spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
 	// A timed span: the collector shows `→ cdn` / `← cdn (Xms)`, so a slow/failed CDN fallback is visible.
-	const span = swLog.span("cdn", { "spec": spec });
+	const span = swLog.span("editor.coi-serviceworker.cdn", { "spec": spec });
 
 	try {
 		// unpkg's redirect for an UNVERSIONED `?meta` carries no CORS header (its file redirects do), so this fetch would
@@ -483,7 +483,7 @@ async function sendBody(call, first, reader) {
 // localhost:<port> — undefined is the answer when nothing serves that port, for the caller to send it to the network.
 async function handleVirtualRequest(request, tab, port, path, options = {}) {
 	// A timed span per request — the collector shows each dev-server round-trip and its duration.
-	const span = swLog.span("virtual", { "tab": tab, "port": port, "method": request.method, "path": path });
+	const span = swLog.span("editor.coi-serviceworker.virtual", { "tab": tab, "port": port, "method": request.method, "path": path });
 	const route = "virtual.request." + tab;
 	const stream = Math.random().toString(36).slice(2) + Date.now().toString(36);
 	const call = (step) => rpc.request(route, { "port": port, "stream": stream, ...step }, EXCHANGE_CALL);

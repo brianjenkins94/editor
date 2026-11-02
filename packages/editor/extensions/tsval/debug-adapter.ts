@@ -446,7 +446,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	 *  trace). Ends any still-open action span first — an action always resolves to a stop before the next one. */
 	private startAction(kind: string): { "traceId": string; "parentSpanId": string } {
 		this.actionSpan?.end();
-		this.actionSpan = this.log.span("debug." + kind);
+		this.actionSpan = this.log.span("editor.extensions.tsval.debug-adapter." + kind);
 
 		return { "traceId": this.actionSpan.traceId, "parentSpanId": this.actionSpan.id };
 	}

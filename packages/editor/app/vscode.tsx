@@ -78,7 +78,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	booted = true;
 
 	// (Pane logs now federate onto the hub → the root $sys.log.> collector; no separate window-relay aggregator.)
-	const span = hostLog.span("editor-window");
+	const span = hostLog.span("editor.app.vscode.editor-window");
 
 	let markReady: () => void;
 	const whenReady = new Promise<void>((resolve) => {

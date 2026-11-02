@@ -41,7 +41,7 @@ const app = new Hono<AppEnv>();
 
 // Every request is one span, active for all the work it does, so the runtime's own spans (fetch, storage) nest under
 // it. Its path is the URL's pathname: the query string is where OAuth puts codes and state, so it's never logged.
-app.use((context, next) => log.span("request", { "method": context.req.method, "path": new URL(context.req.url).pathname }, async (span) => {
+app.use((context, next) => log.span("api.request", { "method": context.req.method, "path": new URL(context.req.url).pathname }, async (span) => {
 	context.set("span", span);
 
 	await next();
@@ -276,27 +276,27 @@ export default {
 	// (behavior.ts), our inbox's day kept (inbox.ts), and the email smoke test run (smoke.ts).
 	"scheduled": async (controller, env, context) => {
 		if (controller.cron === HOURLY) {
-			context.waitUntil(log.span("spend.check", {}, async (span) => {
+			context.waitUntil(log.span("api.spendCheck", {}, async (span) => {
 				span.info("spend checked", await checkSpend(env));
 			}));
 			// The tripwire's canary account, there within the hour of a first deploy (idempotent).
-			context.waitUntil(log.span("tripwire.canary", {}, async () => {
+			context.waitUntil(log.span("api.tripwireCanary", {}, async () => {
 				await ensureCanary(env);
 			}));
 
 			return;
 		}
 
-		context.waitUntil(log.span("audit.expire", {}, async () => {
+		context.waitUntil(log.span("api.auditExpire", {}, async () => {
 			await expire(env.DB);
 		}));
-		context.waitUntil(log.span("account.purge", {}, async () => {
+		context.waitUntil(log.span("api.accountPurge", {}, async () => {
 			await purge(env);
 		}));
-		context.waitUntil(log.span("behavior.decay", {}, async () => {
+		context.waitUntil(log.span("api.behaviorDecay", {}, async () => {
 			await decay(env.DB);
 		}));
-		context.waitUntil(log.span("inbox.expire", {}, async () => {
+		context.waitUntil(log.span("api.inboxExpire", {}, async () => {
 			await expireInbox(env.DB);
 			// Errors (src/errors.ts): occurrences 30 days, groups 90 after last seen.
 			await expireErrors(env.DB);
@@ -304,7 +304,7 @@ export default {
 			await env.DB.prepare("DELETE FROM alerts WHERE at < ?").bind(Date.now() - 90 * 86_400_000).run();
 		}));
 		// Not while the kill switch is on: the API is down on purpose, and a sign-in through it would only fail.
-		context.waitUntil(log.span("smoke.email", {}, async () => {
+		context.waitUntil(log.span("api.smokeEmail", {}, async () => {
 			if (!(await maintenance(env)).on) {
 				await smokeTest(env, context);
 			}

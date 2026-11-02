@@ -331,7 +331,7 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 	const failures: ProvokeResult["failures"] = [];
 	const transformErrors: ProvokeResult["transformErrors"] = [];
 	const collected = { "failures": failures, "transformErrors": transformErrors };
-	const span = log.span("preview.provoke", { "rounds": rounds, "modules": urls.length, "hardReset": hardReset });
+	const span = log.span("editor.workers.node-worker.provoke", { "rounds": rounds, "modules": urls.length, "hardReset": hardReset });
 
 	if (hardReset) {
 		const buffer = getSharedWorkspaceBuffer();

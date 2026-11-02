@@ -21,6 +21,29 @@ messages name what to use instead.
   (`node --test packages/theme/test/budget.mjs`). If you remove styling, lower the budget; if you must add, raise it
   there, where the diff shows it.
 
+## Spans
+
+Anything someone may one day need to explain is a span, from `@brianjenkins94/util/logger` through the context's
+source logger (observability's `relayLoggerToHub`), so it shows in the monitor, `metrics_query` and `logs_query`
+without a profiler. Not `console.*`, and not a pair of `performance.now()`s.
+
+- **What gets one:** whatever crosses a boundary (a realm, a hub request, a filesystem layer, the network, a worker,
+  IndexedDB), waits, or does work a person waits on (a load, a parse, a walk, an install, a command, a tool call).
+- **The function form:** `parent.span("<feature>.<operation>", attrs, async (span) => …)`, which ends itself on
+  return or throw. A handle only when the end is an event somewhere else, then `using` or an `end()` on every path.
+- **Parentage is passed, not found:** hand the span down (it's a logger) and open children off it; across a hub
+  message, send `traceContext` and `continueSpan` on the far side.
+- **The name is where it is, then one word for what it does:** the file's path from the repository's root (no
+  leading `packages/`, no `src/`, no extension; `index`, `extension` or a file named after its folder drops out; `/`
+  as `.`), then the word: in `packages/editor/extensions/history/ledger.ts`, `editor.extensions.history.ledger.reach`.
+  ESLint holds it (`logger/span-names`, util's): `--fix` writes the place and keeps the word, so a moved file's
+  names follow it. The feature a span belongs to is joined from its path at read time, through the ledger's paths.
+- **Attributes** say who asked (`caller`), what (`op`, `path`) and how much (`bytes`, `count`); results go on
+  `end({ … })`. No secrets, no contents.
+- **Hot paths are counted, not spanned:** something done thousands of times a second (a zen-fs lookup, a provider
+  `stat`) adds its count and time to the span that caused it (`end({ "stats": n, "statMs": t })`) and to a
+  metrics-plane gauge. A span per call only when asked for, as `editor_trace` keeps VS Code's log.
+
 ## Features
 
 The feature ledger (`.silo/features.json`; packages/silo/README.md, *The feature ledger*) is what's been decided about

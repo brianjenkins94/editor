@@ -103,6 +103,28 @@ How it's kept:
      dependencies are fetched alongside it now, and installing says it's busy, so the stall check doesn't take it for
      stuck. Not measured cold: the browser's HTTP cache kept the tarballs across reloads (each ~2 ms).
    - Can't run in a browser: baseline (execFileSync).
+3. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
+   from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
+   Waits on items 1 and 2 being good enough to work in. In order:
+   - **Visibility first**, so the rewrite is measured from its start: a span at every filesystem boundary, with its
+     caller, duration, bytes and parent (*Visibility*). Done when the 2026-10-30/31 load questions are answered from
+     `metrics_query` and `logs_query` alone. It serves item 1's load cost too, so it can go ahead of the rest.
+     Before it, so the spans CLAUDE.md asks for (*Spans*) count:
+     - a span that throws ends at info with `{ error }` (util/logger `failure`), and observability's `spanMetrics`
+       counts only error-level closes or errors logged inside, so the monitor doesn't see it fail;
+     - hub RPCs (`call`, `serve`) open no span and send no `traceContext`, though the envelope carries one: spanned at
+       that seam (through observability, or a hook: the hub doesn't import the logger), every hub request is covered;
+     - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
+       and this repository's spans take it already; the editor's lint holds them once lib publishes util.
+   - **Measure**: what of the rewrite's scope BABLR parses, and a sample of its comments sorted into dropped, kept,
+     note, and note citing a doc.
+   - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
+     or kept, each "stays because" reason checked again.
+   - **The zero-knowledge baseline** on 3–5 features: the code alone against the code as it is.
+   - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
+     an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
+   - **The standard**, from the pass's gaps, and one small feature ported as its worked example.
+   - **Progress in the ledger**: each feature's step, in the features map. Waits on decision 21 (*Decisions*).
 
 ## Watching
 
@@ -184,6 +206,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   a weekly full run; CI reruns a vouched test after 7 days. Open: decision 15 (tests that lean on each other), 17–19
   (the audit rate, whose vouches count, different runtimes), 20 (CI's entry point) and 21 (what the ledger holds for a
   declared feature, and what becomes of the AI-written manifest).
+- **The rewrite** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Decided 2026-11-02: in place, in this
+  repository, worked in the editor. Open: whose a note migrated from a comment is (the repository's, or its
+  `git blame` author's); decision 21 above, which its ledger step waits on.
 
 ## Parked
 
