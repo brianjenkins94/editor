@@ -109,8 +109,9 @@ How it's kept:
      its program started. Most of that was git status, twice a run, on the page's thread: isomorphic-git read every
      ignore file from the root down for each path. Each walk reads them once now (one status: ~2,400 file reads → 39,
      ~98k stats → 60k), and a status walks again only the paths written since the last, while the index and HEAD
-     haven't moved (a whole walk ~1.6 s; one after a run's writes, milliseconds; silo-kept 17.7 s → 4.3 s). Left: the
-     installs, still one at a time; the stall check counts installing as nothing happening.
+     haven't moved (a whole walk ~1.6 s; one after a run's writes, milliseconds; silo-kept 17.7 s → 4.3 s). A package's
+     dependencies are fetched alongside it now, and installing says it's busy, so the stall check doesn't take it for
+     stuck. Not measured cold: the browser's HTTP cache kept the tarballs across reloads (each ~2 ms).
    - Can't run in a browser: baseline (execFileSync).
 3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
    the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or

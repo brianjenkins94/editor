@@ -604,7 +604,15 @@ function installPackage(name: string): boolean {
 
 	const vfs = runtime.getVFS();
 
-	for (const [path, bytes] of unpack(editorLink.tarball(name, version))) {
+	// (installing is busy too: the worker blocks on each tarball, with nothing else to say — a run's dozen installs, a
+	// minute and more with nothing told, read as stuck)
+	post({ "type": "busy" });
+
+	const archive = editorLink.tarball(name, version);
+
+	post({ "type": "busy" });
+
+	for (const [path, bytes] of unpack(archive)) {
 		const file = `${dir}/${path}`;
 
 		vfs.mkdirSync(file.slice(0, file.lastIndexOf("/")), { "recursive": true });

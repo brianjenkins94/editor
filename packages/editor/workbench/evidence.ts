@@ -166,6 +166,34 @@ function repoRelative(path: string): string {
 	return path === ROOT ? "." : path;
 }
 
+/** The most of a package's dependencies prefetched at once (prefetchDependencies): a closure that big is a mistake's. */
+const PREFETCH_MAX = 64;
+
+/**
+ * What `name` depends on, and theirs in turn (versions.json's `dependencies`), fetched alongside it and not waited on.
+ * A debug run installs a package as its code first requires it, waiting on each — its worker blocks until the tarball
+ * is in, so a package with a dozen dependencies was a dozen waits, one after another (2–10 s each on a busy page). Asked
+ * for together, each is in or on its way when the run gets to it (tarballs.ts keeps each once a page). A linked folder
+ * or a platform build is nothing to fetch.
+ */
+function prefetchDependencies(name: string, packages: VersionsFile["packages"]): void {
+	const seen = new Set([name]);
+	const queue = [...packages[name]?.dependencies ?? []];
+
+	while (queue.length > 0 && seen.size <= PREFETCH_MAX) {
+		const dependency = queue.shift()!;
+		const entry = packages[dependency];
+
+		if (seen.has(dependency) || entry === undefined || entry.link !== undefined || entry.platform === true) {
+			continue;
+		}
+
+		seen.add(dependency);
+		queue.push(...entry.dependencies ?? []);
+		void tarball(dependency, entry.version, entry.tarball).catch(() => undefined); // (asked again when it's required)
+	}
+}
+
 export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr): void {
 	const rpc = createRpcClient(hub);
 
@@ -181,7 +209,12 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			throw new TypeError("packages.tarball: a name and a version");
 		}
 
-		const pinned = await vscode.workspace.fs.readFile(vscode.Uri.file(`/workspace/${await keptAt(versionsPath(), async (path) => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`/workspace/${path}`))).then(() => true, () => false))}`)).then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as VersionsFile).packages[name], () => undefined);
+		const packages = await vscode.workspace.fs.readFile(vscode.Uri.file(`/workspace/${await keptAt(versionsPath(), async (path) => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`/workspace/${path}`))).then(() => true, () => false))}`)).then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as VersionsFile).packages, () => undefined);
+		const pinned = packages?.[name];
+
+		if (packages !== undefined) {
+			prefetchDependencies(name, packages);
+		}
 
 		return tarball(name, version, pinned?.version === version ? pinned.tarball : undefined);
 	});
