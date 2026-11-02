@@ -132,8 +132,10 @@
           "uses": "actions/upload-artifact@v4",
           "with": { "name": "performance", "path": "/tmp/performance.json", "if-no-files-found": "ignore" }
         },
+        # What a shard's sessions saw, when it failed — and smoke-app's always, so a passing run says too what its slow
+        # runners queue (NEXT.md: the capabilities baseline reading the app fixture's tree, its registry traffic).
         {
-          "if": "${{ failure() }}",
+          "if": "${{ failure() || (always() && matrix.shard == 'smoke-app') }}",
           "uses": "actions/upload-artifact@v4",
           "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json\n/tmp/architecture-*.png", "if-no-files-found": "ignore" }
         }
