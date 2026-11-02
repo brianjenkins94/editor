@@ -358,12 +358,11 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 	if (replace) {
 		await clearWorkspace(workspaceRoot());
 
-		// A load that brings its own `.git` (a clone — see git-clone.ts) replaces the workspace's: clearWorkspace keeps
-		// `.git` as scaffolding (the editor's own repo, ensureRepo's), but the workspace is becoming THIS repo, history
-		// and all. A load without one (the API fallback) keeps the editor's.
-		if (files.some((file) => file.path.startsWith(workspaceRoot() + "/.git/"))) {
-			await vscode.workspace.fs.delete(vscode.Uri.file(workspaceRoot() + "/.git"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
-		}
+		// The workspace's `.git` goes too, though clearWorkspace keeps it as scaffolding: the workspace is becoming
+		// something else. A clone (git-clone.ts) brings its own, history and all; anything else (a sample, a playground, a
+		// repo read through the API) gets a fresh one below — kept, the last repo's origin would still be where a commit
+		// pushes, and what the shell takes the workspace for (`git.origin`).
+		await vscode.workspace.fs.delete(vscode.Uri.file(workspaceRoot() + "/.git"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
 	}
 
 	// Written straight into the workspace's store, all at once: its change watcher (workspace-changes.ts) reports them
@@ -404,9 +403,12 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 			await vscode.workspace.fs.writeFile(vscode.Uri.file(root + "/.gitignore"), encoder.encode(gitEngine.DEFAULT_GITIGNORE));
 		}
 
-		// A load that brought its own `.git` (a clone): `.silo/` goes in git there too.
+		// A load that brought its own `.git` (a clone): `.silo/` goes in git there too. Any other: a new repository, no
+		// one's origin.
 		if (files.some((file) => file.path.startsWith(root + "/.git/"))) {
 			await gitEngine.includeSilo();
+		} else {
+			await gitEngine.ensureRepo();
 		}
 
 		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing

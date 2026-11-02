@@ -11,14 +11,22 @@ import { sampleById, sampleList } from "./app/samples";
 import { createVscodeWindow } from "./app/vscode";
 import { reportArchitecture } from "./shared/architecture";
 import { reportSpanMetrics } from "./shared/editor-metrics";
+import { followResets, resetAsked, resetEditor, waitForReset } from "./shell/reset";
 
 // Gain cross-origin isolation (SharedArrayBuffer) before booting. A dev server already sends the COOP/COEP
 // headers; on a static host (GitHub Pages) the coi service worker supplies them after one reload. On the
 // un-isolated first load this returns false and schedules that reload, so we skip booting until the page
 // comes back isolated.
-const isolated = ensureCrossOriginIsolated();
+// `?reset` (shell/reset.ts): before any of that — the service worker and the workbench would hold what it deletes.
+const reset = window.parent === window ? resetAsked() : undefined;
+const isolated = reset === undefined && ensureCrossOriginIsolated();
 
-if (isolated && window.parent === window) {
+if (reset === "wait") {
+	waitForReset();
+} else if (reset !== undefined) {
+	void resetEditor((import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/", reset === "all");
+} else if (isolated && window.parent === window) {
+	followResets();
 	// TOP LEVEL: render the outer shell — the app's main layout (chrome + LHS project picker + RHS history). It
 	// iframes THIS same page back in; that nested instance sees `window.parent !== window` and takes the app
 	// branch below, booting the workbench into the middle (fill mode). One entry, one bundle, one COI bootstrap.

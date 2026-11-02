@@ -16,6 +16,7 @@
     "Repo load from GitHub": {
       "what": "Type owner/repo, or open an env/<owner>/<repo> address, and that GitHub repo is cloned into the workspace, history and all, and the address bar shows it.",
       "ways": [
+        "hub request|git.origin",
         "hub subscription|project.openFiles"
       ],
       "paths": [
@@ -33,6 +34,15 @@
         "packages/editor/shell/account-dialog.tsx",
         "packages/editor/shell/github-auth.ts",
         "packages/editor/shell/session.ts"
+      ]
+    },
+    "Reset": {
+      "what": "Start the editor again as new: everything this browser keeps for it deleted — the workspace and its git, settings, caches, its service worker — keeping the sign-in unless asked, from the top bar or a `?reset` address.",
+      "ways": [
+        "button|Reset the editor"
+      ],
+      "paths": [
+        "packages/editor/shell/reset.ts"
       ]
     },
     "Commit to GitHub": {

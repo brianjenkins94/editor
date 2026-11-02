@@ -22,7 +22,7 @@ import type { LaunchTarget, RunInfo } from "../shared/runs";
 import type { RepoBinding } from "./github-auth";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
-import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, Share2 } from "lucide";
+import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, RotateCcw, Share2 } from "lucide";
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { reportArchitecture } from "../shared/architecture";
@@ -33,7 +33,8 @@ import { applyVsCodeColors } from "theme/vscode-colors";
 import { iconSvg } from "../shared/theme";
 import { envRepo, showRepo, site } from "./address";
 import { renderGitPanel } from "./git-panel";
-import { forgetPat, getRepoBinding, GITHUB_APP_INSTALL, setRepoBinding } from "./github-auth";
+import { resetAddress } from "./reset";
+import { forgetRetired, GITHUB_APP_INSTALL } from "./github-auth";
 import type { Reporting } from "./reporting";
 import type { Session } from "./session";
 import { createShellDock } from "./shell-dock";
@@ -43,6 +44,7 @@ import "theme/components/popover";
 import "theme/components/button";
 import "theme/components/callout";
 import "theme/components/card";
+import "theme/components/checkbox";
 import "theme/components/divider";
 import "theme/components/dropdown";
 import "theme/components/dropdown-item";
@@ -205,7 +207,9 @@ function Shell() {
 	const [repoInput, setRepoInput] = useState("");
 	const [loadingRepo, setLoadingRepo] = useState(false);
 	const [loadError, setLoadError] = useState<string | undefined>(undefined);
-	const [boundRepo, setBoundRepo] = useState<RepoBinding | undefined>(() => getRepoBinding());
+	// The repository the workspace is a clone of (where a commit pushes): the workspace's own origin, asked once the app
+	// answers (`git.origin`), and set again by each load.
+	const [boundRepo, setBoundRepo] = useState<RepoBinding | undefined>(undefined);
 	// Commit-back popover (the top-bar Commit button).
 	const [commitOpen, setCommitOpen] = useState(false);
 	const [commitMessage, setCommitMessage] = useState("");
@@ -217,6 +221,11 @@ function Shell() {
 	// Share popover (the top-bar Share button): the workspace as a playground link, copied as it opens.
 	const [shareOpen, setShareOpen] = useState(false);
 	const [share, setShare] = useState<{ "url"?: string; "skipped"?: string[]; "copied"?: boolean; "error"?: string } | undefined>(undefined);
+	// Reset popover (the top-bar Reset button): what a reset would lose — the workspace's uncommitted changes, counted as
+	// it opens (null: they couldn't be) — and whether it signs out too.
+	const [resetOpen, setResetOpen] = useState(false);
+	const [resetLosing, setResetLosing] = useState<number | null | undefined>(undefined);
+	const [resetSignOut, setResetSignOut] = useState(false);
 
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 	const pageRef = useRef<HTMLElement>(null);
@@ -332,7 +341,6 @@ function Shell() {
 						// any repo's, so a commit has nowhere to push until one is opened.
 						if (playground !== undefined) {
 							shellHub.publish("project.openFiles", playground);
-							setRepoBinding(undefined);
 							setBoundRepo(undefined);
 							showRepo(undefined);
 						}
@@ -490,7 +498,7 @@ function Shell() {
 			setGithubUser(undefined);
 		};
 
-		forgetPat();
+		forgetRetired();
 		window.addEventListener("shell:signedOut", signedOut);
 
 		void (async () => {
@@ -521,14 +529,17 @@ function Shell() {
 			// one is read signed in. The workspace already being that repo's (a reload) keeps it, and the edits made in it. The
 			// GitHub popover opens over the load, to show it going and say what went wrong (it closes on success).
 			const wanted = envRepo();
-			const bound = getRepoBinding();
 
-			if (wanted !== undefined && `${bound?.owner}/${bound?.repo}`.toLowerCase() !== `${wanted.owner}/${wanted.repo}`.toLowerCase()) {
-				void appReadyRef.current?.promise.then(async () => {
+			void appReadyRef.current?.promise.then(async () => {
+				const bound = await rpcRef.current?.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 60_000 }).then((origin) => origin as RepoBinding | null ?? undefined, () => undefined);
+
+				setBoundRepo(bound);
+
+				if (wanted !== undefined && `${bound?.owner}/${bound?.repo}`.toLowerCase() !== `${wanted.owner}/${wanted.repo}`.toLowerCase()) {
 					setGithubOpen(true);
 					await loadRepo(`${wanted.owner}/${wanted.repo}`);
-				});
-			}
+				}
+			});
 
 			try {
 				if (session.isSignedIn() && await session.apiDown()) {
@@ -747,7 +758,6 @@ function Shell() {
 			// Remember where this workspace came from so a commit knows where to push.
 			const binding = { "owner": owner, "repo": repo, "branch": meta.default_branch };
 
-			setRepoBinding(binding);
 			setBoundRepo(binding);
 			showRepo(binding);
 			reportingRef.current?.event({ "name": "repo.loaded", "detail": `${owner}/${repo}` });
@@ -857,6 +867,8 @@ function Shell() {
 		setCurrentId(id);
 		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
 		hubRef.current?.publish("project.open", { "id": id });
+		// (a sample isn't any repository's: the workspace's git starts again, with no origin)
+		setBoundRepo(undefined);
 		showRepo(undefined);
 	};
 
@@ -919,6 +931,36 @@ function Shell() {
 			</>
 		);
 	};
+
+	const openReset = async (): Promise<void> => {
+		setResetOpen(true);
+		setResetLosing(undefined);
+
+		const asked = await rpcRef.current?.request("git.status", undefined, { "timeoutMs": 30_000 }).then((answer) => answer as { "files": unknown[] }, () => undefined);
+
+		setResetLosing(asked === undefined ? null : asked.files.length);
+	};
+
+	// The Reset popover's body: what goes, what it would lose here, and the reset (shell/reset.ts, from the address).
+	const resetBody = (): ComponentChildren => (
+		<>
+			<span class="wa-caption-2xs">Everything this browser keeps for the editor goes — the workspace and its git, settings, caches, its service worker — and it loads again as new.</span>
+
+			{resetLosing === undefined
+				? <span class="wa-caption-2xs">Counting what isn't committed…</span>
+				: resetLosing === null
+				? <span class={"wa-caption-2xs " + ghError()}>Couldn't count what isn't committed: anything here not pushed is lost.</span>
+				: resetLosing === 0
+				? <span class="wa-caption-2xs">Nothing here is uncommitted.</span>
+				: <span class={"wa-caption-2xs " + ghError()}>{`${String(resetLosing)} uncommitted change${resetLosing === 1 ? "" : "s"} here would be lost.`}</span>}
+
+			<wa-checkbox size="small" checked={resetSignOut} onChange={(event: Event) => { setResetSignOut((event.target as HTMLInputElement).checked); }}>Sign out too</wa-checkbox>
+
+			<div class="wa-cluster wa-gap-xs">
+				<wa-button variant="danger" size="small" onClick={() => { location.assign(resetAddress(resetSignOut)); }}>Reset</wa-button>
+			</div>
+		</>
+	);
 
 	// The Share popover's body: the link being made, why it couldn't be — or the link, its size, and what it left out.
 	const shareBody = (): ComponentChildren => {
@@ -1237,6 +1279,30 @@ function Shell() {
 				</wa-popover>
 
 				<span class={spacer()} />
+
+				<wa-button id="shell-reset" appearance="plain" size="small" title="Reset the editor" aria-label="Reset the editor"><Icon node={RotateCcw} /></wa-button>
+
+				<wa-popover
+					for="shell-reset"
+					placement="bottom-end"
+					open={resetOpen}
+					onwa-show={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							void openReset();
+						}
+					}}
+					onwa-hide={(event: Event) => {
+						if (event.target === event.currentTarget) {
+							setResetOpen(false);
+						}
+					}}
+				>
+					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="Reset the editor">
+						<span class="wa-font-weight-semibold wa-font-size-s">Reset the editor</span>
+
+						{resetBody()}
+					</div>
+				</wa-popover>
 
 				<wa-button id="shell-github" appearance="plain" size="small" title={githubUser !== undefined ? "GitHub · " + githubUser : "GitHub"} aria-label="GitHub"><Icon node={GitBranch} /></wa-button>
 

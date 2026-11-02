@@ -190,6 +190,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "git.review", "from": ["shell", "root"], "to": ["workbench"] },
 	{ "pattern": "git.branch", "from": ["root", "shell"], "to": ["workbench"] },
 	{ "pattern": "git.checkout", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "git.origin", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "git.log", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.show", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.blame", "from": ["root"], "to": ["workbench"] },

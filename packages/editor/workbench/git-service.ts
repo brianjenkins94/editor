@@ -325,6 +325,13 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 		return engine.branches();
 	});
+	// The GitHub repository the workspace is a clone of — its origin, and the branch it's on — or null: the shell's binding
+	// (where a commit pushes, what an `env/` address compares with), read from the workspace so the two can't disagree.
+	serve(hub, "git.origin", async () => {
+		const [owner, repo] = /github\.com\/(.+)\.git$/u.exec(await engine.githubRemote() ?? "")?.[1].split("/") ?? [];
+
+		return owner === undefined || repo === undefined ? null : { "owner": owner, "repo": repo, "branch": (await engine.branches()).current ?? "main" };
+	});
 	const remote = remoteHttp(async (request) => await shell.request("git.remote", request, { "timeoutMs": 300_000 }) as RemoteResponse);
 
 	// A branch (the current one, by default) brought up to the repository's, when that's a fast-forward: what GitHub has
