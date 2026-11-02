@@ -6,6 +6,8 @@ export { DevServer } from "./dev-server";
 export type { DevServerOptions, HMRUpdate, ResponseData } from "./dev-server";
 export { ViteDevServer } from "./frameworks/vite-dev-server";
 export type { ViteDevServerOptions } from "./frameworks/vite-dev-server";
+export { createRunGlobal } from "./run-global";
+export type { RunGlobal } from "./run-global";
 export { execute, packageDirOf, Runtime } from "./runtime";
 
 export type { LoadedPackage, Module, RequireFunction, Requester, Resolved, RuntimeOptions } from "./runtime";

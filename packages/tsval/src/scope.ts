@@ -38,6 +38,8 @@ export class Scope {
 	public globalObject: Record<string, unknown> | undefined;
 	/** Only the root scope: fall back to the host's real `globalThis` for unresolved names. */
 	public realGlobals = false;
+	/** Only the root scope: VMOptions.sharedGlobals — names it lacks, looked up (and written) there first. */
+	public sharedGlobals: Record<PropertyKey, unknown> | undefined;
 	/** `this` binding for this scope (function scopes and the module root; not arrow functions). */
 	public thisVal: unknown = undefined;
 	public hasThis = false;
@@ -180,7 +182,7 @@ export class Scope {
 			return true;
 		}
 
-		return root.realGlobals && name in globalThis;
+		return (root.sharedGlobals !== undefined && Object.hasOwn(root.sharedGlobals, name)) || (root.realGlobals && name in globalThis);
 	}
 
 	public get(name: string): unknown {
@@ -203,6 +205,10 @@ export class Scope {
 
 		if (globals !== null && globals !== undefined && name in globals) {
 			return globals[name];
+		}
+
+		if (root.sharedGlobals !== undefined && Object.hasOwn(root.sharedGlobals, name)) {
+			return root.sharedGlobals[name];
 		}
 
 		if (root.realGlobals && name in globalThis) {
@@ -243,6 +249,13 @@ export class Scope {
 
 		if (globals !== null && globals !== undefined && name in globals) {
 			globals[name] = value;
+
+			return;
+		}
+
+		// (one global, as a Node process has: the write is everyone's who shares it)
+		if (root.sharedGlobals !== undefined && Object.hasOwn(root.sharedGlobals, name)) {
+			root.sharedGlobals[name] = value;
 
 			return;
 		}

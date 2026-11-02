@@ -19,6 +19,7 @@ import * as unenvFsPromises from "unenv/node/fs/promises";
 import * as unenvProcess from "unenv/node/process";
 import { fillIn, nodeBuiltins } from "./builtins";
 import { transformEsmToCjsSimple } from "./frameworks/esm-cjs";
+import type { RunGlobal } from "./run-global";
 import { asyncContext } from "./shims/async_hooks";
 import { initChildProcess } from "./shims/child_process";
 import * as chokidarShim from "./shims/chokidar";
@@ -224,6 +225,45 @@ function carryAsyncContext(code: string): string {
 /** A module's code as the wrapper runs it: ES module syntax made CommonJS, the async context carried. */
 function prepared(code: string, filename: string): string {
 	return filename.endsWith(".cjs") ? carryAsyncContext(code) : transformEsmToCjs(code, filename);
+}
+
+/**
+ * A module's code as a function of what its wrapper hands it (exports, require, module, …, Buffer, the async context).
+ * Compiled by an indirect eval, so its names are its own, the wrapper's and the global's — not this file's; the module's
+ * own function is strict, as a direct eval in this module made it. With a run's global (`global`, run-global.ts) its
+ * `globalThis`, `global` and `self` are the run's, and its free names resolve first to what the run set there (`with`,
+ * from a sloppy function around it); without one, the host's.
+ */
+function compileModule(code: string, awaits: boolean, global: RunGlobal | undefined): (...args: unknown[]) => unknown {
+	const own = global === undefined ? "" : `var globalThis = $global;\nvar global = $global;\n${"self" in globalThis ? "var self = $global;\n" : ""}`;
+	const module = `function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer, $asyncContext) {
+var exports = $exports;
+var require = $require;
+var module = $module;
+var __filename = $filename;
+var __dirname = $dirname;
+var process = $process;
+var console = $console;
+var import_meta = $importMeta;
+var __dynamicImport = $dynamicImport;
+var fetch = $fetch;
+// Node's Buffer is a global its modules use without requiring it (isomorphic-git, zen-fs): theirs too
+var Buffer = $Buffer;
+// (what a module's awaits resume in: asyncContextEdits)
+var __almostnodeAsyncContext = $asyncContext;
+${own}// Set up global.process and globalThis.process for code that accesses them directly
+${global === undefined ? "var global = globalThis;\n" : ""}globalThis.process = $process;
+global.process = $process;
+return (${awaits ? "async " : ""}function() {
+"use strict";
+${code}
+}).call(this);
+}`;
+	const source = global === undefined ? `(function() { return ${module}; })` : `(function($scope, $global) { with ($scope) { return ${module}; } })`;
+	// eslint-disable-next-line no-eval -- executing module code is almostnode's whole purpose; the runtime IS an evaluator (indirect: the module sees none of this file's names)
+	const factory = (0, eval)(source) as (scope?: object, runGlobal?: object) => (...args: unknown[]) => unknown;
+
+	return factory(global?.scope, global?.global);
 }
 
 /**
@@ -441,6 +481,9 @@ export interface Module {
 
 export interface RuntimeOptions {
 	"cwd"?: string;
+	/** A run's own global (createRunGlobal): what its modules see as `globalThis` and their free names first, so what
+	 *  they set on it stays the run's — the host's global, otherwise. */
+	"global"?: RunGlobal;
   // Whether a package's `browser` field (its string form: a browser build as its entry) is preferred — true by default
   // (almostnode runs in a browser); false resolves as Node does, which reads only `exports`/`main`. A Node program traced
   // under Node (eslint's toolchain) loads the same files this way.
@@ -1081,35 +1124,10 @@ function createRequire(
 			const importMetaUrl = "file://" + resolvedPath;
 			// (top-level await: the module's body is an async function, and import() waits for it)
 			const awaits = code.startsWith(ASYNC_MODULE);
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer, $asyncContext) {
-var exports = $exports;
-var require = $require;
-var module = $module;
-var __filename = $filename;
-var __dirname = $dirname;
-var process = $process;
-var console = $console;
-var import_meta = $importMeta;
-var __dynamicImport = $dynamicImport;
-var fetch = $fetch;
-// Node's Buffer is a global its modules use without requiring it (isomorphic-git, zen-fs): theirs too
-var Buffer = $Buffer;
-// (what a module's awaits resume in: asyncContextEdits)
-var __almostnodeAsyncContext = $asyncContext;
-// Set up global.process and globalThis.process for code that accesses them directly
-var global = globalThis;
-globalThis.process = $process;
-global.process = $process;
-return (${awaits ? "async " : ""}function() {
-${code}
-}).call(this);
-})`;
-
 			let fn;
 
 			try {
-        // eslint-disable-next-line no-eval -- executing user/module code is almostnode's whole purpose; the runtime IS an evaluator.
-				fn = eval(wrappedCode);
+				fn = compileModule(code, awaits, options.global);
 			} catch (evalError) {
 				const msg = evalError instanceof Error ? evalError.message : String(evalError);
 
@@ -1753,36 +1771,9 @@ export class Runtime {
     // Use the same wrapper pattern as loadModule for consistency
 		try {
 			const importMetaUrl = "file://" + filename;
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer, $asyncContext) {
-var exports = $exports;
-var require = $require;
-var module = $module;
-var __filename = $filename;
-var __dirname = $dirname;
-var process = $process;
-var console = $console;
-var import_meta = $importMeta;
-var __dynamicImport = $dynamicImport;
-var fetch = $fetch;
-// Node's Buffer is a global its modules use without requiring it (isomorphic-git, zen-fs): theirs too
-var Buffer = $Buffer;
-// (what a module's awaits resume in: asyncContextEdits)
-var __almostnodeAsyncContext = $asyncContext;
-// Set up global.process and globalThis.process for code that accesses them directly
-var global = globalThis;
-globalThis.process = $process;
-global.process = $process;
-
-return (function() {
-${code}
-}).call(this);
-})`;
-
       // Create dynamic import function for this module context
 			const dynamicImport = createDynamicImport(require, this.options.base, this.options.nativeFileImports);
-
-      // eslint-disable-next-line no-eval -- executing module code is almostnode's whole purpose; the runtime IS an evaluator.
-			const fn = eval(wrappedCode);
+			const fn = compileModule(code, false, this.options.global);
 
 			fn(
 				module.exports,

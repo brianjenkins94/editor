@@ -41,3 +41,13 @@ test("standardGlobals() is a fresh table each time (a host may add to it without
 	assert.strictEqual(first.globalThis, first);
 	assert.ok(!("eval" in first) && !("process" in first));
 });
+
+test("`sharedGlobals`: what's set there (a run's packages' own globals) is the program's too, read and assigned — only that", () => {
+	const shared: Record<PropertyKey, unknown> = { "polyfilled": 1 };
+
+	assert.equal(interpret(`polyfilled + 1`, { "sharedGlobals": shared }), 2);
+	interpret(`polyfilled = 5`, { "sharedGlobals": shared });
+	assert.equal(shared.polyfilled, 5, "an assignment is the shared global's");
+	assert.equal(interpret(`typeof process`, { "sharedGlobals": shared }), "undefined", "nothing of the host's through it");
+	assert.equal(interpret(`Math.max(1, 2)`, { "sharedGlobals": { "Math": { "max": () => 0 } } }), 2, "the program's own global wins");
+});

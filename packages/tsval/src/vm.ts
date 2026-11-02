@@ -160,6 +160,10 @@ export interface VMOptions {
 	/** Fall back to the host's real `globalThis` for names the global object lacks. Default FALSE: a
 	 *  program sees only what it was given. The differential oracle sets it true for parity with Node. */
 	"realGlobals"?: boolean;
+	/** Names the global object lacks, looked up here before anywhere else — and assigned here, when they're here: the
+	 *  globals the program shares with code that isn't interpreted (a run's packages: almostnode's run global's own
+	 *  names, what they set on it). Only these: none of the host's own come through. */
+	"sharedGlobals"?: Record<PropertyKey, unknown>;
 	/** Resolve a module specifier to its namespace object (for `import` / dynamic `import()`). This is
 	 *  the seam through which a host supplies (or replaces) modules. */
 	"resolveModule"?: (specifier: string) => unknown;
@@ -599,6 +603,7 @@ export class Machine implements VM {
 		this.rootScope.hasThis = true;
 		this.rootScope.thisVal = options.thisValue;
 		this.rootScope.realGlobals = options.realGlobals ?? false;
+		this.rootScope.sharedGlobals = options.sharedGlobals;
 		this.resolveModule = options.resolveModule;
 		this.hostGuard = options.hostGuard;
 		this.onAsyncFiber = options.onAsyncFiber;
@@ -1692,6 +1697,7 @@ export class Machine implements VM {
 
 			seen.set(scope, ns);
 			ns.realGlobals = scope.realGlobals;
+			ns.sharedGlobals = scope.sharedGlobals; // (what isn't interpreted isn't forked: shared)
 			ns.hasThis = scope.hasThis;
 			ns.thisVal = clone(scope.thisVal);
 			ns.homeObject = scope.homeObject; // guest prototype — shared (behavior, not data)

@@ -18,7 +18,7 @@
  * On every stop the worker sends the adapter a COMPLETE snapshot (frame + Locals scope + variable values), so
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
-import type { FsShim } from "@brianjenkins94/almostnode";
+import type { FsShim, RunGlobal } from "@brianjenkins94/almostnode";
 import type { Effect, FunctionRun, LoadedPackage, TestReport } from "@brianjenkins94/editor-api";
 import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/editor-api/runtime";
 import type { Told, Traced } from "@brianjenkins94/editor-api/values";
@@ -501,6 +501,10 @@ let runtime: Runtime | undefined;
 let programFsFor: ((cwd: string) => FsShim) | undefined;
 /** The globals the program has on Node beyond ECMAScript's (workspace-runtime.ts' programGlobals), once the runtime's up. */
 let nodeGlobals: Record<string, unknown> = {};
+/** The run's own global, as a Node process has one (almostnode's run-global.ts): its packages' `globalThis`, and the
+ *  program's names that only they set (sharedGlobals) — so what a package does to its globals (just-bash's sandbox
+ *  puts Proxies over `performance` and the timers) is the run's, not this worker's, whose are the debugger's. */
+let runGlobal: RunGlobal | undefined;
 /** The built-ins the program's code gets (the run's capability stand-ins, by name) — set as a run starts. */
 let programBuiltins: Record<string, unknown> = {};
 /** The machine evaluating the program: a program file a package requires is evaluated on it (a nested run). */
@@ -871,7 +875,7 @@ function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<Runtime
 
 /** Load the runtime (runtimeReady): the first time a run asks for it. */
 async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
-	const [{ createFsShim, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
+	const [{ createFsShim, createRunGlobal, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
 
 	// (its files answered once the editor has the worker's mailbox — without it, the runtime's own)
 	if (editorLink !== undefined) {
@@ -892,7 +896,9 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		throw Object.assign(new Error(`EACCES: a library can't write in a debug run (${method} ${path})`), { "code": "EACCES" });
 	};
 
+	runGlobal = createRunGlobal();
 	runtime = workspaceRuntime(await zenfs.createZenfsVFS(), {
+		"global": runGlobal,
 		// (A program's own allowed write is let through while it's made: madeFor.)
 		"beforeFs": (op, method, path) => {
 			if (op === "write" && allowingWrites === 0) {
@@ -1906,7 +1912,7 @@ async function exploreOrderings(message: Extract<Control, { "type": "explore" }>
 		};
 
 		const console = Object.fromEntries(["log", "info", "debug", "dir", "warn", "error", "trace"].map((name) => [name, write]));
-		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...nodeGlobals, ...surface.globals, "console": console }, "modules": programModules(loaded), "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" }, "asyncContext": asyncContext });
+		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...nodeGlobals, ...surface.globals, "console": console }, "modules": programModules(loaded), "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" }, "asyncContext": asyncContext, "sharedGlobals": runGlobal?.own });
 
 		evaluating = vm;
 		let crash: string | undefined;
@@ -2721,7 +2727,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	testsDone = false;
 	functionsRan.clear();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": runGlobal?.own, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 
 	evaluating = loaded.vm;
 
@@ -2781,6 +2787,7 @@ async function launchReplay(message: Extract<Control, { "type": "launch" }>, tra
 		"trace": traceValue,
 		"eventLoop": eventLoop,
 		"asyncContext": asyncContext,
+		"sharedGlobals": runGlobal?.own,
 		"hostGuard": hostGuard,
 		"globals": {
 			...nodeGlobals,
