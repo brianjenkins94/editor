@@ -55,8 +55,16 @@ export interface GitReader {
 export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger): GitReader {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
+	// What's changed in the working tree since the last walk, relative to the repository — what the next walks again
+	// (engine.status); undefined, a walk of the whole tree (the first, or after a change that didn't say where).
+	let changedSince: Set<string> | undefined;
+
 	const walk = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
-		const current = await engine.status();
+		const changed = changedSince === undefined ? undefined : [...changedSince];
+
+		changedSince = new Set();
+
+		const current = await engine.status(changed);
 		const byPath = new Map<string, GitFileChange>();
 
 		const record = (change: engine.GitChange, kind: "staged" | "unstaged"): void => {
@@ -379,8 +387,16 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 	// Tell the shell to refresh when the working tree changes (saves, and picker-driven writes).
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const schedule = (): void => {
+	const schedule = (changed?: { "uri": { "path": string } } | { "path": string }): void => {
 		changes += 1;
+
+		const path = changed === undefined ? undefined : "uri" in changed ? changed.uri.path : changed.path;
+
+		if (path?.startsWith(DIR + "/") === true) {
+			changedSince?.add(path.slice(DIR.length + 1));
+		} else {
+			changedSince = undefined;
+		}
 
 		if (timer !== undefined) {
 			clearTimeout(timer);

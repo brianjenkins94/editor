@@ -108,8 +108,9 @@ How it's kept:
      takes ~250 ms on an idle page: the page's thread was busy, and a first run passed the 120 s stall check before
      its program started. Most of that was git status, twice a run, on the page's thread: isomorphic-git read every
      ignore file from the root down for each path. Each walk reads them once now (one status: ~2,400 file reads → 39,
-     ~98k stats → 60k). Left: the 60k — a stat of every file and of .git/index for each — and the installs, still one
-     at a time; the stall check counts installing as nothing happening.
+     ~98k stats → 60k), and a status walks again only the paths written since the last, while the index and HEAD
+     haven't moved (a whole walk ~1.6 s; one after a run's writes, milliseconds; silo-kept 17.7 s → 4.3 s). Left: the
+     installs, still one at a time; the stall check counts installing as nothing happening.
    - Can't run in a browser: baseline (execFileSync).
 3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
    the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or

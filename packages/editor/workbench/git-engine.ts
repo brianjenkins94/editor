@@ -170,12 +170,54 @@ function readingIgnoresOnce(): typeof fs {
 	return { ...fs, "promises": promises } as typeof fs;
 }
 
-export async function status(): Promise<GitStatus> {
-	const matrix = await statusMatrix({ "fs": readingIgnoresOnce(), "dir": DIR });
+type StatusRow = Awaited<ReturnType<typeof statusMatrix>>[number];
+
+/** The last walk's rows, by path, and the index and HEAD as they were after it (stampOf): a status told what changed
+ *  since walks only those paths, while neither has moved. A walk of the whole tree is a lookup of every file in zen-fs
+ *  on the page's thread — ~1.6 s for this repository — and every change brought one (a debug run's evidence, twice). */
+let known: { "stamp": string; "rows": Map<string, StatusRow> } | undefined;
+
+/** The index and HEAD as they are: when either moves (a commit, a stage, a checkout — anyone's, the terminal's git too),
+ *  what changed in the working tree no longer says all that changed. */
+async function stampOf(): Promise<string> {
+	const index = await fs.promises.stat(`${DIR}/.git/index`).then((stat) => `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`, () => "none");
+	const head = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }).catch(() => "none");
+
+	return `${index} ${head}`;
+}
+
+/** The working tree's status. With `changed` (paths, relative to the repository, written since the last status), only
+ *  those are walked again, while the index and HEAD are as the last status left them; otherwise, the whole tree. */
+export async function status(changed?: readonly string[]): Promise<GitStatus> {
+	const stamp = await stampOf();
+	let rows: Map<string, StatusRow>;
+
+	if (changed !== undefined && known !== undefined && known.stamp === stamp) {
+		rows = new Map(known.rows);
+
+		if (changed.length > 0) {
+			// (a changed path's rows go — its own, or a folder's — and come back as the walk finds them)
+			for (const path of rows.keys()) {
+				if (changed.some((each) => path === each || path.startsWith(`${each}/`))) {
+					rows.delete(path);
+				}
+			}
+
+			for (const row of await statusMatrix({ "fs": readingIgnoresOnce(), "dir": DIR, "filepaths": [...changed] })) {
+				rows.set(row[0], row);
+			}
+		}
+	} else {
+		rows = new Map((await statusMatrix({ "fs": readingIgnoresOnce(), "dir": DIR })).map((row) => [row[0], row]));
+	}
+
+	// (stamped after: a walk may rewrite the index itself, refreshing its stat cache)
+	known = { "stamp": await stampOf(), "rows": rows };
+
 	const staged: GitChange[] = [];
 	const unstaged: GitChange[] = [];
 
-	for (const [path, head, workdir, stage] of matrix) {
+	for (const [path, head, workdir, stage] of rows.values()) {
 		// [1,1,1] is unmodified
 		if (head !== 1 || workdir !== 1 || stage !== 1) {
 			if (workdir !== stage) {
