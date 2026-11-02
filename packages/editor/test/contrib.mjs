@@ -96,7 +96,7 @@ test("Run starts editor-contrib's interpreter: a run in its worker, the program 
 	assert.deepEqual(seen.events.map((each) => each.event), ["values", "coverage", "effects", "ended"], "it told its values, its coverage, its effects and its end");
 	assert.equal(typeof seen.sessions[0].runId, "string", "its session is a run");
 	assert.equal(seen.events[0].source, "const greeting = \"hello\";\nconsole.log(greeting);\n", "its worker read the program through the editor's runtime");
-	assert.ok(seen.records.some((record) => record.includes("runtime.fs") && record.includes("/workspace/contrib-probe.ts")), "the editor answered that read (runtime-fs.ts)");
+	assert.ok(seen.records.some((record) => record.includes("editor.extensions.bridge.runtime-fs.fs") && record.includes("/workspace/contrib-probe.ts")), "the editor answered that read (runtime-fs.ts)");
 	assert.ok(seen.records.some((record) => record.includes("running /workspace/contrib-probe.ts")), "its worker's log is the editor's — over its runtime link");
 
 	const contexts = await eventually("its worker on the architecture", async () => {
