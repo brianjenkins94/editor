@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 
-import { currentFeatures, historyOf, installCommand } from "../src/cli.ts";
+import { currentFeatures, historyOf, installArgs } from "../src/cli.ts";
 
 const CLI = path.join(import.meta.dirname, "../src/cli.ts");
 
@@ -121,13 +121,17 @@ test("silo init: the baseline holds the join — what the code's use of each pac
 	await fs.rm(project, { "recursive": true, "force": true });
 });
 
-test("silo install: nothing published in the last `days` days — `latest` is the latest a week old", () => {
+test("silo install: nothing published in the last `days` days — `latest` is the latest a week old — but what's pinned exactly", async () => {
 	const now = Date.parse("2026-10-13T12:00:00.000Z");
+	const project = await fs.mkdtemp(path.join(fs.tmpdir(), "silo-install-"));
 
-	assert.deepEqual(installCommand("npm", [], 7, now), ["install", "--before=2026-10-06T12:00:00.000Z"]);
-	assert.deepEqual(installCommand("npm", ["react@latest"], 1, now), ["install", "react@latest", "--before=2026-10-12T12:00:00.000Z"]);
-	assert.deepEqual(installCommand("pnpm", [], 7, now), ["install", "--config.minimum-release-age=10080"]);
-	assert.deepEqual(installCommand("pnpm", ["react"], 7, now), ["add", "react", "--config.minimum-release-age=10080"]);
+	await fs.writeFile(path.join(project, "package.json"), JSON.stringify({ "dependencies": { "rolldown": "1.2.13", "react": "latest" } }));
+
+	assert.deepEqual(installArgs("npm", project, [], 7, now), ["install", "--before=2026-10-06T12:00:00.000Z", "--min-release-age-exclude=rolldown"]);
+	assert.deepEqual(installArgs("npm", project, ["react@latest"], 1, now), ["install", "react@latest", "--before=2026-10-12T12:00:00.000Z", "--min-release-age-exclude=rolldown"]);
+	assert.deepEqual(installArgs("pnpm", project, [], 7, now), ["install", "--config.minimum-release-age=10080", "--config.minimum-release-age-exclude=rolldown@1.2.13"]);
+	// (one asked for at a version is pinned too)
+	assert.deepEqual(installArgs("pnpm", project, ["zod@4.1.0"], 7, now), ["add", "zod@4.1.0", "--config.minimum-release-age=10080", "--config.minimum-release-age-exclude=rolldown@1.2.13", "--config.minimum-release-age-exclude=zod@4.1.0"]);
 });
 
 test("silo status, then silo check: the ledger's decisions held to the code — drift fails it", async () => {

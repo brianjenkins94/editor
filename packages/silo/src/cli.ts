@@ -2,7 +2,8 @@
  * silo — the command line. What a program's code says about it, derived and never kept by hand:
  *
  *   silo init [repo]                                   start keeping .silo/: the baseline, synced with what's installed
- *   silo install [package…] [--min-age 7] [--project …] install — nothing newer than a week — and sync the baseline
+ *   silo install [package…] [--min-age 7] [--project …] install — nothing newer than a week but what's pinned exactly —
+ *                                                        and sync the baseline
  *   silo features [repo] [--json]                      every way into the program, found in its code
  *   silo status <entry> <status> [why] [--key …] [--paths …] [--until …]
  *                                                      a decision about a feature, in the ledger (.silo/features.json)
@@ -38,6 +39,7 @@ import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
+import { installCommand, packageManagerOf, pinOfRequest, workspacePins } from "@brianjenkins94/util/silo/install";
 import { byFile, byFolder, byReach, byTests, linkedBySubjects, testsFromRecords } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
@@ -318,32 +320,16 @@ function projectOf(directory: string): string {
 	return at;
 }
 
-/** How a project installs: by its lockfile — npm's first (a project installed with npm here and pnpm in CI has both),
- *  then pnpm's, then yarn's; npm with none. */
-function packageManagerOf(root: string): "npm" | "pnpm" | "yarn" {
-	if (fs.existsSync(path.join(root, "package-lock.json"))) {
-		return "npm";
-	}
-
-	if (fs.existsSync(path.join(root, "pnpm-lock.yaml"))) {
-		return "pnpm";
-	}
-
-	return fs.existsSync(path.join(root, "yarn.lock")) ? "yarn" : "npm";
-}
-
 /**
- * `manager`'s install of `packages` (none: the project's own) that takes no version published in the last `days` days —
- * so `latest` means the latest a week old, a range the newest in it that's that old, every dependency's too. npm's
- * `--before` (a tag past the date falls back to the latest version at or before it); pnpm's `minimum-release-age`
- * (minutes).
+ * `manager`'s install of `packages` (none: the project's own) in the project at `root`, by util/silo/install's rule:
+ * nothing published in the last `days` days — `latest` the latest a week old, a range the newest in it that's that old,
+ * every dependency's too — but each version pinned exactly (in any of the workspace's package.json files, or asked
+ * for as `name@1.2.3`) however young. The setup action CI installs with runs the same rule.
  */
-export function installCommand(manager: "npm" | "pnpm", packages: string[], days: number, now = Date.now()): string[] {
-	if (manager === "pnpm") {
-		return [packages.length === 0 ? "install" : "add", ...packages, `--config.minimum-release-age=${Math.round(days * 24 * 60)}`];
-	}
+export function installArgs(manager: "npm" | "pnpm", root: string, packages: string[], days: number, now = Date.now()): string[] {
+	const asked = packages.map(pinOfRequest).filter((pin) => pin !== undefined);
 
-	return ["install", ...packages, `--before=${new Date(now - days * 24 * 60 * 60 * 1000).toISOString()}`];
+	return installCommand(manager, packages, days * 24 * 60, [...workspacePins(root), ...asked], now);
 }
 
 /** What `entry`'s version grew: the capabilities it can do that the one before it couldn't. */
@@ -380,7 +366,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "install",
-			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — then sync the baseline with what's installed: a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more (its join: the part it uses, tree-shaken) with the members that brought it in — each said, and each asks at the call unless the policy allows it. Exits 1 when the install fails.",
+			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — but a version pinned exactly (`\"1.2.3\"` in a package.json of the workspace, or `name@1.2.3` here) however young, then sync the baseline with what's installed: a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more (its join: the part it uses, tree-shaken) with the members that brought it in — each said, and each asks at the call unless the policy allows it. Exits 1 when the install fails.",
 			"config": juvy({
 				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "What to add (none: the project's own dependencies), as the package manager takes them: name, name@range, name@tag." },
 				"min-age": { "format": Number, "default": 7, "doc": "The youngest a version may be, in days." },
@@ -398,7 +384,7 @@ export const app = subcommands({
 					return;
 				}
 
-				const args = installCommand(manager, config.get("packages") as string[], config.get("min-age"));
+				const args = installArgs(manager, repo, config.get("packages") as string[], config.get("min-age"));
 
 				process.stdout.write(`${manager} ${args.join(" ")}\n`);
 
