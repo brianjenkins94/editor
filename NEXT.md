@@ -55,10 +55,17 @@ How it's kept:
      paths, most of them whole-tree walks by our workspace search (components/monaco-vscode-api/workspace-search.ts:
      every `findFiles` walks the tree, uncached). The steady one, a walk a second from 140 s on, was history's manifest
      watcher re-reading every package.json for each one type acquisition wrote into node_modules: it skips those now,
-     and a burst is one reading (`readdir` 55,300 → 7,700, `stat` 117,500 → 69,600). Still: ~44,000 `stat`s from an
-     extension host one file at a time (MainThreadFileSystem.$stat), uncounted by caller. zen-fs's id tables would make
-     each lookup ~10× cheaper (measured on 2.7.6: statting the repo's 2,249 files 248 ms → 25 ms) — asked upstream
-     (#329). Next: who makes those stats; then the file store's work in a worker. On zen-fs 2.8.3 (2026-11-02) a cold
+     and a burst is one reading (`readdir` 55,300 → 7,700, `stat` 117,500 → 69,600). The extension host's calls,
+     counted by caller 2026-11-02 (its outgoing RPC hooked in a cold load, 4 minutes): 16,752 `stat`s, 99.9% of them
+     tsserver's module resolution relayed by VS Code's TypeScript extension (`fileSystem/stat`, a blocking round trip
+     each), mostly node_modules probes — directories, `.d.ts`, `.ts`/`.tsx`/`.js` per import — and 3.8 per distinct
+     path (4,412: `/workspace/node_modules` 313 times, a missing `@types/node_modules` 121); its reads 4,054 of 1,449
+     files, listings 1,390, watches 1,899. Next by count, silo.history's readManifests: 2,319 reads of nearly every
+     file, 1,325 of them packages/tsval/vendor. At ~0.14 ms a v2 lookup the stats are ~2–5 s of the load's 54 s of
+     main-thread work, before VS Code's own cost per call. Cheapest cuts: the provider answering a path's stat from
+     a cache its change path invalidates (16.7k → ~4.4k lookups), and history reading only the files that can hold a
+     manifest. zen-fs's id tables would make each lookup ~10× cheaper (measured on 2.7.6: statting the repo's 2,249
+     files 248 ms → 25 ms) — asked upstream (#329). Then the file store's work in a worker. On zen-fs 2.8.3 (2026-11-02) a cold
      first load (a fresh browser context) settles later: at 74–75 s against 58–62 s on 2.7.6 (the repository in the
      explorer at 5 s either way; 54 s of main-thread work against 46–51 s). zen-fs alone is ~30% slower on its v2,
      patched or not (this repository's 2,258 files: write 2.8 → 3.7 s, stat 1.2 → 1.6 s, read 1.0 → 1.3 s, readdir
