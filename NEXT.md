@@ -99,8 +99,13 @@ How it's kept:
      quadratic in the zen-fs patch's SingleBuffer — each new id's lookup missed its index and scanned every block. A
      current index's miss is trusted now: mount +16 s → +5 s, Margin up +11 s. Found doing it, and as old as the patch:
      5 realms × 300 files + churn in one folder run out of room ("not enough space for a new metadata block") at ~280.
-   - Not looked at since: page-tools' stall, preview-instrument's empty evidence, replay's
-     null for 99, silo-kept's versions.json test (fails under Node too).
+   - **page-tools waits on the held preview WebSockets**: its client and its debug-mcp server are both in the run, joined
+     by a WebSocket a browser sends to the real network (decided 2026-10-14: a run's WebSockets wait until they can be
+     observed).
+   - **To check once the workspace is pulled** (2026-11-02: the editor's workspace was 30 commits behind, and a test runs
+     the workspace's own code): preview-instrument and replay — almostnode's `vm` gives a context its own globalThis
+     now, and tsval steps only into its own machine's functions (the program's tsval stepped the debugger's), both
+     fixed under Node; silo-kept, which passes under Node now and stalled in the editor on the workspace's old copy.
    - Can't run in a browser: baseline (execFileSync).
 3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
    the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or
