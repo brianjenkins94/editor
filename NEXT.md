@@ -58,7 +58,11 @@ How it's kept:
      and a burst is one reading (`readdir` 55,300 → 7,700, `stat` 117,500 → 69,600). Still: ~44,000 `stat`s from an
      extension host one file at a time (MainThreadFileSystem.$stat), uncounted by caller. zen-fs's id tables would make
      each lookup ~10× cheaper (measured on 2.7.6: statting the repo's 2,249 files 248 ms → 25 ms) — asked upstream
-     (#329). Next: who makes those stats; then the file store's work in a worker.
+     (#329). Next: who makes those stats; then the file store's work in a worker. On zen-fs 2.8.3 (2026-11-02) a cold
+     first load (a fresh browser context) settles later: at 74–75 s against 58–62 s on 2.7.6 (the repository in the
+     explorer at 5 s either way; 54 s of main-thread work against 46–51 s). zen-fs alone is ~30% slower on its v2,
+     patched or not (this repository's 2,258 files: write 2.8 → 3.7 s, stat 1.2 → 1.6 s, read 1.0 → 1.3 s, readdir
+     1.9 → 2.5 s), so it's v2's own cost, not our lock: upstream's to hear of.
    - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
      through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user
      (`git.identity`). The terminal has `git push` / `switch` / `checkout`, and agents have `git_push`, `git_branch`
@@ -90,17 +94,9 @@ How it's kept:
    2026-11-02: a run's WebSocket to a server of its own is joined to it in the run, as Node's reaches its own machine,
    and seen — each frame and its close on the architecture view as that server's traffic (`server:<port>`), the
    connection a span. (A preview's WebSocket to a run's server still goes to the network; it'd be seen the same way.)
-   Still failing, by cause:
-   - **A run's start keeps the page's thread busy** (2026-11-02). preview-instrument, replay and silo-kept pass in Brave
-     now, once the workspace was pulled (it was 30 commits behind, and a test runs the workspace's own code). But a
-     run that installs packages (silo-kept: ~13 tarballs, one at a time) waited 2–10 s for each, where the same fetch
-     takes ~250 ms on an idle page: the page's thread was busy, and a first run passed the 120 s stall check before
-     its program started. Most of that was git status, twice a run, on the page's thread: isomorphic-git read every
-     ignore file from the root down for each path. Each walk reads them once now (one status: ~2,400 file reads → 39,
-     ~98k stats → 60k), and a status walks again only the paths written since the last, while the index and HEAD
-     haven't moved (a whole walk ~1.6 s; one after a run's writes, milliseconds; silo-kept 17.7 s → 4.3 s). A package's
-     dependencies are fetched alongside it now, and installing says it's busy, so the stall check doesn't take it for
-     stuck. Not measured cold: the browser's HTTP cache kept the tarballs across reloads (each ~2 ms).
+   preview-instrument, replay and silo-kept too, a run's package installs no longer waiting on a busy page (git
+   status walks only what a run wrote; a package's dependencies fetched with it): cold — a fresh browser context, no
+   HTTP cache — silo-kept takes 4.2 s, warm 4.0 s (it was 17.7 s). Still failing:
    - Can't run in a browser: baseline (execFileSync).
 
    These tests go with the rewrite (item 3): what's worth fixing here is the runtime they find wrong, since the rebuilt
