@@ -140,17 +140,6 @@ packages/editor (`--all`, `--runs N`, `--json`).
   NotAllowedError still happens after e86501b is unknown: read the next reports, which carry their stack. Also seen
   once: `[almostnode] worker_threads.Worker is not implemented` (synckit's `createSyncFn`, e4e927b).
 
-- **CI's smoke-app shard runs out of its 15 minutes on CI's slower runners** (since 10-30 at least). What queues,
-  found 2026-11-02: the capabilities baseline. The app fixture depends on hub, observability and util, and util's 29
-  peers make a tree of ~1,250 packages; on a runner slow enough that the session outlives its resolution, the baseline
-  reads every one off its tarball from scratch (172 MB from the registry, in the shard's snapshots), and the tests slow
-  until the preview-window ones time out. A fast session (here, Docker, a fast runner) ends before the baseline starts:
-  9–11 tarballs. Not Node 26, nor the async-context carrying (both A/B'd in CI). The resolver now leaves out peers a
-  manifest marks optional, as npm does (69bbec6e: 548 packages, 66 MB — no React Native through b4a, no vite-plus or
-  Sass through vite). Left: util's own peers, all required (googleapis 24 MB, isolated-vm 10 MB, playwright) — lib's
-  util/package.json could mark them optional (`peerDependenciesMeta`), each subpath needing only its own. To confirm
-  in CI's next smoke-app runs.
-
 - **The workspace store's ceiling** (2026-10-31): it's one fixed 64 MB SharedArrayBuffer (workspace-fs.ts
   `BUFFER_BYTES`), and zen-fs's SingleBuffer takes ~2.5× the files' size (this repository's 9 MB tree wrote 22.5 MB;
   live, 26 MB of files — tree 8.5, types in node_modules 12.7, .git 3.2, .silo 1.3 — take 54 MB). So ~25–30 MB of
