@@ -1045,23 +1045,72 @@ no fallback for the old way.
 
 ## The rewrite, in place (2026-11-02)
 
-The editor's composition is rewritten feature by feature, in this repository. That's the shell, the workbench, the
+The editor's composition is rebuilt feature by feature, in this repository. That's the shell, the workbench, the
 composition roots and the extensions: about 20k lines of glue. almostnode, the BABLR packages, tsval, the site and the
 API's apps are fine as they are. Why in place, the user's decision: the secrets, deploys, CI and configuration stay as
 they are, untouched, and the rewrite is done *in the editor*, by people or by agents over debug-mcp. So the rewrite is
 also how the editor becomes the place this repository is worked on. Something the rewrite needs that the editor can't
 do yet is the editor's gap: it goes in NEXT.md, not around the editor from a local shell.
 
-**A feature at a time**, each in one change or a short run of them:
+**Reduce, then reintroduce** (the user, 2026-11-02). Not a port of one feature at a time beside the rest, and no
+allowance for code not yet ported: the editor is reduced to its minimally necessary core, and features come back one
+at a time, each with a purpose.
 
-1. **Declared** in the ledger before its code is touched: its name, what it's for, the ways in and paths it owns, the
-   tests it claims (packages/silo/README.md, decision 21).
-2. **Its comments become notes** (below).
-3. **Ported** to the standard (below), its tests claimed by it and green.
-4. **The old code removed** in the same change (CLAUDE.md, *Features*): there's never a second copy of a feature, so
-   nothing switches between an old and a new one.
+1. **Measured first**, while all the code is there: the zero-knowledge baseline, what BABLR parses, the comments sorted
+   (below), and the whole test suite run one last time for each test's reach and outcome (*Tests*, below). The manifest
+   is the record of what there was (superseded, kept as that snapshot: *Silo, firmed up*).
+2. **The core, declared**: the least the editor needs to be worked in, since the rebuild is worked in it. Candidates,
+   not decided: the shell and the workbench's boot, the workspace filesystem, git (clone, review, commit, push), the
+   hub and observability, the agents' workspace tools, the ledger and `silo check`. Each is declared in the ledger, so
+   code no feature owns is an error from the first commit (packages/silo/README.md, decision 22).
+3. **Everything else removed**, each feature with its ledger tombstone (`silo remove`) and its tests: out until it's
+   reintroduced. Git keeps its code and tests, for reintroduction to read, not to copy back.
+4. **Reintroduced, one feature at a time, only with a purpose**: declared first (its name, what it's for, the ways in,
+   paths and tests it owns: decision 21), built to the standard, its spans as CLAUDE.md says, its whys as notes, its
+   tests green, its zero-knowledge pass run again. A feature with no purpose now stays out.
 
-**Comments become notes.** About 16% of packages/editor's lines (outside tests) are comments. Each one is:
+**Tests, eliminated and rebuilt with their features** (the user, 2026-11-02). The suite isn't ported: it goes with
+the code, and a feature's tests are written again when it comes back, declared in its entry, so every test is
+attributed by declaration from the first one (packages/silo/README.md, decision 13), and a test's file is code its
+feature owns (decision 22). The core's tests are the first written.
+- **The old suite is the record of what was tested.** Its last run (step 1) keeps, per test, what it reached and how it
+  came out: CI's ledger and the editor's traces. A removed feature's old tests are what that feature was held to. When
+  it's reintroduced, what its old tests reached and its new ones don't is shown: a behaviour dropped on purpose, said
+  so with its reason, or a test still missing. That's how existing behaviour is codified rather than lost with the
+  tests. The old tests are read beside the new, at the tombstone, as its old code is.
+- **How a test looks** is part of the standard: it sets up its own state, so it can rest or be vouched for alone
+  (decision 15, answered for the new suite by writing it that way); it belongs to one feature, and a test across
+  features belongs to the one whose behaviour it states; it runs in the editor, on tsval, and on CI's runtime
+  (decision 19).
+- **Where it leads: fewer tests in CI.** A rebuilt suite starts with every test *new*, so CI runs all of it at first.
+  As it settles, two things take tests off CI: a test green 20 runs in a row and not reached by a change *rests* until
+  the weekly full run (decision 14), and a test that passed in the editor at commit is *vouched*, so CI skips it for
+  a week unless it failed lately, can't run where it was vouched, or is audited (*Vouches*). The editor's commit flow
+  makes the vouches, so working in the editor is what lets CI run less.
+
+**The bench does it, for any repository.** This rebuild is the refactor bench's first job (NEXT.md item 1), and what
+it takes is the product: a prototype-grown repository measured, reduced to a declared core, and its features
+reintroduced with purpose, by a person and agents in the editor. None of the steps is this repository's own: the
+ledger, ownership and attribution are silo's, for any repository (packages/silo/README.md), and the bench's tools are
+any workspace's. So each step is built as the bench's, and this rebuild is its first user. What each needs:
+- **Measure**: the zero-knowledge pass as a bench tool, its questions from the ledger, answered by an agent through
+  the workspace tools. "Comments stripped" can be a layer over the workspace rather than a copy, as the workspace
+  already layers overlays. BABLR's parse status per file exists (the bridge's).
+- **Declare**: a feature declared from the bench (name, what it's for, ways in, paths, tests) into the ledger. The
+  features map sets a status only.
+- **Own**: decision 22's error in Problems, where History's drift shows today.
+- **Reduce**: History's Remove (`removalOf`: what only it reaches, and its tombstone) exists for one way in; reducing
+  is that for every feature not declared core, reviewed as one change.
+- **Reintroduce**: a removed feature as it was, beside the work: its code at its tombstone's commit, its notes, its
+  tests and its baseline answers, to read rather than copy, and what its old tests reached that its new ones don't.
+- **Tests**: the feature's list (packages/silo/README.md, *Tests by feature, in your face*), its tests run in the
+  editor, and the vouches its commit flow makes.
+- **Shared code**: runs and coverage by feature (coverage and traces exist; by feature, not yet).
+- **Progress**: the features map's core, out and back, and for each one back, how much of its old tests' reach its
+  new tests cover.
+
+**Comments become notes**: the core's, and a reintroduced feature's old ones, read as it comes back. About 16% of
+packages/editor's lines (outside tests) are comments. Each one is:
 - dropped, when it says what the code says;
 - kept, when it's for a tool: `eslint-disable`, `@ts-expect-error`, a license;
 - a note, when it's a why, a gotcha or a history, on the declaration or statement it sits on (*Durable annotations on
@@ -1082,18 +1131,19 @@ the ledger and docs (why), which are the answers. Agents answer them through the
 
 The first against the second is what comments carry today. The third against the second is whether notes lose any of
 it. Each question the code alone gets wrong is fixed one of three ways: the code says it (a name, a structure), a note
-(a why the code can't), or a doc (it spans many places). A feature's pass runs again when it's ported.
+(a why the code can't), or a doc (it spans many places). A feature's pass runs again when it's reintroduced, against
+its baseline.
 
 **How the code looks** is written from the gaps the pass finds, each rule beside what checks it (ESLint, `silo check`,
 or the pass). Likely: folders are realms; a feature is an extension (*Features as extensions*, above) and registers its
 own ways in (composition roots registering for many features are what the manifest's derivations couldn't follow:
-packages/silo/README.md, *The feature manifest*); no prose comments, only the kind tools read. One small feature is
-ported first as the worked example the rules point at.
+packages/silo/README.md, *The feature manifest*); no prose comments, only the kind tools read. The first feature
+reintroduced is the worked example the rules point at.
 
-**The architecture, reassessed.** A feature's boundaries are drawn before it's declared, so the extensions are looked
-at again first, one feature to an extension. Every reason above for something staying where it is ("running stays in
-the bridge", "the Rule view is core's") is checked again: it may no longer hold. Found 2026-11-02, as candidates, not
-decisions:
+**The architecture, reassessed.** A feature's boundaries are drawn before it's declared, so the extensions are looked at
+again before the reduction, one feature to an extension: what's core and what comes back as what. Every reason above for
+something staying where it is ("running stays in the bridge", "the Rule view is core's") is checked again: it may no
+longer hold. Found 2026-11-02, as candidates, not decisions:
 - **insights** is two features: the editor's own monitor (the metrics plane in the status bar and its cards), and what
   runs say about a program (hover, suggestions and their fixes, profiles).
 - **history** is three: derived history (each pause replayed, what it changed told), the feature ledger (`silo check`'s
@@ -1108,6 +1158,23 @@ decisions:
 - **workbench/** (14k lines) draws other features' views (the features map, the Rule view) and answers agents' tools
   (ci-status, code-*, script-run): core because they must be, or because it was nearest.
 
+**Silo, firmed up.** Silo's capabilities grew session by session (packages/silo/README.md, *The four jobs*, *What
+doesn't fit*). The rewrite settles each one: the job it serves, where it lives (lib `util/silo`, pure; the command
+line; the editor), and what supersedes what. Where it starts:
+- **The manifest is superseded** by tracking features and their tests and attributing code from them (CLAUDE.md,
+  *Features*). What reads it moves to the ledger's declared features and that attribution, or goes:
+  - `silo check`'s drift, `silo features --score`, and `removalOf`'s rewrite of it;
+  - History's `history.features`, which feeds the features map, `git_review`'s features per hunk, and focus;
+  - `history.decisions` and `history.reach`, which agents call as `decisions_for` and `code_reach`.
+- **Code no feature owns is an error** (decided 2026-11-02; packages/silo/README.md, decision 22): owned by
+  declaration, in the ledger, not inferred. Attribution from runs and tests checks a declaration (*Declared against
+  observed*), it doesn't stand in for one. Runs and coverage are also how code shared between features is found:
+  what more than one feature's runs reach is made a feature of its own, or split.
+- **One attribution of runs to features**, where there are two (`coverage` and `exercise`, *What doesn't fit* 4).
+- **History's three features** (above) are split by what's silo's and what's the editor's view of it.
+- **The rest of *What doesn't fit*** (two stores of what code can do, the subcommands, the leftovers) answered, or
+  carried on with a reason, and decision 21 with them.
+
 **Visibility: anything we'd ever debug, without a profiler.** What exists: the metrics plane, span rates and latencies
 from every context's `→ x` / `← x (12ms)` records, the workspace's fill, and each zen-fs store operation counted as an
 architecture edge by caller with its bytes (`observeZenfs`). What it didn't show: the repository's load (NEXT.md item 1)
@@ -1118,13 +1185,19 @@ lookups), the IndexedDB write-back, the change stream, isomorphic-git's reads, t
 almostnode's. Each with its caller, operation, duration, bytes and parent span, so one call can be followed down through
 the layers. Aggregates are always on (per source and name, as span metrics are); single spans are kept on demand, as
 `editor_trace` keeps VS Code's log. The test it passes: the questions of 2026-10-30 and 31 (calls per path, who walks
-the tree, what the write-back costs) answered from `metrics_query` and `logs_query` alone. The other realms' boundaries
-(the hub, the workers, BABLR, TypeScript's servers) are held to the same test as their features are ported.
+the tree, what the write-back costs) answered from `metrics_query` and `logs_query` alone. The core holds to it; the
+other realms' boundaries (the workers, BABLR, TypeScript's servers) are held to it as their features come back.
 
-**Progress is the ledger**: each feature's step above, shown in the features map, with its pass's score. No new silo
-subcommand.
+**Progress is the ledger**: what's core, what's out, what's back, shown in the features map, each with its pass's
+score. No new silo subcommand.
 
 **Open:**
+- **Where the full editor is worked in while main is the core.** The rebuild is done in the editor, and the core can't
+  do all of what doing it takes at first (running the tests, debugging). Either main is reduced and the work is done
+  in the last full editor, kept deployed (production not promoted past it, or a build of it kept), until the core
+  can host its own work; or the reduction happens on a branch the full editor works on, merged once the core can.
+  The first is the bench doing its job: the full editor, deployed, working on this repository.
+- **What the core is**: the candidates in step 2.
 - **Whose a migrated note is.** Notes are kept per author, and only a note's author rewrites it when its code moves. A
   comment's note could be the repository's (an owner of its own), or its `git blame` author's.
 - **Decision 21** (packages/silo/README.md): what a declared feature's ledger entry holds. Step 1 waits on it.

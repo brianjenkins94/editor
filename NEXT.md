@@ -13,7 +13,9 @@ How it's kept:
 
 ## Queue
 
-1. **The refactor bench: refactor this repo in the editor, reading from and committing to GitHub.** It loads: the clone
+1. **The refactor bench: refactor this repo in the editor, reading from and committing to GitHub.** Its first job is
+   item 3's rebuild, and what that takes is the product, for any repository (ARCHITECTURE.md, *The bench does it*):
+   a step it can't support is a gap here. It loads: the clone
    of `brianjenkins94/editor` (2,212 files) arrives in about 2 s, and an editor is open in under 10 s. Its
    dependencies are in node_modules as npm puts them (ARCHITECTURE.md, *Packages*):
    - `file:` siblings are linked;
@@ -103,6 +105,9 @@ How it's kept:
      dependencies are fetched alongside it now, and installing says it's busy, so the stall check doesn't take it for
      stuck. Not measured cold: the browser's HTTP cache kept the tarballs across reloads (each ~2 ms).
    - Can't run in a browser: baseline (execFileSync).
+
+   These tests go with the rewrite (item 3): what's worth fixing here is the runtime they find wrong, since the rebuilt
+   tests run, and are vouched for, in the editor.
 3. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
    from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
    Waits on items 1 and 2 being good enough to work in. In order:
@@ -116,15 +121,24 @@ How it's kept:
        that seam (through observability, or a hook: the hub doesn't import the logger), every hub request is covered;
      - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
        and this repository's spans take it already; the editor's lint holds them once lib publishes util.
-   - **Measure**: what of the rewrite's scope BABLR parses, and a sample of its comments sorted into dropped, kept,
-     note, and note citing a doc.
+   - **Measure, while all the code is there**: what of the scope BABLR parses, a sample of its comments sorted into
+     dropped, kept, note, and note citing a doc, and the zero-knowledge baseline on 3–5 features (the code alone
+     against the code as it is). And the whole test suite run one last time, in CI and in the editor, for each test's
+     reach and outcome: what each feature's tests held it to, once they're gone.
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
      or kept, each "stays because" reason checked again.
-   - **The zero-knowledge baseline** on 3–5 features: the code alone against the code as it is.
+   - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved
+     to declared features and attribution, or removed; silo README's *What doesn't fit* answered; decision 21.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
-   - **The standard**, from the pass's gaps, and one small feature ported as its worked example.
-   - **Progress in the ledger**: each feature's step, in the features map. Waits on decision 21 (*Decisions*).
+   - **The standard**, from the pass's gaps.
+   - **Reduce to the core**: the core declared in the ledger (decision 22 holds from then on), everything else removed
+     with its tombstone, its tests with it; the core's tests written again, the first of the new suite. Waits on
+     decision 21 and on what the core is and where the full editor is worked in (*Decisions*).
+   - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
+     tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
+     editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
+     when it's next.
 
 ## Watching
 
@@ -195,10 +209,16 @@ packages/editor (`--all`, `--runs N`, `--json`).
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
   a weekly full run; CI reruns a vouched test after 7 days. Open: decision 15 (tests that lean on each other), 17–19
   (the audit rate, whose vouches count, different runtimes), 20 (CI's entry point) and 21 (what the ledger holds for a
-  declared feature, and what becomes of the AI-written manifest).
+  declared feature; the AI-written manifest is superseded, 2026-11-02).
 - **The rewrite** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Decided 2026-11-02: in place, in this
-  repository, worked in the editor. Open: whose a note migrated from a comment is (the repository's, or its
-  `git blame` author's); decision 21 above, which its ledger step waits on.
+  repository, worked in the editor; reduced to a minimal core, then features reintroduced one at a time with a
+  purpose, no allowance for undeclared code; code no feature explicitly owns is an error (silo README, decision 22);
+  the test suite eliminated and rebuilt with the features, declared, so CI can run fewer of them by resting and
+  vouches.
+  Open: what the core is; where the full editor is worked in while main is the core (the last full build kept
+  deployed, or the reduction on a branch until the core can host its own work); decision 22's grain (a file, or a
+  declaration); whose a note migrated from a comment is (the repository's, or its `git blame` author's); decision 21
+  above, which its ledger step waits on.
 
 ## Parked
 

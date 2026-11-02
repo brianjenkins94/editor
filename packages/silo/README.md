@@ -457,8 +457,8 @@ runs", "failing since b98c0fc2"); opened, each test with its own strip. An edit 
 every feature whose tests ran the changed code turns *touched*, first, with "Re-run N", exactly its tests. You don't go
 looking: the touched tests run in the background when they can, and whatever hasn't run by then runs before the
 commit (decision 12). Two rows are never hidden:
-- **Unattributed**: tests no feature claims and files no feature owns, counted. With features declared first it should
-  be empty, so anything in it is a gap.
+- **Unattributed**: tests no feature claims and files no feature owns, counted. With features declared first it's
+  empty: code no feature explicitly owns is an error (decision 22).
 - **Declared against observed**: a test that declares one feature but whose reach is mostly another's code. That's how
   a boundary drawn in the wrong place shows itself.
 
@@ -505,6 +505,9 @@ own glue (decision 20).
 - **Its runtime gap** is decision 19's case: the editor runs tests on tsval, CI runs the unit tests on Node.
 - **Its tours** are the suites that lean on each other (the calc selection test on the tests run before it, the
   features tests on selection's).
+- **Its suite is rebuilt** (2026-11-02): the old tests go with the reduction, and each feature's come back written
+  again, declared, and independent, so the editor is a project with declared tests from the start rather than
+  attributed ones. The old suite's last run is kept as what each feature was held to.
 
 ### Purity: decided statically, checked by runs (designed 2026-10-22; built 2026-10-24–25)
 
@@ -984,12 +987,15 @@ From *Tests by feature* (above), for the rewrite:
     heavy to run on every save), and whatever hasn't run by then runs before the commit, in the commit flow that makes
     the vouches. The button stays, for running them by hand.
 13. ~~**What counts as a feature's tests.**~~ Decided 2026-10-29: in the rewrite, everything is declared: a feature's
-    tests are the ones it declares. In the meantime, here, tests are attributed as best they can be (by the code their
-    reach runs), and shown as attributed rather than declared.
+    tests are the ones it declares. The editor's suite is rebuilt rather than ported (2026-11-02): each feature's tests
+    are written again as it's reintroduced, declared in its entry, and checked against what its old tests reached
+    (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). In the meantime, here, tests are attributed as best they
+    can be (by the code their reach runs), and shown as attributed rather than declared.
 14. ~~**Resting.**~~ Decided 2026-10-29: a test rests after 20 green runs in a row; the full run is weekly. A test never
     retires on its own.
 15. **Tests that lean on each other**: made independent before resting works, or resting by test file for suites that
-    share a session.
+    share a session. The editor's rebuilt suite answers it by how its tests are written: each sets up its own state.
+    Still open for a suite kept as it is.
 16. ~~**A vouch's window.**~~ Decided 2026-10-29: 7 days. CI runs a vouched test itself when it hasn't in a week.
 17. **The audit rate**: how many vouched tests CI runs anyway.
 18. **Whose vouches count**: by default only your own, or the people you list.
@@ -998,7 +1004,15 @@ From *Tests by feature* (above), for the rewrite:
 20. **CI's entry point**: a silo subcommand any CI calls (reopening decision 9, which kept selection out of the command
     line while it was only the editor's and its CI's), or a library call each project's CI script makes. And which
     runner reports silo reads first.
-21. **The ledger and the manifest**: what a declared feature's ledger entry holds (the code it owns — its ways in and
-    paths, the manifest's columns now — and the tests it claims), and what becomes of the manifest once the ledger
-    declares features: kept as this repository's inventory and port list only, or retired with the rewrite.
+21. **What a declared feature's ledger entry holds**: the code it owns — its ways in and paths, the manifest's columns
+    now — and the tests it claims. The manifest itself is superseded (2026-11-02): tracking features and their tests,
+    and attributing code from them, replaces it; it isn't kept up.
+22. ~~**Code no feature owns.**~~ Decided 2026-11-02: an error. Code a feature doesn't explicitly own — by its ledger
+    entry, not inferred from reach or tests — fails `silo check`, in CI and in the editor's Problems; a test's file is
+    code too. Runs and coverage are how code shared between features is found (2026-11-02): code that more than one
+    feature's runs and tests reach is shown as shared, to be made a feature of its own or split, so a declaration
+    that names one owner is checked against what runs show. No allowance for code not yet declared: the editor's
+    rebuild reduces to a declared core first and reintroduces features one at a time (packages/editor/ARCHITECTURE.md,
+    *The rewrite, in place*), so the check holds from the start. Open: the grain (a file by its path, or a
+    declaration).
 
