@@ -146,3 +146,26 @@ test("a platform build — a native binary for some OS or CPU — is marked, its
 	// A lockfile says so too: its entry's os/cpu.
 	assert.deepEqual(lockedVersions({ "packages": { "": {}, [`node_modules/${binary}`]: { "version": "7.0.2", "os": ["linux"], "cpu": ["x64"], "optional": true } } })[binary], { "version": "7.0.2", "range": "7.0.2", "dependencies": [], "platform": true });
 });
+
+test("a peer is resolved as npm installs it: a required one, never one its manifest marks optional", async () => {
+	const realFetch = globalThis.fetch;
+	const old = "2026-07-01T00:00:00Z";
+	const published = (version) => ({ "versions": [{ "versionKey": { "version": version }, "publishedAt": old, "isDefault": true }] });
+	const answers = {
+		"https://api.deps.dev/v3/systems/npm/packages/b4a": published("1.9.0"),
+		"https://api.deps.dev/v3/systems/npm/packages/streamx": published("2.23.0"),
+		"https://registry.npmjs.org/b4a/1.9.0": { "peerDependencies": { "react-native-b4a": "*", "streamx": "^2.0.0" }, "peerDependenciesMeta": { "react-native-b4a": { "optional": true } } },
+		"https://registry.npmjs.org/streamx/2.23.0": {}
+	};
+
+	globalThis.fetch = async (url) => (answers[String(url)] === undefined ? Response.error() : Response.json(answers[String(url)]));
+
+	try {
+		assert.deepEqual(await resolveVersions({ "b4a": "^1.9.0" }, { "now": Date.parse("2026-10-14T00:00:00Z") }), {
+			"b4a": { "version": "1.9.0", "range": "^1.9.0", "dependencies": ["streamx"] },
+			"streamx": { "version": "2.23.0", "range": "^2.0.0", "dependencies": [] }
+		});
+	} finally {
+		globalThis.fetch = realFetch;
+	}
+});

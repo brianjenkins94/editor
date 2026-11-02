@@ -149,7 +149,9 @@ function published(name: string): Promise<Published[]> {
 const isPlatform = (manifest: { "os"?: unknown; "cpu"?: unknown }): boolean => (Array.isArray(manifest.os) && manifest.os.length > 0) || (Array.isArray(manifest.cpu) && manifest.cpu.length > 0);
 
 /** `name`@`version`'s own dependencies — its peers and optional ones too, as npm installs them — by name: their ranges,
- *  from its manifest on npm's registry; and whether it's a platform build (isPlatform). */
+ *  from its manifest on npm's registry; and whether it's a platform build (isPlatform). A peer marked optional
+ *  (`peerDependenciesMeta`) isn't one: npm installs it only when something else depends on it — b4a's
+ *  `react-native-b4a`, which would bring React Native; vite's `@vitejs/devtools`, Sass, Less, Stylus. */
 async function manifestOf(name: string, version: string): Promise<{ "dependencies": Record<string, string>; "platform": boolean }> {
 	const response = await fetch(`https://registry.npmjs.org/${name}/${version}`);
 
@@ -157,9 +159,10 @@ async function manifestOf(name: string, version: string): Promise<{ "dependencie
 		throw new Error(`registry: ${response.status} for ${name}@${version}`);
 	}
 
-	const manifest = await response.json() as Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>> & { "os"?: unknown; "cpu"?: unknown };
+	const manifest = await response.json() as Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>> & { "peerDependenciesMeta"?: Record<string, { "optional"?: boolean }>; "os"?: unknown; "cpu"?: unknown };
+	const peers = Object.fromEntries(Object.entries(manifest.peerDependencies ?? {}).filter(([peer]) => manifest.peerDependenciesMeta?.[peer]?.optional !== true));
 
-	return { "dependencies": { ...manifest.peerDependencies, ...manifest.optionalDependencies, ...manifest.dependencies }, "platform": isPlatform(manifest) };
+	return { "dependencies": { ...peers, ...manifest.optionalDependencies, ...manifest.dependencies }, "platform": isPlatform(manifest) };
 }
 
 /** A dependency range the registry can resolve (not a file:, link:, git or URL dependency, nor an npm: alias). */
