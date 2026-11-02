@@ -44,8 +44,8 @@ How it's kept:
      each zen-fs lookup walks from the root, decoding every parent's listing (StoreFS with `no_id_tables`), ~10 per file
      written (the write, and the change watcher's checks around it), plus isomorphic-git's status walks. Next, by gain:
      zen-fs's own path cache — StoreFS's id tables, off for shared buffers (`no_id_tables`) — asked of upstream (not
-     in our patch, 2026-10-30); meanwhile the provider's readdir stats every child for VS Code's listings. zen-fs 2.8's SingleBuffer v2 doesn't change this (measured; it
-     also loses files across realms without our lock). BABLR isn't reached in those 4 minutes.
+     in our patch, 2026-10-30); meanwhile the provider's readdir stats every child for VS Code's listings. zen-fs 2.8's SingleBuffer v2 (on it since 2026-11-02, our
+     cross-realm lock ported) doesn't change this. BABLR isn't reached in those 4 minutes.
      Profiled again 2026-10-31 (a first load of this repository, 4 minutes, the main thread's samples attributed to
      their owners): ~75% is zen-fs resolving paths, almost all of it asked by VS Code's file service through the
      workspace provider (workspace-fs.ts) — `readdir` 52 s (zen-fs stats each entry to list it, and the provider stat'd
@@ -91,9 +91,6 @@ How it's kept:
    and seen — each frame and its close on the architecture view as that server's traffic (`server:<port>`), the
    connection a span. (A preview's WebSocket to a run's server still goes to the network; it'd be seen the same way.)
    Still failing, by cause:
-   - **zen-fs runs out of metadata room under churn** (found 2026-11-01, as old as the patch): 5 realms × 300 files with
-     renames and deletes in one folder fail at ~280 with "not enough space for a new metadata block". Far past the
-     editor's load; not looked at.
    - **A run's start keeps the page's thread busy** (2026-11-02). preview-instrument, replay and silo-kept pass in Brave
      now, once the workspace was pulled (it was 30 commits behind, and a test runs the workspace's own code). But a
      run that installs packages (silo-kept: ~13 tarballs, one at a time) waited 2–10 s for each, where the same fetch

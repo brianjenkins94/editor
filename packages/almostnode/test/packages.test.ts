@@ -4,7 +4,7 @@
  */
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import pako from "pako";
+import * as pako from "pako";
 import ts from "typescript";
 import type { Manifest } from "../frameworks/packages.ts";
 import { isBare, PackageResolver, relativeUrl, resolveEntry, splitSpecifier, untar } from "../frameworks/packages.ts";

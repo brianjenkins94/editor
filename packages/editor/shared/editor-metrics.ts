@@ -22,7 +22,10 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { ArchitectureStore, Gauge } from "@brianjenkins94/observability";
 import { longFrameGauge, memoryGauge, reportMetrics, spanMetrics } from "@brianjenkins94/observability";
 
-/** zen-fs SingleBuffer's superblock: magic (u32 at 4), used_bytes and total_bytes (u64 at 16 and 24), little-endian. */
+/** zen-fs SingleBuffer's (version 2's) superblock, little-endian: magic (u32 at 4), version (u16 at 8), block_size (u32 at
+ *  20), total_bytes (u64 at 24), state_offset (u32 at 48). Its state: generation (u64 at 8), then two commits of 60 bytes
+ *  from 24 — the current one `generation & 1` — each with free_bytes, spare_total and pending_bytes (u32s at 32, 44
+ *  and 56). What's free is what SingleBufferStore.usage() says: free_bytes + spare_total × block_size + pending_bytes. */
 const SUPERBLOCK_MAGIC = 0x62732E7A;
 
 /** A URL without its fragment: a worker loaded through core's bootstrap (workerBootstrap.worker.ts) carries its target there, and a memory
@@ -102,12 +105,27 @@ export function realmName(url: string, scope: string, workers = new Map<string, 
 export function workspaceFill(buffer: ArrayBufferLike): Record<string, number> | undefined {
 	const view = new DataView(buffer);
 
-	if (buffer.byteLength < 32 || view.getUint32(4, true) !== SUPERBLOCK_MAGIC) {
+	if (buffer.byteLength < 256 || view.getUint32(4, true) !== SUPERBLOCK_MAGIC || view.getUint16(8, true) !== 2) {
 		return undefined;
 	}
 
-	const used = Number(view.getBigUint64(16, true));
 	const total = Number(view.getBigUint64(24, true));
+	const state = view.getUint32(48, true);
+	let free: number;
+
+	// (read again if a commit landed meanwhile: the other commit is then the current one)
+	for (;;) {
+		const generation = view.getBigUint64(state + 8, true);
+		const commit = state + 24 + Number(generation & 1n) * 60;
+
+		free = view.getUint32(commit + 32, true) + view.getUint32(commit + 44, true) * view.getUint32(20, true) + view.getUint32(commit + 56, true);
+
+		if (view.getBigUint64(state + 8, true) === generation) {
+			break;
+		}
+	}
+
+	const used = total - free;
 
 	return { "usedMB": used / 1048576, "totalMB": total / 1048576, "percent": total > 0 ? (used / total) * 100 : 0 };
 }

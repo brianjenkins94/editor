@@ -16,6 +16,6 @@
   },
   "devDependencies": {
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
-    "playwright": "^1.63.0"
+    "playwright": "latest"
   }
 }

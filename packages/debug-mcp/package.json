@@ -23,9 +23,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "ws": "^8.21.3",
-    "zod": "^4.6.2"
+    "@modelcontextprotocol/sdk": "latest",
+    "ws": "latest",
+    "zod": "latest"
   },
   "peerDependencies": {
     "@brianjenkins94/hub": "*",
@@ -34,8 +34,8 @@
   "devDependencies": {
     "@brianjenkins94/hub": "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
-    "@types/node": "^24.13.3",
-    "@types/ws": "^8.18.1",
-    "tsx": "^4.23.13"
+    "@types/node": "latest",
+    "@types/ws": "latest",
+    "tsx": "latest"
   }
 }

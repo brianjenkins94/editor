@@ -14,7 +14,7 @@ import ts from "typescript";
 import { TsvalInternalError } from "../../src/errors.ts";
 import { parse } from "../../src/frontend.ts";
 import { VM } from "../../src/vm.ts";
-import { structural } from "./harness.ts";
+import { structural, TRANSPILE_OPTIONS } from "./harness.ts";
 import { caseSource, policySkip } from "./ts-cases-corpus.ts";
 
 export type TsCaseOutcome = { "kind": "skipped"; "reason": string } | { "kind": "inconclusive"; "reason": string } | { "kind": "match" } | { "kind": "both-threw"; "node": string; "tsval": string } | { "kind": "mismatch"; "reason": string };
@@ -109,7 +109,7 @@ async function settle(value: unknown): Promise<{ "threw": boolean; "error"?: unk
  *  a strict-mode early error TypeScript's parser does not flag (`arguments = 1`, a top-level
  *  `return`), which is outside the supported surface rather than a disagreement. */
 function compileControl(code: string): nodeVm.Script | undefined {
-	const js = ts.transpileModule(code, { "compilerOptions": { "target": ts.ScriptTarget.ES2022, "module": ts.ModuleKind.None } }).outputText;
+	const js = ts.transpileModule(code, { "compilerOptions": TRANSPILE_OPTIONS }).outputText;
 
 	try {
 		// (`void 0` after the directive: the directive is itself an expression statement and would

@@ -4,7 +4,7 @@
  * Provides basic compression utilities
  */
 
-import pako from "pako";
+import * as pako from "pako";
 import { Buffer } from "../utils/buffer";
 
 // Brotli WASM instance - loaded lazily

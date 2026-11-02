@@ -40,12 +40,12 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@stitches/core": "1.2.8"
+    "@stitches/core": "latest"
   },
   "peerDependencies": {
     "@awesome.me/webawesome": ">=3"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "typescript": "^6"
   }
 }

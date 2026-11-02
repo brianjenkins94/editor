@@ -21,12 +21,12 @@
   "dependencies": {
     "@brianjenkins94/bablr": "file:../bablr",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
-    "cmd-ts": "^0.15.0",
-    "rolldown": "1.2.13",
-    "typescript": "7.1.0-beta"
+    "cmd-ts": "latest",
+    "rolldown": "latest",
+    "typescript": "^7.1.0-beta"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
-    "tsx": "^4.23.13"
+    "@types/node": "latest",
+    "tsx": "latest"
   }
 }

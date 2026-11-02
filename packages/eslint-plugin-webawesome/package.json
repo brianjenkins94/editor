@@ -6,8 +6,15 @@
   "exports": {
     ".": "./src/index.js"
   },
-  "files": ["src"],
-  "keywords": ["eslint", "eslintplugin", "eslint-plugin", "webawesome"],
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "eslint",
+    "eslintplugin",
+    "eslint-plugin",
+    "webawesome"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=24"

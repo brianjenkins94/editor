@@ -12,7 +12,7 @@
  * Self-contained (no dev-server imports), so it can be tested on its own.
  */
 import type ts from "typescript";
-import pako from "pako";
+import * as pako from "pako";
 import { exports as resolveExports } from "resolve.exports";
 
 /** Where a served package file lives: `/@pkg/<name>/<file>`. */

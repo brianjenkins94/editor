@@ -15,21 +15,21 @@
     "test:cosmetic": "tsx test/cosmetic.mjs"
   },
   "dependencies": {
-    "@bablr/agast-helpers": "0.11.4",
-    "@bablr/agast-vm-helpers": "0.11.4",
-    "@bablr/cli": "0.12.5",
-    "@bablr/helpers": "0.26.5",
-    "@bablr/language-en-blank-space": "0.11.2",
-    "@bablr/language-en-esnext": "0.4.1",
-    "bablr": "0.12.6"
+    "@bablr/agast-helpers": "latest",
+    "@bablr/agast-vm-helpers": "latest",
+    "@bablr/cli": "latest",
+    "@bablr/helpers": "latest",
+    "@bablr/language-en-blank-space": "latest",
+    "@bablr/language-en-esnext": "latest",
+    "bablr": "latest"
   },
   "devDependencies": {
-    "@bablr/language-en-c-comments": "^0.11.2",
+    "@bablr/language-en-c-comments": "latest",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
-    "@bablr/language-en-es5": "0.4.1",
-    "@bablr/language-en-es6": "^0.4.1",
-    "@bablr/language-en-json": "0.14.1",
+    "@bablr/language-en-es5": "latest",
+    "@bablr/language-en-es6": "latest",
+    "@bablr/language-en-json": "latest",
     "tsx": "latest",
-    "typescript": "^5.9.3"
+    "typescript": "^6"
   }
 }

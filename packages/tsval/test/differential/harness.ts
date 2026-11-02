@@ -51,12 +51,18 @@ function blockedRequire(spec: string): never {
 	throw new Error(`oracle: require('${spec}') is blocked`);
 }
 
+/** How the oracle strips types: as TypeScript 5's `module: None` did, byte for byte — CommonJS, a script sloppy unless
+ *  it's a module, imports without interop helpers. */
+export const TRANSPILE_OPTIONS: ts.CompilerOptions = { "target": ts.ScriptTarget.ES2022, "module": ts.ModuleKind.CommonJS, "esModuleInterop": false, "alwaysStrict": false };
+
 /** The oracle: type-strip with tsc, then evaluate in Node, capturing completion value + console. */
 export function runNode(code: string): RunResult {
 	const js = ts.transpileModule(code, {
 		// ES2022 (not ESNext) so tsc downlevels anything Node lacks natively. Standard TS emit only —
-		// no `experimentalDecorators`: legacy decorators are out of tsval's supported surface.
-		"compilerOptions": { "target": ts.ScriptTarget.ES2022, "module": ts.ModuleKind.None }
+		// no `experimentalDecorators`: legacy decorators are out of tsval's supported surface. CommonJS, sloppy
+		// unless the code is a module, no import helpers — what `module: None` emitted before TypeScript 6
+		// deprecated it and made strict mode and esModuleInterop the defaults (TRANSPILE_OPTIONS).
+		"compilerOptions": TRANSPILE_OPTIONS
 	}).outputText;
 	const logs: unknown[][] = [];
 	const console = makeConsole(logs);

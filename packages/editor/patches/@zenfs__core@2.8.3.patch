@@ -1,0 +1,181 @@
+diff --git a/dist/backends/single_buffer/v2.js b/dist/backends/single_buffer/v2.js
+index d9d5d32..2d4b01e 100644
+--- a/dist/backends/single_buffer/v2.js
++++ b/dist/backends/single_buffer/v2.js
+@@ -656,7 +656,11 @@ let SuperBlock = (() => {
+         get lock() { return this.#lock_accessor_storage; }
+         set lock(value) { this.#lock_accessor_storage = value; }
+         computeChecksum() {
+-            return crc32c(new Uint8Array(this.buffer, this.byteOffset + 4, offsetof(SuperBlock, 'lock') - 4));
++            // (the cross-realm FS-operation lock's word, the padding's first, changes as file system operations run: the
++            // checksum treats it as zero, as version 1's did its lock)
++            const bytes = new Uint8Array(this.buffer, this.byteOffset + 4, offsetof(SuperBlock, 'lock') - 4).slice();
++            bytes.fill(0, offsetof(SuperBlock, '_padding') - 4, offsetof(SuperBlock, '_padding'));
++            return crc32c(bytes);
+         }
+         update() {
+             this.checksum = this.computeChecksum();
+@@ -1027,6 +1031,13 @@ export class SingleBufferStore extends DataView {
+             super(buffer.buffer, buffer.byteOffset + byteOffset, byteLength ?? buffer.byteLength - byteOffset);
+         else
+             super(buffer, byteOffset, byteLength);
++        // A cross-realm lock for a whole file system operation (StoreFS's transaction, store.js): v2 commits each set on
++        // its own, so a listing's read-modify-write in one realm could otherwise lose another realm's entry. It's the
++        // super block padding's first word, which the checksum treats as zero (computeChecksum) — not the super block's
++        // lock, which setup holds while StoreFS checks the root.
++        this._shared = typeof SharedArrayBuffer !== 'undefined' && this.buffer instanceof SharedArrayBuffer;
++        this._fsLockView = new Int32Array(this.buffer, this.byteOffset + offsetof(SuperBlock, '_padding'), 1);
++        this._fsLockDepth = 0;
+         if (this.byteOffset % 8)
+             throw crit(withErrno('EINVAL', 'sbfs: buffer must be 8-byte aligned'));
+         if (this.byteLength < sizeof(SuperBlock))
+@@ -1253,6 +1264,37 @@ export class SingleBufferStore extends DataView {
+             tx.retire(old.offset, old.capacity);
+         });
+     }
++    /**
++     * Acquire the cross-realm FS-operation lock (exclusive). Reentrant within a realm via a depth counter, so
++     * nested transactions don't self-deadlock. Uses `Atomics.wait` in workers; on the main thread (where wait
++     * throws) it falls back to spinning. Held for the duration of one filesystem operation (one transaction).
++     */
++    fsLock() {
++        if (!this._shared)
++            return;
++        if (this._fsLockDepth++ > 0)
++            return;
++        const lock = this._fsLockView;
++        while (Atomics.compareExchange(lock, 0, 0, 1) !== 0) {
++            try {
++                Atomics.wait(lock, 0, 1, 50);
++            }
++            catch {
++                /* main thread: Atomics.wait is disallowed, so busy-spin until the holder releases */
++            }
++        }
++    }
++    /** Release the cross-realm FS-operation lock (once the reentrancy depth returns to zero). */
++    fsUnlock() {
++        if (!this._shared)
++            return;
++        if (--this._fsLockDepth > 0)
++            return;
++        if (this._fsLockDepth < 0)
++            this._fsLockDepth = 0;
++        Atomics.store(this._fsLockView, 0, 0);
++        Atomics.notify(this._fsLockView, 0, 1);
++    }
+     allocId() {
+         const id = Atomics.add(this.nextId, 0, 2n);
+         if (id + 1n > max_id)
+diff --git a/dist/backends/store/store.js b/dist/backends/store/store.js
+index 36f2868..a68f64b 100644
+--- a/dist/backends/store/store.js
++++ b/dist/backends/store/store.js
+@@ -103,6 +103,18 @@ export class WrappedTransaction {
+     constructor(raw, fs) {
+         this.raw = raw;
+         this.fs = fs;
++        // Serialize the entire filesystem operation across realms. Shared-buffer stores expose fsLock/fsUnlock;
++        // other stores don't, so this is a no-op there. Held until the transaction is disposed (commit or abort).
++        this._locked = false;
++        raw.store.fsLock?.();
++        this._locked = true;
++    }
++    /** Release the cross-realm FS-operation lock exactly once. */
++    _releaseLock() {
++        if (this._locked) {
++            this._locked = false;
++            this.raw.store.fsUnlock?.();
++        }
+     }
+     /**
+      * Stores data in the keys we modify prior to modifying them.
+@@ -186,14 +198,22 @@ export class WrappedTransaction {
+         this.done = true;
+     }
+     async [Symbol.asyncDispose]() {
+-        if (this.done)
+-            return;
+-        await this.abort();
++        try {
++            if (!this.done)
++                await this.abort();
++        }
++        finally {
++            this._releaseLock();
++        }
+     }
+     [Symbol.dispose]() {
+-        if (this.done)
+-            return;
+-        this.abortSync();
++        try {
++            if (!this.done)
++                this.abortSync();
++        }
++        finally {
++            this._releaseLock();
++        }
+     }
+     /**
+      * Stashes given key value pair into `originalData` if it doesn't already exist.
+diff --git a/dist/vfs/async.js b/dist/vfs/async.js
+index 1087f29..2152bef 100644
+--- a/dist/vfs/async.js
++++ b/dist/vfs/async.js
+@@ -218,13 +218,23 @@ export async function mkdir(path, options = {}) {
+             }
+             if (checkAccess && !hasAccess(this, parent, constants.W_OK | constants.X_OK))
+                 throw UV('EACCES', 'mkdir', path);
++            let raced;
+             const inode = await fs
+                 .mkdir(resolved, {
+                 mode,
+                 uid: parent.mode & constants.S_ISUID ? parent.uid : uid,
+                 gid: parent.mode & constants.S_ISGID ? parent.gid : gid,
+             })
+-                .catch(rethrow({ syscall: 'mkdir', path }));
++                .catch(async (e) => {
++                // Another realm sharing this store created it between the check above and here: recursive means that's fine
++                raced = recursive && e?.code == 'EEXIST' ? await fs.stat(resolved).catch(() => undefined) : undefined;
++                if (raced && isDirectory(raced))
++                    return raced;
++                raced = undefined;
++                return rethrow({ syscall: 'mkdir', path })(e);
++            });
++            if (raced)
++                return inode;
+             if (recursive)
+                 firstCreated ??= path;
+             emitChange(this, 'rename', path);
+diff --git a/dist/vfs/sync.js b/dist/vfs/sync.js
+index 4acfd60..6471ecc 100644
+--- a/dist/vfs/sync.js
++++ b/dist/vfs/sync.js
+@@ -235,11 +235,21 @@ export function mkdir(path, options = {}) {
+             if (checkAccess && !hasAccess(this, parent, constants.W_OK | constants.X_OK))
+                 throw UV('EACCES', 'mkdir', path);
+             const _ = __addDisposableResource(env_2, cache.lockSync(parentPath, 'rw', parent), false);
+-            const inode = wrap(fs, 'mkdirSync', { path, syscall: 'mkdir' })(resolved, {
+-                mode,
+-                uid: parent.mode & constants.S_ISUID ? parent.uid : uid,
+-                gid: parent.mode & constants.S_ISGID ? parent.gid : gid,
+-            });
++            let inode;
++            try {
++                inode = wrap(fs, 'mkdirSync', { path, syscall: 'mkdir' })(resolved, {
++                    mode,
++                    uid: parent.mode & constants.S_ISUID ? parent.uid : uid,
++                    gid: parent.mode & constants.S_ISGID ? parent.gid : gid,
++                });
++            }
++            catch (e) {
++                // Another realm sharing this store created it between the check above and here: recursive means that's fine
++                const raced = recursive && e?.code == 'EEXIST' ? fs.statSync(resolved) : undefined;
++                if (!raced || !isDirectory(raced))
++                    throw e;
++                return raced;
++            }
+             if (recursive)
+                 firstCreated ??= path;
+             emitChange(this, 'rename', path);

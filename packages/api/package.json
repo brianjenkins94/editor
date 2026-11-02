@@ -8,17 +8,17 @@
   },
   "dependencies": {
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
-    "@noble/hashes": "2.4.0",
-    "@simplewebauthn/server": "14.0.3",
-    "hono": "4.13.13",
-    "jose": "6.2.12"
+    "@noble/hashes": "latest",
+    "@simplewebauthn/server": "latest",
+    "hono": "latest",
+    "jose": "latest"
   },
   "devDependencies": {
-    "@awesome.me/webawesome": "3.14.0",
-    "@cloudflare/workers-types": "5.20261007.1",
-    "@types/node": "^24.13.3",
-    "esbuild": "0.28.1",
-    "wrangler": "4.148.0"
+    "@awesome.me/webawesome": "latest",
+    "@cloudflare/workers-types": "latest",
+    "@types/node": "latest",
+    "esbuild": "latest",
+    "wrangler": "latest"
   },
   "scripts": {
     "dev": "wrangler dev",
