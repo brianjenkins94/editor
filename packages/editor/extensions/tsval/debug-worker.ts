@@ -883,7 +883,7 @@ function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<Runtime
 
 /** Load the runtime (runtimeReady): the first time a run asks for it. */
 async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
-	const [{ createFsShim, createRunGlobal, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
+	const [{ createFsShim, createRunGlobal, getServerBridge, observeSockets, "packageDirOf": dirOf, webSocketGlobal }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
 
 	// (its files answered once the editor has the worker's mailbox — without it, the runtime's own)
 	if (editorLink !== undefined) {
@@ -905,6 +905,12 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 	};
 
 	runGlobal = createRunGlobal();
+	// A WebSocket the run opens to a server of its own (ws's, on a port) is joined to it here, as Node's reaches a server
+	// on its own machine — and seen as that server's traffic, each frame and its close (the runtime link's `socket`).
+	runGlobal.global.WebSocket = webSocketGlobal(globalThis.WebSocket);
+	const socketsSeen = editorLink;
+
+	observeSockets(socketsSeen === undefined ? undefined : ({ port, path }) => socketsSeen.socket(port, path));
 	runtime = workspaceRuntime(await zenfs.createZenfsVFS(), {
 		"global": runGlobal,
 		// (A program's own allowed write is let through while it's made: madeFor.)

@@ -19,10 +19,10 @@
  * The extension's own code never joins the editor's hub: only its worker's runtime link does, through this.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { MetricsReporter, Observed, ObserveOptions } from "@brianjenkins94/observability";
+import type { MetricsReporter, Observed, ObserveOptions, TrafficKind } from "@brianjenkins94/observability";
 import type { Effect } from "./index.ts";
 import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
-import { observe, relayLoggerToHub, reportMetrics } from "@brianjenkins94/observability";
+import { describeJsonMessage, observe, relayLoggerToHub, reportMetrics } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "./probes.ts";
 
 /** What `workspaceRuntime()` gives a debugger's extension. */
@@ -557,10 +557,21 @@ export interface RuntimeConnection {
 	/** Answer the preview's requests to `port` with `handler` until the returned disposer runs — each body whole, or a
 	 *  stream (see `exchanges`). */
 	"serve": (port: number, handler: (request: RuntimeRequest) => Promise<RuntimeResponse>) => () => void;
+	/** A WebSocket the program keeps inside the worker — a client of its own joined to its server on `port` (on `path`)
+	 *  — seen as that server's traffic is: each frame, either way, and its close, on the architecture view's
+	 *  `server:<port>` (a server on no port: `socket:<path>`), the connection a span of the log's. */
+	"socket": (port: number | undefined, path: string) => RuntimeSocket;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
 	"log": Observed["log"];
 	/** A preview's page, driven: a Playwright call there (PlaywrightCall), answered when it's done (once `ready`). */
 	"playwright": (call: PlaywrightCall) => Promise<unknown>;
+}
+
+/** A WebSocket inside the worker, as `socket` sees it: each frame as it's sent (`fromClient`: by the program's client),
+ *  and its close. */
+export interface RuntimeSocket {
+	"frame": (fromClient: boolean, data: unknown) => void;
+	"closed": (code: number, reason: string) => void;
 }
 
 /** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect(name, session)`'s), as
@@ -637,6 +648,37 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 			});
 
 			return serve(hub, `virtual.debug.${listening}`, async (raw) => answer(raw as ExchangeCall));
+		},
+		"socket": (listening, path) => {
+			const server = listening === undefined ? `socket:${path}` : `server:${listening}`;
+			const span = log.span("runtime.socket", { "port": listening, "path": path });
+			let frames = 0;
+			let total = 0;
+
+			architecture.record(architecture.self, server, "request", `WebSocket ${path}`);
+
+			return {
+				// (named as a WebSocket probe names a frame: by what its JSON says it is — a hub frame's subject, say)
+				"frame": (fromClient, data) => {
+					let described: { "kind": TrafficKind; "label": string } = { "kind": "message", "label": "frame" };
+
+					if (typeof data === "string") {
+						try {
+							described = describeJsonMessage(JSON.parse(data));
+						} catch { /* not JSON */ }
+					}
+
+					const bytes = typeof data === "string" ? data.length : (data as { "byteLength"?: number }).byteLength ?? 0;
+
+					frames += 1;
+					total += bytes;
+					architecture.record(fromClient ? architecture.self : server, fromClient ? server : architecture.self, described.kind, described.label, bytes, 1, data);
+				},
+				"closed": (code, reason) => {
+					architecture.record(architecture.self, server, "lifecycle", `close ${code}${reason === "" ? "" : ` ${reason}`}`);
+					span.end({ "frames": frames, "bytes": total, "code": code });
+				}
+			};
 		}
 	};
 }

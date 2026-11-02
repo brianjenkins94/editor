@@ -84,14 +84,14 @@ How it's kept:
    within 50 s, done or not, and is waited on again by its run id). Passing in Brave, 2026-11-01: architecture-model,
    code, collab-identity, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the
    terminal's git, history, less, node and ps; npm and terminal-session since 2026-11-02 (just-bash's sandbox: its context
-   carried across awaits, a run's own global, a returned promise adopted in the return's context). Still failing, by
-   cause:
+   carried across awaits, a run's own global, a returned promise adopted in the return's context); page-tools since
+   2026-11-02: a run's WebSocket to a server of its own is joined to it in the run, as Node's reaches its own machine,
+   and seen — each frame and its close on the architecture view as that server's traffic (`server:<port>`), the
+   connection a span. (A preview's WebSocket to a run's server still goes to the network; it'd be seen the same way.)
+   Still failing, by cause:
    - **zen-fs runs out of metadata room under churn** (found 2026-11-01, as old as the patch): 5 realms × 300 files with
      renames and deletes in one folder fail at ~280 with "not enough space for a new metadata block". Far past the
      editor's load; not looked at.
-   - **page-tools waits on the held preview WebSockets**: its client and its debug-mcp server are both in the run, joined
-     by a WebSocket a browser sends to the real network (decided 2026-10-14: a run's WebSockets wait until they can be
-     observed).
    - **A run's start keeps the page's thread busy** (2026-11-02). preview-instrument, replay and silo-kept pass in Brave
      now, once the workspace was pulled (it was 30 commits behind, and a test runs the workspace's own code). But a
      run that installs packages (silo-kept: ~13 tarballs, one at a time) waited 2–10 s for each, where the same fetch

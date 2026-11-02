@@ -102,3 +102,53 @@ test("a client with no server here opens on its own, and a noServer server takes
 	client.close();
 	upgradeOnly.close();
 });
+
+test("a server on a port (any free one, for 0) is what the global WebSocket reaches at ws://localhost:<port> — EventTarget-style, as ws's sockets are, and every frame and the close seen", async () => {
+	const { observeSockets, webSocketGlobal } = await import("../shims/ws.ts");
+	const seen: unknown[] = [];
+
+	observeSockets(({ port, path }) => {
+		seen.push(["open", port, path]);
+
+		return { "frame": (fromClient, data) => { seen.push([fromClient ? "client" : "server", data]); }, "closed": (code) => { seen.push(["closed", code]); } };
+	});
+
+	const server = new WebSocketServer({ "port": 0 });
+	const port = await new Promise<number>((resolve) => { server.on("listening", () => { resolve(server.address()!.port); }); });
+	let request: { "url": string; "headers": Record<string, string> } | undefined;
+
+	assert.ok(port > 0, "bound to a port of its own");
+	server.on("connection", (socket: Socket, upgrade: typeof request) => {
+		request = upgrade;
+		socket.addEventListener("message", (event) => { socket.send("pong " + String((event as MessageEvent).data)); });
+	});
+
+	// (the host's WebSocket, Node's: what it'd reach is the network — this one's here)
+	const Global = webSocketGlobal(globalThis.WebSocket);
+	const client = new Global(`ws://localhost:${port}/tools?tab=1`);
+	const heard: unknown[] = [];
+
+	client.addEventListener("message", (event) => { heard.push(event.data); });
+	await new Promise((resolve) => { client.addEventListener("open", resolve, { "once": true }); });
+	client.send("ping");
+	await until(() => heard.length > 0, "the server's reply");
+	client.close(1000);
+	await until(() => seen.some(([what]) => what === "closed"), "the close to be seen");
+
+	assert.deepEqual(heard, ["pong ping"]);
+	assert.deepEqual(request, { "url": "/tools?tab=1", "headers": { "host": `localhost:${port}`, "upgrade": "websocket", "connection": "Upgrade" } }, "the upgrade request, as ws hands it over");
+	assert.deepEqual(seen, [["open", port, "/tools"], ["client", "ping"], ["server", "pong ping"], ["closed", 1000]]);
+
+	// The port's taken while it's bound; closed, it's free again.
+	const second = new WebSocketServer({ "port": port });
+	const error = await new Promise<Error & { "code"?: string }>((resolve) => { second.on("error", resolve); });
+
+	assert.equal(error.code, "EADDRINUSE");
+	server.close();
+	observeSockets(undefined);
+
+	const third = new WebSocketServer({ "port": port });
+
+	await new Promise((resolve) => { third.on("listening", resolve); });
+	third.close();
+});

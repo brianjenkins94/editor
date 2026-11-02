@@ -16,6 +16,10 @@ export { getServerBridge, resetServerBridge, ServerBridge } from "./server-bridg
 // The in-worker server registry: `http.Server.listen` registers by port here (see shims/http.ts), so the node
 // worker can look a listening server up by port and drive its `handleRequest` for the preview bridge relay.
 export { getAllServers, getServer } from "./shims/http";
+// The realm's WebSockets: a program's global `WebSocket` reaching its own servers (ws's, bound to a port here), and who
+// sees each connection made here — its frames and its close.
+export { observeSockets, webSocketGlobal } from "./shims/ws";
+export type { SocketObserver, SocketWatch } from "./shims/ws";
 export type { BridgeOptions, InitServiceWorkerOptions, IVirtualServer, VirtualServer } from "./server-bridge";
 /**
  * Vendored, trimmed almostnode — an in-browser node runtime.
