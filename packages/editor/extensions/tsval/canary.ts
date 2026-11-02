@@ -161,7 +161,13 @@ export function capabilityStandins(): { "globals": Record<string, unknown>; "mod
 	const noop = (): void => { /* inert */ };
 	// Every method almostnode gates, as an inert stand-in: reads find nothing, writes (a copy or a rename's too) do nothing.
 	const fsResults: Record<string, () => unknown> = { "readdir": () => [], "readdirSync": () => [], "existsSync": () => false, "createReadStream": inert, "createWriteStream": inert };
-	const resultOf = (method: string, op: string): () => unknown => fsResults[method] ?? (op === "read" && FS_DESTINATION[method] === undefined ? () => "" : noop);
+	// (a function of each method's own: tag() marks the function, so a shared one — noop, inert — took the last method's
+	// tag: every write a copy's landing, its data resolved as a path; createReadStream createWriteStream's capability)
+	const resultOf = (method: string, op: string): () => unknown => {
+		const result = fsResults[method] ?? (op === "read" && FS_DESTINATION[method] === undefined ? () => "" : noop);
+
+		return () => result();
+	};
 	const landingOf = (method: string): string | undefined => (FS_DESTINATION[method] === undefined ? undefined : "fs:" + FS_DESTINATION[method]);
 	const fsMock = Object.fromEntries([
 		...Object.entries(FS_SYNC).map(([method, op]) => [method, tag("fs:" + op, resultOf(method, op), 0, landingOf(method))]),
