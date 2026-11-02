@@ -34,7 +34,10 @@ const server = await createServer({
 	// `path.dirname` at eval and reads `process`) and BYPASSES hostPlugins' `polyfillNode`. Vite 8 optimizes with
 	// ROLLDOWN, not esbuild, so the fix is `rolldownOptions` + polyfillNodeRolldown (the esbuild variant throws
 	// "Not implemented" and kills the optimizer): it resolves the four builtins and inlines a `process` shim.
-	"optimizeDeps": { "rolldownOptions": { "plugins": [polyfillNodeRolldown(["fs", "path", "url", "util"])] } },
+	// `include`: what only the service worker imports (coi-serviceworker.js), which the optimizer's scan of the pages
+	// doesn't reach — found as the worker loaded instead, its bundling reloaded the page under the boot (CI's performance
+	// suite: "Execution context was destroyed").
+	"optimizeDeps": { "include": ["@brianjenkins94/editor-api/recorded"], "rolldownOptions": { "plugins": [polyfillNodeRolldown(["fs", "path", "url", "util"])] } },
 	"plugins": [brotliStub, ...hostPlugins()],
 	// PORT lets a second checkout (a git worktree) run beside the main one; strict so a taken port fails loudly
 	// instead of sliding to the next one, where a launch config pinned to the port would find the other server.
