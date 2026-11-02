@@ -30,6 +30,13 @@
       "packages/editor/extensions/history"
     ]
   },
+  "insights.monitor": {
+    "status": "removed",
+    "why": "dormant: CI's runs load its files and never run its code",
+    "since": "2026-11-02",
+    "key": "view|insights.monitor",
+    "paths": []
+  },
   "terminal_run": {
     "status": "removed",
     "why": "agents act through the editor's typed tools (files_*, git_*, debug_*), not a shell: ARCHITECTURE.md, *Workspace tools*; terminal_output stays, and the terminal is people's",

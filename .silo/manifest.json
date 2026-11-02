@@ -212,12 +212,12 @@
     "Playwright tests in the debugger": {
       "what": "A Playwright test file (`@playwright/test`) runs in the debugger against the preview you have open: its locators, actions and expect are the editor's own Playwright (packages/playwright), each op run on the preview's page, and its tests told and traced as node:test's are.",
       "docs": "packages/editor/RUNNING.md, *Tests*",
+      "ways": [
+        "hub request|playwright.run"
+      ],
       "paths": [
         "packages/editor/extensions/tsval/playwright-test.js",
         "packages/playwright"
-      ],
-      "ways": [
-        "hub request|playwright.run"
       ]
     },
     "Preview's dev server as a debug session": {
@@ -539,8 +539,7 @@
         "status bar item|insights.longFrames",
         "status bar item|insights.memory",
         "status bar item|insights.spanErrors",
-        "status bar item|insights.workspace",
-        "view|insights.monitor"
+        "status bar item|insights.workspace"
       ]
     },
     "Runtime evidence kept in git": {
