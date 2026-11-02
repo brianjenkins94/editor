@@ -86,19 +86,9 @@ How it's kept:
    terminal's git, history, less, node and ps; npm and terminal-session since 2026-11-02 (just-bash's sandbox: its context
    carried across awaits, a run's own global, a returned promise adopted in the return's context). Still failing, by
    cause:
-   - **The editor's page hangs in Brave, then a call to it gets no answer** (2026-11-01). Not `_approved`: util/mcp
-     keeps that to itself, and the page is asked the same either way. The page's main thread stops — no logs or
-     metrics, `page_eval` unanswered, the tab gone from `tabs_list`, Brave unable to screenshot it — and since 15:50,
-     within 10–40 s of every boot, with no run going (the last log, "the Margin is up", arrives ~38 s late). Earlier the
-     same page ran tests for minutes first. Claude in Chrome's actions reload a hung tab, so they can't watch it. In a
-     fresh tab (18:40) it didn't come back: up for minutes and three reloads, the Live architecture view open and
-     active, collab-identity 6/6 and game-rules 4/4 by `runs_tests`, the renderer flat at ~3.1 GB across reloads (so not
-     a leak across them). Not found: what stopped the old tab. The boot's two 30 s stalls are one fixed, one left: the
-     workspace kept a `file:` sibling's link as its files, so each boot restored ~1,800 of them, install deleted and
-     linked them again, and the flush put ~12k (Margin up 67 s → 22 s, no rpc timing out). The other: the restore was
-     quadratic in the zen-fs patch's SingleBuffer — each new id's lookup missed its index and scanned every block. A
-     current index's miss is trusted now: mount +16 s → +5 s, Margin up +11 s. Found doing it, and as old as the patch:
-     5 realms × 300 files + churn in one folder run out of room ("not enough space for a new metadata block") at ~280.
+   - **zen-fs runs out of metadata room under churn** (found 2026-11-01, as old as the patch): 5 realms × 300 files with
+     renames and deletes in one folder fail at ~280 with "not enough space for a new metadata block". Far past the
+     editor's load; not looked at.
    - **page-tools waits on the held preview WebSockets**: its client and its debug-mcp server are both in the run, joined
      by a WebSocket a browser sends to the real network (decided 2026-10-14: a run's WebSockets wait until they can be
      observed).
@@ -113,9 +103,6 @@ How it's kept:
      dependencies are fetched alongside it now, and installing says it's busy, so the stall check doesn't take it for
      stuck. Not measured cold: the browser's HTTP cache kept the tarballs across reloads (each ~2 ms).
    - Can't run in a browser: baseline (execFileSync).
-3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
-   the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or
-   action on a preview window (`playwright.run`, with its `window`) is what's left, when an agent needs one.
 
 ## Watching
 
