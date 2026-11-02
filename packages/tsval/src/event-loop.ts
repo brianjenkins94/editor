@@ -19,7 +19,7 @@
  * or a result and a timeout, is a choice point, and every way it can go is a schedule to run (explore.ts).
  */
 import type { GuestFunction } from "./values.ts";
-import { isGuestFunction } from "./values.ts";
+import { ownedBy } from "./values.ts";
 
 /** How the event loop starts: its clock (ms since the epoch; the host's now by default), the random generator's seed
  *  (the host's random by default) — a host that wants a run again records both — and what a wait costs. */
@@ -333,7 +333,7 @@ export function loopGlobals(): Record<string, unknown> {
 				throw new TypeError("The \"callback\" argument must be of type function");
 			}
 
-			const run = isGuestFunction(fn) ? machine.deferCallback(fn as GuestFunction) : fn as () => unknown;
+			const run = ownedBy(fn, machine) ? machine.deferCallback(fn) : fn as () => unknown;
 
 			void Promise.resolve().then(() => run());
 		}),

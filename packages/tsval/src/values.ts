@@ -35,6 +35,8 @@ export interface GuestFunctionMeta {
 	"homeObject"?: object;
 	/** The function object itself (a generator's `.prototype` is read from it at each invocation). */
 	"self"?: GuestFunction;
+	/** The machine it was made on (ownedBy). */
+	"machine"?: object;
 }
 
 export interface GuestFunction {
@@ -45,6 +47,13 @@ export interface GuestFunction {
 /** An OWN brand: a host Proxy that answers every key (an auto-stub) must not pass as guest code. */
 export function isGuestFunction(value: unknown): value is GuestFunction {
 	return typeof value === "function" && Object.hasOwn(value, "__tsval") && (value as Partial<GuestFunction>).__tsval !== null && (value as Partial<GuestFunction>).__tsval !== undefined;
+}
+
+/** A guest function `machine` made, to step into: another machine's is a host function to it — its wrapper runs it
+ *  on its own. (A program that runs tsval itself — the editor's tests, under the editor's debugger — hands that tsval
+ *  the debugger's functions: stepped by the wrong machine, they ran on its observers, with its bookkeeping.) */
+export function ownedBy(value: unknown, machine: object): value is GuestFunction {
+	return isGuestFunction(value) && value.__tsval.machine === machine;
 }
 
 /**

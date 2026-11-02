@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { interpret, standardGlobals } from "../../src/index.ts";
+import { createVM, interpret, standardGlobals } from "../../src/index.ts";
 
 test("the standard built-ins are there by default", () => {
 	assert.equal(interpret(`Math.max(1, 2) + JSON.parse("[3]")[0] + [...new Set([4])][0] + Number.parseInt("5")`), 14);
@@ -50,4 +50,15 @@ test("`sharedGlobals`: what's set there (a run's packages' own globals) is the p
 	assert.equal(shared.polyfilled, 5, "an assignment is the shared global's");
 	assert.equal(interpret(`typeof process`, { "sharedGlobals": shared }), "undefined", "nothing of the host's through it");
 	assert.equal(interpret(`Math.max(1, 2)`, { "sharedGlobals": { "Math": { "max": () => 0 } } }), 2, "the program's own global wins");
+});
+
+test("a function another machine made is a host function to this one: it runs on its own, out of this one's sight", () => {
+	// (the editor's tests run tsval under the editor's debugger: the program's machine was handed the debugger's
+	// functions, and stepped them itself, on its own observers)
+	const theirs = interpret(`(() => "theirs")`);
+	const seen: string[] = [];
+	const { vm } = createVM(`theirs() + " " + (() => "mine")()`, { "globals": { "theirs": theirs }, "observe": (_node, site) => { seen.push(site); } });
+
+	assert.equal(vm.run(), "theirs mine");
+	assert.deepEqual(seen.filter((site) => site === "return"), ["return"], "only its own function's return");
 });

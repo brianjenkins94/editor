@@ -5,7 +5,7 @@ import type { NodeFrame } from "../frame.ts";
 import type { Machine } from "../vm.ts";
 import ts from "typescript";
 import { requireOf } from "../modules.ts";
-import { isGuestFunction } from "../values.ts";
+import { ownedBy } from "../values.ts";
 import { isGuestClass, superCall } from "./classes.ts";
 import { cookedTemplateText, describe, normalizeTemplateLineTerminators } from "./realm.ts";
 import { AFTER_REF, CHAIN_BREAK, chainShort, evaluateReference, getValue, thisOf } from "./references.ts";
@@ -73,7 +73,7 @@ function taggedTemplateExpression(vm: Machine, frame: NodeFrame): void {
 		const calleeVal = vm.pop();
 		const args = [templateObject(vm, node), ...substitutions];
 
-		if (isGuestFunction(calleeVal)) {
+		if (ownedBy(calleeVal, vm)) {
 			vm.pushCall(calleeVal.__tsval, args, frame.thisArg);
 			frame.phase = AFTER_REF + 2;
 
@@ -173,7 +173,7 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 			return;
 		}
 
-		if (isGuestFunction(calleeVal)) {
+		if (ownedBy(calleeVal, vm)) {
 			const meta = calleeVal.__tsval;
 
 			// Generator / async calls produce a generator object / Promise instead of running the body

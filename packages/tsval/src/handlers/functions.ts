@@ -30,7 +30,8 @@ export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closur
 		"isArrow": node.kind === Kind.ArrowFunction,
 		"isGenerator": (node).asteriskToken !== null && (node).asteriskToken !== undefined,
 		"isAsync": (modifierFlags & ModifierFlags.Async) !== 0,
-		"homeObject": homeObject
+		"homeObject": homeObject,
+		"machine": vm
 	};
 	// The host-invoked wrapper (array callbacks, host-supplied functions, host-mediated `new`) runs a nested loop to
 	// completion. Its *shape* mirrors the guest function's: an arrow (no `this`, no `prototype`, not

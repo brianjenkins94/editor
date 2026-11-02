@@ -12,7 +12,7 @@ import { STANDARD_GLOBAL_NAMES, standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, isSimpleTree, nodeHandlers, pushHostCall, pushPattern, simpleValue, syntheticHandlers } from "./handlers.ts";
 import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
 import { Scope } from "./scope.ts";
-import { isGuestFunction } from "./values.ts";
+import { ownedBy } from "./values.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
 // functions and kinds used here are read off it once.
@@ -1025,7 +1025,7 @@ export class Machine implements VM {
 
 		// Stepped async: a guest callback a host promise will call is a job of its own, run on the main stack.
 		if (this.steppedHere && !isConstruct && promising) {
-			args = args.map((arg) => (isGuestFunction(arg) ? this.deferCallback(arg) : arg));
+			args = args.map((arg) => (ownedBy(arg, this) ? this.deferCallback(arg) : arg));
 		}
 
 		this.callSite = site; // (set BEFORE the guard runs: a guard may read it, or the `site` argument)
@@ -1718,6 +1718,9 @@ export class Machine implements VM {
 			return ns;
 		};
 
+		// (this machine's functions are rebound to the fork; another's stay its own)
+		const owns = (value: unknown): value is GuestFunction => ownedBy(value, this);
+
 		function clone(value: unknown): unknown {
 			if (value === null || (typeof value !== "object" && typeof value !== "function")) {
 				return value;
@@ -1728,7 +1731,7 @@ export class Machine implements VM {
 			}
 
 			if (typeof value === "function") {
-				if (isGuestFunction(value)) {
+				if (owns(value)) {
 					const meta = value.__tsval;
 					// Rebind to the forked VM; break the closure cycle via pre-registration.
 					const fn = createGuestFunction(forked, meta.node, meta.closure, meta.homeObject);
@@ -2037,7 +2040,7 @@ export class Machine implements VM {
 		this.values.length = 0; // between tasks: nothing on it is anyone's
 		this.asyncContext?.enter(fired.context);
 
-		if (isGuestFunction(fired.fn)) {
+		if (ownedBy(fired.fn, this)) {
 			this.pushCall(fired.fn.__tsval, fired.args, undefined);
 		} else {
 			(fired.fn as (...args: unknown[]) => unknown)(...fired.args);
