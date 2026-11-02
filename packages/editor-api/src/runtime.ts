@@ -651,7 +651,7 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 		},
 		"socket": (listening, path) => {
 			const server = listening === undefined ? `socket:${path}` : `server:${listening}`;
-			const span = log.span("runtime.socket", { "port": listening, "path": path });
+			const span = log.span("editor-api.runtime.socket", { "port": listening, "path": path });
 			let frames = 0;
 			let total = 0;
 
