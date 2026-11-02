@@ -79,6 +79,7 @@ export interface LoopMachine {
 	"loop": Loop | undefined;
 	"deferCallback": (fn: GuestFunction) => (...args: unknown[]) => Promise<unknown>;
 	"asyncContext"?: AsyncContext | undefined;
+	"family": object;
 }
 
 /** VMOptions.asyncContext: what carries a host's async context (an AsyncLocalStorage's store) through the program's

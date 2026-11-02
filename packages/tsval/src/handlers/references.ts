@@ -58,16 +58,16 @@ export function superBase(scope: Scope): object {
 	return base;
 }
 
-export function superGet(scope: Scope, key: PropertyKey): unknown {
+export function superGet(scope: Scope, key: PropertyKey, base?: object): unknown {
 	const receiver = thisValue(scope); // the `this` binding is resolved first (spec order)
 
-	return Reflect.get(superBase(scope), key, receiver);
+	return Reflect.get(base ?? superBase(scope), key, receiver);
 }
 
-export function superSet(scope: Scope, key: PropertyKey, value: unknown): void {
+export function superSet(scope: Scope, key: PropertyKey, value: unknown, base?: object): void {
 	const receiver = thisValue(scope);
 
-	if (!Reflect.set(superBase(scope), key, value, receiver)) {
+	if (!Reflect.set(base ?? superBase(scope), key, value, receiver)) {
 		throw new TypeError(`Cannot assign to read only property '${keyText(key)}'`);
 	}
 }
@@ -119,8 +119,10 @@ export type Ref =
 	 *  after a nullish base has thrown (so `null[k] = rhs()` evaluates `rhs` first, then throws). */
 	| { "kind": "member"; "obj": unknown; "key": unknown }
 	| { "kind": "private"; "obj": unknown; "name": string }
-	/** `key` raw until first use, like a member reference (ToPropertyKey after the RHS of `super[k] = v`). */
-	| { "kind": "super"; "key": unknown }
+	/** `key` raw until first use, like a member reference (ToPropertyKey after the RHS of `super[k] = v`); `base` the home
+	 *  object's prototype as the reference was made (MakeSuperPropertyReference's GetSuperBase, before ToPropertyKey: a
+	 *  key's toString that changes the prototype doesn't change where `super[key] += 1` reads and writes). */
+	| { "kind": "super"; "key": unknown; "base": object }
 	| { "kind": "value"; "value": unknown }
 	| { "kind": "short" };
 
@@ -167,7 +169,7 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 		if (isSuper) {
 			thisValue(frame.scope);
 			if (isPropertyAccessExpression(member)) {
-				return resolved(frame, { "kind": "super", "key": member.name.text });
+				return resolved(frame, { "kind": "super", "key": member.name.text, "base": superBase(frame.scope) });
 			}
 
 			frame.phase = 2;
@@ -218,7 +220,7 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 	const rawKey = vm.pop();
 
 	if (isSuper) {
-		return resolved(frame, { "kind": "super", "key": rawKey });
+		return resolved(frame, { "kind": "super", "key": rawKey, "base": superBase(frame.scope) });
 	}
 
 	return resolved(frame, { "kind": "member", "obj": vm.pop(), "key": rawKey });
@@ -274,7 +276,7 @@ export function getValue(vm: Machine, scope: Scope, ref: Ref, crossing = true): 
 		case "private":
 			return privateGet(memberOf(ref, false).obj, lookupPrivate(scope, ref.name));
 		case "super": {
-			const value = superGet(scope, superKeyOf(ref));
+			const value = superGet(scope, superKeyOf(ref), ref.base);
 
 			return crossing ? vm.fromHost(value) : value;
 		}
@@ -314,7 +316,7 @@ export function putValue(vm: Machine, scope: Scope, ref: Ref, value: unknown): v
 			return; }
 
 		case "super":
-		{ superSet(scope, superKeyOf(ref), value);
+		{ superSet(scope, superKeyOf(ref), value, ref.base);
 
 			return; }
 

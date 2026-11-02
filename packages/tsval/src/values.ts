@@ -35,8 +35,8 @@ export interface GuestFunctionMeta {
 	"homeObject"?: object;
 	/** The function object itself (a generator's `.prototype` is read from it at each invocation). */
 	"self"?: GuestFunction;
-	/** The machine it was made on (ownedBy). */
-	"machine"?: object;
+	/** The family of the machine it was made on — a machine and its forks, which share a program's code (ownedBy). */
+	"family"?: object;
 }
 
 export interface GuestFunction {
@@ -49,11 +49,12 @@ export function isGuestFunction(value: unknown): value is GuestFunction {
 	return typeof value === "function" && Object.hasOwn(value, "__tsval") && (value as Partial<GuestFunction>).__tsval !== null && (value as Partial<GuestFunction>).__tsval !== undefined;
 }
 
-/** A guest function `machine` made, to step into: another machine's is a host function to it — its wrapper runs it
- *  on its own. (A program that runs tsval itself — the editor's tests, under the editor's debugger — hands that tsval
- *  the debugger's functions: stepped by the wrong machine, they ran on its observers, with its bookkeeping.) */
-export function ownedBy(value: unknown, machine: object): value is GuestFunction {
-	return isGuestFunction(value) && value.__tsval.machine === machine;
+/** A guest function `machine`'s family made — it or a fork of it — to step into: another machine's is a host function
+ *  to it, whose wrapper runs it on its own. (A program that runs tsval itself — the editor's tests, under the editor's
+ *  debugger — hands that tsval the debugger's functions: stepped by the wrong machine, they ran on its observers, with
+ *  its bookkeeping. A fork's are its family's: an imported module's exports are shared with the machine it forked.) */
+export function ownedBy(value: unknown, machine: { "family": object }): value is GuestFunction {
+	return isGuestFunction(value) && value.__tsval.family === machine.family;
 }
 
 /**

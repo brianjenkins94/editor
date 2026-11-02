@@ -482,6 +482,8 @@ export class Machine implements VM {
 	public onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
 	/** VMOptions.asyncContext. */
 	public asyncContext: AsyncContext | undefined;
+	/** This machine and its forks: whose guest functions it steps into (values.ts ownedBy). */
+	public family: object = {};
 	public onBreakpoint: ((vm: VM) => void) | undefined;
 	/** VMOptions.steppedAsync. */
 	public steppedAsync = false;
@@ -1886,6 +1888,7 @@ export class Machine implements VM {
 		forked.sentValue = clone(this.sentValue);
 		forked.steppedAsync = this.steppedAsync;
 		forked.asyncContext = this.asyncContext;
+		forked.family = this.family;
 		forked.idle = this.idle;
 		forked.depth = 0;
 		forked.contexts = [];

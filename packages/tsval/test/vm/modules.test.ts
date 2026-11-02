@@ -98,6 +98,30 @@ test("an import's own imports run first, even one its importer imports later: ES
 	assert.deepStrictEqual(await run(files, "/w/main.ts"), ["definition", "reader", "2 2"]);
 });
 
+test("a fork steps into an imported module's function, as the machine it forked does: its exports are the family's", async () => {
+	// (the editor's debugger runs a program on forks: one that took the module's function for another machine's ran it out
+	// of sight, and stepping in never got there)
+	const files = {
+		"/w/main.ts": "import { area } from './shapes';\nconst size = area(3, 4);\nlog(size);\n",
+		"/w/shapes.ts": "export function area(width: number, height: number) {\n  const product = width * height;\n  return product;\n}\n"
+	};
+	const lines: unknown[] = [];
+	const { vm } = createVM(files["/w/main.ts"]!, { "fileName": "/w/main.ts", "modules": loaderOf(files), "globals": { "log": (value: unknown) => { lines.push(value); } }, "eventLoop": { "pace": "fast" } });
+
+	vm.addBreakpointsByLine(2);
+	vm.runToBreakpoint();
+	assert.deepStrictEqual([vm.location()?.file ?? "/w/main.ts", vm.location()?.line], ["/w/main.ts", 1]);
+
+	const fork = vm.fork();
+
+	fork.breakpoints.clear();
+	fork.addBreakpointsInFile("/w/shapes.ts", 2);
+	fork.runToBreakpoint();
+	assert.deepStrictEqual([fork.location()?.file, fork.location()?.line], ["/w/shapes.ts", 1], "inside area, on the fork");
+	await runToEnd(fork);
+	assert.deepStrictEqual(lines, [12]);
+});
+
 test("a cycle sees the partial exports, as Node's does", async () => {
 	const files = {
 		"/w/a.js": "exports.early = 'a-early';\nconst b = require('./b');\nexports.late = 'a-late';\nlog(b.seen);\n",
