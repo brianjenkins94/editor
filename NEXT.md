@@ -97,9 +97,10 @@ How it's kept:
      active, collab-identity 6/6 and game-rules 4/4 by `runs_tests`, the renderer flat at ~3.1 GB across reloads (so not
      a leak across them). Not found: what stopped the old tab. The boot's two 30 s stalls are one fixed, one left: the
      workspace kept a `file:` sibling's link as its files, so each boot restored ~1,800 of them, install deleted and
-     linked them again, and the flush put ~12k (Margin up 67 s → 22 s, no rpc timing out). Left: the restore, 3,124
-     files in ~15 s, is quadratic in zen-fs SingleBuffer — each new id's lookup misses its index and scans every
-     block; trusting a current index's miss is 27 s → 3.8 s for 4,800 files in Node, but that's the patch's own code.
+     linked them again, and the flush put ~12k (Margin up 67 s → 22 s, no rpc timing out). The other: the restore was
+     quadratic in the zen-fs patch's SingleBuffer — each new id's lookup missed its index and scanned every block. A
+     current index's miss is trusted now: mount +16 s → +5 s, Margin up +11 s. Found doing it, and as old as the patch:
+     5 realms × 300 files + churn in one folder run out of room ("not enough space for a new metadata block") at ~280.
    - Not looked at since: npm.test's load TypeError, page-tools' stall, preview-instrument's empty evidence, replay's
      null for 99, silo-kept's versions.json test (fails under Node too).
    - Can't run in a browser: baseline (execFileSync).

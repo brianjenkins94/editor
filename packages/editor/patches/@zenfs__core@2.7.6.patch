@@ -43,7 +43,7 @@ index 119eb77..3ee7e5a 100644
      return crc32c(new Uint8Array(value.buffer, value.byteOffset + 4, length));
  }
  /**
-@@ -611,6 +626,109 @@ export class SingleBufferStore extends BufferView {
+@@ -611,6 +626,112 @@ export class SingleBufferStore extends BufferView {
          this._view = new DataView(this.buffer, this.byteOffset, this.byteLength);
          this._u8 = new Uint8Array(this.buffer, this.byteOffset, this.byteLength);
          this.superblock = new SuperBlock(this.buffer, this.byteOffset);
@@ -89,12 +89,15 @@ index 119eb77..3ee7e5a 100644
 +            this._indexGen = gen;
 +        }
 +        const at = this._index.get(id);
-+        if (at !== undefined) {
-+            const entry = at.block.items[at.i];
-+            if (entry.offset && entry.id == id)
-+                return { block: at.block, entry };
-+        }
-+        // Not indexed, or the index is wrong: be sure, by scanning (and rebuild next time).
++        // Not indexed is not there: the index is every block's, kept by each slot change since (another realm's bumps
++        // the generation, so it's rebuilt). Scanning for a miss scanned the store for each new id, so a bulk load cost
++        // its square — 4,800 files 27 s; 3.8 s trusting the index.
++        if (at === undefined)
++            return undefined;
++        const entry = at.block.items[at.i];
++        if (entry.offset && entry.id == id)
++            return { block: at.block, entry };
++        // The index is wrong: be sure, by scanning (and rebuild next time).
 +        for (let block = this.superblock.metadata; block; block = block.previous) {
 +            block.waitUnlocked();
 +            for (const entry of block.items) {
@@ -153,7 +156,7 @@ index 119eb77..3ee7e5a 100644
      }
      *keys() {
          const keys = new Set();
-@@ -625,44 +743,54 @@ export class SingleBufferStore extends BufferView {
+@@ -625,44 +746,54 @@ export class SingleBufferStore extends BufferView {
          }
      }
      get(id) {
@@ -227,7 +230,7 @@ index 119eb77..3ee7e5a 100644
                          return;
                      }
                      catch (e_1) {
-@@ -674,19 +802,32 @@ export class SingleBufferStore extends BufferView {
+@@ -674,19 +805,32 @@ export class SingleBufferStore extends BufferView {
                      }
                  }
              }
@@ -266,7 +269,7 @@ index 119eb77..3ee7e5a 100644
          }
          catch (e_2) {
              env_1.error = e_2;
-@@ -697,18 +838,58 @@ export class SingleBufferStore extends BufferView {
+@@ -697,18 +841,58 @@ export class SingleBufferStore extends BufferView {
          }
      }
      delete(id) {
