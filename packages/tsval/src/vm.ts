@@ -1,4 +1,4 @@
-import type { EventLoopOptions, Loop } from "./event-loop.ts";
+import type { AsyncContext, EventLoopOptions, Loop } from "./event-loop.ts";
 import type { AsyncFrame, CallFrame, Frame, Iteration, ModuleFrame, NodeFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
 import type { ModuleLoader, ModuleRecord } from "./modules.ts";
 import type { GuestClass } from "./handlers.ts";
@@ -173,6 +173,10 @@ export interface VMOptions {
 	/** Notified with the Promise of every async guest function invoked, so a driver can track
 	 *  outstanding async work (a host that must observe every effect awaits it). */
 	"onAsyncFiber"?: (promise: Promise<unknown>) => void;
+	/** Stepped async: the host's async context (an AsyncLocalStorage's store, almostnode's), carried through the
+	 *  program's jobs as Node carries it — an await resumes in the context it suspended in, a promise callback or a timer
+	 *  runs in the one it was handed over in. */
+	"asyncContext"?: AsyncContext;
 	/** Run async code on the main stack, steppable — a debugger's stepping, breakpoints and forks reach into it. An async
 	 *  function runs until its first `await`, where its frames are cut off as a pending fiber; when what it awaited
 	 *  settles, the fiber is a job the machine resumes once its stack is empty (between jobs, in the order they
@@ -472,6 +476,8 @@ export class Machine implements VM {
 	public callSite: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression | undefined;
 	public hostGuard: HostGuard | undefined;
 	public onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
+	/** VMOptions.asyncContext. */
+	public asyncContext: AsyncContext | undefined;
 	public onBreakpoint: ((vm: VM) => void) | undefined;
 	/** VMOptions.steppedAsync. */
 	public steppedAsync = false;
@@ -596,6 +602,7 @@ export class Machine implements VM {
 		this.resolveModule = options.resolveModule;
 		this.hostGuard = options.hostGuard;
 		this.onAsyncFiber = options.onAsyncFiber;
+		this.asyncContext = options.asyncContext;
 		this.onBreakpoint = options.onBreakpoint;
 		this.steppedAsync = options.steppedAsync === true || options.eventLoop !== undefined;
 		this.maxSteps = options.maxSteps;
@@ -1868,11 +1875,12 @@ export class Machine implements VM {
 		forked.pauseValue = clone(this.pauseValue);
 		forked.sentValue = clone(this.sentValue);
 		forked.steppedAsync = this.steppedAsync;
+		forked.asyncContext = this.asyncContext;
 		forked.idle = this.idle;
 		forked.depth = 0;
 		forked.contexts = [];
 		// Its own pending fibers (their frames and closures, cloned), and the shared record of what settled.
-		forked.pending = new Map([...this.pending].map(([id, each]) => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base } : { "kind": "callback", "fn": clone(each.fn) as GuestFunction }]));
+		forked.pending = new Map([...this.pending].map(([id, each]) => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base, "context": each.context } : { "kind": "callback", "fn": clone(each.fn) as GuestFunction, "context": each.context }]));
 		forked.scheduler = this.scheduler;
 		forked.loop = this.loop === undefined ? undefined : forkLoop(this.loop, clone);
 
@@ -1902,7 +1910,7 @@ export class Machine implements VM {
 		const id = this.scheduler.ids;
 		const { scheduler } = this;
 
-		this.pending.set(id, { "kind": "callback", "fn": fn });
+		this.pending.set(id, { "kind": "callback", "fn": fn, "context": this.asyncContext?.capture() });
 
 		return (...args: unknown[]): Promise<unknown> => new this.realm.Promise<unknown>((resolve, reject) => {
 			settle(scheduler, id, { "kind": "call", "args": args, "resolve": resolve, "reject": reject });
@@ -1990,6 +1998,7 @@ export class Machine implements VM {
 
 		this.idle = false;
 		this.values.length = 0; // between tasks: nothing on it is anyone's
+		this.asyncContext?.enter(fired.context);
 
 		if (isGuestFunction(fired.fn)) {
 			this.pushCall(fired.fn.__tsval, fired.args, undefined);
@@ -2019,7 +2028,7 @@ export class Machine implements VM {
 		const awaited = this.pauseValue;
 		const { scheduler } = this;
 
-		this.pending.set(id, { "kind": "fiber", "frames": this.frames.slice(bottom), "values": this.values.slice(base), "base": base });
+		this.pending.set(id, { "kind": "fiber", "frames": this.frames.slice(bottom), "values": this.values.slice(base), "base": base, "context": this.asyncContext?.capture() });
 		this.frames.length = bottom;
 		this.values.length = base;
 		this.paused = false;
@@ -2057,6 +2066,7 @@ export class Machine implements VM {
 
 		this.pending.delete(entry.id);
 		this.idle = false;
+		this.asyncContext?.enter(job.context);
 
 		if (job.kind === "callback") {
 			if (input.kind !== "call") {
@@ -2242,9 +2252,11 @@ export class Machine implements VM {
 					return;
 				}
 
-				// Suspended on `await result.value`; resume when it settles.
+				// Suspended on `await result.value`; resume when it settles (in the async context it suspended in).
+				const context = this.asyncContext?.capture();
+
 				Promise.resolve(result.value).then(
-					(value) => { drive({ "kind": "next", "value": value }); },
+					(value) => { this.asyncContext?.enter(context); drive({ "kind": "next", "value": value }); },
 					(error: unknown) => {
 						// An uncatchable error (interpreter bug, a host's abort) that rejected an awaited promise
 						// must not be injected as a guest `throw` — guest try/catch could swallow it.
@@ -2252,6 +2264,7 @@ export class Machine implements VM {
 							activeFiber.done = true;
 							reject(error);
 						} else {
+							this.asyncContext?.enter(context);
 							drive({ "kind": "throw", "value": error });
 						}
 					}
@@ -2306,14 +2319,18 @@ export class Machine implements VM {
 			}
 
 			if (result.kind === "await") {
+				const context = this.asyncContext?.capture();
+
 				return Promise.resolve(result.value).then(
-					(value) => drive({ "kind": "next", "value": value }),
+					(value) => { this.asyncContext?.enter(context); return drive({ "kind": "next", "value": value }); },
 					(error: unknown) => {
 						if (isUncatchable(error)) {
 							fiber.done = true;
 
 							return Promise.reject(error);
 						}
+
+						this.asyncContext?.enter(context);
 
 						return drive({ "kind": "throw", "value": error });
 					}
@@ -2932,7 +2949,8 @@ interface Fiber {
 
 /** Stepped async: a fiber cut off at an `await` (its frames from its async frame up, their operands, and the value-stack
  *  depth they were cut at) — or a guest callback handed to a host promise, waiting to be called. */
-type Pending = { "kind": "fiber"; "frames": Frame[]; "values": unknown[]; "base": number } | { "kind": "callback"; "fn": GuestFunction };
+/** (`context`: VMOptions.asyncContext's, as it was when the job was made) */
+type Pending = { "kind": "fiber"; "frames": Frame[]; "values": unknown[]; "base": number; "context"?: unknown } | { "kind": "callback"; "fn": GuestFunction; "context"?: unknown };
 
 /** How a pending job is resumed: a fiber with what it awaited (or the rejection, thrown at the `await`), a callback with
  *  the host's call. */

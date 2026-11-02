@@ -120,6 +120,42 @@ test("stepped async: `return await x` resumed under its caller's pending operand
 	assert.deepStrictEqual(lines, ["v", "xv"]);
 });
 
+test("stepped async: an await, a promise callback and a timer resume in the host's async context they were made in", async () => {
+	const { lines, globals } = logged();
+	// The host's async context (almostnode's AsyncLocalStorage, say): `current`, which `within` sets around a call.
+	let current: unknown;
+	const within = (context: unknown, fn: () => unknown): unknown => {
+		const before = current;
+
+		current = context;
+
+		try {
+			return fn();
+		} finally {
+			current = before;
+		}
+	};
+	// A host promise that leaves its context behind when it settles, as a package's continuation does.
+	const leaving = (): Promise<void> => new Promise((resolve) => { setTimeout(() => { current = "left behind"; resolve(); }, 1); });
+	const src = [
+		// in a host's call (a nested run: its awaits are the host promise queue's), and on the main stack
+		"async function job(name) { await null; log(name + ' ' + store()); await Promise.resolve(); log(name + ' again ' + store()); }",
+		"within('a', () => job('a'));",
+		"enterWith('b'); Promise.resolve().then(() => log('b ' + store())); setTimeout(() => log('c ' + store()), 1); enterWith(undefined);",
+		"async function main() { await leaving(); log('main ' + store()); }",
+		"main();",
+		"log('top ' + store());"
+	].join("\n");
+	const { vm } = createVM(src, {
+		"globals": { ...globals, "within": within, "store": () => current, "enterWith": (context: unknown) => { current = context; }, "leaving": leaving },
+		"eventLoop": { "pace": "fast" },
+		"asyncContext": { "capture": () => current, "enter": (context) => { current = context; } }
+	});
+
+	await toEnd(vm);
+	assert.deepStrictEqual(lines.map(String).sort((a, b) => a.localeCompare(b)), ["a a", "a again a", "b b", "c b", "main undefined", "top undefined"]);
+});
+
 test("without steppedAsync: async code runs on the host's promise queue, as before", async () => {
 	const { lines, globals } = logged();
 	const { vm } = createVM("async function main() { await null; log('later'); }\nmain();\nlog('now');", { "globals": globals });

@@ -6,6 +6,7 @@
   "license": "MIT",
   "exports": {
     ".": "./index.ts",
+    "./async-context": "./shims/async_hooks.ts",
     "./bridge": "./server-bridge.ts",
     "./packages": "./frameworks/packages.ts",
     "./fs-capabilities": "./shims/fs-capabilities.ts",

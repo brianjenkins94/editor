@@ -84,10 +84,13 @@ How it's kept:
    within 50 s, done or not, and is waited on again by its run id). Passing in Brave, 2026-11-01: architecture-model,
    code, collab-identity, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the
    terminal's git, history, less, node and ps. Still failing, by cause:
-   - **AsyncLocalStorage doesn't carry across an await** (almostnode's holds its store only for `run`'s synchronous
-     part): just-bash's sandbox loses its context at its first await and refuses every command —
-     terminal-session (3 of 5). Node's carries it through promise continuations; here that would be tsval's, as it
-     runs them. Many libraries lean on it.
+   - **just-bash's defense in depth proxies the realm's globals** (terminal-session: its first test passes, then the
+     file stops). AsyncLocalStorage carries across awaits now (2026-11-02, almostnode's async_hooks.ts and its `await`
+     rewrite, tsval's `asyncContext`), so just-bash's sandbox works — and while a command runs it puts Proxies over
+     `performance` and the like on globalThis. A browser's `performance.now` refuses a Proxy as its receiver (Node's
+     doesn't), and the program shares the debug worker's globals: the debugger's own log spans (util's logger,
+     `performance.now()` at each end) throw "Illegal invocation". Either util's logger keeps its own clock, bound at
+     load, or a program gets globals of its own.
    - **The editor's page hangs in Brave, then a call to it gets no answer** (2026-11-01). Not `_approved`: util/mcp
      keeps that to itself, and the page is asked the same either way. The page's main thread stops — no logs or
      metrics, `page_eval` unanswered, the tab gone from `tabs_list`, Brave unable to screenshot it — and since 15:50,

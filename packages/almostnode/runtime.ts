@@ -19,6 +19,7 @@ import * as unenvFsPromises from "unenv/node/fs/promises";
 import * as unenvProcess from "unenv/node/process";
 import { fillIn, nodeBuiltins } from "./builtins";
 import { transformEsmToCjsSimple } from "./frameworks/esm-cjs";
+import { asyncContext } from "./shims/async_hooks";
 import { initChildProcess } from "./shims/child_process";
 import * as chokidarShim from "./shims/chokidar";
 import * as esbuildShim from "./shims/esbuild";
@@ -92,6 +93,139 @@ function hasTopLevelAwait(sourceFile: ts.SourceFile): boolean {
 	return found;
 }
 
+/** What a module's code calls the async context by (shims/async_hooks.ts `asyncContext`, the wrapper's), and what an
+ *  async function's body keeps the one it was in as. */
+const ASYNC_CONTEXT = "__almostnodeAsyncContext";
+const ITS_CONTEXT = "__almostnodeContext";
+
+/**
+ * Where a module's code carries the async context, as Node's does (an AsyncLocalStorage's store): each `await x` — and
+ * an async generator's `yield x` — resumes in the context it suspended in, `resume(capture(), await x)`; and an async
+ * function's `catch`, `finally` and `for await` bodies, and what follows a `for await`, in the one the function was in.
+ * As [start, end, text] edits that only insert (a block's opening brace, a directive's end, are kept), so they go with
+ * any other replacements.
+ */
+function asyncContextEdits(sourceFile: ts.SourceFile): [number, number, string][] {
+	const edits: [number, number, string][] = [];
+	const enter = `${ASYNC_CONTEXT}.enter(${ITS_CONTEXT});`;
+	/** After `block`'s opening brace. */
+	const opening = (block: ts.Block, text: string): [number, number, string] => {
+		const at = block.getStart(sourceFile);
+
+		return [at, at + 1, "{" + text];
+	};
+
+	interface Owner { "generator": boolean; "enters": [number, number, string][] }
+
+	/** The edits that keep `owner`'s context at the start of its `statements` (after any directives), and go back to it. */
+	const keep = (owner: Owner, statements: ts.NodeArray<ts.Statement>, start: (text: string) => [number, number, string] | undefined): void => {
+		if (owner.enters.length === 0) {
+			return;
+		}
+
+		const declaration = `const ${ITS_CONTEXT} = ${ASYNC_CONTEXT}.capture();`;
+		const directives = statements.filter((statement, index) => statements.slice(0, index + 1).every((each) => ts.isExpressionStatement(each) && ts.isStringLiteral(each.expression)));
+		const last = directives.at(-1);
+		const at = last === undefined ? start(declaration) : [last.getEnd() - 1, last.getEnd(), sourceFile.text[last.getEnd() - 1] + ";" + declaration] as [number, number, string];
+
+		if (at !== undefined) {
+			edits.push(at, ...owner.enters);
+		}
+	};
+
+	const visit = (node: ts.Node, owner: Owner | undefined): void => {
+		if (ts.isFunctionLike(node) || ts.isClassStaticBlockDeclaration(node)) {
+			const body = "body" in node ? node.body as ts.Node | undefined : undefined;
+			const isAsync = ts.canHaveModifiers(node) && (ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ?? false);
+			const own: Owner | undefined = isAsync ? { "generator": "asteriskToken" in node && node.asteriskToken !== undefined, "enters": [] } : undefined;
+
+			ts.forEachChild(node, (child) => { visit(child, child === body ? own : undefined); });
+
+			if (own !== undefined && body !== undefined && ts.isBlock(body)) {
+				keep(own, body.statements, (text) => opening(body, text));
+			}
+
+			return;
+		}
+
+		// (the closing `)` before anything ending where it does, and the opening `resume(` after anything starting there:
+		// of edits at one position, the one pushed later comes first)
+		if (ts.isAwaitExpression(node) || (owner?.generator === true && ts.isYieldExpression(node))) {
+			edits.push([node.getEnd(), node.getEnd(), ")"]);
+			ts.forEachChild(node, (child) => { visit(child, owner); });
+			edits.push([node.getStart(sourceFile), node.getStart(sourceFile), `${ASYNC_CONTEXT}.resume(${ASYNC_CONTEXT}.capture(), `]);
+
+			return;
+		}
+
+		if (owner !== undefined && ts.isCatchClause(node)) {
+			owner.enters.push(opening(node.block, enter));
+		}
+
+		if (owner !== undefined && ts.isTryStatement(node) && node.finallyBlock !== undefined) {
+			owner.enters.push(opening(node.finallyBlock, enter));
+		}
+
+		if (owner !== undefined && ts.isForOfStatement(node) && node.awaitModifier !== undefined) {
+			const statement = ts.isLabeledStatement(node.parent) ? node.parent : node;
+			const body = node.statement;
+
+			// After the loop: when it's a statement of a list (else, an `if`'s body, say, what follows isn't its own)
+			if (ts.isBlock(statement.parent) || ts.isSourceFile(statement.parent) || ts.isCaseOrDefaultClause(statement.parent) || ts.isModuleBlock(statement.parent)) {
+				owner.enters.push([statement.getEnd(), statement.getEnd(), enter]);
+			}
+
+			if (ts.isBlock(body)) {
+				owner.enters.push(opening(body, enter));
+			} else {
+				owner.enters.push([body.getEnd(), body.getEnd(), " }"]);
+				ts.forEachChild(node, (child) => { visit(child, owner); });
+				owner.enters.push([body.getStart(sourceFile), body.getStart(sourceFile), "{ " + enter]);
+
+				return;
+			}
+		}
+
+		ts.forEachChild(node, (child) => { visit(child, owner); });
+	};
+
+	// A module's top level is an async function's body when it awaits (ASYNC_MODULE): its own context then.
+	const topLevel: Owner | undefined = hasTopLevelAwait(sourceFile) ? { "generator": false, "enters": [] } : undefined;
+
+	ts.forEachChild(sourceFile, (child) => { visit(child, topLevel); });
+
+	if (topLevel !== undefined) {
+		keep(topLevel, sourceFile.statements, (text) => [0, 0, text]);
+	}
+
+	return edits;
+}
+
+/** `edits` ([start, end, text]) made to `code`, from the last to the first (so each one's positions hold). */
+function edited(code: string, edits: [number, number, string][]): string {
+	let result = code;
+
+	for (const [start, end, text] of [...edits].sort((a, b) => b[0] - a[0])) {
+		result = result.slice(0, start) + text + result.slice(end);
+	}
+
+	return result;
+}
+
+/** A CommonJS module (`.cjs`, which has no ES module syntax to transform) carrying the async context through its awaits. */
+function carryAsyncContext(code: string): string {
+	if (!/\bawait\b/.test(code)) {
+		return code;
+	}
+
+	return edited(code, asyncContextEdits(ts.createSourceFile("module.js", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)));
+}
+
+/** A module's code as the wrapper runs it: ES module syntax made CommonJS, the async context carried. */
+function prepared(code: string, filename: string): string {
+	return filename.endsWith(".cjs") ? carryAsyncContext(code) : transformEsmToCjs(code, filename);
+}
+
 /**
  * Transform dynamic imports in code: import('x') -> __dynamicImport('x')
  * Regex-based fallback for when AST parsing fails.
@@ -109,7 +243,7 @@ function transformEsmToCjs(code: string, filename: string): string {
   // Quick check: does the code have any ESM-like patterns?
 	const maybeEsm = /\bimport\b|\bexport\b/.test(code);
 
-	if (!maybeEsm) { return code; }
+	if (!maybeEsm) { return carryAsyncContext(code); }
 
 	try {
 		return transformEsmToCjsAst(code, filename);
@@ -146,6 +280,11 @@ function transformEsmToCjsAst(code: string, filename: string): string {
 		}
 	});
 
+	// (and its awaits carry the async context, on the same parse)
+	if (/\bawait\b/.test(code)) {
+		deepReplacements.push(...asyncContextEdits(sourceFile));
+	}
+
   // Check for actual import/export declarations
 	const hasImportDecl = sourceFile.statements.some((statement) => ts.isImportDeclaration(statement));
 	const hasExportDecl = sourceFile.statements.some((statement) => ts.isExportDeclaration(statement)
@@ -153,12 +292,7 @@ function transformEsmToCjsAst(code: string, filename: string): string {
 		|| (ts.canHaveModifiers(statement) && (ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false)));
 
   // Apply deep replacements from end to start (preserves earlier positions)
-	let transformed = code;
-
-	deepReplacements.sort((a, b) => b[0] - a[0]);
-	for (const [start, end, replacement] of deepReplacements) {
-		transformed = transformed.slice(0, start) + replacement + transformed.slice(end);
-	}
+	let transformed = edited(code, deepReplacements);
 
   // Transform import/export declarations (re-parses the modified code)
 	if (hasImportDecl || hasExportDecl) {
@@ -915,9 +1049,7 @@ function createRequire(
       // Transform ESM to CJS if needed (for .mjs files or ESM that wasn't pre-transformed)
       // transformEsmToCjs uses AST to handle import/export, import.meta, and dynamic imports
       // It also handles already-CJS files safely (AST finds no ESM nodes → no-op)
-			if (!resolvedPath.endsWith(".cjs")) {
-				code = transformEsmToCjs(code, resolvedPath);
-			}
+			code = prepared(code, resolvedPath);
 
       // Cache the processed code
 			processedCodeCache?.set(codeCacheKey, code);
@@ -949,7 +1081,7 @@ function createRequire(
 			const importMetaUrl = "file://" + resolvedPath;
 			// (top-level await: the module's body is an async function, and import() waits for it)
 			const awaits = code.startsWith(ASYNC_MODULE);
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer) {
+			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer, $asyncContext) {
 var exports = $exports;
 var require = $require;
 var module = $module;
@@ -962,6 +1094,8 @@ var __dynamicImport = $dynamicImport;
 var fetch = $fetch;
 // Node's Buffer is a global its modules use without requiring it (isomorphic-git, zen-fs): theirs too
 var Buffer = $Buffer;
+// (what a module's awaits resume in: asyncContextEdits)
+var __almostnodeAsyncContext = $asyncContext;
 // Set up global.process and globalThis.process for code that accesses them directly
 var global = globalThis;
 globalThis.process = $process;
@@ -995,7 +1129,8 @@ ${code}
 				{ "url": importMetaUrl, "dirname": dirname, "filename": resolvedPath, "resolve": importMetaResolve(moduleRequire) },
 				dynamicImport,
 				options.globalFor?.("fetch", program ? "program" : "package", dirname) ?? globalThis.fetch,
-				UnenvBuffer
+				UnenvBuffer,
+				asyncContext
 			);
 
 			// An ES module's static imports are evaluated before it, as Node does; one still evaluating (its top level
@@ -1612,15 +1747,13 @@ export class Runtime {
 		}
 
     // Transform ESM to CJS if needed (AST-based, handles import.meta and dynamic imports too)
-		if (!filename.endsWith(".cjs")) {
-			code = transformEsmToCjs(code, filename);
-		}
+		code = prepared(code, filename);
 
     // Execute code
     // Use the same wrapper pattern as loadModule for consistency
 		try {
 			const importMetaUrl = "file://" + filename;
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer) {
+			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch, $Buffer, $asyncContext) {
 var exports = $exports;
 var require = $require;
 var module = $module;
@@ -1633,6 +1766,8 @@ var __dynamicImport = $dynamicImport;
 var fetch = $fetch;
 // Node's Buffer is a global its modules use without requiring it (isomorphic-git, zen-fs): theirs too
 var Buffer = $Buffer;
+// (what a module's awaits resume in: asyncContextEdits)
+var __almostnodeAsyncContext = $asyncContext;
 // Set up global.process and globalThis.process for code that accesses them directly
 var global = globalThis;
 globalThis.process = $process;
@@ -1660,7 +1795,8 @@ ${code}
 				{ "url": importMetaUrl, "dirname": dirname, "filename": filename, "resolve": importMetaResolve(require) },
 				dynamicImport,
 				this.options.globalFor?.("fetch", "program", dirname) ?? globalThis.fetch,
-				UnenvBuffer
+				UnenvBuffer,
+				asyncContext
 			);
 
 			module.loaded = true;

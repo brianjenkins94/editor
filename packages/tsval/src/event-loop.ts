@@ -49,7 +49,7 @@ export interface Choice { "candidates": Candidate[]; "picked": number }
 
 /** A timer: when it's due on the virtual clock, its place among timers due then, what it calls, its delay, and whether
  *  it repeats (an interval). An unref'd one doesn't keep the program alive. */
-export interface Timer { "id": number; "due": number; "seq": number; "fn": unknown; "args": unknown[]; "delay": number; "interval": boolean; "ref": boolean }
+export interface Timer { "id": number; "due": number; "seq": number; "fn": unknown; "args": unknown[]; "delay": number; "interval": boolean; "ref": boolean; "context"?: unknown }
 
 /** A machine's event loop: its own (a fork copies it). `checkpoint`: a real turn of the host's event loop has passed
  *  since the machine went idle — the host's microtasks are flushed, so a timer may fire. */
@@ -78,7 +78,12 @@ export interface Loop {
 export interface LoopMachine {
 	"loop": Loop | undefined;
 	"deferCallback": (fn: GuestFunction) => (...args: unknown[]) => Promise<unknown>;
+	"asyncContext"?: AsyncContext | undefined;
 }
+
+/** VMOptions.asyncContext: what carries a host's async context (an AsyncLocalStorage's store) through the program's
+ *  jobs — the context now, and entering one. */
+export interface AsyncContext { "capture": () => unknown; "enter": (context: unknown) => void }
 
 /** An intrinsic's behavior, given the machine calling it: what `invokeHost` runs instead of calling the function. */
 export type Intrinsic = (machine: LoopMachine, thisArg: unknown, args: unknown[], isConstruct: boolean) => unknown;
@@ -275,7 +280,7 @@ function setTimer(machine: LoopMachine, fn: unknown, delay: number, args: unknow
 
 	loop.ids += 1;
 	loop.seq += 1;
-	loop.timers.set(loop.ids, { "id": loop.ids, "due": loop.clock + delay, "seq": loop.seq, "fn": fn, "args": args, "delay": delay, "interval": interval, "ref": true });
+	loop.timers.set(loop.ids, { "id": loop.ids, "due": loop.clock + delay, "seq": loop.seq, "fn": fn, "args": args, "delay": delay, "interval": interval, "ref": true, "context": machine.asyncContext?.capture() });
 	loop.wake?.();
 
 	return handleFor(loop.ids);
