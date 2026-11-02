@@ -48,7 +48,9 @@ const unpicked = (rows: DiffRowInfo[], picked: ReadonlySet<number>): Set<number>
  *  (An extension learns of a change as VS Code's own git does: a save, or a file watcher — the repository is files too.) */
 /** What the service reads the working tree with, for whoever joins more to it (git-review.ts). */
 export interface GitReader {
-	"status": () => Promise<{ "files": GitFileChange[]; "head"?: string }>;
+	/** `whole`: a walk of the whole tree, for whoever acts on what it says (a commit, a checkpoint) — the change watcher
+	 *  tells of a write a little after it, so a walk of only what it's told of may not have it yet. */
+	"status": (options?: { "whole"?: boolean }) => Promise<{ "files": GitFileChange[]; "head"?: string }>;
 	"file": (path: unknown) => Promise<{ "head": string; "working": string }>;
 }
 
@@ -59,8 +61,8 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 	// (engine.status); undefined, a walk of the whole tree (the first, or after a change that didn't say where).
 	let changedSince: Set<string> | undefined;
 
-	const walk = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
-		const changed = changedSince === undefined ? undefined : [...changedSince];
+	const walk = async (whole: boolean): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
+		const changed = whole || changedSince === undefined ? undefined : [...changedSince];
 
 		changedSince = new Set();
 
@@ -94,17 +96,18 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 	// One walk for askers that overlap: the Source Control view and the review panel each ask as the working tree
 	// changes, and a walk is a lookup of every file in zen-fs. A walk that began after the last change answers whoever
-	// asks while it runs; one asked after a change, or once it's done, walks again.
+	// asks while it runs (one asking for a whole walk, only a whole one); one asked after a change, or once it's done,
+	// walks again.
 	let changes = 0;
-	let walking: { "since": number; "result": Promise<{ "files": GitFileChange[]; "head"?: string }> } | undefined;
+	let walking: { "since": number; "whole": boolean; "result": Promise<{ "files": GitFileChange[]; "head"?: string }> } | undefined;
 
-	const status = async (): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
-		if (walking?.since === changes) {
+	const status = async ({ whole = false }: { "whole"?: boolean } = {}): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
+		if (walking?.since === changes && (walking.whole || !whole)) {
 			return walking.result;
 		}
 
-		const result = walk();
-		const current = { "since": changes, "result": result };
+		const result = walk(whole);
+		const current = { "since": changes, "whole": whole, "result": result };
 
 		walking = current;
 		void result.finally(() => {
@@ -116,8 +119,8 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		return result;
 	};
 
-	serve(hub, "git.status", status);
-	vscode.commands.registerCommand("editor.git.status", status);
+	serve(hub, "git.status", async (args) => status({ "whole": (args as { "whole"?: boolean } | null | undefined)?.whole === true }));
+	vscode.commands.registerCommand("editor.git.status", async () => status());
 
 	// What changed, as `git diff HEAD` says it: one file's (`path`), or every changed file's — a unified diff of the
 	// working tree against the last commit (debug-mcp's git tool).
@@ -266,7 +269,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		if (request?.files === undefined) {
 			made = await engine.commitAll(message);
 		} else {
-			const changes = new Map((await status()).files.map((change) => [change.path, change]));
+			const changes = new Map((await status({ "whole": true })).files.map((change) => [change.path, change]));
 			const picked = await Promise.all(request.files.map(async (pick) => toCommit(pick, changes)));
 
 			made = await engine.commitSelection(message, picked.filter((each) => each !== undefined));

@@ -35,7 +35,7 @@ export function installCheckpoints(vscode: typeof vscodeApi, hub: Hub, git: GitR
 
 	serve(hub, "workspace.checkpoint", async (args) => {
 		const { label } = (args ?? {}) as { "label"?: unknown };
-		const { files, head } = await git.status();
+		const { files, head } = await git.status({ "whole": true });
 		const kept = new Map<string, string | null>();
 
 		for (const change of files.filter(({ path }) => !RECORDS.test(path))) {
@@ -58,7 +58,7 @@ export function installCheckpoints(vscode: typeof vscodeApi, hub: Hub, git: GitR
 			throw new Error(`no checkpoint ${String(id)} here (they're this page's, and don't survive a reload): ${JSON.stringify(listed())}`);
 		}
 
-		const { files, head } = await git.status();
+		const { files, head } = await git.status({ "whole": true });
 
 		if (head !== checkpoint.head) {
 			throw new Error(`HEAD has moved since checkpoint ${checkpoint.id} (${checkpoint.head?.slice(0, 8) ?? "no commit"} then, ${head?.slice(0, 8) ?? "none"} now): restoring would mean undoing a commit, which is git's to do`);

@@ -56,7 +56,7 @@ const git: ToolFamily = ({ request }) => [
 				"description": "The workspace's changed files, each A, M or D, staged or not. Returns { files }.",
 				"inputSchema": {}
 			},
-			"handler": async (_args, { signal }) => ok(request("git.status", undefined, signal))
+			"handler": async (_args, { signal }) => ok(request("git.status", { "whole": true }, signal))
 		})
 	},
 	{

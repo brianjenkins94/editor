@@ -143,7 +143,7 @@ export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: Git
 	serve(hub, "code.problems", async (args) => {
 		const { paths, depth, limit } = (args ?? {}) as { "paths"?: unknown; "depth"?: unknown; "limit"?: unknown };
 		const only = Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "").replace(/\/$/u, "")) : undefined;
-		const changes = (await git.status()).files.filter((change) => CODE.test(change.path) && (only === undefined || only.some((path) => change.path === path || change.path.startsWith(path + "/"))));
+		const changes = (await git.status({ "whole": true })).files.filter((change) => CODE.test(change.path) && (only === undefined || only.some((path) => change.path === path || change.path.startsWith(path + "/"))));
 		const heads = new Map<GitFileChange, string | null>();
 
 		for (const change of changes) {

@@ -147,7 +147,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	};
 
 	const affected = async (paths?: string[]): Promise<{ "tests": Affected[]; "changed": string[]; "untraced": string[] }> => {
-		const changed = paths ?? (await git.status()).files.filter((change) => change.status !== "D").map((change) => change.path);
+		const changed = paths ?? (await git.status({ "whole": true })).files.filter((change) => change.status !== "D").map((change) => change.path);
 		const tests = new Map<string, Affected>();
 
 		for (const path of changed.filter((each) => CODE.test(each))) {
