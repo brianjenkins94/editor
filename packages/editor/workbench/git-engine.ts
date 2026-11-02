@@ -137,8 +137,41 @@ function stagedLetterFor(head: number, stage: number): "A" | "M" | "D" {
  * A file can be in BOTH (staged, then edited again). statusMatrix rows are [path, head, workdir, stage] with 0/1/2/3
  * codes; `[1,1,1]` is unmodified and skipped.
  */
+/** `fs` for one walk of the tree: each ignore file (`.gitignore`, `.git/info/exclude`) read once. isomorphic-git reads
+ *  every one from the root down for each path it checks — for this repository's packages/editor alone, 2,762 reads of
+ *  .gitignore files and 694 of exclude in one status, each a path walk in zen-fs on the page's thread; 9 this way. They
+ *  can't change during one walk, and the next walk reads them afresh. */
+function readingIgnoresOnce(): typeof fs {
+	const seen = new Map<string, Promise<unknown>>();
+	const promises = new Proxy(fs.promises, {
+		"get": (target, name) => {
+			const method = Reflect.get(target, name) as (path: unknown, ...rest: unknown[]) => Promise<unknown>;
+
+			if (name !== "readFile" && name !== "stat" && name !== "lstat") {
+				return method;
+			}
+
+			return (path: unknown, ...rest: unknown[]): Promise<unknown> => {
+				if (!/(?:^|\/)\.gitignore$|\/\.git\/info\/exclude$/u.test(String(path))) {
+					return method.call(target, path, ...rest);
+				}
+
+				const key = `${name}\0${String(path)}\0${JSON.stringify(rest)}`;
+
+				if (!seen.has(key)) {
+					seen.set(key, method.call(target, path, ...rest));
+				}
+
+				return seen.get(key)!;
+			};
+		}
+	});
+
+	return { ...fs, "promises": promises } as typeof fs;
+}
+
 export async function status(): Promise<GitStatus> {
-	const matrix = await statusMatrix({ "fs": fs, "dir": DIR });
+	const matrix = await statusMatrix({ "fs": readingIgnoresOnce(), "dir": DIR });
 	const staged: GitChange[] = [];
 	const unstaged: GitChange[] = [];
 

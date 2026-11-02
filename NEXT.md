@@ -102,10 +102,14 @@ How it's kept:
    - **page-tools waits on the held preview WebSockets**: its client and its debug-mcp server are both in the run, joined
      by a WebSocket a browser sends to the real network (decided 2026-10-14: a run's WebSockets wait until they can be
      observed).
-   - **To check once the workspace is pulled** (2026-11-02: the editor's workspace was 30 commits behind, and a test runs
-     the workspace's own code): preview-instrument and replay — almostnode's `vm` gives a context its own globalThis
-     now, and tsval steps only into its own machine's functions (the program's tsval stepped the debugger's), both
-     fixed under Node; silo-kept, which passes under Node now and stalled in the editor on the workspace's old copy.
+   - **A run's start keeps the page's thread busy** (2026-11-02). preview-instrument, replay and silo-kept pass in Brave
+     now, once the workspace was pulled (it was 30 commits behind, and a test runs the workspace's own code). But a
+     run that installs packages (silo-kept: ~13 tarballs, one at a time) waited 2–10 s for each, where the same fetch
+     takes ~250 ms on an idle page: the page's thread was busy, and a first run passed the 120 s stall check before
+     its program started. Most of that was git status, twice a run, on the page's thread: isomorphic-git read every
+     ignore file from the root down for each path. Each walk reads them once now (one status: ~2,400 file reads → 39,
+     ~98k stats → 60k). Left: the 60k — a stat of every file and of .git/index for each — and the installs, still one
+     at a time; the stall check counts installing as nothing happening.
    - Can't run in a browser: baseline (execFileSync).
 3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against
    the preview you have open (2026-10-31; packages/editor/RUNNING.md, *Tests*); an agent tool for one locator call or
