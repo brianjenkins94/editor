@@ -111,6 +111,33 @@ How it's kept:
 3. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
    from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
    Waits on items 1 and 2 being good enough to work in. In order:
+   - **Before the reduction: what the rehearsal found** (2026-11-02, on `cosmetic`: measured, declared, removed with its
+     test, reintroduced with a test of its own and its whys as notes, all through the editor and its agent tools; the
+     branch `rehearsal/cosmetic` is in the browser's workspace only, below). Fixed as found: the editor's reset and its
+     repo binding read from the workspace (216bfc89); notes' threads remade ~60 times a second (each thread's input
+     editor counts as visible, and every visibility change re-showed every note); the Margin's gutter overlay taking
+     the clicks meant for VS Code's comment icons and folding. Still to do, by the step it blocks:
+     - *Working in it at all:* one agent session per machine drives the editor (debug-mcp's port), and a session that
+       couldn't start one has no tools with nothing saying why; two tabs back from a reset both cloned into one
+       workspace; a tab sometimes missing from `tabs_list`; the shell's spans never reach debug-mcp (no `shell` or
+       `github` source), so a repository's load can't be timed from the tools; the reset's warning counts uncommitted
+       changes but not unpushed commits — the rehearsal's branch would have gone with one.
+     - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced); CI's reach
+       covers the architecture suites only, and there `activate` is reached by nearly every test; History's tools
+       (`decisions_for`, `code_reach`) don't answer until a TypeScript file is open; `decisions_for` named five
+       features for one file; nothing shows code with its comments stripped (the zero-knowledge pass's first
+       condition); the clone is one commit deep, so `git_log` sees nothing older.
+     - *Declare:* no way but editing `.silo/features.json` by hand, and no fields for ways in or tests (decision 21);
+       `silo check` can't run in the editor.
+     - *Remove:* agents can't delete a file (no tool; the Explorer can); every save runs ESLint's fix-all, rewriting
+       lines an edit didn't touch (an import moved, a line split and left unindented) — review by hunk kept them out.
+     - *Reintroduce:* the editor's `npm test` didn't collect an extension's own `test/` (added on the branch); no agent
+       tool adds a note though `notes.add` takes its text; a note on a `for` anchored to its loop variable; notes and
+       run records are authored `local`, not the signed-in user; nothing tests an extension's wiring (activate → read →
+       badge) short of the architecture harness — the old tour step did, end to end, the new unit test doesn't; the
+       Explorer didn't list files an agent wrote until a reload.
+     - *Commit:* a push from the localhost editor is refused (HTTP 403; the dev GitHub App's access, likely), so the
+       branch never reached CI.
    - **Visibility first**, so the rewrite is measured from its start: a span at every filesystem boundary, with its
      caller, duration, bytes and parent (*Visibility*). Done when the 2026-10-30/31 load questions are answered from
      `metrics_query` and `logs_query` alone. It serves item 1's load cost too, so it can go ahead of the rest.
