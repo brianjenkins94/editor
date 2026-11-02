@@ -83,7 +83,7 @@ How it's kept:
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within 50 s, done or not, and is waited on again by its run id). Passing in Brave, 2026-11-01: architecture-model,
    code, collab-identity, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the
-   terminal's git, history, less, node and ps; terminal-session since 2026-11-02 (just-bash's sandbox: its context
+   terminal's git, history, less, node and ps; npm and terminal-session since 2026-11-02 (just-bash's sandbox: its context
    carried across awaits, a run's own global, a returned promise adopted in the return's context). Still failing, by
    cause:
    - **The editor's page hangs in Brave, then a call to it gets no answer** (2026-11-01). Not `_approved`: util/mcp
@@ -99,7 +99,7 @@ How it's kept:
      quadratic in the zen-fs patch's SingleBuffer — each new id's lookup missed its index and scanned every block. A
      current index's miss is trusted now: mount +16 s → +5 s, Margin up +11 s. Found doing it, and as old as the patch:
      5 realms × 300 files + churn in one folder run out of room ("not enough space for a new metadata block") at ~280.
-   - Not looked at since: npm.test's load TypeError, page-tools' stall, preview-instrument's empty evidence, replay's
+   - Not looked at since: page-tools' stall, preview-instrument's empty evidence, replay's
      null for 99, silo-kept's versions.json test (fails under Node too).
    - Can't run in a browser: baseline (execFileSync).
 3. **A `.locator` call on the preview, for agents** (packages/playwright). Playwright tests run in the debugger against

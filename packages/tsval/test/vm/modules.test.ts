@@ -87,6 +87,17 @@ test("ES modules: named, default, re-exported — the imported files evaluated f
 	assert.deepStrictEqual(await run(files, "/w/main.ts"), ["greet", "answer, after ada", "main", "hello, ada", 42, 42]);
 });
 
+test("an import's own imports run first, even one its importer imports later: ESM's depth-first order", async () => {
+	// (npm.test: pnpm.ts reads npm's definition at its top level, and the test imports that definition after pnpm.ts)
+	const files = {
+		"/w/main.ts": "import { size } from './reader';\nimport definition from './definition';\nlog(size + ' ' + definition.items.length);\n",
+		"/w/reader.ts": "import definition from './definition';\nexport const size = Object.keys(definition.items).length;\nlog('reader');\n",
+		"/w/definition.ts": "log('definition');\nexport default { items: ['a', 'b'] };\n"
+	};
+
+	assert.deepStrictEqual(await run(files, "/w/main.ts"), ["definition", "reader", "2 2"]);
+});
+
 test("a cycle sees the partial exports, as Node's does", async () => {
 	const files = {
 		"/w/a.js": "exports.early = 'a-early';\nconst b = require('./b');\nexports.late = 'a-late';\nlog(b.seen);\n",

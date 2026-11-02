@@ -1602,8 +1602,11 @@ export class Machine implements VM {
 		return cached !== undefined ? cached.exports : this.runSub(() => { this.pushModule(resolved.filename); });
 	}
 
-	/** A file about to run (its program node's first step): the program files it imports from, not loaded yet, pushed
-	 *  first — depth-first, each once (ESM's link order) — true if there were any (it runs again once they have). */
+	/** A file about to run (its program node's first step): the first program file it imports from that isn't loaded
+	 *  yet, pushed first — true if there was one (it runs again once that has, for the next). One at a time, because a
+	 *  module is loaded once it's pushed: pushing them all, a later one an earlier one imports (npm.test's
+	 *  `./command.ts`, which pnpm.ts reads at its top level) looked loaded to it before it had run. So each import's
+	 *  own imports run first, depth-first, each once — ESM's evaluation order. */
 	public linkImports(source: ts.SourceFile, frame: NodeFrame): boolean {
 		const loader = this.modules;
 
@@ -1613,25 +1616,23 @@ export class Machine implements VM {
 
 		this.values.length = frame.valuesBase; // (what the modules it waited on left)
 
-		const pending = new Set<string>();
-
 		for (const specifier of linkedSpecifiers(source)) {
-			try {
-				const resolved = loader.resolve(specifier, directoryOf(source.fileName));
+			let resolved: ReturnType<typeof loader.resolve>;
 
-				if (resolved.kind === "program" && loader.cached(resolved.filename) === undefined) {
-					pending.add(resolved.filename);
-				}
+			try {
+				resolved = loader.resolve(specifier, directoryOf(source.fileName));
 			} catch {
-				// not found: its import binding says so
+				continue; // not found: its import binding says so
+			}
+
+			if (resolved.kind === "program" && loader.cached(resolved.filename) === undefined) {
+				this.pushModule(resolved.filename);
+
+				return true;
 			}
 		}
 
-		for (const filename of [...pending].reverse()) {
-			this.pushModule(filename);
-		}
-
-		return pending.size > 0;
+		return false;
 	}
 
 	/** A file's exports, once its bindings are declared: an ES module's, on its module's `exports` (modules.ts). */
