@@ -16,6 +16,59 @@ import { ghError, ghOk, popoverBody } from "theme/styles/shell";
 import { errText, githubLog, shared, statusOf, useStore } from "./feature";
 import { Icon } from "./icon";
 
+/** What a commit and push came to: what to say, whether it failed, and the commit made (its short id), if one was. */
+export interface CommitOutcome { "said": string; "failed": boolean; "made"?: string }
+
+/** The workspace's changes committed with `message` and pushed, over `rpc`, for `repo` (owner/repo, for the log): the
+ *  branch first brought up to GitHub's; nothing committed when it can't be; with nothing changed, what's committed
+ *  pushed. */
+export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, message: string, repo: string): Promise<CommitOutcome> {
+	const span = githubLog.span("editor.shell.commit.githubCommit", { "repo": repo });
+	let made: string | undefined;
+
+	try {
+		const pulled = await rpc.request("git.pull", {}, { "timeoutMs": 300_000 }) as { "ref": string; "outcome": string; "files"?: string[]; "conflicts"?: string[] };
+
+		if (pulled.outcome === "diverged") {
+			throw new Error(`GitHub's ${pulled.ref} and this workspace's have each moved on, so it can't catch up: that's a rebase or a merge`);
+		}
+
+		if (pulled.outcome === "conflicts") {
+			throw new Error(`GitHub changed files you've changed here, so it can't catch up: ${(pulled.conflicts ?? []).join(", ")}`);
+		}
+
+		const caught = pulled.outcome === "fast-forwarded" ? `Caught up with GitHub (${String(pulled.files?.length ?? 0)} files). ` : "";
+		// (a commit of every change reads every file's status: on this repository, 2,212 files with the page busy after its
+		// load, more than a minute — as git_review's and git_commit's tools allow)
+		const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": { "path": string }[] };
+		// (`.silo/`'s own .gitignore and .gitattributes alone are nothing to commit: they go only with something else
+		// under `.silo/`, git-engine.ts `stageSiloSeeds`)
+		const changed = files.filter(({ path }) => path !== ".silo/.gitignore" && path !== ".silo/.gitattributes");
+
+		if (changed.length > 0) {
+			made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 600_000 }) as { "oid": string }).oid.slice(0, 7);
+		}
+
+		const pushed = await rpc.request("git.push", {}, { "timeoutMs": 300_000 }) as { "ref": string; "ok": boolean; "error"?: string };
+
+		if (!pushed.ok) {
+			throw new Error(`GitHub refused the push to ${pushed.ref}${pushed.error === undefined ? "" : `: ${pushed.error}`}`);
+		}
+
+		span.info("committed and pushed", { "files": changed.length, "ref": pushed.ref, "pulled": pulled.outcome, ...made === undefined ? {} : { "sha": made } });
+
+		return { "said": caught + (made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}`), "failed": false, ...made === undefined ? {} : { "made": made } };
+	} catch (failure) {
+		const text = failure instanceof Error ? failure.message : "Commit failed";
+
+		span.error("commit or push failed", { "error": errText(failure), "status": statusOf(failure), ...made === undefined ? {} : { "sha": made } });
+
+		return { "said": made === undefined ? text : `Committed ${made}, but not pushed: ${text}`, "failed": true, ...made === undefined ? {} : { "made": made } };
+	} finally {
+		span.end();
+	}
+}
+
 function CommitControl({ shell }: { "shell": ShellContext }) {
 	const { githubUser, boundRepo } = useStore(shared);
 	const [open, setOpen] = useState(false);
@@ -27,7 +80,6 @@ function CommitControl({ shell }: { "shell": ShellContext }) {
 	const [branch, setBranch] = useState<string | undefined>(undefined);
 
 	const commit = async (): Promise<void> => {
-		const { rpc } = shell;
 		const said = message.trim();
 
 		if (boundRepo === undefined) {
@@ -46,50 +98,19 @@ function CommitControl({ shell }: { "shell": ShellContext }) {
 		setError(undefined);
 		setResult(undefined);
 
-		const span = githubLog.span("editor.shell.commit.githubCommit", { "repo": boundRepo.owner + "/" + boundRepo.repo });
-		let made: string | undefined;
+		const done = await commitAndPush(shell.rpc, said, boundRepo.owner + "/" + boundRepo.repo);
 
-		try {
-			const pulled = await rpc.request("git.pull", {}, { "timeoutMs": 300_000 }) as { "ref": string; "outcome": string; "files"?: string[]; "conflicts"?: string[] };
-
-			if (pulled.outcome === "diverged") {
-				throw new Error(`GitHub's ${pulled.ref} and this workspace's have each moved on, so it can't catch up: that's a rebase or a merge`);
-			}
-
-			if (pulled.outcome === "conflicts") {
-				throw new Error(`GitHub changed files you've changed here, so it can't catch up: ${(pulled.conflicts ?? []).join(", ")}`);
-			}
-
-			const caught = pulled.outcome === "fast-forwarded" ? `Caught up with GitHub (${String(pulled.files?.length ?? 0)} files). ` : "";
-			// (a commit of every change reads every file's status: on this repository, 2,212 files with the page busy after its
-			// load, more than a minute — as git_review's and git_commit's tools allow)
-			const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": { "path": string }[] };
-			// (`.silo/`'s own .gitignore and .gitattributes alone are nothing to commit: they go only with something else
-			// under `.silo/`, git-engine.ts `stageSiloSeeds`)
-			const changed = files.filter(({ path }) => path !== ".silo/.gitignore" && path !== ".silo/.gitattributes");
-
-			if (changed.length > 0) {
-				made = (await rpc.request("git.commit", { "message": said }, { "timeoutMs": 600_000 }) as { "oid": string }).oid.slice(0, 7);
-				setMessage("");
-			}
-
-			const pushed = await rpc.request("git.push", {}, { "timeoutMs": 300_000 }) as { "ref": string; "ok": boolean; "error"?: string };
-
-			if (!pushed.ok) {
-				throw new Error(`GitHub refused the push to ${pushed.ref}${pushed.error === undefined ? "" : `: ${pushed.error}`}`);
-			}
-
-			setResult(caught + (made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}`));
-			span.info("committed and pushed", { "files": changed.length, "ref": pushed.ref, "pulled": pulled.outcome, ...made === undefined ? {} : { "sha": made } });
-		} catch (failure) {
-			const text = failure instanceof Error ? failure.message : "Commit failed";
-
-			setError(made === undefined ? text : `Committed ${made}, but not pushed: ${text}`);
-			span.error("commit or push failed", { "error": errText(failure), "status": statusOf(failure), ...made === undefined ? {} : { "sha": made } });
-		} finally {
-			span.end();
-			setCommitting(false);
+		if (done.made !== undefined) {
+			setMessage("");
 		}
+
+		if (done.failed) {
+			setError(done.said);
+		} else {
+			setResult(done.said);
+		}
+
+		setCommitting(false);
 	};
 
 	// The popover's body: what it needs first, until it has it — then the repo it pushes to, and the message.

@@ -193,11 +193,23 @@ How it's kept:
        own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
      - *Docs:* done 2026-11-02 — ARCHITECTURE.md (1,277 lines to 688) and RUNNING.md (320 to 126) describe the core;
        RUNTIME-EVIDENCE.md says it's out, kept as the design its features come back to.
+     - *Every file one feature's:* done 2026-11-03 — `silo check` fails on a code file under packages/editor no live
+       feature's `paths` (or `tests`) holds, and on one two features' `paths` both hold (`.silo/owned.json`; silo README,
+       decision 22), in CI's lint and in the editor's Problems. Then the files that mixed features split along their
+       lines, each part into a module of its feature's: the debug worker (worker/, a module per feature) and the
+       adapter's stops; workbench-entry down to the boot and its wiring (project.ts, theme-follow.ts, bridge-link.ts);
+       workspace-fs's stores report to architecture-zenfs.ts; git-service.ts to git alone (git-push.ts, git-history.ts,
+       git-review.ts' discard and partial commit, the origin to project.ts, unpushed.ts); the build's parts for one
+       feature each beside it in build/ (command-tap, history, static-host, package-types; snapshot.ts the starter's);
+       the debug worker's session to the stepping debugger alone; the shell's icons out of shared/theme.ts. ata.ts,
+       test-runs.ts and workspace-tools.ts were one feature's each.
      - *The core's tests:* begun 2026-11-02 — the ledger declares each core feature's tests (`tests`, which `silo check`
-       holds to the files): 16 of the 29 have them, four of those new (history-ledger: decisions and drift in Problems;
-       tarballs; runs; shell-feature). The unit suite passes in Node. Without a test yet: the agent's view of the editor
-       and its workspace tools, capability stops, Commit and Push to GitHub, file search, the review panel, the static
-       host's service worker, sign-in, Source Control, tests for agents and tests run in the debugger, the theme following
+       holds to the files): 22 of the 35 have them. New: history-ledger, tarballs, runs, shell-feature (2026-11-02); and
+       git's (2026-11-03): git-push (pushed, pulled, branches, a refusal's reason, through `git http-backend`), commit
+       (the top bar's Commit, its flow as `commitAndPush`), git-views (the review panel and Source Control, in the
+       browser, in CI's `realms`). The unit suite passes in Node. Without a test yet: the agent's view of the editor and
+       its workspace tools, capability stops, the architecture reports, the build, extensions by URL, file search, the
+       static host's service worker, sign-in, the bridge, the test harnesses, the starter workspace, the theme following
        the system.
      - *Then:* `EDITOR_DEPLOYS` set to `off` (production keeps the full editor) and the branch landed on main.
      Found while reducing: the editor's runner has no `globalThis.crypto` (runs.test.mjs fails there, passes in Node);

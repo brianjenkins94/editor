@@ -276,6 +276,9 @@
     ],
     "paths": [
       "packages/editor/shell/commit.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/commit.test.mjs"
     ]
   },
   "Coverage in the gutter": {
@@ -918,6 +921,9 @@
       "packages/editor/shell/git-push.ts",
       "packages/editor/shell/push.ts",
       "packages/editor/workbench/git-push.ts"
+    ],
+    "tests": [
+      "packages/editor/test/git-push.test.mjs"
     ]
   },
   "Real effects, decided per call": {
@@ -1039,6 +1045,9 @@
     "paths": [
       "packages/editor/shell/git-codehike.tsx",
       "packages/editor/shell/git-panel.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/git-views.mjs"
     ]
   },
   "Rule editor": {
@@ -1204,6 +1213,9 @@
     ],
     "paths": [
       "packages/editor/extensions/source-control/"
+    ],
+    "tests": [
+      "packages/editor/test/git-views.mjs"
     ]
   },
   "Spell check": {

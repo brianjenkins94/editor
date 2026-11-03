@@ -448,7 +448,8 @@ export async function push(http: HttpClient, url: string, ref?: string, force = 
 	const result = await gitPush({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": branchName, "remoteRef": branchName, "force": force });
 	const answer = result.refs[`refs/heads/${branchName}`];
 
-	return { "ref": branchName, "ok": result.ok && answer?.ok !== false, ...answer?.error === undefined ? {} : { "error": answer.error } };
+	// (isomorphic-git's answer for a ref that went through has an empty `error`)
+	return { "ref": branchName, "ok": result.ok && answer?.ok !== false, ...answer?.error === undefined || answer.error === "" ? {} : { "error": answer.error } };
 }
 
 /**
