@@ -195,6 +195,18 @@ How it's kept:
        "unless already probed", which the code doesn't do; the git panel's `git-panel.css` after the move to Stitches); a
        cite of a queue entry by number (checkpoints.ts' "NEXT.md item 2"), which drifts as items move; and a JSDoc
        block on nothing (two in a row before `renderGitPanel`).
+     - *The zero-knowledge baseline* (2026-11-03, `.silo/zero-knowledge.json`: questions, key, grades) — three
+       features (Answer a call where it stops, core; Experiments that undo themselves and Notes on code, removed), the
+       pass's five questions each, answered by an agent per feature and condition through files_* alone: the code alone
+       (`.refs/full-editor~stripped/`, built for it: git_open's `stripped`, comments blanked by BABLR line for line, no
+       Markdown or `.silo/`) **12 of 15**; the code as it is (comments, still no docs) **14.5 of 15**. Every point the
+       comments carried was a why: the three "why is it this way" answers came from a comment as it is, and the code
+       alone guessed them — one wrong, two right but unsure (one from an agent tool's description string, which stripping
+       keeps). What it's for, its ways in, what's its own and what removing it takes held without comments: the names,
+       the registrations and the strings say them. Both missed half of a feature's what (Experiments' preview of a
+       replacement lives in files_replace): a boundary to draw, not a comment to keep. Found: the stripped tree is slow
+       cold — each file is parsed as it's read, so greps across folders timed out until BABLR had them (its cache, warmed by
+       BABLR: Check Which Files Parse…); the code-alone agents took 15–24 minutes against 2.
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
      or kept, each "stays because" reason checked again.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved

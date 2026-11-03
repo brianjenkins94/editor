@@ -1,0 +1,192 @@
+{
+	"about": "The zero-knowledge pass's baseline (packages/editor/ARCHITECTURE.md, *What's self-explanatory*): per feature, the pass's questions answered by an agent from the code alone (comments blanked, no docs: .refs/full-editor~stripped/) and from the code as it is (comments, still no Markdown or .silo/: .refs/full-editor/), through the editor's files_read, files_glob and files_grep — graded against the key (the manifest's what and ways, the ledger, the docs): 1 right, 0.5 partly right or right but guessed, 0 wrong. A feature's pass runs again when it's reintroduced, against this.",
+	"ref": "full-editor",
+	"commit": "28ddbcfb6b7f8efa6434af9b0b9bac8b8a36ed90",
+	"on": "2026-11-03",
+	"score": {
+		"as it is": 14.5,
+		"code alone": 12,
+		"of": 15
+	},
+	"features": [
+		{
+			"feature": "Answer a call where it stops",
+			"entry": "packages/editor/extensions/bridge/capability-stops.ts",
+			"questions": [
+				{
+					"asked": "What does it do, for a person using the editor?",
+					"key": "A run reaching a call that touches files, the network or commands that nothing has decided stops on that line and asks in the margin: allow, skip or deny, for this call, this run or always, or make a rule.",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Its ways in?",
+					"key": "command editor.capability.decide; the Margin's margin.decide and margin.rule; a debug adapter tracker; hub request debug.session.<id>.decide.",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Besides capability-stops.ts, which files are part of it?",
+					"key": "The debugger's side: tsval's adapter and worker handling `decide` (split into adapter/stops.ts and worker/stops.ts since).",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Why does \"for this run\" cover every call of the capability, not only calls reaching the same resource?",
+					"key": "A loop's calls reach a different resource each time round (capability-stops.ts 119–120, a comment).",
+					"as it is": {
+						"grade": 1,
+						"from": "the comment"
+					},
+					"code alone": {
+						"grade": 0,
+						"said": "inferred: a resource often isn't known before the call; a rule on one resource wouldn't match non-literal arguments"
+					}
+				},
+				{
+					"asked": "What would removing it take?",
+					"key": "capability-stops.ts and its registration; the Margin's ask item and commands; the debugger's decide; policyFor's and takeOnce's other callers (debug-events.ts, runtime-fs.ts) need another source.",
+					"as it is": {
+						"grade": 1,
+						"said": "more than the key: runs_tests' approvals send allow-once"
+					},
+					"code alone": {
+						"grade": 1
+					}
+				}
+			]
+		},
+		{
+			"feature": "Experiments that undo themselves",
+			"entry": "packages/editor/workbench/checkpoints.ts",
+			"questions": [
+				{
+					"asked": "What does it do, and for whom?",
+					"key": "An agent notes the working tree, tries a change, sees what it breaks, and puts every file back if it doesn't hold; and previews a replacement across files as a diff before making it.",
+					"as it is": {
+						"grade": 0.5,
+						"said": "the undo half; the preview half only as files_replace's pointer"
+					},
+					"code alone": {
+						"grade": 0.5,
+						"said": "the undo half only"
+					}
+				},
+				{
+					"asked": "Its ways in?",
+					"key": "agent tools workspace_checkpoint and workspace_restore; hub requests workspace.checkpoint and workspace.restore; core module installCheckpoints.",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Besides checkpoints.ts, which code is part of it?",
+					"key": "app/tools/workspace/tools.ts, the install in workbench-entry.tsx, its test.",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Why does a checkpoint leave out .silo/?",
+					"key": "The editor keeps its records there as it goes (the baseline, pinned versions): a restore would undo the editor's work, not the agent's (the header comment).",
+					"as it is": {
+						"grade": 1,
+						"from": "the comment"
+					},
+					"code alone": {
+						"grade": 0.5,
+						"said": "right, from the agent tool's description string, held as an inference"
+					}
+				},
+				{
+					"asked": "What would removing it take?",
+					"key": "checkpoints.ts, the workspace tool family, the install, its test and page-tools' names; files_replace's description points at it.",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1,
+						"said": "missed files_replace's pointer"
+					}
+				}
+			]
+		},
+		{
+			"feature": "Notes on code",
+			"entry": "packages/editor/extensions/notes/",
+			"questions": [
+				{
+					"asked": "What does it do, for a person using the editor?",
+					"key": "A note attached to a piece of code follows that code as it moves and changes; when the code is gone, the note waits in Problems to be re-placed or dismissed.",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Its ways in?",
+					"key": "commands notes.add, confirm, dismiss, placeHere, replace; the comment controller; the notes diagnostics and code actions; a status bar item; agent tool notes_add and hub request notes.add.",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Where does a note's place in the code come from: what does it rely on, through what?",
+					"key": "Annotations that stay on their code: the editor's BABLR, through the bridge's editor.annotations.refer and resolve (hub annotations.*).",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 1
+					}
+				},
+				{
+					"asked": "Why does dismissing a note write it back marked dismissed, rather than deleting it?",
+					"key": "So a branch merge can't bring the note back (the header comment; notes merge line by line).",
+					"as it is": {
+						"grade": 1,
+						"from": "the comment"
+					},
+					"code alone": {
+						"grade": 0.5,
+						"said": "the same reason, inferred from the merge rule, low confidence: 'I couldn't find the reason stated'"
+					}
+				},
+				{
+					"asked": "What would removing it take?",
+					"key": "extensions/notes, its bundledExtension, notes_add and the notes.add hub request; its tests; the annotations commands stay (others use them).",
+					"as it is": {
+						"grade": 1
+					},
+					"code alone": {
+						"grade": 0.5,
+						"said": "no tests or other callers: greps across folders timed out"
+					}
+				}
+			]
+		}
+	]
+}

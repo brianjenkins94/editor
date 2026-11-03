@@ -563,7 +563,9 @@ the ledger and docs (why), which are the answers. Agents answer them through the
 - the code as it is;
 - the code, comments stripped, with notes through the tools.
 
-The first against the second is what comments carry today. The third against the second is whether notes lose any of
+The first against the second is what comments carry today. The baseline (2026-11-03, three features,
+`.silo/zero-knowledge.json`): 12 of 15 from the code alone, 14.5 as it is — and what the comments carried was the whys,
+only: what a feature's for, its ways in, what's its own and what removing it takes held without them. The third against the second is whether notes lose any of
 it. Each question the code alone gets wrong is fixed one of three ways: the code says it (a name, a structure), a note
 (a why the code can't), or a doc (it spans many places). A feature's pass runs again when it's reintroduced, against
 its baseline.
