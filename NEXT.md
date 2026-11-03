@@ -127,10 +127,7 @@ How it's kept:
      works). Still to do, by the step it blocks:
      - *Working in it at all:* one agent session per machine drives the editor (debug-mcp's port), and a session that
        couldn't start one has no tools with nothing saying why; two tabs back from a reset both cloned into one
-       workspace; a tab sometimes missing from `tabs_list`. The workspace's store is a fixed 64 MB, and this
-       repository's fresh clone and its types take half (32 MB, 2026-11-03); a day of pulls filled the rest (91%: a
-       pack each, and nothing collects them), and the merge's pull failed (`sbfs: no free extent is large enough`, nothing
-       half-written) — a Reset and a fresh clone was the way out.
+       workspace; a tab sometimes missing from `tabs_list`; the workspace store full (*Watching*, its ceiling).
      - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced); CI's reach
        covers the architecture suites only, and there `activate` is reached by nearly every test; `decisions_for` named five
        features for one file; nothing shows code with its comments stripped (the zero-knowledge pass's first
@@ -274,7 +271,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   live, 26 MB of files — tree 8.5, types in node_modules 12.7, .git 3.2, .silo 1.3 — take 54 MB). So ~25–30 MB of
   files is the practical limit; this repository is near it. A bigger buffer costs nothing until it's used (measured in
   V8: a 512 MB SingleBuffer mounted and filled with this tree used the memory a 64 MB one did), so raising the constant
-  is the cheap fix — not done yet (2026-10-31, decided to wait). zen-fs can't grow a buffer in place (it reads the size
+  is the cheap fix — not done yet (2026-10-31, decided to wait). It was hit 2026-11-03: a day of pulls (a pack each;
+  nothing collects them) took the store to 91%, and the merge's pull failed (`sbfs: no free extent is large enough`,
+  nothing half-written); a Reset and a fresh clone — 32 MB, half the store — was the way out. zen-fs can't grow a buffer in place (it reads the size
   once); a growable SAB would need that upstream. The fill gauge (editor-metrics.ts `workspaceFill`) reads the
   allocator's high-water mark, freed space included, so it overstates how full the store is.
 
