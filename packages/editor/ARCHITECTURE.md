@@ -548,7 +548,8 @@ packages/editor's lines (outside tests) are comments. Each one is:
 Agents read notes where they'd have read the comments: `decisions_for` returns a file's or a name's notes beside the
 ledger, the manifest and the docs. `files_read` can show them inline, where the comment was. `files_edit` says when an
 edit leaves a note without its code. A file BABLR can't parse can't hold notes, so what of the scope it parses is
-measured first (BABLR's grammar has gaps on module code).
+measured first: all of it, 2026-11-03 (`full-editor`'s packages/editor, tests and demo aside: 317 of 317 files, 62,734
+lines, at about 16 ms a line; main's 192 of 192 — BABLR: Check Which Files Parse…, workbench/bablr.ts).
 
 **What's self-explanatory: the zero-knowledge pass.** Per feature, a fixed set of questions: what it's for, its ways
 in, what owns a given piece, why it's the way it is, what removing it takes. They're drawn from the manifest (what) and

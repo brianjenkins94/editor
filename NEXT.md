@@ -176,6 +176,12 @@ How it's kept:
      work* (workbench/git-refs.ts) — Git: Open a Commit Read-Only… (agents' `git_open`) opens a branch, tag or commit
      at `.refs/<name>/`, read from git's objects, fetched one commit deep (`full-editor`: 14 s), read-only, out of git
      and of the globs that don't name it; the Explorer, Quick Open, Find in Files and files_* read it as any folder.
+     - *What BABLR parses: all of it* (2026-11-03) — *Unparsable files flagged* back for it (workbench/bablr.ts, its
+       worker in workers/, started on first use; the user's choice over a node run): BABLR: Check Which Files Parse…
+       (agents' `code_parses`) parses a folder's code files one at a time, each kept by its blob oid, a file it can't
+       take a warning in Problems until it parses. `full-editor`'s packages/editor, tests, demo and dist aside: 317 of
+       317 files, 62,734 lines, in 17 minutes (about 16 ms a line); main's: 192 of 192, 28,428 lines. Found: after a
+       reload, a restored editor tab can say its file wasn't found (package.json, seen each reload today).
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
      or kept, each "stays because" reason checked again.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved

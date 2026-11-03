@@ -263,7 +263,8 @@ export async function preBuild(): Promise<void> {
 		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
 		// (and hub/observability to the editor's own: a debugger's worker connects through editor-api's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
-		"resolve": { "dedupe": ["typescript", ...SHARED_PACKAGES] },
+		// (`@brianjenkins94/bablr`, the BABLR worker's: its built, browser-safe dist — the fresh one, not the store's copy)
+		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", ...SHARED_PACKAGES] },
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
 		"plugins": [unenvResolve()],
@@ -283,7 +284,9 @@ export async function preBuild(): Promise<void> {
 					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
 					// ESLint's worker: real ESLint and the preset under almostnode (the eslint extension starts it), from the
 					// toolchain beside it
-					"lsp/eslint-worker": resolvePath("./extensions/eslint/worker.ts")
+					"lsp/eslint-worker": resolvePath("./extensions/eslint/worker.ts"),
+					// BABLR's worker (workbench/bablr.ts starts it): which files its grammar takes
+					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",

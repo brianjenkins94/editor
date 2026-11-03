@@ -23,6 +23,11 @@
         "command": "editor.git.openRef",
         "title": "Open a Commit Read-Only…",
         "category": "Git"
+      },
+      {
+        "command": "editor.bablr.check",
+        "title": "Check Which Files Parse…",
+        "category": "BABLR"
       }
     ]
   }

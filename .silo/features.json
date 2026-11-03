@@ -1530,16 +1530,27 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Unparsable files flagged": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "A file the editor can't parse gets a warning in Problems, because notes and evidence can't attach to it until it parses again.",
+    "status": "active",
+    "why": "the rewrite's Measure: what of the scope BABLR parses, measured before comments become notes (a file BABLR can't parse can't hold one); reintroduced 2026-11-03 (user: BABLR back, over a node run)",
+    "since": "2026-11-03",
+    "what": "A file the editor can't parse gets a warning in Problems, because notes and evidence can't attach to it until it parses again; and a folder can be checked for how much of it BABLR parses.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Comments become notes*",
     "ways": [
+      "agent tool|code_parses",
+      "command|editor.bablr.check",
+      "core module|installBablr",
       "diagnostic collection|BABLR",
-      "hub subscription|parse.status"
+      "hub request|bablr.check",
+      "hub request|bablr.parse"
     ],
-    "in": "e5772e5d",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/workbench/bablr.ts",
+      "packages/editor/workers/bablr-fast-freeze.ts",
+      "packages/editor/workers/bablr-worker.ts"
+    ],
+    "tests": [
+      "packages/editor/test/bablr.mjs"
+    ]
   },
   "What a way in reaches": {
     "status": "removed",

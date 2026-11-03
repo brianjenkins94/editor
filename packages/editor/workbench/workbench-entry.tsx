@@ -41,6 +41,7 @@ import { installTypeAcquisition } from "./ata";
 import { wireWorkbenchHub } from "./bridge-link";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installDecisions } from "./decisions";
+import { installBablr } from "./bablr";
 import { installEditorState } from "./editor-state";
 import { installFsTrace } from "./fs-trace";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
@@ -388,6 +389,8 @@ function maybeBoot(): void {
 
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 				installFsTrace(workbenchHub, api as typeof import("vscode"), paneLog);
+				// Which files BABLR parses, and a warning on each it can't (bablr.ts).
+				installBablr(api as typeof import("vscode"), workbenchHub, paneLog);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;
