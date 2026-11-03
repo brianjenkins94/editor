@@ -43,7 +43,7 @@ const TYPESCRIPT = (() => {
 	return undefined;
 })();
 
-/** How long one may take to load (the debug worker's TypeScript is megabytes; the cspell host starts its server). */
+/** How long one may take to load (the debug worker's TypeScript is megabytes). */
 const LOAD_MS = 60_000;
 
 let browser;
@@ -61,8 +61,8 @@ after(async () => {
 });
 
 test("the entries are found", () => {
-	assert.ok(ENTRIES.includes("lsp/debug-worker.js") && ENTRIES.includes("lsp/packages-worker.js"), "dist/lsp has its entries: " + ENTRIES.join(", "));
-	assert.ok(ENTRIES.includes("extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-engine.js") && ENTRIES.includes("extensions/history/node_modules/history-ts-plugin/history-engine.js"), "the tsserver plugins' engines are beside them: " + ENGINES.join(", "));
+	assert.ok(ENTRIES.includes("lsp/debug-worker.js") && ENTRIES.includes("lsp/node-worker.js"), "dist/lsp has its entries: " + ENTRIES.join(", "));
+	assert.ok(ENTRIES.includes("extensions/history/node_modules/history-ts-plugin/history-engine.js"), "the tsserver plugin's engine is beside it: " + ENGINES.join(", "));
 });
 
 /** Load `entry` as its starter does, in its realm: undefined when it loaded, else why it couldn't. */

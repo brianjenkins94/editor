@@ -16,55 +16,32 @@
     "group": "${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}"
   },
-  # The live architecture view's end-to-end suites (packages/editor/test/architecture-*.mjs): a real editor session in
-  # headless Chromium — boot, a preview + HMR, two dev servers, a cold provoke round, a node script under the tsval
-  # debugger, a webview, the git review diff, this checkout's debug-mcp, editor-contrib's extension (contrib/) loaded and
-  # run — checked against the declared model. They catch
-  # a wiring regression or an upstream monaco-vscode-api release (the component installs the latest) before it ships.
-  # Its own workflow, not a job in `ci`, so it doesn't gate the deploy until it has proven stable there. The last suite
-  # (test/performance.mjs) holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json,
-  # and warns on a rise since the last green run here — whose `performance` artifact is its baseline.
+  # The editor's browser suites, in headless Chromium against its dev server (packages/editor/test/architecture-harness.mjs):
+  # `realms` loads every module the editor starts in a realm of its own there (test/worker-realms.mjs); `performance`
+  # holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json, and warns on a rise
+  # since the last green run here — whose `performance` artifact is its baseline. Each on a runner of its own, so
+  # nothing shares the CPU while performance measures. They catch a wiring regression or an upstream monaco-vscode-api
+  # release (the component installs the latest) before it ships. Its own workflow, not a job in `ci`, so it doesn't gate
+  # the deploy.
   #
-  # Sharded: each suite file (or a few short ones together) on a runner of its own, so they run side by side without
-  # sharing a CPU — the tour is three files, each in a session of its own (test/architecture-tour-session.mjs). The tour's
-  # shards keep what they saw; `diagram` merges it and checks ARCHITECTURE.md's diagram against it.
-  #
-  # Selected (packages/editor/test/selection.mjs; packages/silo/README.md, *Which tests reach what*): only the shards a
-  # change reached run, by what each test reached when it last ran — the records at the base (the commit before a push,
-  # a pull request's merge base), so a change can't skip its own tests by editing them. Every shard but performance runs
-  # instrumented (COVERAGE=1) and keeps what each of its tests reached; on main, `reach` folds that into the records and
-  # commits them when they change.
+  # The rewrite (packages/editor/ARCHITECTURE.md, *The rewrite, in place*) reduced these to the core's: the tours, the
+  # smoke session and their selection by reach went with the features they toured, and come back as each feature's own
+  # tests do.
   "jobs": {
-    "select": {
-      "runs-on": "ubuntu-latest",
-      "outputs": {
-        "matrix": "${{ steps.select.outputs.matrix }}",
-        "any": "${{ steps.select.outputs.any }}",
-        "tours": "${{ steps.select.outputs.tours }}"
-      },
-      "steps": [
-        { "uses": "actions/checkout@v4", "with": { "fetch-depth": 0 } },
-        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
-        {
-          "id": "select",
-          "run": "base=\"${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}\"\nif [ \"${{ github.event_name }}\" = pull_request ]; then base=$(git merge-base \"$base\" HEAD); fi\nmatrix=$(node packages/editor/test/selection.mjs select \"$base\")\necho \"matrix=$matrix\" >> \"$GITHUB_OUTPUT\"\necho \"any=$(echo \"$matrix\" | jq '.include | length > 0')\" >> \"$GITHUB_OUTPUT\"\necho \"tours=$(echo \"$matrix\" | jq '[.include[].shard | select(startswith(\"tour-\"))] | length == 3')\" >> \"$GITHUB_OUTPUT\""
-        }
-      ],
-      "timeout-minutes": 10
-    },
     "suites": {
       "name": "${{ matrix.shard }}",
-      "needs": "select",
-      "if": "${{ needs.select.outputs.any == 'true' }}",
       "runs-on": "ubuntu-latest",
       # actions: read, to download the last green run's performance results.
       "permissions": { "contents": "read", "actions": "read" },
       "strategy": {
-        # Every shard runs to the end: a failure in one says nothing about the others.
+        # Every shard runs to the end: a failure in one says nothing about the other.
         "fail-fast": false,
-        # (selection.mjs's SHARDS: smoke-app, the three tours, and performance — alone, so nothing else shares the CPU
-        # while it measures)
-        "matrix": "${{ fromJSON(needs.select.outputs.matrix) }}"
+        "matrix": {
+          "include": [
+            { "shard": "realms", "files": "test/worker-realms.mjs" },
+            { "shard": "performance", "files": "test/performance.mjs" }
+          ]
+        }
       },
       "steps": [
         { "uses": "actions/checkout@v4" },
@@ -96,35 +73,12 @@
           "run": "id=$(gh run list --repo \"$GITHUB_REPOSITORY\" --workflow architecture --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')\nif [ -n \"$id\" ]; then gh run download \"$id\" --repo \"$GITHUB_REPOSITORY\" --name performance --dir /tmp/performance-baseline || echo \"run $id kept no performance results\"; fi",
           "env": { "GH_TOKEN": "${{ github.token }}" }
         },
-        # The fixture app (architecture-app.mjs) installs hub and observability as tarballs: this commit's, not the
-        # published ones (a change to either publishes only after ci passes, so @latest would race it). util-publish with CI
-        # unset just packs them into docs/packages (no release); a static server hands them to the editor in the browser.
-        {
-          "if": "${{ matrix.shard == 'smoke-app' }}",
-          "run": "CI= npx util-publish packages/hub packages/observability\n(npx -y http-server docs/packages -p 5198 --cors -c-1 --silent &)\nnpx -y wait-on -t 30000 http-get://localhost:5198/hub@0.0.0.tgz"
-        },
         {
           "run": "pnpm --filter ./packages/editor exec node --test --test-concurrency=1 --test-global-setup=test/architecture-harness.mjs ${{ matrix.files }}",
           "env": {
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
-            "ARCH_HUB_TGZ": "http://localhost:5198/hub@0.0.0.tgz",
-            "ARCH_OBSERVABILITY_TGZ": "http://localhost:5198/observability@0.0.0.tgz",
-            "PERF_BASELINE": "/tmp/performance-baseline/performance.json",
-            # (what each test reaches, kept for selection — not while performance measures)
-            "COVERAGE": "${{ matrix.shard != 'performance' && '1' || '' }}"
+            "PERF_BASELINE": "/tmp/performance-baseline/performance.json"
           }
-        },
-        # What each of its tests reached, for the records.
-        {
-          "if": "${{ matrix.shard != 'performance' }}",
-          "uses": "actions/upload-artifact@v4",
-          "with": { "name": "reach-${{ matrix.shard }}", "path": "/tmp/architecture-reach/*.json", "if-no-files-found": "error" }
-        },
-        # What a tour shard saw, for the diagram.
-        {
-          "if": "${{ startsWith(matrix.shard, 'tour-') }}",
-          "uses": "actions/upload-artifact@v4",
-          "with": { "name": "tour-seen-${{ matrix.shard }}", "path": "/tmp/architecture-tour-seen/*.json", "if-no-files-found": "error" }
         },
         # This run's results — the next one's baseline — and something to look at when a budget fails.
         {
@@ -132,54 +86,14 @@
           "uses": "actions/upload-artifact@v4",
           "with": { "name": "performance", "path": "/tmp/performance.json", "if-no-files-found": "ignore" }
         },
-        # What a shard's sessions saw, when it failed — and smoke-app's always, so a passing run says too what its slow
-        # runners queue (NEXT.md: the capabilities baseline reading the app fixture's tree, its registry traffic).
+        # What a shard's session saw, when it failed.
         {
-          "if": "${{ failure() || (always() && matrix.shard == 'smoke-app') }}",
+          "if": "${{ failure() }}",
           "uses": "actions/upload-artifact@v4",
           "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json\n/tmp/architecture-*.png", "if-no-files-found": "ignore" }
         }
       ],
       "timeout-minutes": 15
-    },
-    # ARCHITECTURE.md's diagram, against what the tour's shards saw together — when every tour ran. No browser: a merge
-    # and a render.
-    "diagram": {
-      "needs": ["select", "suites"],
-      "if": "${{ needs.select.outputs.tours == 'true' }}",
-      "runs-on": "ubuntu-latest",
-      "steps": [
-        { "uses": "actions/checkout@v4" },
-        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
-        {
-          "uses": "actions/download-artifact@v4",
-          "with": { "pattern": "tour-seen-*", "merge-multiple": true, "path": "/tmp/architecture-tour-seen" }
-        },
-        { "run": "pnpm --filter ./packages/editor run test:architecture:diagram" }
-      ],
-      "timeout-minutes": 15
-    },
-    # The records (.silo/evidence/ci/architecture.json): what each test that ran reached, folded in and committed when
-    # it changed — on main, once every selected shard passed. CI's own evidence only (packages/silo/README.md, "Trust").
-    "reach": {
-      "needs": ["select", "suites"],
-      "if": "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.suites.result == 'success' }}",
-      "runs-on": "ubuntu-latest",
-      "permissions": { "contents": "write" },
-      "steps": [
-        { "uses": "actions/checkout@v4" },
-        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
-        {
-          "uses": "actions/download-artifact@v4",
-          "with": { "pattern": "reach-*", "merge-multiple": true, "path": "/tmp/architecture-reach" }
-        },
-        # (folded into the records as main has them now — another run's may have landed since this commit — read against
-        # this commit's files; then committed on main's tip, a fast-forward: if main moves before the push, again)
-        {
-          "run": "records=.silo/evidence/ci/architecture.json\ngit config user.name 'github-actions[bot]'\ngit config user.email '41898282+github-actions[bot]@users.noreply.github.com'\nfor attempt in 1 2 3; do\n  git checkout -q -f --detach ${{ github.sha }}\n  git fetch -q origin main\n  git show \"origin/main:$records\" > \"$records\" 2>/dev/null || rm -f \"$records\"\n  node packages/editor/test/selection.mjs merge /tmp/architecture-reach\n  cp \"$records\" /tmp/records.json\n  git checkout -q -f --detach origin/main\n  mkdir -p \"$(dirname \"$records\")\"\n  cp /tmp/records.json \"$records\"\n  if git diff --quiet -- \"$records\" && git ls-files --error-unmatch \"$records\" >/dev/null 2>&1; then echo 'the reach is as it was'; exit 0; fi\n  git add \"$records\"\n  git commit -q -m \"the architecture suites' reach, from CI (${{ github.sha }})\"\n  if git push -q origin HEAD:main; then exit 0; fi\n  sleep 5\ndone\nexit 1"
-        }
-      ],
-      "timeout-minutes": 10
     }
   }
 }
