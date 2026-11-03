@@ -968,7 +968,8 @@
       "packages/editor/shell/address.ts",
       "packages/editor/shell/git-clone.ts",
       "packages/editor/shell/github.ts",
-      "packages/editor/shell/repo-load.tsx"
+      "packages/editor/shell/repo-load.tsx",
+      "packages/editor/workbench/project.ts"
     ],
     "tests": [
       "packages/editor/test/github.test.mjs"
@@ -1333,7 +1334,8 @@
     "docs": "packages/editor/ARCHITECTURE.md, *Extensions: which one, which host*",
     "paths": [
       "packages/editor/extensions/bridge/extension.ts",
-      "packages/editor/extensions/bridge/hub.ts"
+      "packages/editor/extensions/bridge/hub.ts",
+      "packages/editor/workbench/bridge-link.ts"
     ]
   },
   "The editor's test harnesses": {
@@ -1395,7 +1397,8 @@
       "hub subscription|theme.colors"
     ],
     "paths": [
-      "packages/editor/shared/theme.ts"
+      "packages/editor/shared/theme.ts",
+      "packages/editor/workbench/theme-follow.ts"
     ]
   },
   "Type queries": {

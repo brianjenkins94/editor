@@ -98,9 +98,10 @@ async function analyzerOf(repo: string): Promise<Analyzer> {
 	return analyzer;
 }
 
-/** The program now: its tracked files as they are on disk — its features, and its declaration graph. */
+/** The program now: its files as they are on disk (but for what git ignores) — its features, and its declaration graph. */
 export async function currentProgram(repo: string): Promise<{ "features": ReturnType<typeof featuresOf>; "graph": DeclarationGraph }> {
-	const files = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && includeByDefault(file) && fs.existsSync(path.join(repo, file)));
+	// (and the files not yet committed, but for those git ignores: as the ledger's drift reads them)
+	const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && includeByDefault(file) && fs.existsSync(path.join(repo, file)));
 	const analyzer = await analyzerOf(repo);
 
 	try {

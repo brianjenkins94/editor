@@ -8,6 +8,9 @@
  *   (`runtime.fs.attach`), which every debugger's worker asks for first. While the page is busy loading, the bridge
  *   (on the page's own thread) can be minutes from that.
  */
+import type { Hub } from "@brianjenkins94/hub";
+import type * as vscodeApi from "vscode";
+import { rpcCallSubject } from "@brianjenkins94/hub";
 
 export const STAGES = ["workspace", "api", "debugger"] as const;
 
@@ -56,4 +59,14 @@ export async function waitFor(stages: readonly Stage[], timeoutMs: number, signa
 	await Promise.race([Promise.all(stages.map(whenReady)), deadline]);
 
 	return stages.filter((stage) => !reached.has(stage));
+}
+
+/** The debugger's up once tsval is active and the bridge answers the workspace runtime's link: then a debug run can
+ *  start (`debugger`). */
+export async function whenDebuggerUp(vscode: typeof vscodeApi, hub: Hub): Promise<void> {
+	await vscode.extensions.getExtension("brianjenkins94.tsval")?.activate();
+
+	while (!await hub.whenInterested(rpcCallSubject("runtime.fs.attach"), 60_000)) { /* still coming up */ }
+
+	markReady("debugger");
 }
