@@ -50,6 +50,10 @@
     "paths": [
       "packages/editor/app/tools/editor/",
       "packages/editor/workbench/editor-state.ts"
+    ],
+    "tests": [
+      "packages/editor/test/agent-tools.mjs",
+      "packages/editor/test/page-tools.test.mjs"
     ]
   },
   "Agent workspace tools": {
@@ -94,6 +98,10 @@
       "packages/editor/app/tools/terminal/",
       "packages/editor/workbench/git-history.ts",
       "packages/editor/workbench/workspace-tools.ts"
+    ],
+    "tests": [
+      "packages/editor/test/agent-tools.mjs",
+      "packages/editor/test/page-tools.test.mjs"
     ]
   },
   "Agents drive the debugger": {
@@ -164,6 +172,9 @@
       "packages/editor/extensions/bridge/capability-stops.ts",
       "packages/editor/extensions/tsval/adapter/stops.ts",
       "packages/editor/extensions/tsval/worker/stops.ts"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
     ]
   },
   "Architecture reports and metrics": {

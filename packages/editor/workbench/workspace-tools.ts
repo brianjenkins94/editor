@@ -86,11 +86,12 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 	};
 
 	const relative = (uri: vscodeApi.Uri): string => vscode.workspace.asRelativePath(uri, false);
-	/** A file's text as the editor has it: an open document's (unsaved edits included), else what's on disk. */
+	/** A file's text as the editor has it: an open document's with unsaved edits, else what's on disk. (Not an unedited
+	 *  document's: VS Code keeps one after its file is deleted, and it would read as there.) */
 	const textOf = async (uri: vscodeApi.Uri): Promise<{ "text": string; "dirty": boolean }> => {
 		const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
 
-		if (open !== undefined) {
+		if (open?.isDirty === true) {
 			return { "text": open.getText(), "dirty": open.isDirty };
 		}
 

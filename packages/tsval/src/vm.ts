@@ -1481,11 +1481,14 @@ export class Machine implements VM {
 
 	private breakpointsAt(source: ts.SourceFile, lines: number[]): void {
 		const wanted = new Set(lines);
+		// Only a line's first statement, as V8 places a line's breakpoint: `try { call(); }` or `if (a) b();` stops once on
+		// a continue, not again at the statement inside — and a loop's next pass stops there again. (Visited in order,
+		// outer before inner, so the first seen on a line is its first.)
 		const visit = (node: ts.Node): void => {
 			if (isStatement(node)) {
 				const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 
-				if (wanted.has(line)) {
+				if (wanted.delete(line)) {
 					this.breakpoints.add(`${source.fileName}:${node.getStart(source)}`);
 				}
 			}
