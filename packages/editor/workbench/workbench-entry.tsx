@@ -45,8 +45,8 @@ import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
-import { installCodeReach } from "./code-reach";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
+import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import * as gitEngine from "./git-engine";
@@ -670,8 +670,8 @@ function maybeBoot(): void {
 
 				// The review: the changes as hunks, with BABLR's verdicts and the features they're in (git-review.ts).
 				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
-				// What's been decided about code: the history extension's reading of the program (code-reach.ts).
-				installCodeReach(api as typeof import("vscode"), workbenchHub);
+				// What's been decided about a file or a name: the history extension's reading of the ledger and docs (decisions.ts).
+				installDecisions(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
 

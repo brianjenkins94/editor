@@ -1,37 +1,21 @@
 /**
- * History — what your edits change, as you make them. Derived history (packages/silo/README.md, *Derived history*: live from edits) live: when you pause,
- * the program as it now stands is read — by this extension's TypeScript server plugin (ts-plugin.js), with the server's
- * own TypeScript, edits not yet saved included — and replayed against the last reading (util/silo's Replayer). What a
- * pause changed (a feature added, removed, changed — through anything it reaches) is told in the History output channel.
+ * History — the program as it stands, read as you edit, and the feature ledger held to it. When you pause, the program is
+ * read by this extension's TypeScript server plugin (ts-plugin.js), with the server's own TypeScript, edits not yet saved
+ * included; its ways in are what the ledger (ledger.ts) is checked against — `silo check`'s drift, in Problems — and
+ * what `history.decisions` answers from.
  *
- * And what runs say (step 4): after each reading, and whenever a run leaves evidence, each feature's own code is joined
- * with the evidence placed in the files as they are now (util/silo's exercise) — exercised, or dormant (its file ran, its
- * code didn't) — and a change in that is told too. Evidence is keyed on BABLR spans; the shared evidence store
- * (insights') places them through the editor's resolver, so the join with BABLR happens there, at the edge.
+ * Nothing it finds is kept: it's for the session.
  *
- * And the feature ledger (ledger.ts): `silo check`'s drift, in Problems, against the ways in it reads; and its dormant
- * ways in, in purple where they're registered, with Keep and Remove. And the program by feature (features.ts): which
- * of the manifest's features own each declaration, for core's features map, and a focus on one that dims the rest.
- *
- * Nothing it finds is kept: it's for the session. Once committed, the commit tells what changed (`silo history`), and what
- * runs say is recomputed from the evidence, which is kept.
- *
- * Public API only: the plugin through `typescript.tsserverRequest`, evidence through the bridge's
- * `editor.annotations.resolve`. No hub, no core capture: the TypeScript server already sees every edit.
+ * Public API only: the plugin through `typescript.tsserverRequest`. No hub, no core capture: the TypeScript server
+ * already sees every edit.
  */
-import type { Exercise, Ran } from "@brianjenkins94/util/silo/exercise";
 import type { WayIn } from "@brianjenkins94/util/silo/features";
-import type { Analysis, Analyzer } from "@brianjenkins94/util/silo/graph";
+import type { Analysis } from "@brianjenkins94/util/silo/graph";
 import type { FileAnalysis } from "@brianjenkins94/util/silo/ts-analysis";
-import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
-import { parseRuns } from "@brianjenkins94/util/silo/evidence";
-import { exerciseOf } from "@brianjenkins94/util/silo/exercise";
 import { featuresOf, waysInManifest } from "@brianjenkins94/util/silo/features";
-import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util/silo/history";
-import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
+import { includeByDefault } from "@brianjenkins94/util/silo/history";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
 import * as vscode from "vscode";
-import { featuresView } from "./features";
 import { ledgerView } from "./ledger";
 
 /** How long after the last keystroke a burst ends. */
@@ -60,24 +44,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	const output = vscode.window.createOutputChannel("History");
 	const readings = new Map<string, { "analysis": FileAnalysis; "revision": number }>();
 	const manifests = new Map<string, WayIn[]>();
-	// The program as the plugin last read it: no snapshot is read here, so `read` is never asked.
+	// The program as the plugin last read it.
 	let latest: Analysis | undefined;
-	const analyzer: Analyzer = {
-		"analyze": () => {
-			latest = analysisOf(new Map([...readings].map(([path, reading]) => [path, reading.analysis])), manifests);
-
-			return Promise.resolve(latest);
-		}
-	};
-	const evidence = evidenceStore(vscode, context.subscriptions);
-	const ledger = ledgerView(context, root, output);
-	const byFeature = featuresView(context, root);
-	// What runs last said of each feature, this session (undefined until the first join: that one is told as a summary).
-	let exercised: Map<string, Exercise> | undefined;
-	const replayer = new Replayer(() => Promise.resolve(""), { "analyzer": analyzer, "include": includeByDefault });
+	const ledger = ledgerView(context, root);
 	const edited = new Set<string>();
-	let baseline = false;
-	let steps = 0;
+	let read = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	/** Whether a code file was made or deleted since the last reading: its projects read their files again first. */
 	let rescan = false;
@@ -100,85 +71,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}
 
-	/** The files some run ran: the run envelopes' (everyone's), and those with evidence kept. */
-	async function ranFiles(withEvidence: string[]): Promise<Set<string>> {
-		const files = new Set(withEvidence);
-		const folder = vscode.Uri.joinPath(root, SILO_DIR, "runs");
-
-		for (const [name] of await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscode.FileType][])) {
-			const text = await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder, name))).then((bytes) => new TextDecoder().decode(bytes), () => "");
-
-			for (const run of parseRuns(text)) {
-				for (const file of Object.keys(run.files)) {
-					files.add(file);
-				}
-			}
-		}
-
-		return files;
-	}
-
-	/** Join each feature's code with what ran, and tell what changed in that. */
-	async function exercise(): Promise<void> {
-		if (latest === undefined) {
-			return;
-		}
-
-		const analysis = latest;
-		const features = featuresOf([...analysis.ways].map(([file, ways]) => ({ "file": file, "ways": ways })));
-		const withEvidence = await evidence.files();
-		const observed = await ranFiles(withEvidence);
-
-		if (observed.size === 0) {
-			return; // nothing has run: nothing to say
-		}
-
-		// The evidence of the files that hold some feature's code, placed in their text as it is now.
-		const ran = new Map<string, Ran[]>();
-
-		for (const file of withEvidence) {
-			if ([...features.values()].some((feature) => feature.files.includes(file) || feature.roots.some((rootId) => rootId.startsWith(file + "#")))) {
-				const open = vscode.workspace.textDocuments.find((document) => relative(document.uri) === file);
-				const text = open?.getText() ?? await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, file))).then((bytes) => new TextDecoder().decode(bytes), () => "");
-				const placed = await evidence.placedIn(file, text);
-
-				ran.set(file, placed.flatMap((span) => (span.evidence.reached === undefined ? [] : [{ "file": file, "start": span.start, "end": span.end, ...span.evidence.reached }])));
-			}
-		}
-
-		const now = new Map([...features].map(([key, feature]) => [key, exerciseOf(feature, analysis.graph, ran, observed)]));
-
-		if (exercised === undefined) {
-			const count = (status: Exercise["status"]): number => [...now.values()].filter((each) => each.status === status).length;
-
-			output.appendLine(`Runs say: ${String(count("exercised"))} features exercised, ${String(count("dormant"))} dormant, ${String(count("unobserved"))} not run yet.`);
-			exercised = now;
-
-			return;
-		}
-
-		const events = exerciseEvents(features, exercised, now);
-
-		exercised = now;
-
-		if (events.length > 0) {
-			output.appendLine(`${new Date().toISOString()} runs: ${events.map((event) => event.type + " " + event.facet + " " + event.id).join("; ")}`);
-		}
-	}
-
 	/** Hold the ledger to the ways in as they're read now. */
 	async function checkLedger(): Promise<void> {
 		if (latest === undefined) {
 			return;
 		}
 
-		const features = featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways })));
-
-		await ledger.check(features, latest.graph);
-		await byFeature.show(features, latest.graph);
+		await ledger.check(featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways }))));
 	}
 
-	/** Read the program as it stands, and replay it against the last reading: the first is the baseline. */
+	/** Read the program as it stands. */
 	async function step(attempt = 0): Promise<void> {
 		const file = [...edited][0] ?? vscode.window.activeTextEditor?.document.uri.path;
 		const asked = rescan;
@@ -214,28 +116,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}
 
-		steps += 1;
-
-		const files = [...[...readings].map(([path, reading]) => ({ "path": path, "oid": String(reading.revision) })), ...[...manifests.keys()].map((path) => ({ "path": path, "oid": "manifest" }))];
-		const result = await replayer.step({ "id": "edit:" + String(steps), "date": new Date().toISOString(), "files": files });
-		const changed = [...edited].sort();
-
 		edited.clear();
+		latest = analysisOf(new Map([...readings].map(([path, reading]) => [path, reading.analysis])), manifests);
 
-		if (!baseline) {
-			baseline = true;
-			output.appendLine(`Reading ${String(readings.size)} files: ${String(result.features)} features.`);
-			await exercise();
-			await checkLedger();
-
-			return;
+		if (!read) {
+			read = true;
+			output.appendLine(`Reading ${String(readings.size)} files: ${String(latest.ways.size)} with ways in.`);
 		}
 
-		if (result.events.length > 0) {
-			output.appendLine(`${result.date} ${changed.join(", ")}: ${result.events.map((event) => event.type + " " + event.facet + " " + (event.id === "" ? "(unnamed)" : event.id)).join("; ")}`);
-		}
-
-		await exercise();
 		await checkLedger();
 	}
 
@@ -269,14 +157,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		})
 	);
-
-	// A run left evidence (or a person's evidence changed): what runs say may have changed.
-	context.subscriptions.push(evidence.onDidChange(() => {
-		queue = queue.then(exercise).catch((error: unknown) => {
-			// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: one that isn't an Error is said as String() says it
-			output.appendLine("History failed to join what ran: " + (error instanceof Error ? error.message : String(error)));
-		});
-	}));
 
 	// Code changed outside an editor — a pull, a checkout, a file written by a tool: read the program again.
 	const code = vscode.workspace.createFileSystemWatcher("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}");
@@ -320,15 +200,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(watcher, watcher.onDidChange(manifestsChanged), watcher.onDidCreate(manifestsChanged), watcher.onDidDelete(manifestsChanged));
 
-	// The ledger, a doc or CI's records changed: its drift, or what's dormant, may have (a doc naming a removed feature, say).
-	const decided = vscode.workspace.createFileSystemWatcher("**/{features.json,architecture.json,*.md}");
+	// The ledger or a doc changed: its drift may have (a doc naming a removed feature, say).
+	const decided = vscode.workspace.createFileSystemWatcher("**/{features.json,*.md}");
 	const ledgerChanged = (): void => {
 		queue = queue.then(checkLedger).catch(() => undefined);
 	};
 
 	context.subscriptions.push(decided, decided.onDidChange(ledgerChanged), decided.onDidCreate(ledgerChanged), decided.onDidDelete(ledgerChanged));
 
-	// The baseline: the program as it is when the extension starts.
+	// The first reading: the program as it is when the extension starts.
 	queue = queue.then(readManifests).catch(() => undefined);
 	schedule(IDLE_MS);
 }
