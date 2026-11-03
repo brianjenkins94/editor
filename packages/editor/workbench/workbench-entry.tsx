@@ -13,21 +13,22 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 // (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
+import "../shared/hidden-timers";
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
-import "../shared/hidden-timers";
 // First of what runs, before anything loads Lit: Web Awesome's components here move into docked windows (theme/documents).
-import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
+import "theme/documents";
 // eslint-disable-next-line perfectionist/sort-imports -- theme/documents above, first on purpose: it has to run before Lit does
 import { failureText } from "@brianjenkins94/editor-api/failures";
+import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, rpcCallSubject, serve } from "@brianjenkins94/hub";
+import { fs as workspaceStore } from "@zenfs/core";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
-import { fs as workspaceStore } from "@zenfs/core";
 import bridgeExtension from "bridge:extension";
 import settingsDefaults from "editor:settings-defaults";
 import historyExtension from "history:extension";
@@ -557,7 +558,6 @@ function maybeBoot(): void {
 				publishColors = () => {
 					workbenchHub.publish("theme.colors", readVsCodeColors(workbench));
 				};
-
 				publishColors();
 			}
 
@@ -684,7 +684,7 @@ function maybeBoot(): void {
 
 				// (VS Code has swapped its theme's style when it says so; a frame later, its colours read as the new theme's)
 				themeApi.window.onDidChangeActiveColorTheme(() => {
-					requestAnimationFrame(() => { publishColors?.(); });
+					requestAnimationFrame(() => publishColors?.());
 				});
 
 				workbenchHub.subscribe("theme.colorScheme", (data) => {

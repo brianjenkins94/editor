@@ -1,5 +1,6 @@
 /** @jsxImportSource preact */
 // (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
+import "./shared/hidden-timers";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import moduleVersions from "editor:versions";
@@ -9,7 +10,6 @@ import { createVscodeWindow } from "./app/vscode";
 import { reportArchitecture } from "./shared/architecture";
 import { reportSpanMetrics } from "./shared/editor-metrics";
 import { followResets, resetAsked, resetEditor, waitForReset } from "./shell/reset";
-import "./shared/hidden-timers";
 
 // Gain cross-origin isolation (SharedArrayBuffer) before booting. A dev server already sends the COOP/COEP
 // headers; on a static host (GitHub Pages) the coi service worker supplies them after one reload. On the
