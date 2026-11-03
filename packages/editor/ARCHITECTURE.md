@@ -274,13 +274,10 @@ What's discovered, and how, with no source read:
 What can't be: what never ran (a static scan is its later complement: edges no run has seen are untested paths);
 intent (which way a subject may travel — a rule); a component's insides; the file and line.
 
-So `architecture-model.ts` keeps only the rules — containment, the hub tree, each family's direction, each direct
-channel's reason, what a preview window's link allows — with a sentence of intent where a name doesn't say it. The
-family descriptions, the stores table and the declared diagram went. Discovered edges are their own kind
-(`declaredBetween` says `discovered`), drawn green, never red. Since 2026-10-19 the view is the canvas, the feature lens
-and each hub's components as rows in its box (a hub link's messages a thin line to the component subscribed); its side
-panel went, and review is debug-mcp's `architecture_state` (its `violations`, or a channel's traffic with `channel`)
-and observability's `flowsOf`, which the tour checks.
+The declared model went with the rewrite's reduction, and the live view that drew the store and checked it against
+the model's rules with it (2026-11-02; the ledger keeps its tombstone, restorable from the `full-editor` tag). What's
+discovered stays: every context's reports, kept in the workbench's architecture store (workbench/architecture-store.ts)
+and in debug-mcp's, which `architecture_state` answers from, and the tour's diagram below.
 
 Decided 2026-10-04: components by namespace refined by registering function (not a child hub per component); flows by
 traces where the hub can, timing elsewhere, marked inferred; stores and databases discovered; this file's diagram
@@ -293,15 +290,11 @@ The diagram above is the narrative, and says what can't be seen (what's bundled 
 **architecture tour** (its shards, `test/architecture-tour-*.mjs`, together) saw the editor do — every context, extension and store, and what
 joined them; then the stores, with who writes and who reads each; then each hub's components — rendered by
 `tourDiagram()` with nothing declared but where things run (*Discovered, not declared*, above). Instances read as one of a kind
-(`Preview :*`), and there are no counts, so the same tour renders the same block. A local run of the tour (then
+(`Server :*`), and there are no counts, so the same tour renders the same block. A local run of the tour (then
 `test/architecture-diagram.mjs`, which merges what its shards saw) rewrites it; the architecture workflow re-runs it and
 fails when it differs — so a change that adds a part, a channel or a store
 shows up here, in the same commit. Hub links are `<==>`, other channels `<-.->` (labelled by their protocol, or
 `undeclared`), an extension's commands `commands`, and a store's edges say whether it's read or written.
-
-What the model in `architecture-model.ts` still declares is the rules: which way each subject family may travel, why a
-direct channel isn't a hub link, what a preview window's link allows, and where each context runs. The **live
-architecture view** (*Developer: Open Live Architecture Diagram*) checks what it observes against them.
 
 <!-- architecture-tour:begin -->
 ```mermaid

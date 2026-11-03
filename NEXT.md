@@ -180,15 +180,16 @@ How it's kept:
      are real ones), error reports and the session timeline (the API keeps its side, for the deployed full editor), the
      shell's placeholder buttons, Explore Orderings, the debugger's browser tests (nothing drove a preview's page once
      previews went; their locator engine's package with them), and the architecture model's and view's previews, node worker,
-     ESLint and provoke (71 subject families nothing sent). The core's tests: 4 new (history-ledger, tarballs, runs,
+     ESLint and provoke (71 subject families nothing sent); then the live architecture diagram itself, its declared
+     model and conformance check (the reports and their store stay: debug-mcp's architecture_state and the CI harness
+     read them). The core's tests: 4 new (history-ledger, tarballs, runs,
      shell-feature), below. Realms and performance pass (8 of 8).
      Left, in order:
      - *Kept, a decision rather than a cut:* extensions by URL (`?extension=`, `extensions.json`) and the extension
        template (contrib/) — editor-contrib's site is the editor with its extension added, and contrib.yml syncs
-       contrib/ there, so taking them out is a decision about editor-contrib. The Live architecture view stays: the CI
-       harness reads it.
-     - *What's still in the manifest:* tsval's site sums, the Live architecture view, extensions by URL and the
-       extension template — they move to the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
+       contrib/ there, so taking them out is a decision about editor-contrib.
+     - *What's still in the manifest:* tsval's site sums, the architecture reports and metrics, extensions by URL and
+       the extension template — they move to the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
        own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
      - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
        check` caught a removed feature named.

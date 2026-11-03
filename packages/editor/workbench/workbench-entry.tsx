@@ -23,9 +23,9 @@ import "theme/documents";
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
-import { createHub, createRpcClient, rpcCallSubject, serve } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, rpcCallSubject } from "@brianjenkins94/hub";
 import { fs as workspaceStore } from "@zenfs/core";
-import { boot, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, registerExtension, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
 import settingsDefaults from "editor:settings-defaults";
@@ -38,7 +38,7 @@ import tsvalExtension from "tsval:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
-import { architectureStore, renderArchitectureView } from "./architecture-view";
+import { architectureStore } from "./architecture-store";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installDecisions } from "./decisions";
@@ -113,7 +113,6 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 // answered as tsval's is (ARCHITECTURE.md, *Extension points* 2: its file calls by the bridge, its servers by the preview) — linked as
 // every runtime link is (editor-api's linkRuntime: its own id, carrying only the runtime).
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
-registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
 
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.
@@ -555,11 +554,9 @@ function maybeBoot(): void {
 			// Open the initial editors now — deferred from boot's defaultLayout because the source files no longer live
 			// in boot's priority-1 seed (that layer now carries only the read-only base). They're in the zen-fs overlay
 			// seeded just above, so the editor can read them. Empty `files` = open only, don't rewrite (already seeded).
-			// openProject self-gates on the vscode API being ready (apiReady, captured below). Then the live architecture
-			// diagram, last, so a fresh load lands on it (the source editors sit beside it).
+			// openProject self-gates on the vscode API being ready (apiReady, captured below).
 			void (openEditors.length > 0 ? openProject([], openEditors, false) : apiReady)
-				.catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); })
-				.then(() => { runCommand(OPEN_ARCHITECTURE_COMMAND); });
+				.catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); });
 
 			// The editor's settings DEFAULTS — settings-defaults.jsonc, registered as the lowest settings layer (a
 			// contributions-only extension: no code, no host). Layers merge per key, so a workspace `.vscode/settings.json`

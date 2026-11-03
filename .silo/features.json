@@ -504,6 +504,24 @@
     "in": "517144b7",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
+  "Live architecture diagram": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A live diagram of the editor's parts and the messages between them, opened at boot, checked against a declared model of what may talk to what (conformance), with the violations for debug-mcp's architecture_state.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
+    "ways": [
+      "hub request|\"tool.architecture_violations.\" + tab",
+      "hub request|architecture.violations"
+    ],
+    "paths": [
+      "packages/editor/shared/architecture-model.ts",
+      "packages/editor/test/architecture-model.test.mjs",
+      "packages/editor/workbench/architecture-view.ts",
+      "packages/theme/src/styles/architecture-view.ts"
+    ],
+    "restore": "from the full-editor tag: architecture-view.ts (registered with the component's registerLiveArchitecture, opened by OPEN_ARCHITECTURE_COMMAND), the model and its test, and main.tsx's architecture_violations forward; the store it drew stays, in architecture-store.ts"
+  },
   "Live runs after an edit": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",

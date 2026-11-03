@@ -835,7 +835,7 @@ Little beats the file that registers a way in. What that says:
 - **Subjects are edges, when they're near.** A hub way in joined to the ways in whose registration quotes its subject
   (`linkedBySubjects`) is almost never wrong (0.97 alone) and lifts the file grouping to 0.60, the only derivation
   above the baseline. But only 36 of the 101 literal subjects are quoted in a registration; 49 are quoted only in
-  declarations, and those mislead: a catalog of subjects (`architecture-model.ts`'s `subjects` names 40) and composition
+  declarations, and those mislead: a catalog of subjects (the editor's declared architecture model named 40) and composition
   roots (the shell's `Shell` quotes 8) join features that aren't one. Followed through what a registration names, the
   links are 85% right one by one and chain file groups together (F 0.55–0.57); as reach, a shared subject node is one
   declaration among many and moves nothing (0.51–0.52).

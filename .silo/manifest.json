@@ -40,19 +40,15 @@
         "packages/editor/workbench/extensions.ts"
       ]
     },
-    "Live architecture view and metrics": {
-      "what": "A live diagram of the editor's parts and the messages between them, checked against its rules, and per-second memory, timing and traffic numbers for the monitor.",
+    "Architecture reports and metrics": {
+      "what": "Every context reports itself and its traffic on the architecture plane, and its memory, timing and traffic numbers on the metrics plane, for debug-mcp (architecture_state, metrics_query) and the architecture harness.",
       "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
-      "ways": [
-        "hub request|\"tool.architecture_violations.\" + tab",
-        "hub request|architecture.violations"
-      ],
       "paths": [
         "packages/editor/extensions/command-tap.ts",
-        "packages/editor/shared/architecture-model.ts",
         "packages/editor/shared/architecture-zenfs.ts",
         "packages/editor/shared/architecture.ts",
-        "packages/editor/shared/editor-metrics.ts"
+        "packages/editor/shared/editor-metrics.ts",
+        "packages/editor/workbench/architecture-store.ts"
       ]
     }
   },
@@ -185,8 +181,7 @@
       "docs": "packages/api/README.md, *The architecture page*",
       "paths": [
         "packages/admin/src/architecture.tsx",
-        "packages/api/src/architecture.ts",
-        "packages/theme/src/styles/architecture-view.ts"
+        "packages/api/src/architecture.ts"
       ]
     }
   },

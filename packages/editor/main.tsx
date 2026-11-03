@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 // (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
 import "./shared/hidden-timers";
-import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
+import { createHub, windowTransport } from "@brianjenkins94/hub";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import moduleVersions from "editor:versions";
 import { ensureCrossOriginIsolated } from "./app/coi";
@@ -70,15 +70,9 @@ if (reset === "wait") {
 	});
 
 	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
-	// This tab's id. The service worker is shared by every tab of the origin and links each tab's root separately, so
-	// what it asks on a tab's behalf is addressed to that tab: capability decisions (a node script's: the node worker is
-	// told its tab). This root answers its tab's addresses by asking its own tree — never another tab's.
+	// This tab's id: debug-mcp addresses this tab's page tools by it, apart from every other tab's.
 	const tab = crypto.randomUUID().slice(0, 8);
-	const tabRpc = createRpcClient(rootHub);
 
-	// What in this tab's architecture needs review (the workbench's conformance check), for debug-mcp's
-	// architecture_state: addressed like a page tool, but not announced as one.
-	serve(rootHub, "tool.architecture_violations." + tab, async () => tabRpc.request("architecture.violations", undefined, { "timeoutMs": 10000, "waitForResponderMs": 5000 }));
 	linkServiceWorkerHub(rootHub);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	// Dev-only: this tab's MCP tools, which debug-mcp registers while it's connected — under this tab's id, so it can
