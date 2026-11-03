@@ -151,9 +151,10 @@ How it's kept:
      git the most, 77,779 `stat`s for 3,561 paths (22 a path, 4.5 s) — a third of it the review panel's change problems,
      each a whole-tree walk (~1.5 s), until the panel asked for only what changed (git's `stat`s 77,779 → 29,927); a
      write-back 4 ms for 317 KB. The bridge's runtime-fs, a span per call, is counted instead (`runtime-fs`, by the
-     worker's kind: ESLint's first lint of a file here, 9,177 `stat`s for 4,738 paths and 10.6 MB read). Left: the realms
-     beyond the workbench (the debug and ESLint workers' stores, almostnode's) count but don't report, a
-     single call's span on demand, and VS Code's own callers named apart (all `vscode` now).
+     worker's kind: ESLint's first lint of a file here, 9,177 `stat`s for 4,738 paths and 10.6 MB read). The workers'
+     own stores need nothing (2026-11-03): a debug run's program reads and stats, and ESLint's, all cross runtime-fs —
+     a probe's `statSync` and `readFileSync` arrived there as `debug-worker`'s, and its shared mount made no store
+     call. Left: a single call's span on demand, and VS Code's own callers named apart (all `vscode` now).
      Before it, so the spans CLAUDE.md asks for (*Spans*) count (a throwing span and hub requests: done 2026-11-02):
      - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
        and this repository's spans take it already; the editor's lint holds them once lib publishes util.

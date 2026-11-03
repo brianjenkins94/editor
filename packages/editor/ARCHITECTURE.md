@@ -603,7 +603,8 @@ Built so far (2026-11-03): every call at the workbench's boundaries is counted b
 calls, time, distinct paths, bytes — as the metrics plane's `fs` gauge (shared/fs-boundaries.ts): VS Code's file
 service into the workspace provider (`provider`) and the node_modules one (`node_modules`), every zen-fs store operation
 timed (`zenfs`, `zenfs-local`), the write-back (`indexeddb`, and a span per flush), the change stream (`changes`), and the workers' file calls
-through the bridge (`runtime-fs`, by the worker's kind: `eslint`, a debugger's — once a span each, thousands a second);
+through the bridge (`runtime-fs`, by the worker's kind: `eslint`, a debugger's — once a span each, thousands a second),
+which is all of theirs: a debug run's reads and stats cross it, and the workers' own mounts of the store make no call;
 git's status walk is a span. Who asked is named by whoever calls the store (shared/fs-caller.ts): the provider
 (`vscode`), the boot (`seed`, `restore`), the write-back (`persist`), type acquisition's probes (`has`), npm's links
 (`install`), a project's writes (`project`), the terminal, and git — isomorphic-git through an fs whose promise calls
