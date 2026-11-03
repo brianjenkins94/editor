@@ -375,9 +375,9 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "ESLint": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced first (user, 2026-11-03): what contributes an ESLint rule comes back early, so the rules CI holds the code to — util's preset, the Web Awesome plugin, the realms' boundaries — hold as code is written in the editor",
+    "since": "2026-11-03",
     "what": "Real ESLint checks your code as you type, with quick fixes, fix-all on save, formatting, and the usual eslint.* settings.",
     "ways": [
       "code actions provider||eslint/extension.ts",
@@ -391,8 +391,15 @@
       "setting|eslint.workingDirectories",
       "worker||eslint/worker.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/build/eslint-toolchain-trace.mjs",
+      "packages/editor/build/eslint-toolchain.ts",
+      "packages/editor/extensions/eslint/"
+    ],
+    "tests": [
+      "packages/editor/test/eslint.mjs",
+      "packages/editor/test/performance.mjs"
+    ]
   },
   "Error reports from the editor": {
     "status": "removed",

@@ -248,6 +248,15 @@ How it's kept:
      util's preset (span names among them), the Web Awesome plugin, the realms' boundaries in eslint.config.js — hold as
      the code is written in the editor too; then what's built on it (*A change's problems*); and any feature that brings a
      rule of its own comes back with it, early.
+     - *ESLint: back* 2026-11-03 — `extensions/eslint` and its worker, the toolchain built beside them (263 packages,
+       10 MB), declared in the ledger with its tests (eslint.mjs, in CI's `workbench`: the preset where there's no
+       config, a folder's own config, a broken one said on itself, fix-all on save, `eslint.enable`), budgets back
+       (realm 294 of 400 MB). The first extension on `observeExtension`: its load and each lint and fix a span of
+       `ext:eslint`'s (first lint ~5 s, waiting on ESLint's load of ~4 s; then ~65 ms). `_eslint.problems` stays out until
+       *A change's problems* comes back to call it. Found: a file an agent writes (`files_write`, not shown) isn't linted
+       until it's opened in an editor, and its save isn't fixed — ESLint, in the web worker host, lints the documents that
+       host has, and an unshown one isn't; records an extension logs as it activates reached debug-mcp under the tab
+       before a reload at least once (not pinned down).
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_problems` (Problems shows the
      current set, not a change's), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in

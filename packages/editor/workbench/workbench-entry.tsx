@@ -26,6 +26,7 @@ import { createHub, createRpcClient } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
+import eslintExtension from "eslint:extension";
 import settingsDefaults from "editor:settings-defaults";
 import historyExtension from "history:extension";
 import { render } from "preact";
@@ -426,10 +427,10 @@ function maybeBoot(): void {
 			// and the workspace runtime the bridge exports.
 			builtIn(tsvalExtension, ExtensionHostKind.LocalProcess);
 
-			// The rest run in the web worker host, each from its folder with the files its manifest lists: history (its
-			// tsserver plugin) and Source Control (on the editor's git). Public API only, but for what ARCHITECTURE.md lists
-			// (*Extension points* 3).
-			for (const extension of [historyExtension, sourceControlExtension]) {
+			// The rest run in the web worker host, each from its folder with the files its manifest lists: ESLint (real ESLint
+			// in a worker of its own), history (its tsserver plugin) and Source Control (on the editor's git). Public API only,
+			// but for what ARCHITECTURE.md lists (*Extension points* 3).
+			for (const extension of [eslintExtension, historyExtension, sourceControlExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -437,7 +438,7 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "history", "source-control"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "history", "source-control"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

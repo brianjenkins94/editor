@@ -10,6 +10,7 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, createLogger } from "vite";
 import { commandTap, TAPPED_VSCODE } from "./build/command-tap";
+import { eslintToolchain } from "./build/eslint-toolchain";
 import { buildHistory, HISTORY_FILES } from "./build/history";
 import { editorTypesPlugin, editorVersionsPlugin, nodeModulesCdnPlugin } from "./build/package-types";
 import { editorSettingsDefaultsPlugin, editorWorkspacePlugin } from "./build/snapshot";
@@ -223,6 +224,8 @@ export async function preBuild(): Promise<void> {
 		"plugins": [
 			bundledExtension("bridge"),
 			bundledExtension("tsval"),
+			// (its worker: ESLint and the preset under almostnode, from the toolchain built beside it — build/eslint-toolchain.ts)
+			bundledExtension("eslint", { "worker.js": { "worker": "eslint-worker.js" } }),
 			bundledExtension("history", HISTORY_FILES),
 			bundledExtension("source-control"),
 			editorSettingsDefaultsPlugin(),
@@ -275,7 +278,10 @@ export async function preBuild(): Promise<void> {
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
 				"input": {
-					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts")
+					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
+					// ESLint's worker: real ESLint and the preset under almostnode (the eslint extension starts it), from the
+					// toolchain beside it
+					"lsp/eslint-worker": resolvePath("./extensions/eslint/worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
@@ -291,6 +297,12 @@ export async function preBuild(): Promise<void> {
 			}
 		}
 	});
+
+	// 2b. ESLint's toolchain (dist/lsp/eslint-toolchain.tgz): ESLint, the preset and what they load, traced from a real lint
+	// and packed for the eslint worker to unpack (build/eslint-toolchain.ts).
+	const toolchain = await eslintToolchain(path.join(root, "dist/lsp/eslint-toolchain.tgz"));
+
+	logger.info(`eslint toolchain: ${toolchain.packages} packages, ${toolchain.files} files, ${(toolchain.bytes / 1048576).toFixed(1)} MB`);
 
 	// 3. The history extension's tsserver plugin and its engine (build/history.ts).
 	await buildHistory(root, { "logger": logger, "sourcemap": sourcemap, "banner": PROCESS_SHIM });

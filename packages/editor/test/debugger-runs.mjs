@@ -218,7 +218,7 @@ test("stdin: what's typed at a terminal's run reaches the program", async () => 
 	assert.match(output, /got hello/u);
 });
 
-test("the bridge: the extension host's one hub, linked to the workbench's, and every debug run's worker linked to it", () => {
+test("the bridge: the extension host's one hub, linked to the workbench's, and every debug run's worker linked to it; other extensions only for their records", () => {
 	const { nodes, channels } = session.seen();
 	const linked = (one, other) => channels.some((channel) => channel.linked && ((channel.a === one && channel.b === other) || (channel.a === other && channel.b === one)));
 	// (the hub's links: the view's other channels are what's reported on it — extensions' command calls, their workers' traffic)
@@ -227,6 +227,8 @@ test("the bridge: the extension host's one hub, linked to the workbench's, and e
 	assert.ok(nodes.some((node) => node.id === "bridge" && node.state === "alive"), "the bridge reports on the page: its uplink works");
 	assert.ok(linked("workbench", "bridge"), JSON.stringify(onHub));
 	assert.ok(linked("bridge", "debug-worker"), "a debug run's worker links to the bridge (the workspace runtime's link)");
-	// (the other extensions' are on the architecture view as their commands, not on the hub)
-	assert.deepEqual(onHub.filter((id) => id.startsWith("ext") || ["tsval", "history", "source-control"].includes(id)), []);
+	// (the other extensions are on the architecture view as their commands; on the hub, at most for their records —
+	// observeExtension's `ext:<name>`, linked to the workbench, never the bridge — and not as hubs of their own)
+	assert.deepEqual(onHub.filter((id) => ["tsval", "history", "source-control"].includes(id) || id.startsWith("exthost")), []);
+	assert.ok(channels.filter((channel) => channel.linked && (channel.a.startsWith("ext:") || channel.b.startsWith("ext:"))).every((channel) => [channel.a, channel.b].includes("workbench")), "an extension's records link to the workbench");
 });
