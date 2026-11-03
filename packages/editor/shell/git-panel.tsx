@@ -108,8 +108,6 @@ function commitLabelOf(commitError: boolean, allChecked: boolean, chosen: number
 	return allChecked ? "Commit all changes" : "Commit " + chosen + " of " + total;
 }
 
-const isCodeFile = (file: GitFileChange): boolean => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u.test(file.path) && file.status !== "D";
-
 /** Current OS colour scheme — the diff highlights with the matching shiki theme (the shell drives the same query). */
 const prefersDark = (): boolean => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
@@ -436,21 +434,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		}
 
 		force();
-	};
-
-	const toggleExpand = (path: string): void => {
-		setExpanded((current) => {
-			const next = new Set(current);
-
-			if (next.has(path)) {
-				next.delete(path);
-			} else {
-				next.add(path);
-				void showDiff(path); // ensure the diff is open so a chunk-hover has somewhere to spotlight
-			}
-
-			return next;
-		});
 	};
 
 	const commit = async (): Promise<void> => {
