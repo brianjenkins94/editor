@@ -30,15 +30,24 @@ test("the theme follows the system's: VS Code's theme switches, and the shell dr
 	const { page } = session;
 	const theme = async () => session.workbench().evaluate(() => globalThis.__editor.api.workspace.getConfiguration().get("workbench.colorTheme"));
 	const background = async () => page.evaluate(() => document.body.style.getPropertyValue("--vscode-editor-background").trim());
+	// (each theme's own colour: the setting changes before its colours reach the shell, so what the shell has just after
+	// it may still be the last theme's)
+	const inColours = async (scheme, name, colour) => {
+		let seen;
 
-	await page.emulateMedia({ "colorScheme": "dark" });
-	await session.eventually("the dark theme", async () => (await theme() === "Default Dark+" ? true : undefined), 30_000);
+		await page.emulateMedia({ "colorScheme": scheme });
+		await session.eventually(`the ${scheme} theme`, async () => (await theme() === name ? true : undefined), 30_000);
+		await session.eventually(`the shell in ${scheme} colours`, async () => {
+			seen = await background();
 
-	const dark = await session.eventually("the shell in its colours", async () => (await background()) || undefined, 30_000);
+			return seen.toLowerCase() === colour ? true : undefined;
+		}, 30_000).catch((error) => {
+			throw new Error(`${error.message}: it has ${JSON.stringify(seen)}, not ${colour}`);
+		});
+	};
 
-	await page.emulateMedia({ "colorScheme": "light" });
-	await session.eventually("the light theme", async () => (await theme() === "Default Light+" ? true : undefined), 30_000);
-	await session.eventually("the shell in the light colours", async () => (await background() !== dark ? true : undefined), 30_000);
+	await inColours("dark", "Default Dark+", "#1e1e1e");
+	await inColours("light", "Default Light+", "#ffffff");
 });
 
 test("a fresh editor opens on the starter workspace, with the editor's settings as its defaults", async () => {
@@ -58,22 +67,23 @@ test("a fresh editor opens on the starter workspace, with the editor's settings 
 });
 
 test("every context reports on the architecture plane: the realms, the extensions by their commands, the stores", async () => {
-	const seen = await session.eventually("the extensions' commands", async () => {
-		const now = session.seen();
+	// (each reports when it's up and has something to say: all of them are waited for, not the first)
+	let missing = [];
 
-		return now.channels.some((channel) => channel.a.startsWith("ext:") && channel.b === "ext:vscode" && channel.count > 0) ? now : undefined;
-	}, 60_000);
-	const alive = (id) => seen.nodes.some((node) => node.id === id && node.state === "alive");
+	await session.eventually("every context's report", async () => {
+		const { nodes, channels } = session.seen();
 
-	for (const realm of ["shell", "root", "sw", "workbench", "bridge"]) {
-		assert.ok(alive(realm), realm);
-	}
+		missing = [
+			...["shell", "root", "sw", "workbench", "bridge"].filter((realm) => !nodes.some((node) => node.id === realm && node.state === "alive")),
+			...["ext:bridge", "ext:source-control", "ext:history"].filter((extension) => !nodes.some((node) => node.id === extension)),
+			...channels.some((channel) => channel.a.startsWith("ext:") && channel.b === "ext:vscode" && channel.count > 0) ? [] : ["an extension's commands"],
+			...channels.some((channel) => channel.b.startsWith("store:") || channel.a.startsWith("store:")) ? [] : ["a store's traffic, by its files"]
+		];
 
-	for (const extension of ["ext:bridge", "ext:source-control", "ext:history"]) {
-		assert.ok(seen.nodes.some((node) => node.id === extension), extension);
-	}
-
-	assert.ok(seen.channels.some((channel) => channel.b.startsWith("store:") || channel.a.startsWith("store:")), "a store's traffic, by its files");
+		return missing.length === 0 ? true : undefined;
+	}, 60_000).catch((error) => {
+		throw new Error(`${error.message}: no ${missing.join(", no ")}`);
+	});
 });
 
 test("an extension loaded by URL (`?extension=`) runs in the editor", async () => {

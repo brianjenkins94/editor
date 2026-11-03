@@ -221,7 +221,14 @@ How it's kept:
        from the editor: a test's trace was the Margin's (*Runs kept*), out since the reduction — what Reintroduce compares
        a feature's new tests with is CI's reach until it's back.
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
-     or kept, each "stays because" reason checked again.
+     or kept, each "stays because" reason checked again. Checked 2026-11-03 (ARCHITECTURE.md has the reasons): the
+     reduction settled the candidates that went with their features; tsval's seven features, the bridge's four and
+     features across realm folders stay, nothing split. Left: **a stopped run has no way for a person to answer** (the
+     Margin's buttons went; only `runs_tests`' approvals call `editor.capability.decide`), the UI to choose and build;
+     whether tsval can give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one
+     file). Found on the way, CI's `workbench` shard red on 3 of 4 pushes while local runs passed: two tests read the shell
+     before the reports they assert reached it (the theme's colours, the extensions' reports), fixed to wait for what they
+     assert.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved
      to declared features and attribution, or removed; silo README's *What doesn't fit* answered; decision 21.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,

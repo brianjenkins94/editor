@@ -584,6 +584,29 @@ uplink, the workspace runtime, the run contract's events, capability decisions a
 and holds the ledger to it; the shell is a core and feature modules (shell/feature.ts). insights, margin, the features
 map and the rest went with their features, and come back one feature to an extension.
 
+Checked again 2026-11-03 against the ledger, on what's left (NEXT.md item 3, *The boundaries*). One feature to an
+extension holds for what plugs into the editor (change-problems, eslint, history, source-control); these stay as they are,
+each for a reason the code still gives:
+- **tsval holds seven features** (stepping, test runs, terminal runs, stops, the gate, a run's packages, agents' tests)
+  because it's one debugger: they're what its worker does to a running program, and nothing outside a worker can. They're
+  apart by file (`worker/*.ts`), each file one feature's.
+- **The bridge holds four** (itself, stops, the decider and runtime-fs, a run's events) because it's the one extension
+  that touches the hub, and each of them answers a worker or a session over it.
+- **A feature across realm folders is its realms, not a tangle.** A change's problems: its row in the shell, its request
+  in the workbench, its plugin in an extension, its tool in the app, each where only it can run. A folder is a realm, so a
+  feature that crosses realms crosses folders.
+- **The decider stays in the bridge**: `capabilities/decide.ts` has one caller, runtime-fs; no second decider yet.
+  **Command counts stay command-tap's**: the bridge's architecture report still reads them, and core's command service
+  still can't tell which extension called.
+
+**tsval's workspace buffer** holds as what its module loader reads, but its reason has weakened: since a run loads
+`.refs/` through its link, the same test file took 3.4 s that way and 3.9 s from the store (git-hunks, warm, one run each),
+and ESLint's worker has never had the buffer. Whether tsval can give up the privilege wants a whole suite's timing.
+
+**What the reduction broke:** *Answer a call where it stops* is core, but its one person's way in was the Margin's
+buttons. `editor.capability.decide` is called only by agents' `runs_tests` approvals now, so a person's run sits stopped
+at a gated call with nothing to answer it by. It needs its UI back (CLAUDE.md, *Agent tools*).
+
 **Silo, firmed up.** Silo's capabilities grew session by session (packages/silo/README.md, *The four jobs*, *What
 doesn't fit*). The rewrite settles each one: the job it serves, where it lives (lib `util/silo`, pure; the command
 line; the editor), and what supersedes what. Where it starts:
