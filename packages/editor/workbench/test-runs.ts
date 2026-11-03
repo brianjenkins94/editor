@@ -30,7 +30,7 @@ import type * as vscodeApi from "vscode";
 import type { Bablr } from "./bablr";
 import type { GitReader } from "./git-service";
 import type { NodeRunner } from "./node-runner";
-import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { serve } from "@brianjenkins94/hub";
 import { localTracesPath } from "@brianjenkins94/util/silo/layout";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
 import { waitFor } from "./readiness";
@@ -116,7 +116,6 @@ interface Affected {
 }
 
 export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitReader, bablr: Bablr, runner: NodeRunner): void {
-	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
 	const tracesOf = async (path: string): Promise<RunTrace[]> => parseTraces(await read(localTracesPath(path)) ?? "").filter((trace) => trace.test !== undefined);
@@ -210,7 +209,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				active = performance.now();
 			}
 		});
-		// (stuck: where it is — no session yet, or the session's state, line and code — and the run ended)
+		// (stuck: where it is — no session yet, or the session's top frame, as DAP says it — and the run ended)
 		const watching = setInterval(() => {
 			if (performance.now() - active < STALL_MS || stalled !== undefined) {
 				return;
@@ -224,11 +223,15 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				return;
 			}
 
-			void rpc.request(`debug.session.${session.id}.state`, undefined, { "timeoutMs": 5000 }).then((state) => {
-				const { "state": now, reason, line, code } = state as { "state"?: string; "reason"?: string; "line"?: number; "code"?: string };
+			const stuck = session;
 
-				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session ${now ?? "?"}${reason === undefined ? "" : ` (${reason})`}${line === undefined ? "" : ` at line ${String(line)}${code === undefined ? "" : `: ${code.trim()}`}`}`;
-			}, () => {
+			void (async () => {
+				const { threads } = await stuck.customRequest("threads") as { "threads": { "id": number }[] };
+				const { stackFrames } = await stuck.customRequest("stackTrace", { "threadId": threads[0]?.id, "levels": 1 }) as { "stackFrames"?: { "name": string; "line": number }[] };
+				const [frame] = stackFrames ?? [];
+
+				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session ${frame === undefined ? "had no frame" : `at ${frame.name}, line ${String(frame.line)}`}`;
+			})().catch(() => {
 				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session didn't say where it is`;
 			}).finally(stop);
 		}, 5000);

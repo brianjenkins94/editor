@@ -1,7 +1,7 @@
 {
   "name": "bridge",
   "displayName": "Bridge",
-  "description": "The bridge between the editor's core runtime and VS Code — the one extension that touches the hub: core's vscode API is its; every debugger's editor-api events, capability stops and agent control, and the workspace runtime it gives a debugger (tsval, or an interpreter plugged in); tasks, Source Control and the run picker.",
+  "description": "The bridge between the editor's core runtime and VS Code — the one extension that touches the hub: core's vscode API is its; every debugger's editor-api events and capability stops, and the workspace runtime it gives a debugger (tsval, or an interpreter plugged in).",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
@@ -11,75 +11,5 @@
   "activationEvents": [
     "onStartupFinished",
     "onDebug"
-  ],
-  "contributes": {
-    "configuration": {
-      "title": "Run",
-      "properties": {
-        "run.debugger": {
-          "type": "string",
-          "default": "tsval",
-          "description": "The debugger Run (▷) and live runs start: tsval, or another extension's debug type — an interpreter plugged in from editor-contrib. Its `values` and `coverage` events show in the margin as tsval's do."
-        }
-      }
-    },
-    "commands": [
-      {
-        "command": "editor.debugFile",
-        "title": "Run",
-        "category": "Debug",
-        "icon": "$(play)"
-      },
-      {
-        "command": "tsval.stepRecordedStop",
-        "title": "Step a Recorded Stop",
-        "category": "Debug",
-        "icon": "$(debug-step-into)"
-      },
-      {
-        "command": "editor.pane.toggleNative",
-        "title": "Toggle Pane / VS Code Annotations",
-        "category": "Pane"
-      },
-      {
-        "command": "editor.pane.chooseView",
-        "title": "Show View…",
-        "category": "Pane"
-      }
-    ],
-    "menus": {
-      "editor/title/run": [
-        {
-          "command": "editor.debugFile",
-          "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/",
-          "group": "navigation@2"
-        }
-      ]
-    },
-    "taskDefinitions": [
-      {
-        "type": "run",
-        "required": [
-          "command"
-        ],
-        "properties": {
-          "command": {
-            "type": "string",
-            "description": "The command to run, as typed in a terminal (npm run dev)."
-          },
-          "cwd": {
-            "type": "string",
-            "description": "Where to run it (the workspace, by default)."
-          }
-        }
-      }
-    ],
-    "debuggers": [
-      {
-        "type": "production",
-        "label": "production (almostnode run)",
-        "hiddenWhen": "true"
-      }
-    ]
-  }
+  ]
 }

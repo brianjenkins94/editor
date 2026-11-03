@@ -1,8 +1,7 @@
 /**
  * Capability stops, whichever debugger's (the run contract, @brianjenkins94/editor-api): a run stopped at a gated call
- * asks on its line (`ask`: the Margin shows it, reading the event itself), and the answer — the Margin's buttons
- * (`editor.capability.decide`, ARCHITECTURE.md, *Extension points* 5), an agent's `debug.session.<id>.decide` — goes back to the debugger
- * as a `decide` request.
+ * asks on its line (`ask`), and the answer — `editor.capability.decide` (ARCHITECTURE.md, *Extension points* 5): a test
+ * run's approval, runs_tests' — goes back to the debugger as a `decide` request.
  *
  * What an answer means is the editor's, not the debugger's: Allow, Skip or Deny for this call, this run (every call of
  * its capability, until the run ends — a rule kept here, never written) or always (my policy override, as the preview's
@@ -11,14 +10,10 @@
  * effect from now on. Every debugger is given the policy as it launches (`__policy`, debug-events.ts).
  */
 import type { AskEvent, CapabilityChoice, DecideRequest } from "@brianjenkins94/editor-api";
-import type { Hub } from "@brianjenkins94/hub";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { DebugOutcome } from "./debug-control";
 import { loadEffectivePolicy, persistOverride, replaceRule } from "@brianjenkins94/editor-api/policy";
-import { serve } from "@brianjenkins94/hub";
 import { EMPTY_POLICY, problemOf, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { controllable } from "./debug-control";
 
 const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always", "rule", "give-once"] satisfies CapabilityChoice[]);
 
@@ -147,16 +142,14 @@ async function decide(session: vscode.DebugSession, choice: CapabilityChoice, ru
 	answered(session.id);
 }
 
-/** Every session's capability stops: answered over `debug.session.<id>.decide` (the margin's buttons, an agent's
- *  debug_* tools) — answering, for a tsval session, with where it stops next — and cleared as the session resumes or
+/** Every session's capability stops: answered by `editor.capability.decide`, and cleared as the session resumes or
  *  ends. */
-export function registerCapabilityStops(context: vscode.ExtensionContext, hub: Hub): void {
-	const served = new Map<string, () => void>();
+export function registerCapabilityStops(context: vscode.ExtensionContext): void {
 	/** Every session running, by its id. */
 	const running = new Map<string, vscode.DebugSession>();
 
 	context.subscriptions.push(
-		// The Margin's buttons (ARCHITECTURE.md, *Extension points* 5): a session's stop answered — answered itself once it's told.
+		// A session's stop answered (ARCHITECTURE.md, *Extension points* 5) — answered itself once it's told.
 		vscode.commands.registerCommand("editor.capability.decide", async (id: unknown, choice: unknown, rule?: Rule, give?: unknown) => {
 			const session = typeof id === "string" ? running.get(id) : undefined;
 
@@ -168,20 +161,6 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 		}),
 		vscode.debug.onDidStartDebugSession((session) => {
 			running.set(session.id, session);
-			served.set(session.id, serve(hub, `debug.session.${session.id}.decide`, async (args, { signal }): Promise<DebugOutcome | { "session": string; "state": "running" }> => {
-				const { choice = "", rule, give } = (args ?? {}) as { "choice"?: string; "rule"?: Rule; "give"?: unknown };
-
-				if (!CHOICES.has(choice)) {
-					throw new Error(`unknown choice "${choice}" — one of ${[...CHOICES].join(", ")}`);
-				}
-
-				// (waiting from before it's told, so the stop it reaches isn't missed)
-				const next = controllable(session.id)?.next(signal);
-
-				await decide(session, choice as CapabilityChoice, rule, give);
-
-				return next ?? { "session": session.id, "state": "running" };
-			}));
 		}),
 		// Resumed — by an answer, or VS Code's toolbar — the question's been answered.
 		vscode.debug.registerDebugAdapterTrackerFactory("*", {
@@ -203,8 +182,6 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 			answered(session.id);
 			runRules.delete(session.id);
 			onceFor.delete(session.id);
-			served.get(session.id)?.();
-			served.delete(session.id);
 		})
 	);
 }

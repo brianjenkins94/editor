@@ -55,7 +55,7 @@ import { installGitService } from "./git-service";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { markReady } from "./readiness";
-import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
+import { createBashProcess, serveTerminalState } from "./terminal";
 import { installTestRuns } from "./test-runs";
 import { installTarballs } from "./tarballs";
 import { pinned, watchVersions } from "./versions";
@@ -650,8 +650,6 @@ function maybeBoot(): void {
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
-				// And the bridge's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
-				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
 				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;
 				// debug-mcp's files_* tools).
 				installWorkspaceTools(api as typeof import("vscode"), workbenchHub);
