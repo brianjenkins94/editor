@@ -39,9 +39,9 @@ export const signInSettled = new Promise<void>((resolve) => {
 	settle = resolve;
 });
 
-const signedOut = (): void => {
+function signedOut(): void {
 	shared.set({ "signedInAs": undefined, "githubUser": undefined });
-};
+}
 
 /** Your account, in a dialog (account-dialog.tsx, loaded when first opened). */
 async function openAccount(): Promise<void> {
@@ -131,34 +131,40 @@ async function accountAction(run: (session: typeof import("./session")) => Promi
 	}
 }
 
-const endOtherSession = async (id: string): Promise<void> => accountAction(async (session) => {
-	await session.endSession(id);
-	state.set({ "sessions": await session.sessions() });
+async function endOtherSession(id: string): Promise<void> {
+	await accountAction(async (session) => {
+		await session.endSession(id);
+		state.set({ "sessions": await session.sessions() });
 
-	return undefined;
-}, "Couldn't end that session.");
+		return undefined;
+	}, "Couldn't end that session.");
+}
 
-const signOutEverywhere = async (): Promise<void> => accountAction(async (session) => {
-	await session.signOutEverywhere();
-	signedOut();
-	state.set({ "sessions": undefined });
+async function signOutEverywhere(): Promise<void> {
+	await accountAction(async (session) => {
+		await session.signOutEverywhere();
+		signedOut();
+		state.set({ "sessions": undefined });
 
-	return "Signed out everywhere.";
-}, "Couldn't sign out everywhere.");
+		return "Signed out everywhere.";
+	}, "Couldn't sign out everywhere.");
+}
 
-const deleteAccount = async (): Promise<void> => accountAction(async (session) => {
-	const { githubAuthorizationRevoked } = await session.deleteAccount();
-	const github = shared.get().githubUser !== undefined;
+async function deleteAccount(): Promise<void> {
+	await accountAction(async (session) => {
+		const { githubAuthorizationRevoked } = await session.deleteAccount();
+		const github = shared.get().githubUser !== undefined;
 
-	signedOut();
-	state.set({ "sessions": undefined });
+		signedOut();
+		state.set({ "sessions": undefined });
 
-	if (!github) {
-		return "Your account is deleted. Sign in within 30 days to bring it back; after that it's gone for good.";
-	}
+		if (!github) {
+			return "Your account is deleted. Sign in within 30 days to bring it back; after that it's gone for good.";
+		}
 
-	return githubAuthorizationRevoked ? "Your account is deleted, and the editor's GitHub App no longer has access. Sign in within 30 days to bring it back; after that it's gone for good." : "Your account is deleted. GitHub didn't confirm the app's access ended: remove it under GitHub's Settings → Applications.";
-}, "Couldn't delete the account.");
+		return githubAuthorizationRevoked ? "Your account is deleted, and the editor's GitHub App no longer has access. Sign in within 30 days to bring it back; after that it's gone for good." : "Your account is deleted. GitHub didn't confirm the app's access ended: remove it under GitHub's Settings → Applications.";
+	}, "Couldn't delete the account.");
+}
 
 /** Sign out: the session ends at the API (and GitHub's token with it), and this browser forgets its key. */
 async function signOutGithub(): Promise<void> {

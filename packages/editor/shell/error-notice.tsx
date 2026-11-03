@@ -35,11 +35,7 @@ function ErrorNotice() {
 	return (
 		<wa-callout variant="danger" size="small" class={errorNotice()}>
 			<div class="wa-stack wa-gap-2xs">
-				<span>
-					Something went wrong, and we've been told. If you get in touch about it, quote
-					<strong>{id}</strong>
-					.
-				</span>
+				<span>Something went wrong, and we've been told. If you get in touch about it, quote <strong>{id}</strong>.</span>
 
 				<wa-button size="small" appearance="plain" onClick={() => { state.set({ "id": undefined }); }}>Dismiss</wa-button>
 			</div>

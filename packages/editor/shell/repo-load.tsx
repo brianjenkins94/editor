@@ -5,8 +5,8 @@
  * popover's Load section, or from the address (`env/<owner>/<repo>`). github.ts is lazy, so fido loads only when a
  * repository is actually fetched.
  */
-import type { RepoBinding } from "./github-auth";
 import type { ShellContext, ShellFeature } from "./feature";
+import type { RepoBinding } from "./github-auth";
 import { ghError } from "theme/styles/shell";
 import { envRepo, showRepo } from "./address";
 import { createStore, errText, githubLog, shared, statusOf, useStore } from "./feature";

@@ -11,7 +11,7 @@ import type { createRpcClient, Hub } from "@brianjenkins94/hub";
 import type { FunctionComponent } from "preact";
 import type { RepoBinding } from "./github-auth";
 import { logger } from "@brianjenkins94/util/logger";
-import { useEffect, useReducer } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 
 /** What a feature is given: the shell's hub, linked to the app, and a client for asking over it. */
 export interface ShellContext {
@@ -60,9 +60,11 @@ export function createStore<T extends object>(initial: T): Store<T> {
 
 /** A store's value, rendered again as it changes. */
 export function useStore<T>(store: Store<T>): T {
-	const [, changed] = useReducer((count: number) => count + 1, 0);
+	const [, setChanges] = useState(0);
 
-	useEffect(() => store.subscribe(changed), [store]);
+	useEffect(() => store.subscribe(() => {
+		setChanges((changes) => changes + 1);
+	}), [store]);
 
 	return store.get();
 }
