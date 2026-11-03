@@ -189,14 +189,17 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "When a run reaches a call that touches files, the network or commands and nothing has decided it yet, the run stops on that line and asks in the margin: allow, skip or deny, for this call, this run or always, or make a rule.",
+    "what": "When a run reaches a call that touches files, the network or commands and nothing has decided it yet, the run stops on that line and asks in the margin, for as long as it waits: allow, skip or deny, for this call, this run or always.",
     "docs": "packages/editor/RUNNING.md, *Capability stops*",
     "ways": [
       "command|editor.capability.decide",
+      "command|margin.decide",
+      "command|margin.paneView",
       "debug adapter tracker provider|*|bridge/capability-stops.ts"
     ],
     "paths": [
       "packages/editor/extensions/bridge/capability-stops.ts",
+      "packages/editor/extensions/margin/",
       "packages/editor/extensions/tsval/adapter/stops.ts",
       "packages/editor/extensions/tsval/worker/stops.ts"
     ],
@@ -694,7 +697,6 @@
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live values*",
     "ways": [
       "command|margin.hold",
-      "command|margin.paneView",
       "command|margin.pick",
       "inline values provider||margin/margin.ts"
     ],
@@ -778,13 +780,12 @@
     ]
   },
   "Pane beside every editor": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "the Margin is where a stopped run asks, and it's a pane view; reintroduced 2026-11-03 for that (user: a notification can be dismissed, and then it's unclear the program is stopped)",
+    "since": "2026-11-03",
     "what": "A strip of tabbed views beside the code (the Margin and each extension's), level with the lines they describe, or shown instead as VS Code's own code lenses, hints and hovers.",
     "docs": "packages/editor/ARCHITECTURE.md, *4. Pane views*",
     "ways": [
-      "agent tool|margin_state",
       "code lens provider||workbench/pane-native.ts",
       "command|editor.pane.chooseView",
       "command|editor.pane.native.input",
@@ -797,8 +798,17 @@
       "inlay hints provider||workbench/pane-native.ts",
       "text editor decoration type||workbench/pane-native.ts"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "components/monaco-vscode-api/pane.ts",
+      "packages/editor-api/src/pane.ts",
+      "packages/editor/workbench/pane-native.ts",
+      "packages/editor/workbench/pane-views.ts",
+      "packages/theme/src/styles/margin.ts",
+      "packages/theme/src/styles/pane-views.ts"
+    ],
+    "tests": [
+      "packages/editor/test/pane-views.mjs"
+    ]
   },
   "Past runs, as balls": {
     "status": "removed",

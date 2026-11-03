@@ -230,6 +230,7 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("change-problems", { "node_modules/change-problems-ts-plugin/package.json": { "json": { "name": "change-problems-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "node_modules/change-problems-ts-plugin/index.js": { "script": "ts-plugin.js", "format": "es" } }),
 			bundledExtension("history", HISTORY_FILES),
 			bundledExtension("source-control"),
+			bundledExtension("margin"),
 			editorSettingsDefaultsPlugin(),
 			polyfillNode(["path", "url", "buffer"])
 		],

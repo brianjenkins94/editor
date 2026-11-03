@@ -31,6 +31,7 @@ import eslintExtension from "eslint:extension";
 import settingsDefaults from "editor:settings-defaults";
 import historyExtension from "history:extension";
 import { render } from "preact";
+import marginExtension from "margin:extension";
 import sourceControlExtension from "source-control:extension";
 import tsvalExtension from "tsval:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
@@ -44,6 +45,7 @@ import { installDecisions } from "./decisions";
 import { installBablr } from "./bablr";
 import { installEditorState } from "./editor-state";
 import { installFsTrace } from "./fs-trace";
+import { installPaneViews } from "./pane-views";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installCodeProblems } from "./code-problems";
 import { installGitHistory } from "./git-history";
@@ -389,6 +391,8 @@ function maybeBoot(): void {
 
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 				installFsTrace(workbenchHub, api as typeof import("vscode"), paneLog);
+				// The pane beside an editor: what extensions' pane views draw, level with the code (pane-views.ts).
+				installPaneViews(api as typeof import("vscode"));
 				// Which files BABLR parses, and a warning on each it can't (bablr.ts).
 				const bablr = installBablr(api as typeof import("vscode"), workbenchHub, paneLog);
 
@@ -442,8 +446,9 @@ function maybeBoot(): void {
 
 			// The rest run in the web worker host, each from its folder with the files its manifest lists: ESLint (real ESLint
 			// in a worker of its own), a change's problems and history (their tsserver plugins) and Source Control (on the
-			// editor's git). Public API only, but for what ARCHITECTURE.md lists (*Extension points* 3).
-			for (const extension of [eslintExtension, changeProblemsExtension, historyExtension, sourceControlExtension]) {
+			// editor's git), and the Margin (a stopped call's question). Public API only, but for what ARCHITECTURE.md lists
+			// (*Extension points* 3).
+			for (const extension of [eslintExtension, changeProblemsExtension, historyExtension, sourceControlExtension, marginExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -451,7 +456,7 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "change-problems", "history", "source-control"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "change-problems", "history", "source-control", "margin"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

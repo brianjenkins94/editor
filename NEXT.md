@@ -223,9 +223,11 @@ How it's kept:
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
      or kept, each "stays because" reason checked again. Checked 2026-11-03 (ARCHITECTURE.md has the reasons): the
      reduction settled the candidates that went with their features; tsval's seven features, the bridge's four and
-     features across realm folders stay, nothing split. Left: **a stopped run has no way for a person to answer** (the
-     Margin's buttons went; only `runs_tests`' approvals call `editor.capability.decide`), the UI to choose and build;
-     whether tsval can give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one
+     features across realm folders stay, nothing split. A stopped run had no way for a person to answer (the Margin's buttons
+     went; only `runs_tests`' approvals called `editor.capability.decide`): it asks in the margin again, on its line, for
+     as long as it waits (the user: not a notification, which can be dismissed) — *Pane beside every editor* back for
+     it, and `extensions/margin` with only that question; Rule… waits for the Rule editor, and the pane's span and
+     ran placings for BABLR's annotations. Left: whether tsval can give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one
      file). Found on the way, CI's `workbench` shard red on 3 of 4 pushes while local runs passed: two tests read the shell
      before the reports they assert reached it (the theme's colours, the extensions' reports), fixed to wait for what they
      assert.

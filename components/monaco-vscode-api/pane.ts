@@ -1,0 +1,812 @@
+/**
+ * The right-hand side (packages/editor/RUNTIME-EVIDENCE.md, *Live values*): a pane beside every editor showing a file, each entry beside
+ * the span of lines it's about. The consumer renders an entry into the element it's handed (`showPane`'s `render`);
+ * this frame only places it — and makes Monaco the grid's row sizer: an entry taller than its span gets a view zone
+ * after the span's last line as tall as the difference, so the code below moves down by that much and no entry spills
+ * onto lines it isn't about. Entries on overlapping spans share one cell, stacked.
+ *
+ * Hovering an entry marks its span in the editor; the cursor on a line lights the entry about it.
+ *
+ * Entries can be grouped (`groups`): a group is a card drawn around the lines it spans — behind its entries, from its
+ * first line's top to its last line's bottom, view zones included — with a label its consumer renders (through `render`,
+ * handed the group) on its bottom border, in the blank line between steps; the cursor in it lights it. The program's projection (packages/editor/RUNTIME-EVIDENCE.md, *Projections*): a card per
+ * step, several statements long, Automator's look, its values still level with their lines.
+ *
+ * The pane has a gutter column of its own too, right of the line numbers: a mark per line the consumer gives (`marks`:
+ * a class to style it by, a title), as tall as its line wraps to — coverage's, say. It's the left end of the editor's
+ * line-decorations lane, where VS Code's change bars go (the workbench turns those off: scm.diffDecorations), folding's
+ * chevrons to its right. A mark is drawn as VS Code draws its change bar there (3px, 5px into the lane), so the column
+ * looks native. The glyph margin stays the breakpoints' (VS Code won't set one where
+ * another extension's glyph is).
+ *
+ * The pane's left edge is a divider you drag (remembered, the same for every editor). Wrapping code wraps at it: while a
+ * pane shows and wrapping is wanted, the editor wraps at a column (`wordWrap: "bounded"`) set to the divider's — and
+ * View: Toggle Word Wrap (Alt+Z), whose override knows only "on" (wrap at the editor's full width, under the pane) and
+ * "off", is taken over for an editor with a pane: it toggles wrapping at the divider instead. Elsewhere it's VS Code's.
+ *
+ * The pane's first line is reserved: while a pane shows, the editor has a line's padding above its first line (given
+ * back when the pane goes), and the pane puts a strip of tabs there — the views the consumer gives (`showPaneViews`): the
+ * margin as it is, and the program's other projections (packages/editor/RUNTIME-EVIDENCE.md, *Projections*). The strip is pinned: it stays at the top as the
+ * code scrolls, the pane's rows passing under it.
+ *
+ * Runs (RUNNING.md, unattended runs): the strip ends with a ball for each run of the file the consumer keeps
+ * (`showPaneRuns`), the one shown held, a click picking another; and a run rolls a ball down the gutter column along the
+ * lines it went through (`rollPaneBall`), once, before it settles — or, a long one, follows it as it goes.
+ */
+import { getService, ICodeEditorService } from "@codingame/monaco-vscode-api";
+import { CommandsRegistry } from "@codingame/monaco-vscode-api/monaco";
+import { renderMarkdown as renderVsMarkdown } from "@codingame/monaco-vscode-api/vscode/vs/base/browser/markdownRenderer";
+import * as monaco from "monaco-editor";
+
+/** An entry, about lines `fromLine`–`toLine` (0-based, inclusive, as VS Code's). */
+export interface PaneEntry { "id": string; "fromLine": number; "toLine": number }
+
+/** Render `entry` into `element`; what it returns, if anything, is called when the entry goes. */
+export type PaneRender = (entry: PaneEntry, element: HTMLElement) => (() => void) | void;
+
+/** A mark beside line `line` (0-based) in the pane's gutter column: `kind` its class (the consumer styles it), `title`
+ *  on hover. */
+export interface PaneMark { "line": number; "kind": string; "title"?: string }
+
+/** A view the pane can show, its tab in the strip on the pane's first line: `disabled` while it isn't built yet (its
+ *  `title` says what it will be). */
+export interface PaneView { "id": string; "label": string; "title"?: string; "disabled"?: boolean }
+
+/** A run of a file, a ball at the end of the strip: `title` on hover, `state` how it ended (its class: `ran`, `crashed`,
+ *  `stopped`), `picked` the one shown. */
+export interface PaneRunBall { "id": string; "title": string; "state"?: string; "picked"?: boolean }
+
+/** Each file's runs, and what to do when one's picked, by URI. */
+const runsOf = new Map<string, { "runs": PaneRunBall[]; "pick": (id: string) => void }>();
+
+/** The run each file's ball last rolled for, by URI: a draw of the same run doesn't roll it again. */
+const rolled = new Map<string, string>();
+/** The run each file's ball is following as it goes, by URI: when it ends, its ball settles where it is. */
+const following = new Map<string, string>();
+
+/** A ball's roll: at most this long however many lines a run went through, and at most this long a line. */
+const ROLL_MS = 1600;
+const STEP_MS = 110;
+
+/** The views every pane's strip offers, the one shown, and what to do when another's chosen. */
+let views: { "list": PaneView[]; "active": string; "select": (id: string) => void } = { "list": [], "active": "", "select": () => undefined };
+
+/** The gutter column's width, at the line-decorations lane's left end: a mark sits in it as VS Code's change bar would
+ *  (the editor's theme: theme/exceptions/margin.css, which the editor's pane-views.ts puts in), with room for a consumer's badge centred on it. */
+const GUTTER_WIDTH = 12;
+
+/** Each file's entries, how to render them, and its marks, by URI. */
+const panes = new Map<string, { "entries": PaneEntry[]; "render": PaneRender; "marks": PaneMark[]; "groups": PaneEntry[] }>();
+/** Each editor's frame, while it shows a file with a pane. */
+const frames = new Map<monaco.editor.ICodeEditor, Frame>();
+let started: Promise<void> | undefined;
+
+const DIVIDER_KEY = "pane.divider";
+/** The code's room by default (the divider not dragged), however short its lines: this many columns, or 40% of the way. */
+const CODE_COLUMNS = 60;
+/** Where the divider is, as a share of the width past the line numbers (undefined: past the longest line). */
+let divider = ((): number | undefined => {
+	try {
+		const stored = Number(localStorage.getItem(DIVIDER_KEY));
+
+		return stored > 0 && stored < 1 ? stored : undefined;
+	} catch {
+		return undefined; // no storage: the default
+	}
+})();
+const TOGGLE_WORD_WRAP = "editor.action.toggleWordWrap";
+/** VS Code's word-wrap toggle keeps its state per model under this key (toggleWordWrap.ts): cleared, it wraps as configured. */
+const TRANSIENT_WORD_WRAP = "transientWordWrapState";
+
+interface WrapService { "setTransientModelProperty": (model: monaco.editor.ITextModel, key: string, value: unknown) => void }
+let codeEditors: WrapService | undefined;
+
+/** Entries grouped into cells: those whose spans overlap share one (its span, theirs together). */
+function cellsOf(entries: PaneEntry[]): { "fromLine": number; "toLine": number; "entries": PaneEntry[] }[] {
+	const cells: { "fromLine": number; "toLine": number; "entries": PaneEntry[] }[] = [];
+
+	for (const entry of entries.toSorted((a, b) => a.fromLine - b.fromLine || a.toLine - b.toLine)) {
+		const last = cells.at(-1);
+
+		if (last !== undefined && entry.fromLine <= last.toLine) {
+			last.toLine = Math.max(last.toLine, entry.toLine);
+			last.entries.push(entry);
+		} else {
+			cells.push({ "fromLine": entry.fromLine, "toLine": entry.toLine, "entries": [entry] });
+		}
+	}
+
+	return cells;
+}
+
+interface Cell { "fromLine": number; "toLine": number; "element": HTMLElement; "items": { "line": number; "element": HTMLElement }[]; "zone"?: { "id": string; "height": number } }
+
+/** One editor's frame: an overlay widget it lays out as the editor scrolls, lays out and changes, and the view zones
+ *  its tall cells need. */
+class Frame implements monaco.editor.IOverlayWidget {
+	private readonly editor: monaco.editor.ICodeEditor;
+	private readonly element = document.createElement("div");
+	private readonly listeners: monaco.IDisposable[] = [];
+	private readonly resize = new ResizeObserver(() => { this.layout(); });
+	private readonly sash = document.createElement("div");
+	/** The tabs on the pane's first line (the editor's top padding is that line). */
+	private readonly tabs = document.createElement("div");
+	/** The gutter column, an overlay of its own left of the code. */
+	private readonly gutter = document.createElement("div");
+	private readonly gutterWidget: monaco.editor.IOverlayWidget = { "getId": () => "notes-margin-gutter", "getDomNode": () => this.gutter, "getPosition": () => null };
+	private marks: { "line": number; "element": HTMLElement }[] = [];
+	/** A run's ball in the gutter column, the line it's on (none: hidden), and the step it takes next. */
+	private readonly ball = document.createElement("div");
+	private ballLine: number | undefined;
+	private rolling: ReturnType<typeof setTimeout> | undefined;
+	/** The file's runs, at the strip's end. */
+	private readonly runs = document.createElement("div");
+	private cells: Cell[] = [];
+	/** The cards drawn around groups of lines, behind the cells. */
+	private groups: { "fromLine": number; "toLine": number; "element": HTMLElement }[] = [];
+	private disposers: (() => void)[] = [];
+	private marked: string[] = [];
+	/** Whether the code wraps (at the divider), and the editor's own wrap options to give back when the pane goes. */
+	private wrap: boolean;
+	private readonly own: { "wordWrap": unknown; "wordWrapColumn": unknown; "padding": unknown };
+	private applying = false;
+
+	public constructor(editor: monaco.editor.ICodeEditor) {
+		this.editor = editor;
+		this.element.className = "notes-margin";
+		this.sash.className = "notes-margin-sash";
+		this.sash.title = "Drag to move the divider";
+		this.gutter.className = "notes-margin-gutter";
+		this.ball.className = "notes-margin-ball";
+		this.ball.hidden = true;
+		this.gutter.append(this.ball);
+		this.runs.className = "notes-margin-runs";
+		this.tabs.className = "notes-margin-tabs";
+		this.tabs.setAttribute("role", "tablist");
+		this.element.append(this.sash, this.tabs);
+		this.renderTabs();
+		this.sash.addEventListener("pointerdown", (event) => { this.drag(event); });
+
+		const raw = editor.getRawOptions();
+
+		this.own = { "wordWrap": raw.wordWrap, "wordWrapColumn": raw.wordWrapColumn, "padding": raw.padding };
+		this.wrap = editor.getOption(monaco.editor.EditorOption.wrappingInfo).wrappingColumn !== -1;
+		editor.addOverlayWidget(this);
+		editor.addOverlayWidget(this.gutterWidget);
+		this.listeners.push(
+			editor.onDidScrollChange(() => { this.place(); }),
+			editor.onDidLayoutChange(() => { this.place(); }),
+			editor.onDidChangeModelContent(() => { this.layout(); }),
+			editor.onDidChangeCursorPosition(() => { this.place(); }),
+			// The configured wrap re-applied (a settings change), or Alt+Z's override turned on elsewhere: wrap at the
+			// divider again. The configured padding re-applied (VS Code gives an editor its options again as a debug session
+			// starts, say): the first line reserved again.
+			editor.onDidChangeConfiguration((event) => {
+				if (this.applying) {
+					return;
+				}
+
+				if (event.hasChanged(monaco.editor.EditorOption.wrappingInfo)) {
+					if (editor.getOption(monaco.editor.EditorOption.wordWrapOverride2) === "on") {
+						this.wrap = true;
+					}
+
+					this.place();
+				} else if (event.hasChanged(monaco.editor.EditorOption.padding) || event.hasChanged(monaco.editor.EditorOption.lineHeight)) {
+					this.place();
+				}
+			})
+		);
+	}
+
+	/** Alt+Z, for an editor with a pane: wrap at the divider, or don't wrap. */
+	public toggleWrap(): void {
+		this.wrap = !this.wrap;
+		this.place();
+	}
+
+	/** The strip's tabs, as `views` has them now. */
+	public renderTabs(): void {
+		this.tabs.hidden = views.list.length === 0;
+		this.tabs.replaceChildren(this.runs);
+		this.tabs.prepend(...views.list.map((view) => {
+			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+			const tab = document.createElement("button");
+
+			tab.className = "notes-margin-tab";
+			tab.type = "button";
+			tab.textContent = view.label;
+			tab.disabled = view.disabled === true;
+			tab.setAttribute("role", "tab");
+			tab.setAttribute("aria-selected", String(view.id === views.active));
+
+			if (view.title !== undefined) {
+				tab.title = view.title;
+			}
+
+			tab.addEventListener("click", () => {
+				if (view.id !== views.active) {
+					views.select(view.id);
+				}
+			});
+
+			return tab;
+		}));
+	}
+
+	/** The file's runs at the strip's end, a ball each (oldest first), `pick` called with another's id when it's clicked. */
+	public renderRuns(list: PaneRunBall[], pick: (id: string) => void): void {
+		this.runs.replaceChildren(...list.map((run) => {
+			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+			const ball = document.createElement("button");
+
+			ball.className = `notes-margin-run${run.state === undefined ? "" : ` ${run.state}`}`;
+			ball.type = "button";
+			ball.title = run.title;
+			ball.setAttribute("aria-label", run.title);
+			ball.setAttribute("aria-pressed", String(run.picked === true));
+			ball.addEventListener("click", () => {
+				if (run.picked !== true) {
+					pick(run.id);
+				}
+			});
+
+			return ball;
+		}));
+	}
+
+	/** Roll the ball down the gutter column through `lines` (0-based, in the order a run went), then let it settle. */
+	public roll(lines: number[]): void {
+		clearTimeout(this.rolling);
+
+		if (lines.length === 0) {
+			return;
+		}
+
+		const step = Math.max(16, Math.min(STEP_MS, Math.floor(ROLL_MS / lines.length)));
+		let index = 0;
+		const next = (): void => {
+			if (index < lines.length) {
+				this.ballLine = lines[index];
+				index += 1;
+				this.placeBall();
+				this.rolling = setTimeout(next, step);
+			} else {
+				this.settle();
+			}
+		};
+
+		this.bringOut(lines[0]);
+		next();
+	}
+
+	/** The ball beside `line`, where a run still going is now: gliding there from where it was, if it's out. */
+	public follow(line: number | undefined): void {
+		clearTimeout(this.rolling);
+
+		if (line === undefined) {
+			return;
+		}
+
+		if (this.ball.hidden || this.ball.classList.contains("settled")) {
+			this.bringOut(line);
+		} else {
+			this.ballLine = line;
+			this.placeBall();
+		}
+	}
+
+	/** The ball fading where it is, then gone. */
+	public settle(): void {
+		clearTimeout(this.rolling);
+
+		if (this.ballLine === undefined) {
+			return;
+		}
+
+		this.ball.classList.add("settled");
+		this.rolling = setTimeout(() => {
+			this.ball.hidden = true;
+			this.ballLine = undefined;
+		}, 600);
+	}
+
+	/** The ball out beside `line`, without gliding there from wherever it last settled. */
+	private bringOut(line: number): void {
+		this.ball.classList.remove("settled");
+		this.ball.classList.add("placing");
+		this.ballLine = line;
+		this.ball.hidden = false;
+		this.placeBall();
+		// (laid out where it is before gliding is on again)
+		this.ball.getBoundingClientRect();
+		this.ball.classList.remove("placing");
+	}
+
+	/** Every frame laid out again (the divider moved). */
+	public relayout(): void {
+		this.layout();
+	}
+
+	public getId(): string {
+		return "notes-margin";
+	}
+
+	public getDomNode(): HTMLElement {
+		return this.element;
+	}
+
+	public getPosition(): null {
+		return null; // placed by `place`
+	}
+
+	public show(entries: PaneEntry[], render: PaneRender, marks: PaneMark[] = [], groups: PaneEntry[] = []): void {
+		this.clear();
+		// The cards first, so the cells draw over them.
+		this.groups = groups.map((group) => {
+			const element = document.createElement("div");
+			const label = document.createElement("div");
+
+			element.className = "notes-margin-group";
+			label.className = "notes-margin-group-label";
+			element.append(label);
+			this.element.append(element);
+
+			const dispose = render(group, label);
+
+			if (typeof dispose === "function") {
+				this.disposers.push(dispose);
+			}
+
+			return { "fromLine": group.fromLine, "toLine": group.toLine, "element": element };
+		});
+		this.marks = marks.map((mark) => {
+			const element = document.createElement("div");
+
+			element.className = `notes-margin-mark ${mark.kind}`;
+
+			if (mark.title !== undefined) {
+				element.title = mark.title;
+			}
+
+			this.gutter.append(element);
+
+			return { "line": mark.line, "element": element };
+		});
+		this.cells = cellsOf(entries).map((cell) => {
+			const element = document.createElement("div");
+
+			element.className = "notes-margin-cell";
+			// (its first line, 0-based: what a script driving the editor looks it up by)
+			element.dataset["line"] = String(cell.fromLine);
+
+			const items: Cell["items"] = [];
+
+			for (const entry of cell.entries) {
+				const item = document.createElement("div");
+
+				item.className = "notes-margin-entry";
+				item.addEventListener("mouseenter", () => { this.mark(entry); });
+				item.addEventListener("mouseleave", () => { this.mark(undefined); });
+				element.append(item);
+				items.push({ "line": entry.fromLine, "element": item });
+
+				const dispose = render(entry, item);
+
+				if (typeof dispose === "function") {
+					this.disposers.push(dispose);
+				}
+			}
+
+			this.element.append(element);
+			this.resize.observe(element);
+
+			return { "fromLine": cell.fromLine, "toLine": cell.toLine, "element": element, "items": items };
+		});
+		this.layout();
+	}
+
+	public dispose(): void {
+		clearTimeout(this.rolling);
+		this.clear();
+		this.resize.disconnect();
+
+		for (const listener of this.listeners) {
+			listener.dispose();
+		}
+
+		this.editor.removeOverlayWidget(this);
+		this.editor.removeOverlayWidget(this.gutterWidget);
+		// (An option that wasn't set given back as its default: updateOptions skips an undefined one.)
+		this.editor.updateOptions({ ...this.own, "padding": this.own.padding ?? { "top": 0 } } as monaco.editor.IEditorOptions);
+	}
+
+	/** Drag the divider: a share of the width past the line numbers, kept for every editor. */
+	private drag(start: PointerEvent): void {
+		start.preventDefault();
+		this.sash.setPointerCapture(start.pointerId);
+		this.sash.classList.add("dragging");
+
+		const move = (event: PointerEvent): void => {
+			const layout = this.editor.getLayoutInfo();
+			const right = layout.width - layout.minimap.minimapWidth - layout.verticalScrollbarWidth;
+			const x = event.clientX - (this.editor.getDomNode()?.getBoundingClientRect().left ?? 0);
+
+			divider = Math.min(0.9, Math.max(0.15, (x - layout.contentLeft) / (right - layout.contentLeft)));
+
+			for (const frame of frames.values()) {
+				frame.relayout();
+			}
+		};
+
+		const end = (): void => {
+			this.sash.removeEventListener("pointermove", move);
+			this.sash.removeEventListener("pointerup", end);
+			this.sash.classList.remove("dragging");
+
+			try {
+				localStorage.setItem(DIVIDER_KEY, String(divider));
+			} catch {
+				// no storage: the divider stays where it is until reload
+			}
+		};
+
+		this.sash.addEventListener("pointermove", move);
+		this.sash.addEventListener("pointerup", end);
+	}
+
+	/** A line's padding above the editor's first line (`lineHeight` — it follows the editor's zoom): the strip's room. */
+	private reserveFirstLine(lineHeight: number): void {
+		if (this.editor.getOption(monaco.editor.EditorOption.padding).top === lineHeight) {
+			return;
+		}
+
+		this.applying = true;
+
+		try {
+			this.editor.updateOptions({ "padding": { ...this.editor.getRawOptions().padding, "top": lineHeight } });
+		} finally {
+			this.applying = false;
+		}
+	}
+
+	/** Wrap at `column` (the divider's) when wrapping's wanted — clearing Alt+Z's override, which would wrap under the
+	 *  pane — or not at all when it isn't. */
+	private wrapAt(column: number): void {
+		const raw = this.editor.getRawOptions();
+		const model = this.editor.getModel();
+		const wanted: monaco.editor.IEditorOptions = this.wrap ? { "wordWrap": "bounded", "wordWrapColumn": column } : { "wordWrap": "off" };
+		const overridden = this.editor.getOption(monaco.editor.EditorOption.wordWrapOverride2) !== "inherit";
+
+		if (raw.wordWrap === wanted.wordWrap && (!this.wrap || raw.wordWrapColumn === column) && !overridden) {
+			return;
+		}
+
+		this.applying = true;
+
+		try {
+			if (overridden && model !== null) {
+				codeEditors?.setTransientModelProperty(model, TRANSIENT_WORD_WRAP, null);
+			}
+
+			this.editor.updateOptions(wanted);
+		} finally {
+			this.applying = false;
+		}
+	}
+
+	private clear(): void {
+		for (const dispose of this.disposers) {
+			dispose();
+		}
+
+		this.disposers = [];
+		this.editor.changeViewZones((accessor) => {
+			for (const cell of this.cells) {
+				if (cell.zone !== undefined) {
+					accessor.removeZone(cell.zone.id);
+				}
+			}
+		});
+
+		for (const cell of this.cells) {
+			this.resize.unobserve(cell.element);
+		}
+
+		this.cells = [];
+		this.gutter.replaceChildren(this.ball);
+		this.groups = [];
+		this.marks = [];
+		this.element.replaceChildren(this.sash, this.tabs);
+		this.mark(undefined);
+	}
+
+	/** The ball beside its line's first row, as the editor scrolls. */
+	private placeBall(): void {
+		if (this.ballLine === undefined || this.ballLine >= (this.editor.getModel()?.getLineCount() ?? 0)) {
+			return;
+		}
+
+		const lineHeight = this.editor.getOption(monaco.editor.EditorOption.lineHeight);
+
+		// (centred on the line's first row: the ball's own height is the theme's)
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside the line the run is on, as the editor scrolls
+		this.ball.style.top = `${this.editor.getTopForLineNumber(this.ballLine + 1) - this.editor.getScrollTop() + (lineHeight - this.ball.offsetHeight) / 2}px`;
+	}
+
+	/** Mark `entry`'s span in the editor (or none). */
+	private mark(entry: PaneEntry | undefined): void {
+		this.marked = this.editor.deltaDecorations(this.marked, entry === undefined ? [] : [{ "range": new monaco.Range(entry.fromLine + 1, 1, entry.toLine + 1, 1), "options": { "isWholeLine": true, "className": "notes-margin-marked" } }]);
+	}
+
+	/** Size each tall cell's view zone (the code side of the row grows by the difference), then place everything. */
+	private layout(): void {
+		this.align();
+		this.editor.changeViewZones((accessor) => {
+			for (const cell of this.cells) {
+				// The span's own height: its lines' (each as many rows as it wraps to), not counting the zone after it.
+				const span = this.bottomOf(cell.toLine) - this.editor.getTopForLineNumber(cell.fromLine + 1);
+				const height = Math.max(0, Math.ceil(cell.element.offsetHeight - span));
+
+				if (cell.zone?.height === height) {
+					continue;
+				}
+
+				if (cell.zone !== undefined) {
+					accessor.removeZone(cell.zone.id);
+				}
+
+				cell.zone = height === 0 ? undefined : { "id": accessor.addZone({ "afterLineNumber": cell.toLine + 1, "heightInPx": height, "domNode": document.createElement("div") }), "height": height };
+			}
+		});
+		this.place();
+	}
+
+	/** Each entry of a cell (entries whose lines overlap: a statement's, and those of statements inside it) beside its
+	 *  own line, not just under the one before it: as far down as its line, if the entries before it leave room. */
+	private align(): void {
+		for (const cell of this.cells) {
+			const top = this.editor.getTopForLineNumber(cell.fromLine + 1);
+			let bottom = 0;
+
+			for (const item of cell.items) {
+				const below = this.editor.getTopForLineNumber(item.line + 1) - top - bottom;
+
+				// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: down to its line (no room: the sheet's gap)
+				item.element.style.marginTop = item.element.previousElementSibling === null || below < 0 ? "" : `${below}px`;
+				bottom = item.element.offsetTop + item.element.offsetHeight;
+			}
+		}
+	}
+
+	/** Where everything goes now: the frame at the divider (by default past the longest line, but no further than 60% of
+	 *  the way, and no nearer than CODE_COLUMNS), the code wrapping there if it wraps, each cell beside its span as the editor scrolls, the cursor's lit. */
+	/** Where line `line` (0-based) ends: its last wrapped row's bottom, not counting a zone after it. */
+	private bottomOf(line: number): number {
+		const editor = this.editor as unknown as { "getBottomForLineNumber"?: (line: number, includeViewZones?: boolean) => number };
+
+		return editor.getBottomForLineNumber?.(line + 1, false) ?? this.editor.getTopForLineNumber(line + 1) + this.editor.getOption(monaco.editor.EditorOption.lineHeight);
+	}
+
+	private place(): void {
+		const model = this.editor.getModel();
+		const layout = this.editor.getLayoutInfo();
+		const font = this.editor.getOption(monaco.editor.EditorOption.fontInfo);
+
+		if (model === null) {
+			return;
+		}
+
+		let longest = 0;
+
+		for (let line = 1; line <= model.getLineCount(); line += 1) {
+			longest = Math.max(longest, model.getLineMaxColumn(line));
+		}
+
+		const right = layout.width - layout.minimap.minimapWidth - layout.verticalScrollbarWidth;
+		const span = right - layout.contentLeft;
+		// (but never less than room to write in — a blank file's longest line is none — of CODE_COLUMNS, or 40% of the way)
+		const room = Math.min(CODE_COLUMNS * font.typicalHalfwidthCharacterWidth, span * 0.4);
+		const left = layout.contentLeft + (divider === undefined ? Math.min(Math.max((longest + 3) * font.typicalHalfwidthCharacterWidth, room), span * 0.6) : span * divider);
+		const cursor = (this.editor.getPosition()?.lineNumber ?? 0) - 1;
+
+		const lineHeight = this.editor.getOption(monaco.editor.EditorOption.lineHeight);
+
+		this.reserveFirstLine(lineHeight);
+		this.wrapAt(Math.max(20, Math.floor((left - layout.contentLeft) / font.typicalHalfwidthCharacterWidth) - 2));
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: the frame beside the code, as the editor lays out
+		Object.assign(this.element.style, { "left": `${left}px`, "width": `${right - left}px`, "height": `${layout.height}px`, "lineHeight": `${lineHeight}px` });
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: the reserved first line, as tall as the editor's lines
+		this.tabs.style.height = `${lineHeight}px`;
+		// The editor's own font for code in a note (VS Code's --vscode-editor-font-* aren't defined in here).
+		this.element.style.setProperty("--notes-margin-code-font-family", font.fontFamily);
+		this.element.style.setProperty("--notes-margin-code-font-size", `${font.fontSize}px`);
+		// (and the line's height, for what has to fit on one: a row's buttons)
+		this.element.style.setProperty("--notes-margin-line-height", `${lineHeight}px`);
+
+		// The gutter column: the line-decorations lane's left end, right of the line numbers (where the change bars were).
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: the lane's place and the editor's height
+		Object.assign(this.gutter.style, { "left": `${layout.decorationsLeft}px`, "width": `${GUTTER_WIDTH}px`, "height": `${layout.height}px` });
+
+		for (const mark of this.marks) {
+			const top = this.editor.getTopForLineNumber(mark.line + 1);
+
+			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside its line, as tall as it wraps to
+			Object.assign(mark.element.style, { "top": `${top - this.editor.getScrollTop()}px`, "height": `${this.bottomOf(mark.line) - top}px` });
+		}
+
+		this.placeBall();
+
+		for (const cell of this.cells) {
+			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside its span, as the editor scrolls
+			cell.element.style.top = `${this.editor.getTopForLineNumber(cell.fromLine + 1) - this.editor.getScrollTop()}px`;
+			cell.element.classList.toggle("lit", cell.fromLine <= cursor && cursor <= cell.toLine);
+		}
+
+		// Each card around its lines, with the view zone after its last line (an entry taller than its span) inside it.
+		const lineCount = model.getLineCount();
+
+		for (const group of this.groups) {
+			const top = this.editor.getTopForLineNumber(group.fromLine + 1);
+			const bottom = group.toLine + 2 <= lineCount ? this.editor.getTopForLineNumber(group.toLine + 2) : this.bottomOf(group.toLine) + (this.cells.find((cell) => cell.toLine === group.toLine)?.zone?.height ?? 0);
+
+			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: around its lines, as the editor scrolls
+			Object.assign(group.element.style, { "top": `${top - this.editor.getScrollTop()}px`, "height": `${bottom - top}px` });
+			group.element.classList.toggle("lit", group.fromLine <= cursor && cursor <= group.toLine);
+		}
+	}
+}
+
+/** Keep each editor's frame to its file's pane, as editors come and go and change files. */
+async function start(): Promise<void> {
+	const service = await getService(ICodeEditorService);
+
+	codeEditors = service;
+
+	// Alt+Z, taken over for an editor with a pane (see above); anywhere else, VS Code's own.
+	const toggle = CommandsRegistry.getCommand(TOGGLE_WORD_WRAP);
+
+	if (toggle !== undefined) {
+		CommandsRegistry.registerCommand(TOGGLE_WORD_WRAP, (accessor, ...args: unknown[]) => {
+			const editor = service.getFocusedCodeEditor() ?? service.getActiveCodeEditor();
+			const frame = editor === null ? undefined : frames.get(editor);
+
+			if (frame === undefined) {
+				toggle.handler(accessor, ...args);
+
+				return;
+			}
+
+			frame.toggleWrap();
+
+			return undefined;
+		});
+	}
+
+	const follow = (editor: monaco.editor.ICodeEditor): void => {
+		editor.onDidChangeModel(() => { sync(editor); });
+		editor.onDidDispose(() => {
+			frames.get(editor)?.dispose();
+			frames.delete(editor);
+		});
+		sync(editor);
+	};
+
+	for (const editor of service.listCodeEditors()) {
+		follow(editor);
+	}
+
+	service.onCodeEditorAdd((editor) => { follow(editor); });
+}
+
+/** An editor's frame, shown or taken down to match its file's pane. */
+/** An editor inside another — a peek's (references, definition), an inline diff's — which VS Code makes with a
+ *  parent (`EmbeddedCodeEditorWidget.getParentEditor`): no pane of its own, which would draw inside the peek. */
+function embedded(editor: monaco.editor.ICodeEditor): boolean {
+	return typeof (editor as { "getParentEditor"?: unknown }).getParentEditor === "function";
+}
+
+function sync(editor: monaco.editor.ICodeEditor): void {
+	const pane = embedded(editor) ? undefined : panes.get(editor.getModel()?.uri.toString() ?? "");
+	let frame = frames.get(editor);
+
+	if (pane === undefined) {
+		frame?.dispose();
+		frames.delete(editor);
+
+		return;
+	}
+
+	if (frame === undefined) {
+		frame = new Frame(editor);
+		frames.set(editor, frame);
+	}
+
+	frame.show(pane.entries, pane.render, pane.marks, pane.groups);
+
+	const runs = runsOf.get(editor.getModel()?.uri.toString() ?? "");
+
+	frame.renderRuns(runs?.runs ?? [], runs?.pick ?? (() => undefined));
+}
+
+/** The frames of every editor showing `uri`. */
+function framesOf(uri: string): Frame[] {
+	return [...frames].filter(([editor]) => editor.getModel()?.uri.toString() === uri).map(([, frame]) => frame);
+}
+
+/** The runs of `uri` (a file URI's string) the pane's strip ends with, a ball each (oldest first) — `pick` called with
+ *  another's id when it's clicked — now and when an editor opens it. */
+export function showPaneRuns(uri: string, runs: PaneRunBall[], pick: (id: string) => void): void {
+	runsOf.set(uri, { "runs": runs, "pick": pick });
+
+	for (const frame of framesOf(uri)) {
+		frame.renderRuns(runs, pick);
+	}
+}
+
+/** Roll a ball down the gutter column of every editor showing `uri`, through `lines` (0-based, the order a run went) —
+ *  once for each run `id`: a draw of the same run doesn't roll it again. `live`: the run is still going, and the ball
+ *  follows it to `lines`' last; once it ends, it settles there rather than rolling. */
+export function rollPaneBall(uri: string, id: string, lines: number[], live = false): void {
+	if (live) {
+		following.set(uri, id);
+
+		for (const frame of framesOf(uri)) {
+			frame.follow(lines.at(-1));
+		}
+
+		return;
+	}
+
+	if (rolled.get(uri) === id) {
+		return;
+	}
+
+	const followed = following.get(uri) === id;
+
+	rolled.set(uri, id);
+	following.delete(uri);
+
+	for (const frame of framesOf(uri)) {
+		if (followed) {
+			frame.settle();
+		} else {
+			frame.roll(lines);
+		}
+	}
+}
+
+/** Show `entries` beside every editor showing `uri` (a file URI's string), each rendered by `render` — now and when one
+ *  opens it — or, with none, take the pane away. `groups`: cards around spans of lines, each one's label rendered by
+ *  `render` too. */
+export function showPane(uri: string, entries: PaneEntry[] | undefined, render?: PaneRender, marks: PaneMark[] = [], groups: PaneEntry[] = []): void {
+	if (entries === undefined || render === undefined) {
+		panes.delete(uri);
+	} else {
+		panes.set(uri, { "entries": entries, "render": render, "marks": marks, "groups": groups });
+	}
+
+	started ??= start();
+	void started.then(async () => {
+		for (const editor of (await getService(ICodeEditorService)).listCodeEditors()) {
+			sync(editor);
+		}
+	});
+}
+
+/** The views every pane's strip offers (its tabs, on the pane's first line), `active` the one shown; `select` is called
+ *  with another's id when it's chosen. None: the strip is empty (the line stays reserved). */
+export function showPaneViews(list: PaneView[], active: string, select: (id: string) => void): void {
+	views = { "list": list, "active": active, "select": select };
+
+	for (const frame of frames.values()) {
+		frame.renderTabs();
+	}
+}
+
+/** Markdown rendered as VS Code renders it (sanitized: a note may be anyone's), a code block by `codeBlock` if given. */
+export function renderMarkdown(text: string, codeBlock?: (languageId: string, value: string) => Promise<HTMLElement>): { "element": HTMLElement; "dispose": () => void } {
+	const rendered = renderVsMarkdown({ "value": text }, codeBlock === undefined ? {} : { "codeBlockRenderer": codeBlock });
+
+	return { "element": rendered.element, "dispose": () => { rendered.dispose(); } };
+}

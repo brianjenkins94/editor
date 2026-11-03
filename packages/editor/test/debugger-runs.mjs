@@ -160,6 +160,33 @@ console.log(said.join(", "));
 	await assert.rejects(session.request("files.read", { "path": "stop-denied.txt" }, 10_000), /doesn't exist/u);
 });
 
+test("a stopped call asks in the margin, on its line, until it's answered: there's nothing to dismiss", async () => {
+	const view = session.workbench();
+	const program = "/workspace/margin-asks.mjs";
+
+	await session.request("files.write", { "path": "margin-asks.mjs", "content": `import { writeFileSync } from "node:fs";
+
+writeFileSync("/workspace/margin-wrote.txt", "written");
+` }, 30_000);
+	await view.evaluate(async (file) => {
+		const { api } = globalThis.__editor;
+
+		await api.window.showTextDocument(api.Uri.file(file));
+		void api.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "margin-asks", "program": file });
+	}, program);
+
+	const question = view.locator(".pane-item.tone-question, .pane-item.tone-warning");
+
+	await question.waitFor({ "timeout": 60_000 });
+	assert.match(await question.innerText(), /writeFileSync.*margin-wrote\.txt.*fs:write/su);
+	await session.eventually("still asking, with nothing yet written", async () => (await question.count() === 1 ? true : undefined), 5000);
+	await assert.rejects(session.request("files.read", { "path": "margin-wrote.txt" }, 10_000), /doesn't exist/u);
+
+	await question.locator("wa-button", { "hasText": "Allow" }).first().click();
+	await question.waitFor({ "state": "detached", "timeout": 30_000 });
+	await session.eventually("the call made", async () => session.request("files.read", { "path": "margin-wrote.txt" }, 10_000).then(({ content }) => (content.includes("written") ? true : undefined), () => undefined), 30_000);
+});
+
 test("a package the program imports loads in the run", async () => {
 	await session.request("files.write", { "path": "debugger-package.test.mjs", "content": `import assert from "node:assert/strict";
 import { test } from "node:test";

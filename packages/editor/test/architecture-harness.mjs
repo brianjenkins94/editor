@@ -403,13 +403,19 @@ export async function startSession(options = {}) {
 	// Preview windows float over the workbench (they live in the shell), so drive it by keyboard from a spot they
 	// never cover: the side bar's title.
 	async function focusWorkbench() {
-		await workbench().locator(".part.sidebar .composite.title").first().click();
+		// (its label: the middle of the title is a control in some views — Run and Debug's configuration dropdown)
+		await workbench().locator(".part.sidebar .composite.title .title-label").first().click();
 	}
 
 	async function runCommand(title) {
 		await page.keyboard.press("ControlOrMeta+Shift+P");
 		await page.keyboard.type(title);
-		await page.waitForTimeout(700);
+		// (Enter once the command's the one chosen, not before: the list filters as it can)
+		await workbench().locator(".quick-input-list .monaco-list-row.focused", { "hasText": title }).first().waitFor({ "timeout": 15_000 }).catch(async (error) => {
+			const seen = await workbench().evaluate(() => ({ "visible": document.querySelector(".quick-input-widget")?.style.display, "typed": document.querySelector(".quick-input-box input")?.value, "rows": [...document.querySelectorAll(".quick-input-list .monaco-list-row")].slice(0, 5).map((row) => `${row.classList.contains("focused") ? "*" : ""}${row.textContent}`), "active": document.activeElement?.className }));
+
+			throw new Error(`${error.message.split("\n")[0]}; the palette: ${JSON.stringify(seen)}`, { "cause": error });
+		});
 		await page.keyboard.press("Enter");
 	}
 

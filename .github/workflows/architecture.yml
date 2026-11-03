@@ -21,7 +21,7 @@
   # file in its debugger (test/debugger-runs.mjs); `workbench` reviews and commits through the review panel and Source
   # Control (test/git-views.mjs), asks the workbench what an agent's tools ask it (test/agent-tools.mjs), and drives the
   # editor's own surfaces — the theme, the starter, the service worker, the reports, an extension by URL, signing in
-  # (test/workbench.mjs), lints in the editor with ESLint (test/eslint.mjs), and says which files BABLR parses (test/bablr.mjs); `performance`
+  # (test/workbench.mjs), lints in the editor with ESLint (test/eslint.mjs), says which files BABLR parses (test/bablr.mjs), and draws extensions' views beside the code (test/pane-views.mjs); `performance`
   # holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json, and warns on a rise
   # since the last green run here — whose `performance` artifact is its baseline. Each on a runner of its own, so
   # nothing shares the CPU while performance measures. They catch a wiring regression or an upstream monaco-vscode-api
@@ -43,7 +43,7 @@
         "matrix": {
           "include": [
             { "shard": "realms", "files": "test/worker-realms.mjs test/debugger-runs.mjs" },
-            { "shard": "workbench", "files": "test/git-views.mjs test/agent-tools.mjs test/workbench.mjs test/eslint.mjs test/bablr.mjs" },
+            { "shard": "workbench", "files": "test/git-views.mjs test/agent-tools.mjs test/workbench.mjs test/eslint.mjs test/bablr.mjs test/pane-views.mjs" },
             { "shard": "performance", "files": "test/performance.mjs" }
           ]
         }

@@ -787,6 +787,9 @@ export type {
 // sidebar / panel / auxiliary bar (ViewContainerLocation) — real DOM, not a sandboxed webview iframe, so it
 // composites everywhere. (silo's review burndown; mirrors the @codingame demo's customView feature.)
 // From the modules both layouts share (each layout's override re-exports these), so importing them loads neither.
+// The pane beside an editor: what extensions' pane views draw in, level with the code (pane.ts; the workbench's pane-views.ts).
+export type { PaneEntry, PaneMark, PaneRender, PaneRunBall, PaneView } from "./pane";
+export { renderMarkdown, rollPaneBall, showPane, showPaneRuns, showPaneViews } from "./pane";
 export { registerCustomView, viewContainerRegistry } from "@codingame/monaco-vscode-api/service-override/tools/views";
 export { ViewContainerLocation } from "@codingame/monaco-vscode-api/vscode/vs/workbench/common/views";
 

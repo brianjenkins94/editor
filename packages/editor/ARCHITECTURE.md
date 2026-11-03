@@ -603,9 +603,13 @@ each for a reason the code still gives:
 `.refs/` through its link, the same test file took 3.4 s that way and 3.9 s from the store (git-hunks, warm, one run each),
 and ESLint's worker has never had the buffer. Whether tsval can give up the privilege wants a whole suite's timing.
 
-**What the reduction broke:** *Answer a call where it stops* is core, but its one person's way in was the Margin's
-buttons. `editor.capability.decide` is called only by agents' `runs_tests` approvals now, so a person's run sits stopped
-at a gated call with nothing to answer it by. It needs its UI back (CLAUDE.md, *Agent tools*).
+**What the reduction broke, and what's back:** *Answer a call where it stops* is core, but its one person's way in was
+the Margin's buttons, so for a day a person's run sat stopped at a gated call with nothing to answer it by. The question
+is the Margin's again (the user, 2026-11-03: a notification can be dismissed, and then it's unclear the program is
+stopped). So the pane view it draws in is back (*Pane beside every editor*), and `extensions/margin` holds only that
+question: no pane until a run asks, there until it's answered or the run moves on. Its values, cards and coverage, and
+Rule…, come back as their features do. The pane places by lines until BABLR's annotations are back: span references and
+ranges in a text that ran place nothing yet.
 
 **Silo, firmed up.** Silo's capabilities grew session by session (packages/silo/README.md, *The four jobs*, *What
 doesn't fit*). The rewrite settles each one: the job it serves, where it lives (lib `util/silo`, pure; the command
