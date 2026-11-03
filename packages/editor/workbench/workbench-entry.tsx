@@ -57,7 +57,8 @@ import { createNodeRunner } from "./node-runner";
 import { markReady } from "./readiness";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
 import { installTestRuns } from "./test-runs";
-import { pinned } from "./versions";
+import { installTarballs } from "./tarballs";
+import { pinned, watchVersions } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
@@ -634,6 +635,10 @@ function maybeBoot(): void {
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", pinned, (path) => workspaceFs?.has(path) ?? false, paneLog);
+				// The versions every package loads at (.silo/versions.json), kept up to the manifests, and what the CDN can't
+				// serve installed (versions.ts); and a debug run's packages, as tarballs (tarballs.ts).
+				watchVersions(api as typeof import("vscode"));
+				installTarballs(api as typeof import("vscode"), workbenchHub);
 				// The workspace terminal — just-bash on the workspace filesystem, registered as the DEFAULT terminal
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner
