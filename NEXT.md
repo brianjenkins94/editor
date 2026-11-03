@@ -157,9 +157,86 @@ How it's kept:
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.
-   - **Reduce to the core**: the core declared in the ledger (decision 22 holds from then on), everything else removed
-     with its tombstone, its tests with it; the core's tests written again, the first of the new suite. Waits on
-     decision 21 and on what the core is and where the full editor is worked in (*Decisions*).
+   - **Reduce to the core** — started 2026-11-02 on the branch `reduction`, in the editor. Done: the composition roots
+     cut to the core (the workbench's extensions and services, build.ts, the app realm, the shell's top bar, the agent
+     tool families); what the core no longer reaches deleted with its tests and theme surfaces; CI's architecture
+     workflow down to `realms` and `performance`. Then the bridge and History split, one job each: the bridge is core's
+     runtime crossing into VS Code (the uplink, capability decisions and stops, the workspace runtime, the run
+     contract's events, the terminal's auto-attach); History reads the program and holds the ledger to it (drift in
+     Problems, `history.decisions`); code-reach.ts became decisions.ts. What removed features left in the core went
+     (notes.add, "Your edits", Share's workspace.files, BABLR's annotations). 45 features are tombstoned in the ledger;
+     the 10 more the core keeps are declared there; `silo check` agrees. The core boots, loads this repository and runs
+     its tests in the editor (git's, reset's, the workspace's: 20 of 20); the editor's unit tests pass in Node (94 of 94).
+     And the shell split: shell.tsx is its core (the page, the hub, the theme, the review panel; 1,111 lines to
+     307), and each other part of the top window a feature module started and placed from one list (shell/feature.ts:
+     sign-in, repo load, the GitHub popover, Commit, Reset, the push's serves, error reports). And previews out: the node
+     worker (the in-browser dev server), the preview taps, the service worker's preview routing and gate, the runner's
+     preview hooks and the COVERAGE=1 build; `vite` is a command the terminal says isn't here; the four preview features
+     tombstoned. CI's suites pass locally (realms 4 of 4, performance 5 of 5: boot 1.4 s, a typed hover 1 s, a 1000-file
+     load 0.9 s; memory read from the metrics plane through debug-mcp now).
+     The reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
+     Then more cut, the same day: BABLR (its last job the review's cosmetic verdicts, whose feature was already out;
+     git_review's verdicts and owners with it), docking (the editor's iframe fills the main region; VS Code's new windows
+     are real ones), error reports and the session timeline (the API keeps its side, for the deployed full editor), the
+     shell's placeholder buttons, Explore Orderings, the debugger's browser tests (nothing drove a preview's page once
+     previews went; their locator engine's package with them), and the architecture model's and view's previews, node worker,
+     ESLint and provoke (71 subject families nothing sent); then the live architecture diagram itself, its declared
+     model and conformance check (the reports and their store stay: debug-mcp's architecture_state and the CI harness
+     read them). And the terminal down to the core's commands (node, npm, ps, kill, git). The core's tests: 4 new (history-ledger, tarballs, runs,
+     shell-feature), below. Realms and performance pass (8 of 8).
+     Left, in order:
+     - *Kept, a decision rather than a cut:* extensions by URL (`?extension=`, `extensions.json`) and the extension
+       template (contrib/) — editor-contrib's site is the editor with its extension added, and contrib.yml syncs
+       contrib/ there, so taking them out is a decision about editor-contrib.
+     - *What's still in the manifest:* tsval's site sums, the architecture reports and metrics, extensions by URL and
+       the extension template — they move to the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
+       own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
+     - *Docs:* done 2026-11-02 — ARCHITECTURE.md (1,277 lines to 688) and RUNNING.md (320 to 126) describe the core;
+       RUNTIME-EVIDENCE.md says it's out, kept as the design its features come back to.
+     - *Every file one feature's:* done 2026-11-03 — `silo check` fails on a code file under packages/editor no live
+       feature's `paths` (or `tests`) holds, and on one two features' `paths` both hold (`.silo/owned.json`; silo README,
+       decision 22), in CI's lint and in the editor's Problems. Then the files that mixed features split along their
+       lines, each part into a module of its feature's: the debug worker (worker/, a module per feature) and the
+       adapter's stops; workbench-entry down to the boot and its wiring (project.ts, theme-follow.ts, bridge-link.ts);
+       workspace-fs's stores report to architecture-zenfs.ts; git-service.ts to git alone (git-push.ts, git-history.ts,
+       git-review.ts' discard and partial commit, the origin to project.ts, unpushed.ts); the build's parts for one
+       feature each beside it in build/ (command-tap, history, static-host, package-types; snapshot.ts the starter's);
+       the debug worker's session to the stepping debugger alone; the shell's icons out of shared/theme.ts. ata.ts,
+       test-runs.ts and workspace-tools.ts were one feature's each.
+     - *The core's tests:* begun 2026-11-02 — the ledger declares each core feature's tests (`tests`, which `silo check`
+       holds to the files): all 35 have them (2026-11-03). New: history-ledger, tarballs, runs, shell-feature (2026-11-02); and
+       git's (2026-11-03): git-push (pushed, pulled, branches, a refusal's reason, through `git http-backend`), commit
+       (the top bar's Commit, its flow as `commitAndPush`), git-views (the review panel and Source Control, in the
+       browser, in CI's `realms`); and the agent's (agent-tools: what its files, git, terminal and editor tools ask,
+       answered by the real workbench) and a capability stop answered at the call (debugger-runs: allowed once, skipped,
+       denied). They found: `files.read` gave a deleted file's text (an unedited document VS Code kept), and a line's
+       breakpoint stopped at every statement starting on it (tsval), so `try { write(); }` asked twice and the first
+       answer went to the wrong question. Then search (agent-tools: findFiles' globs, Quick Open, Find in Files; its
+       provider is the monaco-vscode-api component's workspace-search.ts, now in the feature's paths) and the bridge
+       (debugger-runs: the extension host's one hub, linked to the workbench's and to each debug run's worker). And the
+       editor's own surfaces (workbench.mjs: the theme following the system, the starter opened, the service worker
+       serving a package once it controls the page, every context on the architecture plane, an extension by URL, a
+       sign-in started — the API stood in for), with starter, static-host and editor-metrics in Node. The build and the
+       test harnesses are tested by use: worker-realms loads what's built, and workbench.mjs and history-ledger drive the
+       harness and the stand-in `vscode`. CI's browser suites are three shards now: realms, workbench, performance. The
+       unit suite passes in Node.
+     - *Then:* `EDITOR_DEPLOYS` set to `off` (production keeps the full editor) and the branch landed on main.
+     Found while reducing: the editor's runner has no `globalThis.crypto` (runs.test.mjs fails there, passes in Node);
+     it can't run the theme's budget test (`Unsupported encoding: latin1`) or a
+     test that hooks `vscode` (`registerHooks` isn't in almostnode's `node:module`); `git_checkout` can't switch to a
+     branch the shallow clone hasn't fetched (`git.show` fetches one; checkout should too); `git_pull` reports
+     "diverged" when main moved under a branch (a merge in the editor would settle it); the editor's GitHub Apps
+     couldn't push a change to `.github/workflows` (workflows read/write added to both apps 2026-11-02); writing the
+     ledger has no editor UI yet (the tombstones were written with silo's own code from a checkout); the editor reloaded
+     itself three times under large edits (8:24, 8:39, 8:46 pm): Vite's socket closed on both frames at once and its
+     client reloaded the page, while the dev server and debug-mcp kept running — the work in the workspace survived,
+     the calls in flight didn't; `files_edit` has no line-range cut, so a 360-line cut is 360 lines in the call (the
+     longest cuts were made from a checkout); `runs_stop` doesn't stop a `runs_tests` run (a test that starts a server
+     hung in the editor's runner); `files_grep`'s scope argument is `glob`, and `editor_problems` has no severity
+     filter (cspell's infos drown the rest — moot now cspell is out). The bridge's capability decisions asked the shell's
+     `capability.prompt`, which nothing answered once the shell's prompt went: now an undecided call is refused and said
+     once, with how to allow it (a rule). tsval's busy heartbeat rides its `observe` and `called` hooks, so its site sums,
+     coverage and purity (which nothing reads now) can go only once the heartbeat has a source of its own.
    - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
      tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
      editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here

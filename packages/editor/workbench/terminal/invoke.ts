@@ -14,14 +14,9 @@ import { juvy } from "@brianjenkins94/util/juvy";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { defineCommand } from "just-bash/browser";
 
-/** `definition` with `implementation`, as a just-bash command. A missing command (or subcommand) says what to do
- *  instead: 127 for a command, as a shell's "not found"; 1 for a subcommand. */
-export function toCommand(definition: CommandDefinition, implementation: Implementation | undefined): Command {
+/** `definition` with `implementation`, as a just-bash command. */
+export function toCommand(definition: CommandDefinition, implementation: Implementation): Command {
 	return defineCommand(definition.name, async (args, ctx) => {
-		if (definition.missing !== undefined) {
-			return { "stdout": "", "stderr": `${definition.name}: ${definition.missing}\n`, "exitCode": 127 };
-		}
-
 		let [stdout, stderr] = ["", ""];
 		// The process juvy runs it on: one that collects what it writes, and doesn't exit.
 		const proc: RunProcess = {
@@ -52,9 +47,7 @@ export function toCommand(definition: CommandDefinition, implementation: Impleme
 			: subcommands({
 					"name": definition.name,
 					"description": definition.summary,
-					"commands": Object.entries(definition.subcommands).map(([name, subcommand]) => leaf(name, subcommand.summary, subcommand.options, subcommand.stopEarly, subcommand.missing === undefined
-						? (implementation as Record<string, Handler>)[name]
-						: () => Promise.resolve({ "stdout": "", "stderr": `${definition.name} ${name}: ${subcommand.missing}\n`, "exitCode": 1 }), subcommand.aliases))
+					"commands": Object.entries(definition.subcommands).map(([name, subcommand]) => leaf(name, subcommand.summary, subcommand.options, subcommand.stopEarly, (implementation as Record<string, Handler>)[name], subcommand.aliases))
 				});
 
 		// (a subcommand's bare `-<number>` as the option it stands for: `git log -3` is `git log -n 3`)

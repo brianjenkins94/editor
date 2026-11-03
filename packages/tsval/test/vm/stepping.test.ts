@@ -28,6 +28,39 @@ test("breakpoint by line: pause before the marked statement and inspect state", 
 	assert.strictEqual(vm.completion, 6);
 });
 
+test("a line's breakpoint is its first statement's: on `for (…) { if (a) b(); }` it stops as the `for` starts, not at the `if` or `b()`", () => {
+	const src = ["let calls = 0;", "const b = () => { calls += 1; };", "for (let i = 0; i < 2; i++) { if (i >= 0) b(); }", "calls;"].join("\n");
+	const { vm } = createVM(src);
+
+	vm.addBreakpointsByLine(3);
+
+	let stops = 0;
+
+	for (vm.runToBreakpoint(); !vm.finished; vm.runToBreakpoint()) {
+		stops += 1;
+		assert.strictEqual(vm.location()?.line, 2);
+		vm.step(); // (off the statement it's stopped at, as a continue goes)
+	}
+
+	// The `for` statement is the line's first: it starts once — the `if` and `b()` inside it on the same line aren't stops.
+	assert.strictEqual(stops, 1);
+});
+
+test("a one-line `try { call(); }` stops once, before the call", () => {
+	const { vm } = createVM(["let done = 0;", "try { done += 1; } catch {}", "done;"].join("\n"));
+
+	vm.addBreakpointsByLine(2);
+
+	let stops = 0;
+
+	for (vm.runToBreakpoint(); !vm.finished; vm.runToBreakpoint()) {
+		stops += 1;
+		vm.step();
+	}
+
+	assert.strictEqual(stops, 1);
+});
+
 test("location + currentNode track the top frame", () => {
 	const { vm } = createVM(`const a = 1;\nconst b = 2;\na + b;`);
 

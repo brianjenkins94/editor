@@ -1,5 +1,12 @@
 # Runtime evidence
 
+**Out of the core, until reintroduced** (ARCHITECTURE.md, *The rewrite, in place*). The editor this describes — evidence
+kept in git, the Margin's live values, hovers, notes and annotations on spans, previews under HMR, live runs and runs
+kept as balls — went with the reduction; each feature's ledger tombstone says what it was and how to bring it back.
+It stays as the design they come back to, and what the packages that still carry their engines cite (tsval's live
+values and live runs, almostnode's instrumentation, editor-api's evidence and annotations). What the core does at a
+capability stop is RUNNING.md, *Capability stops*.
+
 The editor learns what your program actually does by running it: which code ran and how often, where the time went,
 the values that passed through, whether the types held, which branches were taken, which capabilities it used. It keeps
 that evidence in git beside the code, attached to stable spans rather than lines, and turns it into help you can act on.
@@ -439,7 +446,7 @@ reasons:
 | Automator | here |
 |---|---|
 | The cards, top to bottom | A function's statements, from its BABLR tree, each with a durable identity (*Durable annotations on spans*) |
-| A card's options | A call's arguments; the rule editor already draws an input from a schema (rule-editor.ts) |
+| A card's options | A call's arguments; the full editor's rule editor drew an input from a schema |
 | What flows between cards | The types a run observes at each range |
 | *Results* under a card | The Margin's live values |
 | Step, Stop, Run | The tsval debugger — and back, which Automator can't |

@@ -86,11 +86,12 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 	};
 
 	const relative = (uri: vscodeApi.Uri): string => vscode.workspace.asRelativePath(uri, false);
-	/** A file's text as the editor has it: an open document's (unsaved edits included), else what's on disk. */
+	/** A file's text as the editor has it: an open document's with unsaved edits, else what's on disk. (Not an unedited
+	 *  document's: VS Code keeps one after its file is deleted, and it would read as there.) */
 	const textOf = async (uri: vscodeApi.Uri): Promise<{ "text": string; "dirty": boolean }> => {
 		const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
 
-		if (open !== undefined) {
+		if (open?.isDirty === true) {
 			return { "text": open.getText(), "dirty": open.isDirty };
 		}
 
@@ -176,36 +177,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		await vscode.workspace.fs.delete(uri, { "recursive": true, "useTrash": false });
 
 		return { "path": at, "folder": stat.type === vscode.FileType.Directory };
-	});
-
-	// A note on code, as Add Note does from a selection (the notes extension's `notes.add`, given its text): `at` is the
-	// code it's about, as it's written in the file — found once, else it says so.
-	serve(hub, "notes.add", async (args) => {
-		const { path, at, text } = (args ?? {}) as { "path"?: unknown; "at"?: unknown; "text"?: unknown };
-		const uri = uriOf(path);
-
-		if (typeof at !== "string" || at === "" || typeof text !== "string" || text.trim() === "") {
-			throw new TypeError("notes.add takes { path, at, text }: the code the note is about, as it's written, and the note");
-		}
-
-		const document = await vscode.workspace.openTextDocument(uri);
-		const found = occurrences(document.getText(), at);
-
-		if (found.length !== 1) {
-			throw new Error(found.length === 0 ? `${relative(uri)} has no ${JSON.stringify(at.slice(0, 60))}` : `${relative(uri)} has that code ${String(found.length)} times: give more of it`);
-		}
-
-		const editor = await vscode.window.showTextDocument(document, { "preview": false });
-
-		editor.selection = new vscode.Selection(document.positionAt(found[0]), document.positionAt(found[0] + at.length));
-
-		const added = await vscode.commands.executeCommand<unknown>("notes.add", text);
-
-		if (added === undefined) {
-			throw new Error("the note wasn't added: no code there it can stand on (select a statement or an expression)");
-		}
-
-		return { "path": relative(uri), "line": document.positionAt(found[0]).line + 1 };
 	});
 
 	serve(hub, "files.edit", async (args) => {

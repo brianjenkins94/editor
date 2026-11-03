@@ -1,6 +1,6 @@
 /**
  * Runtime Automatic Type Acquisition — fetch a package's type surface on demand and write it into the workbench
- * filesystem, so an arbitrary `import "pkg"` type-checks with NO bake step (snapshot.ts) and no rebuild.
+ * filesystem, so an arbitrary `import "pkg"` type-checks with NO bake step (build/package-types.ts) and no rebuild.
  *
  * Why it exists (and why it's not the CDN overlay): the type-checker resolves modules against a SYNCHRONOUS view
  * seeded up front (snapshot.ts). The node_modules CDN overlay (node-modules-provider.ts) is async/lazy — great
@@ -46,7 +46,7 @@ interface MetaNode { "type"?: string; "path": string; "files"?: MetaNode[] }
  *  two string literals reads as one (`?: Property.MsFlowFrom | undefined;`). */
 const SPECIFIER = String.raw`(?<![\w$."'-])(?:from|import|require)\s*(?:\(\s*)?["']([^"'\s]+)["']`;
 
-/** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors snapshot.ts. */
+/** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors build/package-types.ts. */
 export function importedPackages(source: string): string[] {
 	const roots = new Set<string>();
 
@@ -274,15 +274,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	const nodeModules = workspaceFolder.replace(/\/$/u, "") + "/node_modules";
 	// Same-origin base the SW intercepts; it proxies /workspace/node_modules/* to the CDN (unversioned → latest).
 	const deployBase = location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/";
-
-	// Drop retired IndexedDB stores from earlier designs (best-effort, one-shot per user):
-	//   • "ata-cache"  — ATA's own cache, retired in M1 (the workspace zen-fs store persists now).
-	//   • "vfs-store"  — the SW's seed-mirror store, retired once the editor/type-checker/LSP workers all read
-	//                    the workspace through the zen-fs FileSystemProvider + shared SharedArrayBuffer.
-	try {
-		indexedDB.deleteDatabase("ata-cache");
-		indexedDB.deleteDatabase("vfs-store");
-	} catch { /* best-effort */ }
 
 	const fetchedPath = new Set<string>();          // node_modules-relative paths already handled this session
 	const seenPackage = new Set<string>();          // packages already acquired this session

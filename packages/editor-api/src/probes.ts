@@ -1,8 +1,7 @@
 /**
  * The node id a probe gives what it sees — a worker by its file, a request by where it goes, an IndexedDB database by
  * its owner — in every realm the probes run in (the service worker and every worker too), the editor's and a debugger's
- * worker's alike (`connectRuntime` probes with these unless told otherwise). Kept apart from the declared model (the
- * editor's architecture-model.ts), which only the view and the tests read, so a probe doesn't carry the declarations.
+ * worker's alike (`connectRuntime` probes with these unless told otherwise).
  */
 import type { NetworkProbeOptions } from "@brianjenkins94/observability";
 

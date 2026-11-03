@@ -18,21 +18,20 @@
  * M3 swapped the backend to a SharedArrayBuffer (SingleBuffer) so the LSP workers attach to this SAME filesystem
  * (see the zenfs-vfs.ts seam). The service worker deliberately does NOT serve from it: the SW can't be
  * cross-origin isolated on a static host (its own script load isn't stampable with COEP), so a SharedArrayBuffer
- * sent to it degrades to a non-shared copy — the preview instead runs its own in-page dev server, and the SW only
- * folds node_modules in from the CDN. See coi-serviceworker.js.
+ * sent to it degrades to a non-shared copy — so the SW only folds node_modules in from the CDN. See
+ * coi-serviceworker.js.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { Logger } from "@brianjenkins94/util/logger";
-import type { FileSystem } from "@zenfs/core";
 import type { WorkspaceChange } from "../shared/workspace-changes";
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay, Uri } from "@brianjenkins94/monaco-vscode-api/main";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { configure, defaultContext, fs, InMemory, resolveMountConfig, SingleBuffer } from "@zenfs/core";
 import { IndexedDB } from "@zenfs/dom";
 
-import { observeZenfs, reportZenfsUsage, ZENFS_NODE } from "../shared/architecture-zenfs";
+import { observeStores, ZENFS_NODE } from "../shared/architecture-zenfs";
 import { watchWorkspaceStore, WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
 
@@ -228,21 +227,6 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 	return { "restored": restored, "tombstoned": tombstoned, "retired": retired, "moved": moved };
 }
 
-/** Put the stores on the live architecture diagram: the workspace's (`shared`: the SharedArrayBuffer-backed one), with
- *  its usage, and silo's local/, a store of its own — what's kept there, by shape, on the view's stores (not the
- *  shared workspace's). `caller` says who is calling the store right now. */
-function observeStores(sink: ArchSink | undefined, store: FileSystem | undefined, localStore: object | undefined, shared: boolean, caller: () => string | undefined): void {
-	if (sink !== undefined && store !== undefined) {
-		sink.declare({ "id": ZENFS_NODE, "meta": { "backend": shared ? "SingleBuffer (SharedArrayBuffer)" : "InMemory (this realm only)" } });
-		observeZenfs(sink, store, { "caller": caller });
-		reportZenfsUsage(sink, store);
-	}
-
-	if (sink !== undefined && localStore !== undefined) {
-		observeZenfs(sink, localStore, { "caller": caller, "mountedAt": LOCAL_DIR, "shared": false });
-	}
-}
-
 /** Drop `paths` from the persisted store (what moved into silo's local/ lives in its own store now). */
 function forgetPersisted(db: IDBDatabase | undefined, paths: string[]): void {
 	if (db !== undefined && paths.length > 0) {
@@ -316,7 +300,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		(each as { "attributes"?: Map<string, unknown> } | undefined)?.attributes?.set("no_atime", undefined);
 	}
 
-	observeStores(sink, store, localStore, buffer !== undefined, () => caller);
+	observeStores(sink, store, { "store": localStore, "at": LOCAL_DIR }, buffer !== undefined, () => caller);
 
 	// Paths seeded read-only (managed configs like tsconfig.json, the baked type surface, ambient files). The
 	// snapshot carries the `readonly` flag; we enforce it here — boot's own seed marks them read-only too, but this

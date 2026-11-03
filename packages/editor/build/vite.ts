@@ -107,65 +107,6 @@ function componentDistDirectory(): string {
 	return url.fileURLToPath(new URL("../../../components/monaco-vscode-api/dist", import.meta.url));
 }
 
-/** The store root the resolver serves; node_modules (where the CDN fallback lives) sits under it. */
-const NODE_MODULES = "/workspace/node_modules/";
-
-/**
- * Dev-only mirror of the resolver's node_modules CDN fallback (public/coi-serviceworker.js `fetchCdn`). In
- * production the COI service worker answers a store miss under `/workspace/node_modules/` by fetching the
- * package from the CDN and re-serving it same-origin; in dev no service worker runs in the in-app pane (the
- * page is isolated by the coi-headers middleware directly), so this middleware does the same job — match a
- * `…/workspace/node_modules/<pkg>/<sub>` request, reconstruct the CDN URL from `?v=` (pinned version) and
- * `?meta` (directory listing), fetch it, and pipe it back. The node_modules overlay hits this uniformly in
- * both modes; this is the fold-in that retired the old `__proxy__` route.
- */
-export function nodeModulesCdnPlugin(): Plugin {
-	return {
-		"name": "node-modules-cdn",
-
-		"configureServer": function(server) {
-			server.middlewares.use((req, res, next) => {
-				const [pathname, rawQuery] = (req.url ?? "").split("?");
-				const index = pathname.indexOf(NODE_MODULES);
-
-				if (index === -1) {
-					next();
-
-					return;
-				}
-
-				const rel = pathname.slice(index + NODE_MODULES.length);
-				const at = rel.startsWith("@") ? rel.indexOf("/", rel.indexOf("/") + 1) : rel.indexOf("/");
-				const pkg = at === -1 ? rel : rel.slice(0, at);
-				const sub = at === -1 ? "" : rel.slice(at + 1);
-				const params = new URLSearchParams(rawQuery ?? "");
-				const version = params.get("v");
-				const spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
-				const upstream = "https://unpkg.com/" + spec + (params.has("meta") ? "?meta" : "");
-
-				fetch(upstream).then(async (response) => {
-					const body = Buffer.from(await response.arrayBuffer());
-					const contentType = response.headers.get("content-type");
-
-					res.statusCode = response.status;
-
-					if (contentType !== null) {
-						res.setHeader("content-type", contentType);
-					}
-
-					res.setHeader("cache-control", "no-cache");
-					// Same-origin to the isolated iframe (no CORP strictly needed), but set it to match the prod SW.
-					res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-					res.end(body);
-				}).catch((error: unknown) => {
-					res.statusCode = 502;
-					res.end("cdn error: " + (error instanceof Error ? error.message : "unknown"));
-				});
-			});
-		}
-	};
-}
-
 export function vscodePlugin(): Plugin {
 	const componentDist = componentDistDirectory();
 	const workbenchDist = url.fileURLToPath(new URL("../dist", import.meta.url));

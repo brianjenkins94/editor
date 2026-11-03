@@ -64,12 +64,12 @@ test("commit -a takes what's tracked; nothing staged says so", async () => {
 	assert.match((await git("commit")).stderr, /needs a message/u);
 });
 
-test("branch, and what isn't here says what to do", async () => {
+test("branch, and juvy's routing and parsing", async () => {
 	assert.equal((await git("branch")).stdout, "* main\n");
 	await git("branch feature");
 	assert.equal((await git("branch")).stdout, "  feature\n* main\n");
 	assert.match((await git("push upstream")).stderr, /has origin, where it was loaded from/u);
-	assert.match((await git("merge")).stderr, /merging isn't here yet/u);
+	assert.match((await git("merge")).stderr, /unknown git command 'merge'/u, "what isn't here is unknown");
 	assert.match((await git("frobnicate")).stderr, /unknown git command 'frobnicate'/u, "juvy's routing");
 	assert.match((await git("stats")).stderr, /Did you mean 'status'\?/u);
 	assert.match((await git("status --bogus")).stderr, /Unknown option '--bogus'/u, "juvy's parsing");

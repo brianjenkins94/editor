@@ -1,11 +1,12 @@
 /**
- * The workspace filesystem on the architecture diagram. zen-fs is shared MEMORY, not a channel: every realm that
+ * The workspace filesystem in the architecture reports. zen-fs is shared MEMORY, not a channel: every realm that
  * mounts the workspace SharedArrayBuffer reads and writes the same bytes, with no message to observe. So each realm
  * wraps its own `/workspace` store and reports the store operations it performs, as traffic from itself to the
- * `zenfs` node — which is how the diagram shows who touches the workspace, how much, and (in the workbench) through
+ * `zenfs` node — which is how the reports show who touches the workspace, how much, and (in the workbench) through
  * which door: the vscode provider or a direct caller (isomorphic-git, the terminal's path walk).
  */
 import type { ArchSink } from "@brianjenkins94/observability";
+import type { FileSystem } from "@zenfs/core";
 
 export const ZENFS_NODE = "zenfs";
 
@@ -160,4 +161,20 @@ export function reportZenfsUsage(sink: ArchSink, store: { "usage": () => { "tota
 	return () => {
 		clearInterval(timer);
 	};
+}
+
+/** Put the workspace's stores on the architecture reports: the workspace's (`shared`: the SharedArrayBuffer-backed one), with
+ *  its usage, and silo's local/, a store of its own — what's kept there, by shape, among the reports' stores (not the
+ *  shared workspace's), mounted at `localAt`. `caller` says who is calling the store right now. (The mount point is
+ *  handed in: silo's layout imports util's env, which reads `process` as it loads, and workers bundle this module.) */
+export function observeStores(sink: ArchSink | undefined, store: FileSystem | undefined, local: { "store": object | undefined; "at": string }, shared: boolean, caller: () => string | undefined): void {
+	if (sink !== undefined && store !== undefined) {
+		sink.declare({ "id": ZENFS_NODE, "meta": { "backend": shared ? "SingleBuffer (SharedArrayBuffer)" : "InMemory (this realm only)" } });
+		observeZenfs(sink, store, { "caller": caller });
+		reportZenfsUsage(sink, store);
+	}
+
+	if (sink !== undefined && local.store !== undefined) {
+		observeZenfs(sink, local.store, { "caller": caller, "mountedAt": local.at, "shared": false });
+	}
 }

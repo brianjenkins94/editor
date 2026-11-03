@@ -65,7 +65,7 @@ export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?:
 
 	const unlink = hub.link(portTransport(port), { "peer": id,
 "permissions": {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcCallSubject("playwright.run"), rpcReplySubject("node")],
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
 		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
 	} });
 
@@ -537,10 +537,6 @@ export interface RuntimeDecision { "kind": "fs" | "exec" | "net"; "method"?: str
 /** What the editor decided: whether the call may be made, and how (an Effect's `decided`). */
 export interface RuntimeVerdict { "allow": boolean; "decided": NonNullable<Effect["decided"]> }
 
-/** A Playwright call on a preview window's page (packages/playwright's `Driver`: `run` an op, `goto`, `url`, `title`),
- *  served by the shell — on `window` (a preview window's id), else the one used last: the preview you have open. */
-export interface PlaywrightCall { "call": "run" | "goto" | "url" | "title"; "args"?: unknown[]; "window"?: string }
-
 /** A worker's link into the editor's runtime. */
 export interface RuntimeConnection {
 	/** The workspace's files (once `ready`). */
@@ -563,8 +559,6 @@ export interface RuntimeConnection {
 	"socket": (port: number | undefined, path: string) => RuntimeSocket;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
 	"log": Observed["log"];
-	/** A preview's page, driven: a Playwright call there (PlaywrightCall), answered when it's done (once `ready`). */
-	"playwright": (call: PlaywrightCall) => Promise<unknown>;
 }
 
 /** A WebSocket inside the worker, as `socket` sees it: each frame as it's sent (`fromClient`: by the program's client),
@@ -628,11 +622,6 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 		"decide": (decision) => call({ "op": "decide", "call": decision }).meta as RuntimeVerdict,
 		"tarball": (name, version) => call({ "op": "tarball", "name": name, "version": version }).payload,
 		"log": log,
-		"playwright": async (playwright) => {
-			await ready;
-
-			return rpc.request("playwright.run", playwright, { "timeoutMs": 60_000, "waitForResponderMs": 10_000 });
-		},
 		"serve": (listening, handler) => {
 			const answer = exchanges(async (request) => {
 				const path = request.url.split("?")[0];

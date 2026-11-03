@@ -3,9 +3,8 @@
  * agents' `runs_affected` and `runs_tests`.
  *
  * - `tests.affected` { paths? }: the tests whose kept traces (`.silo/local/traces/<file>.jsonl`: what each test ran of
- *   each file) ran code in the changed files — each with its last outcome, and `stale` when its trace ran a declaration
- *   the file no longer has (a BABLR span id gone from its spans: it hasn't run on this code), as a save's selection
- *   (live-run.ts `reachedRuns`) judges it. And the test files no trace names (`untraced`): what they reach isn't known
+ *   each file) ran code in the changed files — each with its last outcome, and `stale`: the file has changed since
+ *   (a change in a file is all it can tell by: every test that reached a changed file is). And the test files no trace names (`untraced`): what they reach isn't known
  *   until they run, so an answer without them isn't the whole of it.
  * - `tests.run` { files?, affected? }: test files run one at a time, as `node --test` runs each (in the debugger), and
  *   each test's result: its outcome, what it threw, what a failed assertion compared, its time, and how it came out
@@ -13,8 +12,8 @@
  *   call the policy leaves undecided) isn't left waiting on a person who isn't watching: one `approved` names (its
  *   key, `runs_tests:<scope>`) is allowed, this once; the first that isn't ends the run there, and the run answers with
  *   its question (`ask`) — which runs_tests puts to the person through debug-mcp (BERNARD, JUDICIAL, then them), and
- *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace and the
- *   debugger), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
+ *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace, the debugger
+ *   and the packages' versions), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
  *   nothing for STALL_MS — no debug session, no output, no question, no word it's computing (the run contract's `busy`)
  *   — is stuck: it's ended, and says where (`stalled`).
  *
@@ -27,10 +26,9 @@ import type { TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import type * as vscodeApi from "vscode";
-import type { Bablr } from "./bablr";
 import type { GitReader } from "./git-service";
 import type { NodeRunner } from "./node-runner";
-import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { serve } from "@brianjenkins94/hub";
 import { localTracesPath } from "@brianjenkins94/util/silo/layout";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
 import { waitFor } from "./readiness";
@@ -54,7 +52,7 @@ const KEPT = 20;
 /** How long a file's run may do nothing (no session, output, question or `busy`) before it's ended as stuck. */
 const STALL_MS = 120_000;
 
-/** How long working out the affected tests may take — their traces, BABLR's spans, a search of the workspace — before a
+/** How long working out the affected tests may take — their traces and a search of the workspace — before a
  *  run goes on without (named files: how each test came out before) or says so (none named). */
 const AFFECTED_MS = 60_000;
 
@@ -115,8 +113,7 @@ interface Affected {
 	"reaches": string[];
 }
 
-export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitReader, bablr: Bablr, runner: NodeRunner): void {
-	const rpc = createRpcClient(hub);
+export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitReader, runner: NodeRunner): void {
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
 	const tracesOf = async (path: string): Promise<RunTrace[]> => parseTraces(await read(localTracesPath(path)) ?? "").filter((trace) => trace.test !== undefined);
@@ -152,19 +149,15 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		for (const path of changed.filter((each) => CODE.test(each))) {
 			const traces = await tracesOf(path);
-			const text = traces.length === 0 ? undefined : await read(path);
-			const ids = text === undefined ? undefined : new Set((await bablr.spans(text).catch(() => [])).map((span) => span.id));
 
 			for (const trace of traces) {
 				const { test } = trace;
-				const stale = ids !== undefined && ids.size > 0 && (trace.declarations ?? []).some((id) => !ids.has(id));
 				const known = tests.get(test.id);
 
 				// (a test's latest trace on each file: its outcome is its last run's)
 				if (known === undefined || trace.at > known.at) {
-					tests.set(test.id, { "id": test.id, "file": test.id.split(" › ")[0], "outcome": test.outcome, "at": trace.at, "stale": stale || known?.stale === true, "reaches": [...new Set([...known?.reaches ?? [], path])] });
+					tests.set(test.id, { "id": test.id, "file": test.id.split(" › ")[0], "outcome": test.outcome, "at": trace.at, "stale": true, "reaches": [...new Set([...known?.reaches ?? [], path])] });
 				} else {
-					known.stale ||= stale;
 					known.reaches = [...new Set([...known.reaches, path])];
 				}
 			}
@@ -210,7 +203,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				active = performance.now();
 			}
 		});
-		// (stuck: where it is — no session yet, or the session's state, line and code — and the run ended)
+		// (stuck: where it is — no session yet, or the session's top frame, as DAP says it — and the run ended)
 		const watching = setInterval(() => {
 			if (performance.now() - active < STALL_MS || stalled !== undefined) {
 				return;
@@ -224,11 +217,15 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				return;
 			}
 
-			void rpc.request(`debug.session.${session.id}.state`, undefined, { "timeoutMs": 5000 }).then((state) => {
-				const { "state": now, reason, line, code } = state as { "state"?: string; "reason"?: string; "line"?: number; "code"?: string };
+			const stuck = session;
 
-				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session ${now ?? "?"}${reason === undefined ? "" : ` (${reason})`}${line === undefined ? "" : ` at line ${String(line)}${code === undefined ? "" : `: ${code.trim()}`}`}`;
-			}, () => {
+			void (async () => {
+				const { threads } = await stuck.customRequest("threads") as { "threads": { "id": number }[] };
+				const { stackFrames } = await stuck.customRequest("stackTrace", { "threadId": threads[0]?.id, "levels": 1 }) as { "stackFrames"?: { "name": string; "line": number }[] };
+				const [frame] = stackFrames ?? [];
+
+				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session ${frame === undefined ? "had no frame" : `at ${frame.name}, line ${String(frame.line)}`}`;
+			})().catch(() => {
 				stalled = `nothing for ${String(STALL_MS / 1000)} s: the session didn't say where it is`;
 			}).finally(stop);
 		}, 5000);
@@ -298,9 +295,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		const { signal } = batch.controller;
 
 		// (the editor up first: a run started before the debugger can take it waits out its timeout, saying nothing)
-		batch.now = { "doing": "waiting for the editor to be up (its workspace and debugger)", "since": performance.now() };
+		batch.now = { "doing": "waiting for the editor to be up (its workspace, its debugger and its packages' versions)", "since": performance.now() };
 
-		const waiting = await waitFor(["workspace", "debugger"], READY_MS, signal);
+		const waiting = await waitFor(["workspace", "debugger", "versions"], READY_MS, signal);
 
 		if (waiting.length > 0) {
 			throw new Error(`the editor is still starting — after ${String(READY_MS / 1000)} s, waiting on ${waiting.join(" and ")} (readiness.ts)`);
@@ -308,7 +305,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		const listed = Array.isArray(files) ? files.filter((file): file is string => typeof file === "string").map((file) => file.replace(/^\/workspace\//u, "")) : [];
 		// (no stall clock runs yet, and any of its steps can wait without end while the page is loading: a deadline)
-		const tooLong = `working out the affected tests took over ${String(AFFECTED_MS / 1000)} s (their traces, BABLR's spans, the workspace's files)`;
+		const tooLong = `working out the affected tests took over ${String(AFFECTED_MS / 1000)} s (their traces, the workspace's files)`;
 
 		batch.now = { "doing": "working out the affected tests", "since": performance.now() };
 

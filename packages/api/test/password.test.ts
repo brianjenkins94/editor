@@ -311,7 +311,7 @@ test("there's nothing to reset for an account without a password, or no account"
 const authenticator = (secret: string) => async (ahead = 0): Promise<string> => hotp(unbase32(secret), stepAt(Date.now()) + ahead);
 
 /** An email account with MFA on: the app, and its recovery codes. */
-async function withMfa(address: string): Promise<{ "signedIn": App; "app": (ahead?: number) => Promise<string>; "recovery": string[] }> {
+async function withMfa(address: string): Promise<{ "signedIn": App; "app": (ahead?: number) => Promise<string>; "used": string; "recovery": string[] }> {
 	const signedIn = await signedInByEmail(address);
 	const started = await (await signedIn.call("POST", "/admin/account/mfa/start", {})).json() as { "secret": string; "uri": string };
 	const codeNow = authenticator(started.secret);
@@ -319,11 +319,13 @@ async function withMfa(address: string): Promise<{ "signedIn": App; "app": (ahea
 	assert.match(started.uri, /^otpauth:\/\/totp\/unusually%20good%3A.*\?secret=[A-Z2-7]+&issuer=unusually\+good&algorithm=SHA1&digits=6&period=30$/u);
 	assert.equal((await signedIn.call("POST", "/admin/account/mfa/confirm", { "code": "000000" === await codeNow() ? "111111" : "000000" })).status, 400, "a wrong code doesn't turn it on");
 
-	const confirmed = await (await signedIn.call("POST", "/admin/account/mfa/confirm", { "code": await codeNow() })).json() as { "recoveryCodes": string[] };
+	// (the code itself, kept: asked again later, "now" may be the next step)
+	const used = await codeNow();
+	const confirmed = await (await signedIn.call("POST", "/admin/account/mfa/confirm", { "code": used })).json() as { "recoveryCodes": string[] };
 
 	assert.equal(confirmed.recoveryCodes.length, 10);
 
-	return { "signedIn": signedIn, "app": codeNow, "recovery": confirmed.recoveryCodes };
+	return { "signedIn": signedIn, "app": codeNow, "used": used, "recovery": confirmed.recoveryCodes };
 }
 
 /** An email sign-in up to its second step: the browser, and what verifying the code answered. */
@@ -370,11 +372,11 @@ test("new recovery codes: the app's code (not a recovery code) makes ten more; t
 
 test("signing in with two-factor on: the emailed code, then the app's code (each step once), and the sign-in says both", async () => {
 	const address = someone();
-	const { app: codeNow } = await withMfa(address);
+	const { app: codeNow, used } = await withMfa(address);
 	const { browser, answer } = await firstFactorByEmail(address);
 
 	assert.deepEqual(answer, { "second_factor": "totp" }, "no session yet");
-	assert.equal((await form("/auth/second", browser.cookie, { "code": await codeNow() })).status, 400, "the step the setup used, used once already");
+	assert.equal((await form("/auth/second", browser.cookie, { "code": used })).status, 400, "the step the setup used, used once already");
 
 	const second = await form("/auth/second", browser.cookie, { "code": await codeNow(1) });
 	const { location } = await second.json() as { "location": string };

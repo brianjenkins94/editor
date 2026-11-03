@@ -1,7 +1,6 @@
 /**
  * Runs, as the realms that show them have them: what's running (the core runtime's registry, workbench/runs.ts, serves
- * `runs.list`) and what there is to run (the bridge's launch.ts serves `tasks.list`) — both read by the shell's run
- * picker.
+ * `runs.list`; agents' `runs_list`).
  */
 
 export type RunKind = "service" | "task";
@@ -23,21 +22,7 @@ export interface RunInfo {
 	/** A service's port (a dev server's preview). */
 	"port"?: number;
 	/** The file it runs (a dev server: its folder), and what runs it — tsval's interpreter, almostnode, the browser, or
-	 *  another extension's debugger (its debug type: `run.debugger`). */
+	 *  another extension's debugger (its debug type). */
 	"entry"?: string;
 	"runtime"?: "tsval" | "almostnode" | "preview" | (string & {});
-}
-
-/** One thing there is to run, as the shell's picker shows it. */
-export interface LaunchTarget {
-	/** Picks it back out (`tasks.run`): its source and name. */
-	"id": string;
-	"name": string;
-	/** Its package's folder relative to the workspace ("." for the root), when it's a package's script. */
-	"package"?: string;
-	/** The command it runs (`npm run dev`), and where. */
-	"command": string;
-	"cwd": string;
-	/** Keeps running until stopped (a background task: a dev server, a watcher), or runs to completion. */
-	"lifecycle": "service" | "task";
 }

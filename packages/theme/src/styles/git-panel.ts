@@ -63,47 +63,8 @@ export const gitPanelStyles = stylesheet({
 	".gp-file:hover .gp-discard, .gp-discard.armed": {
 		"visibility": "visible"
 	},
-	// "Your edits" — per-file chunk timeline (Automerge edit-bursts, node-grouped). Hovering a chunk spotlights its
-	// range in the open diff (setDiffHighlight), in the same colour.
-	".gp-chunks": {
-		"padding": "var(--wa-space-3xs) var(--wa-space-s) var(--wa-space-xs) var(--wa-space-xl)",
-		"background": "var(--wa-color-surface-lowered)"
-	},
-	".gp-chunk, .gp-chunk-info": {
-		"padding": "var(--wa-space-3xs) var(--wa-space-2xs)"
-	},
-	".gp-chunk": {
-		"cursor": "pointer",
-		"fontVariantNumeric": "tabular-nums"
-	},
-	".gp-chunk:hover": {
-		"background": "var(--wa-color-warning-fill-quiet)"
-	},
-	".gp-chunk-label": {
-		"flex": "1 1 0",
-		"minWidth": "0",
-		"fontFamily": "var(--wa-font-family-code)"
-	},
-	// BABLR verdict banner — sticky at the top of the diff, in the variant (wa-neutral / wa-warning / wa-danger) of
-	// whether the change moves the meaning.
 	".sxs-wrap": {
 		"minHeight": "100%"
-	},
-	".sxs-verdict": {
-		"position": "sticky",
-		"top": "0",
-		"zIndex": "1",
-		"padding": "var(--wa-space-xs) var(--wa-space-s)",
-		"background": "var(--wa-color-surface-raised)",
-		"color": "var(--wa-color-on-quiet)",
-		"letterSpacing": ".02em",
-		"borderBlockEnd": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)"
-	},
-	".sxs-dot": {
-		"flex": "none",
-		"width": "8px",
-		"height": "8px",
-		"background": "var(--wa-color-fill-loud)"
 	},
 	// Side-by-side codehike diff: HEAD | working, sharing one grid so a row's height is the taller of its two cells
 	// (that's what keeps alignment under word wrap). Each line is a subgrid item = number gutter + wrapped code.
@@ -194,15 +155,6 @@ export const gitPanelStyles = stylesheet({
 	},
 	".sxs-empty": {
 		"background": "var(--wa-color-surface-lowered)"
-	},
-	".sxs-line": {
-		"transition": "opacity var(--wa-transition-slow) var(--wa-transition-easing)"
-	},
-	".sxs-line.faded": {
-		"opacity": ".38"
-	},
-	".sxs-line.faded:hover": {
-		"opacity": "1"
 	},
 	".sxs-fold": {
 		"border": "0",

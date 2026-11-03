@@ -1,8 +1,7 @@
 /**
  * The terminal's `git`: the workspace's one git (isomorphic-git, git-engine.ts — the same that Source Control and the
  * review panel show), spoken as git is: status, diff, log, add, restore, commit and branch, printed as git prints them,
- * each a subcommand juvy routes and parses (command.ts — where what isn't here yet, switch, stash, push…, says what to do
- * instead). What changes the repository says so (`git.changed`), as git-service does, so Source Control and the review
+ * each a subcommand juvy routes and parses (command.ts). What changes the repository says so (`git.changed`), as git-service does, so Source Control and the review
  * panel refresh.
  *
  * `diff` compares the working tree with HEAD: without `--staged` the files with unstaged changes, with it the staged

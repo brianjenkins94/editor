@@ -1,6 +1,6 @@
 /**
  * The editor's addresses: the site's root, and `env/<owner>/<repo>` under it — the editor opened to that GitHub repo. The
- * host serves the editor's page at every `env/` path (the `_redirects` rewrite build.ts writes, Pages' 404.html), and
+ * host serves the editor's page at every `env/` path (the `_redirects` rewrite build/static-host.ts writes, Pages' 404.html), and
  * index.html puts a `<base>` at the root there, so the page and its files resolve as they do at the root.
  */
 

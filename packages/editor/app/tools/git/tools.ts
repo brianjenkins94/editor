@@ -1,5 +1,5 @@
 /** The workspace's git: status, diff, the changes as hunks, commit and discard (whole files or hunks), branches, a push
- *  to GitHub, and history — log, a file at a revision, blame (git-service.ts). */
+ *  to GitHub, and history — log, a file at a revision, blame (git-service.ts, git-review.ts, git-push.ts, git-history.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -75,14 +75,12 @@ const git: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "git_review",
 			"config": {
-				"description": "The working tree's changes as hunks, each with an id that git_commit and git_discard take: per file its status and hunks (the HEAD and working lines each replaces, removed and added). With verdicts, BABLR's verdict on each modified code file and whether each hunk is cosmetic (formatting or comments only; slow, about a second per thousand characters); with owners, the features (from .silo/manifest.json) whose code each hunk is in. Returns { files: [{ path, status, hunks: [{ id, head, working, removed, added, cosmetic?, owners? }], verdict? }], head }.",
+				"description": "The working tree's changes as hunks, each with an id that git_commit and git_discard take: per file its status and hunks (the HEAD and working lines each replaces, removed and added). Returns { files: [{ path, status, hunks: [{ id, head, working, removed, added }] }], head }.",
 				"inputSchema": {
-					"paths": z.array(z.string()).optional().describe("Only these files (relative to the workspace); default, every change."),
-					"verdicts": z.boolean().optional().describe("Ask BABLR which changes are cosmetic."),
-					"owners": z.boolean().optional().describe("Say which features each hunk's code is in.")
+					"paths": z.array(z.string()).optional().describe("Only these files (relative to the workspace); default, every change.")
 				}
 			},
-			"handler": async ({ paths, verdicts, owners }, { signal }) => ok(request("git.review", { "paths": paths, "verdicts": verdicts === true, "owners": owners === true }, signal))
+			"handler": async ({ paths }, { signal }) => ok(request("git.review", { "paths": paths }, signal))
 		})
 	},
 	{

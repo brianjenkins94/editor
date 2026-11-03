@@ -1,4 +1,19 @@
 {
+  "A change's problems": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The TypeScript and ESLint problems a change made and the ones it fixed, against HEAD: its changed files and the files importing them, each checked now and as HEAD had it, with what wasn't checked said.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+    "ways": [
+      "agent tool|code_problems",
+      "command|_eslint.problems",
+      "core module|installCodeProblems",
+      "hub request|code.problems"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
   "Agent connection": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -11,6 +26,9 @@
       "packages/editor/app/tools/host.ts",
       "packages/editor/app/tools/index.ts",
       "packages/editor/app/tools/page-tools.ts"
+    ],
+    "tests": [
+      "packages/editor/test/page-tools.test.mjs"
     ]
   },
   "Agent view of the editor": {
@@ -28,6 +46,14 @@
       "hub request|editor.trace",
       "hub request|notifications.list",
       "hub request|problems.list"
+    ],
+    "paths": [
+      "packages/editor/app/tools/editor/",
+      "packages/editor/workbench/editor-state.ts"
+    ],
+    "tests": [
+      "packages/editor/test/agent-tools.mjs",
+      "packages/editor/test/page-tools.test.mjs"
     ]
   },
   "Agent workspace tools": {
@@ -51,6 +77,7 @@
       "agent tool|git_show",
       "agent tool|git_status",
       "agent tool|terminal_output",
+      "core module|installGitHistory",
       "core module|installWorkspaceTools",
       "hub request|files.delete",
       "hub request|files.edit",
@@ -64,7 +91,199 @@
       "hub request|git.log",
       "hub request|git.show",
       "hub request|terminal.state"
+    ],
+    "paths": [
+      "packages/editor/app/tools/files/",
+      "packages/editor/app/tools/git/",
+      "packages/editor/app/tools/terminal/",
+      "packages/editor/workbench/git-history.ts",
+      "packages/editor/workbench/workspace-tools.ts"
+    ],
+    "tests": [
+      "packages/editor/test/agent-tools.mjs",
+      "packages/editor/test/page-tools.test.mjs"
     ]
+  },
+  "Agents drive the debugger": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "An AI agent can start, step, pace and stop debug sessions, send them input, set values in them, answer a call's question, set breakpoints, explore orderings, and read what the margin and the Rules view show.",
+    "docs": "packages/editor/RUNNING.md, *The model*",
+    "ways": [
+      "agent tool|debug_breakpoints",
+      "agent tool|debug_explore",
+      "agent tool|debug_list",
+      "agent tool|debug_start",
+      "agent tool|debug_state",
+      "agent tool|debug_step",
+      "agent tool|debug_stop",
+      "command|margin.state",
+      "debug adapter tracker provider|*|bridge/debug-control.ts",
+      "hub request|`debug.session.${session.id}.decide`",
+      "hub request|debug.breakpoints",
+      "hub request|debug.explore",
+      "hub request|debug.sessions",
+      "hub request|debug.start",
+      "hub request|prefix + \"pace\"",
+      "hub request|prefix + \"setValue\"",
+      "hub request|prefix + \"state\"",
+      "hub request|prefix + \"stdin\"",
+      "hub request|prefix + \"step\"",
+      "hub request|prefix + \"stop\"",
+      "hub request|subject"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Annotations that stay on their code": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Notes, rules and evidence placed on a piece of code, by the editor or an extension, stay on that code through edits, moves and reformatting.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
+    "ways": [
+      "command|editor.annotations.refer",
+      "command|editor.annotations.resolve",
+      "command|editor.annotations.spans",
+      "hub request|annotations.refer",
+      "hub request|annotations.resolve",
+      "hub request|annotations.spans",
+      "hub request|bablr.follow",
+      "hub request|bablr.pick",
+      "hub request|bablr.refer",
+      "hub request|bablr.resolve",
+      "hub request|bablr.spans"
+    ],
+    "in": "e5772e5d",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Answer a call where it stops": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "When a run reaches a call that touches files, the network or commands and nothing has decided it yet, the run stops on that line and asks in the margin: allow, skip or deny, for this call, this run or always, or make a rule.",
+    "docs": "packages/editor/RUNNING.md, *Capability stops*",
+    "ways": [
+      "command|editor.capability.decide",
+      "debug adapter tracker provider|*|bridge/capability-stops.ts"
+    ],
+    "paths": [
+      "packages/editor/extensions/bridge/capability-stops.ts",
+      "packages/editor/extensions/tsval/adapter/stops.ts",
+      "packages/editor/extensions/tsval/worker/stops.ts"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
+    ]
+  },
+  "Architecture reports and metrics": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Every context reports itself and its traffic on the architecture plane, and its memory, timing and traffic numbers on the metrics plane, for debug-mcp (architecture_state, metrics_query) and the architecture harness.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
+    "paths": [
+      "packages/editor/build/command-tap.ts",
+      "packages/editor/extensions/command-tap.ts",
+      "packages/editor/shared/architecture-zenfs.ts",
+      "packages/editor/shared/architecture.ts",
+      "packages/editor/shared/editor-metrics.ts",
+      "packages/editor/workbench/architecture-store.ts"
+    ],
+    "tests": [
+      "packages/editor/test/editor-metrics.test.mjs",
+      "packages/editor/test/performance.mjs",
+      "packages/editor/test/workbench.mjs"
+    ]
+  },
+  "Breakpoints in a page's code": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A breakpoint in a web app's page code records what was in scope each time its line ran and shows it in the margin, and a recorded call can be stepped through again in the debugger.",
+    "docs": "packages/editor/RUNNING.md, *Apps: recorded stops, not live ones*",
+    "ways": [
+      "command|tsval.stepRecordedStop",
+      "hub subscription|stops.preview"
+    ],
+    "paths": [
+      "packages/editor/extensions/tsval/replay-run.ts",
+      "packages/editor/test/replay.test.mjs"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Build a game by painting a level": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Start a new game, paint a level on a grid with one-click objects, pick systems, and generate the game's code into the project.",
+    "paths": [
+      "packages/editor/extensions/event-sheet/authoring.ts",
+      "packages/editor/extensions/event-sheet/generator.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/extensions/event-sheet/authoring.ts packages/editor/extensions/event-sheet/generator.ts"
+  },
+  "Building and serving the editor": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The editor's build (build.ts, build/vite.ts: the workbench, its extensions and workers; each feature's own part in build/, by its name), its dev server (dev.ts), the dependency patches applied after install, and the ambient types the build provides.",
+    "paths": [
+      "packages/editor/build.ts",
+      "packages/editor/build/vite.ts",
+      "packages/editor/dev.ts",
+      "packages/editor/env.d.ts",
+      "packages/editor/patches/",
+      "packages/editor/wa-jsx.d.ts"
+    ],
+    "tests": [
+      "packages/editor/test/worker-realms.mjs"
+    ]
+  },
+  "Capability calls panel": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A panel lists the program's capability calls and lets you allow, deny or clear each one; a denied call is marked as an error in the code.",
+    "ways": [
+      "command|capabilities.allow",
+      "command|capabilities.clear",
+      "command|capabilities.deny",
+      "command|capabilities.disposition",
+      "diagnostic collection|capabilities-policy",
+      "view|capabilities.calls"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Capability findings in the code": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Calls that reach the network, files, commands, the environment or eval are underlined in the code and listed in Problems, with the actual URL or path filled in by a background run.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Capabilities*",
+    "ways": [
+      "diagnostic collection|capabilities"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Capability prompts for previews": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "When your app reaches the network, a WebSocket or WebRTC that the policy hasn't decided, its preview window asks you; a preview nobody is watching is answered from what the call returned last time.",
+    "docs": "packages/editor/RUNNING.md, *A call's result*",
+    "ways": [
+      "core module|installSocketGate",
+      "hub request|\"capability.decide.\" + tab",
+      "hub request|tap.worker.decide"
+    ],
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Commit to GitHub": {
     "status": "active",
@@ -73,6 +292,198 @@
     "what": "Commit every change in the workspace with a message and push it to the repo it was loaded from, on the branch it's on, from the top bar.",
     "ways": [
       "button|Commit"
+    ],
+    "paths": [
+      "packages/editor/shell/commit.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/commit.test.mjs"
+    ]
+  },
+  "Coverage in the gutter": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "After a run, marks beside each line show whether it ran and how often, and the same colors appear in the scrollbar.",
+    "ways": [
+      "command|coverage.paneView",
+      "core module|installCoverage",
+      "text editor decoration type||margin/coverage.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Debug toolbar in the preview title bar": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The pause, step, restart and stop buttons also appear in the preview window's title bar and control the same session.",
+    "ways": [
+      "debug adapter tracker provider|*|bridge/debug-toolbar.ts",
+      "hub subscription|debug.command"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Dependency baseline and exceptions": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "What each dependency's own code can do is recorded when it's added, and the Exceptions view shows anything that goes beyond that and how each run's calls were answered.",
+    "ways": [
+      "setting|silo.baseline",
+      "view|silo.exceptions",
+      "worker||capabilities/packages-worker.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Docking editors into windows": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Move a VS Code editor into its own window docked around the editor, and show a docked window (such as a preview) as an editor tab.",
+    "ways": [
+      "hub request|dock.closeEditor",
+      "hub request|dock.hostEditor",
+      "hub request|dock.openWindow",
+      "hub subscription|dock.closeWindow"
+    ],
+    "paths": [
+      "packages/editor/shared/dock-host.ts",
+      "packages/editor/shell/shell-dock.ts",
+      "packages/editor/shell/window.ts",
+      "packages/theme/src/styles/dock.ts"
+    ],
+    "in": "3f3d8152",
+    "restore": "from the full-editor tag: shell-dock.ts made the shell's main region a dockview layout, and workbench-entry.tsx's openAuxiliaryWindow asked it for a window"
+  },
+  "Dormant features marked in History": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A way in whose files CI's runs load and whose code they never run is tinted purple where it's registered, with what deleting it frees, and a choice to keep it for 90 days or remove it.",
+    "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes*",
+    "ways": [
+      "code actions provider||history/ledger.ts",
+      "command|history.ledger.keep",
+      "command|history.ledger.remove",
+      "diagnostic collection|silo-dormant",
+      "text editor decoration type||history/ledger.ts"
+    ],
+    "in": "39b30c64",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "ESLint": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Real ESLint checks your code as you type, with quick fixes, fix-all on save, formatting, and the usual eslint.* settings.",
+    "ways": [
+      "code actions provider||eslint/extension.ts",
+      "diagnostic collection|eslint",
+      "diagnostic collection|eslint-config",
+      "document formatting edit provider||eslint/extension.ts",
+      "setting|eslint.enable",
+      "setting|eslint.format.enable",
+      "setting|eslint.rules.customizations",
+      "setting|eslint.validate",
+      "setting|eslint.workingDirectories",
+      "worker||eslint/worker.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Error reports from the editor": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Every realm's uncaught errors, and a signed-in session's timeline (repo loaded, commands run, panes shown, runs), sent to the API from the shell; an error reported shows its id, to quote.",
+    "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
+    "ways": [
+      "hub subscription|session.event"
+    ],
+    "paths": [
+      "packages/editor/shell/error-notice.tsx",
+      "packages/editor/shell/reporting.ts"
+    ],
+    "in": "3f3d8152",
+    "restore": "from the full-editor tag: the shell's errorReports feature (error-notice.tsx), session.ts's postEvents and reportError, and the session.event publishes in main.tsx, repo-load.tsx, runs.ts and workbench-entry.tsx"
+  },
+  "Event Sheet": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Shows the game the open file belongs to as a map of its objects, rules, behaviors and components, each of which opens its code, and shows this file's part of the game beside the code.",
+    "ways": [
+      "command|eventSheet.paneView",
+      "view|eventSheet.view",
+      "worker||event-sheet/recognizer-worker.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Experiments that undo themselves": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "An agent notes the working tree, tries a change, sees what it breaks, and puts every file back as it was if it doesn't hold; and previews a replacement across files as a diff before making it.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+    "ways": [
+      "agent tool|workspace_checkpoint",
+      "agent tool|workspace_restore",
+      "core module|installCheckpoints",
+      "hub request|workspace.checkpoint",
+      "hub request|workspace.restore"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Explore orderings": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Runs a program under every ordering of its events and shows the different outcomes, so bugs that depend on order turn up.",
+    "ways": [
+      "command|tsval.explore",
+      "command|tsval.exploreOrderings"
+    ],
+    "in": "fcc92752",
+    "restore": "from the full-editor tag: debug-adapter.ts's exploreProgram and its two commands, debug-worker.ts's exploreOrderings (tsval's explore, still in packages/tsval)"
+  },
+  "Extensions by URL": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Load extensions from outside the editor (an interpreter or renderer from editor-contrib) by URL, reloading as they're rebuilt.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Extension points*",
+    "ways": [
+      "url parameter|?extension"
+    ],
+    "paths": [
+      "packages/editor/workbench/extensions.ts"
+    ],
+    "tests": [
+      "packages/editor/test/fixtures/url-extension/",
+      "packages/editor/test/workbench.mjs"
+    ]
+  },
+  "Feature ledger drift in Problems": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Where what's been decided about a feature no longer matches the code, a problem says so on the ledger and offers both ways out.",
+    "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes*",
+    "ways": [
+      "diagnostic collection|silo",
+      "output channel|History"
+    ],
+    "paths": [
+      "packages/editor/build/history.ts",
+      "packages/editor/extensions/history/"
+    ],
+    "tests": [
+      "packages/editor/test/history-ledger.test.mjs"
     ]
   },
   "Features from tests": {
@@ -83,6 +494,25 @@
       "packages/editor/extensions/insights/features-view.ts"
     ]
   },
+  "Features map": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A side bar of the program as its features, in the Insights monitor's cards: a card per area, a block per feature sized by its code, a legend in their colors; clicking one focuses on it and the rest of the workspace steps back (Explorer dots, open editors dimmed, its name in the status bar); a feature's status is set from the Command Palette.",
+    "docs": "packages/silo/README.md, *The feature manifest*",
+    "ways": [
+      "command|history.features",
+      "command|history.features.focus",
+      "command|history.features.open",
+      "command|history.features.setStatus",
+      "command|history.features.unfocus",
+      "file decoration provider||history/features.ts",
+      "status bar item|history.features",
+      "text editor decoration type||history/features.ts"
+    ],
+    "in": "39b30c64",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
   "File and text search": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -90,7 +520,31 @@
     "what": "Quick Open, Find in Files and extensions' file searches over the workspace, honouring files-to-include and files-to-exclude globs.",
     "ways": [
       "search result provider|file"
+    ],
+    "paths": [
+      "components/monaco-vscode-api/workspace-search.ts"
+    ],
+    "tests": [
+      "packages/editor/test/agent-tools.mjs"
     ]
+  },
+  "Formatting-only changes marked": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Each change is judged formatting-only or meaningful; a file whose changes are only whitespace, semicolons or comments gets a badge and a dimmed name in Source Control and the Explorer.",
+    "ways": [
+      "command|cosmetic.list",
+      "command|editor.annotations.classify",
+      "file decoration provider||cosmetic/extension.ts",
+      "hub request|annotations.classify",
+      "hub request|bablr.verdict"
+    ],
+    "paths": [
+      "packages/bablr-language-ts/lib/cosmetic.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Git in the browser": {
     "status": "active",
@@ -104,8 +558,153 @@
       "core module|installGitService"
     ],
     "paths": [
-      "packages/editor/workbench/git-engine.ts"
+      "packages/editor/workbench/git-engine.ts",
+      "packages/editor/workbench/git-service.ts"
+    ],
+    "tests": [
+      "packages/editor/test/git-status.test.mjs",
+      "packages/editor/test/git-fast-forward.test.mjs",
+      "packages/editor/test/git-diff.test.mjs",
+      "packages/editor/test/silo-kept.test.mjs",
+      "packages/editor/workbench/terminal/commands/git/git.test.mjs"
     ]
+  },
+  "How a commit did in CI": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "For a commit (HEAD by default), its GitHub Actions runs on the workspace's origin, the jobs of each that didn't pass with their failed steps, and a job's log up to its first error with the tests it failed, through the editor's sign-in.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+    "ways": [
+      "agent tool|ci_status",
+      "core module|installCiStatus",
+      "hub request|ci.status",
+      "hub request|github.actions"
+    ],
+    "paths": [
+      "packages/editor/workbench/ci-status.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/workbench/ci-status.ts"
+  },
+  "In-browser dev server": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Your app's dev server (Vite) runs inside the browser on the workspace's files, and a program's own server is served to the preview the same way; an agent can force its cold-start race to check for transform errors.",
+    "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
+    "ways": [
+      "hub request|`virtual.debug.${listening}`",
+      "hub request|preview.provoke",
+      "hub request|preview.start",
+      "hub request|preview.stops",
+      "hub request|provoke.round",
+      "hub request|virtual.request"
+    ],
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Live architecture diagram": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A live diagram of the editor's parts and the messages between them, opened at boot, checked against a declared model of what may talk to what (conformance), with the violations for debug-mcp's architecture_state.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
+    "ways": [
+      "hub request|\"tool.architecture_violations.\" + tab",
+      "hub request|architecture.violations"
+    ],
+    "paths": [
+      "packages/editor/shared/architecture-model.ts",
+      "packages/editor/test/architecture-model.test.mjs",
+      "packages/editor/workbench/architecture-view.ts",
+      "packages/theme/src/styles/architecture-view.ts"
+    ],
+    "in": "87a1e23f",
+    "restore": "from the full-editor tag: architecture-view.ts (registered with the component's registerLiveArchitecture, opened by OPEN_ARCHITECTURE_COMMAND), the model and its test, and main.tsx's architecture_violations forward; the store it drew stays, in architecture-store.ts"
+  },
+  "Live runs after an edit": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The file you're editing runs again on save and on a timer so the margin stays current, without asking you anything, and a call these unwatched runs can't make can be pinned to a value it returned before or given a rule.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live runs*",
+    "ways": [
+      "command|margin.pin",
+      "command|margin.unattended",
+      "command|run.live.again",
+      "command|run.live.state",
+      "setting|run.liveRuns",
+      "setting|run.liveRuns.interval"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Live values in the margin": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Beside the code, each line shows the values it produced when it ran, one column per turn of a loop; you can hold a column or pick a call to look at, and while stopped the latest value appears inline.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live values*",
+    "ways": [
+      "command|margin.hold",
+      "command|margin.paneView",
+      "command|margin.pick",
+      "inline values provider||margin/margin.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Mock a value": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Give the program different command-line arguments, or a variable a different value, either once at a stop or on every run by a rule.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Mocking a value — and one way to run*",
+    "ways": [
+      "command|editor.debug.setValue",
+      "command|margin.mockArgv",
+      "command|margin.mockVariable"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Notes on code": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A note attached to a piece of code follows that code as it moves and changes; when the code is gone, the note waits in Problems to be re-placed or dismissed.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
+    "ways": [
+      "agent tool|notes_add",
+      "code actions provider||notes/extension.ts",
+      "command|notes.add",
+      "command|notes.confirm",
+      "command|notes.dismiss",
+      "command|notes.placeHere",
+      "command|notes.replace",
+      "comment controller|notes",
+      "diagnostic collection|notes",
+      "hub request|notes.add",
+      "status bar item||notes/extension.ts"
+    ],
+    "in": "e5772e5d",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Package scripts as tasks and the run picker": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Every package.json script is a task you can run, listed in Run Task and in the shell's run picker, and each runs in its own terminal.",
+    "ways": [
+      "hub request|tasks.list",
+      "hub request|tasks.run",
+      "hub subscription|`terminal.exit.${id}`",
+      "hub subscription|`terminal.out.${id}`",
+      "task provider|run"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Packages and types from the CDN": {
     "status": "active",
@@ -113,14 +712,220 @@
     "since": "2026-11-02",
     "what": "Any import type-checks and go-to-definition reaches real package source without installing anything, at dependency versions pinned for everyone.",
     "ways": [
+      "core module|installPackage",
+      "core module|installTarballs",
       "core module|installTypeAcquisition",
       "hub request|packages.tarball"
     ],
     "paths": [
+      "packages/editor/build/package-types.ts",
+      "packages/editor/extensions/tsval/worker/install.ts",
+      "packages/editor/workbench/ata.ts",
+      "packages/editor/workbench/install.ts",
       "packages/editor/workbench/node-modules-provider.ts",
       "packages/editor/workbench/tarballs.ts",
       "packages/editor/workbench/versions.ts"
+    ],
+    "tests": [
+      "packages/editor/test/ata.test.mjs",
+      "packages/editor/test/tarballs.test.mjs"
     ]
+  },
+  "Pane beside every editor": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A strip of tabbed views beside the code (the Margin and each extension's), level with the lines they describe, or shown instead as VS Code's own code lenses, hints and hovers.",
+    "docs": "packages/editor/ARCHITECTURE.md, *4. Pane views*",
+    "ways": [
+      "agent tool|margin_state",
+      "code lens provider||workbench/pane-native.ts",
+      "command|editor.pane.chooseView",
+      "command|editor.pane.native.input",
+      "command|editor.pane.native.more",
+      "command|editor.pane.refresh",
+      "command|editor.pane.toggleNative",
+      "core module|installNativeFace",
+      "core module|installPaneViews",
+      "hover provider||workbench/pane-native.ts",
+      "inlay hints provider||workbench/pane-native.ts",
+      "text editor decoration type||workbench/pane-native.ts"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Past runs, as balls": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Each run of a file is kept on this machine, and picking it at the top of the margin shows its values and how it ended.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Runs kept, as balls*",
+    "ways": [
+      "command|margin.pickRun"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Performance monitor": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The status bar and a Monitor view of small live charts show the editor's memory, workspace fill, long frames and errors as they happen.",
+    "docs": "packages/editor/ARCHITECTURE.md, *The metrics plane*",
+    "ways": [
+      "command|editor.metrics.read",
+      "status bar item|insights.longFrames",
+      "status bar item|insights.memory",
+      "status bar item|insights.spanErrors",
+      "status bar item|insights.workspace",
+      "view|insights.monitor"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Playground links": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Open a TypeScript Playground link here as a real workspace (swap its host for the editor's), and share your workspace as a link the Playground opens too.",
+    "ways": [
+      "button|Share",
+      "hub request|workbench.files",
+      "hub request|workspace.files"
+    ],
+    "paths": [
+      "packages/editor/shared/playground-link.ts"
+    ],
+    "in": "e5772e5d",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Playwright tests in the debugger": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*); and nothing answered `playwright.run` once previews went",
+    "since": "2026-11-02",
+    "what": "A Playwright test file (`@playwright/test`) runs in the debugger against the preview you have open: its locators, actions and expect are the editor's own Playwright (packages/playwright), each op run on the preview's page, and its tests told and traced as node:test's are.",
+    "docs": "packages/editor/RUNNING.md, *Tests*",
+    "paths": [
+      "packages/editor/extensions/tsval/playwright-test.js",
+      "packages/playwright"
+    ],
+    "in": "fcc92752",
+    "restore": "from the full-editor tag: packages/playwright, tsval's playwright-test.js and its host half in debug-worker.ts, editor-api's RuntimeConnection.playwright — with previews, which served it"
+  },
+  "Preview CPU profiles": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Profile a preview's page on demand, and automatically when it keeps running slow, saving each profile as a .cpuprofile mapped back to the lines you wrote.",
+    "ways": [
+      "agent tool|previews_profile",
+      "core module|installAutoProfiler",
+      "core module|installPreviewProfiler",
+      "core module|installProfileFiles",
+      "hub request|PREVIEW_PROFILE",
+      "hub subscription|PREVIEW_PROFILED"
+    ],
+    "paths": [
+      "packages/editor/extensions/insights/profiles.ts",
+      "packages/editor/workbench/sourcemap.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/extensions/insights/profiles.ts packages/editor/workbench/sourcemap.ts"
+  },
+  "Preview DevTools": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Chrome's DevTools docked under a preview window (console, elements, network), and the same DevTools protocol for agents.",
+    "ways": [
+      "agent tool|previews_cdp",
+      "core module|installPreviewCdp",
+      "hub request|PREVIEW_CDP",
+      "hub subscription|PREVIEW_CDP_EVENT + key"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Preview windows": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Running a dev server opens movable windows onto your app, as many per server as you like, hot-reloading on every change and showing your app's console and errors in the editor.",
+    "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
+    "ways": [
+      "core module|installConsoleTap",
+      "hub subscription|`preview.hmr.${port}`",
+      "hub subscription|preview.close",
+      "hub subscription|tap.worker.log"
+    ],
+    "paths": [
+      "packages/editor/previews/tap-shared.ts",
+      "packages/editor/previews/worker-tap.ts"
+    ],
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Preview's dev server as a debug session": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A running preview's dev server shows up in Run and Debug with a Stop button, and its output goes to the Debug Console.",
+    "ways": [
+      "debug adapter descriptor provider|production",
+      "debug configuration provider|production",
+      "debugger|production",
+      "hub subscription|`production.exit.${id}`",
+      "hub subscription|`production.exit.${this.id}`",
+      "hub subscription|`production.out.${this.id}`",
+      "hub subscription|production.launch"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Programs, services and what's running": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A program started from the terminal, a task or Run runs in the debugger with its output streamed back, and a server it starts opens a preview; a status bar entry lists what's running, stops each, and says how each ended.",
+    "docs": "packages/editor/RUNNING.md, *The model*",
+    "ways": [
+      "agent tool|runs_list",
+      "agent tool|runs_stop",
+      "hub request|runs.begin",
+      "hub request|runs.list",
+      "hub request|runs.stop",
+      "hub subscription|`debug.declined.${runId}`",
+      "hub subscription|`node.exit.${run.id}`",
+      "hub subscription|`node.exit.${runId}`",
+      "hub subscription|`node.listening.${run.id}`",
+      "hub subscription|`node.listening.${runId}`",
+      "hub subscription|`node.out.${runId}`"
+    ],
+    "paths": [
+      "packages/editor/shared/runs.ts",
+      "packages/editor/workbench/runs.ts"
+    ],
+    "tests": [
+      "packages/editor/test/runs.test.mjs"
+    ]
+  },
+  "Project picker": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A projects panel on the left, collapsible to a rail and resizable, for opening a bundled sample project into the editor (the sample catalog is empty today).",
+    "ways": [
+      "button|Collapse project panel",
+      "button|Open project",
+      "button|Toggle project panel",
+      "hub request|project.list",
+      "hub subscription|project.open"
+    ],
+    "paths": [
+      "packages/editor/app/samples.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/app/samples.ts"
   },
   "Push to GitHub": {
     "status": "active",
@@ -132,6 +937,7 @@
       "agent tool|git_checkout",
       "agent tool|git_pull",
       "agent tool|git_push",
+      "core module|installGitPush",
       "hub request|git.branch",
       "hub request|git.checkout",
       "hub request|git.identity",
@@ -141,8 +947,55 @@
     ],
     "paths": [
       "packages/editor/shared/git-remote.ts",
-      "packages/editor/shell/git-push.ts"
+      "packages/editor/shell/git-push.ts",
+      "packages/editor/shell/push.ts",
+      "packages/editor/workbench/git-push.ts"
+    ],
+    "tests": [
+      "packages/editor/test/git-push.test.mjs"
     ]
+  },
+  "Real effects, decided per call": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Your policy decides whether each file, network or command call a run or preview makes really happens; what an allowed call returned is recorded so a rule can give it back later, and what each run did is kept.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Capabilities*",
+    "paths": [
+      "packages/editor/extensions/bridge/capabilities/coalesce.ts",
+      "packages/editor/extensions/bridge/capabilities/decide.ts",
+      "packages/editor/extensions/bridge/runtime-fs.ts",
+      "packages/editor/extensions/tsval/canary.ts",
+      "packages/editor/extensions/tsval/capability-calls.ts",
+      "packages/editor/extensions/tsval/worker/gate.ts",
+      "packages/editor/extensions/tsval/worker/package-calls.ts",
+      "packages/editor/silo-enforce.d.ts"
+    ],
+    "tests": [
+      "packages/editor/test/capabilities.test.mjs"
+    ]
+  },
+  "Refactoring for agents": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "An agent finds where a name is used, renames it everywhere, and moves a file with every import of it kept right, as TypeScript resolves them: one edit the editor sees as typing, every file saved, nothing asked.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+    "ways": [
+      "agent tool|code_move",
+      "agent tool|code_query",
+      "agent tool|code_references",
+      "agent tool|code_rename",
+      "agent tool|code_rewrite",
+      "core module|installCodeRefactor",
+      "hub request|code.move",
+      "hub request|code.query",
+      "hub request|code.references",
+      "hub request|code.rename",
+      "hub request|code.rewrite"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Repo load from GitHub": {
     "status": "active",
@@ -156,7 +1009,12 @@
     "paths": [
       "packages/editor/shell/address.ts",
       "packages/editor/shell/git-clone.ts",
-      "packages/editor/shell/github.ts"
+      "packages/editor/shell/github.ts",
+      "packages/editor/shell/repo-load.tsx",
+      "packages/editor/workbench/project.ts"
+    ],
+    "tests": [
+      "packages/editor/test/github.test.mjs"
     ]
   },
   "Reset": {
@@ -170,14 +1028,19 @@
       "url parameter|?reset"
     ],
     "paths": [
-      "packages/editor/shell/reset.ts"
+      "packages/editor/shell/reset-popover.tsx",
+      "packages/editor/shell/reset.ts",
+      "packages/editor/workbench/unpushed.ts"
+    ],
+    "tests": [
+      "packages/editor/test/reset.test.mjs"
     ]
   },
   "Review by hunk": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "The working tree's changes as hunks with ids, each with BABLR's cosmetic verdict and the features whose code it's in; a commit or a discard takes some of a file's hunks, by an agent's ids or the review panel's line picks.",
+    "what": "The working tree's changes as hunks with ids; a commit or a discard takes some of a file's hunks, by an agent's ids or the review panel's line picks.",
     "ways": [
       "agent tool|git_discard",
       "agent tool|git_review",
@@ -185,7 +1048,11 @@
       "hub request|git.review"
     ],
     "paths": [
-      "packages/editor/shared/git-hunks.ts"
+      "packages/editor/shared/git-hunks.ts",
+      "packages/editor/workbench/git-review.ts"
+    ],
+    "tests": [
+      "packages/editor/test/git-hunks.test.mjs"
     ]
   },
   "Review panel": {
@@ -197,8 +1064,7 @@
       "button|Close diff",
       "button|Collapse changes panel",
       "button|Discard changes",
-      "button|History",
-      "button|Toggle history panel",
+      "button|Toggle changes panel",
       "hub request|git.commit",
       "hub request|git.discard",
       "hub request|git.file",
@@ -206,8 +1072,90 @@
       "hub subscription|git.changed"
     ],
     "paths": [
-      "packages/editor/shell/git-codehike.tsx"
+      "packages/editor/shell/git-codehike.tsx",
+      "packages/editor/shell/git-panel.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/git-views.mjs"
     ]
+  },
+  "Rule editor": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "One editor for every rule about what a program may do (allow, deny, give a value), opened under the Rules tree from a stop, the Margin or a preview prompt.",
+    "docs": "packages/editor/RUNNING.md, *Rules*",
+    "ways": [
+      "agent tool|rules_list",
+      "command|editor.rules.cancelEdit",
+      "command|editor.rules.edit"
+    ],
+    "paths": [
+      "packages/editor/workbench/rule-editor.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/workbench/rule-editor.ts"
+  },
+  "Rules": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The Rules view lists every rule as a sentence, in the order rules are checked, where you can add, open, edit and remove them.",
+    "docs": "packages/editor/RUNNING.md, *Rules*",
+    "ways": [
+      "command|silo.rules.given",
+      "command|silo.rules.list",
+      "command|silo.rules.new",
+      "command|silo.rules.open",
+      "command|silo.rules.refresh",
+      "command|silo.rules.remove",
+      "command|silo.rules.set",
+      "view|silo.rules"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Rules placed in the code": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A rule tied to a line stays with its code through edits, shows as a gutter mark with its sentence on hover, and can be re-placed when its place is lost.",
+    "docs": "packages/editor/RUNNING.md, *A rule placed in the code*",
+    "ways": [
+      "command|silo.rules.files",
+      "command|silo.rules.replace"
+    ],
+    "paths": [
+      "packages/editor/extensions/capabilities/placed-rules.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/extensions/capabilities/placed-rules.ts"
+  },
+  "Run a file in the debugger": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Run (the editor's play button) runs the open file in the debugger, the one way every program runs, whichever debugger is set to run it.",
+    "docs": "packages/editor/RUNNING.md, *The model*",
+    "ways": [
+      "command|editor.debugFile",
+      "debug adapter tracker provider|*|bridge/debug-events.ts",
+      "debug configuration provider|*|bridge/debug-events.ts"
+    ],
+    "in": "6d1ad3ce",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Run from the shell": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A Run menu in the top bar runs the file in the editor in the debugger, or one of the workspace's scripts and tasks, showing a running service's preview instead of starting it twice.",
+    "docs": "packages/editor/RUNNING.md, *The model*",
+    "ways": [
+      "button|Run"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Run with Inputs": {
     "status": "removed",
@@ -227,8 +1175,46 @@
     ],
     "paths": [
       "packages/editor/app/coi.ts",
+      "packages/editor/build/static-host.ts",
+      "packages/editor/coi-serviceworker.js",
       "packages/editor/index.html"
+    ],
+    "tests": [
+      "packages/editor/test/static-host.test.mjs",
+      "packages/editor/test/workbench.mjs"
     ]
+  },
+  "Runtime evidence kept in git": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "What runs and previews observed (which code ran, the values that passed, whether functions stayed pure) is summed and committed beside the code with each run's envelope and the machine it ran on; you choose how much of a preview is recorded.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *The model*",
+    "ways": [
+      "core module|installPageEvidence",
+      "hub request|preview.version",
+      "hub subscription|evidence.flush",
+      "hub subscription|evidence.preview"
+    ],
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Scripts over the workspace": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "JavaScript an agent runs for counting or joining data across the workspace's files, which it reads but can't change, in a locked-down realm with no network; the answer says what it read and what it was refused.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+    "ways": [
+      "agent tool|script_run",
+      "core module|installScriptRun",
+      "hub request|script.run"
+    ],
+    "paths": [
+      "packages/editor/workbench/script-run.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/workbench/script-run.ts"
   },
   "Sign-in and account": {
     "status": "active",
@@ -241,7 +1227,12 @@
     "paths": [
       "packages/editor/shell/account-dialog.tsx",
       "packages/editor/shell/github-auth.ts",
-      "packages/editor/shell/session.ts"
+      "packages/editor/shell/github-control.tsx",
+      "packages/editor/shell/session.ts",
+      "packages/editor/shell/sign-in.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "Source Control for git": {
@@ -249,19 +1240,117 @@
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
     "what": "The Source Control view shows staged and unstaged changes with diffs against the last commit, and commits from its input box.",
-    "docs": "packages/editor/ARCHITECTURE.md, *Worked examples (the git/SCM + BABLR stack)*",
+    "docs": "packages/editor/ARCHITECTURE.md, *Worked example: git*",
     "ways": [
       "command|sourceControl.commit",
       "command|sourceControl.refresh",
       "source control|git",
       "text document content provider||source-control/extension.ts"
+    ],
+    "paths": [
+      "packages/editor/extensions/source-control/"
+    ],
+    "tests": [
+      "packages/editor/test/git-views.mjs"
+    ]
+  },
+  "Spell check": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The real cspell engine spell-checks code and prose.",
+    "paths": [
+      "packages/editor/extensions/cspell"
+    ],
+    "in": "e16b2b75",
+    "restore": "git checkout full-editor -- packages/editor/extensions/cspell"
+  },
+  "Stepping debugger with step back": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Breakpoints, stepping forward and backward, and variables, on a predictable clock whose timer waits can be skipped or made real.",
+    "ways": [
+      "command|tsval.skipWaits",
+      "command|tsval.waitRealTime",
+      "debug adapter descriptor provider|tsval",
+      "debug configuration provider|tsval",
+      "debugger|tsval",
+      "worker||tsval/debug-worker.ts"
+    ],
+    "paths": [
+      "packages/editor/bench/running.ts",
+      "packages/editor/extensions/tsval/debug-adapter.ts",
+      "packages/editor/extensions/tsval/debug-protocol.ts",
+      "packages/editor/extensions/tsval/debug-worker.ts",
+      "packages/editor/extensions/tsval/extension.ts",
+      "packages/editor/extensions/tsval/worker/runtime.ts",
+      "packages/editor/extensions/tsval/worker/session.ts",
+      "packages/editor/extensions/tsval/worker/state.ts"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
+    ]
+  },
+  "Terminal commands beyond the core's": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*); the terminal keeps the commands the core's features run: node, npm, ps, kill, git",
+    "since": "2026-11-02",
+    "what": "The terminal's other commands: code and open (a file into the editor), less, more and history, pnpm, yarn and npx (npm in their words), the commands that say they aren't here and what to do instead (vim, python, docker, vite, …) and git's subcommands that did the same, and a terminal that runs one task's command.",
+    "paths": [
+      "packages/editor/workbench/terminal/commands/bun/",
+      "packages/editor/workbench/terminal/commands/deno/",
+      "packages/editor/workbench/terminal/commands/docker/",
+      "packages/editor/workbench/terminal/commands/make/",
+      "packages/editor/workbench/terminal/commands/nano/",
+      "packages/editor/workbench/terminal/commands/pip/",
+      "packages/editor/workbench/terminal/commands/python/",
+      "packages/editor/workbench/terminal/commands/python3/",
+      "packages/editor/workbench/terminal/commands/ssh/",
+      "packages/editor/workbench/terminal/commands/sudo/",
+      "packages/editor/workbench/terminal/commands/tar/",
+      "packages/editor/workbench/terminal/commands/vi/",
+      "packages/editor/workbench/terminal/commands/vim/",
+      "packages/editor/workbench/terminal/commands/vite/",
+      "packages/editor/workbench/terminal/commands/pnpm/",
+      "packages/editor/workbench/terminal/commands/yarn/",
+      "packages/editor/workbench/terminal/commands/npx/",
+      "packages/editor/workbench/terminal/commands/code/",
+      "packages/editor/workbench/terminal/commands/open/",
+      "packages/editor/workbench/terminal/commands/less/",
+      "packages/editor/workbench/terminal/commands/more/",
+      "packages/editor/workbench/terminal/commands/history/"
+    ],
+    "in": "537c4815",
+    "restore": "from the full-editor tag: each command's folder (catalog.ts finds them), with `missing` back in catalog.ts and invoke.ts for the ones that aren't here"
+  },
+  "Terminal node runs in the debugger": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Typing `node <file>` in the terminal starts a debug session that prints and reads input in that terminal, and Ctrl-C stops it.",
+    "docs": "packages/editor/RUNNING.md, *The model*",
+    "ways": [
+      "debug adapter tracker provider|*|bridge/debug-events.ts",
+      "debug configuration provider|*|bridge/debug-events.ts",
+      "hub subscription|`node.stdin.${runId}`",
+      "hub subscription|debug.launch",
+      "hub subscription|debug.stop"
+    ],
+    "paths": [
+      "packages/editor/extensions/bridge/debug-events.ts",
+      "packages/editor/extensions/tsval/worker/process.ts",
+      "packages/editor/workbench/node-runner.ts"
+    ],
+    "tests": [
+      "packages/editor/workbench/terminal/commands/node/node.test.mjs"
     ]
   },
   "Tests for agents": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "Which tests a change reaches, by the traces of their runs here (stale when they ran code it has altered, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
+    "what": "Which tests a change reaches, by the traces of their runs here (each stale, as a changed file is all it can tell by, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "ways": [
       "agent tool|runs_affected",
@@ -269,6 +1358,15 @@
       "core module|installTestRuns",
       "hub request|tests.affected",
       "hub request|tests.run"
+    ],
+    "paths": [
+      "packages/editor/app/tools/runs/",
+      "packages/editor/extensions/tsval/worker/busy.ts",
+      "packages/editor/workbench/readiness.ts",
+      "packages/editor/workbench/test-runs.ts"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
     ]
   },
   "Tests run in the debugger": {
@@ -278,7 +1376,69 @@
     "what": "`node --test` runs test files in the debugger with breakpoints and stepping, and remembers which code each test reached.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "paths": [
-      "packages/editor/extensions/tsval/node-test.js"
+      "packages/editor/extensions/tsval/node-test.js",
+      "packages/editor/extensions/tsval/worker/tests.ts"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
+    ]
+  },
+  "The bridge": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Core's one crossing into VS Code: the extension that holds the workbench's hub for the others, exports the workspace runtime, and is the only extension on the hub.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Extensions: which one, which host*",
+    "paths": [
+      "packages/editor/extensions/bridge/extension.ts",
+      "packages/editor/extensions/bridge/hub.ts",
+      "packages/editor/workbench/bridge-link.ts"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
+    ]
+  },
+  "The editor's test harnesses": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A real editor in headless Chromium for the browser suites (the architecture harness, through the workbench's `__architecture` and `__editor` hooks), and a stand-in `vscode` for Node's unit tests.",
+    "paths": [
+      "packages/editor/test/architecture-harness.mjs",
+      "packages/editor/test/vscode/",
+      "packages/editor/workbench/debug-bridge.ts"
+    ],
+    "tests": [
+      "packages/editor/test/history-ledger.test.mjs",
+      "packages/editor/test/workbench.mjs"
+    ]
+  },
+  "The shell": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The top window: the page, the editor in its iframe, the shell hub linked to the app, and where each of the shell's features is started and its control placed (shell/feature.ts).",
+    "paths": [
+      "packages/editor/shell/feature.ts",
+      "packages/editor/shell/icon.tsx",
+      "packages/editor/shell/shell.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/shell-feature.test.mjs"
+    ]
+  },
+  "The starter workspace": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The project a fresh editor opens on when no repository is loaded: a small React app with the editor's preferred settings, baked into the build (build/snapshot.ts).",
+    "paths": [
+      "packages/editor/build/snapshot.ts",
+      "packages/editor/demo/"
+    ],
+    "tests": [
+      "packages/editor/test/starter.test.mjs",
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "The workspace terminal": {
@@ -286,14 +1446,111 @@
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
     "what": "A bash-like terminal on the workspace's files with npm, node, git, vite and other commands, which VS Code tasks also run in.",
-    "ways": [
-      "hub request|terminal.run",
-      "hub subscription|`terminal.in.${id}`",
-      "hub subscription|`terminal.stop.${id}`"
-    ],
     "paths": [
       "packages/editor/workbench/terminal/"
+    ],
+    "tests": [
+      "packages/editor/test/terminal-integration.test.mjs",
+      "packages/editor/test/terminal-session.test.mjs",
+      "packages/editor/workbench/terminal/commands/npm/npm.test.mjs",
+      "packages/editor/workbench/terminal/commands/ps/ps.test.mjs"
     ]
+  },
+  "Theme follows your system": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The editor switches light or dark with the operating system, and the surrounding chrome takes on VS Code's colours.",
+    "ways": [
+      "hub subscription|theme.colorScheme",
+      "hub subscription|theme.colors"
+    ],
+    "paths": [
+      "packages/editor/workbench/theme-follow.ts"
+    ],
+    "tests": [
+      "packages/editor/test/workbench.mjs"
+    ]
+  },
+  "Type queries": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A `// ^?` comment under an expression shows that expression's type at the end of the comment, as in the TypeScript Playground.",
+    "ways": [
+      "inlay hints provider||type-queries/extension.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Unparsable files flagged": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A file the editor can't parse gets a warning in Problems, because notes and evidence can't attach to it until it parses again.",
+    "ways": [
+      "diagnostic collection|BABLR",
+      "hub subscription|parse.status"
+    ],
+    "in": "e5772e5d",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "What a way in reaches": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "For a way in (a command, hub request, tool, core module, setting, view), the feature that owns it, where it's registered, what removing it would free and leave by hand, and everywhere code, tests and docs name it: silo remove's plan, written nowhere.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
+    "ways": [
+      "agent tool|code_reach",
+      "command|history.reach",
+      "core module|installCodeReach",
+      "hub request|code.reach"
+    ],
+    "in": "39b30c64",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "What could go, in purple": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Code the runs show was never needed, such as a `?.` that never met an empty value or a branch never taken, is tinted purple with a quick fix to remove it, and the Suggestions view lists them for every file.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Fourth slice: what could go, in purple, across inputs*",
+    "ways": [
+      "code actions provider||insights/fixes.ts",
+      "command|insights.applySuggestion",
+      "diagnostic collection|evidence",
+      "setting|silo.evidence.minRuns",
+      "setting|silo.evidence.minSeen",
+      "text editor decoration type||insights/fixes.ts",
+      "view|insights.suggestions"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "What went through this code, on hover": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Hovering code shows which values passed through it across runs, how often they were empty, what kinds they were next to the declared type, and how often each branch ran.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Second slice: values, branches and types*",
+    "ways": [
+      "hover provider||insights/hover.ts"
+    ],
+    "in": "e16b2b75",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "What your edits change": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "When you pause typing, the History output says which features your edits added, removed or changed, and whether runs used them.",
+    "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say*",
+    "ways": [
+      "output channel|History"
+    ],
+    "in": "39b30c64",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "What's been decided about it": {
     "status": "active",
@@ -304,7 +1561,15 @@
     "ways": [
       "agent tool|decisions_for",
       "command|history.decisions",
+      "core module|installDecisions",
       "hub request|decisions.for"
+    ],
+    "paths": [
+      "packages/editor/app/tools/decisions/",
+      "packages/editor/workbench/decisions.ts"
+    ],
+    "tests": [
+      "packages/editor/test/history-ledger.test.mjs"
     ]
   },
   "Workbench boot": {
@@ -321,8 +1586,18 @@
       "url parameter|?pane"
     ],
     "paths": [
+      "packages/editor/app/logging.ts",
+      "packages/editor/app/vscode.tsx",
+      "packages/editor/main.tsx",
+      "packages/editor/shared/hidden-timers.ts",
       "packages/editor/shared/pane-link.ts",
-      "packages/editor/workbench/Workbench.tsx"
+      "packages/editor/workbench/Workbench.tsx",
+      "packages/editor/workbench/workbench-entry.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/worker-realms.mjs",
+      "packages/editor/test/performance.mjs",
+      "packages/editor/test/hidden-timers.test.mjs"
     ]
   },
   "Workspace filesystem": {
@@ -333,30 +1608,45 @@
     "docs": "packages/editor/ARCHITECTURE.md, *The workspace filesystem (zen-fs)*",
     "ways": [
       "core module|installWorkspaceFs",
-      "hub request|workspace.buffer",
       "hub subscription|WORKSPACE_CHANGED"
     ],
     "paths": [
       "packages/editor/shared/workspace-changes.ts",
       "packages/editor/shared/workspace-runtime.ts",
-      "packages/editor/shared/zenfs-vfs.ts"
+      "packages/editor/shared/zenfs-vfs.ts",
+      "packages/editor/workbench/provider-base.ts",
+      "packages/editor/workbench/workspace-fs.ts",
+      "packages/editor/workbench/workspace.ts"
+    ],
+    "tests": [
+      "packages/editor/test/workspace-changes.test.mjs"
     ]
   },
+  "Your edits since the last commit": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Every edit burst since the last commit is recorded per file and shown as small chunks grouped by the code they touched, surviving reloads.",
+    "ways": [
+      "button|Your edits",
+      "command|editor.history.texts",
+      "core module|installEditHistory",
+      "hub request|bablr.editGroups",
+      "hub request|history.chunks"
+    ],
+    "in": "e5772e5d",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
   "capability engine": {
-    "status": "parked",
-    "why": "paused 2026-10-02 for coverage and profiling; its records may move into the run ledger",
-    "since": "2026-10-23",
-    "paths": [
-      "packages/editor/extensions/capabilities/engine.ts"
-    ]
+    "status": "removed",
+    "why": "went with the capabilities extension, which the rewrite reduced out",
+    "since": "2026-11-02",
+    "in": "e16b2b75"
   },
   "derived history": {
     "status": "parked",
     "why": "its ways-in list is this repository's alone; features from tests are the portable way in (silo README, *Derived history*)",
-    "since": "2026-10-23",
-    "paths": [
-      "packages/editor/extensions/history"
-    ]
+    "since": "2026-10-23"
   },
   "terminal_run": {
     "status": "removed",

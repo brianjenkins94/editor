@@ -1,6 +1,6 @@
 /**
- * Drives a real editor session in a fresh headless Chromium for the architecture tests, and reads what the live
- * architecture view observed (`globalThis.__architecture` in the workbench realm — see architecture-view.ts).
+ * Drives a real editor session in a fresh headless Chromium for the architecture tests, and reads what the workbench's
+ * architecture store observed (`globalThis.__architecture` in the workbench realm — see architecture-store.ts).
  *
  * Uses the dev server at ARCH_URL (default http://localhost:5173/), starting `tsx dev.ts` if nothing answers — once for
  * a whole run when it's the run's global setup (`node --test --test-global-setup=test/architecture-harness.mjs`), else
@@ -19,7 +19,7 @@ import { until } from "@brianjenkins94/util/until";
 export const URL_UNDER_TEST = process.env.ARCH_URL ?? "http://localhost:5173/";
 export const TIMEOUT_MS = 120_000;
 /** The realms a booted editor has (the smoke test's `boot`), and how long a session waits for them before giving up. */
-const BOOT_REALMS = ["shell", "root", "sw", "workbench", "bridge", "node"];
+const BOOT_REALMS = ["shell", "root", "sw", "workbench", "bridge"];
 const BOOT_TIMEOUT_MS = 90_000;
 
 /** Where the page's debug-mcp socket (:7378) is relayed to: this checkout's debug-mcp (`debugMcp: true` starts one; with
@@ -330,7 +330,7 @@ export async function startSession(options = {}) {
 	const channelsSeen = new Map();
 	const workbench = () => page.frames().find((frame) => frame.url().includes("/__vscode__/host.html"));
 
-	/** Take the view's snapshot now, and keep what it's seen. */
+	/** Take the store's snapshot now, and keep what it's seen. */
 	async function look() {
 		const frame = workbench();
 
@@ -388,7 +388,7 @@ export async function startSession(options = {}) {
 		});
 	}
 
-	/** Poll what the view observed until `ready(snapshot)` holds. */
+	/** Poll what the store observed until `ready(snapshot)` holds. */
 	async function observed(what, ready, timeoutMs = TIMEOUT_MS) {
 		return failFast(what, until(what, async () => {
 			const seen = await look();
@@ -468,8 +468,7 @@ export async function startSession(options = {}) {
 		"topologySeen": () => topologySeen,
 		/** Everything seen all session: the last snapshot, with every node and channel any look saw. */
 		"seen": () => ({ ...snapshot, "nodes": [...nodesSeen.values()], "channels": [...channelsSeen.values()], "topology": topologySeen }),
-		"conformance": async () => workbench().evaluate(() => globalThis.__architecture.conformance()),
-		/** A command run, as an extension runs one: the editor's (ARCHITECTURE.md, *Extension points* 5) or an extension's. */
+		/** A command run, as an extension runs one: the editor's (ARCHITECTURE.md, *Extension points* 3) or an extension's. */
 		"execute": async (command, ...args) => workbench().evaluate(([name, given]) => globalThis.__editor.api.commands.executeCommand(name, ...given), [command, args]),
 		/** An RPC into the hub tree, from the workbench realm. */
 		// (a request that times out says what the page was saying about runs and debuggers meanwhile: the bridge logs each

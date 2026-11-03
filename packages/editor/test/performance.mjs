@@ -25,11 +25,15 @@ import { after, before, test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 import { until } from "@brianjenkins94/util/until";
 
-import { startSession } from "./architecture-harness.mjs";
+import { createDebugMcp } from "../../debug-mcp/src/server.ts";
+import { DEBUG_MCP_PORT, startSession } from "./architecture-harness.mjs";
 
 const budgets = JSON.parse(fs.readFileSync(new URL("performance-budgets.json", import.meta.url)));
 const results = {};
 let session;
+/** This checkout's debug-mcp, in-process: the page's metrics plane is read from its store (`metricsOf`), as metrics_query
+ *  reads it. */
+let debugMcp;
 
 // The memory reading is measureUserAgentSpecificMemory, which Chrome's headless shell on Linux doesn't have (it throws
 // "not available" — CI's runners, reproduced in Playwright's Linux image): the full Chromium build does, so that's the
@@ -37,12 +41,15 @@ let session;
 // workers started since (TypeScript's servers — 10 realms one time, 16 the next). Eager, it's immediate and has them all.
 // (`boot: false`: this suite times the boot and the first hover itself, so its session doesn't wait for every realm first.)
 before(async () => {
-	session = await startSession({ "boot": false, "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } });
+	debugMcp = createDebugMcp({ "port": DEBUG_MCP_PORT });
+	await debugMcp.whenListening;
+	session = await startSession({ "boot": false, "debugMcp": "external", "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } });
 });
 
 after(async () => {
 	report();
 	await session?.close("architecture-performance"); // its architecture snapshot, beside the other suites' (not performance.json)
+	await debugMcp?.close();
 });
 
 /** The workbench realm, once the editor is ready. */
@@ -134,8 +141,12 @@ test("the demo's first typed hover", async () => {
 
 test("memory by realm, at idle", async () => {
 	const workbench = await editor();
-	// The workbench's samples (none until the pod, which serves the command, has activated).
-	const samples = async () => (await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.metrics.read")).catch(() => ({})))["workbench"] ?? [];
+	// The workbench's samples, from the metrics plane as debug-mcp keeps it (none until the tab has linked and answered).
+	const samples = async () => {
+		const [tab] = await debugMcp.tabs(2000).catch(() => []);
+
+		return tab === undefined ? [] : debugMcp.metricsOf(tab.tab)?.read()["workbench"] ?? [];
+	};
 	const read = async () => (await samples()).filter((sample) => sample.values["memory.total"] !== undefined).at(-1)?.values;
 	const before = (await read())?.["memory.total"];
 	// What the gauge stands on, measured directly — so if no reading comes, the failure says why.

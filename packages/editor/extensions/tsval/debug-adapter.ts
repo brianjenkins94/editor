@@ -10,19 +10,16 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/editor-api";
-import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
-import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 
 import type { Span } from "@brianjenkins94/util/logger";
-import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
-import { annotations } from "@brianjenkins94/editor-api/annotations";
+import type { Policy } from "@brianjenkins94/util/silo/policy";
+import type { CapabilityAsk, Control, LoopStart, RunEnd, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
-import { loadEffectivePolicy } from "@brianjenkins94/editor-api/policy";
 import { logger } from "@brianjenkins94/util/logger";
-import { EMPTY_POLICY, given as givenBy, placesOf } from "@brianjenkins94/util/silo/policy";
+import { EMPTY_POLICY } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
+import { askEvent, decideControl } from "./adapter/stops";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -40,10 +37,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private state: DebugState = "starting";
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
 	private ended = false;
-	/** The program's files core has values of, each with the text that ran (sent with its first values): the entry, and
-	 *  any other of the program's files (packages/tsval/README.md, *Modules*). */
-	private readonly told = new Map<string, string>();
-	/** What the capability stop it's at asks (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*), until the run resumes. */
+	/** What the capability stop it's at asks (RUNNING.md, *Capability stops*), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
 	/** Breakpoint lines by source path — VS Code sends them per file, and tsval runs one program. */
 	private readonly breakpointLines = new Map<string, number[]>();
@@ -54,12 +48,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private program = "";
 	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
 	private args: string[] = [];
-	/** A recorded call to replay (RUNNING.md: stepping a recorded handler) — the text that ran, and what the call read —
-	 *  rather than the file as a program. */
-	private replay: (Replay & { "source": string }) | undefined;
 	/** Where it was started and with what environment — a terminal's (`cwd`, `env`); none, the workspace and nothing. */
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
-	/** Where the event loop starts — given by a launch that runs one ordering again (exploreProgram's), else fresh. */
+	/** Where the event loop starts — given by a launch (its clock, its seed, the choices to make), else fresh. */
 	private eventLoop: LoopStart | undefined;
 	private lines: number[] = [];
 	private snapshot: Snapshot | undefined;
@@ -87,24 +78,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	// gated call hard-stops at its line). Empty when there's none — then every undecided dangerous call breaks
 	// (firewall default).
 	private policy: Policy = EMPTY_POLICY;
-	/** The rules placed in this program's code, found in the text that runs (`placeRules`). */
-	private hooks: SetHook[] = [];
 	private sourceReady = false;
 	private configDone = false;
 	private started = false;
-	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
+	/** Run Without Debugging: breakpoints don't stop it. Capability breakpoints still do — they're
 	 *  the policy gate, not a debugging aid. */
 	private noDebug = false;
-	/** A live run (RUNTIME-EVIDENCE.md, *Live runs*): launched quiet on a save or its interval, stopping at nothing. */
-	private live = false;
-	/** A live run nobody's looking at (one a save selected: `__unattended`): a call that never ran for real halts it. */
-	private unattended = false;
-	/** What calls returned when they last ran for real (`__recorded`): a live run gives them back where it would skip. */
-	private recorded: Record<string, unknown> | undefined;
-	/** The latest coverage the worker reported, and whether the final one has gone out as the `coverage` event. */
-	private coverage: CoverageReport | undefined;
-	private coverageSent = false;
-	private readonly coverageWaiters = new Set<(report: CoverageReport) => void>();
 	/** A `setValue` waiting on the worker's answer. */
 	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
@@ -148,7 +127,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.maybeStart();
 				break;
 
-			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
 			// Input for the program's process.stdin — a terminal's run's typing (the run contract's `stdin`, debug-events.ts).
 			case "stdin": {
 				const { data, end } = args as unknown as StdinRequest;
@@ -157,13 +135,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.respond(request);
 				break;
 			}
-
-			case "getCoverage":
-				// With the text that ran, so the margin can place it on the code as it is now (coverage.ts).
-				void this.currentCoverage(5000).then((report) => {
-					this.respond(request, { ...report, "source": this.source });
-				});
-				break;
 
 			case "launch":
 				this.launchRequest(request, args);
@@ -206,16 +177,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private launchRequest(request: DapRequest, args: Record<string, unknown>): void {
 		this.program = (args["program"] as string | undefined) ?? "";
 		this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
-		this.replay = typeof args["replay"] === "object" && args["replay"] !== null ? args["replay"] as Replay & { "source": string } : undefined;
 		this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
 		this.eventLoop = loopStartOf(args["eventLoop"]);
 		this.noDebug = args["noDebug"] === true;
 		this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
-		// A live run (RUNTIME-EVIDENCE.md, *Live runs*): the file run again on a save or its interval — it stops at nothing.
-		this.live = args["__live"] === true;
-		this.unattended = this.live && args["__unattended"] === true;
-		this.recorded = typeof args["__recorded"] === "object" && args["__recorded"] !== null ? args["__recorded"] as Record<string, unknown> : undefined;
-		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
+		this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 		this.respond(request);
 		void this.loadSource();
 	}
@@ -227,13 +193,13 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			return;
 		}
 
-		const { verdict, value, policy, decided } = args as unknown as DecideRequest;
+		const answer = args as unknown as DecideRequest;
 
-		if (policy !== undefined) {
-			this.policy = policy;
+		if (answer.policy !== undefined) {
+			this.policy = answer.policy;
 		}
 
-		this.control({ "type": "decide", ...policy === undefined ? {} : { "policy": policy }, "deny": verdict === "deny", "skip": verdict === "skip", ...verdict === "give" ? { "give": value ?? null } : {}, ...decided === undefined ? {} : { "decided": decided } });
+		this.control(decideControl(answer));
 		this.respond(request);
 		this.goOn("continue");
 	}
@@ -339,35 +305,17 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	private terminateRequest(request: DapRequest): void {
-		// A live run stopped by the next edit, or one that ran nothing: it tells nothing — no coverage, no end — and the
-		// margin keeps the last run's until the next one finishes.
-		if (this.live && (!this.ended || !this.coverageSent)) {
-			this.ended = true;
-			this.coverageSent = true;
-			this.endAction();
-			this.closeWorker();
-			this.respond(request);
-			this.event("terminated");
-			this.settle("terminated");
+		// Stopped early: hard-stop — terminate() kills the worker even while it's blocked in Atomics.wait (an in-handler
+		// pause), which a postMessage could not reach.
+		this.endAction();
+		this.closeWorker();
+		// Its end told, as when it runs to its end — and, stopped while paused, where it was.
+		const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
 
-			return;
-		}
-
-		// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
-		// in-handler pause) can't answer, and then the last report stands. Then hard-stop: terminate() kills
-		// the worker even while it's blocked, which a postMessage could not reach.
-		void this.currentCoverage(500).then((report) => {
-			this.sendFinalCoverage(report);
-			this.endAction();
-			this.closeWorker();
-			// The session's live values go with it, as when it runs to its end — and, stopped while paused, where it was.
-			const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
-
-			this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
-			this.respond(request);
-			this.event("terminated");
-			this.settle("terminated");
-		});
+		this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
+		this.respond(request);
+		this.event("terminated");
+		this.settle("terminated");
 	}
 
 	/** Resume with `action`, from somewhere other than VS Code's UI (an agent, an answer at a capability stop). */
@@ -459,63 +407,13 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	private async loadSource(): Promise<void> {
 		try {
-			// A replay runs the text that ran in the page (its recorded version), whatever the file holds now.
-			this.source = this.replay?.source ?? (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
-			this.hooks = await this.placeRules();
+			this.source = (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
 			this.sourceReady = true;
 			this.maybeStart();
 		} catch (error) {
 			this.event("output", { "category": "stderr", "output": `Failed to read ${this.program}: ${String(error)}\n` });
 			this.event("terminated");
 		}
-	}
-
-	/** Where the rules placed in this program's code are now (RUNNING.md, *A rule placed in the code*): each place found
-	 *  again in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. In the entry,
-	 *  and in any other file a rule is placed in (it hooks there when the program loads that file —
-	 *  packages/tsval/README.md, *Modules*), read as the run reads it. One that's lost, or only uncertainly found, isn't
-	 *  applied (the Rules view says so). */
-	private async placeRules(): Promise<SetHook[]> {
-		// A span reference names its file workspace-relative.
-		const entry = vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false);
-		const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-		const byFile = new Map<string, { "rule": Rule; "place": unknown }[]>();
-
-		for (const rule of this.policy.rules) {
-			for (const place of placesOf(rule)) {
-				const file = (place as { "file"?: unknown } | null)?.file;
-
-				if (typeof file === "string" && (file === entry || root !== undefined)) {
-					byFile.set(file, [...byFile.get(file) ?? [], { "rule": rule, "place": place }]);
-				}
-			}
-		}
-
-		const hooks = await Promise.all([...byFile].map(async ([file, placed]) => {
-			const absolute = file === entry ? this.program : vscode.Uri.joinPath(root, file).path;
-			const source = file === entry ? this.source : await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(absolute))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
-
-			if (source === undefined) {
-				return [];
-			}
-
-			// (a file BABLR can't parse as it is: its rules' places can't be told, so none hooks — the bridge says why, on it)
-			const answer = await annotations(vscode.commands).resolve(source, file, placed.map(({ place }) => place as SpanRef));
-			const found = "value" in answer ? answer.value : [];
-
-			return placed.flatMap(({ rule, place }, index): SetHook[] => {
-				const resolution = found[index];
-				const start = resolution?.candidate?.start;
-
-				if (start === undefined || resolution?.status === "orphaned" || resolution?.status === "uncertain" || (resolution?.candidate?.file !== undefined && resolution.candidate.file !== file)) {
-					return [];
-				}
-
-				return [{ "line": source.slice(0, start).split("\n").length, "place": place, "rule": rule, ...file === entry ? {} : { "file": absolute } }];
-			});
-		}));
-
-		return hooks.flat();
 	}
 
 	private maybeStart(): void {
@@ -544,7 +442,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.live ? { "live": true } : {}, ...this.unattended ? { "unattended": true } : {}, ...this.recorded === undefined ? {} : { "recorded": this.recorded } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */
@@ -557,49 +455,13 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		return this.noDebug ? {} : Object.fromEntries([...this.breakpointLines].filter(([path, lines]) => path !== this.program && lines.length > 0));
 	}
 
-	/** The worker's coverage now, or — when it's gone or doesn't answer within `timeoutMs` — the last it reported. */
-	private currentCoverage(timeoutMs: number): Promise<CoverageReport> {
-		const fallback = (): CoverageReport => this.coverage ?? { "file": this.program, "statements": [], "sites": [] };
-
-		if (this.worker === undefined) {
-			return Promise.resolve(fallback());
-		}
-
-		return new Promise((resolve) => {
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const answer = (report: CoverageReport): void => {
-				clearTimeout(timer);
-				resolve(report);
-			};
-
-			timer = setTimeout(() => {
-				this.coverageWaiters.delete(answer);
-				resolve(fallback());
-			}, timeoutMs);
-			this.coverageWaiters.add(answer);
-			this.control({ "type": "coverage" });
-		});
-	}
-
-	/** Once per session, before `terminated`: the final coverage as a custom `coverage` event — the session is gone
-	 *  after, so this is how a coverage run (or anyone else) gets it (vscode.debug.onDidReceiveDebugSessionCustomEvent). */
-	private sendFinalCoverage(report: CoverageReport): void {
-		if (!this.coverageSent) {
-			this.coverageSent = true;
-			// (with the source that ran, which the file may no longer be: the run's evidence is of that)
-			this.tell("coverage", { ...report, "file": this.program, "source": this.source });
-		}
-	}
-
 	private closeWorker(): void {
 		this.worker?.close();
 		this.worker = undefined;
 	}
 
-	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
-	 *  stop is driven by a control message the worker's loop is awaiting. */
-	/** The session's end, once, for core (live-values.ts, through debug-events.ts): its values go — from every file it had them in — and how the
-	 *  run ended short, if it did, is marked on its line, in the file that's in (`endFile`, the entry by default). */
+	/** The session's end, once (the run contract's `ended`): how the run ended short, if it did, on its line, in the file
+	 *  that's in (`endFile`, the entry by default). */
 	private tellEnded(end: RunEnd | undefined, endFile = this.program): void {
 		if (this.ended) {
 			return;
@@ -607,9 +469,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		this.ended = true;
 
-		const sources = new Map([[this.program, this.source], ...this.told]);
+		const sources = new Map([[this.program, this.source]]);
 
-		// A question asked in a file it had no values from (its margin's to clear).
+		// A question asked in another of the program's files.
 		if (this.ask?.file !== undefined && !sources.has(this.ask.file)) {
 			sources.set(this.ask.file, this.ask.source ?? "");
 		}
@@ -618,12 +480,14 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			this.tell("ended", { "file": file, "source": source, ...end === undefined || file !== endFile ? {} : { "end": end } });
 		}
 
-		// Ended short in a file it had no values from yet.
+		// Ended short in another of the program's files.
 		if (end !== undefined && !sources.has(endFile)) {
 			this.tell("ended", { "file": endFile, "end": end });
 		}
 	}
 
+	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
+	 *  stop is driven by a control message the worker's loop is awaiting. */
 	private resume(kind: StepAction): void {
 		const trace = this.startAction(kind);
 
@@ -659,22 +523,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.tell("tests", { "file": this.program, "tests": message.tests });
 				break;
 
-			case "coverage":
-				this.onCoverage(message);
-				break;
-
 			case "terminated":
 				this.onTerminated(message);
-				break;
-
-			// What a run's allowed call returned, recorded (RUNNING.md, *A call's result*): a rule can give it back.
-			case "recorded":
-				this.tell("recorded", { "capability": message.capability, "resource": message.resource, "value": message.value, ...message.request === undefined ? {} : { "request": message.request } });
-				break;
-
-			// The session's live values (RUNTIME-EVIDENCE.md, *Live values*), on to core (through debug-events.ts): the file they're of, what's new.
-			case "values":
-				this.onValues(message);
 				break;
 
 			// (started in a terminal, its stdout and stderr are printed there too: debug-events.ts)
@@ -707,8 +557,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.tell("idle", {});
 				break;
 
-			// (an explore's answer: exploreProgram's worker sends it, a session's doesn't)
-			case "explored":
 			default:
 				break;
 		}
@@ -723,41 +571,17 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		// A capability stop asks on its line (the run contract's `ask`: the margin shows it — capability-stops.ts) — in
 		// the file it's in.
 		if (message.ask !== undefined) {
-			const { file, source, ...ask } = message.ask;
-			const text = file === undefined ? this.source : source;
-
-			this.tell("ask", { ...ask, "file": file ?? this.program, ...text === undefined ? {} : { "source": text } });
+			this.tell("ask", askEvent(message.ask, this.program, this.source));
 		}
 
 		this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 		this.settle("stopped");
 	}
 
-	private onCoverage(message: Extract<WorkerEvent, { "type": "coverage" }>): void {
-		this.coverage = message.report;
-
-		for (const waiter of [...this.coverageWaiters]) {
-			waiter(message.report);
-		}
-
-		this.coverageWaiters.clear();
-
-		if (message.final === true) {
-			this.sendFinalCoverage(message.report);
-		}
-	}
-
 	private onTerminated(message: Extract<WorkerEvent, { "type": "terminated" }>): void {
 		this.endAction();
 
-		// A live run that ran nothing (its text doesn't parse yet): no values, no coverage, no end — the margin keeps
-		// the last run's.
-		if (message.quiet === true) {
-			this.ended = true;
-		}
-
-		// (a live run that ran out of budget ends stopped where it got to, not crashed)
-		this.tellEnded(message.crash === undefined ? undefined : { "kind": message.crash.stopped === true ? "stopped" : "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
+		this.tellEnded(message.crash === undefined ? undefined : { "kind": "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
 		// (DAP's own: the run's end, with its exit code — the editor's run ends with it)
 		this.event("exited", { "exitCode": message.exitCode ?? 0 });
 		this.event("terminated");
@@ -765,14 +589,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.settle("terminated");
 	}
 
-	private onValues(message: Extract<WorkerEvent, { "type": "values" }>): void {
-		// The text that ran, once a file: what core anchors the values' ranges in.
-		const file = message.file ?? this.program;
-		const source = message.file === undefined ? this.source : message.source ?? this.told.get(file) ?? "";
-
-		this.tell("values", { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
-		this.told.set(file, source);
-	}
 }
 
 /** What a rejection says: an Error's message, anything else stringified as it is. */
@@ -794,11 +610,6 @@ function loopStartOf(value: unknown): LoopStart | undefined {
 	return typeof now === "number" && typeof seed === "number" ? { "now": now, "seed": seed, ...Array.isArray(schedule) ? { "schedule": schedule.map(Number) } : {} } : undefined;
 }
 
-/**
- * Every ordering of `program`'s events (tsval's explore, in a debug worker of its own): with the stand-ins and the rules
- * a debug run has — the arguments a rule gives its process.argv too — each way its host calls' answers, and its timers,
- * can come; the distinct outcomes, each with a schedule to debug it by (a launch's `eventLoop`).
- */
 /** A debug worker: started, given its link into the editor's runtime (the workspace runtime — its servers answer the
  *  preview through it, its log and spans are the editor's) — for debug session `session`, when it runs one — then sent
  *  control messages; its events go to `onEvent`, a failure to load or an uncaught error to `onError` (with whether it had
@@ -837,89 +648,8 @@ function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onE
 	};
 }
 
-export async function exploreProgram(runtime: WorkspaceRuntime, program: string, maxRuns = 100): Promise<Explored> {
-	const uri = vscode.Uri.file(program);
-	const source = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-	// (the policy a launch is given as `__policy` — this runs outside a session, so it reads it as the enforcer does)
-	const policy = await loadEffectivePolicy().catch(() => EMPTY_POLICY);
-	const mocked = givenBy(policy, { "program": vscode.workspace.asRelativePath(uri, false) }, "process.argv")?.values.find((each): each is string[] => Array.isArray(each));
-	let failed: ((reason: Error) => void) | undefined;
-	let resolveExplored: ((explored: Explored) => void) | undefined;
-	const explored = new Promise<Explored>((resolve, reject) => {
-		resolveExplored = resolve;
-		failed = reject;
-	});
-	const worker = startWorker(runtime, undefined, (event) => {
-		if (event.type === "explored") {
-			resolveExplored?.(event.explored);
-		}
-	}, (message) => {
-		failed?.(new Error(`the debug worker failed: ${message}`));
-	});
-
-	try {
-		worker.send({ "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns, ...worker.buffer === undefined ? {} : { "workspace": worker.buffer } });
-
-		return await Promise.race([
-			explored,
-			new Promise<never>((_, reject) => {
-				setTimeout(() => {
-					reject(new Error("exploring took over 2 minutes"));
-				}, 120_000);
-			})
-		]);
-	} finally {
-		worker.close();
-	}
-}
-
-/** One outcome as the Explore Orderings list shows it: what it ends with, how many runs, the events chosen along it. */
-function orderingItem(outcome: Explored["outcomes"][number], index: number): vscode.QuickPickItem & { "index": number } {
-	const last = outcome.output.at(-1);
-
-	return {
-		"index": index,
-		"label": outcome.crash === undefined ? `$(output) ${last ?? "(printed nothing)"}` : `$(error) crashed: ${outcome.crash}`,
-		"description": `${outcome.output.length} line${outcome.output.length === 1 ? "" : "s"} · ${outcome.runs} run${outcome.runs === 1 ? "" : "s"}`,
-		"detail": outcome.path.length === 0 ? "no choice to make" : outcome.path.join("  →  ")
-	};
-}
-
 export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: WorkspaceRuntime): void {
 	context.subscriptions.push(
-		// Explore Orderings (tsval's explore): every way the file's async results and timers can come, run; the distinct
-		// endings listed — a race is more than one — and the one picked debugged, run exactly that way.
-		vscode.commands.registerCommand("tsval.exploreOrderings", async (target?: vscode.Uri) => {
-			const uri = target instanceof vscode.Uri ? target : vscode.window.activeTextEditor?.document.uri;
-
-			if (uri === undefined) {
-				return;
-			}
-
-			const name = uri.path.split("/").pop();
-			const explored = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Notification, "title": `Exploring the orderings of ${name}…` }, () => exploreProgram(runtime, uri.path));
-			const runs = `${explored.runs} run${explored.runs === 1 ? "" : "s"}${explored.complete ? "" : ", cut short"}`;
-
-			if (explored.outcomes.length === 1) {
-				void vscode.window.showInformationMessage(`No race in ${name}: every ordering ends the same way (${runs}).`);
-
-				return;
-			}
-
-			const picked = await vscode.window.showQuickPick(explored.outcomes.map(orderingItem), { "title": `${name}: ${explored.outcomes.length} ways it can end (${runs}) — pick one to debug it`, "matchOnDetail": true });
-
-			if (picked !== undefined) {
-				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index].schedule } });
-			}
-		}),
-		// The same, as data (the bridge's `debug.explore`, for an agent): the distinct outcomes, each with its schedule.
-		vscode.commands.registerCommand("tsval.explore", async (program: unknown, maxRuns?: unknown) => {
-			if (typeof program !== "string") {
-				throw new TypeError("tsval.explore: a program to explore");
-			}
-
-			return exploreProgram(runtime, program, typeof maxRuns === "number" ? maxRuns : undefined);
-		}),
 		// Skip Waits: a tsval session's timers fire without waiting their real delay (the event loop's order unchanged) —
 		// and back. The debug toolbar shows whichever applies.
 		...(["fast", "real"] as const).map((pace) => vscode.commands.registerCommand(pace === "fast" ? "tsval.skipWaits" : "tsval.waitRealTime", async () => {

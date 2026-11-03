@@ -43,11 +43,6 @@ export default {
 			"summary": "A branch, as switch does; -b makes it first. (A file's changes: git restore.)",
 			"options": { "create": { "format": Boolean, "default": false, "short": "b", "doc": "Make it first." }, "name": { "format": String, "default": "", "positional": true, "doc": "The branch." } }
 		},
-		"merge": { "summary": "Not here yet.", "missing": "merging isn't here yet" },
-		"rebase": { "summary": "Not here yet.", "missing": "rebasing isn't here yet" },
-		"stash": { "summary": "Not here yet.", "missing": "stashing isn't here yet — commit, or restore what you don't want" },
-		"reset": { "summary": "Not here.", "missing": "git restore --staged <path> unstages, git restore <path> undoes" },
-		"show": { "summary": "Not here yet.", "missing": "show isn't here yet — git log lists the commits" },
 		"push": {
 			"summary": "Push a branch (the current one) to the GitHub repository this was loaded from — signed in with GitHub.",
 			"options": {
@@ -56,13 +51,6 @@ export default {
 				"remote": { "format": String, "default": "origin", "positional": true, "doc": "origin, the only one." },
 				"branch": { "format": String, "default": "", "positional": true, "doc": "The branch; none: the current one." }
 			}
-		},
-		"pull": { "summary": "Not here: the git is local.", "missing": "this workspace's git is local — load the repository again for what's new" },
-		"fetch": { "summary": "Not here: the git is local.", "missing": "this workspace's git is local — load the repository again for what's new" },
-		"clone": { "summary": "Not here.", "missing": "load a repository from the Open button instead" },
-		"remote": { "summary": "Not here: the git is local.", "missing": "this workspace's git is local, with no remotes" },
-		"rm": { "summary": "Not here.", "missing": "delete the file (rm <path>), then git add it" },
-		"mv": { "summary": "Not here.", "missing": "move the file (mv <from> <to>), then git add both" },
-		"init": { "summary": "Not needed.", "missing": "this workspace is a repository already" }
+		}
 	}
 } satisfies CommandDefinition;

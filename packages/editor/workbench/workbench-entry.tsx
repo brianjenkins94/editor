@@ -14,73 +14,48 @@
  */
 // (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
 import "../shared/hidden-timers";
-import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import type { BridgeExports } from "../extensions/bridge/extension";
-import type { ShellDockHost } from "../shared/dock-host";
-import type { SharedWorkspace } from "../shared/playground-link";
+import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { WorkspaceFs } from "./workspace-fs";
-// First of what runs, before anything loads Lit: Web Awesome's components here move into docked windows (theme/documents).
+// First of what runs, before anything loads Lit: Web Awesome's components here move into VS Code's new windows (theme/documents).
 import "theme/documents";
 // eslint-disable-next-line perfectionist/sort-imports -- theme/documents above, first on purpose: it has to run before Lit does
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
-import { createHub, createRpcClient, rpcCallSubject, serve } from "@brianjenkins94/hub";
-import { fs as workspaceStore } from "@zenfs/core";
-import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { createHub, createRpcClient } from "@brianjenkins94/hub";
+import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
-import capabilitiesExtension from "capabilities:extension";
-import cosmeticExtension from "cosmetic:extension";
-import cspellExtension from "cspell:extension";
 import settingsDefaults from "editor:settings-defaults";
-import eslintExtension from "eslint:extension";
-import eventSheetExtension from "event-sheet:extension";
 import historyExtension from "history:extension";
-import insightsExtension from "insights:extension";
-import marginExtension from "margin:extension";
-import notesExtension from "notes:extension";
 import { render } from "preact";
-import runningExtension from "running:extension";
 import sourceControlExtension from "source-control:extension";
-import { mirrorStyles } from "theme/sheet";
-import { followVsCodeTheme, followVsCodeThemeIn } from "theme/vscode";
-import { readVsCodeColors } from "theme/vscode-colors";
 import tsvalExtension from "tsval:extension";
-import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
-import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
-import { architectureStore, renderArchitectureView } from "./architecture-view";
-import { registerFeaturesMap } from "./features-map";
+import { architectureStore } from "./architecture-store";
 import { installTypeAcquisition } from "./ata";
-import { startBablr } from "./bablr";
-import { installCheckpoints } from "./checkpoints";
-import { installCiStatus } from "./ci-status";
-import { installCodeProblems } from "./code-problems";
-import { installCodeReach } from "./code-reach";
-import { installCodeRefactor } from "./code-refactor";
+import { wireWorkbenchHub } from "./bridge-link";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
-import { markReady } from "./readiness";
-import { installEditHistory } from "./edit-history";
+import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
-import { installEvidence } from "./evidence";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
-import * as gitEngine from "./git-engine";
-import { installGitReview } from "./git-review";
+import { installGitHistory } from "./git-history";
+import { installGitPush } from "./git-push";
+import { commitPart, installGitReview } from "./git-review";
 import { installGitService } from "./git-service";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
-import { installPaneViews } from "./pane-views";
-import { installProfileFiles } from "./profile-files";
-import { registerRuleView } from "./rule-view";
-import { installScriptRun } from "./script-run";
-import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
-import { pinned } from "./versions";
-import { Workbench } from "./Workbench";
+import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS, serveOrigin } from "./project";
+import { markReady, whenDebuggerUp } from "./readiness";
+import { createBashProcess, serveTerminalState } from "./terminal";
+import { installTarballs } from "./tarballs";
 import { installTestRuns } from "./test-runs";
-import { keepTypeScriptProjects } from "./ts-projects";
+import { followSystemTheme, showVsCodeTheme } from "./theme-follow";
+import { serveUnpushed } from "./unpushed";
+import { pinned, watchVersions } from "./versions";
+import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
 import { installWorkspaceTools } from "./workspace-tools";
@@ -139,30 +114,6 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 // answered as tsval's is (ARCHITECTURE.md, *Extension points* 2: its file calls by the bridge, its servers by the preview) — linked as
 // every runtime link is (editor-api's linkRuntime: its own id, carrying only the runtime).
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
-registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
-
-// A dock panel of the shell dropped into the editor area (shell-dock.ts): an editor per panel, whose content the shell
-// moves in — through its host on the top window, as element references can't cross the hub.
-function shellDock(): ShellDockHost | undefined {
-	try {
-		return (window.top as unknown as Record<string, ShellDockHost | undefined> | null)?.[SHELL_DOCK_HOST];
-	} catch {
-		return undefined; // a top window that isn't ours
-	}
-}
-
-registerHostedEditors({
-	"render": (slot, element) => { shellDock()?.attach(slot, element); },
-	"onClose": (slot) => { shellDock()?.closed(slot); }
-});
-serve(workbenchHub, "dock.hostEditor", async (args) => {
-	const { slot, title } = args as { "slot": string; "title": string };
-
-	await openHostedEditor(slot, title);
-});
-serve(workbenchHub, "dock.closeEditor", async (args) => {
-	await closeHostedEditor((args as { "slot": string }).slot);
-});
 
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.
@@ -257,223 +208,6 @@ function runCommand(command: string): void {
 	});
 }
 
-/**
- * Open a project into the LIVE workbench (the LHS picker → shell hub → app → pane bus → here): write each file
- * through the vscode FS API (creating parent dirs first, since the zen-fs provider won't auto-create them) so it
- * lands in the workspace + shows in the explorer, then open + focus each entry. No reboot — one booted workbench.
- */
-// Editor-owned paths at the workspace root: the shim .d.ts (when the demo needs one), the capability ledger,
-// acquired deps, git meta. They survive a `replace` (the editor needs them) and are never sent back to a repo on commit.
-const SCAFFOLDING = new Set(["editor-ambient.d.ts", ".silo", "node_modules", ".git"]);
-
-// Root-level managed configs are OVERRIDABLE DEFAULTS: writable in zen-fs (see workspace-fs.ts), and writable in the
-// priority-1 base too (see the boot below) — the file service refuses a write to a path whose stat says read-only, so a
-// read-only base would make a deleted default impossible to write again. A write goes to the highest writable overlay,
-// zen-fs: the base never changes, and the new file is the workspace's (copy-up). A loaded repo's own copy overwrites in
-// place, because clearWorkspace keeps these. When a repo ships NONE, the reconciliation differs by how the config is read:
-//   FALLTHROUGH_DEFAULTS — TS project configs, read by tsserver via the COMPOSITE file service: DELETE the writable
-//     copy so the priority-1 base shows through.
-//   .gitignore — read straight off zen-fs by isomorphic-git (a priority-1 base would be invisible to it): MATERIALIZE
-//     the git default (gitEngine.DEFAULT_GITIGNORE) into zen-fs.
-//   ESLINT_CONFIGS — kept overridable so a repo's own is writable; eslint's worker lints with it (else the preset)
-//     (extensions/eslint/worker.ts), so there's nothing to materialize; on omit we just drop a stale one. Variants are
-//     one concept — a repo providing ANY counts.
-// Keep OVERRIDABLE_DEFAULTS in sync with workspace-fs.ts.
-const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
-const ESLINT_CONFIGS = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"];
-const OVERRIDABLE_DEFAULTS = new Set([...FALLTHROUGH_DEFAULTS, ...ESLINT_CONFIGS, ".gitignore"]);
-
-function workspaceRoot(): string {
-	return init?.workspaceFolder ?? "/workspace";
-}
-
-/** Delete every workspace entry except the editor scaffolding — the "workspace = the repo" reset before a load. */
-async function clearWorkspace(root: string): Promise<void> {
-	const vscode = vscodeApi;
-	const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(root));
-	const kept = (name: string): boolean => SCAFFOLDING.has(name) || OVERRIDABLE_DEFAULTS.has(name);
-
-	// Close the editors on the files about to go first. VS Code closes an editor whose file is deleted from inside the
-	// app, but a moment later — after a load has reopened the same file in that editor, which then closes instead.
-	// Unsaved editors stay, as VS Code keeps them.
-	const going = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => {
-		const path: string | undefined = tab.input instanceof vscode.TabInputText ? tab.input.uri.path : undefined;
-
-		return path?.startsWith(root + "/") === true && !tab.isDirty && !kept(path.slice(root.length + 1).split("/")[0]);
-	});
-
-	await vscode.window.tabGroups.close(going);
-
-	for (const [name] of entries) {
-		// Keep scaffolding always; keep overridable-default configs so a repo that ships its own can OVERWRITE them
-		// in place (openProject prunes the ones the repo omits afterwards, so those fall through to the base).
-		if (!kept(name)) {
-			await vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": true, "useTrash": false }).then(undefined, () => { /* already gone */ });
-		}
-	}
-}
-
-/** Fire change events for the files in `<workspace>/.vscode/` so the configuration service re-reads them (see the
- *  call site). A no-op when the folder doesn't exist. */
-async function announceWorkspaceSettings(vscode: typeof import("vscode"), store: WorkspaceFs | undefined): Promise<void> {
-	const dir = workspaceRoot() + "/.vscode";
-	const entries: [string, unknown][] = await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir)).then((list) => list, () => []);
-	// The extension API's Uri IS vscode's URI class in this (local-process) host — the type the provider fires.
-	const uris = entries.map(([name]) => vscode.Uri.file(dir + "/" + name)) as unknown as Parameters<WorkspaceFs["announce"]>[0];
-
-	store?.announce(uris);
-}
-
-/** Walk the workspace and return every project file (path + bytes), skipping editor scaffolding — the commit source. */
-async function collectFiles(root: string): Promise<{ "path": string; "bytes": Uint8Array }[]> {
-	const vscode = vscodeApi;
-	const out: { "path": string; "bytes": Uint8Array }[] = [];
-
-	const walk = async (dir: string): Promise<void> => {
-		for (const [name, type] of await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir))) {
-			if (dir !== root || !SCAFFOLDING.has(name)) {
-				const full = dir + "/" + name;
-
-				if (type === vscode.FileType.Directory) {
-					await walk(full);
-				} else if (type === vscode.FileType.File) {
-					out.push({ "path": full, "bytes": await vscode.workspace.fs.readFile(vscode.Uri.file(full)) });
-				}
-			}
-		}
-	};
-
-	await walk(root);
-
-	return out;
-}
-
-async function openProject(files: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[], openEditors: string[], replace = false): Promise<void> {
-	await apiReady;
-
-	const vscode = vscodeApi;
-	const encoder = new TextEncoder();
-	const madeDirs = new Set<string>();
-
-	if (replace) {
-		await clearWorkspace(workspaceRoot());
-
-		// The workspace's `.git` goes too, though clearWorkspace keeps it as scaffolding: the workspace is becoming
-		// something else. A clone (git-clone.ts) brings its own, history and all; anything else (a sample, a playground, a
-		// repo read through the API) gets a fresh one below — kept, the last repo's origin would still be where a commit
-		// pushes, and what the shell takes the workspace for (`git.origin`).
-		await vscode.workspace.fs.delete(vscode.Uri.file(workspaceRoot() + "/.git"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
-	}
-
-	// Written straight into the workspace's store, all at once: its change watcher (workspace-changes.ts) reports them
-	// to VS Code as one batch, as it does isomorphic-git's and the terminal's writes. Through VS Code's file service each
-	// file cost a stat to validate it, two mkdirp walks of its folders and a listing of its folder — each a path walk in
-	// zen-fs, the listings quadratic in a folder's size (288 files in one of this repository's): the page was busy for
-	// minutes loading a repository of ~2,000 files.
-	for (const file of files) {
-		const dir = file.path.slice(0, file.path.lastIndexOf("/"));
-
-		if (dir.length > 0 && !madeDirs.has(dir)) {
-			madeDirs.add(dir);
-			workspaceStore.mkdirSync(dir, { "recursive": true });
-		}
-
-		// Binary files (from a GitHub repo) arrive as bytes; text samples as a string to encode.
-		workspaceStore.writeFileSync(file.path, file.bytes ?? encoder.encode(file.contents ?? ""));
-	}
-
-	if (replace) {
-		// Reconcile overridable-default configs the loaded repo did NOT provide (the write loop above already
-		// overwrote any it DID ship; clearWorkspace kept these so those were in-place overwrites).
-		const provided = new Set(files.map((file) => file.path));
-		const root = workspaceRoot();
-		const providedAtRoot = (name: string): boolean => provided.has(root + "/" + name);
-		const dropWritable = (name: string): Promise<void> => vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": false, "useTrash": false }).then(undefined, () => { /* not present */ });
-
-		// TS project configs: DELETE so tsserver falls through to the read-only base via the composite file service.
-		for (const name of FALLTHROUGH_DEFAULTS) {
-			if (!providedAtRoot(name)) {
-				await dropWritable(name);
-			}
-		}
-
-		// .gitignore: isomorphic-git reads zen-fs directly, so MATERIALIZE the git default when the repo omits it
-		// (in-place overwrite — clearWorkspace kept it). Matches ensureRepo's first-run default.
-		if (!providedAtRoot(".gitignore")) {
-			await vscode.workspace.fs.writeFile(vscode.Uri.file(root + "/.gitignore"), encoder.encode(gitEngine.DEFAULT_GITIGNORE));
-		}
-
-		// A load that brought its own `.git` (a clone): `.silo/` goes in git there too. Any other: a new repository, no
-		// one's origin.
-		if (files.some((file) => file.path.startsWith(root + "/.git/"))) {
-			await gitEngine.includeSilo();
-		} else {
-			await gitEngine.ensureRepo();
-		}
-
-		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing
-		// to materialize — with none, eslint's worker lints with the preset.
-		if (!ESLINT_CONFIGS.some((name) => providedAtRoot(name))) {
-			for (const name of ESLINT_CONFIGS) {
-				await dropWritable(name);
-			}
-		}
-	}
-
-	for (const path of openEditors) {
-		try {
-			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path));
-
-			await vscode.window.showTextDocument(document, { "preview": false });
-		} catch (error) {
-			paneLog.error("openProject: show failed", { "path": path, "error": errText(error) });
-		}
-	}
-
-	runCommand("workbench.view.explorer");
-	paneLog.info("openProject wrote sample", { "files": files.length });
-}
-
-/**
- * Uplink the extension bridge's hub to the page's root hub. The ext host is an isolated `extension-file://` realm
- * with no window path out, so the bridge rides the bridge extension's EXPORTED bridge (a marshaled event +
- * function, see extension.ts BridgeExports). A workbench hub links that bridge to the bridge and windowTransport(host)
- * to the top page (workbench-entry HAS window access) — so bridge/worker spans reach the page's $sys.log.>
- * collector. No-op if the extension exposes no bridge (the bridge then stays a standalone root).
- */
-function wireWorkbenchHub(workspaceBuffer?: SharedArrayBuffer): void {
-	const bridge = vscodeApi?.extensions?.getExtension("brianjenkins94.bridge");
-
-	if (bridge === undefined) {
-		return;
-	}
-
-	(bridge.activate() as Promise<BridgeExports | undefined>).then((bridge) => {
-		if (bridge?.toWorkbench === undefined || bridge.fromWorkbench === undefined) {
-			return;
-		}
-
-		// Hand the bridge the shared workspace SharedArrayBuffer: a debug run's worker mounts the SAME zen-fs the editor uses
-		// (at /workspace), through the workspace runtime. No-op when there's no SAB (no cross-origin isolation).
-		if (workspaceBuffer !== undefined) {
-			(bridge as BridgeExports & { "attachWorkspaceBuffer"?: (b: unknown) => void }).attachWorkspaceBuffer?.(workspaceBuffer);
-		}
-
-		// bridge (ext host) <-> workbench, over the extension's exported event/function bridge. (The workbench <->
-		// top-page link is the transferred MessagePort wired above.)
-		workbenchHub.link({
-			"send": (message) => { bridge.fromWorkbench(message); },
-			"listen": (onMessage) => {
-				const subscription = bridge.toWorkbench(onMessage);
-
-				return () => {
-					subscription.dispose();
-				};
-			}
-		});
-	}).catch((error: unknown) => { paneLog.error("workbench hub uplink failed", { "error": errText(error) }); });
-}
-
 /** Boot even with no viewport. When the workbench is mounted into a document that currently has no
  *  layout box — a closed/hidden preview pane, a background tab, a display:none host — the window,
  *  <html> and <body> all measure 0×0, and monaco's layout throws "Unable to figure out browser width
@@ -564,24 +298,13 @@ function maybeBoot(): void {
 		"onSave": (path, contents) => {
 			workbenchHub.publish("workbench.save", { "path": path, "contents": contents });
 			paneLog.info("saved", { "path": path, "bytes": contents.length });
-		},
-		"openAuxiliaryWindow": openDockedWindow
+		}
 	})
 		.then(async () => {
 			bootSpan.info("monaco booted");
 			// Web Awesome in this document, on the active VS Code theme (theme/vscode): the workbench's own views draw
 			// with <wa-*> components, not CSS of their own.
-			const workbench = document.querySelector<HTMLElement>(".monaco-workbench");
-
-			if (workbench !== null) {
-				followVsCodeTheme(workbench);
-				// And its colours to the shell, which draws with Web Awesome too (theme/vscode-colors): now, and on each theme
-				// change (below, once the vscode api is here).
-				publishColors = () => {
-					workbenchHub.publish("theme.colors", readVsCodeColors(workbench));
-				};
-				publishColors();
-			}
+			publishColors = showVsCodeTheme(workbenchHub);
 
 			// The writable workspace: a zen-fs-backed FileSystemProvider the type-checker reads through (priority 2,
 			// above boot's now defaults-only priority-1 base). This is the SOLE store for source — it gets the FULL
@@ -605,11 +328,9 @@ function maybeBoot(): void {
 			// Open the initial editors now — deferred from boot's defaultLayout because the source files no longer live
 			// in boot's priority-1 seed (that layer now carries only the read-only base). They're in the zen-fs overlay
 			// seeded just above, so the editor can read them. Empty `files` = open only, don't rewrite (already seeded).
-			// openProject self-gates on the vscode API being ready (apiReady, captured below). Then the live architecture
-			// diagram, last, so a fresh load lands on it (the source editors sit beside it).
-			void (openEditors.length > 0 ? openProject([], openEditors, false) : apiReady)
-				.catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); })
-				.then(() => { runCommand(OPEN_ARCHITECTURE_COMMAND); });
+			// openProject self-gates on the vscode API being ready (apiReady, captured below).
+			void apiReady.then(async () => (openEditors.length > 0 ? openProject(vscodeApi, workspaceFolder ?? "/workspace", paneLog, { "openEditors": openEditors }) : undefined))
+				.catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); });
 
 			// The editor's settings DEFAULTS — settings-defaults.jsonc, registered as the lowest settings layer (a
 			// contributions-only extension: no code, no host). Layers merge per key, so a workspace `.vscode/settings.json`
@@ -641,47 +362,28 @@ function maybeBoot(): void {
 				markApiReady(); // let a queued openProject (picker) proceed
 				markBridgeReady();
 				markReady("api");
-				// A debug run can start once tsval is active and the bridge answers the workspace runtime's link (readiness.ts).
-				void (async () => {
-					await (api as typeof import("vscode")).extensions.getExtension("brianjenkins94.tsval")?.activate();
-
-					while (!await workbenchHub.whenInterested(rpcCallSubject("runtime.fs.attach"), 60_000)) { /* still coming up */ }
-
-					markReady("debugger");
-				})().catch((error: unknown) => { bootSpan.error("the debugger didn't come up", { "error": errText(error) }); });
+				// A debug run can start once the debugger is up (readiness.ts).
+				whenDebuggerUp(api as typeof import("vscode"), workbenchHub).catch((error: unknown) => { bootSpan.error("the debugger didn't come up", { "error": errText(error) }); });
 				// Workspace settings persisted in the store (a loaded repo's .vscode/, or the user's own) were invisible
 				// when the configuration service read them at startup — the store mounts after boot, and restoring it
 				// fires no change events. Announce them now so they apply. (Writes after boot fire events themselves.)
-				void announceWorkspaceSettings(api as typeof import("vscode"), workspaceFs);
+				void announceWorkspaceSettings(api as typeof import("vscode"), workspaceFolder ?? "/workspace", workspaceFs);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", pinned, (path) => workspaceFs?.has(path) ?? false, paneLog);
+				// The versions every package loads at (.silo/versions.json), kept up to the manifests, and what the CDN can't
+				// serve installed (versions.ts); and a debug run's packages, as tarballs (tarballs.ts).
+				watchVersions(api as typeof import("vscode"));
+				installTarballs(api as typeof import("vscode"), workbenchHub);
 				// The workspace terminal — just-bash on the workspace filesystem, registered as the DEFAULT terminal
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner
 				// (worker) is shared by every terminal.
-				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
+				const nodeRunner = createNodeRunner(workbenchHub);
 
-				// A preview that ran slow was profiled: save it, source-mapped, for whoever reads profiles (profile-files.ts).
-				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
-				// Each run's envelope — whose, where, on what code — into .silo/runs/ as it ends, and what it observed into
-				// .silo/evidence/ (evidence.ts).
-				// The editor's BABLR, in its worker: the classifier's verdicts and the evidence's span ids queue on it (bablr.ts).
-				const bablr = startBablr(workbenchHub);
-
-				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr);
-				// The pane's views (pane-views.ts): its tabs — the Margin's (extensions/margin) and each extension's — and what
-				// each draws beside the code.
-				installPaneViews(api as typeof import("vscode"));
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
-				// The Rule view: the rule editor, for whoever edits a rule (`editor.rules.edit`, rule-view.ts).
-				registerRuleView(api as typeof import("vscode"));
-				// The features map: the program as its features, a block each, sized by its code (features-map.ts).
-				registerFeaturesMap(api as typeof import("vscode"));
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
-				// And the bridge's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
-				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
 				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;
 				// debug-mcp's files_* tools).
 				installWorkspaceTools(api as typeof import("vscode"), workbenchHub);
@@ -690,60 +392,32 @@ function maybeBoot(): void {
 				// Uplink the extension bridge to the page: a workbench hub bridges the bridge (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. bridge/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
-				wireWorkbenchHub(workspaceFs?.buffer);
+				wireWorkbenchHub(api as typeof import("vscode"), workbenchHub, paneLog, workspaceFs?.buffer);
 				// The metrics plane: memory by realm, workspace fill, long frames, hub traffic, storage (editor-metrics.ts).
 				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer, architectureStore(workbenchHub));
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
 					// shell's review panel, and VS Code's Source Control view (the source-control extension, by the editor.git.* commands). See
 					// git-service.ts / git-engine.ts.
-				const git = installGitService(api as typeof import("vscode"), workbenchHub, paneLog);
+				const git = installGitService(api as typeof import("vscode"), workbenchHub, paneLog, { "part": commitPart });
 
-				// The review: the changes as hunks, with BABLR's verdicts and the features they're in (git-review.ts).
-				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
-				// The TypeScript server's projects told of files made or deleted on disk, which it isn't in the browser (ts-projects.ts).
-				const typescriptProjects = keepTypeScriptProjects(api as typeof import("vscode"));
-				// A change's problems against HEAD: TypeScript's (the history extension's tsserver plugin) and ESLint's (code-problems.ts).
-				installCodeProblems(api as typeof import("vscode"), workbenchHub, git, typescriptProjects);
-				// What a way in reaches: the history extension's reading of the program (code-reach.ts).
-				installCodeReach(api as typeof import("vscode"), workbenchHub);
-				// References, rename, and a move with its imports: VS Code's providers, as WorkspaceEdits (code-refactor.ts).
-				installCodeRefactor(api as typeof import("vscode"), workbenchHub, typescriptProjects);
-				// Experiments that undo themselves: the working tree noted, and put back (checkpoints.ts).
-				installCheckpoints(api as typeof import("vscode"), workbenchHub, git);
-				// How a commit did in CI: its GitHub Actions runs, a job's log, through the shell's sign-in (ci-status.ts).
-				installCiStatus(workbenchHub);
-				// JavaScript for what a script is for, the workspace read-only, in the capability-gated realm (script-run.ts).
-				installScriptRun(api as typeof import("vscode"), workbenchHub);
+				// The review: the changes as hunks, committed or discarded in part (git-review.ts).
+				installGitReview(workbenchHub, git);
+				// Branches, and a branch pulled from or pushed to GitHub through the shell's sign-in (git-push.ts).
+				const remote = installGitPush(workbenchHub, paneLog);
+
+				// Diff, log, show and blame, for agents' git tools (git-history.ts).
+				installGitHistory(api as typeof import("vscode"), workbenchHub, remote);
+				// The repository the workspace is a clone of, for the shell's binding (project.ts); and what only it holds,
+				// for Reset (unpushed.ts).
+				serveOrigin(workbenchHub);
+				serveUnpushed(workbenchHub);
+				// What's been decided about a file or a name: the history extension's reading of the ledger and docs (decisions.ts).
+				installDecisions(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
-				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
-					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
-					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
-					// edit-history.ts.
-				installEditHistory(api as typeof import("vscode"), workbenchHub, bablr, paneLog);
+				installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner);
 
-					// Editor theme follows the OS, like the shell chrome. `window.autoDetectColorScheme` isn't wired to
-					// `prefers-color-scheme` in this monaco-vscode-api build, so drive `workbench.colorTheme` ourselves.
-					// The SHELL is the source of truth (it reliably gets prefers-color-scheme changes; an iframe may not),
-					// so apply what it publishes on `theme.colorScheme`; also react to this frame's own matchMedia as a
-					// real-browser fallback.
-				const themeApi = api as typeof import("vscode");
-				const applyEditorTheme = (dark: boolean): void => {
-					void themeApi.workspace.getConfiguration().update("workbench.colorTheme", dark ? "Default Dark+" : "Default Light+", themeApi.ConfigurationTarget.Global);
-				};
-
-				const themeMq = window.matchMedia("(prefers-color-scheme: dark)");
-
-				// (VS Code has swapped its theme's style when it says so; a frame later, its colours read as the new theme's)
-				themeApi.window.onDidChangeActiveColorTheme(() => {
-					requestAnimationFrame(() => publishColors?.());
-				});
-
-				workbenchHub.subscribe("theme.colorScheme", (data) => {
-					applyEditorTheme((data as { "dark"?: boolean } | null)?.dark ?? themeMq.matches);
-				});
-				themeMq.addEventListener("change", () => {
-					applyEditorTheme(themeMq.matches);
-				});
+				// The editor's theme follows the system's, as the shell's does (theme-follow.ts).
+				followSystemTheme(api as typeof import("vscode"), workbenchHub, () => publishColors?.());
 				bootSpan.info("the bridge's vscode api, for core");
 			}).catch((error: unknown) => { bootSpan.error("the bridge's setup failed", { "error": errText(error) }); });
 
@@ -752,13 +426,10 @@ function maybeBoot(): void {
 			// and the workspace runtime the bridge exports.
 			builtIn(tsvalExtension, ExtensionHostKind.LocalProcess);
 
-			// The rest run in the web worker host, each from its folder with the files its manifest lists: eslint (real ESLint
-			// and the preset under almostnode, in its worker); capabilities (static and dynamic halves inside its tsserver
-			// plugin, which finds its engine and canary beside itself; its package worker for the baseline); history (its
-			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the Margin; the event sheet (its webview's script,
-			// its recognizer worker); running; type queries (`// ^?`); notes; Source Control (on the editor's git); cosmetic changes (BABLR's verdict on them, a file decoration); cspell (the real cspell under almostnode, in its
-			// worker). Public API only, but for what ARCHITECTURE.md lists (*Extension points* 5).
-			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, marginExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cosmeticExtension, cspellExtension]) {
+			// The rest run in the web worker host, each from its folder with the files its manifest lists: history (its
+			// tsserver plugin) and Source Control (on the editor's git). Public API only, but for what ARCHITECTURE.md lists
+			// (*Extension points* 3).
+			for (const extension of [historyExtension, sourceControlExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -766,15 +437,11 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "margin", "running", "event-sheet", "type-queries", "notes", "source-control", "cosmetic", "cspell"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "history", "source-control"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
 			bootSpan.end();
-			// The session timeline (packages/api/README.md O6): commands run and panes shown, by id, to the shell.
-			void onWorkbenchActivity((event) => {
-				workbenchHub.publish("session.event", event);
-			});
 		})
 		.catch((error: unknown) => {
 			bootSpan.error("workbench boot failed", { "error": errText(error) });
@@ -787,39 +454,6 @@ function maybeBoot(): void {
 // was 1.5s of every load); the retry is a backstop. Linking the hub above is itself the announce — the host retargets to
 // this window on the first frame — so there's no separate "ready" ping.
 const paneRpc = createRpcClient(workbenchHub);
-
-/**
- * A VS Code window as a panel of the shell's dock (shell-dock.ts): the shell adds a blank iframe and names it, and
- * we find it on the top window — same origin, so VS Code can move its editors' DOM in. VS Code closes a window by
- * calling `close()`, a no-op on a frame's window, so that asks the shell to remove the panel instead. No shell (the
- * workbench on its own) → undefined, and VS Code opens a real popup.
- */
-async function openDockedWindow(request: AuxiliaryWindowRequest): Promise<Window | undefined> {
-	try {
-		const { name } = await paneRpc.request("dock.openWindow", request, { "timeoutMs": 4000, "waitForResponderMs": 1000 }) as { "name": string };
-		const frame = window.top?.document.querySelector<HTMLIFrameElement>(`iframe[name="${CSS.escape(name)}"]`);
-		const docked = frame?.contentWindow ?? undefined;
-
-		if (docked !== undefined) {
-			// (VS Code copies its own stylesheets into the window; ours — Workbench.tsx's Stitches, the exception sheets —
-			// theme/sheet copies; and Web Awesome on the VS Code theme, theme/vscode adopts there itself)
-			const stopMirroring = mirrorStyles(docked.document);
-			const stopTheme = followVsCodeThemeIn(docked.document);
-
-			docked.close = () => {
-				stopMirroring();
-				stopTheme();
-				workbenchHub.publish("dock.closeWindow", { "name": name });
-			};
-		}
-
-		return docked;
-	} catch (error) {
-		paneLog.info("no dock to open a window in", { "error": errText(error) });
-
-		return undefined;
-	}
-}
 
 void (async () => {
 	for (;;) {
@@ -842,51 +476,11 @@ void (async () => {
 	}
 })();
 
-// A live project switch (the LHS picker → host) arrives as a publish; write + focus it into the running workbench.
-// `replace` (a GitHub repo load) clears the workspace first — the workspace becomes the repo.
-//
-// COALESCED: the hub delivers a single load as a burst of identical publishes. That's harmless for a plain write
-// (idempotent), but a `replace` clears + rewrites the SingleBuffer (SAB) FS each time, and repeated clear/rewrite
-// cycles corrupt it ("offset is out of bounds"). So we debounce the burst to ONE run with the latest request.
-let pendingProject: { "files"?: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[]; "openEditors"?: string[]; "replace"?: boolean } | undefined;
-let projectTimer: ReturnType<typeof setTimeout> | undefined;
-
-workbenchHub.subscribe("workbench.openProject", (data) => {
-	pendingProject = data;
-
-	clearTimeout(projectTimer);
-	projectTimer = setTimeout(() => {
-		const project = pendingProject;
-
-		pendingProject = undefined;
-
-		if (project !== undefined) {
-			void openProject(project.files ?? [], project.openEditors ?? [], project.replace ?? false).catch((error: unknown) => {
-				paneLog.error("openProject failed", { "error": errText(error) });
-			});
-		}
-	}, 150);
-});
-
-// The host asks for the current workspace — to commit it back to GitHub, or share it as a link. We hold the FS and the
-// editors, so we serve it: every project file as bytes (editor scaffolding excluded), and the editor in front with its
-// selection (1-based, as a playground link records it).
-serve(workbenchHub, "workbench.files", async (): Promise<SharedWorkspace> => {
-	const files = await collectFiles(workspaceRoot());
-	const editor = vscodeApi.window.activeTextEditor;
-
-	if (editor === undefined || editor.document.uri.scheme !== "file") {
-		return { "files": files };
-	}
-
-	const { active, anchor } = editor.selection;
-
-	return {
-		"files": files,
-		"activeFile": editor.document.uri.path,
-		"selection": { "positionLineNumber": active.line + 1, "positionColumn": active.character + 1, "selectionStartLineNumber": anchor.line + 1, "selectionStartColumn": anchor.character + 1 }
-	};
-});
+// A live project switch (the shell's repo load → the app → here), written into the running workbench (project.ts).
+followProjectSwitches(workbenchHub, async (project) => {
+	await apiReady;
+	await openProject(vscodeApi, init?.workspaceFolder ?? "/workspace", paneLog, project);
+}, paneLog);
 
 // Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.
 installDebugBridge(() => vscodeApi);
