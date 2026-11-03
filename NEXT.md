@@ -182,9 +182,15 @@ How it's kept:
        nothing until previews come back.
      - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
        check` caught a removed file named.
-     - *Then:* the core's tests written again, the first of the new suite; `EDITOR_DEPLOYS` set to `off` (production
-       keeps the full editor) and the branch landed on main.
-     Found while reducing: the editor's runner can't run the theme's budget test (`Unsupported encoding: latin1`) or a
+     - *The core's tests:* begun 2026-11-02 — the ledger declares each core feature's tests (`tests`, which `silo check`
+       holds to the files): 16 of the 32 have them, four of those new (history-ledger: decisions and drift in Problems;
+       tarballs; runs; shell-feature). The unit suite passes in Node (107 of 107). Without a test yet: the agent's view
+       of the editor and its workspace tools, capability stops, Commit and Push to GitHub, docking, explore orderings,
+       file search, Playwright tests in the debugger, the review panel, the static host's service worker, sign-in,
+       Source Control, tests for agents and tests run in the debugger, the theme following the system.
+     - *Then:* `EDITOR_DEPLOYS` set to `off` (production keeps the full editor) and the branch landed on main.
+     Found while reducing: the editor's runner has no `globalThis.crypto` (runs.test.mjs fails there, passes in Node);
+     it can't run the theme's budget test (`Unsupported encoding: latin1`) or a
      test that hooks `vscode` (`registerHooks` isn't in almostnode's `node:module`); `git_checkout` can't switch to a
      branch the shallow clone hasn't fetched (`git.show` fetches one; checkout should too); `git_pull` reports
      "diverged" when main moved under a branch (a merge in the editor would settle it); the editor's GitHub Apps
