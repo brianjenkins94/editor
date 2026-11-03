@@ -169,13 +169,17 @@ How it's kept:
      its tests in the editor (git's, reset's, the workspace's: 20 of 20); the editor's unit tests pass in Node (94 of 94).
      And the shell split: shell.tsx is its core (the page, the dock, the hub, the theme, the review panel; 1,111 lines to
      307), and each other part of the top window a feature module started and placed from one list (shell/feature.ts:
-     sign-in, repo load, the GitHub popover, Commit, Reset, the push's serves, error reports).
+     sign-in, repo load, the GitHub popover, Commit, Reset, the push's serves, error reports). And previews out: the node
+     worker (the in-browser dev server), the preview taps, the service worker's preview routing and gate, the runner's
+     preview hooks and the COVERAGE=1 build; `vite` is a command the terminal says isn't here; the four preview features
+     tombstoned. CI's suites pass locally (realms 4 of 4, performance 5 of 5: boot 1.4 s, a typed hover 1 s, a 1000-file
+     load 0.9 s; memory read from the metrics plane through debug-mcp now).
      The reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
      Left, in order:
-     - *The node worker, split:* the in-browser dev server and the preview taps stay for the terminal's `vite` (four
-       features on a lease to 2026-12-01: preview windows, the dev server, previews' capability prompts, runtime
-       evidence); `vite` goes, or they're the worker's to keep, before the lease runs out. tsval keeps Playwright tests
-       and site sums; the workbench keeps the Live architecture view and extensions by URL (the manifest still has them).
+     - *What's still in the manifest:* tsval's Playwright tests and site sums, the workbench's Live architecture view and
+       extensions by URL, and the extension template's — the core keeps them; they move to the ledger with the rest of
+       the manifest (*Silo, firmed up*). A debug run's own server is still answered (editor-api's runtime link), asked by
+       nothing until previews come back.
      - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
        check` caught a removed file named.
      - *Then:* the core's tests written again, the first of the new suite; `EDITOR_DEPLOYS` set to `off` (production
