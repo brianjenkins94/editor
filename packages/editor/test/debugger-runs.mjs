@@ -59,6 +59,27 @@ test("a test file's tests run in the debugger: each one's outcome, a failure's s
 	assert.equal(tests["reads its own file"].outcome, "pass", "a read through the runtime's files");
 });
 
+test("a test file at a commit opened beside the work runs from there: its own modules as that commit has them", async () => {
+	await session.request("files.write", { "path": "refs-run/value.mjs", "content": "export const value = \"as committed\";\n" }, 30_000);
+	await session.request("files.write", { "path": "refs-run/value.test.mjs", "content": `import assert from "node:assert/strict";
+import { test } from "node:test";
+import { value } from "./value.mjs";
+
+test("imports its neighbour", () => {
+	assert.equal(value, "as committed");
+});
+` }, 30_000);
+	await session.request("git.commit", { "message": "refs: a test to run at its commit", "files": [{ "path": "refs-run/value.mjs" }, { "path": "refs-run/value.test.mjs" }] }, 60_000);
+	// (changed since: the commit's is what the run loads)
+	await session.request("files.write", { "path": "refs-run/value.mjs", "content": "export const value = \"changed since\";\n" }, 30_000);
+
+	const commit = (await session.request("git.log", { "limit": 1 }, 30_000)).commits[0].oid.slice(0, 12);
+	const { path } = await session.request("git.openRef", { "ref": commit }, 60_000);
+	const answer = await runTests([`${path}/refs-run/value.test.mjs`]);
+
+	assert.deepEqual(answer.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(answer).slice(0, 2000));
+});
+
 test("a write the policy doesn't decide stops the run and asks; approved, it's made", async () => {
 	await session.request("files.write", { "path": "debugger-writes.test.mjs", "content": `import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";

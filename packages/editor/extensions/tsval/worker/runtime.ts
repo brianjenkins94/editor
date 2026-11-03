@@ -4,6 +4,7 @@
  */
 import type { ModuleLoader } from "@brianjenkins94/tsval";
 import type { Control } from "../debug-protocol";
+import { REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { packageDisposition } from "@brianjenkins94/util/silo/policy";
 import nodeTestSource from "../node-test.js?raw";
 import { tally } from "./gate";
@@ -51,7 +52,26 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 	const socketsSeen = state.editorLink;
 
 	observeSockets(socketsSeen === undefined ? undefined : ({ port, path }) => socketsSeen.socket(port, path));
-	state.runtime = workspaceRuntime(await zenfs.createZenfsVFS(), {
+
+	// (a commit opened beside the work, `.refs/` — the bridge's git-refs.ts — isn't in the workspace's store: its files,
+	// a test's modules among them, are the editor's, through the link, as a program's own file calls are)
+	const store = await zenfs.createZenfsVFS();
+	const refs = state.editorLink === undefined ? undefined : new RuntimeVfs(state.editorLink.fs) as unknown as Record<string | symbol, unknown>;
+	const atRefs = (path: unknown): boolean => typeof path === "string" && path.startsWith(`/workspace/${REFS_DIR}/`);
+	const vfs = refs === undefined ? store : new Proxy(store, {
+		"get": (target, property, receiver) => {
+			const value = Reflect.get(target, property, receiver) as unknown;
+			const there = refs[property];
+
+			if (typeof value !== "function" || typeof there !== "function") {
+				return value;
+			}
+
+			return (...args: unknown[]) => (atRefs(args[0]) ? (there as (...parameters: unknown[]) => unknown).apply(refs, args) : (value as (...parameters: unknown[]) => unknown).apply(target, args));
+		}
+	});
+
+	state.runtime = workspaceRuntime(vfs, {
 		"global": state.runGlobal,
 		// (A program's own allowed write is let through while it's made: madeFor.)
 		"beforeFs": (op, method, path) => {

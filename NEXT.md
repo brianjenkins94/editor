@@ -207,6 +207,19 @@ How it's kept:
        replacement lives in files_replace): a boundary to draw, not a comment to keep. Found: the stripped tree is slow
        cold — each file is parsed as it's read, so greps across folders timed out until BABLR had them (its cache, warmed by
        BABLR: Check Which Files Parse…); the code-alone agents took 15–24 minutes against 2.
+     - *The old suite's last run* (2026-11-03, `.silo/last-run/`: outcomes.json, each test's; reach.json, the
+       architecture suites' reach as selection folds it) — **in CI**, the architecture workflow dispatched on the tag
+       (every shard, instrumented; none had run at the tag, a docs commit): 132 of 133 passed, `tour-selection`'s "an edit
+       to an imported module reruns the programs that ran what changed" timing out; 115 tests' reach (tour-selection's
+       failure kept its back). The unit suite passed whole at the tag's push run, and CI keeps no unit test's reach.
+       **In the editor**, every unit test file run from `.refs/full-editor/` in the debugger (built for it: a run's
+       modules under `.refs/` read through its link, as its program's files are — tsval's worker/runtime.ts): 57 files,
+       201 passed and 8 failed, 5 didn't load and 2 stalled — each one the editor's gap, not the code's, CI's run being
+       green: no `ReadableStream`, `child_process.execFileSync`, `module.registerHooks` or
+       `net.getDefaultAutoSelectFamilyAttemptTimeout` in the debugger's runtime; BABLR's `dist`, a build's output git
+       hasn't; timers while the tab is hidden; `mailbox.test.mjs` and `page-tools.test.mjs` never finishing. And no reach
+       from the editor: a test's trace was the Margin's (*Runs kept*), out since the reduction — what Reintroduce compares
+       a feature's new tests with is CI's reach until it's back.
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
      or kept, each "stays because" reason checked again.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved

@@ -1,0 +1,692 @@
+{
+	"about": "The old suite's last run (packages/editor/ARCHITECTURE.md, *Tests, eliminated and rebuilt with their features*): every test as `full-editor` had it, run once more — in CI, instrumented, its reach in reach.json (the architecture suites' records, as test/selection.mjs folds them), and in the editor's debugger, from .refs/full-editor/. What each feature's tests held it to, read beside the new tests as each feature comes back. An outcome in the editor that CI's isn't is the editor's gap, said in `why`.",
+	"ref": "full-editor",
+	"commit": "28ddbcfb6b7f8efa6434af9b0b9bac8b8a36ed90",
+	"on": "2026-11-03",
+	"ci": {
+		"architecture": {
+			"run": "https://github.com/brianjenkins94/editor/actions/runs/41718025201",
+			"counts": {
+				"smoke-app": {
+					"pass": 36
+				},
+				"tour-previews": {
+					"pass": 17
+				},
+				"tour-tools": {
+					"pass": 16
+				},
+				"tour-runs": {
+					"pass": 23
+				},
+				"tour-capabilities": {
+					"pass": 23
+				},
+				"tour-selection": {
+					"pass": 12,
+					"fail": 1
+				},
+				"performance": {
+					"pass": 5
+				}
+			},
+			"tests": {
+				"smoke-app": {
+					"an app with a tarball dependency, a module worker, a nested iframe and a MessageChannel runs in the preview": "pass",
+					"a nested frame's console reaches the editor's log plane — tagged with its frame — and never the app's own page": "pass",
+					"a page's capability request (WebSocket, WebRTC) is decided by the editor, for its window — over the window's hub": "pass",
+					"a worker's capability request is decided the same way — asked through its page": "pass",
+					"a worker's console reaches the editor's log plane too — through the worker tap, tagged with its worker": "pass",
+					"an edit to a module only the nested frame loaded reloads that frame, and leaves the page alone": "pass",
+					"the app's own hubs join the editor's tree: its startup log, its tab and its tools reach debug-mcp through it": "pass",
+					"the app's metrics reach the editor's metrics plane, named by the edge: its page and its worker under its window": "pass",
+					"the app's link is confined: an editor subject it publishes doesn't cross into the editor": "pass",
+					"the editor's architecture view takes the app's contexts as the app's: none of it needs review": "pass",
+					"the app opens its own page as a new window: a second preview window onto the same server, its own page in every way": "pass",
+					"a preview window dropped on the editor area runs in a VS Code editor: its hubs rejoin, a tab switch keeps its page, and it docks back": "pass",
+					"a preview window popped out into a browser window of its own: its hubs rejoin through its opener, an edit reaches it, and closing it brings it back": "pass",
+					"boot: every realm reports": "pass",
+					"observability: an extension's log reaches the tree's collector, as ext:<name>'s": "pass",
+					"preview: npm run dev in the terminal serves the demo": "pass",
+					"hmr: a save reaches the preview": "pass",
+					"coverage: every must-see hub link, channel and message was observed": "pass",
+					"conformance: nothing observed needs review": "pass",
+					"Run starts editor-contrib's interpreter: a run in its worker, the program read through the editor's runtime, telling its values, coverage, effects and end": "pass",
+					"an agent's run of editor-contrib's interpreter answers with how it ended": "pass",
+					"editor-contrib's extension is on the editor's observability plane: its log, as ext:contrib's": "pass",
+					"editor.annotations.spans gives an extension the editor's spans for a text": "pass",
+					"an extension's pane view: its tab, its items level with their code, followed as it changes, its buttons and input — and natively, the pane hidden": "pass",
+					"the entries are found": "pass",
+					"extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-canary.js loads in a worker of its own": "pass",
+					"extensions/capabilities/node_modules/capabilities-ts-plugin/capabilities-engine.js loads in a worker of its own": "pass",
+					"extensions/history/node_modules/history-ts-plugin/history-engine.js loads in a worker of its own": "pass",
+					"lsp/bablr-worker.js loads in a worker of its own": "pass",
+					"lsp/debug-worker.js loads in a worker of its own": "pass",
+					"lsp/eslint-worker.js loads in a worker of its own": "pass",
+					"lsp/node-worker.js loads in a worker of its own": "pass",
+					"lsp/packages-worker.js loads in a worker of its own": "pass",
+					"lsp/provoke-worker.js loads in a worker of its own": "pass",
+					"lsp/recognizer-worker.js loads in a worker of its own": "pass",
+					"lsp/server-host.js loads in a worker of its own": "pass"
+				},
+				"tour-previews": {
+					"debug-mcp: this checkout's debug-mcp joins the hub tree": "pass",
+					"previews: two dev servers side by side": "pass",
+					"playwright: a test file in the debugger drives the preview you have open": "pass",
+					"evidence: a preview run, across a hot update": "pass",
+					"recorded stops: a breakpoint in a page's handler records its scope each time it runs": "pass",
+					"provoke: a cold transform round in a child worker": "pass",
+					"preview prompt: Rule… makes the rule in the Rules view, and the call waits on it": "pass",
+					"a preview's fetch: a rule's result given in its place; unwatched, its recording, or halted": "pass",
+					"run: an app's file runs the app — its dev server and its preview": "pass",
+					"node script: a service runs in the debugger, and stopping it leaves the previews up": "pass",
+					"localhost: a preview's request for another port reaches its server, streamed both ways": "pass",
+					"record: a node service's reads of the workspace, kept to be given back": "pass",
+					"event sheet: its tab — a game's rule a card around its code, its condition and action on their line, its behaviors on theirs": "pass",
+					"webview: a markdown preview": "pass",
+					"git review: a diff in the shell": "pass",
+					"dock: an editor moved into a new window lands in a panel of the shell's dock, and comes back": "pass",
+					"conformance: nothing observed needs review": "pass"
+				},
+				"tour-tools": {
+					"agent tools: the editor, its problems, notifications, rules, terminals and previews — as data": "pass",
+					"workspace tools: write, edit, read, find, search and diff": "pass",
+					"workspace tools: a replacement across files, all or nothing": "pass",
+					"editor trace: a component's trace log, for a while, in the log stream": "pass",
+					"test runs: which tests a change reaches, and their results as data": "pass",
+					"refactoring: references, a rename everywhere, and a move with its imports": "pass",
+					"structural search: a shape found however it's spelled, and rewritten": "pass",
+					"code reach: a way in's registration, what names it, and what removing it frees": "pass",
+					"decisions: a file's ledger entries, and the docs' lines naming it": "pass",
+					"ci status: a workspace's commit asked of GitHub Actions, and a refusal said with why": "pass",
+					"checkpoints: a change tried, previewed, and put back as it was": "pass",
+					"script run: a count over the workspace's files, and what it touched — the network refused": "pass",
+					"code problems: what a change adds and clears, against HEAD": "pass",
+					"git history: a file's log, a revision of it, and its blame": "pass",
+					"cspell: code words pass, a misspelling doesn't — after an edit too": "pass",
+					"conformance: nothing observed needs review": "pass"
+				},
+				"tour-runs": {
+					"node script: a task runs under the tsval debugger": "pass",
+					"run: one way in from every button, and a file that isn't a program says why": "pass",
+					"debug session: one VS Code starts is a run, known by the same id": "pass",
+					"evidence: a file the program imports gets its own": "pass",
+					"evidence: a run's values and branches, beside its coverage": "pass",
+					"live values: a session's values beside the code, as the talk's binary search": "pass",
+					"inline values: at a stop, each line's latest value at its end, as VS Code draws them": "pass",
+					"live runs: saved, the file runs again — writes into its own layer, half-typed kept, an endless loop stopped": "pass",
+					"set a value: from the margin, at a stop or by a rule, and the run goes on with it": "pass",
+					"mock process.argv: a rule giving it, once or kept, several runs, and a plain run given them": "pass",
+					"projection: the margin's cards are the file's steps, each saying whether it ran": "pass",
+					"projection: the run log — each step's share of the work, and its waits": "pass",
+					"run ends: a crash is marked on the line it threw on, and stays on it through a reformat": "pass",
+					"types: the tsserver plugin types each of a file's ranges as its site observes": "pass",
+					"notes: a note follows its code, and waits in Problems when its code is gone": "pass",
+					"notes: a note goes with its code to another file": "pass",
+					"search: findFiles keeps to its glob, and to files.exclude unless told not to": "pass",
+					"margin: a references peek shows the code, with no pane of its own inside it": "pass",
+					"defaults: a deleted tsconfig.json falls back to the default, and a new one can be written over it": "pass",
+					"stores: discovered from what's written and read": "pass",
+					"components: a realm's hub, told apart by who subscribed": "pass",
+					"components: on the view, a message's line lands on the component that handles it": "pass",
+					"conformance: nothing observed needs review": "pass"
+				},
+				"tour-capabilities": {
+					"capability decisions: a gated call asks on its line, and the choice resumes the run": "pass",
+					"real effects: an allowed read reads the file, recorded; a call nobody allowed fails": "pass",
+					"package prompt: whose call, and why it's asked; Allow always is about that package; the dialog closes": "pass",
+					"eslint: real ESLint in its worker — a type-aware problem reported, and fix-all": "pass",
+					"a program's read is the editor's: an open editor's unsaved text": "pass",
+					"capability decisions and placed rules: in a file the program imports, as in its entry": "pass",
+					"capability decisions: Skip always and Deny always — every run goes past the call, or fails at it, unasked": "pass",
+					"capability decisions: Allow this run lets a loop's calls through, until the run ends": "pass",
+					"rules view: every rule as a sentence, opened and removed there": "pass",
+					"rules view: a rule whose place is lost, re-placed at a selection": "pass",
+					"placed rules: marked beside their code, followed through edits, and kept placed on save": "pass",
+					"mock a call's result: given at its capability stop, from what it returned for real": "pass",
+					"debugger: a task's timers run on tsval's deterministic event loop": "pass",
+					"debugger: a program's imports — built-ins and its other files — load": "pass",
+					"debugger: a breakpoint in a file the program imports, its values, and stepping into it": "pass",
+					"debugger: a program's server answers the preview, and keeps the run alive": "pass",
+					"debugger: a program reads its stdin from the Debug Console": "pass",
+					"terminal: node runs in the debugger with its args, cwd and env — output and stdin in the terminal": "pass",
+					"debugger: the event loop's scope, and Skip Waits": "pass",
+					"explore orderings: a race's endings, each debugged by its schedule": "pass",
+					"eslint: the workspace's own eslint.config — its rules, reloaded as it changes; one that can't load says so; no network": "pass",
+					"eslint: each package's own config, from the working directory eslint.workingDirectories gives": "pass",
+					"conformance: nothing observed needs review": "pass"
+				},
+				"tour-selection": {
+					"tests: node --test keeps a trace of each test on each file it ran": "pass",
+					"selection: a save reruns the tests that executed what changed, and only those": "pass",
+					"features: a feature's code and tests, from the manifest, on the features map": "pass",
+					"features: a feature's status, set in the editor, goes into the ledger": "pass",
+					"features: the ledger's drift in Problems — stopped but present, until the decision changes": "pass",
+					"features: a dormant way in is marked where it's registered, and Keep / Remove write the ledger": "pass",
+					"selection: an edit to an imported module reruns the programs that ran what changed, and only those": "fail",
+					"halt: a selected run halts before a call that never ran for real, and a pinned value is a rule": "pass",
+					"runs kept: picking an older run shows its own coverage": "pass",
+					"runs kept: a long run's ball follows it while it goes, then settles": "pass",
+					"purity: a function's verdict on its card, and a pure one a run saw write outside, flagged": "pass",
+					"purity from runs: a function the check calls unknown, run often and never impure, says so on its card": "pass",
+					"conformance: nothing observed needs review": "pass"
+				},
+				"performance": {
+					"boot: the page's start to the editor being ready": "pass",
+					"the demo's first typed hover": "pass",
+					"memory by realm, at idle": "pass",
+					"script by realm, at idle": "pass",
+					"loading a 1000-file project": "pass"
+				}
+			},
+			"reach": "reach.json: 115 tests (every shard but tour-selection, whose failure kept its reach back; performance runs uninstrumented)"
+		},
+		"unit": {
+			"run": "https://github.com/brianjenkins94/editor/actions/runs/41554799262",
+			"outcome": "success",
+			"note": "the push run at the tag: every unit test passed; CI keeps no unit test's reach"
+		}
+	},
+	"editor": {
+		"counts": {
+			"files": 57,
+			"pass": 201,
+			"fail": 8,
+			"didn't load": 5,
+			"stalled": 2
+		},
+		"reach": "none kept: test traces were the Margin's (Runs kept), out since the reduction",
+		"files": {
+			"packages/bablr-language-ts/test/anchor-format.test.mjs": {
+				"exitCode": 1,
+				"didn't load": "Cannot find module '../../bablr/dist/index.js' (a build's output: git hasn't it)"
+			},
+			"packages/bablr-language-ts/test/history-identity.test.mjs": {
+				"exitCode": 1,
+				"didn't load": "Cannot find module '../../bablr/dist/index.js' (a build's output: git hasn't it)"
+			},
+			"packages/bablr-language-ts/test/identity.test.mjs": {
+				"exitCode": 1,
+				"didn't load": "Cannot find module '../../bablr/dist/index.js' (a build's output: git hasn't it)"
+			},
+			"packages/editor-api/test/annotations.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"the answer, as the bridge gives it": "pass",
+					"a text BABLR can't parse: why, not a lost annotation": "pass",
+					"no editor BABLR: unavailable, and why": "pass",
+					"nothing asked, nothing to ask the editor": "pass"
+				}
+			},
+			"packages/editor-api/test/cpuprofile.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a trace becomes a call tree: one node per frame under its caller, each sample on its stack's node": "pass",
+					"a summary: self time and total time by function, busiest first, idle apart": "pass"
+				}
+			},
+			"packages/editor-api/test/effects.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"the editor's and the debugger's effects, together — a telling replaces only the debugger's": "pass",
+					"a package's calls are its own: kept apart from the program's same call": "pass"
+				}
+			},
+			"packages/editor-api/test/exchanges.test.mjs": {
+				"exitCode": 1,
+				"tests": {
+					"an answer still being written comes in pieces, until done": "fail",
+					"an answer written all at once comes whole, with no exchange left open": "fail",
+					"without an exchange named, a streamed answer is drained and sent whole": "fail",
+					"a request body in writes reaches the server in order — the first write may overtake the request": "fail",
+					"a cancel reaches the server's body": "fail"
+				},
+				"why": "ReferenceError: ReadableStream is not defined (the debugger's runtime)"
+			},
+			"packages/editor-api/test/gate.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"the policy decides: allowed, skipped or refused — and refused when it doesn't say": "pass",
+					"a live run makes nothing but a read the policy allows": "pass",
+					"a recording is the whole request's: a POST's isn't given to a GET of the same URL": "pass"
+				}
+			},
+			"packages/editor-api/test/layer.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a run's writes stay in its layer, and its reads see them": "pass"
+				}
+			},
+			"packages/editor-api/test/lifecycle.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a script that serves or watches is a service, whatever it's called": "pass",
+					"a script that builds, tests or checks is a task": "pass",
+					"otherwise the name decides: dev, start, serve, preview and watch keep running": "pass",
+					"a file that listens, serves, ticks or reads input is a service": "pass",
+					"a file that just runs is a task — and what's commented out doesn't count": "pass"
+				}
+			},
+			"packages/editor-api/test/mailbox.test.mjs": {
+				"exitCode": null,
+				"stalled": "ran past 100 s twice without a test finishing; stopped"
+			},
+			"packages/editor/test/architecture-model.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a subject family may only cross the tree links between its senders and receivers": "pass",
+					"and only in its direction: an event or a call from its senders to its receivers, a reply back": "pass",
+					"every family names who sends it and who it's for, as hubs in the tree": "pass",
+					"every direct channel says why it isn't a hub link": "pass",
+					"labels map back to subjects; control frames aren't subjects": "pass",
+					"conformance flags undeclared channels, unexpected subjects, duplicate peers and unknown nodes": "pass",
+					"every declared channel endpoint and hub link names a declared node (or a pattern)": "pass",
+					"workers and URLs map to model ids": "pass",
+					"a subject's component: the one subscribed to it, a call or a folded subject alike": "pass",
+					"the tour's diagram: what was seen, one of a kind each, without counts": "pass",
+					"each pair of contexts is declared as one channel (a second one could never be seen)": "pass",
+					"a previewed app's contexts are its own: scoped under their preview window, and not checked against the model": "pass",
+					"a previewed app's layout: frames in the realm at their parent address, workers under the realm that started them": "pass",
+					"two windows on one port: each window's contexts apart, nested within that window only, none flagged": "pass",
+					"nothing is guessed: a context that doesn't say where it runs sits in its window, and a hub across windows is its own": "pass",
+					"a pair meeting through a medium only they use is judged by the medium's declaration": "pass",
+					"every subject the source names is declared": "pass"
+				}
+			},
+			"packages/editor/test/argv-inputs.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"inputs: runs by |, arguments by spaces, quotes keeping a space": "pass"
+				}
+			},
+			"packages/editor/test/ata.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"imports, requires and dynamic imports name their package roots": "pass",
+					"a `from` inside a string isn't an import: csstype's keys and string unions name no package": "pass",
+					"triple-slash references and the package's own `#` imports still sort into their buckets": "pass"
+				}
+			},
+			"packages/editor/test/baseline.test.mjs": {
+				"exitCode": 1,
+				"tests": {
+					"a tarball's files, long paths included — bytes as they are, and what packageCaps makes of them": "fail",
+					"a lockfile's packages: each name once, root before nested, a link by its folder — and what each depends on": "pass",
+					"a link's folder, relative to the workspace root; what the editor installs itself": "pass",
+					"a range resolved with nothing younger than a week — `latest` the latest a week old": "pass",
+					"what's resolved already stays — a lockfile's way: nothing asked again": "pass",
+					"one resolved before its dependencies were kept: they're read, its version as it was": "pass",
+					"a platform build — a native binary for some OS or CPU — is marked, its version resolved as any other's": "pass",
+					"a peer is resolved as npm installs it: a required one, never one its manifest marks optional": "pass"
+				},
+				"why": "Error: [unenv] child_process.execFileSync is not implemented yet!"
+			},
+			"packages/editor/test/capabilities.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"every method almostnode gates is a capability call — including rm, rename, copyFile": "pass",
+					"a copy is a read of its source and a write where it lands; a rename, a write at both": "pass",
+					"the canary stands in for every gated method, inertly": "pass",
+					"identical decisions asked at once share one answer — one prompt, not one per request": "pass"
+				}
+			},
+			"packages/editor/test/ci-status.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a commit's runs: each workflow's conclusion, and the jobs of one that failed, its failed steps": "pass",
+					"no runs: said, so an empty list isn't read as green": "pass",
+					"a job's log: its last lines without timestamps or colors, its errors, and the tests it failed": "pass",
+					"a refusal says why: signed out, public runs only; signed in, the App's Actions permission": "pass"
+				}
+			},
+			"packages/editor/test/code-patterns.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a call by its callee and first argument, any arguments after; a string in either quotes": "pass",
+					"$X binds one node, the same text where it's named twice": "pass",
+					"whitespace and comments aside; a statement's body as a run": "pass",
+					"a rewrite fills its template from the bindings, outermost matches only": "pass",
+					"a pattern that isn't one expression or statement says so": "pass"
+				}
+			},
+			"packages/editor/test/code-problems.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a problem that moved is unchanged; one that's new is added; one that's gone is cleared": "pass",
+					"as multisets: a second copy of a problem is added, and the source tells TypeScript's from ESLint's": "pass"
+				}
+			},
+			"packages/editor/test/collab-identity.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"clone determinism: a clone's identical content yields identical ids, annotations resolve": "pass",
+					"rebase / force-push: a content-derived id is immune to oid rewrites": "pass",
+					"new commit / base jump: reidentify carries the annotation across a content change": "pass",
+					"merge: a branch annotation resolves onto the merge with no lineage walk": "pass",
+					"hard reset: a reset-away node orphans cleanly (never misattaches)": "pass",
+					"semantic granularity: a value edit orphans that span; the identifier survives": "pass"
+				}
+			},
+			"packages/editor/test/cosmetic.test.mjs": {
+				"exitCode": 1,
+				"didn't load": "Uncaught TypeError: registerHooks is not a function"
+			},
+			"packages/editor/test/event-sheet.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"every generated line is chrome or maps to exactly one row": "pass",
+					"each row owns a single contiguous line range, and rowAt/spanOf are inverse": "pass",
+					"click-to-jump: an unknown row has no span, a real row lands on its condition comment": "pass",
+					"durable anchor: shift-resistant to an unrelated row, self-edit-aware for its own": "pass"
+				}
+			},
+			"packages/editor/test/game-anchors.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"every recognized node gets an anchor, and the five behaviors' anchors are distinct": "pass",
+					"move-stable: an unrelated edit above a node does not change its anchor": "pass",
+					"self-edit-aware: changing a node's own content changes its anchor": "pass"
+				}
+			},
+			"packages/editor/test/game-generator.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"generating the example block model emits a complete runnable game": "pass",
+					"a blank game is a complete, runnable, empty scaffold": "pass",
+					"the COMPOSED example generates a complete runnable game whose systems are compiled from primitives": "pass",
+					"the arcade game generates a complete, deterministic real-time game (fixed timestep, pixel positions)": "pass",
+					"adding an entity to the model shows up in the regenerated projection": "pass"
+				}
+			},
+			"packages/editor/test/game-recognizer.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"recognizes every example behavior (data + tag), cross-file, with correct kind and fields": "pass",
+					"excludes non-components: the Direction enum (object of numbers, never queried) is not a behavior": "pass",
+					"recognizes entity types by spec SHAPE (components array), not by a load() callee": "pass",
+					"recognizes rules (systems) by shape, with subjects and event→action rows": "pass",
+					"recognizeGame composes all three into one JSON model (what the worker returns)": "pass"
+				}
+			},
+			"packages/editor/test/game-rules.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"push and win compile from primitives to readable systems, and a built-in is a reusable function of primitives": "pass",
+					"the compiled game reverse-projects back to the example's map (the round-trip)": "pass",
+					"arcade: continuous movement compiles to deterministic fixed-point code, no nondeterminism": "pass",
+					"composed behaviors get durable anchors (the library keeps its identity across edits)": "pass"
+				}
+			},
+			"packages/editor/test/git-diff.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a changed line, a removed one and an added one: git's hunks": "pass",
+					"a file made, a file deleted, a file unchanged": "pass"
+				}
+			},
+			"packages/editor/test/git-fast-forward.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"behind: the branch moves to theirs, their files written, a change of mine to another file kept": "pass",
+					"a file changed on both sides: nothing touched, and which files say why": "pass",
+					"up to date, ahead, diverged: nothing to do, or nothing it can": "pass"
+				}
+			},
+			"packages/editor/test/git-hunks.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a file's changes are its hunks: where each is on both sides, what it removes and adds": "pass",
+					"committing some hunks leaves the rest in the working tree, under the same ids": "pass",
+					"discarding a hunk puts HEAD's lines back and keeps the rest of the change": "pass",
+					"a deletion is placed after the line it followed; the same change twice is two hunks": "pass",
+					"a hunk that isn't there now is refused, naming the ones that are": "pass",
+					"a rewrite past the diff's limit is one replacement": "pass",
+					"blame: each line from the newest version that has it where the older one doesn't; the oldest's are boundary": "pass"
+				}
+			},
+			"packages/editor/test/git-status.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"told what changed, status says what a whole walk would — a new file, an edit, a folder gone": "pass",
+					"when the index has moved since (a stage the working tree didn't say), status walks the whole tree": "pass"
+				}
+			},
+			"packages/editor/test/github.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"the client goes where it's pointed: GitHub's paths under the API's proxy when signed in": "pass",
+					"readTree requests the recursive tree; getRepo returns undefined on 404 but throws otherwise": "pass",
+					"readRepo returns every blob as decoded bytes (text + binary), skipping tree entries": "pass",
+					"decodeBase64ToText round-trips UTF-8 through GitHub's wrapped base64": "pass"
+				}
+			},
+			"packages/editor/test/hidden-timers.test.mjs": {
+				"exitCode": 1,
+				"tests": {
+					"while the tab is hidden, a timer is the worker's: it fires, with its arguments and the realm as `this`": "fail",
+					"an interval repeats until cleared, and either clear clears either, as the browser's do": "fail",
+					"while the tab is shown, a short timer is the realm's own; one of a second or more is the worker's": "pass",
+					"once a realm, and not at all where there's no worker": "pass"
+				},
+				"why": "AssertionError: Expected values to be strictly deep-equal:; AssertionError: it repeated (0)"
+			},
+			"packages/editor/test/insights-suggestions.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"never isn't proof: how rare it could still be, and how strongly to say so": "pass",
+					"a branch's arms, in its text": "pass",
+					"what could go: each, marked, sure as its tries, with the edit that removes it": "pass",
+					"an if never taken: its then tinted, and the fix keeps the else, unwrapped": "pass",
+					"a statement inside an arm already marked isn't marked again": "pass"
+				}
+			},
+			"packages/editor/test/page-tools.test.mjs": {
+				"exitCode": null,
+				"stalled": "ran past 70 s without a test finishing; stopped"
+			},
+			"packages/editor/test/playground-link.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a v2 link opens its whole project, on its active file": "pass",
+					"a classic link is one file, with the playground's defaults under the query's options": "pass",
+					"a classic link's file is named as the playground names it": "pass",
+					"#src= is plain URI-encoded source": "pass",
+					"only playground hashes are links, and a v2 project stays inside /workspace": "pass",
+					"a share link round-trips the workspace, without its binary files": "pass",
+					"a share link names no active file it doesn't carry": "pass"
+				}
+			},
+			"packages/editor/test/preview-instrument.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"same evidence from tsval and a preview: optional chains, nullish, branches": "pass",
+					"same evidence from tsval and a preview: parameters and returns": "pass",
+					"same evidence from tsval and a preview: a chain an earlier link stopped": "pass",
+					"same evidence from tsval and a preview: a method called optionally keeps its this": "pass"
+				}
+			},
+			"packages/editor/test/replay.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a snapshot: data comes back as data, what can't as what stands in for it": "pass",
+					"the program a replay runs: every line and column the file's, the function called with its recorded this and arguments": "pass",
+					"a recorded call, replayed: its code stepped on what it read, each call it couldn't make handed what it returned": "pass"
+				}
+			},
+			"packages/editor/test/reset.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a reset takes the editor's databases and keys, and keeps the sign-in": "pass",
+					"signing out too takes the sign-in's database and keys": "pass",
+					"nothing of another site's on the origin is touched": "pass"
+				}
+			},
+			"packages/editor/test/runtime-evidence.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a value site: strict counts add up run by run, the weight fades": "pass",
+					"a branch: each arm's strict count, a weight of times taken": "pass",
+					"a site a run didn't report only fades; one faded away is dropped": "pass",
+					"each fold leaves the other kinds as they were": "pass",
+					"two sites a run reports under one span add up; tags past the cap count as other": "pass",
+					"an evidence file round-trips every kind, sorted by kind and span": "pass",
+					"samples: this machine's, newest distinct first, only for sites the evidence still knows": "pass",
+					"a preview's packages: the exact versions esm.sh served it, not the ranges it asked for": "pass",
+					"an esm.sh URL's package: its name, and its version when exact — a range names only the package": "pass"
+				}
+			},
+			"packages/editor/test/script-run.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a value: whole while its JSON fits, else its first characters and how many there were": "pass",
+					"a log: its first 500 lines, a long one cut, and how many were left out": "pass"
+				}
+			},
+			"packages/editor/test/selection.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"declarations: top-level names, a class's members, the rest as the top level": "pass",
+					"a change's declarations: by their tokens, so a reformat or a comment changes none": "pass",
+					"selection: a declaration's tests; ambient code the smoke suite; docs nothing; anything else everything": "pass",
+					"ARCHITECTURE.md: its diagram changed, or only its prose": "pass",
+					"merged: a run's reach folds into the records — sets grow, a declaration its file lost drops out": "pass"
+				}
+			},
+			"packages/editor/test/silo-kept.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"where a kept file is: at .silo/ when the repository has it there, else in .silo/local/": "pass",
+					"an untracked kept file at .silo/ moves to its local copy; a committed one stays, and git sees neither move": "pass",
+					".silo/'s own .gitignore goes into a commit only with something else under .silo/": "pass"
+				}
+			},
+			"packages/editor/test/site-sums.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a value site: how often seen, how often nullish, each type tag, a few distinct primitives": "pass",
+					"a branch site: how often each arm ran, both arms there even when one never did": "pass",
+					"tags past eight count as other; samples stop at five, strings cut short": "pass",
+					"a fork's sums go on from a copy, leaving its stop's as they were": "pass",
+					"a file's report has only its own sites — the program's other files report theirs": "pass"
+				}
+			},
+			"packages/editor/test/sourcemap.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a compiled position maps back to where it was written, though the types are gone": "pass",
+					"a .tsx module's map still lines up after React Refresh puts its setup in front": "pass",
+					"no map, or a line with no mappings, is no answer": "pass"
+				}
+			},
+			"packages/editor/test/span-annotations.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"the default pipeline and policy never re-place an annotation onto the wrong span": "pass",
+					"a re-placement says which strategy placed it, and how sure it was": "pass",
+					"a call rewritten into something else isn't guessed at: it's asked about or orphaned": "pass",
+					"the structural diff matches a call by its type, so one replaced by another call is asked about, not followed": "pass",
+					"a function whose body was rewritten is followed by the diff — its name and signature survived": "pass",
+					"the typed strategy lifts a shape match whose types agree, drops one whose types don't, and leaves the rest as the shape had it": "pass"
+				}
+			},
+			"packages/editor/test/terminal-integration.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a command line comes through VS Code's reading as it was typed — separators, backslashes, spaces and all": "pass",
+					"the working directory too, and a finish with or without its exit code": "pass"
+				}
+			},
+			"packages/editor/test/terminal-session.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a cd and an export stick from one command to the next, and the probe never shows": "pass",
+					"after a Ctrl-C, the next command runs where the session was — not in just-bash's default directory": "pass",
+					"an interrupted command's own cd doesn't reach the session (it never gets to report it)": "pass",
+					"statementsOf: a streaming line's statements, and the lines run whole": "pass",
+					"outputCaptured: a statement's output into a pipe or a file, and only stderr moved, or nothing": "pass"
+				}
+			},
+			"packages/editor/test/workspace-changes.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"creating a file is one add (its writes fold into it), with an absolute path": "pass",
+					"rewriting a file is a change": "pass",
+					"emptying a file (only a touch in zen-fs) is a change": "pass",
+					"reading is not a change": "pass",
+					"a recursive delete reports every file and directory under it": "pass",
+					"renaming a directory deletes the old path and adds the new one": "pass"
+				}
+			},
+			"packages/editor/workbench/terminal/commands/code/code.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"code: a file, a file at a line, a new file, a folder": "pass",
+					"open: code's opener, and a URL in the browser": "pass"
+				}
+			},
+			"packages/editor/workbench/terminal/commands/git/git.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"status, add, commit, log: a first commit": "pass",
+					"diff, then restore undoes it": "pass",
+					"commit -a takes what's tracked; nothing staged says so": "pass",
+					"branch, and what isn't here says what to do": "pass",
+					"switch and checkout: onto a branch, -c / -b making it first with the changes kept": "pass",
+					"a script HEAD has as executable stays so through an edit: the workspace's filesystem keeps no executable bit": "pass"
+				}
+			},
+			"packages/editor/workbench/terminal/commands/history/history.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"history: the terminal's lines, numbered; history n the last n": "pass"
+				}
+			},
+			"packages/editor/workbench/terminal/commands/less/less.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"less: prints its files, or what's piped in (UTF-8 intact)": "pass"
+				}
+			},
+			"packages/editor/workbench/terminal/commands/node/node.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"node's arguments, read as node reads them": "pass",
+					"node --test finds test files as node does": "pass"
+				}
+			},
+			"packages/editor/workbench/terminal/commands/npm/npm.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"npm: ls, run alone lists the scripts, a script runs with its arguments, version": "pass",
+					"npm install -D and uninstall edit package.json": "pass",
+					"npx: a command this shell has runs; a package's own binary says why not": "pass",
+					"pnpm and yarn: npm in their words": "pass"
+				}
+			},
+			"packages/editor/workbench/terminal/commands/ps/ps.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"ps: what's running, a short id each; -a adds what ended": "pass",
+					"kill: by any unique beginning of the id; an ambiguous or unknown one says so": "pass"
+				}
+			},
+			"packages/playwright/test/engine.test.mjs": {
+				"exitCode": 1,
+				"didn't load": "Uncaught Error: [unenv] net.getDefaultAutoSelectFamilyAttemptTimeout is not implemented yet! (in /node_modules/playwright-core/lib/coreBundle.js)"
+			},
+			"packages/editor-api/test/values.test.mjs": {
+				"exitCode": 0,
+				"tests": {
+					"a preview, as code would write it — and never a getter": "pass",
+					"a batch: what's new, its calls named once": "pass",
+					"bounds: a loop's late turns, a call's later values, later calls — dropped and counted": "pass",
+					"now: where a run is past the bounds, with each batch — and a batch for values only dropped": "pass",
+					"a call whose first value was dropped is named once all the same": "pass",
+					"stepping back: a replayed value isn't told twice": "pass",
+					"stepping back into a statement told already: its values aren't told twice, and what's after them is": "pass",
+					"a stop in the middle of a statement: going on from it, the statement's later values are new": "pass"
+				}
+			}
+		}
+	}
+}

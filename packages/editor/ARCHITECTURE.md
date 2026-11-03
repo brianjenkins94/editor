@@ -499,7 +499,9 @@ the code, and a feature's tests are written again when it comes back, declared i
 attributed by declaration from the first one (packages/silo/README.md, decision 13), and a test's file is code its
 feature owns (decision 22). The core's tests are the first written.
 - **The old suite is the record of what was tested.** Its last run (step 1) keeps, per test, what it reached and how it
-  came out: CI's ledger and the editor's traces. A removed feature's old tests are what that feature was held to. When
+  came out: CI's ledger and the editor's traces. Run 2026-11-03, after the reduction, at `full-editor`: `.silo/last-run/`
+  (each test's outcome, in CI and in the editor's debugger; the architecture suites' reach, from CI — the editor kept none,
+  its traces being the Margin's). A removed feature's old tests are what that feature was held to. When
   it's reintroduced, what its old tests reached and its new ones don't is shown: a behaviour dropped on purpose, said
   so with its reason, or a test still missing. That's how existing behaviour is codified rather than lost with the
   tests. The old tests are read beside the new, at the tombstone, as its old code is.
