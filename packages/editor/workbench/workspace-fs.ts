@@ -63,9 +63,11 @@ type FileResource = Parameters<IFileSystemProviderWithFileReadWriteCapability["w
 const PERSIST_DB = "workspace-fs";
 const PERSIST_STORE = "files";
 const FLUSH_MS = 500;
-/** Fixed size of the shared filesystem buffer (SingleBuffer can't grow). 64 MB: headroom for a real project's
- *  type surface + sources; tunable. Overflow handling (evict / realloc) is a later concern. */
-const BUFFER_BYTES = 64 * 1024 * 1024;
+/** Fixed size of the shared filesystem buffer (SingleBuffer can't grow: it reads its size once). 128 MB: SingleBuffer
+ *  takes ~2.5× the files' size, and nothing collects the packs pulls fetch — at 64 MB this repository's clone and its
+ *  types took half, and a day of pulls the rest. Not more: the browser's memory measurement counts the buffer at its
+ *  size, written or not, against the workbench's budget (ARCHITECTURE.md, *The workspace filesystem*). */
+const BUFFER_BYTES = 128 * 1024 * 1024;
 
 /**
  * Silo's `local/` — what stays on this machine (the edit history, raw profiles, BABLR's verdicts): files like any other

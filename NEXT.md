@@ -127,7 +127,9 @@ How it's kept:
      works). Still to do, by the step it blocks:
      - *Working in it at all:* one agent session per machine drives the editor (debug-mcp's port), and a session that
        couldn't start one has no tools with nothing saying why; two tabs back from a reset both cloned into one
-       workspace; a tab sometimes missing from `tabs_list`; the workspace store full (*Watching*, its ceiling).
+       workspace; a tab sometimes missing from `tabs_list`; the workspace store fills with a day's pulls — nothing
+       collects the packs they fetch (its buffer 64 → 128 MB, 2026-11-03: about three days' room, within the workbench's
+       memory budget).
      - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced); CI's reach
        covers the architecture suites only, and there `activate` is reached by nearly every test; `decisions_for` named five
        features for one file; nothing shows code with its comments stripped (the zero-knowledge pass's first
@@ -241,7 +243,11 @@ How it's kept:
    - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
      tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
      editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
-     when it's next.
+     when it's next. **First, what contributes an ESLint rule** (user, 2026-11-03): ESLint in the editor
+     (`extensions/eslint`, its worker and build/eslint-toolchain at `full-editor`), so the rules CI holds the code to —
+     util's preset (span names among them), the Web Awesome plugin, the realms' boundaries in eslint.config.js — hold as
+     the code is written in the editor too; then what's built on it (*A change's problems*); and any feature that brings a
+     rule of its own comes back with it, early.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_problems` (Problems shows the
      current set, not a change's), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
@@ -265,17 +271,6 @@ packages/editor (`--all`, `--runs N`, `--json`).
   method $init on worker thread channel default` (b9ca734, as monaco-vscode-api 38.0.2 was pinned). Whether the
   NotAllowedError still happens after e86501b is unknown: read the next reports, which carry their stack. Also seen
   once: `[almostnode] worker_threads.Worker is not implemented` (synckit's `createSyncFn`, e4e927b).
-
-- **The workspace store's ceiling** (2026-10-31): it's one fixed 64 MB SharedArrayBuffer (workspace-fs.ts
-  `BUFFER_BYTES`), and zen-fs's SingleBuffer takes ~2.5× the files' size (this repository's 9 MB tree wrote 22.5 MB;
-  live, 26 MB of files — tree 8.5, types in node_modules 12.7, .git 3.2, .silo 1.3 — take 54 MB). So ~25–30 MB of
-  files is the practical limit; this repository is near it. A bigger buffer costs nothing until it's used (measured in
-  V8: a 512 MB SingleBuffer mounted and filled with this tree used the memory a 64 MB one did), so raising the constant
-  is the cheap fix — not done yet (2026-10-31, decided to wait). It was hit 2026-11-03: a day of pulls (a pack each;
-  nothing collects them) took the store to 91%, and the merge's pull failed (`sbfs: no free extent is large enough`,
-  nothing half-written); a Reset and a fresh clone — 32 MB, half the store — was the way out. zen-fs can't grow a buffer in place (it reads the size
-  once); a growable SAB would need that upstream. The fill gauge (editor-metrics.ts `workspaceFill`) reads the
-  allocator's high-water mark, freed space included, so it overstates how full the store is.
 
 - **A repository load the browser closed on is kept half-written** (2026-10-31): a load's files are written back to
   IndexedDB in debounced batches (workspace-fs.ts `flush`), and a browser closed in the middle keeps what landed — here

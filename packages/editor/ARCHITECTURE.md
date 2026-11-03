@@ -126,8 +126,16 @@ tab the same way (non-transit), for the same reason.
 
 ### The workspace filesystem (zen-fs)
 
-The workbench creates a 64 MB `SharedArrayBuffer` zen-fs store (`workspace-fs.ts`) mounted at `/workspace` and hands
+The workbench creates a 128 MB `SharedArrayBuffer` zen-fs store (`workspace-fs.ts`) mounted at `/workspace` and hands
 the buffer to a debug run in its launch (the bridge holds it). All of them read and write the same bytes under an Atomics lock.
+Its size is fixed (zen-fs reads it once), and SingleBuffer takes ~2.5× the files' size: this repository's 26 MB of files
+(the tree, the types in node_modules, .git, .silo) took 54 MB. At 64 MB a fresh clone took half, and a day of pulls —
+a pack each, which nothing collects — the rest, and a pull failed for room (2026-11-03). Bigger isn't free on paper: V8
+holds only the pages written (a 512 MB buffer filled with this tree used the memory a 64 MB one did), but the browser's
+memory measurement counts a SharedArrayBuffer at its size, so the workbench's memory budget sees all of it (256 MB read
+395 MB against its 300). Collecting the packs is the fix that lasts. Files persist to IndexedDB one by one, not as the buffer. The metrics plane's fill gauge
+(editor-metrics.ts `workspaceFill`) reads the allocator's high-water mark, freed space included, so it overstates how
+full the store is.
 
 Shared memory tells nobody anything, so there is **one change stream** (`workspace-changes.ts`): each realm watches its
 own mount's mutating store operations and reports them, batched, as `workspace.changed`. The workbench persists every
@@ -360,7 +368,7 @@ effects. It gets **synchronous files through core** instead, each call answered 
   Source Control and watchers see it. Paths are `/workspace`'s, failing as node's do.
 - **Packages.** A package's published tarball, for one the debugger's `require` finds nothing of (the editor serves
   packages from a CDN, and type acquisition writes only their types), at the version `versions.json` pins (`.silo/`'s, or its local copy: RUNTIME-EVIDENCE.md, *Storage in git*). The
-  worker unpacks it into its own memory, never the workspace's buffer: 64 MB is no place for node_modules. A package
+  worker unpacks it into its own memory, never the workspace's buffer, which is no place for node_modules. A package
   the policy bans is never fetched. What no CDN serves is in the workspace's node_modules already, as npm puts it
   (workbench/install.ts, run by each sync of the versions, so `npm install` is that sync): a `file:` dependency is a
   symlink to its folder, which zen-fs follows in every realm, and a tarball from anywhere but npm's registry is
