@@ -101,10 +101,10 @@ commands). That's how `history` is built.
   subscribed, so each realm runs standalone. The app↔workbench boot handshake is just hub messages on that link:
   the pane requests `workbench.init` (RPC, retried until interest settles), then publishes `workbench.online` /
   `workbench.save`, and the host publishes `workbench.openProject`.
-- **plain postMessage** — only where the hub can't or mustn't go: a protocol dictated by someone else, or a realm that
-  must stay bare. Every other worker joins the tree with its own hub (`worker-hub.ts`) and `serve`s its methods: calls
-  get timeouts, cancellation and worker-failure handling from the hub instead of a hand-rolled id→pending map, show up
-  by name in the architecture reports, and can be called from anywhere in the tree.
+- **plain postMessage** — only where the hub can't or mustn't go: a protocol dictated by someone else (the debug
+  protocol, tsval's own), or a realm that must stay bare. A worker that runs a program joins the tree through the
+  workspace runtime's link (editor-api's `connectRuntime`): its log, spans and servers are the editor's, its calls get
+  timeouts and worker-failure handling from the hub, and it shows up by name in the architecture reports.
 - **shared memory** — the workspace filesystem (below), and a debug worker's mailbox for the runtime's files
   (*Extension points* 2). No messages at all, so the architecture reports observe the workspace by wrapping each realm's
   `/workspace` mount (`architecture-zenfs.ts`).

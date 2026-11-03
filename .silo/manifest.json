@@ -29,29 +29,6 @@
       ]
     }
   },
-  "Platform": {
-    "Extensions by URL": {
-      "what": "Load extensions from outside the editor (an interpreter or renderer from editor-contrib) by URL, reloading as they're rebuilt.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Extension points*",
-      "ways": [
-        "url parameter|?extension"
-      ],
-      "paths": [
-        "packages/editor/workbench/extensions.ts"
-      ]
-    },
-    "Architecture reports and metrics": {
-      "what": "Every context reports itself and its traffic on the architecture plane, and its memory, timing and traffic numbers on the metrics plane, for debug-mcp (architecture_state, metrics_query) and the architecture harness.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
-      "paths": [
-        "packages/editor/extensions/command-tap.ts",
-        "packages/editor/shared/architecture-zenfs.ts",
-        "packages/editor/shared/architecture.ts",
-        "packages/editor/shared/editor-metrics.ts",
-        "packages/editor/workbench/architecture-store.ts"
-      ]
-    }
-  },
   "Accounts and sign-in": {
     "Sign in with GitHub": {
       "what": "Signs a person in to the editor or the admin app with their GitHub account, through a GitHub App that reads only their numeric GitHub id.",

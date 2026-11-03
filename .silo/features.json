@@ -46,6 +46,10 @@
       "hub request|editor.trace",
       "hub request|notifications.list",
       "hub request|problems.list"
+    ],
+    "paths": [
+      "packages/editor/app/tools/editor/",
+      "packages/editor/workbench/editor-state.ts"
     ]
   },
   "Agent workspace tools": {
@@ -82,6 +86,12 @@
       "hub request|git.log",
       "hub request|git.show",
       "hub request|terminal.state"
+    ],
+    "paths": [
+      "packages/editor/app/tools/files/",
+      "packages/editor/app/tools/git/",
+      "packages/editor/app/tools/terminal/",
+      "packages/editor/workbench/workspace-tools.ts"
     ]
   },
   "Agents drive the debugger": {
@@ -147,6 +157,23 @@
     "ways": [
       "command|editor.capability.decide",
       "debug adapter tracker provider|*|bridge/capability-stops.ts"
+    ],
+    "paths": [
+      "packages/editor/extensions/bridge/capability-stops.ts"
+    ]
+  },
+  "Architecture reports and metrics": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Every context reports itself and its traffic on the architecture plane, and its memory, timing and traffic numbers on the metrics plane, for debug-mcp (architecture_state, metrics_query) and the architecture harness.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
+    "paths": [
+      "packages/editor/extensions/command-tap.ts",
+      "packages/editor/shared/architecture-zenfs.ts",
+      "packages/editor/shared/architecture.ts",
+      "packages/editor/shared/editor-metrics.ts",
+      "packages/editor/workbench/architecture-store.ts"
     ]
   },
   "Breakpoints in a page's code": {
@@ -177,6 +204,20 @@
     ],
     "in": "e16b2b75",
     "restore": "git checkout full-editor -- packages/editor/extensions/event-sheet/authoring.ts packages/editor/extensions/event-sheet/generator.ts"
+  },
+  "Building and serving the editor": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The editor's build (build.ts and build/: the workbench, its extensions and workers, the service worker, the baked starter workspace), its dev server (dev.ts), the dependency patches applied after install, and the ambient types the build provides.",
+    "paths": [
+      "packages/editor/build.ts",
+      "packages/editor/build/",
+      "packages/editor/dev.ts",
+      "packages/editor/env.d.ts",
+      "packages/editor/patches/",
+      "packages/editor/wa-jsx.d.ts"
+    ]
   },
   "Capability calls panel": {
     "status": "removed",
@@ -383,6 +424,19 @@
     "in": "fcc92752",
     "restore": "from the full-editor tag: debug-adapter.ts's exploreProgram and its two commands, debug-worker.ts's exploreOrderings (tsval's explore, still in packages/tsval)"
   },
+  "Extensions by URL": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Load extensions from outside the editor (an interpreter or renderer from editor-contrib) by URL, reloading as they're rebuilt.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Extension points*",
+    "ways": [
+      "url parameter|?extension"
+    ],
+    "paths": [
+      "packages/editor/workbench/extensions.ts"
+    ]
+  },
   "Feature ledger drift in Problems": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -392,6 +446,9 @@
     "ways": [
       "diagnostic collection|silo",
       "output channel|History"
+    ],
+    "paths": [
+      "packages/editor/extensions/history/"
     ],
     "tests": [
       "packages/editor/test/history-ledger.test.mjs"
@@ -463,7 +520,8 @@
       "core module|installGitService"
     ],
     "paths": [
-      "packages/editor/workbench/git-engine.ts"
+      "packages/editor/workbench/git-engine.ts",
+      "packages/editor/workbench/git-service.ts"
     ],
     "tests": [
       "packages/editor/test/git-status.test.mjs",
@@ -621,6 +679,8 @@
       "hub request|packages.tarball"
     ],
     "paths": [
+      "packages/editor/workbench/ata.ts",
+      "packages/editor/workbench/install.ts",
       "packages/editor/workbench/node-modules-provider.ts",
       "packages/editor/workbench/tarballs.ts",
       "packages/editor/workbench/versions.ts"
@@ -800,6 +860,10 @@
       "hub subscription|`node.listening.${runId}`",
       "hub subscription|`node.out.${runId}`"
     ],
+    "paths": [
+      "packages/editor/shared/runs.ts",
+      "packages/editor/workbench/runs.ts"
+    ],
     "tests": [
       "packages/editor/test/runs.test.mjs"
     ]
@@ -853,7 +917,11 @@
     "docs": "packages/editor/ARCHITECTURE.md, *Capabilities*",
     "paths": [
       "packages/editor/extensions/bridge/capabilities/coalesce.ts",
-      "packages/editor/extensions/bridge/capabilities/decide.ts"
+      "packages/editor/extensions/bridge/capabilities/decide.ts",
+      "packages/editor/extensions/bridge/runtime-fs.ts",
+      "packages/editor/extensions/tsval/canary.ts",
+      "packages/editor/extensions/tsval/capability-calls.ts",
+      "packages/editor/silo-enforce.d.ts"
     ],
     "tests": [
       "packages/editor/test/capabilities.test.mjs"
@@ -954,7 +1022,8 @@
       "hub subscription|git.changed"
     ],
     "paths": [
-      "packages/editor/shell/git-codehike.tsx"
+      "packages/editor/shell/git-codehike.tsx",
+      "packages/editor/shell/git-panel.tsx"
     ]
   },
   "Rule editor": {
@@ -1053,6 +1122,7 @@
     ],
     "paths": [
       "packages/editor/app/coi.ts",
+      "packages/editor/coi-serviceworker.js",
       "packages/editor/index.html"
     ]
   },
@@ -1115,6 +1185,9 @@
       "command|sourceControl.refresh",
       "source control|git",
       "text document content provider||source-control/extension.ts"
+    ],
+    "paths": [
+      "packages/editor/extensions/source-control/"
     ]
   },
   "Spell check": {
@@ -1140,6 +1213,14 @@
       "debug configuration provider|tsval",
       "debugger|tsval",
       "worker||tsval/debug-worker.ts"
+    ],
+    "paths": [
+      "packages/editor/bench/running.ts",
+      "packages/editor/extensions/tsval/debug-adapter.ts",
+      "packages/editor/extensions/tsval/debug-protocol.ts",
+      "packages/editor/extensions/tsval/debug-worker.ts",
+      "packages/editor/extensions/tsval/extension.ts",
+      "packages/editor/extensions/tsval/site-sums.ts"
     ],
     "tests": [
       "packages/editor/test/site-sums.test.mjs"
@@ -1190,6 +1271,10 @@
       "hub subscription|debug.launch",
       "hub subscription|debug.stop"
     ],
+    "paths": [
+      "packages/editor/extensions/bridge/debug-events.ts",
+      "packages/editor/workbench/node-runner.ts"
+    ],
     "tests": [
       "packages/editor/workbench/terminal/commands/node/node.test.mjs"
     ]
@@ -1206,6 +1291,11 @@
       "core module|installTestRuns",
       "hub request|tests.affected",
       "hub request|tests.run"
+    ],
+    "paths": [
+      "packages/editor/app/tools/runs/",
+      "packages/editor/workbench/readiness.ts",
+      "packages/editor/workbench/test-runs.ts"
     ],
     "tests": [
       "packages/editor/test/debugger-runs.mjs"
@@ -1224,6 +1314,28 @@
       "packages/editor/test/debugger-runs.mjs"
     ]
   },
+  "The bridge": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Core's one crossing into VS Code: the extension that holds the workbench's hub for the others, exports the workspace runtime, and is the only extension on the hub.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Extensions: which one, which host*",
+    "paths": [
+      "packages/editor/extensions/bridge/extension.ts",
+      "packages/editor/extensions/bridge/hub.ts"
+    ]
+  },
+  "The editor's test harnesses": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "A real editor in headless Chromium for the browser suites (the architecture harness, through the workbench's `__architecture` and `__editor` hooks), and a stand-in `vscode` for Node's unit tests.",
+    "paths": [
+      "packages/editor/test/architecture-harness.mjs",
+      "packages/editor/test/vscode/",
+      "packages/editor/workbench/debug-bridge.ts"
+    ]
+  },
   "The shell": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1236,6 +1348,15 @@
     ],
     "tests": [
       "packages/editor/test/shell-feature.test.mjs"
+    ]
+  },
+  "The starter workspace": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The project a fresh editor opens on when no repository is loaded: a small React app with the editor's preferred settings, baked into the build (build/snapshot.ts).",
+    "paths": [
+      "packages/editor/demo/"
     ]
   },
   "The workspace terminal": {
@@ -1358,6 +1479,10 @@
       "core module|installDecisions",
       "hub request|decisions.for"
     ],
+    "paths": [
+      "packages/editor/app/tools/decisions/",
+      "packages/editor/workbench/decisions.ts"
+    ],
     "tests": [
       "packages/editor/test/history-ledger.test.mjs"
     ]
@@ -1376,8 +1501,13 @@
       "url parameter|?pane"
     ],
     "paths": [
+      "packages/editor/app/logging.ts",
+      "packages/editor/app/vscode.tsx",
+      "packages/editor/main.tsx",
+      "packages/editor/shared/hidden-timers.ts",
       "packages/editor/shared/pane-link.ts",
-      "packages/editor/workbench/Workbench.tsx"
+      "packages/editor/workbench/Workbench.tsx",
+      "packages/editor/workbench/workbench-entry.tsx"
     ],
     "tests": [
       "packages/editor/test/worker-realms.mjs",
@@ -1398,7 +1528,10 @@
     "paths": [
       "packages/editor/shared/workspace-changes.ts",
       "packages/editor/shared/workspace-runtime.ts",
-      "packages/editor/shared/zenfs-vfs.ts"
+      "packages/editor/shared/zenfs-vfs.ts",
+      "packages/editor/workbench/provider-base.ts",
+      "packages/editor/workbench/workspace-fs.ts",
+      "packages/editor/workbench/workspace.ts"
     ],
     "tests": [
       "packages/editor/test/workspace-changes.test.mjs"
@@ -1428,10 +1561,7 @@
   "derived history": {
     "status": "parked",
     "why": "its ways-in list is this repository's alone; features from tests are the portable way in (silo README, *Derived history*)",
-    "since": "2026-10-23",
-    "paths": [
-      "packages/editor/extensions/history"
-    ]
+    "since": "2026-10-23"
   },
   "terminal_run": {
     "status": "removed",
