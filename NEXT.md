@@ -157,9 +157,37 @@ How it's kept:
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.
-   - **Reduce to the core**: the core declared in the ledger (decision 22 holds from then on), everything else removed
-     with its tombstone, its tests with it; the core's tests written again, the first of the new suite. Waits on
-     decision 21 and on what the core is and where the full editor is worked in (*Decisions*).
+   - **Reduce to the core** — started 2026-11-02 on the branch `reduction`, in the editor. Done: the composition roots
+     cut to the core (the workbench's extensions and services, build.ts, the app realm, the shell's top bar, the agent
+     tool families); what the core no longer reaches deleted with its tests and theme surfaces; CI's architecture
+     workflow down to `realms` and `performance`; the 25 features taken out whole tombstoned in the ledger. The core
+     boots, loads this repository and runs its tests in the editor (git's, reset's, the workspace's: 20 of 20). The
+     reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
+     Left, in order:
+     - *The bridge and History, split.* Most of what's left of the removed features lives inside the core's bridge
+       (the debugger's agent requests, tasks and the run picker, a preview's dev server as a debug session, capability
+       prompts, mocking a value), History (the features map, dormant marks, ledger drift in Problems, what your edits
+       change, `code.reach`), tsval (Playwright tests, site sums), the node worker (the in-browser dev server and the
+       preview taps, there for the terminal's `vite`) and the workbench (the Live architecture view, extensions by URL):
+       `silo check` lists 76 drifts, one way in at a time. Each extension one feature (*The boundaries*), then each
+       removed feature's remains go with it. code-reach.ts serves `decisions.for` (core) and `code.reach` (not).
+     - *Broken remains to take out first:* `notes.add` (workspace-tools.ts) runs a command no longer there; the review
+       panel's "Your edits" relied on edit history; `workspace.files` / `workbench.files` served only Share; the pane's
+       `editor.pane.chooseView` / `toggleNative` are declared and never registered; the ledger's "capability engine"
+       names a deleted file; the docs still name the Project picker, the Rule editor, CI status and scripts.
+     - *Shell, split:* shell.tsx (about 1,100 lines) is still one component holding sign-in, repo load, commit, reset and
+       the review panel: a shell core with each feature's top-bar control, popover and hub wiring registered from its
+       own module.
+     - *Then:* the core's tests written again, the first of the new suite; `EDITOR_DEPLOYS` set to `off` (production
+       keeps the full editor) and the branch landed on main.
+     Found while reducing: the editor's runner can't run the theme's budget test (`Unsupported encoding: latin1`) or a
+     test that hooks `vscode` (`registerHooks` isn't in almostnode's `node:module`); `git_checkout` can't switch to a
+     branch the shallow clone hasn't fetched (`git.show` fetches one; checkout should too); `git_pull` reports
+     "diverged" when main moved under a branch (a merge in the editor would settle it); the editor's GitHub Apps
+     couldn't push a change to `.github/workflows` (workflows read/write added to both apps 2026-11-02); writing the
+     ledger has no editor UI yet (the tombstones were written with silo's own code from a checkout); deleting ~130 files
+     in a row once left the workbench blank until a reload; `files_grep`'s scope argument is `glob`, and
+     `editor_problems` has no severity filter (cspell's infos drown the rest — moot now cspell is out).
    - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
      tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
      editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
