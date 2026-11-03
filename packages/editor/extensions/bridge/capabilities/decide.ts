@@ -1,65 +1,49 @@
 /**
- * ENFORCE — the single capability DECISION ENDPOINT (ext host). Every runtime interceptor (the service-worker
- * net gate, the almostnode fs/exec shim hook) is THIN and full-round-trips here; no policy, grant store, or
- * prompt lives in an interceptor. This is the one place the shared brain runs:
+ * ENFORCE — the single capability DECISION ENDPOINT (ext host). A runtime's interceptor (a debug run's package calls,
+ * through runtime-fs.ts) is THIN and round-trips here; no policy or grant store lives in an interceptor. This is the
+ * one place the shared brain runs:
  *
  *   classify(raw call) → silo scope → broker.gate(redline → grant store → decider) → allow | deny
  *
  * It reuses the portable core published in @brianjenkins94/util/silo/enforce: `gate`/`CapabilityDenied`
  * (the fixed order), `redline` (BERNARD catastrophic scopes), and the intercept helpers (CAP_FS + scope
- * builders) as the single classification source. The decider is a VS Code popup today (Allow / Allow always /
- * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
+ * builders) as the single classification source. The decider is the policy alone today (what it leaves undecided is
+ * refused); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
  * policy merge, the observed-capability rollup, the run firehose — lives in editor-api/policy.
  */
-import type { EditAnswer } from "@brianjenkins94/editor-api/rules";
 import type { AskedWhy } from "@brianjenkins94/editor-api/runtime";
 import type { BrokerOptions, CapabilityRequest, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
-import { recordEffect } from "@brianjenkins94/editor-api/effects";
-import { loadEffectivePolicy, persistOverride, recordObservation, replaceRule } from "@brianjenkins94/editor-api/policy";
-import { decisionOf } from "@brianjenkins94/editor-api/rules";
-import { createRpcClient } from "@brianjenkins94/hub";
+import { loadEffectivePolicy, recordObservation } from "@brianjenkins94/editor-api/policy";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
-import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
-import { effectiveDisposition, isDangerous, packageDisposition } from "@brianjenkins94/util/silo/policy";
+import { CAP_FS, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
+import { effectiveDisposition, isDangerous } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { bridgeHub } from "../hub";
 import { coalesce } from "./coalesce";
 
 /**
  * The RAW call an interceptor sends — deliberately un-classified so the interceptors stay dumb and decoupled
- * (almostnode never imports the policy core, the SW never builds a scope). Classification happens HERE.
+ * (almostnode never imports the policy core). Classification happens HERE.
  *   • net: `{ kind: "net", args: [input, init] }` — host derived from the request.
  *   • fs:  `{ kind: "fs", method, args: [path, …] }` — op derived from the method, path from arg 0.
  *   • exec:`{ kind: "exec", args: [command, …] }`.
- *   • eval:`{ kind: "eval", resource }` — the codegen kind.
- *   • load:`{ kind: "load", package }` — a package a preview loads (the service worker's esm.sh gate), by name or
- *     name@version: the policy's word on the package alone (an org's ban), never a question.
  */
 export interface CapabilityCall {
-	"kind": "net" | "fs" | "exec" | "eval" | "net.ws" | "net.webrtc" | "load";
+	"kind": "net" | "fs" | "exec";
 	"method"?: string;
 	"op"?: "read" | "write";
 	"resource"?: string;
 	"args"?: readonly unknown[];
-	/** The run this call belongs to, when known (a preview's, by its port): counted among that run's effects, which its
-	 *  envelope in the run ledger lists (editor-api/effects's recordEffect). */
+	/** The run this call belongs to, when known: counted among that run's effects (editor-api/effects's recordEffect). */
 	"runId"?: string;
-	/** The preview port a shell-forwarded call (the WS/WebRTC shim) originates from — the ext host resolves it to
-	 *  the run that owns the port (mirroring the SW's runId for net), since the shim can't know the runId itself. */
-	"port"?: number;
-	/** The preview window it came from, when the caller knows (the WS/WebRTC shim's requests arrive from one): the
-	 *  prompt shows there. The service worker's net gate knows only the port — every window of a server has its address. */
-	"window"?: string;
 	/** The package whose code made it (a debug run's, beyond its baseline: runtime-fs.ts), by name@version — its run
 	 *  counts it, as that package's, so it isn't counted here too; the policy's rules about that package's calls decide it,
 	 *  and an answer of "Allow always" is a rule about them. */
 	"package"?: string;
-	/** Why the package's call is asked about (what its baseline says of it), said at the prompt. */
+	/** Why the package's call is asked about (what its baseline says of it). */
 	"why"?: AskedWhy;
-	/** Who it's made for (the policy's `trigger`): `you` (someone's watching: the default) or `edit` (a preview nobody's
-	 *  watching, run again after an edit). */
+	/** Who it's made for (the policy's `trigger`): `you` (someone's watching: the default) or `edit` (nobody is). */
 	"trigger"?: "you" | "edit";
 }
 
@@ -84,14 +68,6 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 		return { "kind": "net", "scope": netScope(host), "resource": host };
 	}
 
-	// WebSocket / WebRTC — captured in the preview realm (the SW can't see them). Gate by endpoint host, one
-	// capability axis per protocol so a `net` allow doesn't silently cover a socket.
-	if (call.kind === "net.ws" || call.kind === "net.webrtc") {
-		const resource = typeof arg0 === "string" ? arg0 : call.resource ?? "";
-
-		return { "kind": call.kind, "scope": `${call.kind}:${endpointOf(resource)}`, "resource": resource } as CapabilityRequest;
-	}
-
 	if (call.kind === "fs") {
 		const op = call.op ?? (call.method !== undefined ? FS_SYNC[call.method] ?? FS_ASYNC[call.method] ?? CAP_FS[call.method] : undefined);
 
@@ -104,19 +80,12 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 		return { "kind": "fs", "op": op, "scope": fsScope(op, path), "resource": path };
 	}
 
-	if (call.kind === "exec") {
-		const bin = typeof arg0 === "string" ? arg0 : call.resource ?? "";
+	const bin = typeof arg0 === "string" ? arg0 : call.resource ?? "";
 
-		return { "kind": "exec", "scope": execScope(bin), "resource": bin };
-	}
-
-	const kind = call.resource ?? "eval";
-
-	return { "kind": "eval", "scope": evalScope(kind), "resource": kind };
+	return { "kind": "exec", "scope": execScope(bin), "resource": bin };
 }
 
-/** The silo capability axis for a request: `fs:read`/`fs:write` carry the op; net/exec/eval/net.ws/net.webrtc are
- *  the kind. */
+/** The silo capability axis for a request: `fs:read`/`fs:write` carry the op; net and exec are the kind. */
 function capabilityOf(request: CapabilityRequest): string {
 	return request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind;
 }
@@ -147,15 +116,8 @@ function answersOf(runId: string | undefined): { "allowed": Set<string>; "refuse
 	return answers;
 }
 
-/** Where a prompt shows: the request's preview window and port, as far as they're known. */
-function windowOf(request: object): { "port"?: number; "window"?: string } {
-	const { port, window } = request as { "port"?: number; "window"?: string };
-
-	return { ...typeof port === "number" ? { "port": port } : {}, ...typeof window === "string" ? { "window": window } : {} };
-}
-
 /** Whose call it is, and why it's asked about, as far as they're known: a package's (name@version), with what its
- *  baseline says of it — said at the prompt. */
+ *  baseline says of it. */
 function askerOf(request: object): { "package"?: string; "why"?: AskedWhy } {
 	const { "package": pkg, why } = request as { "package"?: string; "why"?: AskedWhy };
 
@@ -170,52 +132,22 @@ function aboutOf(request: object): Record<string, string> {
 	return pkg === undefined ? {} : { "package": packageNamed(pkg).name };
 }
 
-const shellRpc = createRpcClient(bridgeHub);
+/** The calls refused as undecided that were said, by scope: each said once a session. */
+const undecidedSaid = new Set<string>();
 
-/** Rule… at a preview's prompt: a rule about the call made in the Rule view (core's
- *  `editor.rules.edit`) — *Just this once* (decided by it, not kept), *Save as rule* (kept in my policy, and decided by
- *  it), or *Cancel* (null: back to the question). Answers the rule's decision. */
-async function ruleMade(capability: string, resource: string, about: Record<string, string>): Promise<string | null> {
-	const answer = await Promise.resolve(vscode.commands.executeCommand<EditAnswer>("editor.rules.edit", {
-		"id": "preview-prompt",
-		"judge": { "kind": "call", "capability": capability, "resource": resource, ...about },
-		"buttons": [
-			{ "id": "once", "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and ask again next time" },
-			{ "id": "save", "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it" },
-			{ "id": "cancel", "label": "Cancel", "className": "cancel", "title": "Back to the preview's question", "always": true }
-		]
-	})).catch(() => null);
-
-	if (answer === null || answer === undefined || answer.button === "cancel") {
-		return null;
-	}
-
-	if (answer.button === "save") {
-		await replaceRule(undefined, answer.rule);
-	}
-
-	return decisionOf(answer.rule) ?? null;
-}
-
-/** The TOFU prompt: OUR WebAwesome overlay INSIDE the preview window (shell-preview.ts), reached over the hub —
- *  never a VS Code notification. Returns the user's choice, or undefined if the shell can't be reached at all
- *  (then we fail CLOSED: if we can't ask, we don't allow — an unreachable shell is a bigger problem anyway). */
-async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean; "port"?: number; "window"?: string; "package"?: string; "why"?: AskedWhy }): Promise<string | undefined> {
-	try {
-		const reply = await shellRpc.request("capability.prompt", request, { "timeoutMs": 300000 });
-
-		return typeof reply === "string" ? reply : undefined;
-	} catch {
-		return undefined;
+/** An undecided call, refused — and said, once a scope: nothing in the core asks a person at the call yet (the
+ *  shell's prompt went with previews), so the policy decides, and what it leaves undecided isn't made. */
+function refuseUndecided(scope: string, pkg: string | undefined): void {
+	if (!undecidedSaid.has(scope)) {
+		undecidedSaid.add(scope);
+		void vscode.window.showWarningMessage(`${pkg === undefined ? "A call" : `${pkg}'s call`} to ${scope} wasn't made: the policy doesn't decide it, and nothing here asks yet. Allow it with a rule in your policy (.silo/policy/<you>.json).`);
 	}
 }
 
-/** The decider: consult the effective policy FIRST — my `policy/<user>.json` overrides layered over the base
- *  `policy.json` contract — and allow / deny with NO prompt (so pre-approved scopes and default-allow patterns
- *  like fs:read under the workspace never nag). For an undecided (review) capability, raise the WebAwesome prompt
- *  overlay in the preview window. "Allow always" writes an allow rule to MY override file (never the shared
- *  contract — that's your "don't show again"); "Allow once" is session-only (the broker adds it to the session
- *  store). Swappable for an external/AI decider behind this same seam. */
+/** The decider: the effective policy — my `policy/<user>.json` overrides layered over the base `policy.json` contract —
+ *  allows or denies with no question (so pre-approved scopes and default-allow patterns like fs:read under the
+ *  workspace never nag). What it leaves undecided is refused (refuseUndecided). Swappable for an external or AI
+ *  decider behind this same seam (ARCHITECTURE.md, *Extension points* 5). */
 async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "decided": Decided }> {
 	const capability = capabilityOf(request);
 	const resource = request.resource ?? "";
@@ -238,42 +170,21 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict & { "d
 		return { "behavior": "deny", "message": "skipped by .silo policy", "decided": "policy" };
 	}
 
-	let choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request), ...askerOf(request) });
+	refuseUndecided(request.scope, pkg);
 
-	// Rule…: the rule is made in the Rule view (ruleMade), and the call waits on it; cancelled, the question comes back.
-	while (choice === "rule") {
-		const made = await ruleMade(capability, resource, aboutOf(request));
-
-		// (a rule made at the call is the person's answer, in their policy now: as Allow always, or a refusal)
-		if (made === "allow" || made === "deny") {
-			return made === "allow" ? { "behavior": "allow", "decided": "always" } : { "behavior": "deny", "message": "denied by your rule", "decided": "refused" };
-		}
-
-		choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request), ...askerOf(request) });
-	}
-
-	if (choice === "allow-always") {
-		await persistOverride(capability, resource, "allow", aboutOf(request));
-
-		return { "behavior": "allow", "decided": "always" };
-	}
-
-	if (choice === "allow-once") {
-		return { "behavior": "allow", "decided": "once" };
-	}
-
-	return { "behavior": "deny", "message": choice === "deny" ? "denied" : "no decision", "decided": "refused" };
+	return { "behavior": "deny", "message": "undecided by .silo policy", "decided": "refused" };
 }
 
-/** BERNARD break-glass for redline scopes — the preview overlay's redline variant (a deliberate one-time
- *  "Authorize once"); never persisted. Fail closed if the shell can't be reached. */
+/** A redline scope's break-glass: nobody here can authorize one (the shell's prompt went with previews), so it stays
+ *  refused. */
 async function breakGlass(request: CapabilityRequest): Promise<boolean> {
-	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true, ...windowOf(request), ...askerOf(request) })) === "authorize";
+	refuseUndecided(request.scope, askerOf(request).package);
+
+	return false;
 }
 
-// The same question from the same window, asked while it's still waiting (six peer connections opened at once), gets
-// one prompt and one answer — "Allow always" written once. (Redline break-glass stays one deliberate answer per call.)
-const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabilityOf(request), request.scope, request.resource ?? "", windowOf(request), aboutOf(request)]), policyDecider);
+// The same question, asked while it's still being decided (six peer connections opened at once), gets one answer.
+const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabilityOf(request), request.scope, request.resource ?? "", aboutOf(request)]), policyDecider);
 
 /**
  * Decide one raw capability call: whether it may be made, and how that was decided — by the policy, or at the call, the
@@ -282,46 +193,17 @@ const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabili
  * once stays allowed, and one refused stays refused, until it ends; the next run asks again.
  */
 export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow": boolean; "decided": Decided }> {
-	// A package a preview loads: refused only when the policy bans it — counted, as a debug run counts a ban, by its run.
-	if (call.kind === "load") {
-		const pkg = call.package ?? "";
-		const named = packageNamed(pkg);
-		const banned = packageDisposition(await loadEffectivePolicy(), named) === "deny";
-
-		if (banned && call.runId !== undefined) {
-			recordEffect(call.runId, "load", pkg, "denied", 1, "policy");
-		}
-
-		// (said once per run: a preview missing a package it was refused shows nothing of why)
-		if (banned && !told.has(`${call.runId ?? ""}\0${pkg}`)) {
-			told.add(`${call.runId ?? ""}\0${pkg}`);
-			void vscode.window.showWarningMessage(`The preview didn't load ${pkg}: the policy bans it.`);
-		}
-
-		return { "allow": !banned, "decided": "policy" };
-	}
-
 	const request = classify(call);
 
 	if (request === undefined) {
 		return { "allow": true, "decided": "policy" };
 	}
 
-	// Carry where it came from onto the request so the decider can route the TOFU overlay there: the preview window
-	// when known (the WS/WebRTC shim), else its port (the SW net gate — any window of that server).
-	if (typeof call.port === "number") {
-		(request as { "port"?: number }).port = call.port;
-	}
-
-	if (typeof call.window === "string") {
-		(request as { "window"?: string }).window = call.window;
-	}
-
 	if (call.trigger !== undefined) {
 		(request as { "trigger"?: string }).trigger = call.trigger;
 	}
 
-	// And whose call it is, and why it's asked: a package's is decided by the rules about its calls, and the prompt says so.
+	// And whose call it is, and why it's asked: a package's is decided by the rules about its calls.
 	if (call.package !== undefined) {
 		Object.assign(request, { "package": call.package }, call.why === undefined ? {} : { "why": call.why });
 	}
@@ -392,21 +274,4 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 
 		throw error;
 	}
-}
-
-/** The bans a run has been told of, by run and package. */
-const told = new Set<string>();
-
-/** The network endpoint of a WS/WebRTC resource: `hostOf` covers ws(s):// (a special scheme with a real host);
- *  stun:/turn: are non-special (URL.host is empty → "*"), so parse `scheme:host:port` by hand. */
-function endpointOf(resource: string): string {
-	const host = hostOf(resource);
-
-	if (host !== "*") {
-		return host;
-	}
-
-	const match = /^[a-z][a-z0-9+.-]*:([^?#]+)/iu.exec(resource);
-
-	return match !== null ? match[1] : resource;
 }

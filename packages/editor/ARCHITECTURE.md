@@ -421,10 +421,10 @@ MCP server that hands them to one outside. Our agent is outside: debug-mcp reach
 
 ### 5. The capability decider
 
-The bridge's decide.ts (extensions/bridge/capabilities) asks the policy, then the person. The decider is the seam: a
-contributed decider (an AI, an elicitation, a team's or CI's policy) answers instead. Not built: it waits until a
-second decider needs it. (Its ask of the shell, `capability.prompt`, has had no answer since the shell's prompt went
-with previews: a debug run's undecided call stops and asks at the line instead, *Capabilities*.)
+The bridge's decide.ts (extensions/bridge/capabilities) asks the policy; what the policy leaves undecided is refused,
+and said once (the shell's prompt that asked a person went with previews). The decider is the seam: a contributed
+decider (an AI, an elicitation, a team's or CI's policy) answers instead. Not built: it waits until a second decider
+needs it.
 
 ### A desktop build
 
@@ -679,9 +679,9 @@ files (the gap between them is the signal), is editor-api's policy.ts and util/s
 
 **A package's call** is decided at the call: trusted by the policy, made; within its baseline (the join of what the
 code imports of it, while the baseline's version is the one running), made; else the editor decides (decide.ts:
-redline, then the policy, then the person). The model is silo's README, *The model*; the order is debug-worker.ts's.
-It's asked about as that package's: the stop names it and says why it asks (editor-api's `AskedWhy`), "Allow always"
-keeps a rule about that package's calls only, and an answer for the run is that package's, not every caller's.
+redline, then the policy; what it leaves undecided isn't made, and is said once, with how to allow it: a rule in my
+policy). The model is silo's README, *The model*; the order is debug-worker.ts's. A rule about a package's calls is
+about that package's only, and so is an answer for the run.
 
 **A call nobody's decided stops the run** on that line and asks (capability-stops.ts, `editor.capability.decide`):
 allow, skip or deny, for this call, this run or always. A run nobody's watching (`runs_tests`) doesn't wait on a person:

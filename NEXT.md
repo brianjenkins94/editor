@@ -212,9 +212,10 @@ How it's kept:
      the calls in flight didn't; `files_edit` has no line-range cut, so a 360-line cut is 360 lines in the call (the
      longest cuts were made from a checkout); `runs_stop` doesn't stop a `runs_tests` run (a test that starts a server
      hung in the editor's runner); `files_grep`'s scope argument is `glob`, and `editor_problems` has no severity
-     filter (cspell's infos drown the rest — moot now cspell is out). The bridge's capability decisions still ask the shell's
-     `capability.prompt`, which nothing answers since the shell's prompt went: an undecided call outside a debug run's
-     stops has nobody to ask.
+     filter (cspell's infos drown the rest — moot now cspell is out). The bridge's capability decisions asked the shell's
+     `capability.prompt`, which nothing answered once the shell's prompt went: now an undecided call is refused and said
+     once, with how to allow it (a rule). tsval's busy heartbeat rides its `observe` and `called` hooks, so its site sums,
+     coverage and purity (which nothing reads now) can go only once the heartbeat has a source of its own.
    - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
      tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
      editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
