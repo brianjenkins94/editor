@@ -133,17 +133,22 @@ test("a breakpoint stops the run; a step goes on a line, a step back returns to 
 });
 
 test("stdin: what's typed at a terminal's run reaches the program", async () => {
-	await session.request("files.write", { "path": "debugger-stdin.mjs", "content": "process.stdin.on(\"data\", (data) => { console.log(\"got \" + String(data).trim()); process.exit(0); });\n" }, 30_000);
+	await session.request("files.write", { "path": "debugger-stdin.mjs", "content": "process.stdin.on(\"data\", (data) => { console.log(\"got \" + String(data).trim()); process.exit(0); });\nconsole.log(\"listening\");\n" }, 30_000);
 	await session.terminal("node debugger-stdin.mjs", { "fresh": true });
-	await new Promise((resolve) => { setTimeout(resolve, 3000); });
+
+	const said = async (text) => {
+		const terminals = await session.request("terminal.state", { "lines": 30 }, 10_000);
+		const output = terminals.map((each) => each.output).join("\n");
+
+		return output.includes(text) ? output : undefined;
+	};
+
+	// (typed once the program reads: before its debug session is up, a line goes to no one — a wait of a fixed time
+	// was sometimes too short)
+	await session.eventually("the program listening", async () => said("listening"), 60_000);
 	await session.terminal("hello");
 
-	const output = await session.eventually("the program's answer", async () => {
-		const terminals = await session.request("terminal.state", { "lines": 30 }, 10_000);
-		const said = terminals.map((each) => each.output).join("\n");
-
-		return said.includes("got hello") ? said : undefined;
-	}, 60_000);
+	const output = await session.eventually("the program's answer", async () => said("got hello"), 60_000);
 
 	assert.match(output, /got hello/u);
 });
