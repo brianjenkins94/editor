@@ -5,7 +5,7 @@
  * sheets are adopted (theme/vscode), they come after every `<style>` in the document, so the order is declared first
  * in the document's head, once (`layerOrder`, which theme/stitches calls as it loads): `vendor` (the DOM we host that
  * isn't ours: dockview's sheet), Web Awesome's own order, then `app`, and in it `app.base`
- * (theme/stitches' globalCss), `app.recipes` (theme/recipes), `app.styles` (a surface's styles, theme/styles/*) and
+ * (theme/stitches' globalCss), `app.recipes` (a composed component's), `app.styles` (a surface's styles, theme/styles/*) and
  * `app.overrides` (a use-site `css`).
  */
 import { layers } from "./web-awesome";

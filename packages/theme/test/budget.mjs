@@ -3,8 +3,7 @@
  *
  * - stitchesDeclarations: the declarations in every surface's styles (theme/styles/*, the theme's Stitches calls made
  *   for one surface), and anywhere a Stitches call is still made outside the theme, so a style moved out of a sheet
- *   into a `css({…})` still counts; and in every use-site override (a theme/recipes recipe called with `css`). The
- *   theme's own recipes and components aren't counted: they're the vocabulary.
+ *   into a `css({…})` still counts. The theme's own components aren't counted: they're the vocabulary.
  * - webawesomeDisables: the `eslint-disable…` comments that turn a webawesome/* rule off.
  *
  * Each may only go down. Over its budget fails, and a raise means editing budget.json, which shows in the diff; under it
@@ -52,13 +51,11 @@ const files = trackedPaths(fs.readFileSync(root + ".git/index")).filter((file) =
 const read = (file) => fs.readFileSync(root + file, "utf8");
 const sources = files.filter((file) => /\.[cm]?[jt]sx?$/u.test(file));
 
-/** The declarations in a file's calls on theme/stitches' css, globalCss, unlayeredGlobalCss and keyframes, and in the
- *  `css` of its recipe calls: every property whose value isn't an object (an object is a nested selector, an at-rule,
+/** The declarations in a file's calls on theme/stitches' css, globalCss, unlayeredGlobalCss and keyframes: every property whose value isn't an object (an object is a nested selector, an at-rule,
  *  a variant or a keyframe). */
 function stitchesDeclarations(file) {
 	const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
 	const names = new Set();
-	const recipes = new Set();
 	let count = 0;
 
 	for (const statement of source.statements) {
@@ -71,11 +68,6 @@ function stitchesDeclarations(file) {
 			}
 		}
 
-		if (ts.isImportDeclaration(statement) && statement.moduleSpecifier.text === "theme/recipes") {
-			for (const element of statement.importClause?.namedBindings?.elements ?? []) {
-				recipes.add(element.name.text);
-			}
-		}
 	}
 
 	const styles = (object) => {
@@ -100,18 +92,10 @@ function stitchesDeclarations(file) {
 			}
 		}
 
-		if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && recipes.has(node.expression.text) && node.arguments[0] !== undefined && ts.isObjectLiteralExpression(node.arguments[0])) {
-			const override = node.arguments[0].properties.find((property) => ts.isPropertyAssignment(property) && property.name.getText(source).replaceAll("\"", "") === "css");
-
-			if (override !== undefined && ts.isObjectLiteralExpression(override.initializer)) {
-				styles(override.initializer);
-			}
-		}
-
 		ts.forEachChild(node, visit);
 	};
 
-	if (names.size > 0 || recipes.size > 0) {
+	if (names.size > 0) {
 		visit(source);
 	}
 

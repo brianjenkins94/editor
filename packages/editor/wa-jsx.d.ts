@@ -33,7 +33,7 @@ declare module "preact" {
 			"wa-dropdown-item": WaAttributes;
 			"wa-popover": WaAttributes;
 			"wa-relative-time": WaAttributes;
-			// The theme's own composed components (theme/app-window, published as components/app-window).
+			// The theme's own composed components (components/app-window).
 			"app-window": WaAttributes;
 		}
 	}

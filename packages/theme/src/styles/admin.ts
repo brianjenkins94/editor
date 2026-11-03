@@ -38,6 +38,9 @@ export const adminStyles = stylesheet({
 	".table th, .table td": {
 		"whiteSpace": "nowrap"
 	},
+	".code": {
+		"fontFamily": "var(--wa-font-family-code)"
+	},
 	".mono": {
 		"fontFamily": "var(--wa-font-family-code)",
 		"fontSize": "var(--wa-font-size-s)"
