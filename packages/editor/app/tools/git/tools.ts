@@ -41,10 +41,11 @@ const git: ToolFamily = ({ request }) => [
 			"config": {
 				"description": "Open a Commit Read-Only (the command): a branch, tag or commit beside the work, at .refs/<name>/ in the workspace, its files as that commit has them — fetched one commit deep when this clone hasn't it (`full-editor` is the editor before the rewrite reduced it). Read it with files_read, files_glob and files_grep at `.refs/<name>/…` (a glob or grep reaches .refs/ only when its pattern names it); nothing there can be written. Open until the editor reloads. Returns { ref, commit, path }.",
 				"inputSchema": {
-					"ref": z.string().describe("The branch, tag or commit (oid or its beginning).")
+					"ref": z.string().describe("The branch, tag or commit (oid or its beginning)."),
+					"stripped": z.boolean().optional().describe("The code alone, at .refs/<name>~stripped/: each code file's comments blanked by BABLR (line for line as it is), no Markdown, no .silo/.")
 				}
 			},
-			"handler": async ({ ref }, { signal }) => ok(request("git.openRef", { "ref": ref }, signal))
+			"handler": async ({ ref, stripped }, { signal }) => ok(request("git.openRef", { "ref": ref, "stripped": stripped }, signal))
 		})
 	},
 	{

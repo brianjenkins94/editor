@@ -3,7 +3,7 @@
  * — the changed files listed, some picked, committed with a message, one discarded — and VS Code's Source Control view
  * (extensions/source-control/) — a change listed, committed from its input box — and a change's problems on its row in
  * the panel (shell/change-problems.tsx, workbench/code-problems.ts) — and a commit opened read-only beside the work
- * (workbench/git-refs.ts). Each over the workbench's git
+ * (workbench/git-refs.ts), and its code alone. Each over the workbench's git
  * (git-service.ts, git-review.ts); what was committed read back with `git.log` and `git.status`.
  *
  *   node --test --test-global-setup=test/architecture-harness.mjs test/git-views.mjs
@@ -136,6 +136,21 @@ test("a commit opened beside the work: read-only at .refs/<name>/, its files as 
 	assert.equal((await changed()).some((path) => path.startsWith(".refs/")), false, "git doesn't see it");
 	await assert.rejects(session.request("git.openRef", { "ref": "no-such-ref" }, 60_000), /isn't a commit/u);
 	await session.request("git.discard", { "path": "refs-probe/a.txt" }, 30_000).catch(() => undefined);
+});
+
+test("a commit's code alone: each file's comments blanked line for line, and no docs", async () => {
+	await session.request("files.write", { "path": "refs-alone/a.ts", "content": "/** what a is */\nexport const a = \"// kept\"; // why\n" }, 30_000);
+	await session.request("files.write", { "path": "refs-alone/README.md", "content": "# what it's for\n" }, 30_000);
+	await session.request("git.commit", { "message": "refs: the code alone", "files": [{ "path": "refs-alone/a.ts" }, { "path": "refs-alone/README.md" }] }, 60_000);
+
+	const commit = (await session.request("git.log", { "limit": 1 }, 30_000)).commits[0].oid.slice(0, 12);
+	const opened = await session.request("git.openRef", { "ref": commit, "stripped": true }, 60_000);
+
+	assert.equal(opened.path, `.refs/${commit}~stripped`);
+	// (BABLR's: the first read waits out its worker loading)
+	assert.equal((await session.request("files.read", { "path": opened.path + "/refs-alone/a.ts" }, 120_000)).content, "1\t                \n2\texport const a = \"// kept\";       \n3\t");
+	await assert.rejects(session.request("files.read", { "path": opened.path + "/refs-alone/README.md" }, 30_000), /doesn't exist|not found|nonexistent/iu);
+	assert.deepEqual((await session.request("files.glob", { "pattern": `.refs/${commit}~stripped/refs-alone/*` }, 30_000)).files, [opened.path + "/refs-alone/a.ts"]);
 });
 
 test("Source Control: a change listed, committed from its input box", async () => {

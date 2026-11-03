@@ -390,7 +390,7 @@ function maybeBoot(): void {
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 				installFsTrace(workbenchHub, api as typeof import("vscode"), paneLog);
 				// Which files BABLR parses, and a warning on each it can't (bablr.ts).
-				installBablr(api as typeof import("vscode"), workbenchHub, paneLog);
+				const bablr = installBablr(api as typeof import("vscode"), workbenchHub, paneLog);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;
@@ -419,8 +419,8 @@ function maybeBoot(): void {
 
 				// Diff, log, show and blame, for agents' git tools (git-history.ts).
 				installGitHistory(api as typeof import("vscode"), workbenchHub, remote);
-				// A commit beside the work, read-only, at .refs/<name>/ (git-refs.ts).
-				installGitRefs(api as typeof import("vscode"), workbenchHub, paneLog, remote);
+				// A commit beside the work, read-only, at .refs/<name>/ — or its code alone, comments stripped by BABLR (git-refs.ts).
+				installGitRefs(api as typeof import("vscode"), workbenchHub, paneLog, bablr, remote);
 				// The repository the workspace is a clone of, for the shell's binding (project.ts); and what only it holds,
 				// for Reset (unpushed.ts).
 				serveOrigin(workbenchHub);

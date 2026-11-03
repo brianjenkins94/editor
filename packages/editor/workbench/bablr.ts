@@ -8,6 +8,8 @@
  *   with a progress notification to cancel it by, the ones BABLR can't take in Problems, and what it took said;
  * - `bablr.check` { path, exclude? }: the same, for agents' `code_parses`, with each file it can't parse and why.
  *
+ * And a text with its comments blanked (`stripped`), for the code alone (git-refs.ts' `.refs/<name>~stripped/`).
+ *
  * BABLR runs in its own worker (workers/bablr-worker.ts), started the first time it's asked — not at boot: it's a big
  * bundle — and asked one text at a time, each kept by its blob oid there, so a file is parsed once. A file whose warning
  * shows is parsed again as it's saved.
@@ -26,8 +28,16 @@ const CODE_FILES = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 /** A why, at most this long in a warning or an answer (BABLR's can carry the parser's state). */
 const MOST_WHY = 300;
 
-/** What the worker says of a text. */
-interface Parse { "parsed": boolean; "why"?: string; "ms": number; "cached": boolean }
+/** What the worker says of a text: whether BABLR parses it, why not, and where its comments are (each one's start and
+ *  end, in turn). */
+interface Parse { "parsed": boolean; "why"?: string; "comments"?: number[]; "ms": number; "cached": boolean }
+
+/** What else reads BABLR: a text with its comments blanked (git-refs.ts' stripped view). */
+export interface Bablr {
+	/** `text` with each comment's characters spaces but its line breaks — line for line the text as it is — or
+	 *  undefined where BABLR can't parse it. */
+	"stripped": (text: string, signal?: AbortSignal) => Promise<string | undefined>;
+}
 
 /** A folder's files, checked. */
 interface Checked {
@@ -42,7 +52,7 @@ interface Checked {
 	"unparsable": { "file": string; "lines": number; "why": string }[];
 }
 
-export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
+export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): Bablr {
 	const diagnostics = vscode.languages.createDiagnosticCollection("BABLR");
 	let started: { "request": (source: string, signal?: AbortSignal) => Promise<Parse> } | undefined;
 
@@ -188,4 +198,24 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): v
 
 		return check(path, exclude, signal);
 	});
+
+	return {
+		"stripped": async (text, signal) => {
+			const { parsed, comments = [] } = await worker().request(text, signal);
+
+			if (!parsed) {
+				return undefined;
+			}
+
+			let blanked = "";
+			let at = 0;
+
+			for (let index = 0; index < comments.length; index += 2) {
+				blanked += text.slice(at, comments[index]) + text.slice(comments[index], comments[index + 1]).replace(/[^\n]/gu, " ");
+				at = comments[index + 1];
+			}
+
+			return blanked + text.slice(at);
+		}
+	};
 }

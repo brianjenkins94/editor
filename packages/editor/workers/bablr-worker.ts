@@ -1,6 +1,7 @@
 /**
  * The editor's BABLR, off the main thread (workbench/bablr.ts starts it and asks one thing at a time): whether BABLR's
- * grammar takes a text, and why not when it doesn't — `bablr.parse` { source } → { parsed, why?, ms, cached }. BABLR is
+ * grammar takes a text, and why not when it doesn't, and where its comments are — `bablr.parse` { source } →
+ * { parsed, why?, comments?, ms, cached }, `comments` each comment's start and end, in turn. BABLR is
  * a VM interpreter, about 14 ms a line, so a text's answer is kept by its git blob oid in this browser's IndexedDB
  * (`bablr`, its own database, not the workspace's store), under PARSE_VERSION, so a grammar change asks again: a file
  * is parsed once however often it's asked about.
@@ -21,8 +22,9 @@ hub.link(portTransport(globalThis));
 
 const { log } = observe(hub, { "network": NETWORK_PROBES });
 
-/** A text's answer as kept: whether it parsed, why not, and what the parse took. */
-interface Answer { "parsed": boolean; "why"?: string; "ms": number }
+/** A text's answer as kept: whether it parsed, why not, where its comments are (each one's start and end, in turn), and
+ *  what the parse took. */
+interface Answer { "parsed": boolean; "why"?: string; "comments"?: number[]; "ms": number }
 
 /** A text's git blob oid: what git calls the same content. */
 async function blobOid(text: string): Promise<string> {
@@ -50,10 +52,10 @@ function done<T>(request: IDBRequest<T>): Promise<T> {
 /** The answers, kept: a store of them by PARSE_VERSION and blob oid; another version's go as it opens. */
 const database = new Promise<IDBDatabase | undefined>((resolve) => {
 	try {
-		const open = indexedDB.open("bablr", 2);
+		const open = indexedDB.open("bablr", 3);
 
 		open.addEventListener("upgradeneeded", () => {
-			// (full-editor's kept spans too, a version before: they go)
+			// (a version before's answers, and full-editor's kept spans: they go)
 			for (const name of [...open.result.objectStoreNames]) {
 				open.result.deleteObjectStore(name);
 			}
@@ -101,8 +103,12 @@ serve(hub, "bablr.parse", async (args, { signal }) => {
 	const answer = await log.span("editor.workers.bablr-worker.parse", { "bytes": source.length }, async (span): Promise<Answer> => {
 		const started = performance.now();
 
+		let comments: number[];
+
 		try {
-			await cstSpansAsync(source, "Program", { "signal": signal });
+			const { spans } = await cstSpansAsync(source, "Program", { "signal": signal }) as { "spans": { "type": string | null; "start": number; "end": number }[] };
+
+			comments = spans.filter((each) => each.type === "Comment").flatMap((each) => [each.start, each.end]);
 		} catch (error) {
 			if (signal.aborted) {
 				throw error;
@@ -113,9 +119,9 @@ serve(hub, "bablr.parse", async (args, { signal }) => {
 			return { "parsed": false, "why": error instanceof Error ? error.message : String(error), "ms": Math.round(performance.now() - started) };
 		}
 
-		span.end({ "parsed": true });
+		span.end({ "parsed": true, "count": comments.length / 2 });
 
-		return { "parsed": true, "ms": Math.round(performance.now() - started) };
+		return { "parsed": true, "comments": comments, "ms": Math.round(performance.now() - started) };
 	});
 
 	if (db !== undefined) {

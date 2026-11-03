@@ -8,7 +8,11 @@
  *
  * - the command `editor.git.openRef` ("Git: Open a Commit Read-Only…"): a branch, tag or commit, fetched one commit deep
  *   when the clone hasn't it, then shown in the Explorer;
- * - `git.openRef` { ref }: the same, for agents' `git_open`.
+ * - `git.openRef` { ref, stripped? }: the same, for agents' `git_open`.
+ *
+ * Or with its comments stripped, at `.refs/<name>~stripped/`: the code alone, as the rewrite's zero-knowledge pass reads
+ * it (ARCHITECTURE.md, *What's self-explanatory*) — each code file with its comments blanked by BABLR (bablr.ts' `stripped`,
+ * line for line the file as it is), and no docs: no Markdown, no `.silo/`.
  *
  * Open until the window reloads.
  */
@@ -22,6 +26,7 @@ import { serve } from "@brianjenkins94/hub";
 import { FileChangeType, FilePermission, FileSystemProviderCapabilities, FileSystemProviderError, FileSystemProviderErrorCode, FileType, registerFileSystemOverlay, Uri } from "@brianjenkins94/monaco-vscode-api/main";
 import { timeCall } from "../shared/fs-boundaries";
 import { vscodeCaller } from "../shared/fs-caller";
+import type { Bablr } from "./bablr";
 import * as engine from "./git-engine";
 import { createChangeEvent, notFound } from "./provider-base";
 
@@ -31,8 +36,14 @@ const ROOT = `${DIR}/${REFS_DIR}`;
 /** An entry of a commit's tree. */
 type Entry = NonNullable<Awaited<ReturnType<typeof engine.treeAt>>>[number];
 
-/** A commit opened: its oid and when it was made (its files' times). */
-interface Opened { "oid": string; "time": number }
+/** A commit opened: its oid, when it was made (its files' times), and whether it's the code alone. */
+interface Opened { "oid": string; "time": number; "stripped": boolean }
+
+/** Code BABLR strips comments from. */
+const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
+
+/** What the code alone leaves out: a doc, and silo's records (the ledger's whys, the manifest's whats). */
+const DOCS = (name: string): boolean => /\.mdx?$/iu.test(name) || name === ".silo";
 
 /** A write somewhere under `.refs/`, refused — an error the overlay doesn't pass on to the workspace's provider. */
 function refused(path: string): FileSystemProviderError {
@@ -44,7 +55,7 @@ function notOurs(): FileSystemProviderError {
 	return FileSystemProviderError.create("not a commit's", FileSystemProviderErrorCode.Unavailable);
 }
 
-export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, remote?: HttpClient): void {
+export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, bablr: Bablr, remote?: HttpClient): void {
 	const opened = new Map<string, Opened>();
 	const trees = new Map<string, Promise<Entry[] | undefined>>();
 	const blobs = new Map<string, Promise<Uint8Array>>();
@@ -97,6 +108,10 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 
 		if (path === "") {
 			return { "commit": commit, "entry": { "type": "tree", "oid": commit.oid } };
+		}
+
+		if (commit.stripped && path.split("/").some(DOCS)) {
+			return undefined;
 		}
 
 		const slash = path.lastIndexOf("/");
@@ -155,7 +170,9 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 			throw notFound();
 		}
 
-		return tree.filter((entry) => entry.type !== "commit").map((entry) => [entry.name, entry.type === "tree" ? FileType.Directory : FileType.File]);
+		const stripped = opened.get(at.name)?.stripped === true;
+
+		return tree.filter((entry) => entry.type !== "commit" && !(stripped && DOCS(entry.name))).map((entry) => [entry.name, entry.type === "tree" ? FileType.Directory : FileType.File]);
 	};
 
 	const readFile = async (resource: { "path": string }): Promise<Uint8Array> => {
@@ -166,7 +183,16 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 			throw notFound();
 		}
 
-		return blobOf(found.entry.oid);
+		const bytes = await blobOf(found.entry.oid);
+
+		if (!found.commit.stripped || !CODE.test(resource.path)) {
+			return bytes;
+		}
+
+		// (a file BABLR can't parse is as it is: its comments can't be told from its code)
+		const stripped = await bablr.stripped(new TextDecoder().decode(bytes));
+
+		return stripped === undefined ? bytes : new TextEncoder().encode(stripped);
 	};
 
 	const write = (path: string): never => {
@@ -196,8 +222,8 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 	// Above the workspace's (2): a write under `.refs/` is refused here before the workspace's provider could take it.
 	registerFileSystemOverlay(3, provider);
 
-	/** Open `ref` at `.refs/<name>/`, fetched one commit deep when the clone hasn't it. */
-	const open = async (ref: string): Promise<{ "ref": string; "commit": string; "path": string }> => log.span("editor.workbench.git-refs.open", { "ref": ref }, async (span) => {
+	/** Open `ref` at `.refs/<name>/` (`<name>~stripped`, the code alone), fetched one commit deep when the clone hasn't it. */
+	const open = async (ref: string, stripped = false): Promise<{ "ref": string; "commit": string; "path": string }> => log.span("editor.workbench.git-refs.open", { "ref": ref, "stripped": stripped }, async (span) => {
 		let commit = await engine.commitOf(ref);
 
 		if (commit === undefined && remote !== undefined && !/^[\da-f]{4,40}$/u.test(ref) && ref !== "HEAD") {
@@ -212,10 +238,10 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 			throw new Error(`${ref} isn't a commit, branch or tag this clone has or could fetch`);
 		}
 
-		const name = ref.replaceAll("/", "~");
+		const name = ref.replaceAll("/", "~") + (stripped ? "~stripped" : "");
 		const path = `${REFS_DIR}/${name}`;
 
-		opened.set(name, commit);
+		opened.set(name, { ...commit, "stripped": stripped });
 
 		for (const listener of listeners) {
 			listener([{ "resource": Uri.file(DIR), "type": FileChangeType.UPDATED }, { "resource": Uri.file(ROOT), "type": FileChangeType.ADDED }, { "resource": Uri.file(`${ROOT}/${name}`), "type": FileChangeType.ADDED }]);
@@ -233,8 +259,14 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 			return;
 		}
 
+		const how = await vscode.window.showQuickPick([{ "label": "As it is", "stripped": false }, { "label": "The code alone", "description": "comments stripped, no docs", "stripped": true }], { "title": "Open a Commit Read-Only" });
+
+		if (how === undefined) {
+			return;
+		}
+
 		try {
-			const { path } = await open(ref.trim());
+			const { path } = await open(ref.trim(), how.stripped);
 
 			await vscode.commands.executeCommand("revealInExplorer", vscode.Uri.file(`${DIR}/${path}`));
 		} catch (error) {
@@ -243,12 +275,12 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 	});
 
 	serve(hub, "git.openRef", async (args) => {
-		const { ref } = (args ?? {}) as { "ref"?: unknown };
+		const { ref, stripped } = (args ?? {}) as { "ref"?: unknown; "stripped"?: unknown };
 
 		if (typeof ref !== "string" || ref.trim() === "") {
-			throw new TypeError("git.openRef takes { ref }: a branch, tag or commit");
+			throw new TypeError("git.openRef takes { ref, stripped? }: a branch, tag or commit, and whether it's the code alone");
 		}
 
-		return open(ref.trim());
+		return open(ref.trim(), stripped === true);
 	});
 }
