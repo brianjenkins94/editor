@@ -206,10 +206,27 @@ test("stdin: what's typed at a terminal's run reaches the program", async () => 
 
 	// (typed once the program reads: before its debug session is up, a line goes to no one — a wait of a fixed time
 	// was sometimes too short)
-	await session.eventually("the program listening", async () => said("listening"), 60_000);
+	await session.eventually("the program listening", async () => said("listening"), 60_000).catch(async (error) => {
+		const terminals = await session.request("terminal.state", { "lines": 30 }, 10_000).catch(() => []);
+
+		throw new Error(`${error.message}; the terminals said ${JSON.stringify(terminals)}`, { "cause": error });
+	});
 	await session.terminal("hello");
 
 	const output = await session.eventually("the program's answer", async () => said("got hello"), 60_000);
 
 	assert.match(output, /got hello/u);
+});
+
+test("the bridge: the extension host's one hub, linked to the workbench's, and every debug run's worker linked to it", () => {
+	const { nodes, channels } = session.seen();
+	const linked = (one, other) => channels.some((channel) => channel.linked && ((channel.a === one && channel.b === other) || (channel.a === other && channel.b === one)));
+	// (the hub's links: the view's other channels are what's reported on it — extensions' command calls, their workers' traffic)
+	const onHub = [...new Set(channels.filter((channel) => channel.linked).flatMap((channel) => [channel.a, channel.b]))];
+
+	assert.ok(nodes.some((node) => node.id === "bridge" && node.state === "alive"), "the bridge reports on the page: its uplink works");
+	assert.ok(linked("workbench", "bridge"), JSON.stringify(onHub));
+	assert.ok(linked("bridge", "debug-worker"), "a debug run's worker links to the bridge (the workspace runtime's link)");
+	// (the other extensions' are on the architecture view as their commands, not on the hub)
+	assert.deepEqual(onHub.filter((id) => id.startsWith("ext") || ["tsval", "history", "source-control"].includes(id)), []);
 });

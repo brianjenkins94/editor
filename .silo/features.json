@@ -508,6 +508,12 @@
     "what": "Quick Open, Find in Files and extensions' file searches over the workspace, honouring files-to-include and files-to-exclude globs.",
     "ways": [
       "search result provider|file"
+    ],
+    "paths": [
+      "components/monaco-vscode-api/workspace-search.ts"
+    ],
+    "tests": [
+      "packages/editor/test/agent-tools.mjs"
     ]
   },
   "Formatting-only changes marked": {
@@ -1368,6 +1374,9 @@
       "packages/editor/extensions/bridge/extension.ts",
       "packages/editor/extensions/bridge/hub.ts",
       "packages/editor/workbench/bridge-link.ts"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
     ]
   },
   "The editor's test harnesses": {
