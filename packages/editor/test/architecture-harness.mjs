@@ -19,7 +19,7 @@ import { until } from "@brianjenkins94/util/until";
 export const URL_UNDER_TEST = process.env.ARCH_URL ?? "http://localhost:5173/";
 export const TIMEOUT_MS = 120_000;
 /** The realms a booted editor has (the smoke test's `boot`), and how long a session waits for them before giving up. */
-const BOOT_REALMS = ["shell", "root", "sw", "workbench", "bridge", "node"];
+const BOOT_REALMS = ["shell", "root", "sw", "workbench", "bridge"];
 const BOOT_TIMEOUT_MS = 90_000;
 
 /** Where the page's debug-mcp socket (:7378) is relayed to: this checkout's debug-mcp (`debugMcp: true` starts one; with

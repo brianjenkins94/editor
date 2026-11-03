@@ -61,7 +61,7 @@ after(async () => {
 });
 
 test("the entries are found", () => {
-	assert.ok(ENTRIES.includes("lsp/debug-worker.js") && ENTRIES.includes("lsp/node-worker.js"), "dist/lsp has its entries: " + ENTRIES.join(", "));
+	assert.ok(ENTRIES.includes("lsp/debug-worker.js") && ENTRIES.includes("lsp/bablr-worker.js"), "dist/lsp has its entries: " + ENTRIES.join(", "));
 	assert.ok(ENTRIES.includes("extensions/history/node_modules/history-ts-plugin/history-engine.js"), "the tsserver plugin's engine is beside it: " + ENGINES.join(", "));
 });
 
