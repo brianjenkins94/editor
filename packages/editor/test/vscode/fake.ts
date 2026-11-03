@@ -78,6 +78,42 @@ export class ThemeColor {
 	}
 }
 
+export class Position {
+	public readonly line: number;
+	public readonly character: number;
+
+	public constructor(line: number, character: number) {
+		this.line = line;
+		this.character = character;
+	}
+}
+
+export class Range {
+	public readonly start: Position;
+	public readonly end: Position;
+
+	public constructor(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
+		this.start = new Position(startLine, startCharacter);
+		this.end = new Position(endLine, endCharacter);
+	}
+}
+
+export enum DiagnosticSeverity { Error = 0, Warning = 1, Information = 2, Hint = 3 }
+
+export class Diagnostic {
+	public readonly range: Range;
+	public readonly message: string;
+	public readonly severity: DiagnosticSeverity;
+	public source?: string;
+	public code?: string | number | { "value": string | number; "target": Uri };
+
+	public constructor(range: Range, message: string, severity = DiagnosticSeverity.Error) {
+		this.range = range;
+		this.message = message;
+		this.severity = severity;
+	}
+}
+
 interface FileDecoration { "badge"?: string; "tooltip"?: string; "color"?: ThemeColor }
 interface FileDecorationProvider { "onDidChangeFileDecorations"?: (listener: Listener<Uri | Uri[] | undefined>) => Disposable; "provideFileDecoration": (uri: Uri) => FileDecoration | undefined }
 
@@ -103,6 +139,10 @@ export const fake = {
 	"commands": new Map<string, (...args: unknown[]) => unknown>(),
 	"decorations": [] as FileDecorationProvider[],
 	"watchers": new Set<Watcher>(),
+	/** The workspace's files, by their path from its root: what `findFiles` finds and `fs` reads. */
+	"files": new Map<string, string>(),
+	/** Each diagnostic collection's problems, by collection name, then by the file's path. */
+	"diagnostics": new Map<string, Map<string, Diagnostic[]>>(),
 	/** A file changed on disk, as a watcher sees it. */
 	"change": (path: string): void => {
 		for (const watcher of fake.watchers) {
@@ -119,6 +159,8 @@ export const fake = {
 		fake.commands.clear();
 		fake.decorations.length = 0;
 		fake.watchers.clear();
+		fake.files.clear();
+		fake.diagnostics.clear();
 	}
 };
 
@@ -151,8 +193,58 @@ export const window = {
 	}
 };
 
+/** A file's path from the workspace's root, for a URI under it. */
+const pathOf = (uri: Uri): string => uri.path.replace(/^\/workspace\//u, "");
+
+/** The files a glob finds: all of them for `**\/*`, those with its extensions for `**\/*.{a,b}` or `**\/*.a`. */
+function found(glob: string): string[] {
+	const extensions = /\*\.(?:\{([^}]+)\}|(\w+))$/u.exec(glob);
+	const wanted = extensions === null ? undefined : (extensions[1] ?? extensions[2]).split(",");
+
+	return [...fake.files.keys()].filter((path) => wanted === undefined || wanted.some((extension) => path.endsWith("." + extension)));
+}
+
+export const languages = {
+	"createDiagnosticCollection": (name: string) => {
+		const problems = new Map<string, Diagnostic[]>();
+
+		fake.diagnostics.set(name, problems);
+
+		return {
+			"set": (uri: Uri, diagnostics: Diagnostic[]) => {
+				problems.set(pathOf(uri), diagnostics);
+			},
+			"clear": () => {
+				problems.clear();
+			},
+			"dispose": () => {
+				fake.diagnostics.delete(name);
+			}
+		};
+	}
+};
+
 export const workspace = {
 	"workspaceFolders": [{ "uri": ROOT, "name": "workspace", "index": 0 }],
+	"findFiles": async (glob: string): Promise<Uri[]> => Promise.resolve(found(glob).map((path) => Uri.joinPath(ROOT, path))),
+	"fs": {
+		"readFile": async (uri: Uri): Promise<Uint8Array> => {
+			const text = fake.files.get(pathOf(uri));
+
+			if (text === undefined) {
+				throw new Error(`no such file: ${uri.path}`);
+			}
+
+			return Promise.resolve(new TextEncoder().encode(text));
+		},
+		"stat": async (uri: Uri): Promise<{ "type": number }> => {
+			if (!fake.files.has(pathOf(uri))) {
+				throw new Error(`no such file: ${uri.path}`);
+			}
+
+			return Promise.resolve({ "type": 1 });
+		}
+	},
 	"createFileSystemWatcher": (_glob: string): Watcher => {
 		const watcher = new Watcher();
 
