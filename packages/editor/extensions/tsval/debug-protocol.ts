@@ -9,8 +9,7 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { CoverageEvent, Effect, LiveBatch, TestReport } from "@brianjenkins94/editor-api";
-import type { Replay } from "@brianjenkins94/editor-api/recorded";
+import type { CoverageEvent, Effect, TestReport } from "@brianjenkins94/editor-api";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
@@ -26,12 +25,12 @@ export type ToWorker =
 export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 
 /** Where a program threw: its line and range — in `file`, when that's another of its files than the entry. */
-/** How a run ended short: an uncaught error where it was thrown — or, `stopped`, where a live run ran out of budget. */
-export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string; "stopped"?: true }
+/** How a run ended short: an uncaught error where it was thrown. */
+export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string }
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay; "live"?: boolean; "unattended"?: boolean; "recorded"?: Record<string, unknown> }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
 	/** Report the coverage so far (answered with a `coverage` event). */
@@ -82,7 +81,7 @@ export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean; "ask"?: CapabilityAsk }
 	/** The program is over: `exitCode` 1 when it threw, else 0. */
 	/** `crash.file`: where it threw, when that's another of the program's files than the entry. */
-	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash; "quiet"?: true }
+	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash }
 	/** The run's effects so far — each gated call made, denied, skipped or given — told with its coverage, for its envelope
 	 *  in the run ledger (each telling has them all). */
 	| { "type": "effects"; "effects": Effect[] }
@@ -91,12 +90,6 @@ export type WorkerEvent =
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
 	/** A test file's tests (node:test, node-test.js), each with the statements it ran — just before the final coverage. */
 	| { "type": "tests"; "tests": TestReport[] }
-	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
-	/** What an allowed capability call returned (RUNNING.md, *Effects are real, decided per call*), for the adapter to
-	 *  record (RUNNING.md, *A call's result*). */
-	| { "type": "recorded"; "capability": string; "resource": string; "value": string; "request"?: string }
-	/** Live values, of the entry — or (`file`) another of the program's files, with its text (`source`) the first time. */
-	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
 	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
 	/** A server the program started listens on `port` (it answers the preview there). */

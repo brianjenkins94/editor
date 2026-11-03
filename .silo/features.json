@@ -159,6 +159,10 @@
       "command|tsval.stepRecordedStop",
       "hub subscription|stops.preview"
     ],
+    "paths": [
+      "packages/editor/extensions/tsval/replay-run.ts",
+      "packages/editor/test/replay.test.mjs"
+    ],
     "in": "6d1ad3ce",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
@@ -1138,7 +1142,6 @@
       "worker||tsval/debug-worker.ts"
     ],
     "tests": [
-      "packages/editor/test/replay.test.mjs",
       "packages/editor/test/site-sums.test.mjs"
     ]
   },
@@ -1203,6 +1206,9 @@
       "core module|installTestRuns",
       "hub request|tests.affected",
       "hub request|tests.run"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
     ]
   },
   "Tests run in the debugger": {
@@ -1213,6 +1219,9 @@
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "paths": [
       "packages/editor/extensions/tsval/node-test.js"
+    ],
+    "tests": [
+      "packages/editor/test/debugger-runs.mjs"
     ]
   },
   "The shell": {

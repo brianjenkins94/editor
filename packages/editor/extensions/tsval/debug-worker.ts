@@ -21,8 +21,7 @@
 import type { FsShim, RunGlobal } from "@brianjenkins94/almostnode";
 import type { Effect, FunctionRun, LoadedPackage, TestReport } from "@brianjenkins94/editor-api";
 import type { AskedWhy, RuntimeConnection, RuntimeDecision, RuntimeVerdict } from "@brianjenkins94/editor-api/runtime";
-import type { Told, Traced } from "@brianjenkins94/editor-api/values";
-import type { EscapeEvent, HostGuard, ImpureKind, LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
+import type { EscapeEvent, HostGuard, ImpureKind, LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
@@ -32,18 +31,15 @@ import type { SiteSums } from "./site-sums";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
 import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { unpack } from "@brianjenkins94/almostnode/packages";
-import { policySkips, recordingKey, requestOf, triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
-import { revive } from "@brianjenkins94/editor-api/recorded";
-import { connectRuntime, layered } from "@brianjenkins94/editor-api/runtime";
+import { triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
+import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 
-import { LiveRecord } from "@brianjenkins94/editor-api/values";
 import { createVM, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
 import { covers, settledReach } from "@brianjenkins94/util/silo/evidence";
 import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 import { capabilityStandins, givenAs, standinCapability } from "./canary";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "./capability-calls";
-import { replayGuard, replayProgram } from "./replay-run";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 import nodeTestSource from "./node-test.js?raw";
 
@@ -76,33 +72,6 @@ function post(message: WorkerEvent): void {
 }
 
 let sourceFile: ts.SourceFile | undefined;
-/** The session's live values (RUNTIME-EVIDENCE.md, *Live values*): what each line bound, returned or chose, told to the adapter a few times
- *  a second, and before each stop and the end — by the program file they're in (packages/tsval/README.md, *Modules*), each its own record. */
-const live = new Map<ts.SourceFile, LiveRecord>();
-/** The program's files whose text the adapter has been told (with their first values): the entry's it has. */
-const toldSource = new Set<string>();
-
-/** Each stop's place in each record's telling (LiveRecord.told), for a run that goes on from that stop again. */
-const toldAt = new WeakMap<Vm, Map<LiveRecord, Told>>();
-
-/** `file`'s live values. */
-function liveIn(file: ts.SourceFile): LiveRecord {
-	let record = live.get(file);
-
-	if (record === undefined) {
-		record = new LiveRecord();
-		live.set(file, record);
-	}
-
-	return record;
-}
-
-let liveTimer: ReturnType<typeof setInterval> | undefined;
-/** When the live values were last told, and how many values were traced since the clock was last read: a run holds the
- *  worker while it goes, so the interval can't fire — the trace tells them too, every quarter second. */
-let flushedAt = 0;
-let tracedSince = 0;
-
 /** Where the run is: a program file and a 1-based line in it — the entry's, or another of the program's (packages/tsval/README.md, *Modules*). */
 interface Place { "file": string; "line": number }
 
@@ -137,20 +106,6 @@ let skipNext = false;
 /** How the call at the capability stop was decided — the person's answer there (an exception to the policy, on record in
  *  the run's effects): taken by the next capability call, the one asked about. */
 let answeredNext: "once" | "always" | "refused" | undefined;
-/** A live run (RUNTIME-EVIDENCE.md, *Live runs*): the file run again on a save or its interval — it stops at nothing,
- *  asks nothing (what it can't make it skips), runs its timers at once, ends at its first idle or its step budget. */
-let liveRun = false;
-/** What calls returned when they last ran for real, by `<capability> <resource>` (the run contract's `__recorded`): a live
- *  run, which nobody is watching, gives a call its recording where it would otherwise skip it. */
-let recordedResults: Record<string, unknown> = {};
-/** A live run nobody's looking at (selected after an edit: RUNNING.md, *Unattended runs*): past runs are the default — a
- *  call gets what it returned the last time it ran for real — and a call that never did halts the run there. */
-let unattended = false;
-/** A live run's own writable layer over the workspace's files (editor-api's `layered`): its writes go there and are
- *  thrown away with it, its reads see them. None for a run someone started. */
-let runLayer: ReturnType<typeof layered> | undefined;
-/** What a halted run's error carries: the call it halted before. */
-const HALTED = Symbol("halted");
 /** The packages whose code the run ran (almostnode tells each as its first module runs), by folder: told with its
  *  coverage, for its envelope (whether anyone ran a version later found compromised). */
 const packagesRan = new Map<string, LoadedPackage>();
@@ -188,12 +143,8 @@ function tellEffects(): void {
 	}
 }
 
-/** A live run's step budget: past it, the run stops there rather than running on (tsval's maxSteps). */
-const LIVE_STEPS = 5_000_000;
 /** Writes a program's allowed call is making right now: the runtime lets these through, a package's it refuses. */
 let allowingWrites = 0;
-/** The last value traced: its call, its loops' turns and its step — where a value set at a stop is recorded. */
-let lastTraced: { "call": number; "turns": number[]; "step": number } | undefined;
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
 let history: Vm[] = [];
 let index = -1;
@@ -455,7 +406,7 @@ const stdin = ((): { "on": (event: string, listener: (...args: unknown[]) => voi
  * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
  */
 /** `process.exit(code)` out of the program (capabilitySurface): the run ends there with `code`, as node's does — not a
- *  crash. Caught where a run's end is decided, as an unattended run's halt is. */
+ *  crash. Caught where a run's end is decided. */
 const EXITED = Symbol("process.exit");
 
 /** The program's `process`, for the exit code it sets (`process.exitCode`) when it finishes on its own. */
@@ -654,8 +605,8 @@ function packageIn(dir: string): { "name": string; "version"?: string } {
  * within what its baseline settled of the version that runs — the join of the code's use of it (what the members it
  * imports reach), else the whole package's — made (the baseline spot-checked at the call: an entry of another version
  * says nothing of this one); else the policy decides, at the call — redline, the policy, then the
- * person, asked, blocking until it's answered (the editor's decide). Where nobody can be asked — a live run (retyping
- * mustn't prompt), no editor, a failure to decide — the policy decides alone, a call it would ask about refused. Every
+ * person, asked, blocking until it's answered (the editor's decide). Where nobody can be asked — no editor, a failure
+ * to decide — the policy decides alone, a call it would ask about refused. Every
  * call is counted with how it was decided.
  */
 function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecision, "package">): RuntimeVerdict {
@@ -674,9 +625,9 @@ function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecis
 		return { "allow": true, "decided": "baseline" };
 	}
 
-	const alone = (): RuntimeVerdict => ({ "allow": verdictOf(policy, capability, call.args[0] ?? "", liveRun) === "allow", "decided": "policy" });
+	const alone = (): RuntimeVerdict => ({ "allow": verdictOf(policy, capability, call.args[0] ?? "") === "allow", "decided": "policy" });
 
-	if (liveRun || editorLink === undefined) {
+	if (editorLink === undefined) {
 		return alone();
 	}
 
@@ -887,7 +838,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		const link = editorLink;
 
 		await link.ready.then(() => {
-			programFsFor = (cwd) => createFsShim(new RuntimeVfs(runLayer ?? link.fs), () => cwd);
+			programFsFor = (cwd) => createFsShim(new RuntimeVfs(link.fs), () => cwd);
 		}, () => undefined);
 	}
 
@@ -953,8 +904,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 	// A server the program starts: answering the preview for its port, the request its handler's call (not stepped on the
 	// main stack — a breakpoint in it pauses there, as in any host-invoked handler: onBreakpointHook).
 	getServerBridge({ "onServerReady": (port: number) => {
-		// (a live run's server isn't served, or announced: no preview opens as you type)
-		if (listening.has(port) || liveRun) {
+		if (listening.has(port)) {
 			return;
 		}
 
@@ -1202,21 +1152,6 @@ function madeArgs(capability: string, args: unknown[], resourceArg: number, cwd:
 	return capability.startsWith("fs:") && typeof argument === "string" && !argument.startsWith("/") ? args.map((each, index) => (index === resourceArg ? `${cwd}/${argument}` : each)) : args;
 }
 
-/** `path`, absolute and with `.` and `..` resolved — as the run's layer keys its files. */
-function normalPath(path: string): string {
-	const parts: string[] = [];
-
-	for (const part of path.split("/")) {
-		if (part === "..") {
-			parts.pop();
-		} else if (part !== "" && part !== ".") {
-			parts.push(part);
-		}
-	}
-
-	return "/" + parts.join("/");
-}
-
 /** Whether a call on `path` is on a workspace file — one the editor makes, and keeps among the run's effects itself. */
 function editorKeeps(capability: string, path: unknown): boolean {
 	return capability.startsWith("fs:") && typeof path === "string" && (path === "/workspace" || path.startsWith("/workspace/"));
@@ -1270,7 +1205,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			denied("EACCES: permission denied (denied at its capability stop)");
 		}
 
-		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "trigger": triggerOf(liveRun), "capability": tagged.capability, "resource": resource }));
+		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "trigger": triggerOf(false), "capability": tagged.capability, "resource": resource }));
 
 		giveNext = undefined;
 
@@ -1296,8 +1231,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		const landing = tagged.landing === undefined ? undefined : { "capability": tagged.landing, "resource": reachedBy(args[1]) };
 
 		if (landing !== undefined) {
-			const askedHere = allowNext && verdictOf(policy, tagged.capability, resource, liveRun) === "allow";
-			const landingVerdict = askedHere ? "allow" : verdictOf(policy, landing.capability, landing.resource, liveRun);
+			const askedHere = allowNext && verdictOf(policy, tagged.capability, resource) === "allow";
+			const landingVerdict = askedHere ? "allow" : verdictOf(policy, landing.capability, landing.resource);
 
 			if (askedHere) {
 				allowNext = false;
@@ -1314,29 +1249,11 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			}
 		}
 
-		// Skipped (by the policy, or a live run's: not made, the run going on — as at its stop), made, or refused — as any
-		// debugger's calls through the runtime's files are (gate.ts).
-		const verdict = verdictOf(policy, tagged.capability, resource, liveRun);
-		// A live run's write to a workspace file goes into its own layer (thrown away when it ends) instead of not happening,
-		// and a read of what it wrote reads it there — but for a call a rule itself skips.
-		const target = madeArgs(tagged.capability, args, tagged.resourceArg, cwd)[tagged.resourceArg];
-		const intoLayer = verdict === "skip" && runLayer !== undefined && programFs !== undefined && editorKeeps(tagged.capability, target) && !policySkips(policy, tagged.capability, resource, liveRun) && (tagged.capability !== "fs:read" || runLayer.holds(normalPath(String(target))));
+		// Skipped by the policy (not made, the run going on — as at its stop), made, or refused — as any debugger's calls
+		// through the runtime's files are (gate.ts).
+		const verdict = verdictOf(policy, tagged.capability, resource);
 
-		if (verdict === "skip" && !intoLayer) {
-			// A live run's skip (not the policy's): what the call returned when it last ran for real, given back, if it did —
-			// the same request's (a POST's recording isn't a GET's).
-			const key = recordingKey(tagged.capability, resource, requestOf(tagged.capability, args));
-
-			if (liveRun && Object.hasOwn(recordedResults, key) && !policySkips(policy, tagged.capability, resource, liveRun)) {
-				return replayed(tagged.capability, resource, givenAs(tagged.capability, fn.apply(this, args), recordedResults[key]));
-			}
-
-			// Nobody's looking and it never ran for real: nothing to give it, so the run ends before it (but for a call the
-			// policy itself says to skip).
-			if (unattended && !policySkips(policy, tagged.capability, resource, liveRun)) {
-				halted(tagged.capability, resource);
-			}
-
+		if (verdict === "skip") {
 			return skipped(tagged.capability, resource, fn.apply(this, args), decided);
 		}
 
@@ -1352,11 +1269,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		// lands too.
 		const made = madeArgs(tagged.capability, landing === undefined ? args : madeArgs(landing.capability, args, 1, cwd), tagged.resourceArg, cwd);
 
-		// (a workspace file's call the editor makes, and keeps among the run's effects itself — but one into the run's own
-		// layer, which the editor never sees)
-		if (intoLayer) {
-			tally(tagged.capability, resource, "made", undefined, "layer");
-		} else if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
+		// (a workspace file's call the editor makes, and keeps among the run's effects itself)
+		if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
 			tally(tagged.capability, resource, "made", undefined, decided);
 		}
 
@@ -1364,7 +1278,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			tally(landing.capability, landing.resource, "made", undefined, decided);
 		}
 
-		return madeFor(tagged.capability, resource, () => effect(...made), requestOf(tagged.capability, args));
+		return madeFor(() => effect(...made));
 	};
 
 	// almostnode's own module (or the network) a stand-in module stands for: its members, the gated ones made real.
@@ -1413,30 +1327,9 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value, key)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value, key)])) };
 }
 
-/** The most of a read's result recorded (RUNNING.md, *A call's result*: what a call returned, to give back in a
- *  debugger). */
-const RECORD_MAX = 256 * 1024;
-
-/** What a read returned, as text: a string, or bytes decoded — else undefined. */
-function textOf(value: unknown): string | undefined {
-	if (typeof value === "string") {
-		return value;
-	}
-
-	return value instanceof Uint8Array ? new TextDecoder().decode(value) : undefined;
-}
-
 /** Make `call` — a program's capability call, allowed — for real: a write let through the runtime's refusal while it's
- *  made, what a read returned recorded (text, not too much of it). */
-function madeFor(capability: string, resource: string, call: () => unknown, request?: string): unknown {
-	const record = (value: unknown): void => {
-		const text = textOf(value);
-
-		if (text !== undefined && text !== "" && text.length <= RECORD_MAX) {
-			post({ "type": "recorded", "capability": capability, "resource": resource, "value": text, ...request === undefined ? {} : { "request": request } });
-		}
-	};
-
+ *  made. */
+function madeFor(call: () => unknown): unknown {
 	allowingWrites += 1;
 
 	let result: unknown;
@@ -1447,88 +1340,17 @@ function madeFor(capability: string, resource: string, call: () => unknown, requ
 		allowingWrites -= 1;
 	}
 
-	if (capability === "net" && result instanceof Promise) {
-		void result.then((response: unknown) => (response instanceof Response && response.ok ? response.clone().text().then(record) : undefined), () => undefined);
-	} else if (capability === "fs:read") {
-		if (result instanceof Promise) {
-			void result.then(record, () => undefined);
-		} else {
-			record(result);
-		}
-	}
-
 	return result;
 }
 
-/** A call that wasn't made (skipped: at its stop, or by a live run) — its stand-in's `result` — told on its line, as a
- *  value of its own, so the margin says what didn't happen there. */
+/** A call that wasn't made (skipped: at its stop, or by the policy) — its stand-in's `result` — told on its line, as a
+ *  counted among the run's effects. */
 function skipped(capability: string, resource: string, result: unknown, decided?: Effect["decided"]): unknown {
-	const node = evaluating?.currentNode;
-
 	tally(capability, resource, "skipped", undefined, decided);
 
-	if (evaluating !== undefined && node !== null && node !== undefined) {
-		const file = node.getSourceFile();
-		const { call, turns } = whereNow(evaluating);
-
-		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "name": "skipped", "value": resource === "" ? capability : `${capability} ${resource}`, "kind": "skip", "call": call, "turns": turns, "step": evaluating.statements, "at": rangeOf(node) });
-	}
-
 	return result;
 }
 
-/** An unattended run ends before a call that never ran for real — told on its line (its *Rule…* and *Pin…* there),
- *  then thrown past the program's own catches, to end the run where it is. */
-function halted(capability: string, resource: string): never {
-	const node = evaluating?.currentNode;
-	const what = resource === "" ? capability : `${capability} ${resource}`;
-
-	if (evaluating !== undefined && node !== null && node !== undefined) {
-		const file = node.getSourceFile();
-		const { call, turns } = whereNow(evaluating);
-
-		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "name": "halted", "value": what, "kind": "halt", "call": call, "turns": turns, "step": evaluating.statements, "at": rangeOf(node) });
-	}
-
-	throw Object.assign(new Error(`halted before ${what}`), { [UNCATCHABLE]: true, [HALTED]: what });
-}
-
-/** A call a live run gave its recording in place of (`result`: the stand-in answering with it) — told on its line, as a
- *  skip is, so the margin says the value came from the last real run. */
-function replayed(capability: string, resource: string, result: unknown): unknown {
-	const node = evaluating?.currentNode;
-
-	tally(capability, resource, "given", undefined, "recorded");
-
-	if (evaluating !== undefined && node !== null && node !== undefined) {
-		const file = node.getSourceFile();
-		const { call, turns } = whereNow(evaluating);
-
-		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "name": "replayed", "value": resource === "" ? capability : `${capability} ${resource}`, "kind": "given", "call": call, "turns": turns, "step": evaluating.statements, "at": rangeOf(node) });
-	}
-
-	return result;
-}
-
-/** Where `vm` is, as a trace event would place it (tsval's `traced`): the call it's in (the nearest call frame's number;
- *  0, the top level) and the turn of each loop around it in that call, outermost first. */
-function whereNow(vm: Vm): { "call": number; "turns": number[] } {
-	const turns: number[] = [];
-
-	for (let index = vm.frames.length - 1; index >= 0; index--) {
-		const frame = vm.frames[index] as { "kind"?: string; "call"?: number; "isLoop"?: boolean; "turn"?: number };
-
-		if (frame.kind === "call" || frame.kind === "construct") {
-			return { "call": frame.call ?? 0, "turns": turns.toReversed() };
-		}
-
-		if (frame.kind === undefined && frame.isLoop === true && frame.turn !== undefined) {
-			turns.push(frame.turn);
-		}
-	}
-
-	return { "call": 0, "turns": turns.toReversed() };
-}
 
 /** `text` as the value it writes, when it's a literal — a string, a number, a boolean, null or undefined, or an array or
  *  object of those — so setting a value can't run code. */
@@ -1616,13 +1438,6 @@ function setValue(vm: Vm, name: string, text: string, overConst = false): Extrac
 
 			binding.value = vm.fromHost(literal.value);
 
-			const at = vm.location();
-
-			if (at !== null && vm.currentNode !== null) {
-				liveIn(vm.currentNode.getSourceFile()).add({ "line": at.line, "name": name, "value": "", "raw": binding.value, "kind": "set", "call": lastTraced?.call ?? 0, "turns": lastTraced?.turns ?? [], "step": lastTraced?.step ?? 0, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } });
-				flushLive();
-			}
-
 			return { "type": "valueSet", "ok": true, "value": format(binding.value), "snapshot": snapshot(vm) };
 		}
 	}
@@ -1673,7 +1488,7 @@ function noteProgramFile(filename: string, source: () => string): void {
 	}
 
 	programFiles.set(filename, file);
-	capabilityLines.set(filename, new Set(policy === undefined || liveRun ? [] : capabilityBreakLines(file, policy)));
+	capabilityLines.set(filename, new Set(policy === undefined ? [] : capabilityBreakLines(file, policy)));
 
 	for (const vm of new Set([current, ...history])) {
 		vm?.addBreakpointsInFile(filename, ...linesIn(filename));
@@ -2002,98 +1817,6 @@ function functionName(node: ts.Node | null): string {
 	return "<module>";
 }
 
-/** Each traced node's file, line and range, read once: a node is traced each time it runs. */
-const tracedAt = new WeakMap<ts.Node, { "file": ts.SourceFile; "line": number; "at": [number, number] }>();
-/** Each call's function as the live values name it, read once. */
-const calleeAt = new WeakMap<ts.Node, NonNullable<Traced["callee"]>>();
-/** The turns of a trace's loops, read once: tsval shares one loops array among a turn's events. */
-const loopTurns = new WeakMap<TraceEvent["loops"], number[]>();
-
-/** `node`'s file, line and range (tracedAt). */
-function tracedPlace(node: ts.Node): { "file": ts.SourceFile; "line": number; "at": [number, number] } {
-	let place = tracedAt.get(node);
-
-	if (place === undefined) {
-		// Each in its own file: the entry's, or another of the program's (packages/tsval/README.md, *Modules*).
-		const file = node.getSourceFile();
-
-		place = { "file": file, "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "at": rangeOf(node) };
-		tracedAt.set(node, place);
-	}
-
-	return place;
-}
-
-/** A call's function by name and line (calleeAt). */
-function calleeOf(node: ts.Node): NonNullable<Traced["callee"]> {
-	let callee = calleeAt.get(node);
-
-	if (callee === undefined) {
-		const { line, at } = tracedPlace(node);
-
-		callee = { "name": calleeName(node), "line": line, "at": at };
-		calleeAt.set(node, callee);
-	}
-
-	return callee;
-}
-
-/** A trace's loops' turns (loopTurns). */
-function turnsOf(loops: TraceEvent["loops"]): number[] {
-	let turns = loopTurns.get(loops);
-
-	if (turns === undefined) {
-		turns = loops.map((loop) => loop.turn);
-		loopTurns.set(loops, turns);
-	}
-
-	return turns;
-}
-
-/** What tsval's trace told, into the session's live values: its line, and its call's function by name and line. */
-function traceValue(event: TraceEvent): void {
-	if (sourceFile === undefined || probing !== undefined) {
-		return; // (a probe's fork didn't run)
-	}
-
-	const place = tracedPlace(event.node);
-	const traced: Traced = { "line": place.line, "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": turnsOf(event.loops), "step": event.step, "at": place.at };
-
-	if (event.callee !== undefined) {
-		traced.callee = calleeOf(event.callee);
-	}
-
-	lastTraced = traced;
-	liveIn(place.file).add(traced);
-	tracedSince += 1;
-
-	if (tracedSince >= 1024) {
-		tracedSince = 0;
-
-		if (Date.now() - flushedAt >= 250) {
-			flushLive();
-		}
-	}
-}
-
-/** The run's process.argv, as the margin shows it (a command line: what Mock takes), on the first line reading it — if
- *  the program reads it at all. */
-function reportArgv(file: ts.SourceFile, args: string[]): void {
-	let read: ts.Node | undefined;
-
-	(function visit(node: ts.Node): void {
-		if (read === undefined && ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "process" && node.name.text === "argv") {
-			read = node;
-		}
-
-		node.forEachChild(visit);
-	})(file);
-
-	if (read !== undefined) {
-		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(read.getStart(file)).line, "name": "process.argv", "value": args.map((arg) => (arg === "" || /[\s"'|]/u.test(arg) ? JSON.stringify(arg) : arg)).join(" "), "kind": "input", "call": 0, "turns": [], "step": 0, "at": [read.getStart(file), read.getEnd()] });
-	}
-}
-
 /** A node's range in the text that ran (offsets, from its first token): what the margin anchors a line's data by — for
  *  a node with a body, its head (`headOf`). */
 function rangeOf(node: ts.Node): [number, number] {
@@ -2143,39 +1866,10 @@ function headOf(node: ts.Node): ts.Node {
 	return node;
 }
 
-/** A function's name as the panel lists its calls: its own, a method's, or the variable an arrow was assigned to. */
-function calleeName(node: ts.Node): string {
-	const named = (node as { "name"?: ts.Node }).name;
-
-	if (named !== undefined && (ts.isIdentifier(named) || ts.isPrivateIdentifier(named))) {
-		return named.text;
-	}
-
-	return ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name) ? node.parent.name.text : "anonymous";
-}
-
-/** Tell the adapter the live values new since it was last told. */
-function flushLive(): void {
-	flushedAt = Date.now();
-
-	for (const [file, record] of live) {
-		const batch = record.drain();
-
-		if (batch !== undefined && !EDITOR_SOURCES.has(file.fileName)) {
-			// Another of the program's files: which, and its text the first time (what its values' ranges are in).
-			const other = file === sourceFile ? {} : { "file": file.fileName, ...toldSource.has(file.fileName) ? {} : { "source": file.text } };
-
-			toldSource.add(file.fileName);
-			post({ "type": "values", "batch": batch, ...other });
-		}
-	}
-}
-
 function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityAsk): void {
 	denyNext = false;
 	allowNext = false;
 	skipNext = false;
-	flushLive();
 	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled }, ...ask === undefined ? {} : { "ask": ask } });
 }
 
@@ -2203,7 +1897,6 @@ function onBreakpointHook(vm: Vm): void {
 	// Set WAITING before posting, so an adapter that stores 1 + notifies before we reach `wait` isn't lost:
 	// Atomics.wait returns immediately when the value is no longer 0.
 	Atomics.store(control, 0, 0);
-	flushLive();
 	post({ "type": "stopped", "reason": "breakpoint", "snapshot": { ...snapshot(vm), "traveled": false }, "atomic": true });
 	Atomics.wait(control, 0, 0);
 }
@@ -2286,8 +1979,6 @@ function fileCoverage(file: ts.SourceFile): CoverageReport {
 /** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would, and
  *  where it threw. */
 function finish(exitCode = 0, crash?: Crash): void {
-	clearInterval(liveTimer);
-	flushLive();
 	// (the step's span closed first: once it's told the run ended the adapter ends this worker, and anything it sent
 	// after that is lost — the span's close was, every run)
 	stepSpan?.end();
@@ -2323,14 +2014,6 @@ function crashOf(vm: Vm, error: unknown, message?: string): Crash | undefined {
 	} catch {
 		return undefined;
 	}
-}
-
-/** Where `vm` is now, as a stopped run's end (`message`, the reason): the margin's ■ on that line. */
-function stoppedAt(vm: Vm, message: string): Crash | undefined {
-	const node = vm.currentNode;
-	const at = vm.location(node);
-
-	return at === null || node === null ? undefined : { "line": at.line, "at": rangeOf(node), "message": message, "stopped": true, ...at.file === sourceFile?.fileName ? {} : { "file": at.file } };
 }
 
 /** What a run that stopped on something the debugger can't run says, loudly and as itself — not as the program's own
@@ -2465,22 +2148,6 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 				return;
 			}
 
-			// An unattended run halted before a call that never ran for real: it stops there, saying why — not a crash.
-			if (typeof error === "object" && error !== null && HALTED in error) {
-				finish(0, stoppedAt(base, `halted before ${String((error as { [HALTED]: unknown })[HALTED])}: it never ran for real, so there's nothing to give it — Rule… or Pin… on its line`));
-				done = true;
-
-				return;
-			}
-
-			// A live run past its budget stops where it got to — saying so, not as a crash.
-			if (liveRun && error instanceof TsvalInternalError && error.message.startsWith("step budget exceeded")) {
-				finish(0, stoppedAt(base, "too long to run live — Run to finish"));
-				done = true;
-
-				return;
-			}
-
 			const unsupported = unrunnable(error);
 
 			post({ "type": "output", "text": unsupported ?? "Uncaught " + String(error), "stream": "stderr" });
@@ -2506,7 +2173,6 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 		// stepped, so it stays a pristine snapshot we can return to.
 		history = history.slice(0, index + 1);
 		history.push(base);
-		toldAt.set(base, new Map([...live.values()].map((record) => [record, record.told()])));
 		index = history.length - 1;
 		// A "continue" that landed on a capability line is a capability stop (the policy gated it); steps stay "step".
 		const stop = placeOf(base);
@@ -2560,11 +2226,6 @@ async function handle(action: Action): Promise<void> {
 
 			record(next, copySums(sumsOf.get(history[index])));
 
-			// (its values told from where they were at this stop: after a step back, the ones told already are replays)
-			for (const each of live.values()) {
-				each.resume(toldAt.get(history[index])?.get(each));
-			}
-
 			await advanceFrom(next, action, actionTrace);
 			break;
 		}
@@ -2586,11 +2247,6 @@ async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
 /** Where a launch's program runs: its directory and environment, as the launch gives them. */
 function whereOf(message: Extract<Control, { "type": "launch" }>): { "cwd"?: string; "env"?: Record<string, string> } {
 	return { ...message.cwd === undefined ? {} : { "cwd": message.cwd }, ...message.env === undefined ? {} : { "env": message.env } };
-}
-
-/** Whether `file`'s text doesn't parse (yet): saved, or run on the interval, mid-statement. */
-function unparsed(file: ts.SourceFile): boolean {
-	return ((file as unknown as { "parseDiagnostics"?: readonly unknown[] }).parseDiagnostics?.length ?? 0) > 0;
 }
 
 /** Each rule's hook, in the file it's placed in: the entry's (`entry`), or another of the program's (the adapter places
@@ -2617,14 +2273,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again; a
 	// launch can give one (its clock, seed and schedule).
 	// A server it starts keeps it alive: out of work, it idles, serving.
-	liveRun = message.live === true;
-	recordedResults = liveRun && message.recorded !== undefined ? message.recorded : {};
-	unattended = liveRun && message.unattended === true;
-	// (a fresh layer for each live run: what the last one wrote is gone)
-	runLayer = liveRun && editorLink !== undefined ? layered(editorLink.fs) : undefined;
-
-	// (a live run's timers at once — its waits skipped — and nothing keeps it alive past its first idle)
-	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": liveRun ? "fast" as const : "real" as const, "keepAlive": () => !liveRun && (held.size > 0 || readsStdin()) };
+	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const, "keepAlive": () => held.size > 0 || readsStdin() };
 	let modules: ModuleLoader;
 	let loadedRuntime: Runtime;
 
@@ -2658,23 +2307,13 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	testsDone = false;
 	functionsRan.clear();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": runGlobal?.own, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": runGlobal?.own, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules });
 
 	evaluating = loaded.vm;
 
-	// A live run of text that doesn't parse yet (saved mid-statement) runs nothing and tells nothing: the margin
-	// keeps what the last run that parsed did.
-	if (liveRun && unparsed(loaded.sourceFile)) {
-		post({ "type": "terminated", "exitCode": 0, "quiet": true });
-
-		return;
-	}
-
 	loopStart = eventLoop.now;
-	pace = liveRun ? "fast" : "real";
+	pace = "real";
 	workerLog().info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
-
-	liveTimer = setInterval(flushLive, 250);
 
 	({ sourceFile } = loaded);
 	record(loaded.vm, new Map());
@@ -2682,16 +2321,13 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (RUNTIME-EVIDENCE.md,
 	// *Capability decisions, on the line*). No policy → every undecided dangerous call breaks (firewall default).
 	({ policy } = message);
-	// (a live run stops at nothing: no breakpoints, no capability lines — what it can't make, it skips)
-	userLines = liveRun ? [] : message.lines;
-	fileLines = liveRun ? new Map() : new Map(Object.entries(message.files ?? {}));
+	userLines = message.lines;
+	fileLines = new Map(Object.entries(message.files ?? {}));
 	programPath = message.program ?? message.fileName;
 	setHooks = hooksByFile(message.hooks ?? [], message.fileName);
 
-	// What it reads from outside, first: process.argv (the margin mocks it there).
-	reportArgv(loaded.sourceFile, message.args ?? []);
 	programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
-	capabilityLines = new Map([[loaded.sourceFile.fileName, new Set(policy !== undefined && !liveRun ? capabilityBreakLines(loaded.sourceFile, policy) : [])]]);
+	capabilityLines = new Map([[loaded.sourceFile.fileName, new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : [])]]);
 	arm(loaded.vm);
 
 	history = [];
@@ -2700,65 +2336,12 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	await session(loaded.vm, trace);
 }
 
-/** A recorded call replayed for the debugger: the function run on what it read in the page — its free names its globals,
- *  revived — each call to something it couldn't record (a page's function, a DOM method, the network) handed the result
- *  it had there, by where it was made and how many times; a call with a function of the program's among its arguments
- *  (`items.map(fn)`) made for real, so the debugger steps into it. Its breakpoints are the file's, the stop among them. */
-async function launchReplay(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): Promise<void> {
-	const { replay } = message;
-	const { standIn, hostGuard } = replayGuard(replay);
-	const self = revive(replay.self, standIn);
-	const eventLoop = { "now": Date.now(), "seed": 1, "pace": "fast" as const };
-	const loaded = createVM(replayProgram(message.source, replay.fn), {
-		"fileName": message.fileName,
-		"onBreakpoint": onBreakpointHook,
-		"coverage": true,
-		"profile": true,
-		"observe": observeSite,
-		"trace": traceValue,
-		"eventLoop": eventLoop,
-		"asyncContext": asyncContext,
-		"sharedGlobals": runGlobal?.own,
-		"hostGuard": hostGuard,
-		"globals": {
-			...nodeGlobals,
-			"__self": typeof self === "object" && self !== null ? self : {},
-			"__args": replay.args.map((arg) => revive(arg, standIn)),
-			"console": guestConsole()
-		}
-	});
-
-	// What it read from outside itself, as the scope around it: bindings the debugger shows (and the call assigns to).
-	for (const [name, value] of Object.entries(replay.free)) {
-		loaded.vm.rootScope.bindings.set(name, { "value": revive(value, standIn), "kind": "let", "initialized": true });
-	}
-
-	evaluating = loaded.vm;
-	loopStart = eventLoop.now;
-	pace = "fast";
-	liveTimer = setInterval(flushLive, 250);
-	({ sourceFile } = loaded);
-	record(loaded.vm, new Map());
-	policy = undefined;
-	userLines = message.lines;
-	fileLines = new Map();
-	programPath = message.program ?? message.fileName;
-	setHooks = new Map();
-	programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
-	capabilityLines = new Map();
-	arm(loaded.vm);
-	history = [];
-	index = -1;
-	done = false;
-	await session(loaded.vm, trace);
-}
-
-/** Launch a run: its program's, or a recorded call's replay. */
+/** Launch a run. */
 function launch(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): void {
 	// Absent without cross-origin isolation: then a breakpoint inside a host-invoked handler can't pause (onBreakpointHook).
 	control = message.control === undefined ? undefined : new Int32Array(message.control);
-	workerLog().info("launch", { "file": message.fileName, "breakpoints": message.lines.length, "replay": message.replay !== undefined });
-	void (message.replay === undefined ? launchProgram(message, trace) : launchReplay(message, trace));
+	workerLog().info("launch", { "file": message.fileName, "breakpoints": message.lines.length });
+	void launchProgram(message, trace);
 }
 
 function setBreakpoints(message: Extract<Control, { "type": "setBreakpoints" }>): void {

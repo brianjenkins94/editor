@@ -17,7 +17,8 @@
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}"
   },
   # The editor's browser suites, in headless Chromium against its dev server (packages/editor/test/architecture-harness.mjs):
-  # `realms` loads every module the editor starts in a realm of its own there (test/worker-realms.mjs); `performance`
+  # `realms` loads every module the editor starts in a realm of its own there (test/worker-realms.mjs), and runs a test
+  # file in its debugger (test/debugger-runs.mjs); `performance`
   # holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json, and warns on a rise
   # since the last green run here — whose `performance` artifact is its baseline. Each on a runner of its own, so
   # nothing shares the CPU while performance measures. They catch a wiring regression or an upstream monaco-vscode-api
@@ -38,7 +39,7 @@
         "fail-fast": false,
         "matrix": {
           "include": [
-            { "shard": "realms", "files": "test/worker-realms.mjs" },
+            { "shard": "realms", "files": "test/worker-realms.mjs test/debugger-runs.mjs" },
             { "shard": "performance", "files": "test/performance.mjs" }
           ]
         }

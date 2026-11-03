@@ -11,7 +11,6 @@
  */
 import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/editor-api";
 import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
-import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 
 import type { Span } from "@brianjenkins94/util/logger";
@@ -39,9 +38,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private state: DebugState = "starting";
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
 	private ended = false;
-	/** The program's files core has values of, each with the text that ran (sent with its first values): the entry, and
-	 *  any other of the program's files (packages/tsval/README.md, *Modules*). */
-	private readonly told = new Map<string, string>();
 	/** What the capability stop it's at asks (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
 	/** Breakpoint lines by source path — VS Code sends them per file, and tsval runs one program. */
@@ -53,9 +49,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private program = "";
 	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
 	private args: string[] = [];
-	/** A recorded call to replay (RUNNING.md: stepping a recorded handler) — the text that ran, and what the call read —
-	 *  rather than the file as a program. */
-	private replay: (Replay & { "source": string }) | undefined;
 	/** Where it was started and with what environment — a terminal's (`cwd`, `env`); none, the workspace and nothing. */
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
 	/** Where the event loop starts — given by a launch (its clock, its seed, the choices to make), else fresh. */
@@ -94,12 +87,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
 	 *  the policy gate, not a debugging aid. */
 	private noDebug = false;
-	/** A live run (RUNTIME-EVIDENCE.md, *Live runs*): launched quiet on a save or its interval, stopping at nothing. */
-	private live = false;
-	/** A live run nobody's looking at (one a save selected: `__unattended`): a call that never ran for real halts it. */
-	private unattended = false;
-	/** What calls returned when they last ran for real (`__recorded`): a live run gives them back where it would skip. */
-	private recorded: Record<string, unknown> | undefined;
 	/** The latest coverage the worker reported, and whether the final one has gone out as the `coverage` event. */
 	private coverage: CoverageReport | undefined;
 	private coverageSent = false;
@@ -205,16 +192,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private launchRequest(request: DapRequest, args: Record<string, unknown>): void {
 		this.program = (args["program"] as string | undefined) ?? "";
 		this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
-		this.replay = typeof args["replay"] === "object" && args["replay"] !== null ? args["replay"] as Replay & { "source": string } : undefined;
 		this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
 		this.eventLoop = loopStartOf(args["eventLoop"]);
 		this.noDebug = args["noDebug"] === true;
 		this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
-		// A live run (RUNTIME-EVIDENCE.md, *Live runs*): the file run again on a save or its interval — it stops at nothing.
-		this.live = args["__live"] === true;
-		this.unattended = this.live && args["__unattended"] === true;
-		this.recorded = typeof args["__recorded"] === "object" && args["__recorded"] !== null ? args["__recorded"] as Record<string, unknown> : undefined;
-		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
+		this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 		this.respond(request);
 		void this.loadSource();
 	}
@@ -338,20 +320,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	private terminateRequest(request: DapRequest): void {
-		// A live run stopped by the next edit, or one that ran nothing: it tells nothing — no coverage, no end — and the
-		// margin keeps the last run's until the next one finishes.
-		if (this.live && (!this.ended || !this.coverageSent)) {
-			this.ended = true;
-			this.coverageSent = true;
-			this.endAction();
-			this.closeWorker();
-			this.respond(request);
-			this.event("terminated");
-			this.settle("terminated");
-
-			return;
-		}
-
 		// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
 		// in-handler pause) can't answer, and then the last report stands. Then hard-stop: terminate() kills
 		// the worker even while it's blocked, which a postMessage could not reach.
@@ -359,7 +327,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			this.sendFinalCoverage(report);
 			this.endAction();
 			this.closeWorker();
-			// The session's live values go with it, as when it runs to its end — and, stopped while paused, where it was.
+			// Its end told, as when it runs to its end — and, stopped while paused, where it was.
 			const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
 
 			this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
@@ -458,8 +426,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	private async loadSource(): Promise<void> {
 		try {
-			// A replay runs the text that ran in the page (its recorded version), whatever the file holds now.
-			this.source = this.replay?.source ?? (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
+			this.source = (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
 			this.hooks = await this.placeRules();
 			this.sourceReady = true;
 			this.maybeStart();
@@ -543,7 +510,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.live ? { "live": true } : {}, ...this.unattended ? { "unattended": true } : {}, ...this.recorded === undefined ? {} : { "recorded": this.recorded } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */
@@ -597,8 +564,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
 	 *  stop is driven by a control message the worker's loop is awaiting. */
-	/** The session's end, once, for core (live-values.ts, through debug-events.ts): its values go — from every file it had them in — and how the
-	 *  run ended short, if it did, is marked on its line, in the file that's in (`endFile`, the entry by default). */
+	/** The session's end, once (the run contract's `ended`): how the run ended short, if it did, on its line, in the file
+	 *  that's in (`endFile`, the entry by default). */
 	private tellEnded(end: RunEnd | undefined, endFile = this.program): void {
 		if (this.ended) {
 			return;
@@ -606,9 +573,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		this.ended = true;
 
-		const sources = new Map([[this.program, this.source], ...this.told]);
+		const sources = new Map([[this.program, this.source]]);
 
-		// A question asked in a file it had no values from (its margin's to clear).
+		// A question asked in another of the program's files.
 		if (this.ask?.file !== undefined && !sources.has(this.ask.file)) {
 			sources.set(this.ask.file, this.ask.source ?? "");
 		}
@@ -617,7 +584,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			this.tell("ended", { "file": file, "source": source, ...end === undefined || file !== endFile ? {} : { "end": end } });
 		}
 
-		// Ended short in a file it had no values from yet.
+		// Ended short in another of the program's files.
 		if (end !== undefined && !sources.has(endFile)) {
 			this.tell("ended", { "file": endFile, "end": end });
 		}
@@ -664,16 +631,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			case "terminated":
 				this.onTerminated(message);
-				break;
-
-			// What a run's allowed call returned, recorded (RUNNING.md, *A call's result*): a rule can give it back.
-			case "recorded":
-				this.tell("recorded", { "capability": message.capability, "resource": message.resource, "value": message.value, ...message.request === undefined ? {} : { "request": message.request } });
-				break;
-
-			// The session's live values (RUNTIME-EVIDENCE.md, *Live values*), on to core (through debug-events.ts): the file they're of, what's new.
-			case "values":
-				this.onValues(message);
 				break;
 
 			// (started in a terminal, its stdout and stderr are printed there too: debug-events.ts)
@@ -747,14 +704,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private onTerminated(message: Extract<WorkerEvent, { "type": "terminated" }>): void {
 		this.endAction();
 
-		// A live run that ran nothing (its text doesn't parse yet): no values, no coverage, no end — the margin keeps
-		// the last run's.
-		if (message.quiet === true) {
-			this.ended = true;
-		}
-
-		// (a live run that ran out of budget ends stopped where it got to, not crashed)
-		this.tellEnded(message.crash === undefined ? undefined : { "kind": message.crash.stopped === true ? "stopped" : "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
+		this.tellEnded(message.crash === undefined ? undefined : { "kind": "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
 		// (DAP's own: the run's end, with its exit code — the editor's run ends with it)
 		this.event("exited", { "exitCode": message.exitCode ?? 0 });
 		this.event("terminated");
@@ -762,14 +712,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.settle("terminated");
 	}
 
-	private onValues(message: Extract<WorkerEvent, { "type": "values" }>): void {
-		// The text that ran, once a file: what core anchors the values' ranges in.
-		const file = message.file ?? this.program;
-		const source = message.file === undefined ? this.source : message.source ?? this.told.get(file) ?? "";
-
-		this.tell("values", { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
-		this.told.set(file, source);
-	}
 }
 
 /** What a rejection says: an Error's message, anything else stringified as it is. */
