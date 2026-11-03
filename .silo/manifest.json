@@ -1,18 +1,5 @@
 {
   "Shell": {
-    "Project picker": {
-      "what": "A projects panel on the left, collapsible to a rail and resizable, for opening a bundled sample project into the editor (the sample catalog is empty today).",
-      "ways": [
-        "button|Collapse project panel",
-        "button|Open project",
-        "button|Toggle project panel",
-        "hub request|project.list",
-        "hub subscription|project.open"
-      ],
-      "paths": [
-        "packages/editor/app/samples.ts"
-      ]
-    },
     "Playground links": {
       "what": "Open a TypeScript Playground link here as a real workspace (swap its host for the editor's), and share your workspace as a link the Playground opens too.",
       "ways": [
@@ -66,18 +53,6 @@
         "text editor decoration type||workbench/pane-native.ts"
       ]
     },
-    "Rule editor": {
-      "what": "One editor for every rule about what a program may do (allow, deny, give a value), opened under the Rules tree from a stop, the Margin or a preview prompt.",
-      "docs": "packages/editor/RUNNING.md, *Rules*",
-      "ways": [
-        "agent tool|rules_list",
-        "command|editor.rules.cancelEdit",
-        "command|editor.rules.edit"
-      ],
-      "paths": [
-        "packages/editor/workbench/rule-editor.ts"
-      ]
-    },
     "Annotations that stay on their code": {
       "what": "Notes, rules and evidence placed on a piece of code, by the editor or an extension, stay on that code through edits, moves and reformatting.",
       "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
@@ -102,13 +77,6 @@
     }
   },
   "Running and debugging": {
-    "Run from the shell": {
-      "what": "A Run menu in the top bar runs the file in the editor in the debugger, or one of the workspace's scripts and tasks, showing a running service's preview instead of starting it twice.",
-      "docs": "packages/editor/RUNNING.md, *The model*",
-      "ways": [
-        "button|Run"
-      ]
-    },
     "Run a file in the debugger": {
       "what": "Run (the editor's play button) runs the open file in the debugger, the one way every program runs, whichever debugger is set to run it.",
       "docs": "packages/editor/RUNNING.md, *The model*",
@@ -244,35 +212,6 @@
     }
   },
   "Live values": {
-    "Live values in the margin": {
-      "what": "Beside the code, each line shows the values it produced when it ran, one column per turn of a loop; you can hold a column or pick a call to look at, and while stopped the latest value appears inline.",
-      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live values*",
-      "ways": [
-        "command|margin.hold",
-        "command|margin.paneView",
-        "command|margin.pick",
-        "inline values provider||margin/margin.ts"
-      ]
-    },
-    "Past runs, as balls": {
-      "what": "Each run of a file is kept on this machine, and picking it at the top of the margin shows its values and how it ended.",
-      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Runs kept, as balls*",
-      "ways": [
-        "command|margin.pickRun"
-      ]
-    },
-    "Live runs after an edit": {
-      "what": "The file you're editing runs again on save and on a timer so the margin stays current, without asking you anything, and a call these unwatched runs can't make can be pinned to a value it returned before or given a rule.",
-      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live runs*",
-      "ways": [
-        "command|margin.pin",
-        "command|margin.unattended",
-        "command|run.live.again",
-        "command|run.live.state",
-        "setting|run.liveRuns",
-        "setting|run.liveRuns.interval"
-      ]
-    },
     "Mock a value": {
       "what": "Give the program different command-line arguments, or a variable a different value, either once at a stop or on every run by a rule.",
       "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Mocking a value — and one way to run*",
@@ -280,14 +219,6 @@
         "command|editor.debug.setValue",
         "command|margin.mockArgv",
         "command|margin.mockVariable"
-      ]
-    },
-    "Coverage in the gutter": {
-      "what": "After a run, marks beside each line show whether it ran and how often, and the same colors appear in the scrollbar.",
-      "ways": [
-        "command|coverage.paneView",
-        "core module|installCoverage",
-        "text editor decoration type||margin/coverage.ts"
       ]
     }
   },
@@ -344,30 +275,6 @@
         "hub request|preview.decide",
         "hub request|tap.worker.decide"
       ]
-    },
-    "Preview DevTools": {
-      "what": "Chrome's DevTools docked under a preview window (console, elements, network), and the same DevTools protocol for agents.",
-      "ways": [
-        "agent tool|previews_cdp",
-        "core module|installPreviewCdp",
-        "hub request|PREVIEW_CDP",
-        "hub subscription|PREVIEW_CDP_EVENT + key"
-      ]
-    },
-    "Preview CPU profiles": {
-      "what": "Profile a preview's page on demand, and automatically when it keeps running slow, saving each profile as a .cpuprofile mapped back to the lines you wrote.",
-      "ways": [
-        "agent tool|previews_profile",
-        "core module|installAutoProfiler",
-        "core module|installPreviewProfiler",
-        "core module|installProfileFiles",
-        "hub request|PREVIEW_PROFILE",
-        "hub subscription|PREVIEW_PROFILED"
-      ],
-      "paths": [
-        "packages/editor/extensions/insights/profiles.ts",
-        "packages/editor/workbench/sourcemap.ts"
-      ]
     }
   },
   "Capabilities and rules": {
@@ -400,73 +307,9 @@
       "paths": [
         "packages/editor/extensions/tsval/canary.ts"
       ]
-    },
-    "Capability calls panel": {
-      "what": "A panel lists the program's capability calls and lets you allow, deny or clear each one; a denied call is marked as an error in the code.",
-      "ways": [
-        "command|capabilities.allow",
-        "command|capabilities.clear",
-        "command|capabilities.deny",
-        "command|capabilities.disposition",
-        "diagnostic collection|capabilities-policy",
-        "view|capabilities.calls"
-      ]
-    },
-    "Dependency baseline and exceptions": {
-      "what": "What each dependency's own code can do is recorded when it's added, and the Exceptions view shows anything that goes beyond that and how each run's calls were answered.",
-      "ways": [
-        "setting|silo.baseline",
-        "view|silo.exceptions",
-        "worker||capabilities/packages-worker.ts"
-      ]
-    },
-    "Rules": {
-      "what": "The Rules view lists every rule as a sentence, in the order rules are checked, where you can add, open, edit and remove them.",
-      "docs": "packages/editor/RUNNING.md, *Rules*",
-      "ways": [
-        "command|silo.rules.given",
-        "command|silo.rules.list",
-        "command|silo.rules.new",
-        "command|silo.rules.open",
-        "command|silo.rules.refresh",
-        "command|silo.rules.remove",
-        "command|silo.rules.set",
-        "view|silo.rules"
-      ]
-    },
-    "Rules placed in the code": {
-      "what": "A rule tied to a line stays with its code through edits, shows as a gutter mark with its sentence on hover, and can be re-placed when its place is lost.",
-      "docs": "packages/editor/RUNNING.md, *A rule placed in the code*",
-      "ways": [
-        "command|silo.rules.files",
-        "command|silo.rules.replace"
-      ],
-      "paths": [
-        "packages/editor/extensions/capabilities/placed-rules.ts"
-      ]
     }
   },
   "Insights": {
-    "What went through this code, on hover": {
-      "what": "Hovering code shows which values passed through it across runs, how often they were empty, what kinds they were next to the declared type, and how often each branch ran.",
-      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Second slice: values, branches and types*",
-      "ways": [
-        "hover provider||insights/hover.ts"
-      ]
-    },
-    "What could go, in purple": {
-      "what": "Code the runs show was never needed, such as a `?.` that never met an empty value or a branch never taken, is tinted purple with a quick fix to remove it, and the Suggestions view lists them for every file.",
-      "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Fourth slice: what could go, in purple, across inputs*",
-      "ways": [
-        "code actions provider||insights/fixes.ts",
-        "command|insights.applySuggestion",
-        "diagnostic collection|evidence",
-        "setting|silo.evidence.minRuns",
-        "setting|silo.evidence.minSeen",
-        "text editor decoration type||insights/fixes.ts",
-        "view|insights.suggestions"
-      ]
-    },
     "Performance monitor": {
       "what": "The status bar and a Monitor view of small live charts show the editor's memory, workspace fill, long frames and errors as they happen.",
       "docs": "packages/editor/ARCHITECTURE.md, *The metrics plane*",
@@ -502,33 +345,6 @@
     }
   },
   "Code quality": {
-    "ESLint": {
-      "what": "Real ESLint checks your code as you type, with quick fixes, fix-all on save, formatting, and the usual eslint.* settings.",
-      "ways": [
-        "code actions provider||eslint/extension.ts",
-        "diagnostic collection|eslint",
-        "diagnostic collection|eslint-config",
-        "document formatting edit provider||eslint/extension.ts",
-        "setting|eslint.enable",
-        "setting|eslint.format.enable",
-        "setting|eslint.rules.customizations",
-        "setting|eslint.validate",
-        "setting|eslint.workingDirectories",
-        "worker||eslint/worker.ts"
-      ]
-    },
-    "Spell check": {
-      "what": "The real cspell engine spell-checks code and prose.",
-      "paths": [
-        "packages/editor/extensions/cspell"
-      ]
-    },
-    "Type queries": {
-      "what": "A `// ^?` comment under an expression shows that expression's type at the end of the comment, as in the TypeScript Playground.",
-      "ways": [
-        "inlay hints provider||type-queries/extension.ts"
-      ]
-    },
     "Unparsable files flagged": {
       "what": "A file the editor can't parse gets a warning in Problems, because notes and evidence can't attach to it until it parses again.",
       "ways": [
@@ -621,41 +437,6 @@
     }
   },
   "Agent tools": {
-    "A change's problems": {
-      "what": "The TypeScript and ESLint problems a change made and the ones it fixed, against HEAD: its changed files and the files importing them, each checked now and as HEAD had it, with what wasn't checked said.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
-      "ways": [
-        "agent tool|code_problems",
-        "command|_eslint.problems",
-        "core module|installCodeProblems",
-        "hub request|code.problems"
-      ]
-    },
-    "How a commit did in CI": {
-      "what": "For a commit (HEAD by default), its GitHub Actions runs on the workspace's origin, the jobs of each that didn't pass with their failed steps, and a job's log up to its first error with the tests it failed, through the editor's sign-in.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
-      "ways": [
-        "agent tool|ci_status",
-        "core module|installCiStatus",
-        "hub request|ci.status",
-        "hub request|github.actions"
-      ],
-      "paths": [
-        "packages/editor/workbench/ci-status.ts"
-      ]
-    },
-    "Scripts over the workspace": {
-      "what": "JavaScript an agent runs for counting or joining data across the workspace's files, which it reads but can't change, in a locked-down realm with no network; the answer says what it read and what it was refused.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
-      "ways": [
-        "agent tool|script_run",
-        "core module|installScriptRun",
-        "hub request|script.run"
-      ],
-      "paths": [
-        "packages/editor/workbench/script-run.ts"
-      ]
-    },
     "What a way in reaches": {
       "what": "For a way in (a command, hub request, tool, core module, setting, view), the feature that owns it, where it's registered, what removing it would free and leave by hand, and everywhere code, tests and docs name it: silo remove's plan, written nowhere.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
@@ -665,53 +446,9 @@
         "core module|installCodeReach",
         "hub request|code.reach"
       ]
-    },
-    "Experiments that undo themselves": {
-      "what": "An agent notes the working tree, tries a change, sees what it breaks, and puts every file back as it was if it doesn't hold; and previews a replacement across files as a diff before making it.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
-      "ways": [
-        "agent tool|workspace_checkpoint",
-        "agent tool|workspace_restore",
-        "core module|installCheckpoints",
-        "hub request|workspace.checkpoint",
-        "hub request|workspace.restore"
-      ]
-    },
-    "Refactoring for agents": {
-      "what": "An agent finds where a name is used, renames it everywhere, and moves a file with every import of it kept right, as TypeScript resolves them: one edit the editor sees as typing, every file saved, nothing asked.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
-      "ways": [
-        "agent tool|code_move",
-        "agent tool|code_query",
-        "agent tool|code_references",
-        "agent tool|code_rename",
-        "agent tool|code_rewrite",
-        "core module|installCodeRefactor",
-        "hub request|code.move",
-        "hub request|code.query",
-        "hub request|code.references",
-        "hub request|code.rename",
-        "hub request|code.rewrite"
-      ]
     }
   },
-  "Game making": {
-    "Event Sheet": {
-      "what": "Shows the game the open file belongs to as a map of its objects, rules, behaviors and components, each of which opens its code, and shows this file's part of the game beside the code.",
-      "ways": [
-        "command|eventSheet.paneView",
-        "view|eventSheet.view",
-        "worker||event-sheet/recognizer-worker.ts"
-      ]
-    },
-    "Build a game by painting a level": {
-      "what": "Start a new game, paint a level on a grid with one-click objects, pick systems, and generate the game's code into the project.",
-      "paths": [
-        "packages/editor/extensions/event-sheet/authoring.ts",
-        "packages/editor/extensions/event-sheet/generator.ts"
-      ]
-    }
-  },
+  "Game making": {},
   "Extension template": {
     "Plug an interpreter into Run": {
       "what": "Another extension's debugger can be the one Run starts; its worker reads and writes the workspace through the editor, under the same policy as any run.",
