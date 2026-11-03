@@ -93,7 +93,7 @@
       "docs": "packages/editor/ARCHITECTURE.md, *4. Pane views*",
       "ways": [
         "agent tool|margin_state",
-        "code lens provider||pane-native.ts",
+        "code lens provider||workbench/pane-native.ts",
         "command|editor.pane.chooseView",
         "command|editor.pane.native.input",
         "command|editor.pane.native.more",
@@ -101,9 +101,9 @@
         "command|editor.pane.toggleNative",
         "core module|installNativeFace",
         "core module|installPaneViews",
-        "hover provider||pane-native.ts",
-        "inlay hints provider||pane-native.ts",
-        "text editor decoration type||pane-native.ts"
+        "hover provider||workbench/pane-native.ts",
+        "inlay hints provider||workbench/pane-native.ts",
+        "text editor decoration type||workbench/pane-native.ts"
       ]
     },
     "Rule editor": {
@@ -183,8 +183,8 @@
       "docs": "packages/editor/RUNNING.md, *The model*",
       "ways": [
         "command|editor.debugFile",
-        "debug adapter tracker provider|*|debug-events.ts",
-        "debug configuration provider|*|debug-events.ts"
+        "debug adapter tracker provider|*|bridge/debug-events.ts",
+        "debug configuration provider|*|bridge/debug-events.ts"
       ]
     },
     "Terminal node runs in the debugger": {
@@ -204,7 +204,7 @@
         "debug adapter descriptor provider|tsval",
         "debug configuration provider|tsval",
         "debugger|tsval",
-        "worker||debug-worker.ts"
+        "worker||tsval/debug-worker.ts"
       ]
     },
     "Explore orderings": {
@@ -255,7 +255,7 @@
     "Debug toolbar in the preview title bar": {
       "what": "The pause, step, restart and stop buttons also appear in the preview window's title bar and control the same session.",
       "ways": [
-        "debug adapter tracker provider|*|debug-toolbar.ts",
+        "debug adapter tracker provider|*|bridge/debug-toolbar.ts",
         "hub subscription|debug.command"
       ]
     },
@@ -281,7 +281,7 @@
         "agent tool|debug_step",
         "agent tool|debug_stop",
         "command|margin.state",
-        "debug adapter tracker provider|*|debug-control.ts",
+        "debug adapter tracker provider|*|bridge/debug-control.ts",
         "hub request|`debug.session.${session.id}.decide`",
         "hub request|debug.breakpoints",
         "hub request|debug.explore",
@@ -327,7 +327,7 @@
         "command|margin.hold",
         "command|margin.paneView",
         "command|margin.pick",
-        "inline values provider||margin.ts"
+        "inline values provider||margin/margin.ts"
       ]
     },
     "Past runs, as balls": {
@@ -363,7 +363,7 @@
       "ways": [
         "command|coverage.paneView",
         "core module|installCoverage",
-        "text editor decoration type||coverage.ts"
+        "text editor decoration type||margin/coverage.ts"
       ]
     }
   },
@@ -454,7 +454,7 @@
         "command|editor.capability.decide",
         "command|margin.decide",
         "command|margin.rule",
-        "debug adapter tracker provider|*|capability-stops.ts"
+        "debug adapter tracker provider|*|bridge/capability-stops.ts"
       ]
     },
     "Real effects, decided per call": {
@@ -493,7 +493,7 @@
       "ways": [
         "setting|silo.baseline",
         "view|silo.exceptions",
-        "worker||packages-worker.ts"
+        "worker||capabilities/packages-worker.ts"
       ]
     },
     "Rules": {
@@ -527,19 +527,19 @@
       "what": "Hovering code shows which values passed through it across runs, how often they were empty, what kinds they were next to the declared type, and how often each branch ran.",
       "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Second slice: values, branches and types*",
       "ways": [
-        "hover provider||hover.ts"
+        "hover provider||insights/hover.ts"
       ]
     },
     "What could go, in purple": {
       "what": "Code the runs show was never needed, such as a `?.` that never met an empty value or a branch never taken, is tinted purple with a quick fix to remove it, and the Suggestions view lists them for every file.",
       "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Fourth slice: what could go, in purple, across inputs*",
       "ways": [
-        "code actions provider||fixes.ts",
+        "code actions provider||insights/fixes.ts",
         "command|insights.applySuggestion",
         "diagnostic collection|evidence",
         "setting|silo.evidence.minRuns",
         "setting|silo.evidence.minSeen",
-        "text editor decoration type||fixes.ts",
+        "text editor decoration type||insights/fixes.ts",
         "view|insights.suggestions"
       ]
     },
@@ -581,15 +581,16 @@
     "ESLint": {
       "what": "Real ESLint checks your code as you type, with quick fixes, fix-all on save, formatting, and the usual eslint.* settings.",
       "ways": [
-        "code actions provider||extension.ts",
+        "code actions provider||eslint/extension.ts",
         "diagnostic collection|eslint",
         "diagnostic collection|eslint-config",
-        "document formatting edit provider||extension.ts",
+        "document formatting edit provider||eslint/extension.ts",
         "setting|eslint.enable",
         "setting|eslint.format.enable",
         "setting|eslint.rules.customizations",
         "setting|eslint.validate",
-        "setting|eslint.workingDirectories"
+        "setting|eslint.workingDirectories",
+        "worker||eslint/worker.ts"
       ]
     },
     "Spell check": {
@@ -601,7 +602,7 @@
     "Type queries": {
       "what": "A `// ^?` comment under an expression shows that expression's type at the end of the comment, as in the TypeScript Playground.",
       "ways": [
-        "inlay hints provider||extension.ts"
+        "inlay hints provider||type-queries/extension.ts"
       ]
     },
     "Unparsable files flagged": {
@@ -691,7 +692,7 @@
         "command|sourceControl.commit",
         "command|sourceControl.refresh",
         "source control|git",
-        "text document content provider||extension.ts"
+        "text document content provider||source-control/extension.ts"
       ]
     },
     "Formatting-only changes marked": {
@@ -699,7 +700,7 @@
       "ways": [
         "command|cosmetic.list",
         "command|editor.annotations.classify",
-        "file decoration provider||extension.ts",
+        "file decoration provider||cosmetic/extension.ts",
         "hub request|annotations.classify",
         "hub request|bablr.verdict"
       ],
@@ -714,6 +715,7 @@
       "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
       "ways": [
         "agent tool|notes_add",
+        "code actions provider||notes/extension.ts",
         "command|notes.add",
         "command|notes.confirm",
         "command|notes.dismiss",
@@ -722,7 +724,7 @@
         "comment controller|notes",
         "diagnostic collection|notes",
         "hub request|notes.add",
-        "status bar item||extension.ts"
+        "status bar item||notes/extension.ts"
       ]
     },
     "What your edits change": {
@@ -743,11 +745,11 @@
       "what": "A way in whose files CI's runs load and whose code they never run is tinted purple where it's registered, with what deleting it frees, and a choice to keep it for 90 days or remove it.",
       "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes*",
       "ways": [
-        "code actions provider||ledger.ts",
+        "code actions provider||history/ledger.ts",
         "command|history.ledger.keep",
         "command|history.ledger.remove",
         "diagnostic collection|silo-dormant",
-        "text editor decoration type||ledger.ts"
+        "text editor decoration type||history/ledger.ts"
       ]
     },
     "Features map": {
@@ -759,9 +761,9 @@
         "command|history.features.open",
         "command|history.features.setStatus",
         "command|history.features.unfocus",
-        "file decoration provider||features.ts",
+        "file decoration provider||history/features.ts",
         "status bar item|history.features",
-        "text editor decoration type||features.ts"
+        "text editor decoration type||history/features.ts"
       ]
     }
   },
@@ -924,7 +926,7 @@
       "ways": [
         "command|eventSheet.paneView",
         "view|eventSheet.view",
-        "worker||recognizer-worker.ts"
+        "worker||event-sheet/recognizer-worker.ts"
       ]
     },
     "Build a game by painting a level": {
@@ -951,7 +953,7 @@
       "ways": [
         "debug adapter descriptor provider|contrib",
         "debugger|contrib",
-        "worker||worker.ts"
+        "worker||src/worker.ts"
       ],
       "paths": [
         "contrib/scripts/dev.mjs",
@@ -1000,7 +1002,7 @@
       "what": "A service worker makes the editor work from a plain static site: it supplies the isolation the editor needs (after one reload), serves package files from a CDN and answers preview requests.",
       "ways": [
         "url parameter|?coep",
-        "worker||coi-serviceworker.js"
+        "worker||editor/coi-serviceworker.js"
       ],
       "paths": [
         "packages/editor/app/coi.ts",

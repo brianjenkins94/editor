@@ -256,6 +256,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Parked
 
+- **Tests inside the editor's real extension host** (2026-11-02): an extension's tests run where it does — the
+  editor's extension host, with VS Code's real API — as VS Code's own test runner runs extension tests inside one,
+  rather than against a stand-in. Until then an extension's wiring is tested in Node against a small fake of the API
+  (packages/editor/test), which grows only as extensions need it.
 - **What the agent is doing, in the editor** (2026-11-02): a view of the agent's work as it happens — the files it reads
   and edits, the command it runs, failures — as [claude-files-pane](https://github.com/Marius-Adam/claude-files-pane)
   shows beside Claude's chat, drawn from debug-mcp's `agent` spans (the editor's tools at its transport, the rest from
