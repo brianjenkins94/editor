@@ -160,24 +160,24 @@ How it's kept:
    - **Reduce to the core** — started 2026-11-02 on the branch `reduction`, in the editor. Done: the composition roots
      cut to the core (the workbench's extensions and services, build.ts, the app realm, the shell's top bar, the agent
      tool families); what the core no longer reaches deleted with its tests and theme surfaces; CI's architecture
-     workflow down to `realms` and `performance`; the 25 features taken out whole tombstoned in the ledger. The core
-     boots, loads this repository and runs its tests in the editor (git's, reset's, the workspace's: 20 of 20). The
-     reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
+     workflow down to `realms` and `performance`. Then the bridge and History split, one job each: the bridge is core's
+     runtime crossing into VS Code (the uplink, capability decisions and stops, the workspace runtime, the run
+     contract's events, the terminal's auto-attach); History reads the program and holds the ledger to it (drift in
+     Problems, `history.decisions`); code-reach.ts became decisions.ts. What removed features left in the core went
+     (notes.add, "Your edits", Share's workspace.files, BABLR's annotations). 45 features are tombstoned in the ledger;
+     the 10 more the core keeps are declared there; `silo check` agrees. The core boots, loads this repository and runs
+     its tests in the editor (git's, reset's, the workspace's: 20 of 20); the editor's unit tests pass in Node (94 of 94).
+     The reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
      Left, in order:
-     - *The bridge and History, split.* Most of what's left of the removed features lives inside the core's bridge
-       (the debugger's agent requests, tasks and the run picker, a preview's dev server as a debug session, capability
-       prompts, mocking a value), History (the features map, dormant marks, ledger drift in Problems, what your edits
-       change, `code.reach`), tsval (Playwright tests, site sums), the node worker (the in-browser dev server and the
-       preview taps, there for the terminal's `vite`) and the workbench (the Live architecture view, extensions by URL):
-       `silo check` lists 76 drifts, one way in at a time. Each extension one feature (*The boundaries*), then each
-       removed feature's remains go with it. code-reach.ts serves `decisions.for` (core) and `code.reach` (not).
-     - *Broken remains to take out first:* `notes.add` (workspace-tools.ts) runs a command no longer there; the review
-       panel's "Your edits" relied on edit history; `workspace.files` / `workbench.files` served only Share; the pane's
-       `editor.pane.chooseView` / `toggleNative` are declared and never registered; the ledger's "capability engine"
-       names a deleted file; the docs still name the Project picker, the Rule editor, CI status and scripts.
+     - *The node worker, split:* the in-browser dev server and the preview taps stay for the terminal's `vite` (four
+       features on a lease to 2026-12-01: preview windows, the dev server, previews' capability prompts, runtime
+       evidence); `vite` goes, or they're the worker's to keep, before the lease runs out. tsval keeps Playwright tests
+       and site sums; the workbench keeps the Live architecture view and extensions by URL (the manifest still has them).
      - *Shell, split:* shell.tsx (about 1,100 lines) is still one component holding sign-in, repo load, commit, reset and
        the review panel: a shell core with each feature's top-bar control, popover and hub wiring registered from its
        own module.
+     - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
+       check` caught a removed file named.
      - *Then:* the core's tests written again, the first of the new suite; `EDITOR_DEPLOYS` set to `off` (production
        keeps the full editor) and the branch landed on main.
      Found while reducing: the editor's runner can't run the theme's budget test (`Unsupported encoding: latin1`) or a
@@ -185,9 +185,13 @@ How it's kept:
      branch the shallow clone hasn't fetched (`git.show` fetches one; checkout should too); `git_pull` reports
      "diverged" when main moved under a branch (a merge in the editor would settle it); the editor's GitHub Apps
      couldn't push a change to `.github/workflows` (workflows read/write added to both apps 2026-11-02); writing the
-     ledger has no editor UI yet (the tombstones were written with silo's own code from a checkout); deleting ~130 files
-     in a row once left the workbench blank until a reload; `files_grep`'s scope argument is `glob`, and
-     `editor_problems` has no severity filter (cspell's infos drown the rest — moot now cspell is out).
+     ledger has no editor UI yet (the tombstones were written with silo's own code from a checkout); the editor reloaded
+     itself three times under large edits (8:24, 8:39, 8:46 pm): Vite's socket closed on both frames at once and its
+     client reloaded the page, while the dev server and debug-mcp kept running — the work in the workspace survived,
+     the calls in flight didn't; `files_edit` has no line-range cut, so a 360-line cut is 360 lines in the call (the
+     longest cuts were made from a checkout); `runs_stop` doesn't stop a `runs_tests` run (a test that starts a server
+     hung in the editor's runner); `files_grep`'s scope argument is `glob`, and `editor_problems` has no severity
+     filter (cspell's infos drown the rest — moot now cspell is out).
    - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
      tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
      editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
