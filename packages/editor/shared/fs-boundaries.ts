@@ -13,7 +13,9 @@ interface Tally { "calls": number; "ms": number; "bytes": number; "paths": Set<s
 /** The distinct paths remembered per tally, at most: past it, `paths` says at least this many. */
 const MOST_PATHS = 50_000;
 
-const tallies = new Map<string, Tally>();
+/** The totals, on the realm's global: one for every bundle loaded into it (the workbench's, the bridge's), which the
+ *  workbench's gauge reports. */
+const tallies = ((globalThis as Record<symbol, unknown>)[Symbol.for("editor.fs-boundaries")] ??= new Map()) as Map<string, Tally>;
 
 function tallyOf(boundary: string, operation: string, caller: string): Tally {
 	const key = `${boundary}.${operation}.${caller}`;

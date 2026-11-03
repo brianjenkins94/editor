@@ -13,7 +13,6 @@
 import type { Effect } from "@brianjenkins94/editor-api";
 import type { RuntimeDecision } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Observed } from "@brianjenkins94/observability";
 import { recordEffect } from "@brianjenkins94/editor-api/effects";
 import { verdictOf } from "@brianjenkins94/editor-api/gate";
 import { answerMailbox, runtimeSession } from "@brianjenkins94/editor-api/runtime";
@@ -21,6 +20,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { decideCapabilityAs } from "./capabilities/decide";
 import { policyFor, takeOnce } from "./capability-stops";
+import { countCall } from "../../shared/fs-boundaries";
 
 const READS = new Set(["readFile", "stat", "readdir"]);
 const WRITES = new Set(["writeFile", "mkdir", "rm", "rename"]);
@@ -109,7 +109,7 @@ function skipped(op: string): Answer {
 }
 
 /** Answer each debugger worker's file calls, once it hands over its mailbox (`runtime.fs.attach`). */
-export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, log: Observed["log"]): void {
+export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): void {
 	const rpc = createRpcClient(hub);
 	const sessions = new Map<string, vscode.DebugSession>();
 	/** Each session's mailboxes, stopped as it ends. */
@@ -228,18 +228,24 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 
 			// The session its link was made for: the extension named it to `connect` — never the worker's word.
 			const bound = from === undefined ? undefined : runtimeSession(from);
+			// Each call counted, not spanned: a debug run's or a linter's file calls are thousands a second (CLAUDE.md, *Spans*,
+			// hot paths) — by operation and by the worker's link (`from`: eslint, a debugger's, by its kind), with its path and bytes, as the
+			// metrics plane's `fs` (fs-boundaries.ts); a failed one apart, as `<op>-failed`.
+			// (by its kind — `eslint`, not `eslint#3488b734`: a worker started afresh is the same caller)
+			const who = from?.split("#")[0] ?? "runtime";
 			const stop = answerMailbox(mailbox, async (meta, payload) => {
-				// eslint-disable-next-line ts/no-base-to-string -- a call's fields come off the mailbox unknown: logged as String() makes them
-				const span = log.span("editor.extensions.bridge.runtime-fs.fs", { "op": String(meta["op"]), "path": String(meta["path"]), ...bound === undefined ? {} : { "session": bound } });
+				const op = typeof meta["op"] === "string" ? meta["op"] : "unknown";
+				const path = typeof meta["path"] === "string" ? meta["path"] : undefined;
+				const started = performance.now();
 
 				try {
-					const { how, ...answered } = await answer(bound, meta, payload);
+					const { how: _how, ...answered } = await answer(bound, meta, payload);
 
-					span.end({ ...how === undefined ? {} : { "how": how }, "bytes": answered.payload?.length ?? 0 });
+					countCall("runtime-fs", op, who, performance.now() - started, path, (answered.payload?.length ?? 0) + payload.length);
 
 					return answered;
 				} catch (error) {
-					span.end({ "error": (error as { "code"?: string }).code ?? String(error) });
+					countCall("runtime-fs", op + "-failed", who, performance.now() - started, path);
 
 					throw error;
 				}

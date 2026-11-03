@@ -65,7 +65,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	// workers' file calls are answered by runtime-fs.ts, a debugger's anywhere (the web worker host's come by core's
 	// bootstrap there).
 	provideWorkspaceRuntime(workspaceRuntime());
-	serveRuntimeFiles(context, bridgeHub, bridgeLog);
+	serveRuntimeFiles(context, bridgeHub);
 	// What every debugger's runs tell core — tsval's, and another extension's (`run.debugger`: an interpreter plugged in
 	// from editor-contrib) — the run contract's events, read the one way; and how each launch is resolved (debug-events.ts).
 	registerDebugEvents(context);

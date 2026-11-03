@@ -265,8 +265,8 @@ export async function startSession(options = {}) {
 	const pageErrors = [];
 	// What the page printed lately — the root prints every record the hub tree collects ([source] text).
 	const printed = [];
-	// The same, less the bridge's file traffic (`editor.extensions.bridge.runtime-fs.fs`: thousands of lines as types
-	// load, which push everything else out of `printed`): what a request that timed out says it was doing.
+	// The same, each with when it was printed: what a request that timed out says it was doing. (The bridge's file calls
+	// were thousands of lines here once; they're counted now, the metrics plane's `fs`.)
 	const notable = [];
 	// Who hears of a realm that couldn't load: each wait in progress, which fails on it at once (failFast).
 	const realmFailed = new Set();
@@ -285,12 +285,10 @@ export async function startSession(options = {}) {
 			printed.shift();
 		}
 
-		if (!message.text().includes("editor.extensions.bridge.runtime-fs.fs")) {
-			notable.push(`${new Date().toISOString().slice(11, 23)} ${message.text().slice(0, 300)}`);
+		notable.push(`${new Date().toISOString().slice(11, 23)} ${message.text().slice(0, 300)}`);
 
-			if (notable.length > 5000) {
-				notable.shift();
-			}
+		if (notable.length > 5000) {
+			notable.shift();
 		}
 
 		if (message.type() === "error") {
@@ -460,7 +458,7 @@ export async function startSession(options = {}) {
 		"workbench": workbench,
 		/** What the page printed lately: each line as the console has it — a collected record as `[source] text`. */
 		"printed": () => printed,
-		/** The same, less the bridge's file traffic (`editor.extensions.bridge.runtime-fs.fs`), each with the time it was printed. */
+		/** The same, each with the time it was printed. */
 		"notable": () => notable,
 		"until": observed,
 		"eventually": eventually,
