@@ -182,7 +182,7 @@ How it's kept:
      previews went; their locator engine's package with them), and the architecture model's and view's previews, node worker,
      ESLint and provoke (71 subject families nothing sent); then the live architecture diagram itself, its declared
      model and conformance check (the reports and their store stay: debug-mcp's architecture_state and the CI harness
-     read them). The core's tests: 4 new (history-ledger, tarballs, runs,
+     read them). And the terminal down to the core's commands (node, npm, ps, kill, git). The core's tests: 4 new (history-ledger, tarballs, runs,
      shell-feature), below. Realms and performance pass (8 of 8).
      Left, in order:
      - *Kept, a decision rather than a cut:* extensions by URL (`?extension=`, `extensions.json`) and the extension
@@ -191,8 +191,8 @@ How it's kept:
      - *What's still in the manifest:* tsval's site sums, the architecture reports and metrics, extensions by URL and
        the extension template — they move to the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
        own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
-     - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
-       check` caught a removed feature named.
+     - *Docs:* done 2026-11-02 — ARCHITECTURE.md (1,277 lines to 688) and RUNNING.md (320 to 126) describe the core;
+       RUNTIME-EVIDENCE.md says it's out, kept as the design its features come back to.
      - *The core's tests:* begun 2026-11-02 — the ledger declares each core feature's tests (`tests`, which `silo check`
        holds to the files): 16 of the 29 have them, four of those new (history-ledger: decisions and drift in Problems;
        tarballs; runs; shell-feature). The unit suite passes in Node. Without a test yet: the agent's view of the editor

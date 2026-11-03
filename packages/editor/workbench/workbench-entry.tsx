@@ -672,7 +672,7 @@ function maybeBoot(): void {
 
 			// The rest run in the web worker host, each from its folder with the files its manifest lists: history (its
 			// tsserver plugin) and Source Control (on the editor's git). Public API only, but for what ARCHITECTURE.md lists
-			// (*Extension points* 5).
+			// (*Extension points* 3).
 			for (const extension of [historyExtension, sourceControlExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}

@@ -143,7 +143,7 @@
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
     "what": "When a run reaches a call that touches files, the network or commands and nothing has decided it yet, the run stops on that line and asks in the margin: allow, skip or deny, for this call, this run or always, or make a rule.",
-    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Capability decisions, on the line*",
+    "docs": "packages/editor/RUNNING.md, *Capability stops*",
     "ways": [
       "command|editor.capability.decide",
       "debug adapter tracker provider|*|bridge/capability-stops.ts"
@@ -1105,7 +1105,7 @@
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
     "what": "The Source Control view shows staged and unstaged changes with diffs against the last commit, and commits from its input box.",
-    "docs": "packages/editor/ARCHITECTURE.md, *Worked examples (the git/SCM + BABLR stack)*",
+    "docs": "packages/editor/ARCHITECTURE.md, *Worked example: git*",
     "ways": [
       "command|sourceControl.commit",
       "command|sourceControl.refresh",
@@ -1171,6 +1171,7 @@
       "packages/editor/workbench/terminal/commands/more/",
       "packages/editor/workbench/terminal/commands/history/"
     ],
+    "in": "537c4815",
     "restore": "from the full-editor tag: each command's folder (catalog.ts finds them), with `missing` back in catalog.ts and invoke.ts for the ones that aren't here"
   },
   "Terminal node runs in the debugger": {

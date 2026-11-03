@@ -1,6 +1,6 @@
 /**
  * Capability stops, whichever debugger's (the run contract, @brianjenkins94/editor-api): a run stopped at a gated call
- * asks on its line (`ask`), and the answer — `editor.capability.decide` (ARCHITECTURE.md, *Extension points* 5): a test
+ * asks on its line (`ask`), and the answer — `editor.capability.decide` (ARCHITECTURE.md, *Extension points* 3): a test
  * run's approval, runs_tests' — goes back to the debugger as a `decide` request.
  *
  * What an answer means is the editor's, not the debugger's: Allow, Skip or Deny for this call, this run (every call of
@@ -149,7 +149,7 @@ export function registerCapabilityStops(context: vscode.ExtensionContext): void 
 	const running = new Map<string, vscode.DebugSession>();
 
 	context.subscriptions.push(
-		// A session's stop answered (ARCHITECTURE.md, *Extension points* 5) — answered itself once it's told.
+		// A session's stop answered (ARCHITECTURE.md, *Extension points* 3) — answered itself once it's told.
 		vscode.commands.registerCommand("editor.capability.decide", async (id: unknown, choice: unknown, rule?: Rule, give?: unknown) => {
 			const session = typeof id === "string" ? running.get(id) : undefined;
 

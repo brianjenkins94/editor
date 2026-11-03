@@ -1,5 +1,12 @@
 # Runtime evidence
 
+**Out of the core, until reintroduced** (ARCHITECTURE.md, *The rewrite, in place*). The editor this describes — evidence
+kept in git, the Margin's live values, hovers, notes and annotations on spans, previews under HMR, live runs and runs
+kept as balls — went with the reduction; each feature's ledger tombstone says what it was and how to bring it back.
+It stays as the design they come back to, and what the packages that still carry their engines cite (tsval's live
+values and live runs, almostnode's instrumentation, editor-api's evidence and annotations). What the core does at a
+capability stop is RUNNING.md, *Capability stops*.
+
 The editor learns what your program actually does by running it: which code ran and how often, where the time went,
 the values that passed through, whether the types held, which branches were taken, which capabilities it used. It keeps
 that evidence in git beside the code, attached to stable spans rather than lines, and turns it into help you can act on.

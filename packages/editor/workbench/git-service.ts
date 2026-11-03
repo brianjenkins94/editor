@@ -44,7 +44,7 @@ interface CommitPick { "path": string; "hunks"?: string[]; "except"?: number[] }
 const unpicked = (rows: DiffRowInfo[], picked: ReadonlySet<number>): Set<number> => new Set(rows.flatMap((row, index) => (row.type !== "ctx" && !picked.has(index) ? [index] : [])));
 
 /** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub — and the same as
- *  commands for extensions (ARCHITECTURE.md, *Extension points* 5): `editor.git.status`, `editor.git.file(path)`, `editor.git.commit(message)`.
+ *  commands for extensions (ARCHITECTURE.md, *Extension points* 3): `editor.git.status`, `editor.git.file(path)`, `editor.git.commit(message)`.
  *  (An extension learns of a change as VS Code's own git does: a save, or a file watcher — the repository is files too.) */
 /** What the service reads the working tree with, for whoever joins more to it (git-review.ts). */
 export interface GitReader {
