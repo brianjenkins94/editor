@@ -160,8 +160,11 @@ How it's kept:
      `workspace.fs` (`MainThreadFileSystem`), 8 left as `vscode`. The walk was three
      searches at once as the project opens — type acquisition's package.jsons and tsconfigs (one search now, a span:
      `editor.workbench.ata.project`) and versions' package.jsons — and searches walking at once now share each folder's
-     listing (the component's workspace-search.ts): a load's search readdirs 1,556 → 519, one walk. Left: a single
-     call's span on demand.
+     listing (the component's workspace-search.ts): a load's search readdirs 1,556 → 519, one walk. A single call
+     on demand (2026-11-03): Trace File Calls (the command; `fs.trace`, agents' `files_trace`) — for a while, each
+     call at a boundary (or all), of a path, with its caller, time and bytes, a record in the span
+     `editor.workbench.fs-trace.window` and a line in the Output channel "File Calls". A record, not a span of its
+     own: a span starts when it's opened, and a call's is known when it ends.
      Before it, so the spans CLAUDE.md asks for (*Spans*) count (a throwing span and hub requests: done 2026-11-02):
      - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
        and this repository's spans take it already; the editor's lint holds them once lib publishes util.

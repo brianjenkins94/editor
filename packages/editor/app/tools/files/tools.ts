@@ -1,4 +1,5 @@
-/** The workspace, as an agent works in it — files read, written, edited, deleted, found and searched (`files.*`, workspace-tools.ts). */
+/** The workspace, as an agent works in it — files read, written, edited, deleted, found and searched (`files.*`, workspace-tools.ts) —
+ *  and the filesystems' calls one at a time, for a while (`fs.trace`, fs-trace.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -110,6 +111,21 @@ const files: ToolFamily = ({ request }) => [
 				}
 			},
 			"handler": async ({ pattern, glob, ignoreCase, limit }, { signal }) => ok(request("files.grep", { "pattern": pattern, "glob": glob, "ignoreCase": ignoreCase, "limit": limit }, signal))
+		})
+	},
+	{
+		"timeoutMs": 5000,
+		"tool": defineTool({
+			"name": "files_trace",
+			"config": {
+				"description": "Trace File Calls (the command): every filesystem call at one boundary, for a while, one at a time — its operation, caller, path, ms and bytes — where metrics_query's `fs` gauge has only their totals. Boundaries: provider (VS Code into the workspace), node_modules, zenfs (the workspace's store), zenfs-local, indexeddb (the write-back), changes, runtime-fs (the workers' files). It answers at once and closes on its own; do the thing, then read with logs_query (source workbench, each call a record \"<boundary> <operation>\"), or the Output channel \"File Calls\". One trace at a time; at most 10,000 calls written. Returns { tracing, until, read }.",
+				"inputSchema": {
+					"boundary": z.string().optional().describe("One boundary's calls (provider, zenfs, runtime-fs…); omitted, every boundary's."),
+					"path": z.string().optional().describe("Only calls whose path has this text."),
+					"seconds": z.number().optional().describe("How long (default 30, at most 300).")
+				}
+			},
+			"handler": async ({ boundary, path, seconds }, { signal }) => ok(request("fs.trace", { "boundary": boundary, "path": path, "seconds": seconds }, signal))
 		})
 	}
 ];

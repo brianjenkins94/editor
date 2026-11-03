@@ -11,5 +11,14 @@
   "activationEvents": [
     "onStartupFinished",
     "onDebug"
-  ]
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "editor.fs.trace",
+        "title": "Trace File Calls…",
+        "category": "Editor"
+      }
+    ]
+  }
 }

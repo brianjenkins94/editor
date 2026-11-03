@@ -191,6 +191,13 @@
     "since": "2026-11-02",
     "what": "Every context reports itself and its traffic on the architecture plane, and its memory, timing and traffic numbers on the metrics plane, for debug-mcp (architecture_state, metrics_query) and the architecture harness.",
     "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
+    "ways": [
+      "agent tool|files_trace",
+      "command|editor.fs.trace",
+      "core module|installFsTrace",
+      "hub request|fs.trace",
+      "output channel|File Calls"
+    ],
     "paths": [
       "packages/editor/build/command-tap.ts",
       "packages/editor/extensions/command-tap.ts",
@@ -199,7 +206,8 @@
       "packages/editor/shared/editor-metrics.ts",
       "packages/editor/shared/fs-boundaries.ts",
       "packages/editor/shared/fs-caller.ts",
-      "packages/editor/workbench/architecture-store.ts"
+      "packages/editor/workbench/architecture-store.ts",
+      "packages/editor/workbench/fs-trace.ts"
     ],
     "tests": [
       "packages/editor/test/editor-metrics.test.mjs",

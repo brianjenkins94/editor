@@ -3,14 +3,14 @@
  * call adds to its boundary, operation and caller's calls, time, distinct paths and bytes, as the `fs` gauge reads them;
  * a library given `callerFs` is named for every call it makes — its promise calls too, answered by their synchronous
  * twins, so a store reached after an await inside the library's fs is still its; and who in VS Code called its file
- * service is the class past it on the call's stack.
+ * service is the class past it on the call's stack; and a trace sees each call, one at a time, while it's open.
  *
  *   node --import tsx --test test/fs-boundaries.test.mjs
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { countCall, fsGauge, timeCall } = await import("../shared/fs-boundaries.ts");
+const { countCall, fsGauge, timeCall, traceCalls } = await import("../shared/fs-boundaries.ts");
 const { asCaller, callerFs, fsCaller, vscodeCaller } = await import("../shared/fs-caller.ts");
 
 test("a call adds to its boundary, operation and caller: calls, time, distinct paths and bytes", async () => {
@@ -82,4 +82,15 @@ test("who in VS Code asked: the class past its file service on the stack, throug
 
 	assert.equal(await new ExplorerService().refresh(new FileService(), () => vscodeCaller()), "ExplorerService");
 	assert.equal(vscodeCaller(), "vscode", "no file service on the stack");
+});
+
+test("a trace sees each call while it's open, and none once it's stopped", () => {
+	const seen = [];
+	const stop = traceCalls((call) => seen.push(call));
+
+	countCall("probe", "write", "someone", 1.5, "/workspace/traced", 7);
+	stop();
+	countCall("probe", "write", "someone", 1, "/workspace/after");
+
+	assert.deepEqual(seen, [{ "boundary": "probe", "operation": "write", "caller": "someone", "ms": 1.5, "path": "/workspace/traced", "bytes": 7 }]);
 });

@@ -596,8 +596,10 @@ finding who walked the tree. So every boundary between the filesystems is a span
 workspace provider and the node_modules provider, zen-fs (its operations timed, not only counted, and its path
 lookups), the IndexedDB write-back, the change stream, isomorphic-git's reads, the terminal's fs, runtime-fs, and
 almostnode's. Each with its caller, operation, duration, bytes and parent span, so one call can be followed down through
-the layers. Aggregates are always on (per source and name, as span metrics are); single spans are kept on demand, as
-`editor_trace` keeps VS Code's log.
+the layers. Aggregates are always on (per source and name, as span metrics are); single calls are kept on demand, as
+`editor_trace` keeps VS Code's log: Trace File Calls (workbench/fs-trace.ts) writes each call at a boundary, for a
+while, as a record in its span and a line in the Output channel "File Calls" — a store call before the provider call
+that made it.
 
 Built so far (2026-11-03): every call at the workbench's boundaries is counted by boundary, operation and caller —
 calls, time, distinct paths, bytes — as the metrics plane's `fs` gauge (shared/fs-boundaries.ts): VS Code's file

@@ -42,6 +42,7 @@ import { wireWorkbenchHub } from "./bridge-link";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
+import { installFsTrace } from "./fs-trace";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installCodeProblems } from "./code-problems";
 import { installGitHistory } from "./git-history";
@@ -385,6 +386,7 @@ function maybeBoot(): void {
 				const nodeRunner = createNodeRunner(workbenchHub);
 
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
+				installFsTrace(workbenchHub, api as typeof import("vscode"), paneLog);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;

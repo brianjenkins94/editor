@@ -7,6 +7,12 @@
  * `.bytes`), so `metrics_query` says how many calls a load made per path, and whose they were.
  */
 
+/** One call, as a trace sees it (`traceCalls`). */
+export interface Call { "boundary": string; "operation": string; "caller": string; "ms": number; "path"?: string; "bytes": number }
+
+/** The traces open now, on the realm's global as the totals are: each sees every call made while it's open. */
+const traces = ((globalThis as Record<symbol, unknown>)[Symbol.for("editor.fs-traces")] ??= new Set()) as Set<(call: Call) => void>;
+
 /** One boundary, operation and caller's totals. */
 interface Tally { "calls": number; "ms": number; "bytes": number; "paths": Set<string> }
 
@@ -40,6 +46,24 @@ export function countCall(boundary: string, operation: string, caller: string, m
 	if (path !== undefined && tally.paths.size < MOST_PATHS) {
 		tally.paths.add(path);
 	}
+
+	if (traces.size > 0) {
+		const call: Call = { "boundary": boundary, "operation": operation, "caller": caller, "ms": ms, "path": path, "bytes": bytes };
+
+		for (const see of traces) {
+			see(call);
+		}
+	}
+}
+
+/** Every call counted from now on, to `see` as well, until the returned function stops it: one call at a time where
+ *  the totals sum them (workbench/fs-trace.ts, asked for). */
+export function traceCalls(see: (call: Call) => void): () => void {
+	traces.add(see);
+
+	return () => {
+		traces.delete(see);
+	};
 }
 
 /** `run` timed as a call of `operation` at `boundary` by `caller`, of `path`: to its return, or to its promise settling. */
