@@ -20,6 +20,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
+import { REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { serve } from "@brianjenkins94/hub";
 import { unifiedDiff } from "./git-service";
 
@@ -41,6 +42,19 @@ const SAVE_ATTEMPTS = 3;
 
 /** What `files.*` leave out, unless a glob asks for it. */
 const EXCLUDE = "{**/node_modules/**,**/.git/**}";
+
+/** The same, and the commits opened beside the work (git-refs.ts): a glob or grep reaches them when its pattern names
+ *  `.refs/`. */
+const EXCLUDE_REFS = `{**/node_modules/**,**/.git/**,${REFS_DIR}/**}`;
+
+/** What a glob or grep leaves out: nothing of what its pattern names (node_modules, .git, a commit opened). */
+function excludeFor(pattern: string): string | undefined {
+	if (/node_modules|\.git\//u.test(pattern)) {
+		return undefined;
+	}
+
+	return pattern.startsWith(REFS_DIR + "/") ? EXCLUDE : EXCLUDE_REFS;
+}
 
 /**
  * Save `document`, as the workspace's tools save an edit: VS Code abandons a save, and `save()` answers false, when its
@@ -314,7 +328,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		}
 
 		const most = typeof limit === "number" && limit > 0 ? limit : GLOB_RESULTS;
-		const found = await vscode.workspace.findFiles(pattern, /node_modules|\.git\//u.test(pattern) ? undefined : EXCLUDE, most + 1);
+		const found = await vscode.workspace.findFiles(pattern, excludeFor(pattern), most + 1);
 		const files = found.map(relative).sort();
 
 		return { "files": files.slice(0, most), "truncated": files.length > most };
@@ -348,7 +362,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		const matches: { "file": string; "line": number; "text": string }[] = [];
 		let total = 0;
 
-		for (const uri of (await vscode.workspace.findFiles(include, /node_modules|\.git\//u.test(include) ? undefined : EXCLUDE)).sort((left, right) => left.path.localeCompare(right.path))) {
+		for (const uri of (await vscode.workspace.findFiles(include, excludeFor(include))).sort((left, right) => left.path.localeCompare(right.path))) {
 			const text = await searchableText(uri);
 
 			if (text !== undefined) {

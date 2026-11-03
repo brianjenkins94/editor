@@ -46,6 +46,7 @@ import { installFsTrace } from "./fs-trace";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installCodeProblems } from "./code-problems";
 import { installGitHistory } from "./git-history";
+import { installGitRefs } from "./git-refs";
 import { installGitPush } from "./git-push";
 import { commitPart, installGitReview } from "./git-review";
 import { installGitService } from "./git-service";
@@ -415,6 +416,8 @@ function maybeBoot(): void {
 
 				// Diff, log, show and blame, for agents' git tools (git-history.ts).
 				installGitHistory(api as typeof import("vscode"), workbenchHub, remote);
+				// A commit beside the work, read-only, at .refs/<name>/ (git-refs.ts).
+				installGitRefs(api as typeof import("vscode"), workbenchHub, paneLog, remote);
 				// The repository the workspace is a clone of, for the shell's binding (project.ts); and what only it holds,
 				// for Reset (unpushed.ts).
 				serveOrigin(workbenchHub);

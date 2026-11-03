@@ -32,7 +32,8 @@ const BOUNDARIES: Record<string, string> = {
 	"zenfs-local": "the store's local folder",
 	"indexeddb": "the write-back",
 	"changes": "the change stream",
-	"runtime-fs": "the workers' files, through the bridge"
+	"runtime-fs": "the workers' files, through the bridge",
+	"refs": "a commit opened beside the work (.refs/)"
 };
 
 /** What a trace is of: a boundary (every one, without), a path (every one, without) and how long. */

@@ -26,6 +26,7 @@
  */
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscode from "vscode";
+import { REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { installedLocally } from "./versions";
 
 /** Files whose imports are worth acquiring types for. */
@@ -560,7 +561,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		};
 
 		// (both in one search: each is a walk of the whole tree)
-		const found = await api.workspace.findFiles(new api.RelativePattern(api.Uri.file(root), "**/{package.json,tsconfig.json}"), "**/node_modules/**");
+		const found = await api.workspace.findFiles(new api.RelativePattern(api.Uri.file(root), "**/{package.json,tsconfig.json}"), `{**/node_modules/**,${REFS_DIR}/**}`);
 		const named = async (name: string): Promise<(Record<string, unknown> | undefined)[]> => Promise.all(found.filter((uri) => uri.path.endsWith("/" + name)).map(read));
 		const [manifests, tsconfigs] = await Promise.all([named("package.json"), named("tsconfig.json")]);
 		const declared = manifests.flatMap((manifest) => Object.keys({ ...manifest?.["dependencies"] as object, ...manifest?.["devDependencies"] as object })).filter((name) => name.startsWith("@types/"));

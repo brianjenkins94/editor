@@ -528,6 +528,9 @@ any workspace's. So each step is built as the bench's, and this rebuild is its f
   is that for every feature not declared core, reviewed as one change.
 - **Reintroduce**: a removed feature as it was, beside the work: its code at its tombstone's commit, its notes, its
   tests and its baseline answers, to read rather than copy, and what its old tests reached that its new ones don't.
+  Its code at a commit exists (2026-11-03, *A commit beside the work*: workbench/git-refs.ts): a branch, tag or commit
+  opened read-only at `.refs/<name>/`, a layer over the workspace read from git's objects, as "comments stripped"
+  could be.
 - **Tests**: the feature's list (packages/silo/README.md, *Tests by feature, in your face*), its tests run in the
   editor, and the vouches its commit flow makes.
 - **Shared code**: runs and coverage by feature (coverage and traces exist; by feature, not yet).

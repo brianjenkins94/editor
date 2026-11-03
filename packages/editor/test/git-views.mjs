@@ -2,7 +2,8 @@
  * The workspace's git as a person reviews and commits it, in a real editor: the shell's review panel (shell/git-panel.tsx)
  * — the changed files listed, some picked, committed with a message, one discarded — and VS Code's Source Control view
  * (extensions/source-control/) — a change listed, committed from its input box — and a change's problems on its row in
- * the panel (shell/change-problems.tsx, workbench/code-problems.ts). Each over the workbench's git
+ * the panel (shell/change-problems.tsx, workbench/code-problems.ts) — and a commit opened read-only beside the work
+ * (workbench/git-refs.ts). Each over the workbench's git
  * (git-service.ts, git-review.ts); what was committed read back with `git.log` and `git.status`.
  *
  *   node --test --test-global-setup=test/architecture-harness.mjs test/git-views.mjs
@@ -110,6 +111,31 @@ test("a change's problems: what it made and what it fixed against HEAD, from cod
 	await session.eventually("its row's counts", async () => (await added.count() > 0 && await cleared.count() > 0 ? true : undefined), 120_000);
 	assert.match(await added.getAttribute("title"), /1: Type 'number' is not assignable to type 'boolean'\. \(ts 2322\)/u);
 	assert.match(await cleared.getAttribute("title"), /2: Type 'string' is not assignable to type 'number'\. \(ts 2322\)/u);
+});
+
+test("a commit opened beside the work: read-only at .refs/<name>/, its files as committed, out of git and the default globs", async () => {
+	await session.request("files.write", { "path": "refs-probe/a.txt", "content": "committed\n" }, 30_000);
+	await session.request("git.commit", { "message": "refs: a file to read at its commit", "files": [{ "path": "refs-probe/a.txt" }] }, 60_000);
+
+	const commit = (await session.request("git.log", { "limit": 1 }, 30_000)).commits[0].oid;
+	const opened = await session.request("git.openRef", { "ref": commit.slice(0, 12) }, 60_000);
+
+	assert.equal(opened.path, ".refs/" + commit.slice(0, 12));
+	assert.equal(opened.commit, commit);
+
+	// The working file changed after: the commit's is as it was.
+	await session.request("files.write", { "path": "refs-probe/a.txt", "content": "changed since\n" }, 30_000);
+	assert.equal((await session.request("files.read", { "path": opened.path + "/refs-probe/a.txt" }, 30_000)).content, "1\tcommitted\n2\t");
+	await assert.rejects(session.request("files.write", { "path": opened.path + "/refs-probe/b.txt", "content": "no\n" }, 30_000), /read-only/u);
+
+	const named = (await session.request("files.glob", { "pattern": ".refs/**/refs-probe/*.txt" }, 30_000)).files;
+	const unnamed = (await session.request("files.glob", { "pattern": "**/refs-probe/*.txt" }, 30_000)).files;
+
+	assert.deepEqual(named, [opened.path + "/refs-probe/a.txt"]);
+	assert.deepEqual(unnamed, ["refs-probe/a.txt"], "a glob that doesn't name .refs/ leaves it out");
+	assert.equal((await changed()).some((path) => path.startsWith(".refs/")), false, "git doesn't see it");
+	await assert.rejects(session.request("git.openRef", { "ref": "no-such-ref" }, 60_000), /isn't a commit/u);
+	await session.request("git.discard", { "path": "refs-probe/a.txt" }, 30_000).catch(() => undefined);
 });
 
 test("Source Control: a change listed, committed from its input box", async () => {

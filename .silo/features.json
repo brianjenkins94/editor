@@ -22,6 +22,25 @@
       "packages/editor/test/page-tools.test.mjs"
     ]
   },
+  "A commit beside the work": {
+    "status": "active",
+    "why": "the rewrite's Measure reads full-editor, and Reintroduce a removed feature's code at its tombstone, in the editor (user, 2026-11-03: the editor's gap first)",
+    "since": "2026-11-03",
+    "what": "Open a branch, tag or commit read-only beside the work: a folder, .refs/<name>/, its files as that commit has them, fetched one commit deep when the clone hasn't it — browsed, searched and read as any folder, never written, and out of git.",
+    "docs": "packages/editor/ARCHITECTURE.md, *The rewrite, in place*",
+    "ways": [
+      "agent tool|git_open",
+      "command|editor.git.openRef",
+      "core module|installGitRefs",
+      "hub request|git.openRef"
+    ],
+    "paths": [
+      "packages/editor/workbench/git-refs.ts"
+    ],
+    "tests": [
+      "packages/editor/test/git-views.mjs"
+    ]
+  },
   "Agent connection": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",

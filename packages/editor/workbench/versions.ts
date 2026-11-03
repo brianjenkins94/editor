@@ -20,7 +20,7 @@
  */
 import type * as vscodeApi from "vscode";
 import { failureText } from "@brianjenkins94/editor-api/failures";
-import { keptAt } from "@brianjenkins94/editor-api/git";
+import { keptAt, REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
 import { markReady } from "./readiness";
@@ -292,7 +292,7 @@ export function syncVersions(vscode: typeof vscodeApi, root = "/workspace"): Pro
 
 		const read = async (file: vscodeApi.Uri): Promise<unknown> => JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(file))) as unknown;
 		const lock = await read(vscode.Uri.file(`${root}/package-lock.json`)).catch(() => undefined) as Parameters<typeof lockedVersions>[0] | undefined;
-		const files = (await vscode.workspace.findFiles("**/package.json", `{**/node_modules/**,**/${SILO_DIR}/**}`)).toSorted((one, other) => one.path.length - other.path.length);
+		const files = (await vscode.workspace.findFiles("**/package.json", `{**/node_modules/**,**/${SILO_DIR}/**,${REFS_DIR}/**}`)).toSorted((one, other) => one.path.length - other.path.length);
 		const { roots, local } = dependenciesOf(await Promise.all(files.map(async (file) => ({ "dir": file.path.slice(root.length + 1, file.path.lastIndexOf("/")), "manifest": await read(file).catch(() => undefined) }))));
 
 		const at = await keptAt(versionsPath(), async (path) => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${root}/${path}`))).then(() => true, () => false));

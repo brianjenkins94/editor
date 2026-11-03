@@ -171,7 +171,11 @@ How it's kept:
    - **Measure, while all the code is there**: what of the scope BABLR parses, a sample of its comments sorted into
      dropped, kept, note, and note citing a doc, and the zero-knowledge baseline on 3–5 features (the code alone
      against the code as it is). And the whole test suite run one last time, in CI and in the editor, for each test's
-     reach and outcome: what each feature's tests held it to, once they're gone.
+     reach and outcome: what each feature's tests held it to, once they're gone. The reduction landed first, so it reads
+     `full-editor`, in the editor (user, 2026-11-03: the editor's gap first). Built for it: *A commit beside the
+     work* (workbench/git-refs.ts) — Git: Open a Commit Read-Only… (agents' `git_open`) opens a branch, tag or commit
+     at `.refs/<name>/`, read from git's objects, fetched one commit deep (`full-editor`: 14 s), read-only, out of git
+     and of the globs that don't name it; the Explorer, Quick Open, Find in Files and files_* read it as any folder.
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
      or kept, each "stays because" reason checked again.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved

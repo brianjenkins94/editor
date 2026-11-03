@@ -2,9 +2,13 @@
  * The editor's git's answers (workbench/git-service.ts): `editor.git.status`'s files, as the Source Control view reads
  * them (packages/editor/ARCHITECTURE.md, *Extension points* 3), and the hub's `git.*`, as the shell's review panel does — and what BABLR says of a change
  * (`editor.annotations.classify`: the cosmetic extension's badge, the panel's). And where the editor keeps the files it
- * makes for a project (`keptAt`).
+ * makes for a project (`keptAt`), and where a commit opened beside the work is (`REFS_DIR`).
  */
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
+
+/** The folder at the workspace's root where a commit opened beside the work is, read-only (workbench/git-refs.ts):
+ *  `.refs/<name>/`. Not in git's store, so git doesn't see it; the walks for the project's own files leave it out. */
+export const REFS_DIR = ".refs";
 
 /** The files the editor makes for a project, under `.silo/`: the versions it pins, the dependency baseline, the static
  *  capability surface. */

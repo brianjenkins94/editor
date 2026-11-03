@@ -17,7 +17,7 @@ import { Buffer } from "node:buffer";
 import { KEPT, localOf } from "@brianjenkins94/editor-api/git";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs as zenfs } from "@zenfs/core";
-import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, setConfig, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
+import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, readCommit, readTree, remove, resetIndex, resolveRef, setConfig, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 import { callerFs } from "../shared/fs-caller";
 
 /** The workspace's store as git reaches it: each of isomorphic-git's calls git's, in the store's counts (fs-caller.ts). */
@@ -685,11 +685,45 @@ export async function headContent(path: string): Promise<string> {
 	return await fileAt(path, "HEAD") ?? "";
 }
 
+/** `ref`'s object — a branch, a tag, HEAD, or a commit's oid, whole or its beginning — or a rejection where it isn't
+ *  one here. */
+async function oidOf(ref: string): Promise<string> {
+	return /^[\da-f]{4,40}$/u.test(ref) ? expandOid({ "fs": fs, "dir": DIR, "oid": ref }).catch(async () => resolveRef({ "fs": fs, "dir": DIR, "ref": ref })) : resolveRef({ "fs": fs, "dir": DIR, "ref": ref });
+}
+
+/** `ref`'s commit and when it was made, or undefined where it isn't one here (a tag is read through to its commit). */
+export async function commitOf(ref: string): Promise<{ "oid": string; "time": number } | undefined> {
+	try {
+		const { oid, commit: made } = await readCommit({ "fs": fs, "dir": DIR, "oid": await oidOf(ref) });
+
+		return { "oid": oid, "time": made.committer.timestamp * 1000 };
+	} catch {
+		return undefined;
+	}
+}
+
+/** What's in `path` ("" the root) at `commit`: each entry's name, its kind and its object — or undefined where `commit`
+ *  hasn't that folder. */
+export async function treeAt(commit: string, path: string): Promise<{ "name": string; "type": "blob" | "tree" | "commit"; "oid": string }[] | undefined> {
+	try {
+		const { tree } = await readTree({ "fs": fs, "dir": DIR, "oid": commit, ...path === "" ? {} : { "filepath": path } });
+
+		return tree.map((entry) => ({ "name": entry.path, "type": entry.type, "oid": entry.oid }));
+	} catch {
+		return undefined;
+	}
+}
+
+/** A file's bytes, by its object. */
+export async function blobBytes(oid: string): Promise<Uint8Array> {
+	return (await readBlob({ "fs": fs, "dir": DIR, "oid": oid })).blob;
+}
+
 /** `path`'s text at `ref` — a branch, HEAD, or a commit's oid, whole or its beginning — or undefined where `ref` isn't a
  *  commit here or hasn't the file. */
 export async function fileAt(path: string, ref: string): Promise<string | undefined> {
 	try {
-		const oid = /^[\da-f]{4,40}$/u.test(ref) ? await expandOid({ "fs": fs, "dir": DIR, "oid": ref }).catch(async () => resolveRef({ "fs": fs, "dir": DIR, "ref": ref })) : await resolveRef({ "fs": fs, "dir": DIR, "ref": ref });
+		const oid = await oidOf(ref);
 		const { blob } = await readBlob({ "fs": fs, "dir": DIR, "oid": oid, "filepath": path });
 
 		return new TextDecoder().decode(blob);

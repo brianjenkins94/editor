@@ -18,6 +18,11 @@
         "command": "editor.fs.trace",
         "title": "Trace File Calls…",
         "category": "Editor"
+      },
+      {
+        "command": "editor.git.openRef",
+        "title": "Open a Commit Read-Only…",
+        "category": "Git"
       }
     ]
   }

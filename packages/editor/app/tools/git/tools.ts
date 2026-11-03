@@ -1,5 +1,6 @@
 /** The workspace's git: status, diff, the changes as hunks, commit and discard (whole files or hunks), branches, a push
- *  to GitHub, and history — log, a file at a revision, blame (git-service.ts, git-review.ts, git-push.ts, git-history.ts). */
+ *  to GitHub, and history — log, a file at a revision, blame, a commit opened beside the work (git-service.ts, git-review.ts, git-push.ts,
+ *  git-history.ts, git-refs.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -31,6 +32,19 @@ const git: ToolFamily = ({ request }) => [
 				}
 			},
 			"handler": async ({ path, rev }, { signal }) => ok(request("git.show", { "path": path, "rev": rev }, signal))
+		})
+	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
+			"name": "git_open",
+			"config": {
+				"description": "Open a Commit Read-Only (the command): a branch, tag or commit beside the work, at .refs/<name>/ in the workspace, its files as that commit has them — fetched one commit deep when this clone hasn't it (`full-editor` is the editor before the rewrite reduced it). Read it with files_read, files_glob and files_grep at `.refs/<name>/…` (a glob or grep reaches .refs/ only when its pattern names it); nothing there can be written. Open until the editor reloads. Returns { ref, commit, path }.",
+				"inputSchema": {
+					"ref": z.string().describe("The branch, tag or commit (oid or its beginning).")
+				}
+			},
+			"handler": async ({ ref }, { signal }) => ok(request("git.openRef", { "ref": ref }, signal))
 		})
 	},
 	{

@@ -767,6 +767,7 @@ export { ExtensionHostKind, registerExtension, registerFileSystemOverlay };
 // (e.g. games' CDN-backed node_modules resolver) without depending on @codingame packages directly.
 export {
 	FileChangeType,
+	FilePermission,
 	FileSystemProviderCapabilities,
 	FileSystemProviderError,
 	FileSystemProviderErrorCode,
