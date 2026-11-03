@@ -214,6 +214,7 @@ export const languages = {
 			"set": (uri: Uri, diagnostics: Diagnostic[]) => {
 				problems.set(pathOf(uri), diagnostics);
 			},
+			"get": (uri: Uri) => problems.get(pathOf(uri)),
 			"clear": () => {
 				problems.clear();
 			},

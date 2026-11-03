@@ -45,8 +45,8 @@ import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
-import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
-import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { ledgerPath, manifestPath, ownedPath } from "@brianjenkins94/util/silo/layout";
+import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, parseOwned, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { codeOwners, featuresOfLedger, manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
@@ -146,18 +146,23 @@ function ledgerOf(repo: string): Ledger {
 /** The feature ledger's drift from `repo` as it is (the checks that need no reach: lib util/silo/ledger). */
 export async function ledgerDrift(repo: string, today = new Date().toISOString().slice(0, 10), program?: Awaited<ReturnType<typeof currentProgram>>): Promise<Drift[]> {
 	const ledger = ledgerOf(repo);
-	const files = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && fs.existsSync(path.join(repo, file)));
+	// (and the files not yet committed, but for those git ignores: a new file is held to an owner before it's committed)
+	const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && fs.existsSync(path.join(repo, file)));
 	const read = (file: string): { "file": string; "text": string } => ({ "file": file, "text": fs.readFileSync(path.join(repo, file)) });
 	const ways = [...(program ?? await currentProgram(repo)).features.values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides }));
 
 	const exists = (each: string): boolean => fs.existsSync(path.join(repo, each));
+	const code = files.filter((file) => includeByDefault(file) && /\.[cm]?[jt]sx?$/u.test(file));
+	// (the folders whose every code file a feature must own: decision 22)
+	const owned = exists(ownedPath()) ? parseOwned(fs.readFileSync(path.join(repo, ownedPath()))) : [];
 
 	return [...drift(ledger, {
 		"today": today,
 		"ways": ways,
 		"exists": exists,
 		"docs": files.filter((file) => file.endsWith(".md")).map(read),
-		"code": files.filter((file) => includeByDefault(file) && /\.[cm]?[jt]sx?$/u.test(file)).map(read)
+		"code": code.map(read),
+		...owned.length === 0 ? {} : { "owned": { "scope": owned, "files": code } }
 	}), ...manifestDriftOf(repo, ways, exists)];
 }
 
@@ -468,7 +473,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "check",
-			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, and dead ends (a command or view declared and never registered, a setting never read) — and the feature manifest's (.silo/manifest.json): a way in no feature owns, one owned that's gone or owned twice, a path that isn't there — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
+			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, a code file in an owned folder (.silo/owned.json) no feature owns or two do, and dead ends (a command or view declared and never registered, a setting never read) — and the feature manifest's (.silo/manifest.json): a way in no feature owns, one owned that's gone or owned twice, a path that isn't there — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "prices": { "format": Boolean, "default": false, "doc": "Every entry's price, too: what deleting its feature would free." } }),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));

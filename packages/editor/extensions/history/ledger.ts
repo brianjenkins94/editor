@@ -2,7 +2,8 @@
  * The feature ledger in the editor (packages/silo/README.md, *The feature ledger*: "In the editor"), what `silo check`
  * says, held to the workspace as it is:
  * - **Drift, in Problems** (lib's util/silo/ledger `drift`, the same checks): each a problem on `.silo/features.json`, at
- *   the entry it's about (a dead end the ledger doesn't name, at its top), with both ways out.
+ *   the entry it's about (a dead end the ledger doesn't name, at its top), with both ways out — and a code file no
+ *   feature owns, or two do, on that file (decision 22: the folders `.silo/owned.json` names).
  * - **What's been decided about a file or a name** (`history.decisions`, core's `decisions.for`, agents' `decisions_for`):
  *   the ledger's entries naming it (or whose paths hold the file), the manifest's features owning it, and each line of
  *   the docs naming it, under its heading — NEXT.md's items, the design sections — so a reason isn't re-derived.
@@ -11,14 +12,17 @@
  */
 import type { Feature } from "@brianjenkins94/util/silo/features";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
-import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
-import { drift, parseLedger } from "@brianjenkins94/util/silo/ledger";
+import { ledgerPath, manifestPath, ownedPath } from "@brianjenkins94/util/silo/layout";
+import { drift, parseLedger, parseOwned } from "@brianjenkins94/util/silo/ledger";
 import { featuresOfManifest, parseManifest } from "@brianjenkins94/util/silo/manifest";
 import * as vscode from "vscode";
 
 /** The files drift reads: docs, and code. */
 const READ = "**/*.{md,ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 const EXCLUDE = "**/node_modules/**";
+
+/** A code file, as ownership counts one. */
+const CODE = /\.[cm]?[jt]sx?$/u;
 
 /** The doc lines `history.decisions` lists, at most. */
 const DOC_LINES = 60;
@@ -131,24 +135,40 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri): 
 			const there = await load();
 			const ledgerText = texts.get(ledgerPath()) ?? await textOf(ledgerUri);
 			const ledger = parseLedger(ledgerText);
+			const owned = parseOwned(await textOf(vscode.Uri.joinPath(root, ownedPath())));
 			const found = drift(ledger, {
 				"today": today(),
 				"ways": [...features.values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides })),
 				"exists": (path) => there.has(path) || [...there].some((file) => file.startsWith(path.replace(/\/+$/u, "") + "/")),
 				"docs": [...texts].filter(([path]) => path.endsWith(".md")).map(([path, text]) => ({ "file": path, "text": text })),
-				"code": [...texts].filter(([path]) => !path.endsWith(".md") && includeByDefault(path)).map(([path, text]) => ({ "file": path, "text": text }))
+				"code": [...texts].filter(([path]) => !path.endsWith(".md") && includeByDefault(path)).map(([path, text]) => ({ "file": path, "text": text })),
+				...owned.length === 0 ? {} : { "owned": { "scope": owned, "files": [...there].filter((path) => includeByDefault(path) && CODE.test(path)) } }
 			});
 			const lines = (ledgerText ?? "").split("\n");
-
-			problems.set(ledgerUri, found.map((each) => {
-				// (at its entry's line in the ledger; a dead end the ledger doesn't name, at the top)
-				const line = each.entry === undefined ? -1 : lines.findIndex((text) => text.includes(JSON.stringify(each.entry)));
-				const problem = new vscode.Diagnostic(new vscode.Range(Math.max(0, line), 0, Math.max(0, line), lines[Math.max(0, line)]?.length ?? 0), `${each.check}: ${each.message} — change the code: ${each.code}; or the decision: ${each.decision}`, vscode.DiagnosticSeverity.Error);
+			// (a file no feature owns, or two do: on that file — its path the message's start)
+			const onFile = found.filter((each) => each.check === "unowned file" || each.check === "owned twice");
+			const problemOf = (each: (typeof found)[number], range: vscode.Range): vscode.Diagnostic => {
+				const problem = new vscode.Diagnostic(range, `${each.check}: ${each.message} — change the code: ${each.code}; or the decision: ${each.decision}`, vscode.DiagnosticSeverity.Error);
 
 				problem.source = "silo";
 				problem.code = each.check;
 
 				return problem;
+			};
+
+			problems.clear();
+
+			for (const each of onFile) {
+				const uri = vscode.Uri.joinPath(root, each.message.slice(0, each.message.indexOf(" is owned")));
+
+				problems.set(uri, [...problems.get(uri) ?? [], problemOf(each, new vscode.Range(0, 0, 0, 0))]);
+			}
+
+			problems.set(ledgerUri, found.filter((each) => !onFile.includes(each)).map((each) => {
+				// (at its entry's line in the ledger; a dead end the ledger doesn't name, at the top)
+				const line = each.entry === undefined ? -1 : lines.findIndex((text) => text.includes(JSON.stringify(each.entry)));
+
+				return problemOf(each, new vscode.Range(Math.max(0, line), 0, Math.max(0, line), lines[Math.max(0, line)]?.length ?? 0));
 			}));
 		}
 	};

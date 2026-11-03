@@ -1,6 +1,6 @@
 // The feature ledger in the editor (extensions/history/ledger.ts), against the vscode stand-in (vscode/fake.ts): what's
 // been decided about a file (`history.decisions`: the ledger's entries holding it, the docs' lines naming it under their
-// headings) and `silo check`'s drift in Problems (a removed feature its docs still name).
+// headings) and `silo check`'s drift in Problems (a removed feature its docs still name; a file no feature owns).
 import "./vscode/hooks.mjs";
 
 import * as assert from "node:assert/strict";
@@ -60,4 +60,20 @@ test("drift in Problems: none when the docs don't name what was removed", async 
 	await view.check(new Map());
 
 	assert.deepEqual(fake.diagnostics.get("silo").get(".silo/features.json"), []);
+});
+
+test("a code file no feature owns, in a folder .silo/owned.json names, is a problem on that file", async () => {
+	const { view } = workspace("# Next\n");
+
+	fake.files.set(".silo/owned.json", JSON.stringify(["src"]));
+	fake.files.set("src/stray.ts", "export const stray = 1;\n");
+	fake.files.set("tools/free.ts", "export const free = 1;\n");
+	await view.check(new Map());
+
+	const silo = fake.diagnostics.get("silo");
+
+	assert.match(silo.get("src/stray.ts")?.[0]?.message ?? "", /^unowned file: src\/stray\.ts is owned by no feature/u);
+	assert.equal(silo.get("src/load.ts"), undefined, "owned by Loading");
+	assert.equal(silo.get("tools/free.ts"), undefined, "outside the owned folders");
+	assert.deepEqual(silo.get(".silo/features.json"), []);
 });
