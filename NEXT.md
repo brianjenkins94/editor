@@ -204,7 +204,7 @@ How it's kept:
        the debug worker's session to the stepping debugger alone; the shell's icons out of shared/theme.ts. ata.ts,
        test-runs.ts and workspace-tools.ts were one feature's each.
      - *The core's tests:* begun 2026-11-02 — the ledger declares each core feature's tests (`tests`, which `silo check`
-       holds to the files): 27 of the 35 have them. New: history-ledger, tarballs, runs, shell-feature (2026-11-02); and
+       holds to the files): all 35 have them (2026-11-03). New: history-ledger, tarballs, runs, shell-feature (2026-11-02); and
        git's (2026-11-03): git-push (pushed, pulled, branches, a refusal's reason, through `git http-backend`), commit
        (the top bar's Commit, its flow as `commitAndPush`), git-views (the review panel and Source Control, in the
        browser, in CI's `realms`); and the agent's (agent-tools: what its files, git, terminal and editor tools ask,
@@ -213,9 +213,13 @@ How it's kept:
        breakpoint stopped at every statement starting on it (tsval), so `try { write(); }` asked twice and the first
        answer went to the wrong question. Then search (agent-tools: findFiles' globs, Quick Open, Find in Files; its
        provider is the monaco-vscode-api component's workspace-search.ts, now in the feature's paths) and the bridge
-       (debugger-runs: the extension host's one hub, linked to the workbench's and to each debug run's worker). The unit
-       suite passes in Node. Without a test yet: the architecture reports, the build, extensions by URL, the static host's
-       service worker, sign-in, the test harnesses, the starter workspace, the theme following the system.
+       (debugger-runs: the extension host's one hub, linked to the workbench's and to each debug run's worker). And the
+       editor's own surfaces (workbench.mjs: the theme following the system, the starter opened, the service worker
+       serving a package once it controls the page, every context on the architecture plane, an extension by URL, a
+       sign-in started — the API stood in for), with starter, static-host and editor-metrics in Node. The build and the
+       test harnesses are tested by use: worker-realms loads what's built, and workbench.mjs and history-ledger drive the
+       harness and the stand-in `vscode`. CI's browser suites are three shards now: realms, workbench, performance. The
+       unit suite passes in Node.
      - *Then:* `EDITOR_DEPLOYS` set to `off` (production keeps the full editor) and the branch landed on main.
      Found while reducing: the editor's runner has no `globalThis.crypto` (runs.test.mjs fails there, passes in Node);
      it can't run the theme's budget test (`Unsupported encoding: latin1`) or a

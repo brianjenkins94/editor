@@ -190,6 +190,11 @@
       "packages/editor/shared/architecture.ts",
       "packages/editor/shared/editor-metrics.ts",
       "packages/editor/workbench/architecture-store.ts"
+    ],
+    "tests": [
+      "packages/editor/test/editor-metrics.test.mjs",
+      "packages/editor/test/performance.mjs",
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "Breakpoints in a page's code": {
@@ -233,6 +238,9 @@
       "packages/editor/env.d.ts",
       "packages/editor/patches/",
       "packages/editor/wa-jsx.d.ts"
+    ],
+    "tests": [
+      "packages/editor/test/worker-realms.mjs"
     ]
   },
   "Capability calls panel": {
@@ -454,6 +462,10 @@
     ],
     "paths": [
       "packages/editor/workbench/extensions.ts"
+    ],
+    "tests": [
+      "packages/editor/test/fixtures/url-extension/",
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "Feature ledger drift in Problems": {
@@ -1166,6 +1178,10 @@
       "packages/editor/build/static-host.ts",
       "packages/editor/coi-serviceworker.js",
       "packages/editor/index.html"
+    ],
+    "tests": [
+      "packages/editor/test/static-host.test.mjs",
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "Runtime evidence kept in git": {
@@ -1214,6 +1230,9 @@
       "packages/editor/shell/github-control.tsx",
       "packages/editor/shell/session.ts",
       "packages/editor/shell/sign-in.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "Source Control for git": {
@@ -1388,6 +1407,10 @@
       "packages/editor/test/architecture-harness.mjs",
       "packages/editor/test/vscode/",
       "packages/editor/workbench/debug-bridge.ts"
+    ],
+    "tests": [
+      "packages/editor/test/history-ledger.test.mjs",
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "The shell": {
@@ -1412,6 +1435,10 @@
     "paths": [
       "packages/editor/build/snapshot.ts",
       "packages/editor/demo/"
+    ],
+    "tests": [
+      "packages/editor/test/starter.test.mjs",
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "The workspace terminal": {
@@ -1440,6 +1467,9 @@
     ],
     "paths": [
       "packages/editor/workbench/theme-follow.ts"
+    ],
+    "tests": [
+      "packages/editor/test/workbench.mjs"
     ]
   },
   "Type queries": {

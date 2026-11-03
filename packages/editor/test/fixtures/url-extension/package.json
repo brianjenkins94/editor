@@ -1,0 +1,13 @@
+{
+	"name": "url-extension",
+	"displayName": "An extension loaded by URL",
+	"description": "workbench.mjs loads it with ?extension=, as editor-contrib's extensions are loaded while developed.",
+	"publisher": "test",
+	"version": "0.0.1",
+	"engines": { "vscode": "*" },
+	"browser": "extension.js",
+	"activationEvents": ["onCommand:urlExtension.hello"],
+	"contributes": {
+		"commands": [{ "command": "urlExtension.hello", "title": "Hello from a URL" }]
+	}
+}
