@@ -167,15 +167,15 @@ How it's kept:
      (notes.add, "Your edits", Share's workspace.files, BABLR's annotations). 45 features are tombstoned in the ledger;
      the 10 more the core keeps are declared there; `silo check` agrees. The core boots, loads this repository and runs
      its tests in the editor (git's, reset's, the workspace's: 20 of 20); the editor's unit tests pass in Node (94 of 94).
+     And the shell split: shell.tsx is its core (the page, the dock, the hub, the theme, the review panel; 1,111 lines to
+     307), and each other part of the top window a feature module started and placed from one list (shell/feature.ts:
+     sign-in, repo load, the GitHub popover, Commit, Reset, the push's serves, error reports).
      The reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
      Left, in order:
      - *The node worker, split:* the in-browser dev server and the preview taps stay for the terminal's `vite` (four
        features on a lease to 2026-12-01: preview windows, the dev server, previews' capability prompts, runtime
        evidence); `vite` goes, or they're the worker's to keep, before the lease runs out. tsval keeps Playwright tests
        and site sums; the workbench keeps the Live architecture view and extensions by URL (the manifest still has them).
-     - *Shell, split:* shell.tsx (about 1,100 lines) is still one component holding sign-in, repo load, commit, reset and
-       the review panel: a shell core with each feature's top-bar control, popover and hub wiring registered from its
-       own module.
      - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
        check` caught a removed file named.
      - *Then:* the core's tests written again, the first of the new suite; `EDITOR_DEPLOYS` set to `off` (production
