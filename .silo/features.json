@@ -1407,7 +1407,6 @@
       "hub subscription|theme.colors"
     ],
     "paths": [
-      "packages/editor/shared/theme.ts",
       "packages/editor/workbench/theme-follow.ts"
     ]
   },
