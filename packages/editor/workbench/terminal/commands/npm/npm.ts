@@ -7,13 +7,12 @@
  *
  * `npm install [pkg…]` (and `ci`) declares dependencies in package.json. A registry package is never fetched whole:
  * each place that loads one fetches what it needs as it's used, from the CDN, at the version `.silo/versions.json` (or its local copy) pins
- * (the preview dev server, the node_modules overlay, type acquisition). A plain `npm install` brings that file up to
+ * (the node_modules overlay, type acquisition, a debug run's packages). A plain `npm install` brings that file up to
  * the manifests and installs what the CDN can't serve — a `file:` dependency linked, a tarball URL unpacked
  * (workbench/install.ts) — as the editor does by itself when the project opens or a manifest changes.
  *
- * `npm ls` lists what package.json declares; `npm run` with no script lists the scripts; `npm exec` / `npx` run a
- * command this shell has (`npx vite`) and say plainly when a package's own binary can't be (nothing's installed
- * locally to run). `pnpm` and `yarn` (../pnpm, ../yarn) are this npm, spoken in their words.
+ * `npm ls` lists what package.json declares; `npm run` with no script lists the scripts; `npm exec` runs a
+ * command this shell has and says plainly when a package's own binary can't be (nothing's installed locally to run).
  */
 import type { ResolvedCommandContext } from "just-bash/browser";
 import type { CommandHost, CommandResult, Handler } from "../../catalog";
@@ -50,7 +49,7 @@ export async function exec(name: string, getSession: CommandHost["session"], wor
 	const bare = command.replace(/@.*$/u, "");
 
 	if (!(ctx.getRegisteredCommands?.() ?? []).includes(bare)) {
-		return { "stdout": "", "stderr": `${name}: can't run ${command} here — packages aren't installed locally (the preview resolves them from esm.sh), so only this shell's own commands run (Tab lists them).\n`, "exitCode": 127 };
+		return { "stdout": "", "stderr": `${name}: can't run ${command} here — packages aren't installed locally, so only this shell's own commands run (Tab lists them).\n`, "exitCode": 127 };
 	}
 
 	return inShell(getSession, [bare, ...args].map(quote).join(" "), ctx);

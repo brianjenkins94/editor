@@ -8,8 +8,8 @@
  * and files the shell creates show up in the explorer.
  *
  * Session model — and DON'T "fix" the probe below thinking it's a workaround for using just-bash wrong: it is
- * stateless per `exec` BY DESIGN (it's an agent tool — each call is a one-shot, isolated, sandboxed run, so a
- * `cd`/`export` doesn't stick; only the filesystem, being external, persists). just-bash's OWN interactive shell
+ * stateless per `exec` BY DESIGN (each call is a one-shot, isolated run, so a `cd`/`export` doesn't stick; only the
+ * filesystem, being external, persists). just-bash's OWN interactive shell
  * (`just-bash-shell`) has the identical limitation — it calls `Bash.exec(line)` exactly like we do, and `cd`/
  * `export` don't persist across its prompts either. There is no persistent-session API to use instead. So the
  * interactive session layer is ours to add: we hold cwd + env here and thread them through every `exec`. env
@@ -26,7 +26,7 @@ import type { NodeOutput, NodeRunner } from "../node-runner";
 import type { CommandFactory, CommandHost } from "./catalog";
 import type { BashSession, SessionState } from "./session";
 import { serve } from "@brianjenkins94/hub";
-import { COMMANDS, PRESENT, STREAMING } from "./catalog";
+import { COMMANDS, STREAMING } from "./catalog";
 import { createWorkspaceTerminalFs } from "./fs";
 import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./integration";
 import { toCommand } from "./invoke";
@@ -42,7 +42,7 @@ const BUILTINS = ["cd", "eval", "exit", "export", "read", "set", "source", "test
 
 /** What Tab offers in command position: the shell's builtins, just-bash's commands (as this build has them — no
  *  `tar` in a browser), and ours. Known once just-bash has loaded (with the first command, or warmed at start). */
-let completions: string[] = [...BUILTINS, ...PRESENT.map((command) => command.name)];
+let completions: string[] = [...BUILTINS, ...COMMANDS.map((command) => command.name)];
 
 /** The longest string that every item starts with (for extending a partial to the common prefix on Tab). */
 function longestCommonPrefix(items: string[]): string {
@@ -76,14 +76,11 @@ const tails = new Map<number, { "terminal": number; "command"?: string; "open": 
 
 export const ESCAPES = /\u001B(?:\[[^A-Za-z@~]*[A-Za-z@~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[A-Z=>\\^_])/gu;
 
-/** A terminal opened to run one command (a task's, serveTaskTerminals), and how it exits when that's done. */
-export interface TerminalCommand { "command": string; "exit": (code: number) => void }
-
-export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, show: (data: string) => void, cwd0: string, run?: TerminalCommand): TerminalProcess {
+export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, show: (data: string) => void, cwd0: string): TerminalProcess {
 	terminalsOpened += 1;
 
 	const terminal = terminalsOpened;
-	const tail: { "terminal": number; "command"?: string; "open": boolean; "text": string } = { "terminal": terminal, ...run === undefined ? {} : { "command": run.command }, "open": true, "text": "" };
+	const tail: { "terminal": number; "open": boolean; "text": string } = { "terminal": terminal, "open": true, "text": "" };
 	// What the terminal shows, kept (its latest) as it's shown.
 	const fire = (data: string): void => {
 		tail.text = (tail.text + data.replaceAll(ESCAPES, "").replaceAll("\r\n", "\n")).slice(-TAIL);
@@ -124,14 +121,13 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
 		sessionPromise ??= import("just-bash/browser").then((module) => {
-			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "captured": () => captured, "terminal": terminal, "session": getSession, "history": () => history };
+			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "captured": () => captured, "terminal": terminal, "session": getSession };
 			const theirs = new Set(module.getCommandNames());
 			// Ours, each loaded the first time it runs (just-bash's lazy command), through juvy (invoke.ts): its options parsed
-			// and `--help` made from its definition, and a missing one's message said. (One that isn't here stays out of the way of
-			// one just-bash comes to have: its `python`, say.)
-			const commands = COMMANDS.filter((command) => command.missing === undefined || !theirs.has(command.name)).map((command) => ({ "name": command.name, "load": async () => toCommand(command, command.missing === undefined ? (await implementations[`./commands/${command.name}/${command.name}.ts`]())(host) : undefined) }));
+			// and `--help` made from its definition.
+			const commands = COMMANDS.map((command) => ({ "name": command.name, "load": async () => toCommand(command, (await implementations[`./commands/${command.name}/${command.name}.ts`]())(host)) }));
 
-			completions = [...new Set([...BUILTINS, ...theirs, ...PRESENT.map((command) => command.name)])];
+			completions = [...new Set([...BUILTINS, ...theirs, ...COMMANDS.map((command) => command.name)])];
 
 			return new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": commands });
 		});
@@ -155,8 +151,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		const runs = input.trim() !== "";
 		let exitCode = 0;
 
-		// (A task's terminal reports nothing of the sort: the task itself says when it starts and how it ended.)
-		if (runs && run === undefined) {
+		if (runs) {
 			fire(commandLine(input) + commandExecuted());
 		}
 
@@ -223,14 +218,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			line = "";
 			pos = 0;
 			// Interrupted is 130, as a shell reports SIGINT.
-			// A task's terminal ends with its command (VS Code says so, and closes it on a key); a shell prompts again.
-			if (run === undefined) {
-				fire(runs ? commandFinished(signal.aborted ? 130 : exitCode) : commandFinished());
-				prompt();
-			} else {
-				tail.open = false; // (its command done, the terminal's finished)
-				run.exit(signal.aborted ? 130 : exitCode);
-			}
+			fire(runs ? commandFinished(signal.aborted ? 130 : exitCode) : commandFinished());
+			prompt();
 		}
 	};
 
@@ -568,14 +557,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 	const start = (): void => {
 		void getSession(); // warm the bundle while the user reads the banner
-
-		// A task's terminal: run its command, shown as typed.
-		if (run !== undefined) {
-			fire(`\x1B[1;36m${state.cwd}\x1B[0m $ ${run.command}\r\n`);
-			void runLine(run.command);
-
-			return;
-		}
 
 		fire("[1mjust-bash[0m — an in-browser shell on the workspace filesystem\r\n");
 		prompt();

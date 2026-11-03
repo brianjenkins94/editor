@@ -79,7 +79,7 @@ test("an interrupted command's own cd doesn't reach the session (it never gets t
 // before it (just-bash hands back a line's output only when the whole line's done): its top-level statements, each with
 // what joins it to the next — or none, when splitting it could change what it means.
 // The commands that stream (the catalog's, terminal/catalog.ts, which only Vite can read): node, npm and vite.
-const STREAMING = new Set(["node", "npm", "vite"]);
+const STREAMING = new Set(["node", "npm"]);
 
 test("statementsOf: a streaming line's statements, and the lines run whole", () => {
 	assert.deepEqual(statementsOf("echo first; node x.js; echo last", STREAMING), [{ "text": "echo first", "then": ";" }, { "text": " node x.js", "then": ";" }, { "text": " echo last", "then": "" }]);

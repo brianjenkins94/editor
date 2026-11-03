@@ -4,9 +4,8 @@
  * holding everything about it — `command.ts` (what it is: its name, a line saying what it does, whether it streams),
  * `<name>.ts` (the implementation, loaded the first time the command runs) and its tests. Adding a command is adding a
  * folder; everything that enumerates commands derives from here — tab completion and which commands make a line run a
- * statement at a time (session.ts) — so neither is a list to keep up by hand. What we don't provide is a folder too (vim, python, docker…), a `missing` message saying what
- * to do instead, so "known, and here's how" never reads as "broken". The terminal is people's; an agent's way in is a tool
- * (app/tools/host.ts).
+ * statement at a time (session.ts) — so neither is a list to keep up by hand. What isn't here is just-bash's "not
+ * found". The terminal is people's; an agent's way in is a tool (app/tools/host.ts).
  *
  * Only `command.ts` is read here, eagerly — it's a few lines and imports nothing — so anything can ask what the
  * commands are without loading a command (index.ts loads the implementations, lazily).
@@ -31,11 +30,7 @@ export interface CommandDefinition {
 	"stopEarly"?: boolean;
 	/** In place of `options`, its subcommands (`git status`), each with its own — routed, and helped, by juvy. */
 	"subcommands"?: Record<string, SubcommandDefinition>;
-	/** It isn't here, and this says what to do instead (`vim` → the editor). Such a command has no implementation: it
-	 *  says so and fails as a missing command does (127), so what people reach for out of habit is answered, not "not
-	 *  found". */
-	"missing"?: string;
-	/** Its output goes to the terminal as it's produced rather than through just-bash's stdout (node, vite) — or it runs
+	/** Its output goes to the terminal as it's produced rather than through just-bash's stdout (node) — or it runs
 	 *  lines that may (npm): a line with it runs a statement at a time, so what came before shows first (session.ts). */
 	"streaming"?: boolean;
 }
@@ -48,8 +43,6 @@ export interface SubcommandDefinition {
 	"aliases"?: string[];
 	/** The option a bare `-<number>` gives, as git's `-3` is `-n 3` (`git log -3`): juvy knows no such flag. */
 	"numberIs"?: string;
-	/** It isn't here: this says what to do instead (`git push` → the Commit button). */
-	"missing"?: string;
 }
 
 /** What a command's implementation is given: the terminal it runs in, and what it may use there. */
@@ -67,8 +60,6 @@ export interface CommandHost {
 	"terminal": number;
 	/** The shell itself, to run a line in (`npm run` runs its script there). */
 	"session": () => Promise<BashSession>;
-	/** The lines typed at this terminal, oldest first (what ↑ walks back through). */
-	"history": () => readonly string[];
 }
 
 /** A command's output, as just-bash takes it. */
@@ -77,8 +68,7 @@ export interface CommandResult { "stdout": string; "stderr": string; "exitCode":
 /** What a command does with what juvy parsed of its arguments. */
 export type Handler = (config: Juvy, ctx: ResolvedCommandContext) => Promise<CommandResult>;
 
-/** A command's implementation: its handler — or, for a command with subcommands, one per subcommand (a missing one
- *  needs none). */
+/** A command's implementation: its handler — or, for a command with subcommands, one per subcommand. */
 export type Implementation = Handler | Record<string, Handler>;
 
 /** A command's implementation module: its `<name>.ts` exports `create`. */
@@ -96,9 +86,6 @@ export const COMMANDS: readonly CommandDefinition[] = Object.entries(found).map(
 
 	return definition;
 }).sort((left, right) => left.name.localeCompare(right.name));
-
-/** The commands that are here (not `missing`). */
-export const PRESENT: readonly CommandDefinition[] = COMMANDS.filter((command) => command.missing === undefined);
 
 /** The commands that stream (see `CommandDefinition.streaming`). */
 export const STREAMING: ReadonlySet<string> = new Set(COMMANDS.filter((command) => command.streaming === true).map((command) => command.name));

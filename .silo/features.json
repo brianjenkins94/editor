@@ -1142,6 +1142,37 @@
       "packages/editor/test/site-sums.test.mjs"
     ]
   },
+  "Terminal commands beyond the core's": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*); the terminal keeps the commands the core's features run: node, npm, ps, kill, git",
+    "since": "2026-11-02",
+    "what": "The terminal's other commands: code and open (a file into the editor), less, more and history, pnpm, yarn and npx (npm in their words), the commands that say they aren't here and what to do instead (vim, python, docker, vite, …) and git's subcommands that did the same, and a terminal that runs one task's command.",
+    "paths": [
+      "packages/editor/workbench/terminal/commands/bun/",
+      "packages/editor/workbench/terminal/commands/deno/",
+      "packages/editor/workbench/terminal/commands/docker/",
+      "packages/editor/workbench/terminal/commands/make/",
+      "packages/editor/workbench/terminal/commands/nano/",
+      "packages/editor/workbench/terminal/commands/pip/",
+      "packages/editor/workbench/terminal/commands/python/",
+      "packages/editor/workbench/terminal/commands/python3/",
+      "packages/editor/workbench/terminal/commands/ssh/",
+      "packages/editor/workbench/terminal/commands/sudo/",
+      "packages/editor/workbench/terminal/commands/tar/",
+      "packages/editor/workbench/terminal/commands/vi/",
+      "packages/editor/workbench/terminal/commands/vim/",
+      "packages/editor/workbench/terminal/commands/vite/",
+      "packages/editor/workbench/terminal/commands/pnpm/",
+      "packages/editor/workbench/terminal/commands/yarn/",
+      "packages/editor/workbench/terminal/commands/npx/",
+      "packages/editor/workbench/terminal/commands/code/",
+      "packages/editor/workbench/terminal/commands/open/",
+      "packages/editor/workbench/terminal/commands/less/",
+      "packages/editor/workbench/terminal/commands/more/",
+      "packages/editor/workbench/terminal/commands/history/"
+    ],
+    "restore": "from the full-editor tag: each command's folder (catalog.ts finds them), with `missing` back in catalog.ts and invoke.ts for the ones that aren't here"
+  },
   "Terminal node runs in the debugger": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1208,9 +1239,6 @@
     "tests": [
       "packages/editor/test/terminal-integration.test.mjs",
       "packages/editor/test/terminal-session.test.mjs",
-      "packages/editor/workbench/terminal/commands/code/code.test.mjs",
-      "packages/editor/workbench/terminal/commands/history/history.test.mjs",
-      "packages/editor/workbench/terminal/commands/less/less.test.mjs",
       "packages/editor/workbench/terminal/commands/npm/npm.test.mjs",
       "packages/editor/workbench/terminal/commands/ps/ps.test.mjs"
     ]

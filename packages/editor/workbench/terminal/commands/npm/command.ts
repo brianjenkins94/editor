@@ -5,7 +5,7 @@ const REST = { "format": Array, "default": [], "positional": "rest" } as const;
 
 export default {
 	"name": "npm",
-	"summary": "Run package.json scripts; install adds a dependency to package.json (the preview resolves it).",
+	"summary": "Run package.json scripts; install adds a dependency to package.json.",
 	"streaming": true, // a script may run node or vite
 	"subcommands": {
 		"install": {

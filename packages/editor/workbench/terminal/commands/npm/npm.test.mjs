@@ -1,16 +1,10 @@
-// npm (and npx, pnpm, yarn) through a real just-bash, built from their definitions through juvy (../../invoke.ts), over a
+// npm through a real just-bash, built from their definitions through juvy (../../invoke.ts), over a
 // package.json in memory.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Bash, defineCommand } from "just-bash/browser";
 
 import { toCommand } from "../../invoke.ts";
-import npxDefinition from "../npx/command.ts";
-import { create as npx } from "../npx/npx.ts";
-import pnpmDefinition from "../pnpm/command.ts";
-import { asNpm, create as pnpm } from "../pnpm/pnpm.ts";
-import yarnDefinition from "../yarn/command.ts";
-import { create as yarn } from "../yarn/yarn.ts";
 import npmDefinition from "./command.ts";
 import { create as npm } from "./npm.ts";
 
@@ -21,7 +15,7 @@ function shell() {
 	const host = { "session": async () => ({ "exec": (line, options) => bash.exec(line, options) }) };
 	const vite = defineCommand("vite", async (args) => ({ "stdout": `vite ran${args.length > 0 ? " " + args.join(" ") : ""}\n`, "stderr": "", "exitCode": 0 }));
 
-	bash = new Bash({ "files": { "/workspace/package.json": PACKAGE }, "cwd": "/workspace", "customCommands": [toCommand(npmDefinition, npm(host)), toCommand(npxDefinition, npx(host)), toCommand(pnpmDefinition, pnpm(host)), toCommand(yarnDefinition, yarn(host)), vite] });
+	bash = new Bash({ "files": { "/workspace/package.json": PACKAGE }, "cwd": "/workspace", "customCommands": [toCommand(npmDefinition, npm(host)), vite] });
 
 	return bash;
 }
@@ -51,27 +45,13 @@ test("npm install -D and uninstall edit package.json", async () => {
 	assert.deepEqual(pkg.dependencies, {});
 });
 
-test("npx: a command this shell has runs; a package's own binary says why not", async () => {
+test("npm exec: a command this shell has runs; a package's own binary says why not", async () => {
 	const bash = shell();
 
-	assert.equal((await bash.exec("npx vite --host")).stdout, "vite ran --host\n", "the command's own options pass through");
 	assert.equal((await bash.exec("npm exec vite")).stdout, "vite ran\n");
 
-	const missing = await bash.exec("npx prettier --write .");
+	const missing = await bash.exec("npm exec prettier");
 
 	assert.equal(missing.exitCode, 127);
 	assert.match(missing.stderr, /can't run prettier here/u);
-});
-
-test("pnpm and yarn: npm in their words", async () => {
-	const bash = shell();
-
-	assert.deepEqual(asNpm([]), ["install"]);
-	assert.deepEqual(asNpm(["add", "lodash"]), ["add", "lodash"]);
-	assert.deepEqual(asNpm(["dev", "--port", "3000"]), ["run", "dev", "--port", "3000"]);
-	assert.deepEqual(asNpm(["dlx", "vite"]), ["exec", "vite"]);
-	assert.equal((await bash.exec("yarn hello")).stdout, "hi from the script\n");
-	assert.equal((await bash.exec("pnpm dev")).stdout, "vite ran\n");
-	assert.match((await bash.exec("pnpm nope")).stderr, /pnpm error: Missing script: "nope"/u);
-	assert.match((await bash.exec("yarn -v")).stdout, /yarn is its npm/u);
 });
