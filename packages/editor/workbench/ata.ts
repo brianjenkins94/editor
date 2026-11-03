@@ -1,6 +1,6 @@
 /**
  * Runtime Automatic Type Acquisition — fetch a package's type surface on demand and write it into the workbench
- * filesystem, so an arbitrary `import "pkg"` type-checks with NO bake step (snapshot.ts) and no rebuild.
+ * filesystem, so an arbitrary `import "pkg"` type-checks with NO bake step (build/package-types.ts) and no rebuild.
  *
  * Why it exists (and why it's not the CDN overlay): the type-checker resolves modules against a SYNCHRONOUS view
  * seeded up front (snapshot.ts). The node_modules CDN overlay (node-modules-provider.ts) is async/lazy — great
@@ -46,7 +46,7 @@ interface MetaNode { "type"?: string; "path": string; "files"?: MetaNode[] }
  *  two string literals reads as one (`?: Property.MsFlowFrom | undefined;`). */
 const SPECIFIER = String.raw`(?<![\w$."'-])(?:from|import|require)\s*(?:\(\s*)?["']([^"'\s]+)["']`;
 
-/** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors snapshot.ts. */
+/** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors build/package-types.ts. */
 export function importedPackages(source: string): string[] {
 	const roots = new Set<string>();
 

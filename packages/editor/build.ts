@@ -9,8 +9,12 @@ import * as fs from "@brianjenkins94/util/fs";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, createLogger } from "vite";
-import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
-import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
+import { commandTap, TAPPED_VSCODE } from "./build/command-tap";
+import { buildHistory, HISTORY_FILES } from "./build/history";
+import { editorTypesPlugin, editorVersionsPlugin, nodeModulesCdnPlugin } from "./build/package-types";
+import { editorSettingsDefaultsPlugin, editorWorkspacePlugin } from "./build/snapshot";
+import { buildServiceWorker, staticHostPlugin } from "./build/static-host";
+import { vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
 
 /**
  * The whole packages/editor build, in ONE file — the five vite passes that used to be separate `-c` configs
@@ -103,9 +107,6 @@ function bundledModule(folder: string, file: string, id: string, format: "cjs" |
 	};
 }
 
-/** The module an extension's `vscode` imports resolve to (commandTap). */
-const TAPPED_VSCODE = "\0vscode-tapped";
-
 /** What goes in an extension's folder beside its entry, by the path its manifest's `files` lists it at: a classic
  *  bootstrap for one of its workers (a module worker built with the LSP workers, in lsp/, sharing their chunks — an
  *  extension's workers start classic; `hold` keeps the messages that come before the module has loaded), a script
@@ -173,34 +174,6 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 	};
 }
 
-/** Hand extension `name` a `vscode` whose commands and file operations are counted (extensions/command-tap.ts;
- *  ARCHITECTURE.md, *Discovered, not declared*): every `import … from "vscode"` in it resolves to a module that is the real `vscode` but
- *  for `commands` and `workspace.fs`. */
-function commandTap(name: string): Plugin {
-	const tapped = TAPPED_VSCODE;
-	const tap = url.fileURLToPath(new URL("./extensions/command-tap.ts", import.meta.url));
-
-	return {
-		"name": "command-tap",
-		"enforce": "pre",
-		// The tapped module's own `vscode` is the real one (external).
-		"resolveId": (source, importer) => (source === "vscode" && importer !== tapped ? tapped : undefined),
-		"load": (id) => (id === tapped ? `import * as vscode from "vscode";\nimport { tappedCommands, tappedWorkspace } from ${JSON.stringify(tap)};\nexport * from "vscode";\nexport const commands = tappedCommands(vscode, ${JSON.stringify(name)});\nexport const workspace = tappedWorkspace(vscode, ${JSON.stringify(name)});\n` : undefined)
-	};
-}
-
-/** Emit the history tsserver plugin VERBATIM into its extension's folder, as the package tsserver loads
- *  (node_modules/history-ts-plugin/index.js), beside history-engine.js — its import.meta.url finds it (copied
- *  byte-for-byte, not a vite input). */
-function historyTsPlugin(): Plugin {
-	return {
-		"name": "history-ts-plugin-asset",
-		"generateBundle": function() {
-			this.emitFile({ "type": "asset", "fileName": "extensions/history/node_modules/history-ts-plugin/index.js", "source": fs.readFileSync(resolvePath("./extensions/history/ts-plugin.js"), { "encoding": null }) });
-		}
-	};
-}
-
 /** The host site's plugins — shared by the host BUILD (hostBuild) and the DEV server (dev.ts): cross-origin
  *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
  *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
@@ -248,9 +221,9 @@ export async function preBuild(): Promise<void> {
 		// still worked.
 		"base": "./",
 		"plugins": [
-				bundledExtension("bridge"),
+			bundledExtension("bridge"),
 			bundledExtension("tsval"),
-			bundledExtension("history", { "node_modules/history-ts-plugin/package.json": { "json": { "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" } } }),
+			bundledExtension("history", HISTORY_FILES),
 			bundledExtension("source-control"),
 			editorSettingsDefaultsPlugin(),
 			polyfillNode(["path", "url", "buffer"])
@@ -319,45 +292,11 @@ export async function preBuild(): Promise<void> {
 		}
 	});
 
-	// 3. history engine (dist/lsp/history-engine.js) — util/silo's reading over TypeScript's tree (ts-analysis), run
-	// INSIDE the history tsserver plugin with tsserver's own `ts`: `typescript` is EXTERNALIZED to the ts-external shim
-	// (the plugin sets globalThis.__historyTs first), and no oxc — ts-analysis loads only silo's pure model and graph.
-	await buildPackage(root, {
-		"customLogger": logger,
-		"base": "./",
-		"resolve": {
-			"alias": [{ "find": /^typescript(\/.*)?$/u, "replacement": resolvePath("./extensions/history/ts-external.js") }],
-			"conditions": ["browser", "import", "default"]
-		},
-		"plugins": [polyfillNode(), historyTsPlugin()],
-		"build": {
-			"outDir": "dist",
-			"emptyOutDir": false,
-			"minify": false,
-			"sourcemap": sourcemap,
-			"assetsInlineLimit": 0,
-			"rollupOptions": {
-				"preserveEntrySignatures": "strict",
-				"input": { "extensions/history/node_modules/history-ts-plugin/history-engine": resolvePath("./extensions/history/engine.ts") },
-				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
-			}
-		}
-	});
+	// 3. The history extension's tsserver plugin and its engine (build/history.ts).
+	await buildHistory(root, { "logger": logger, "sourcemap": sourcemap, "banner": PROCESS_SHIM });
 
-	// 4. COI service worker (→ docs/coi-serviceworker.js), single-file ES module.
-	await buildPackage(root, {
-		"customLogger": logger,
-		"base": "./",
-		"build": {
-			"outDir": "../../docs",
-			"emptyOutDir": false,
-			"rollupOptions": {
-				"preserveEntrySignatures": "strict",
-				"input": { "coi-serviceworker": resolvePath("./coi-serviceworker.js") },
-				"output": { "codeSplitting": false }
-			}
-		}
-	});
+	// 4. The service worker a static host serves the editor with (build/static-host.ts).
+	await buildServiceWorker(root, logger);
 
 	checkExtensionFolders(path.join(root, "dist"));
 }
@@ -434,39 +373,6 @@ async function hostBuild(): Promise<void> {
 		"build": { "outDir": "../../docs", "emptyOutDir": false },
 		"plugins": [...hostPlugins(), shellPreloadPlugin(), staticHostPlugin()]
 	});
-}
-
-/**
- * What a static host needs to serve the site well, beside it. The production site (packages/site/editor.jsonc, Workers
- * static assets) reads `_headers` — real cross-origin isolation headers, so the first load needn't wait for the service
- * worker to stamp them — `_redirects`, which serves the editor's page at every `env/<owner>/<repo>` (shell/address.ts), and
- * `.assetsignore`: the package tarballs are the releases' and Pages', not the site's, and source maps are kept apart; and
- * `robots.txt`, turning crawlers away. GitHub Pages reads none of them;
- * there `404.html` is the editor's page, so a deep link opens the editor (with a 404 status, which the page doesn't mind).
- */
-function staticHostPlugin(): Plugin {
-	return {
-		"name": "static-host",
-		"enforce": "post",
-		"generateBundle": function(_options, bundle) {
-			const index = bundle["index.html"];
-
-			if (index?.type === "asset") {
-				this.emitFile({ "type": "asset", "fileName": "404.html", "source": index.source });
-			}
-
-			// frame-ancestors 'self': the shell is the editor's only embedder. Another site framing it could navigate the frames
-			// inside it, such as the DevTools frame the shell posts to with "*" (shell/preview-devtools.ts).
-			this.emitFile({ "type": "asset", "fileName": "_headers", "source": ["/*", "  Cross-Origin-Opener-Policy: same-origin", "  Cross-Origin-Embedder-Policy: credentialless", "  Content-Security-Policy: frame-ancestors 'self'", "  X-Content-Type-Options: nosniff", ""].join("\n") });
-			// html_handling is "none" (editor.jsonc: no 307 from `x.html` to `x`), so the root names index.html itself. Named
-			// placeholders, not `/env/*`: a splat rewrite 404s under "none".
-			this.emitFile({ "type": "asset", "fileName": "_redirects", "source": ["/ /index.html 200", "/env/:owner/:repo /index.html 200", "/env/:owner/:repo/ /index.html 200", ""].join("\n") });
-			this.emitFile({ "type": "asset", "fileName": ".assetsignore", "source": "packages/\n*.map\n" });
-			// Crawlers that ask are sent to the root domain, which asks them to pay (packages/site/src/gate.ts); the editor stays
-			// static files with no Worker in front, so it can't. Pages serves this at /editor/robots.txt, where nobody looks.
-			this.emitFile({ "type": "asset", "fileName": "robots.txt", "source": "User-agent: *\nDisallow: /\n" });
-		}
-	};
 }
 
 // `tsx build.ts` → the full build. Imported by dev.ts (for preBuild/hostPlugins), where this guard stays false.

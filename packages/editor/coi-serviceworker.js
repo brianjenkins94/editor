@@ -90,7 +90,7 @@ function stamp(response) {
 // from the real path + `?v=` (pinned version) + `?meta` (directory listing), fetch it here — the worker's own
 // fetch follows the CDN's unversioned 302 and isn't bound by the document's COEP — and hand it back
 // same-origin. Serves RAW source (no import rewrite): the consumer is go-to-definition, which shows real dep
-// source. Keep in sync with vite.ts nodeModulesCdnPlugin (the dev mirror).
+// source. Keep in sync with build/package-types.ts nodeModulesCdnPlugin (the dev mirror).
 // Whether the CDN answers for `pkg@version` at all (its package.json comes with CORS), asked once per version: what
 // tells a missing file from an unreachable CDN.
 const answering = new Map();

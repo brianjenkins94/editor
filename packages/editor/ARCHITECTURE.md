@@ -204,7 +204,7 @@ What the editor is, at run time, is discovered from the running editor rather th
   reporter), counting each message's subject, direction, size and kind per link; probes report network requests,
   workers, window messages, `MessagePort`s and each realm's `/workspace` operations, labelled by caller.
 - **Extensions, by their own API.** The build hands every bundled extension a `vscode` whose `commands` are counted
-  (extensions/command-tap.ts, build.ts's `commandTap`); each host sends its totals to the bridge
+  (extensions/command-tap.ts, build/command-tap.ts); each host sends its totals to the bridge
   (`editor.arch.commands`), which reports `ext:<name>` nodes and `cmd …` edges. Commands nobody bundled registered
   belong to `ext:vscode`; an extension installed from the gallery isn't tapped.
 - **Stores, by what's written.** The zen-fs probe records each read, write, create, unlink and rename in a tool's

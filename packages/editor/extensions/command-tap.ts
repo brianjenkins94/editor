@@ -1,6 +1,6 @@
 /**
  * Each bundled extension's commands, as the architecture view discovers them (ARCHITECTURE.md, *Discovered, not declared*): the build hands
- * every extension a `vscode` whose `commands` are these (build.ts, commandTap), so what it registers and what it calls is
+ * every extension a `vscode` whose `commands` are these (build/command-tap.ts), so what it registers and what it calls is
  * counted — by the extension, with nothing in its own code. Each extension host keeps one tally for every extension in
  * it, and sends its totals to the bridge (`editor.arch.commands`) a moment after they change; the bridge puts them on the
  * view as extensions and the commands between them.

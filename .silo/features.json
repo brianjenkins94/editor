@@ -173,6 +173,7 @@
     "what": "Every context reports itself and its traffic on the architecture plane, and its memory, timing and traffic numbers on the metrics plane, for debug-mcp (architecture_state, metrics_query) and the architecture harness.",
     "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
     "paths": [
+      "packages/editor/build/command-tap.ts",
       "packages/editor/extensions/command-tap.ts",
       "packages/editor/shared/architecture-zenfs.ts",
       "packages/editor/shared/architecture.ts",
@@ -213,10 +214,10 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "The editor's build (build.ts and build/: the workbench, its extensions and workers, the service worker, the baked starter workspace), its dev server (dev.ts), the dependency patches applied after install, and the ambient types the build provides.",
+    "what": "The editor's build (build.ts, build/vite.ts: the workbench, its extensions and workers; each feature's own part in build/, by its name), its dev server (dev.ts), the dependency patches applied after install, and the ambient types the build provides.",
     "paths": [
       "packages/editor/build.ts",
-      "packages/editor/build/",
+      "packages/editor/build/vite.ts",
       "packages/editor/dev.ts",
       "packages/editor/env.d.ts",
       "packages/editor/patches/",
@@ -452,6 +453,7 @@
       "output channel|History"
     ],
     "paths": [
+      "packages/editor/build/history.ts",
       "packages/editor/extensions/history/"
     ],
     "tests": [
@@ -684,6 +686,7 @@
       "hub request|packages.tarball"
     ],
     "paths": [
+      "packages/editor/build/package-types.ts",
       "packages/editor/extensions/tsval/worker/install.ts",
       "packages/editor/workbench/ata.ts",
       "packages/editor/workbench/install.ts",
@@ -1134,6 +1137,7 @@
     ],
     "paths": [
       "packages/editor/app/coi.ts",
+      "packages/editor/build/static-host.ts",
       "packages/editor/coi-serviceworker.js",
       "packages/editor/index.html"
     ]
@@ -1374,6 +1378,7 @@
     "since": "2026-11-02",
     "what": "The project a fresh editor opens on when no repository is loaded: a small React app with the editor's preferred settings, baked into the build (build/snapshot.ts).",
     "paths": [
+      "packages/editor/build/snapshot.ts",
       "packages/editor/demo/"
     ]
   },

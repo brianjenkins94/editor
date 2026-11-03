@@ -1,7 +1,7 @@
 /**
  * CDN-backed, read-only, *eventually-consistent* filesystem provider for node_modules.
  *
- * The other half of the resolution stack: the synchronous snapshot (snapshot.ts → editorTypesPlugin)
+ * The other half of the resolution stack: the synchronous snapshot (build/package-types.ts → editorTypesPlugin)
  * seeds the .d.ts surface the TS type-checker needs up front; this overlay lazily fetches FULL package
  * source from unpkg on demand so go-to-definition / hover reaches the real implementation (and
  * transitive deps) without baking any of it into the page. It works in a static deploy (no filesystem).
@@ -112,7 +112,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		}
 
 		// Fetch the REAL same-origin node_modules path. A store miss there is answered by the resolver's CDN
-		// fallback — the SW (prod) or vite.ts nodeModulesCdnPlugin (dev) fetches the package from the CDN and
+		// fallback — the SW (prod) or build/package-types.ts nodeModulesCdnPlugin (dev) fetches the package from the CDN and
 		// hands it back same-origin (the fold-in that retired `__proxy__`; see coi-serviceworker.js). The
 		// pinned version rides along as `?v=` so the served source matches the type-checker snapshot's version;
 		// `?meta` asks for the directory listing. `served()` above guarantees the version is defined here.
