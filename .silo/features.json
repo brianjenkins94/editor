@@ -159,7 +159,8 @@
       "debug adapter tracker provider|*|bridge/capability-stops.ts"
     ],
     "paths": [
-      "packages/editor/extensions/bridge/capability-stops.ts"
+      "packages/editor/extensions/bridge/capability-stops.ts",
+      "packages/editor/extensions/tsval/worker/stops.ts"
     ]
   },
   "Architecture reports and metrics": {
@@ -679,6 +680,7 @@
       "hub request|packages.tarball"
     ],
     "paths": [
+      "packages/editor/extensions/tsval/worker/install.ts",
       "packages/editor/workbench/ata.ts",
       "packages/editor/workbench/install.ts",
       "packages/editor/workbench/node-modules-provider.ts",
@@ -921,6 +923,8 @@
       "packages/editor/extensions/bridge/runtime-fs.ts",
       "packages/editor/extensions/tsval/canary.ts",
       "packages/editor/extensions/tsval/capability-calls.ts",
+      "packages/editor/extensions/tsval/worker/gate.ts",
+      "packages/editor/extensions/tsval/worker/package-calls.ts",
       "packages/editor/silo-enforce.d.ts"
     ],
     "tests": [
@@ -1219,7 +1223,10 @@
       "packages/editor/extensions/tsval/debug-adapter.ts",
       "packages/editor/extensions/tsval/debug-protocol.ts",
       "packages/editor/extensions/tsval/debug-worker.ts",
-      "packages/editor/extensions/tsval/extension.ts"
+      "packages/editor/extensions/tsval/extension.ts",
+      "packages/editor/extensions/tsval/worker/runtime.ts",
+      "packages/editor/extensions/tsval/worker/session.ts",
+      "packages/editor/extensions/tsval/worker/state.ts"
     ],
     "tests": [
       "packages/editor/test/debugger-runs.mjs"
@@ -1272,6 +1279,7 @@
     ],
     "paths": [
       "packages/editor/extensions/bridge/debug-events.ts",
+      "packages/editor/extensions/tsval/worker/process.ts",
       "packages/editor/workbench/node-runner.ts"
     ],
     "tests": [
@@ -1293,6 +1301,7 @@
     ],
     "paths": [
       "packages/editor/app/tools/runs/",
+      "packages/editor/extensions/tsval/worker/busy.ts",
       "packages/editor/workbench/readiness.ts",
       "packages/editor/workbench/test-runs.ts"
     ],
@@ -1307,7 +1316,8 @@
     "what": "`node --test` runs test files in the debugger with breakpoints and stepping, and remembers which code each test reached.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "paths": [
-      "packages/editor/extensions/tsval/node-test.js"
+      "packages/editor/extensions/tsval/node-test.js",
+      "packages/editor/extensions/tsval/worker/tests.ts"
     ],
     "tests": [
       "packages/editor/test/debugger-runs.mjs"
