@@ -555,7 +555,7 @@ function stopReason(base: Vm, action: ForwardAction, stop: Place | undefined): "
 async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): Promise<void> {
 	state.current = base;
 	state.evaluating = base; // (a program file a package requires is evaluated on the machine running)
-	const span = trace !== undefined ? workerLog().continueSpan(trace, "editor.extensions.tsval.debug-worker.step", { "action": action }) : workerLog().span("editor.extensions.tsval.debug-worker.step", { "action": action });
+	const span = trace !== undefined ? workerLog().continueSpan(trace, "editor.extensions.tsval.worker.session.step", { "action": action }) : workerLog().span("editor.extensions.tsval.worker.session.step", { "action": action });
 
 	state.stepSpan = span;
 
