@@ -560,6 +560,9 @@
         "packages/editor-api/src/recorded.ts",
         "packages/editor-api/src/runtime-vfs.ts",
         "packages/editor-api/src/values.ts"
+      ],
+      "ways": [
+        "hub request|`virtual.debug.${listening}`"
       ]
     },
     "Editor API: annotations and pane views": {

@@ -121,80 +121,31 @@ bootstrap's script is done at once, so they'd arrive before it does).
 - **shared memory** — the workspace filesystem (below). No messages at all, so the live view observes it by wrapping
   each realm's `/workspace` mount (`architecture-zenfs.ts`).
 
-### The live preview, end to end
+### Previews (out until reintroduced)
 
-`npm run dev` in the terminal runs the workspace's `vite` script → the terminal publishes `preview.open` → root
-(`preview.ts`) asks the node worker to `preview.start` almostnode's in-browser Vite dev server on that port and
-publishes `preview.ready` → the shell (`shell-preview.ts`) opens a window whose iframe loads
-`<base>/__virtual__/<tab>/<port>/`. Every request from that iframe is answered by the **service worker**, which calls
-the dev server over the hub (`virtual.request.<tab>` to that tab's root, which asks its node worker). The previewed app's bare imports resolve to
-**esm.sh** and pass through the service worker. When anything changes the workspace (a save, a git checkout, a
-script), the dev server hears it on `workspace.changed` and emits an HMR update on `preview.hmr.<port>` → the shell
-posts it into the iframe. Back up the other way, everything rides the window's hub: the dev server inlines a tap as
-each page's first script (`page-tap.ts`), and a window's top frame holds its one hub into the editor — the tap's, which
-the shell links (confined: `previewAppPermissions`) and names as the window. Its console and errors go out on
-`$sys.log`, WebSocket/WebRTC capability requests as `preview.decide` and new windows as `preview.open` (the shell knows
-the window from the link, never from what the page says); frames nested in the window use the top frame's tap
-directly, and the app's own hub, if it has one, joins through it (observability's `linkPreviewHost`). A worker the page
-starts joins the window's hub through the page: the page tap hands it a port as its first message (`WORKER_OFFER`), and
-its tap (`worker-tap.ts`) sends its records and capability questions through the page's (`tap.worker.log`,
-`tap.worker.decide`). A run's own file calls go through the editor instead, by the workspace runtime's mailbox
-(*Extension points* 2), gated there.
-On the live diagram: `preview:<port>` (the iframe) and `vite:<port>` (its dev server) come and go with the preview.
-
-**What a preview's code does is runtime evidence** (RUNTIME-EVIDENCE.md, the third slice). As a preview starts, the
-dev server asks core how much to instrument (`evidence.level`, the `silo.evidence.previews` setting) and compiles each
-workspace module through almostnode's instrumenting transformer, naming each version by its source's blob oid. The page
-tap carries the page runtime (`page-evidence.ts`), which counts what the modules report, by file and version, so a hot
-update's re-import counts on. Each page reports its totals on `evidence.preview` — every 10 s while they change, on a hot
-update, on `pagehide`, and when core asks (`evidence.flush`, which the `vite` command sends before the windows close).
-Core (`evidence.ts`) finds the run by the window's port, asks the dev server for each new version's source
-(`preview.version`), and when the run ends folds every version into the files' evidence in `.silo/`.
-
-**A server has as many windows as the user opens**, like browser tabs onto one dev server — and no address bar. A
-window's "new window" button opens another onto the same server; so does the app itself, opening one of its pages as
-a new window (`window.open`, a `target="_blank"` link): the tap hands that up (`preview.open`) instead of letting it
-leave the editor as a browser tab. Each window is its own page — its own reload, DevTools, capability prompts and hub
-link — named `preview:<port>` (the port's first) or `preview:<port>~<n>`; HMR reaches all of them; closing one closes
-just it, and closing a server's last window (or Ctrl-C on `vite`) stops the server. An app's hubs name themselves (every
-window of one app has a `page`), so the edge names them: the shell renames each window's observability as it enters
-the editor's tree (observability's `scopedTransport`) — the window's hub (its tap's) IS `preview:<port>~<n>`, the app's
-hubs `preview:<port>~<n>/<hub>` — never two `page`s merged. Where each runs is reported, not guessed: a frame's realm names
-its parent's address, and the page's tap tags each worker it starts with its page and window (its URL's hash), so a
-worker sits under the realm that started it and its logs and capability requests go to its window.
-Two ports are two servers; in the editor they share one origin (ports are paths under `/__virtual__/`), which a desktop
-wouldn't — so an app can't rely on origin-scoped state crossing ports.
+The rewrite took previews out (*The rewrite, in place*): the node worker's in-browser Vite dev server, the preview
+windows, their taps and evidence, and the service worker's `/__virtual__/` routing and capability gate. How they
+worked is this section in the `full-editor` tag. A debug run's own server is still answered (the workspace runtime's
+`answerServer`, editor-api's runtime link), with nothing asking it until previews come back.
 
 **The service worker keeps no state.** The browser stops an idle service worker and starts a fresh global on the
 next event, so it remembers nothing between requests: it asks the page for a hub link whenever it starts
-(`sw-needs-hub`), and asks the bridge for every capability decision (the bridge maps a preview's port to its run). Its
-calls wait for a responder (`waitForResponderMs`) instead of publishing into an unlinked hub, and the capability gate
-**fails closed**: with no decider reachable, a preview's data fetch gets a 403 and a node script's write is denied.
+(`sw-needs-hub`). It stamps cross-origin isolation onto what it passes through and serves `node_modules` from the CDN.
 
 **One service worker serves every tab.** It links each tab's root hub separately and **non-transit** (a hub link
-option: nothing passes between two non-transit links), so tabs are never joined through it, and it addresses what it
-asks to the tab it's for — `virtual.request.<tab>`, `capability.decide.<tab>`, which only that tab's root answers,
-from its own tree. The tab comes from the preview's URL, or, for a node script's decision, from the node worker (its
-URL carries the tab). debug-mcp links every open tab the same way (non-transit), for the same reason.
-
-**The preview is not a security boundary.** Its iframe is same-origin with the editor and unsandboxed, by necessity:
-a sandboxed (opaque-origin) frame isn't controlled by the service worker, so `/__virtual__/` would never reach the dev
-server (verified: `sandbox="allow-scripts"` renders nothing), and it would lose cross-origin isolation, so no
-`SharedArrayBuffer` for previewed apps. Adding `allow-same-origin` back makes the sandbox escapable. So a previewed app
-can reach `window.parent` (the editor's DOM, storage, hub), and the capability gate guards against accidents, not
-hostile code. A real boundary needs the preview on a separate origin with its own service worker.
+option: nothing passes between two non-transit links), so tabs are never joined through it. debug-mcp links every open
+tab the same way (non-transit), for the same reason.
 
 ### The workspace filesystem (zen-fs)
 
 The workbench creates a 64 MB `SharedArrayBuffer` zen-fs store (`workspace-fs.ts`) mounted at `/workspace` and hands
-the buffer to the node worker (over the hub, `workspace.buffer`); the provoke child gets it directly, and a debug run
-in its launch (the bridge holds it). All of them read and write the same bytes under an Atomics lock.
+the buffer to a debug run in its launch (the bridge holds it). All of them read and write the same bytes under an Atomics lock.
 
 Shared memory tells nobody anything, so there is **one change stream** (`workspace-changes.ts`): each realm watches its
 own mount's mutating store operations and reports them, batched, as `workspace.changed`. The workbench persists every
 change to IndexedDB (`workspace-fs`, 500 ms debounce — it copies the path's current state, so a deleted or renamed tree
 goes with it) and announces it to VS Code as a file-change event (except `.git/**`, whose writes the git watchers
-cause); the node worker's dev servers hot-reload from it. So a write is saved and seen the same way whoever made it:
+cause). So a write is saved and seen the same way whoever made it:
 the editor's provider, isomorphic-git, the terminal, a node script. The live view labels workbench operations by caller
 (`vscode ·`, `direct ·`, `seed ·`, `restore ·`, `persist ·`).
 

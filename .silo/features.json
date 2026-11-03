@@ -200,17 +200,18 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Capability prompts for previews": {
-    "status": "active",
-    "why": "kept with the node worker, which the terminal's `vite` starts, until the worker is split (NEXT.md, item 3)",
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "until": "2026-12-01",
     "what": "When your app reaches the network, a WebSocket or WebRTC that the policy hasn't decided, its preview window asks you; a preview nobody is watching is answered from what the call returned last time.",
     "docs": "packages/editor/RUNNING.md, *A call's result*",
     "ways": [
       "core module|installSocketGate",
       "hub request|\"capability.decide.\" + tab",
       "hub request|tap.worker.decide"
-    ]
+    ],
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Commit to GitHub": {
     "status": "active",
@@ -451,10 +452,9 @@
     "restore": "git checkout full-editor -- packages/editor/workbench/ci-status.ts"
   },
   "In-browser dev server": {
-    "status": "active",
-    "why": "kept with the node worker, which the terminal's `vite` starts, until the worker is split (NEXT.md, item 3)",
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "until": "2026-12-01",
     "what": "Your app's dev server (Vite) runs inside the browser on the workspace's files, and a program's own server is served to the preview the same way; an agent can force its cold-start race to check for transform errors.",
     "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
     "ways": [
@@ -465,9 +465,8 @@
       "hub request|provoke.round",
       "hub request|virtual.request"
     ],
-    "paths": [
-      "packages/editor/shared/virtual-path.ts"
-    ]
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Live runs after an edit": {
     "status": "removed",
@@ -642,7 +641,6 @@
     "since": "2026-11-02",
     "what": "A Playwright test file (`@playwright/test`) runs in the debugger against the preview you have open: its locators, actions and expect are the editor's own Playwright (packages/playwright), each op run on the preview's page, and its tests told and traced as node:test's are.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
-    "ways": [],
     "paths": [
       "packages/editor/extensions/tsval/playwright-test.js",
       "packages/playwright"
@@ -683,10 +681,9 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Preview windows": {
-    "status": "active",
-    "why": "kept with the node worker, which the terminal's `vite` starts, until the worker is split (NEXT.md, item 3)",
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "until": "2026-12-01",
     "what": "Running a dev server opens movable windows onto your app, as many per server as you like, hot-reloading on every change and showing your app's console and errors in the editor.",
     "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
     "ways": [
@@ -697,9 +694,10 @@
     ],
     "paths": [
       "packages/editor/previews/tap-shared.ts",
-      "packages/editor/previews/worker-tap.ts",
-      "packages/editor/shell/window.ts"
-    ]
+      "packages/editor/previews/worker-tap.ts"
+    ],
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Preview's dev server as a debug session": {
     "status": "removed",
@@ -735,10 +733,7 @@
       "hub subscription|`node.exit.${runId}`",
       "hub subscription|`node.listening.${run.id}`",
       "hub subscription|`node.listening.${runId}`",
-      "hub subscription|`node.out.${runId}`",
-      "hub subscription|`production.stop.${id}`",
-      "hub subscription|node.exit.*",
-      "hub subscription|node.listening.*"
+      "hub subscription|`node.out.${runId}`"
     ]
   },
   "Project picker": {
@@ -788,8 +783,9 @@
     "since": "2026-11-02",
     "what": "Your policy decides whether each file, network or command call a run or preview makes really happens; what an allowed call returned is recorded so a rule can give it back later, and what each run did is kept.",
     "docs": "packages/editor/ARCHITECTURE.md, *Capabilities*",
-    "ways": [
-      "hub request|capability.decide"
+    "paths": [
+      "packages/editor/extensions/bridge/capabilities/coalesce.ts",
+      "packages/editor/extensions/bridge/capabilities/decide.ts"
     ]
   },
   "Refactoring for agents": {
@@ -982,10 +978,9 @@
     ]
   },
   "Runtime evidence kept in git": {
-    "status": "active",
-    "why": "kept with the node worker, which the terminal's `vite` starts, until the worker is split (NEXT.md, item 3)",
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "until": "2026-12-01",
     "what": "What runs and previews observed (which code ran, the values that passed, whether functions stayed pure) is summed and committed beside the code with each run's envelope and the machine it ran on; you choose how much of a preview is recorded.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *The model*",
     "ways": [
@@ -994,9 +989,8 @@
       "hub subscription|evidence.flush",
       "hub subscription|evidence.preview"
     ],
-    "paths": [
-      "packages/editor/extensions/tsval/site-sums.ts"
-    ]
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Scripts over the workspace": {
     "status": "removed",
@@ -1260,7 +1254,6 @@
     "docs": "packages/editor/ARCHITECTURE.md, *The workspace filesystem (zen-fs)*",
     "ways": [
       "core module|installWorkspaceFs",
-      "hub request|workspace.buffer",
       "hub subscription|WORKSPACE_CHANGED"
     ],
     "paths": [
