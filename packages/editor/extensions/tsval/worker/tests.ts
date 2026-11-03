@@ -3,9 +3,11 @@
  * assertion's sides, its time, and the statements it ran.
  */
 import type { TestReport } from "@brianjenkins94/editor-api";
+import type { Vm } from "./state";
 import ts from "typescript";
+import { held, readsStdin } from "./process";
 import { EDITOR_SOURCES } from "./runtime";
-import { state } from "./state";
+import { post, state } from "./state";
 
 /** Each running test's coverage counts as it started, by its titles (JSON): what ran since is that test's. */
 export const testStarts = new Map<string, Map<ts.SourceFile, number[]>>();
@@ -53,4 +55,28 @@ function ranSince(started: Map<ts.SourceFile, number[]>): TestReport["files"] {
 
 		return statements.length === 0 ? [] : [{ "file": file.fileName, "statements": statements }];
 	});
+}
+
+/** A run's tests, none yet: its launch. */
+export function startTests(): void {
+	state.testsRan = [];
+	testStarts.clear();
+	state.testsFailed = 0;
+	state.testsDone = false;
+}
+
+/** A test file's tests all done, and nothing left that Node counts as keeping a process alive — no ref'd timer, server or
+ *  stdin — only promises that nothing here will settle (a package's): it ends, as `node --test` does. (Before then a
+ *  pending promise may be a request in flight, which the browser shows no handle for.) */
+export function testsOver(vm: Vm): boolean {
+	return state.testsDone && held.size === 0 && !readsStdin() && ![...vm.loop?.timers.values() ?? []].some((timer) => timer.ref);
+}
+
+/** The run's end: a test file's tests told, each with what it ran; `exitCode`, or 1 when one failed, as `node --test`. */
+export function tellTests(exitCode: number): number {
+	if (state.testsRan.length > 0) {
+		post({ "type": "tests", "tests": state.testsRan });
+	}
+
+	return exitCode === 0 && state.testsFailed > 0 ? 1 : exitCode;
 }

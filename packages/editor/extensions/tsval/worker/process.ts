@@ -2,6 +2,8 @@
  * The program's process, as a terminal's run has it: its stdin (what's typed there), the servers it listens with, what
  * holds it open, and its exit.
  */
+import type { Control } from "../debug-protocol";
+import { state } from "./state";
 
 /** The ports a debug run's servers listen on (node:http, from almostnode): each answers the preview (`virtual.debug.<port>`,
  *  asked by the dev-server worker) and keeps the run alive — out of work, it idles, serving. */
@@ -83,3 +85,15 @@ Object.assign(globalThis, { "__nodeKeepAlive": {
 	"retain": (handle: unknown) => { held.add(handle); },
 	"release": (handle: unknown) => { held.delete(handle); }
 } });
+
+/** Typed in the Debug Console or the terminal it was started in: the program's input — its listeners called with it
+ *  (or, at its end, told so), and the run woken to go on. */
+export function typed(message: Extract<Control, { "type": "stdin" }>): void {
+	if (message.end === true) {
+		stdin.emit("end");
+	} else {
+		stdin.emit("data", message.data);
+	}
+
+	state.current?.loop?.wake?.();
+}

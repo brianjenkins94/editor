@@ -20,7 +20,8 @@
  */
 import type { ToWorker } from "./debug-protocol";
 import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
-import { launch, setBreakpoints, setPace, setValue, typed } from "./worker/session";
+import { typed } from "./worker/process";
+import { launch, setBreakpoints, setPace, setValue } from "./worker/session";
 import { post, state } from "./worker/state";
 import { decide } from "./worker/stops";
 

@@ -11,6 +11,7 @@ import { triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
 import { UNCATCHABLE } from "@brianjenkins94/tsval";
 import { givenResult } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
+import { capabilityBreakLines } from "../capability-calls";
 import { capabilityStandins, standinCapability, givenAs } from "../canary";
 import { EXITED, stdin } from "./process";
 import { guestConsole, placeOf } from "./session";
@@ -474,3 +475,25 @@ function skipped(capability: string, resource: string, result: unknown, decided?
 
 /** Whether `place` is a capability call the policy gated when it was armed. */
 export const capabilityAt = (place: Place): boolean => state.capabilityLines.get(place.file)?.has(place.line) === true;
+
+/** The host functions the run's own code is given that this worker watches (tsval's `watches`): its console's, and its
+ *  capability stand-ins — it tells their effects (`impure`). */
+export function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object> {
+	const watched = new WeakSet<object>();
+
+	for (const value of holders.flatMap((holder) => Object.values(holder))) {
+		if (typeof value === "function") {
+			watched.add(value);
+		} else if (value !== null && typeof value === "object") {
+			Object.values(value).filter((each) => typeof each === "function").forEach((each) => watched.add(each as object));
+		}
+	}
+
+	return watched;
+}
+
+/** Arm the capability calls in `file` the policy gates as lines a run stops at, to ask there (RUNTIME-EVIDENCE.md,
+ *  *Capability decisions, on the line*); with no policy, none. */
+export function armCapabilities(file: ts.SourceFile): void {
+	state.capabilityLines.set(file.fileName, new Set(state.policy === undefined ? [] : capabilityBreakLines(file, state.policy)));
+}

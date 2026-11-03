@@ -9,37 +9,20 @@ import type { Action, ForwardAction, Place, TraceContext, Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
 import { TsvalInternalError, createVM } from "@brianjenkins94/tsval";
 import ts from "typescript";
-import { capabilityBreakLines } from "../capability-calls";
 import { calledSeen } from "./busy";
-import { capabilityAt, capabilitySurface, functionsIn, tellEffects } from "./gate";
+import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffects, watchedOf } from "./gate";
 import { dropUnpinned, readPins } from "./install";
 import { packagesRan, readBaseline } from "./package-calls";
-import { EXITED, held, listening, readsStdin, stdin } from "./process";
+import { EXITED, held, listening, readsStdin } from "./process";
 import { programModules, runtimeReady, whereOf } from "./runtime";
 import { post, state, workerLog } from "./state";
 import { askAt } from "./stops";
-import { testStarts, testTold } from "./tests";
+import { startTests, tellTests, testsOver, testTold } from "./tests";
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => {
 		state.awaitAction = resolve;
 	});
-}
-
-/** The host functions the run's own code is given that this worker watches (tsval's `watches`): its console's, and its
- *  capability stand-ins — it tells their effects (`impure`). */
-function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object> {
-	const watched = new WeakSet<object>();
-
-	for (const value of holders.flatMap((holder) => Object.values(holder))) {
-		if (typeof value === "function") {
-			watched.add(value);
-		} else if (value !== null && typeof value === "object") {
-			Object.values(value).filter((each) => typeof each === "function").forEach((each) => watched.add(each as object));
-		}
-	}
-
-	return watched;
 }
 
 /** `text` as the value it writes, when it's a literal — a string, a number, a boolean, null or undefined, or an array or
@@ -172,7 +155,7 @@ export function noteProgramFile(filename: string, source: () => string): void {
 	}
 
 	state.programFiles.set(filename, file);
-	state.capabilityLines.set(filename, new Set(state.policy === undefined ? [] : capabilityBreakLines(file, state.policy)));
+	armCapabilities(file);
 
 	for (const vm of new Set([state.current, ...state.history])) {
 		vm?.addBreakpointsInFile(filename, ...linesIn(filename));
@@ -454,12 +437,7 @@ function finish(exitCode = 0, crash?: Crash): void {
 
 	tellEffects();
 
-	// (a test file's tests, each with what it ran)
-	if (state.testsRan.length > 0) {
-		post({ "type": "tests", "tests": state.testsRan });
-	}
-
-	post({ "type": "terminated", "exitCode": exitCode === 0 && state.testsFailed > 0 ? 1 : exitCode, ...crash === undefined ? {} : { "crash": crash } });
+	post({ "type": "terminated", "exitCode": tellTests(exitCode), ...crash === undefined ? {} : { "crash": crash } });
 }
 
 /** Where `vm` is stopped: its file, and the 1-based line in it. */
@@ -566,10 +544,7 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 			// Async work pending and none ready (tsval's steppedAsync): let it settle, then go on — a continue to its next
 			// stop, a step to the next statement that runs (in whichever job runs next).
 			while (!base.finished && base.idle) {
-				// A test file's tests all done, and nothing left that Node counts as keeping a process alive — no ref'd timer,
-				// server or stdin — only promises that nothing here will settle (a package's): it ends, as `node --test` does.
-				// (Before then a pending promise may be a request in flight, which the browser shows no handle for.)
-				if (state.testsDone && held.size === 0 && !readsStdin() && ![...base.loop?.timers.values() ?? []].some((timer) => timer.ref)) {
+				if (testsOver(base)) {
 					finish(0);
 					state.done = true;
 
@@ -732,10 +707,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	state.pins = readPins();
 	dropUnpinned();
 
-	state.testsRan = [];
-	testStarts.clear();
-	state.testsFailed = 0;
-	state.testsDone = false;
+	startTests();
 
 	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules });
 
@@ -754,7 +726,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	state.fileLines = new Map(Object.entries(message.files ?? {}));
 
 	state.programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
-	state.capabilityLines = new Map([[loaded.sourceFile.fileName, new Set(state.policy !== undefined ? capabilityBreakLines(loaded.sourceFile, state.policy) : [])]]);
+	state.capabilityLines = new Map();
+	armCapabilities(loaded.sourceFile);
 	arm(loaded.vm);
 
 	state.history = [];
@@ -783,18 +756,6 @@ export function setBreakpoints(message: Extract<Control, { "type": "setBreakpoin
 	for (const vm of state.history) {
 		arm(vm);
 	}
-}
-
-export function typed(message: Extract<Control, { "type": "stdin" }>): void {
-	// Typed in the Debug Console or the terminal it was started in: the program's input — its listeners called with
-	// it (or, at its end, told so), and the run woken to go on.
-	if (message.end === true) {
-		stdin.emit("end");
-	} else {
-		stdin.emit("data", message.data);
-	}
-
-	state.current?.loop?.wake?.();
 }
 
 export function setPace(message: Extract<Control, { "type": "pace" }>): void {
