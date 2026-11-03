@@ -10,16 +10,14 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/editor-api";
-import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 
 import type { Span } from "@brianjenkins94/util/logger";
-import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
-import { annotations } from "@brianjenkins94/editor-api/annotations";
+import type { Policy } from "@brianjenkins94/util/silo/policy";
+import type { CapabilityAsk, Control, LoopStart, RunEnd, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { logger } from "@brianjenkins94/util/logger";
-import { EMPTY_POLICY, placesOf } from "@brianjenkins94/util/silo/policy";
+import { EMPTY_POLICY } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
@@ -79,18 +77,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	// gated call hard-stops at its line). Empty when there's none — then every undecided dangerous call breaks
 	// (firewall default).
 	private policy: Policy = EMPTY_POLICY;
-	/** The rules placed in this program's code, found in the text that runs (`placeRules`). */
-	private hooks: SetHook[] = [];
 	private sourceReady = false;
 	private configDone = false;
 	private started = false;
-	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
+	/** Run Without Debugging: breakpoints don't stop it. Capability breakpoints still do — they're
 	 *  the policy gate, not a debugging aid. */
 	private noDebug = false;
-	/** The latest coverage the worker reported, and whether the final one has gone out as the `coverage` event. */
-	private coverage: CoverageReport | undefined;
-	private coverageSent = false;
-	private readonly coverageWaiters = new Set<(report: CoverageReport) => void>();
 	/** A `setValue` waiting on the worker's answer. */
 	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
@@ -134,7 +126,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.maybeStart();
 				break;
 
-			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
 			// Input for the program's process.stdin — a terminal's run's typing (the run contract's `stdin`, debug-events.ts).
 			case "stdin": {
 				const { data, end } = args as unknown as StdinRequest;
@@ -143,13 +134,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.respond(request);
 				break;
 			}
-
-			case "getCoverage":
-				// With the text that ran, so the margin can place it on the code as it is now (coverage.ts).
-				void this.currentCoverage(5000).then((report) => {
-					this.respond(request, { ...report, "source": this.source });
-				});
-				break;
 
 			case "launch":
 				this.launchRequest(request, args);
@@ -320,21 +304,17 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	private terminateRequest(request: DapRequest): void {
-		// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
-		// in-handler pause) can't answer, and then the last report stands. Then hard-stop: terminate() kills
-		// the worker even while it's blocked, which a postMessage could not reach.
-		void this.currentCoverage(500).then((report) => {
-			this.sendFinalCoverage(report);
-			this.endAction();
-			this.closeWorker();
-			// Its end told, as when it runs to its end — and, stopped while paused, where it was.
-			const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
+		// Stopped early: hard-stop — terminate() kills the worker even while it's blocked in Atomics.wait (an in-handler
+		// pause), which a postMessage could not reach.
+		this.endAction();
+		this.closeWorker();
+		// Its end told, as when it runs to its end — and, stopped while paused, where it was.
+		const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
 
-			this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
-			this.respond(request);
-			this.event("terminated");
-			this.settle("terminated");
-		});
+		this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
+		this.respond(request);
+		this.event("terminated");
+		this.settle("terminated");
 	}
 
 	/** Resume with `action`, from somewhere other than VS Code's UI (an agent, an answer at a capability stop). */
@@ -427,61 +407,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private async loadSource(): Promise<void> {
 		try {
 			this.source = (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
-			this.hooks = await this.placeRules();
 			this.sourceReady = true;
 			this.maybeStart();
 		} catch (error) {
 			this.event("output", { "category": "stderr", "output": `Failed to read ${this.program}: ${String(error)}\n` });
 			this.event("terminated");
 		}
-	}
-
-	/** Where the rules placed in this program's code are now (RUNNING.md, *A rule placed in the code*): each place found
-	 *  again in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. In the entry,
-	 *  and in any other file a rule is placed in (it hooks there when the program loads that file —
-	 *  packages/tsval/README.md, *Modules*), read as the run reads it. One that's lost, or only uncertainly found, isn't
-	 *  applied (the Rules view says so). */
-	private async placeRules(): Promise<SetHook[]> {
-		// A span reference names its file workspace-relative.
-		const entry = vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false);
-		const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-		const byFile = new Map<string, { "rule": Rule; "place": unknown }[]>();
-
-		for (const rule of this.policy.rules) {
-			for (const place of placesOf(rule)) {
-				const file = (place as { "file"?: unknown } | null)?.file;
-
-				if (typeof file === "string" && (file === entry || root !== undefined)) {
-					byFile.set(file, [...byFile.get(file) ?? [], { "rule": rule, "place": place }]);
-				}
-			}
-		}
-
-		const hooks = await Promise.all([...byFile].map(async ([file, placed]) => {
-			const absolute = file === entry ? this.program : vscode.Uri.joinPath(root, file).path;
-			const source = file === entry ? this.source : await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(absolute))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
-
-			if (source === undefined) {
-				return [];
-			}
-
-			// (a file BABLR can't parse as it is: its rules' places can't be told, so none hooks — the bridge says why, on it)
-			const answer = await annotations(vscode.commands).resolve(source, file, placed.map(({ place }) => place as SpanRef));
-			const found = "value" in answer ? answer.value : [];
-
-			return placed.flatMap(({ rule, place }, index): SetHook[] => {
-				const resolution = found[index];
-				const start = resolution?.candidate?.start;
-
-				if (start === undefined || resolution?.status === "orphaned" || resolution?.status === "uncertain" || (resolution?.candidate?.file !== undefined && resolution.candidate.file !== file)) {
-					return [];
-				}
-
-				return [{ "line": source.slice(0, start).split("\n").length, "place": place, "rule": rule, ...file === entry ? {} : { "file": absolute } }];
-			});
-		}));
-
-		return hooks.flat();
 	}
 
 	private maybeStart(): void {
@@ -510,7 +441,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */
@@ -523,47 +454,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		return this.noDebug ? {} : Object.fromEntries([...this.breakpointLines].filter(([path, lines]) => path !== this.program && lines.length > 0));
 	}
 
-	/** The worker's coverage now, or — when it's gone or doesn't answer within `timeoutMs` — the last it reported. */
-	private currentCoverage(timeoutMs: number): Promise<CoverageReport> {
-		const fallback = (): CoverageReport => this.coverage ?? { "file": this.program, "statements": [], "sites": [] };
-
-		if (this.worker === undefined) {
-			return Promise.resolve(fallback());
-		}
-
-		return new Promise((resolve) => {
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const answer = (report: CoverageReport): void => {
-				clearTimeout(timer);
-				resolve(report);
-			};
-
-			timer = setTimeout(() => {
-				this.coverageWaiters.delete(answer);
-				resolve(fallback());
-			}, timeoutMs);
-			this.coverageWaiters.add(answer);
-			this.control({ "type": "coverage" });
-		});
-	}
-
-	/** Once per session, before `terminated`: the final coverage as a custom `coverage` event — the session is gone
-	 *  after, so this is how a coverage run (or anyone else) gets it (vscode.debug.onDidReceiveDebugSessionCustomEvent). */
-	private sendFinalCoverage(report: CoverageReport): void {
-		if (!this.coverageSent) {
-			this.coverageSent = true;
-			// (with the source that ran, which the file may no longer be: the run's evidence is of that)
-			this.tell("coverage", { ...report, "file": this.program, "source": this.source });
-		}
-	}
-
 	private closeWorker(): void {
 		this.worker?.close();
 		this.worker = undefined;
 	}
 
-	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
-	 *  stop is driven by a control message the worker's loop is awaiting. */
 	/** The session's end, once (the run contract's `ended`): how the run ended short, if it did, on its line, in the file
 	 *  that's in (`endFile`, the entry by default). */
 	private tellEnded(end: RunEnd | undefined, endFile = this.program): void {
@@ -590,6 +485,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		}
 	}
 
+	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
+	 *  stop is driven by a control message the worker's loop is awaiting. */
 	private resume(kind: StepAction): void {
 		const trace = this.startAction(kind);
 
@@ -623,10 +520,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			// A test file's tests, each with what it ran (the run contract's `tests`): kept as traces of them.
 			case "tests":
 				this.tell("tests", { "file": this.program, "tests": message.tests });
-				break;
-
-			case "coverage":
-				this.onCoverage(message);
 				break;
 
 			case "terminated":
@@ -685,20 +578,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 		this.settle("stopped");
-	}
-
-	private onCoverage(message: Extract<WorkerEvent, { "type": "coverage" }>): void {
-		this.coverage = message.report;
-
-		for (const waiter of [...this.coverageWaiters]) {
-			waiter(message.report);
-		}
-
-		this.coverageWaiters.clear();
-
-		if (message.final === true) {
-			this.sendFinalCoverage(message.report);
-		}
 	}
 
 	private onTerminated(message: Extract<WorkerEvent, { "type": "terminated" }>): void {

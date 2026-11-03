@@ -9,11 +9,11 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { CoverageEvent, Effect, TestReport } from "@brianjenkins94/editor-api";
-import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
+import type { Effect, TestReport } from "@brianjenkins94/editor-api";
+import type { Policy } from "@brianjenkins94/util/silo/policy";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
-export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/editor-api";
+export type { RunEnd } from "@brianjenkins94/editor-api";
 
 /** What the adapter posts its worker: first its link into the editor's runtime (editor-api's workspace runtime: its
  *  servers answer the preview through it, its log and spans are the editor's), then control messages — each with the
@@ -30,11 +30,9 @@ export interface Crash { "line": number; "at": [number, number]; "message": stri
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
-	/** Report the coverage so far (answered with a `coverage` event). */
-	| { "type": "coverage" }
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
 	 *  "Allow always", is the policy now in effect — what stops from here on; `give`, the result the call returns instead
 	 *  of being made (a rule's *give result*, just this once). */
@@ -54,10 +52,6 @@ export interface LoopStart { "now": number; "seed": number; "schedule"?: number[
 /** A rule placed in the code (RUNNING.md, *A rule placed in the code*), found in the text that runs: the 1-based line
  *  its statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
  *  matches there. */
-/** A rule's hook: the statement it sets after, by 1-based line — in `file` when that's another of the program's files
- *  than the entry. */
-export interface SetHook { "line": number; "place": unknown; "rule": Rule; "file"?: string }
-
 export interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
 
 /** A stop, complete enough that the adapter answers stackTrace/scopes/variables with no round-trip. */
@@ -86,9 +80,7 @@ export type WorkerEvent =
 	 *  in the run ledger (each telling has them all). */
 	| { "type": "effects"; "effects": Effect[] }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
-	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
-	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
-	/** A test file's tests (node:test, node-test.js), each with the statements it ran — just before the final coverage. */
+	/** A test file's tests (node:test, node-test.js), each with the statements it ran — just before `terminated`. */
 	| { "type": "tests"; "tests": TestReport[] }
 	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
@@ -98,7 +90,3 @@ export type WorkerEvent =
 	| { "type": "serving"; "ports": number[] }
 	/** The program is computing, every few seconds while it runs code (the run contract's `busy`). */
 	| { "type": "busy" };
-
-/** Coverage, and the observed sites, as the run contract has them (@brianjenkins94/editor-api): the body of the
- *  adapter's `getCoverage` reply and of its `coverage` event. */
-export type CoverageReport = CoverageEvent;

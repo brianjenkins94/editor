@@ -1219,11 +1219,10 @@
       "packages/editor/extensions/tsval/debug-adapter.ts",
       "packages/editor/extensions/tsval/debug-protocol.ts",
       "packages/editor/extensions/tsval/debug-worker.ts",
-      "packages/editor/extensions/tsval/extension.ts",
-      "packages/editor/extensions/tsval/site-sums.ts"
+      "packages/editor/extensions/tsval/extension.ts"
     ],
     "tests": [
-      "packages/editor/test/site-sums.test.mjs"
+      "packages/editor/test/debugger-runs.mjs"
     ]
   },
   "Terminal commands beyond the core's": {
