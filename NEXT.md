@@ -220,7 +220,8 @@ How it's kept:
        test harnesses are tested by use: worker-realms loads what's built, and workbench.mjs and history-ledger drive the
        harness and the stand-in `vscode`. CI's browser suites are three shards now: realms, workbench, performance. The
        unit suite passes in Node.
-     - *Then:* `EDITOR_DEPLOYS` set to `off` (production keeps the full editor) and the branch landed on main.
+     - *Landed* 2026-11-03: `EDITOR_DEPLOYS` set to `off` (production keeps the full editor), then `reduction` merged into
+       main (4fbb0f68). Pages and the published editor package are the core now.
      Found while reducing: the editor's runner has no `globalThis.crypto` (runs.test.mjs fails there, passes in Node);
      it can't run the theme's budget test (`Unsupported encoding: latin1`) or a
      test that hooks `vscode` (`registerHooks` isn't in almostnode's `node:module`); `git_checkout` can't switch to a
