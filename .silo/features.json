@@ -26,6 +26,9 @@
       "packages/editor/app/tools/host.ts",
       "packages/editor/app/tools/index.ts",
       "packages/editor/app/tools/page-tools.ts"
+    ],
+    "tests": [
+      "packages/editor/test/page-tools.test.mjs"
     ]
   },
   "Agent view of the editor": {
@@ -362,6 +365,9 @@
     "ways": [
       "diagnostic collection|silo",
       "output channel|History"
+    ],
+    "tests": [
+      "packages/editor/test/history-ledger.test.mjs"
     ]
   },
   "Features from tests": {
@@ -431,6 +437,13 @@
     ],
     "paths": [
       "packages/editor/workbench/git-engine.ts"
+    ],
+    "tests": [
+      "packages/editor/test/git-status.test.mjs",
+      "packages/editor/test/git-fast-forward.test.mjs",
+      "packages/editor/test/git-diff.test.mjs",
+      "packages/editor/test/silo-kept.test.mjs",
+      "packages/editor/workbench/terminal/commands/git/git.test.mjs"
     ]
   },
   "How a commit did in CI": {
@@ -565,6 +578,10 @@
       "packages/editor/workbench/node-modules-provider.ts",
       "packages/editor/workbench/tarballs.ts",
       "packages/editor/workbench/versions.ts"
+    ],
+    "tests": [
+      "packages/editor/test/ata.test.mjs",
+      "packages/editor/test/tarballs.test.mjs"
     ]
   },
   "Pane beside every editor": {
@@ -734,6 +751,9 @@
       "hub subscription|`node.listening.${run.id}`",
       "hub subscription|`node.listening.${runId}`",
       "hub subscription|`node.out.${runId}`"
+    ],
+    "tests": [
+      "packages/editor/test/runs.test.mjs"
     ]
   },
   "Project picker": {
@@ -786,6 +806,9 @@
     "paths": [
       "packages/editor/extensions/bridge/capabilities/coalesce.ts",
       "packages/editor/extensions/bridge/capabilities/decide.ts"
+    ],
+    "tests": [
+      "packages/editor/test/capabilities.test.mjs"
     ]
   },
   "Refactoring for agents": {
@@ -824,6 +847,9 @@
       "packages/editor/shell/git-clone.ts",
       "packages/editor/shell/github.ts",
       "packages/editor/shell/repo-load.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/github.test.mjs"
     ]
   },
   "Reset": {
@@ -839,6 +865,9 @@
     "paths": [
       "packages/editor/shell/reset-popover.tsx",
       "packages/editor/shell/reset.ts"
+    ],
+    "tests": [
+      "packages/editor/test/reset.test.mjs"
     ]
   },
   "Review by hunk": {
@@ -855,6 +884,9 @@
     ],
     "paths": [
       "packages/editor/shared/git-hunks.ts"
+    ],
+    "tests": [
+      "packages/editor/test/git-hunks.test.mjs"
     ]
   },
   "Review panel": {
@@ -1061,6 +1093,10 @@
       "debug configuration provider|tsval",
       "debugger|tsval",
       "worker||tsval/debug-worker.ts"
+    ],
+    "tests": [
+      "packages/editor/test/replay.test.mjs",
+      "packages/editor/test/site-sums.test.mjs"
     ]
   },
   "Terminal node runs in the debugger": {
@@ -1075,6 +1111,9 @@
       "hub subscription|`node.stdin.${runId}`",
       "hub subscription|debug.launch",
       "hub subscription|debug.stop"
+    ],
+    "tests": [
+      "packages/editor/workbench/terminal/commands/node/node.test.mjs"
     ]
   },
   "Tests for agents": {
@@ -1111,6 +1150,9 @@
       "packages/editor/shell/feature.ts",
       "packages/editor/shell/icon.tsx",
       "packages/editor/shell/shell.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/shell-feature.test.mjs"
     ]
   },
   "The workspace terminal": {
@@ -1120,6 +1162,15 @@
     "what": "A bash-like terminal on the workspace's files with npm, node, git, vite and other commands, which VS Code tasks also run in.",
     "paths": [
       "packages/editor/workbench/terminal/"
+    ],
+    "tests": [
+      "packages/editor/test/terminal-integration.test.mjs",
+      "packages/editor/test/terminal-session.test.mjs",
+      "packages/editor/workbench/terminal/commands/code/code.test.mjs",
+      "packages/editor/workbench/terminal/commands/history/history.test.mjs",
+      "packages/editor/workbench/terminal/commands/less/less.test.mjs",
+      "packages/editor/workbench/terminal/commands/npm/npm.test.mjs",
+      "packages/editor/workbench/terminal/commands/ps/ps.test.mjs"
     ]
   },
   "Theme follows your system": {
@@ -1226,6 +1277,9 @@
       "command|history.decisions",
       "core module|installDecisions",
       "hub request|decisions.for"
+    ],
+    "tests": [
+      "packages/editor/test/history-ledger.test.mjs"
     ]
   },
   "Workbench boot": {
@@ -1244,6 +1298,11 @@
     "paths": [
       "packages/editor/shared/pane-link.ts",
       "packages/editor/workbench/Workbench.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/worker-realms.mjs",
+      "packages/editor/test/performance.mjs",
+      "packages/editor/test/hidden-timers.test.mjs"
     ]
   },
   "Workspace filesystem": {
@@ -1260,6 +1319,9 @@
       "packages/editor/shared/workspace-changes.ts",
       "packages/editor/shared/workspace-runtime.ts",
       "packages/editor/shared/zenfs-vfs.ts"
+    ],
+    "tests": [
+      "packages/editor/test/workspace-changes.test.mjs"
     ]
   },
   "Your edits since the last commit": {
