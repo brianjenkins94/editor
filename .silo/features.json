@@ -675,6 +675,7 @@
     "since": "2026-11-02",
     "what": "Any import type-checks and go-to-definition reaches real package source without installing anything, at dependency versions pinned for everyone.",
     "ways": [
+      "core module|installPackage",
       "core module|installTarballs",
       "core module|installTypeAcquisition",
       "hub request|packages.tarball"
