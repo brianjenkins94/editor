@@ -693,6 +693,14 @@ export async function fileAt(path: string, ref: string): Promise<string | undefi
 	}
 }
 
+/** Fetch a branch or a tag the clone hasn't (`full-editor`, say) from `url`, one commit deep: so a file can be read as it
+ *  was there (`fileAt`). Its ref is written as the remote has it — a tag as a tag. */
+export async function fetchRef(http: HttpClient, url: string, ref: string): Promise<boolean> {
+	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": ref, "singleBranch": true, "depth": 1, "tags": true });
+
+	return fetched.fetchHead !== null;
+}
+
 /** Where a shallow clone's history ends: the commits whose parents it hasn't (`.git/shallow`). None in a whole one. */
 export async function shallowEnds(): Promise<string[]> {
 	try {

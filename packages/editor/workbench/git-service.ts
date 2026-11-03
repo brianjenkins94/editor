@@ -175,10 +175,19 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 			throw new TypeError("git.show takes { path, rev }: a file, and a commit (its oid, or its beginning), a branch or HEAD");
 		}
 
-		const text = await engine.fileAt(path, rev);
+		let text = await engine.fileAt(path, rev);
+
+		// A branch or a tag the clone hasn't (it's one commit deep): fetched from the repository, then read.
+		if (text === undefined && !/^[\da-f]{4,40}$/u.test(rev) && rev !== "HEAD") {
+			const url = await engine.githubRemote();
+
+			if (url !== undefined && await engine.fetchRef(remote, url, rev).catch(() => false)) {
+				text = await engine.fileAt(path, rev);
+			}
+		}
 
 		if (text === undefined) {
-			throw new Error(`${rev} has no ${path} here (or isn't a commit this clone has)`);
+			throw new Error(`${rev} has no ${path} here (or isn't a commit, branch or tag this clone has or could fetch)`);
 		}
 
 		return { "path": path, "rev": rev, "lines": text.split("\n").length, "content": text.length > MOST_SHOWN ? text.slice(0, MOST_SHOWN) : text, ...text.length > MOST_SHOWN ? { "truncated": true } : {} };

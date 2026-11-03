@@ -13,46 +13,6 @@
         "packages/editor/app/samples.ts"
       ]
     },
-    "Repo load from GitHub": {
-      "what": "Type owner/repo, or open an env/<owner>/<repo> address, and that GitHub repo is cloned into the workspace, history and all, and the address bar shows it.",
-      "ways": [
-        "hub request|git.origin",
-        "hub subscription|project.openFiles"
-      ],
-      "paths": [
-        "packages/editor/shell/address.ts",
-        "packages/editor/shell/git-clone.ts",
-        "packages/editor/shell/github.ts"
-      ]
-    },
-    "Sign-in and account": {
-      "what": "An optional sign-in (GitHub or email) for private repos and commits, with your account, where you're signed in, signing out everywhere and deleting the account.",
-      "ways": [
-        "button|GitHub"
-      ],
-      "paths": [
-        "packages/editor/shell/account-dialog.tsx",
-        "packages/editor/shell/github-auth.ts",
-        "packages/editor/shell/session.ts"
-      ]
-    },
-    "Reset": {
-      "what": "Start the editor again as new: everything this browser keeps for it deleted — the workspace and its git, settings, caches, its service worker — keeping the sign-in unless asked, from the top bar or a `?reset` address.",
-      "ways": [
-        "button|Reset the editor",
-        "hub request|git.unpushed",
-        "url parameter|?reset"
-      ],
-      "paths": [
-        "packages/editor/shell/reset.ts"
-      ]
-    },
-    "Commit to GitHub": {
-      "what": "Commit every change in the workspace with a message and push it to the repo it was loaded from, on the branch it's on, from the top bar.",
-      "ways": [
-        "button|Commit"
-      ]
-    },
     "Playground links": {
       "what": "Open a TypeScript Playground link here as a real workspace (swap its host for the editor's), and share your workspace as a link the Playground opens too.",
       "ways": [
@@ -118,24 +78,6 @@
         "packages/editor/workbench/rule-editor.ts"
       ]
     },
-    "File and text search": {
-      "what": "Quick Open, Find in Files and extensions' file searches over the workspace, honouring files-to-include and files-to-exclude globs.",
-      "ways": [
-        "search result provider|file"
-      ]
-    },
-    "Packages and types from the CDN": {
-      "what": "Any import type-checks and go-to-definition reaches real package source without installing anything, at dependency versions pinned for everyone.",
-      "ways": [
-        "core module|installTypeAcquisition",
-        "hub request|packages.tarball"
-      ],
-      "paths": [
-        "packages/editor/workbench/node-modules-provider.ts",
-        "packages/editor/workbench/tarballs.ts",
-        "packages/editor/workbench/versions.ts"
-      ]
-    },
     "Annotations that stay on their code": {
       "what": "Notes, rules and evidence placed on a piece of code, by the editor or an extension, stay on that code through edits, moves and reformatting.",
       "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
@@ -165,17 +107,6 @@
       "docs": "packages/editor/RUNNING.md, *The model*",
       "ways": [
         "button|Run"
-      ]
-    },
-    "The workspace terminal": {
-      "what": "A bash-like terminal on the workspace's files with npm, node, git, vite and other commands, which VS Code tasks also run in.",
-      "ways": [
-        "hub request|terminal.run",
-        "hub subscription|`terminal.in.${id}`",
-        "hub subscription|`terminal.stop.${id}`"
-      ],
-      "paths": [
-        "packages/editor/workbench/terminal/"
       ]
     },
     "Run a file in the debugger": {
@@ -212,13 +143,6 @@
       "ways": [
         "command|tsval.explore",
         "command|tsval.exploreOrderings"
-      ]
-    },
-    "Tests run in the debugger": {
-      "what": "`node --test` runs test files in the debugger with breakpoints and stepping, and remembers which code each test reached.",
-      "docs": "packages/editor/RUNNING.md, *Tests*",
-      "paths": [
-        "packages/editor/extensions/tsval/node-test.js"
       ]
     },
     "Playwright tests in the debugger": {
@@ -614,24 +538,6 @@
     }
   },
   "Source control": {
-    "Review panel": {
-      "what": "A changes panel on the right listing changed files, with a side-by-side diff, per-file discard and a commit box, like GitHub Desktop.",
-      "ways": [
-        "button|Close diff",
-        "button|Collapse changes panel",
-        "button|Discard changes",
-        "button|History",
-        "button|Toggle history panel",
-        "hub request|git.commit",
-        "hub request|git.discard",
-        "hub request|git.file",
-        "hub request|git.status",
-        "hub subscription|git.changed"
-      ],
-      "paths": [
-        "packages/editor/shell/git-codehike.tsx"
-      ]
-    },
     "Your edits since the last commit": {
       "what": "Every edit burst since the last commit is recorded per file and shown as small chunks grouped by the code they touched, surviving reloads.",
       "ways": [
@@ -640,59 +546,6 @@
         "core module|installEditHistory",
         "hub request|bablr.editGroups",
         "hub request|history.chunks"
-      ]
-    },
-    "Git in the browser": {
-      "what": "The workspace is a real git repository, with no git binary, which VS Code's Source Control view and extensions read and commit to.",
-      "ways": [
-        "command|editor.git.commit",
-        "command|editor.git.file",
-        "command|editor.git.status",
-        "core module|installGitService"
-      ],
-      "paths": [
-        "packages/editor/workbench/git-engine.ts"
-      ]
-    },
-    "Push to GitHub": {
-      "what": "A branch of the workspace's git pushed to the GitHub repository it was loaded from, through the editor's sign-in, its commits by the signed-in user, and brought up to the repository's first when that's a fast-forward; branches made and switched to.",
-      "ways": [
-        "agent tool|git_branch",
-        "agent tool|git_checkout",
-        "agent tool|git_pull",
-        "agent tool|git_push",
-        "hub request|git.branch",
-        "hub request|git.checkout",
-        "hub request|git.identity",
-        "hub request|git.pull",
-        "hub request|git.push",
-        "hub request|git.remote"
-      ],
-      "paths": [
-        "packages/editor/shared/git-remote.ts",
-        "packages/editor/shell/git-push.ts"
-      ]
-    },
-    "Review by hunk": {
-      "what": "The working tree's changes as hunks with ids, each with BABLR's cosmetic verdict and the features whose code it's in; a commit or a discard takes some of a file's hunks, by an agent's ids or the review panel's line picks.",
-      "ways": [
-        "agent tool|git_discard",
-        "agent tool|git_review",
-        "core module|installGitReview",
-        "hub request|git.review"
-      ],
-      "paths": [
-        "packages/editor/shared/git-hunks.ts"
-      ]
-    },
-    "Source Control for git": {
-      "what": "The Source Control view shows staged and unstaged changes with diffs against the last commit, and commits from its input box.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Worked examples (the git/SCM + BABLR stack)*",
-      "ways": [
-        "command|sourceControl.commit",
-        "command|sourceControl.refresh",
-        "source control|git",
-        "text document content provider||source-control/extension.ts"
       ]
     },
     "Formatting-only changes marked": {
@@ -768,39 +621,6 @@
     }
   },
   "Agent tools": {
-    "Agent workspace tools": {
-      "what": "An agent reads, writes, edits, globs and greps the workspace's files, reads what the terminals printed, and checks status, diffs and commits with git: through the editor, not a shell.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
-      "ways": [
-        "agent tool|files_delete",
-        "agent tool|files_edit",
-        "agent tool|files_glob",
-        "agent tool|files_grep",
-        "agent tool|files_read",
-        "agent tool|files_replace",
-        "agent tool|files_write",
-        "agent tool|git_blame",
-        "agent tool|git_commit",
-        "agent tool|git_diff",
-        "agent tool|git_log",
-        "agent tool|git_show",
-        "agent tool|git_status",
-        "agent tool|terminal_output",
-        "core module|installWorkspaceTools",
-        "hub request|files.delete",
-        "hub request|files.edit",
-        "hub request|files.glob",
-        "hub request|files.grep",
-        "hub request|files.read",
-        "hub request|files.replace",
-        "hub request|files.write",
-        "hub request|git.blame",
-        "hub request|git.diff",
-        "hub request|git.log",
-        "hub request|git.show",
-        "hub request|terminal.state"
-      ]
-    },
     "A change's problems": {
       "what": "The TypeScript and ESLint problems a change made and the ones it fixed, against HEAD: its changed files and the files importing them, each checked now and as HEAD had it, with what wasn't checked said.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
@@ -834,15 +654,6 @@
       ],
       "paths": [
         "packages/editor/workbench/script-run.ts"
-      ]
-    },
-    "What's been decided about it": {
-      "what": "For a file (its path or name) or a name (an identifier, a tool, a hub request, a feature), what's been decided about it before it's changed: the feature ledger's entries naming it or whose paths hold the file, the manifest's features owning it, and each docs line naming it under its heading.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
-      "ways": [
-        "agent tool|decisions_for",
-        "command|history.decisions",
-        "hub request|decisions.for"
       ]
     },
     "What a way in reaches": {
@@ -881,42 +692,6 @@
         "hub request|code.references",
         "hub request|code.rename",
         "hub request|code.rewrite"
-      ]
-    },
-    "Tests for agents": {
-      "what": "Which tests a change reaches, by the traces of their runs here (stale when they ran code it has altered, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
-      "docs": "packages/editor/RUNNING.md, *Tests*",
-      "ways": [
-        "agent tool|runs_affected",
-        "agent tool|runs_tests",
-        "core module|installTestRuns",
-        "hub request|tests.affected",
-        "hub request|tests.run"
-      ]
-    },
-    "Agent view of the editor": {
-      "what": "An agent reads what's on screen as data: the active file, cursor and open tabs, the Problems view, and the notifications showing.",
-      "ways": [
-        "agent tool|editor_notifications",
-        "agent tool|editor_problems",
-        "agent tool|editor_state",
-        "agent tool|editor_trace",
-        "core module|installEditorState",
-        "hub request|editor.state",
-        "hub request|editor.trace",
-        "hub request|notifications.list",
-        "hub request|problems.list"
-      ]
-    },
-    "Agent connection": {
-      "what": "Each open tab offers its tools to an agent through debug-mcp, addressed by tab so one agent can drive several, plus a scripting hook for automation on localhost.",
-      "ways": [
-        "core module|installDebugBridge"
-      ],
-      "paths": [
-        "packages/editor/app/tools/host.ts",
-        "packages/editor/app/tools/index.ts",
-        "packages/editor/app/tools/page-tools.ts"
       ]
     }
   },
@@ -969,46 +744,6 @@
     }
   },
   "Platform": {
-    "Workbench boot": {
-      "what": "The editor page boots VS Code's workbench in a frame, hands it the workspace, and keeps the two talking even when the editor is popped out.",
-      "docs": "packages/editor/ARCHITECTURE.md, *Cross-realm communication*",
-      "ways": [
-        "hub request|workbench.init",
-        "hub subscription|workbench.online",
-        "hub subscription|workbench.openProject",
-        "hub subscription|workbench.save",
-        "url parameter|?pane"
-      ],
-      "paths": [
-        "packages/editor/shared/pane-link.ts",
-        "packages/editor/workbench/Workbench.tsx"
-      ]
-    },
-    "Workspace filesystem": {
-      "what": "One in-memory workspace shared by the editor, terminal, previews and debugger, saved across reloads, where a change made anywhere is seen everywhere.",
-      "docs": "packages/editor/ARCHITECTURE.md, *The workspace filesystem (zen-fs)*",
-      "ways": [
-        "core module|installWorkspaceFs",
-        "hub request|workspace.buffer",
-        "hub subscription|WORKSPACE_CHANGED"
-      ],
-      "paths": [
-        "packages/editor/shared/workspace-changes.ts",
-        "packages/editor/shared/workspace-runtime.ts",
-        "packages/editor/shared/zenfs-vfs.ts"
-      ]
-    },
-    "Runs on a static host": {
-      "what": "A service worker makes the editor work from a plain static site: it supplies the isolation the editor needs (after one reload), serves package files from a CDN and answers preview requests.",
-      "ways": [
-        "url parameter|?coep",
-        "worker||editor/coi-serviceworker.js"
-      ],
-      "paths": [
-        "packages/editor/app/coi.ts",
-        "packages/editor/index.html"
-      ]
-    },
     "Extensions by URL": {
       "what": "Load extensions from outside the editor (an interpreter or renderer from editor-contrib) by URL, reloading as they're rebuilt.",
       "docs": "packages/editor/ARCHITECTURE.md, *Extension points*",

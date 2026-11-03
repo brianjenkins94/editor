@@ -47,7 +47,7 @@ import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshot
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { ledgerPath, manifestPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
-import { codeOwners, manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
+import { codeOwners, featuresOfLedger, manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 
@@ -161,20 +161,23 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 	}), ...manifestDriftOf(repo, ways, exists)];
 }
 
-/** The feature manifest's drift from the ways in (lib util/silo/manifest): none without a manifest. Throws for one that
- *  isn't a manifest. */
+/** The features' drift from the ways in (lib util/silo/manifest): the manifest's and the ledger's declared ones (decision
+ *  21: the ledger's are the source of truth; the manifest's go as they move). Throws for a manifest that isn't one. */
 function manifestDriftOf(repo: string, ways: Parameters<typeof manifestDrift>[1]["ways"], exists: (path: string) => boolean): Drift[] {
-	if (!exists(manifestPath())) {
+	const ledger = ledgerOf(repo);
+
+	// (a repository that declares no features anywhere isn't held to them)
+	if (!exists(manifestPath()) && featuresOfLedger(ledger).length === 0) {
 		return [];
 	}
 
-	const manifest = parseManifest(fs.readFileSync(path.join(repo, manifestPath())));
+	const manifest = exists(manifestPath()) ? parseManifest(fs.readFileSync(path.join(repo, manifestPath()))) : {};
 
 	if (manifest === undefined) {
 		throw new Error(`${manifestPath()} isn't a manifest: areas of features by name, each with its \`what\``);
 	}
 
-	return manifestDrift(manifest, { "ways": ways, "exists": exists });
+	return manifestDrift(manifest, { "ways": ways, "exists": exists }, ledger);
 }
 
 /** How many of the manifest's features own each declaration (lib util/silo/manifest `codeOwners`). */

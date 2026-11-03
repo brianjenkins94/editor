@@ -51,7 +51,9 @@
         { "run": "pnpm exec wrangler d1 migrations apply editor-api --env production --remote", "working-directory": "packages/api" },
         # RELEASE: the commit, so an error says which release it came from (packages/api/src/errors.ts).
         { "run": "pnpm exec wrangler deploy --env production --var RELEASE:$(git rev-parse --short HEAD)", "working-directory": "packages/api" },
-        { "run": "pnpm exec wrangler deploy --config editor.jsonc", "working-directory": "packages/site" },
+        # The editor, unless held: while the rewrite reduces main to its core, production keeps the full editor
+        # (packages/editor/ARCHITECTURE.md, *The rewrite, in place*) — the repository variable EDITOR_DEPLOYS is `off`.
+        { "if": "${{ vars.EDITOR_DEPLOYS != 'off' }}", "run": "pnpm exec wrangler deploy --config editor.jsonc", "working-directory": "packages/site" },
         # The admin app's own build (packages/admin/dist; the root build doesn't make it), then its static host.
         { "run": "pnpm run build", "working-directory": "packages/admin" },
         { "run": "pnpm exec wrangler deploy --config admin.jsonc", "working-directory": "packages/site" },

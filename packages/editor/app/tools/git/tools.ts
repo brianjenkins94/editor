@@ -24,10 +24,10 @@ const git: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "git_show",
 			"config": {
-				"description": "A file as it was at a revision: a commit's oid (or its beginning), a branch, or HEAD. Returns { path, rev, lines, content, truncated? }.",
+				"description": "A file as it was at a revision: a commit's oid (or its beginning), a branch, a tag, or HEAD. A branch or tag this clone hasn't (it's one commit deep) is fetched from the repository first — `full-editor` is the editor before the rewrite reduced it. Returns { path, rev, lines, content, truncated? }.",
 				"inputSchema": {
 					"path": z.string().describe("The file (relative to the workspace)."),
-					"rev": z.string().describe("The commit (oid or its beginning), branch or HEAD.")
+					"rev": z.string().describe("The commit (oid or its beginning), branch, tag or HEAD.")
 				}
 			},
 			"handler": async ({ path, rev }, { signal }) => ok(request("git.show", { "path": path, "rev": rev }, signal))
