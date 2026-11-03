@@ -131,9 +131,6 @@ if (reset === "wait") {
 				hostLog.info("project.openFiles", { "files": request.files.length });
 			}
 		});
-		// The shell asks for the current workspace to commit it back to GitHub or share it as a link; the workbench pane holds
-		// the FS and the editors, so we relay its files (bytes and all — the token never comes down here) and active editor up.
-		serve(rootHub, "workspace.files", () => vscodeWindow.readWorkspace());
 		hostLog.info("shell link established");
 	}
 }

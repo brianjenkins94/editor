@@ -1,27 +1,19 @@
 /**
  * The BABLR worker — the editor's BABLR, OFF the main thread (bablr.ts starts it and queues what it's asked): the
- * cosmetic/semantic analysis over the CST-node IDENTITY core, and the span ids the runtime evidence keys on.
+ * cosmetic/semantic analysis over the CST-node IDENTITY core, and a text's spans.
  *
  * `deriveIdentityAsync` restates the verdict on top of stable node identity: cosmetic exactly when the trivia-insensitive
  * node atoms are unchanged, otherwise semantic (a deletion counts), or unparsable — and it also yields which nodes
- * changed and the working lines they land on, so the diff pane can focus per node. `editGroups` decomposes an
- * edit-burst chain into node-grouped chunks for the "your edits" timeline.
+ * changed and the working lines they land on, so the diff pane can focus per node.
  *
- * Served over the hub, to bablr.ts: `bablr.verdict` and `bablr.editGroups` (cosmetic-classifier.ts); `bablr.spans`,
- * every span of a source, from its cached parse (below); and `bablr.pick`, the span standing for each of a text's
- * ranges, from its spans (the runtime evidence's span ids for a run's statements); and `bablr.follow`, where a span of
- * one version of a text went in another (a span annotation re-placed from its baseline, RUNTIME-EVIDENCE.md, *Durable annotations on spans*); and for
- * annotations themselves, `bablr.refer` (references to the spans standing for ranges) and `bablr.resolve` (where
- * references' spans are in a text now — silo's resolver, over the text's span shapes).
+ * Served over the hub, to bablr.ts: `bablr.verdict`, and `bablr.spans`, every span of a source, from its cached parse.
  * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so a cancelled call's signal lands
  * mid-parse and the run bails cooperatively, no worker termination. bablr.ts drives one call at a time.
  */
 import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
 // (A comment, so sorting leaves the freeze first.)
-import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
-import { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
+import { cstSpansAsync, deriveIdentityAsync, PARSE_VERSION, spanAnchors } from "@brianjenkins94/bablr";
 import { serve } from "@brianjenkins94/hub";
-import { OBSERVED, PIPELINE, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
 import { createWorkerHub } from "./worker-hub";
 
 const hub = createWorkerHub("bablr");
@@ -269,22 +261,6 @@ serve(hub, "bablr.verdict", async (args, { signal }) => {
 	}
 });
 
-// A burst chain [HEAD, …afters] ⇒ node-grouped chunks for the "your edits" timeline. From cached parses too: each burst's
-// text is parsed once, ever.
-serve(hub, "bablr.editGroups", async (args, { signal }) => {
-	try {
-		const { groups, bursts } = await editGroups((args as { "chain": string[] }).chain, { "signal": signal, "parse": cachedParse(signal) });
-
-		return { "groups": groups, "bursts": bursts };
-	} catch (error) {
-		if (signal.aborted) {
-			throw error;
-		}
-
-		return { "groups": [], "bursts": 0 };
-	}
-});
-
 // A source ⇒ every span of it that can be a handle (punctuation never is: pickAnchor skips it) — its id and offsets — or
 // `unparsable` — why — when BABLR's grammar doesn't take it. From the cached parse.
 serve(hub, "bablr.spans", async (args, { signal }) => {
@@ -301,165 +277,4 @@ serve(hub, "bablr.spans", async (args, { signal }) => {
 	}
 
 	return { "spans": (spanAnchors(source, "Program", cst) as { "type": string | null; "start": number; "end": number; "id": string }[]).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end })) };
-});
-
-// A text's spans (bablr.spans, cached) and ranges in it — TypeScript's statements, as a run's coverage gives them ⇒ the
-// span standing for each range (pickAnchor). No parse: the spans are given.
-serve(hub, "bablr.pick", (args) => {
-	const { spans, ranges } = args as { "spans": { "id": string; "start": number; "end": number }[]; "ranges": { "start": number; "end": number }[] };
-	const handles = spans.map((span) => ({ ...span, "type": "" }));
-
-	return { "ids": ranges.map((range) => pickAnchor(handles, range.start, range.end) ?? null) };
-});
-
-// A span of a baseline text ⇒ where it went in the current one, by the structural diff (follow): the same node — a
-// container survives edits inside it — or the one an edit replaced it with; nothing when it went. From cached parses.
-serve(hub, "bablr.follow", async (args, { signal }) => {
-	const { baseline, current, span } = args as { "baseline": string; "current": string; "span": string };
-	const [was, now] = [await parse(baseline, signal), await parse(current, signal)];
-
-	if (was === undefined || now === undefined) {
-		return {};
-	}
-
-	const index = spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === span);
-	const found = index === -1 ? undefined : follow(atomsOf(was), atomsOf(now), index);
-
-	return found === undefined ? {} : { "id": spanAnchors(current, "Program", now)[found.to].id, "how": found.how };
-});
-
-/** Every span of a parsed text as silo's annotation strategies see it: id, node type, offsets, tokens. */
-function shapesOf(source: string, cst: Cst): SpanShape[] {
-	const tokens = cst.spans.filter((span) => span.token && !span.trivia).sort((left, right) => left.start - right.start);
-	const firstAt = (offset: number): number => {
-		let low = 0;
-		let high = tokens.length;
-
-		while (low < high) {
-			const middle = (low + high) >> 1;
-
-			if (tokens[middle].start < offset) {
-				low = middle + 1;
-			} else {
-				high = middle;
-			}
-		}
-
-		return low;
-	};
-
-	return (spanAnchors(source, "Program", cst) as { "type": string | null; "start": number; "end": number; "id": string }[]).filter((span) => span.type !== null).map((span) => {
-		const atoms: string[] = [];
-
-		for (let at = firstAt(span.start); at < tokens.length && tokens[at].end <= span.end; at += 1) {
-			atoms.push(tokens[at].text);
-		}
-
-		return { "id": span.id, "type": span.type, "start": span.start, "end": span.end, "atoms": atoms };
-	});
-}
-
-// A text, ranges in it, and the file's name ⇒ a reference to the span standing for each range (its id, shape and
-// neighbours, and the text's blob oid as its baseline) — what an annotation keeps. When BABLR can't parse it, why.
-serve(hub, "bablr.refer", async (args, { signal }) => {
-	const { source, ranges, file } = args as { "source": string; "ranges": { "start": number; "end": number }[]; "file": string };
-	const cst = source === "" ? undefined : await parse(source, signal);
-
-	if (cst === undefined) {
-		return source === "" ? {} : { "unparsable": await failureOf(source) };
-	}
-
-	const shapes = shapesOf(source, cst);
-	const blob = await blobOid(source);
-
-	return { "refs": ranges.map((range) => {
-		const id = pickAnchor(shapes, range.start, range.end);
-
-		return (id === undefined ? undefined : referTo(shapes, id, file, blob)) ?? null;
-	}) };
-});
-
-/** Where `span`, a span of `baseline` (`was`: its parse, undefined when there's none), is in the text now (`now`, and
- *  its `anchors`), by the structural diff; undefined when it went. */
-function reidentify(baseline: string, was: Cst | undefined, span: string, now: Cst, anchors: ReturnType<typeof spanAnchors>): { "id": string; "how": "kept" | "replaced" } | undefined {
-	const index = was === undefined ? -1 : spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === span);
-	const found = was === undefined || index === -1 ? undefined : follow(atomsOf(was), atomsOf(now), index);
-
-	return found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
-}
-
-// References, the text their file has now (and their baselines' texts, by blob oid — git's, and the texts the caller knows
-// the file went through, `texts`, keyed here — other files' texts, by path, and
-// what spans of this text are beyond their shape — TypeScript's type, observed tags — when the caller could get them) ⇒ where each one's span is: silo's resolver — the authored pipeline, with the other
-// files as where a span may have moved and the structural diff from a baseline as its re-identified strategy, or the
-// observed one (the id alone) — and, for one found anywhere but by its own id, the reference as it would be made where
-// it was found now (for an annotation to be rewritten with).
-serve(hub, "bablr.resolve", async (args, { signal }) => {
-	const { source, file, refs, "baselines": fromGit = {}, texts = [], others = {}, observed = false, types = {} } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "texts"?: string[]; "others"?: Record<string, string>; "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }> };
-	const cst = source === "" ? undefined : await parse(source, signal);
-	const baselines: Record<string, string> = { ...fromGit };
-
-	for (const text of texts) {
-		baselines[await blobOid(text)] = text;
-	}
-
-	if (cst === undefined) {
-		return { "resolutions": refs.map(() => ({ "status": "orphaned", "alternatives": [] })), ...source === "" ? {} : { "unparsable": await failureOf(source) } };
-	}
-
-	const shapes = shapesOf(source, cst);
-	const ids = new Set(shapes.map((shape) => shape.id));
-	const anchors = spanAnchors(source, "Program", cst);
-	const blob = await blobOid(source);
-	// The other files' spans, by id — parsed (or taken from the cache) only once a reference needs them.
-	let elsewhere: Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }> | undefined;
-	const indexOthers = async (): Promise<void> => {
-		const index = new Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }>();
-
-		for (const [path, text] of Object.entries(others)) {
-			const parsed = await parse(text, signal);
-
-			if (parsed !== undefined) {
-				const theirs = shapesOf(text, parsed);
-				const theirBlob = await blobOid(text);
-
-				for (const shape of theirs) {
-					if (!index.has(shape.id)) {
-						index.set(shape.id, { "file": path, "shape": shape, "shapes": theirs, "blob": theirBlob });
-					}
-				}
-			}
-		}
-
-		elsewhere = index;
-	};
-
-	// One reference's resolution, with the reference as it would be made where it was found (when that wasn't by its id).
-	const resolveRef = (ref: SpanRef, reidentified: { "id": string; "how": "kept" | "replaced" } | undefined) => {
-		const index = elsewhere;
-		const resolution = resolve(ref, { "file": file, "shapes": shapes, "types": (id: string) => types[id], ...index === undefined ? {} : { "elsewhere": (id: string) => index.get(id) }, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
-		const at = resolution.status === "attached" ? undefined : resolution.candidate;
-		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": blob } : index?.get(at.span);
-
-		return { ...resolution, ...at === undefined || there === undefined ? {} : { "ref": referTo(there.shapes, at.span, at.file, there.blob) } };
-	};
-
-	const resolutions = [];
-
-	for (const ref of refs) {
-		let reidentified: { "id": string; "how": "kept" | "replaced" } | undefined;
-		const baseline = ref.baseline === undefined ? undefined : baselines[ref.baseline.blob];
-
-		if (!observed && baseline !== undefined && !ids.has(ref.span)) {
-			reidentified = reidentify(baseline, await parse(baseline, signal), ref.span, cst, anchors);
-		}
-
-		if (!observed && !ids.has(ref.span) && Object.keys(others).length > 0 && elsewhere === undefined) {
-			await indexOthers();
-		}
-
-		resolutions.push(resolveRef(ref, reidentified));
-	}
-
-	return { "resolutions": resolutions };
 });

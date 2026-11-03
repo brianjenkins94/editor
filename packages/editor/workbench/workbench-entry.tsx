@@ -17,7 +17,6 @@ import "../shared/hidden-timers";
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";
-import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 // First of what runs, before anything loads Lit: Web Awesome's components here move into docked windows (theme/documents).
 import "theme/documents";
@@ -56,8 +55,8 @@ import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { markReady } from "./readiness";
 import { createBashProcess, serveTerminalState } from "./terminal";
-import { installTestRuns } from "./test-runs";
 import { installTarballs } from "./tarballs";
+import { installTestRuns } from "./test-runs";
 import { pinned, watchVersions } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -815,26 +814,6 @@ workbenchHub.subscribe("workbench.openProject", (data) => {
 			});
 		}
 	}, 150);
-});
-
-// The host asks for the current workspace — to commit it back to GitHub, or share it as a link. We hold the FS and the
-// editors, so we serve it: every project file as bytes (editor scaffolding excluded), and the editor in front with its
-// selection (1-based, as a playground link records it).
-serve(workbenchHub, "workbench.files", async (): Promise<SharedWorkspace> => {
-	const files = await collectFiles(workspaceRoot());
-	const editor = vscodeApi.window.activeTextEditor;
-
-	if (editor === undefined || editor.document.uri.scheme !== "file") {
-		return { "files": files };
-	}
-
-	const { active, anchor } = editor.selection;
-
-	return {
-		"files": files,
-		"activeFile": editor.document.uri.path,
-		"selection": { "positionLineNumber": active.line + 1, "positionColumn": active.character + 1, "selectionStartLineNumber": anchor.line + 1, "selectionStartColumn": anchor.character + 1 }
-	};
 });
 
 // Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.

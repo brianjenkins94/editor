@@ -36,9 +36,6 @@ interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
  */
 export interface DiffOverlay { "el": HTMLElement; "title": HTMLElement; "body": HTMLElement; "close": HTMLElement }
 
-/** A node-grouped chunk of "your edits" (from the Automerge tier), as history.chunks returns it. */
-interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
-
 /** The plain diff's lines, from the aligned rows: a modified row as its deletion, then its addition. */
 function plainRows(head: string, working: string, rows: DiffRowInfo[]): DiffRow[] {
 	const [headLines, workingLines] = [head.split("\n"), working.split("\n")];
@@ -116,101 +113,18 @@ const isCodeFile = (file: GitFileChange): boolean => /\.(?:ts|tsx|js|jsx|mjs|cjs
 /** Current OS colour scheme — the diff highlights with the matching shiki theme (the shell drives the same query). */
 const prefersDark = (): boolean => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-/** A chunk timeline's note line (a status, or the summary above the chunks). */
-const CHUNK_INFO = "gp-chunk-info wa-font-size-2xs wa-color-text-quiet";
-
-/** What the chunk timeline says until it has chunks to show. */
-const CHUNK_NOTES = { "loading": "Loading your edits…", "error": "Couldn't load edit history.", "empty": "No edits recorded since the last commit." };
-
 /** A file's status letter, by the Web Awesome variant it's drawn in: added, modified, deleted. */
 const STATUS_VARIANTS: Record<GitFileChange["status"], string> = { "A": "success", "M": "warning", "D": "danger" };
 
-/** The "your edits" chunk timeline for one expanded file — hovering a chunk spotlights its range in the open diff. */
-function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeof createRpcClient>; "onOpen": (path: string) => void }) {
-	const [state, setState] = useState<{ "status": "loading" | "error" | "empty" | "ready"; "groups"?: EditGroup[]; "bursts"?: number }>({ "status": "loading" });
-	const highlightRef = useRef<(range: { "start": number; "end": number } | null) => void>(() => { /* set once codehike loads */ });
-
-	useEffect(() => {
-		let live = true;
-
-		void import("./git-codehike").then(({ setDiffHighlight }) => {
-			highlightRef.current = setDiffHighlight;
-		}).catch(() => { /* island unavailable — hover is a no-op */ });
-
-		void (async () => {
-			try {
-				const result = await rpc.request("history.chunks", { "path": path }) as { "groups": EditGroup[]; "bursts": number };
-
-				if (!live) {
-					return;
-				}
-
-				setState(result.groups.length === 0 ? { "status": "empty" } : { "status": "ready", "groups": result.groups, "bursts": result.bursts });
-			} catch {
-				if (live) {
-					setState({ "status": "error" });
-				}
-			}
-		})();
-
-		return () => {
-			live = false;
-		};
-	}, [path, rpc]);
-
-	if (state.status !== "ready") {
-		return <div class="gp-chunks wa-stack wa-gap-0"><div class={CHUNK_INFO}>{CHUNK_NOTES[state.status]}</div></div>;
-	}
-
-	const groups = state.groups ?? [];
-
-	return (
-		<div class="gp-chunks wa-stack wa-gap-0">
-			<div class={CHUNK_INFO}>{groups.length + " change" + (groups.length === 1 ? "" : "s") + " · " + (state.bursts ?? 0) + " edit" + (state.bursts === 1 ? "" : "s")}</div>
-
-			{groups.map((group, index) => {
-				const range = group.endLine > group.startLine ? "L" + group.startLine + "–" + group.endLine : "L" + group.startLine;
-
-				return (
-					<div
-						key={index}
-						class="gp-chunk wa-cluster wa-flex-nowrap wa-gap-xs wa-align-items-baseline wa-border-radius-s wa-font-size-xs"
-						onMouseEnter={() => { highlightRef.current({ "start": group.startLine, "end": group.endLine }); }}
-						onMouseLeave={() => { highlightRef.current(null); }}
-						onClick={() => { onOpen(path); }}
-					>
-						<span class="wa-font-size-3xs wa-text-lowercase wa-color-text-quiet">{group.kind}</span>
-
-						<span class="gp-chunk-label wa-text-truncate">{group.label}</span>
-
-						{group.edits > 1 && (
-							<wa-badge variant="neutral" appearance="outlined" title={group.edits + " edit-bursts touched this"}>
-								{group.edits}
-
-								{" "}
-								edits
-							</wa-badge>
-						)}
-
-						<span class="wa-font-size-2xs wa-color-text-quiet">{range}</span>
-					</div>
-				);
-			})}
-		</div>
-	);
-}
-
-/** One changed-file row: tri-state pick, status, name, and a tail (your-edits expander, cosmetic badge, discard). */
-function FileRow({ file, cosmetic, state, current, expanded, onPick, onOpen, onToggleExpand, onDiscard }: {
+/** One changed-file row: tri-state pick, status, name, and a tail (cosmetic badge, discard). */
+function FileRow({ file, cosmetic, state, current, onPick, onOpen, onDiscard }: {
 	"file": GitFileChange;
 	/** Its change is formatting or comments only (BABLR's verdict). */
 	"cosmetic": boolean;
 	"state": "all" | "partial" | "off";
 	"current": boolean;
-	"expanded": boolean;
 	"onPick": (checked: boolean) => void;
 	"onOpen": () => void;
-	"onToggleExpand": () => void;
 	"onDiscard": () => void;
 }) {
 	const [armed, setArmed] = useState(false);
@@ -236,14 +150,9 @@ function FileRow({ file, cosmetic, state, current, expanded, onPick, onOpen, onT
 	};
 
 	const clickRow = (event: MouseEvent): void => {
-		if ((event.target as HTMLElement).closest("wa-checkbox, .gp-discard, .gp-expand") === null) {
+		if ((event.target as HTMLElement).closest("wa-checkbox, .gp-discard") === null) {
 			onOpen();
 		}
-	};
-
-	const clickExpand = (event: MouseEvent): void => {
-		event.stopPropagation();
-		onToggleExpand();
 	};
 
 	return (
@@ -255,8 +164,6 @@ function FileRow({ file, cosmetic, state, current, expanded, onPick, onOpen, onT
 			<span class={"gp-name wa-text-truncate" + (cosmetic ? " wa-color-text-quiet" : "")}><bdi dir="ltr">{file.path}</bdi></span>
 
 			<span class="wa-cluster wa-flex-nowrap wa-gap-2xs">
-				{isCodeFile(file) && <wa-button class="gp-expand" appearance="plain" size="small" title="Your edits" aria-label="Your edits" onClick={clickExpand}>{expanded ? "▾" : "▸"}</wa-button>}
-
 				{cosmetic && <wa-badge variant="neutral">cosmetic</wa-badge>}
 
 				<wa-button class={"gp-discard" + (armed ? " armed" : "")} appearance="plain" size="small" variant="danger" title="Discard changes" aria-label="Discard changes" onClick={clickDiscard}>{armed ? "Discard?" : "⨯"}</wa-button>
@@ -276,7 +183,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	/** The changed files whose change is cosmetic, by path (BABLR's verdict, asked as they're listed). */
 	const [cosmetic, setCosmetic] = useState<ReadonlySet<string>>(new Set());
 	const [selected, setSelected] = useState<string | undefined>(undefined);
-	const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 	const [committing, setCommitting] = useState(false);
 	const [commitError, setCommitError] = useState(false);
 	const [, force] = useReducer((x: number) => x + 1, 0);
@@ -615,14 +521,10 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 									cosmetic={cosmetic.has(file.path)}
 									state={fileState(file.path)}
 									current={file.path === selected}
-									expanded={expanded.has(file.path)}
 									onPick={(checked) => { pickFile(file.path, checked); }}
 									onOpen={() => { void showDiff(file.path); }}
-									onToggleExpand={() => { toggleExpand(file.path); }}
 									onDiscard={() => { void rpc.request("git.discard", { "path": file.path }); }}
 								/>
-
-								{expanded.has(file.path) && <Chunks path={file.path} rpc={rpc} onOpen={(path) => { void showDiff(path); }} />}
 							</Fragment>
 						))}
 			</div>

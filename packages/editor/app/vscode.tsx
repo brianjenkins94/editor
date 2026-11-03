@@ -21,8 +21,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import type { SharedWorkspace } from "../shared/playground-link";
-import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { serve } from "@brianjenkins94/hub";
 import { windowServerTransport } from "../shared/pane-link";
 import { hostLog } from "./logging";
 
@@ -60,12 +59,10 @@ export interface VscodeWindowHandle {
 	/** Resolves once the workbench has actually booted (monaco mounted), for readiness gating. */
 	"whenReady": Promise<void>;
 	/** Open a project into the ALREADY-BOOTED workbench: write `files` into the workspace and focus `openEditors`.
-	 *  Waits for readiness internally, so a call made before boot still lands. Drives the LHS picker. */
+	 *  Waits for readiness internally, so a call made before boot still lands. */
 	"openProject": (files: ProjectFile[], openEditors: string[]) => void;
 	/** Like openProject, but CLEARS the workspace first (minus editor scaffolding) — "workspace = the repo". */
 	"replaceProject": (files: ProjectFile[], openEditors: string[]) => void;
-	/** Read the current workspace back (every project file as bytes, scaffolding excluded) — the commit source. */
-	"readWorkspace": () => Promise<SharedWorkspace>;
 }
 
 let booted = false;
@@ -152,13 +149,5 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		});
 	};
 
-	// The pane holds the FS and serves `workbench.files`; request it over the same hub link.
-	const paneRpc = createRpcClient(paneHub);
-	const readWorkspace = async (): Promise<SharedWorkspace> => {
-		await whenReady;
-
-		return await paneRpc.request("workbench.files", undefined, { "timeoutMs": 15000 }) as SharedWorkspace;
-	};
-
-	return { "whenReady": whenReady, "openProject": openProject, "replaceProject": replaceProject, "readWorkspace": readWorkspace };
+	return { "whenReady": whenReady, "openProject": openProject, "replaceProject": replaceProject };
 }
