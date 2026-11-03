@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 /**
- * The top bar's Commit: the workspace's changes committed and pushed — the workbench's git (git-service.ts `git.pull`,
- * `git.commit` with every change, then `git.push` of the current branch, through this shell's sign-in: git-push.ts), as
+ * The top bar's Commit: the workspace's changes committed and pushed — the workbench's git (git-push.ts `git.pull`,
+ * git-service.ts `git.commit` with every change, then `git.push` of the current branch, through this shell's sign-in: git-push.ts), as
  * agents' git_pull, git_commit and git_push do and the review panel commits a part of. First the branch is brought up
  * to GitHub's when that's a fast-forward (CI commits to main too), so the push is one; when it can't be — the two have
  * each moved on, or GitHub changed a file changed here — nothing is committed, and it says why. With nothing changed,

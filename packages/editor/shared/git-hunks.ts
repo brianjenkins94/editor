@@ -2,8 +2,8 @@
  * A change as hunks: the line diff of a file's HEAD text against its working text, aligned for the side-by-side review
  * (`rows`), grouped into hunks with ids (`hunksOf`), and a selection of them turned back into the text to commit or to
  * keep (`committedContent`). One implementation for every face that picks part of a change — the shell's review panel
- * by rows, an agent's `git_commit` / `git_discard` by hunk ids — run by the git service (workbench/git-service.ts,
- * `git.review`, `git.commit`, `git.discard`).
+ * by rows, an agent's `git_commit` / `git_discard` by hunk ids — run in the workbench (git-review.ts
+ * `git.review`, `git.discard`, and its part of git-service.ts' `git.commit`).
  */
 import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { ArrayChange } from "diff";

@@ -1,6 +1,6 @@
 /**
  * A git remote reached through another realm: isomorphic-git's HTTP as messages. The workbench has the repository and
- * makes the requests (workbench/git-service.ts); the shell has the sign-in and sends them (shell/git-push.ts). A request
+ * makes the requests (workbench/git-push.ts); the shell has the sign-in and sends them (shell/git-push.ts). A request
  * and its answer cross whole — bodies as bytes, never a credential.
  */
 import type { HttpClient } from "isomorphic-git";

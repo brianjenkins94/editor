@@ -10,6 +10,7 @@ import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
 import type { WorkspaceFs } from "./workspace-fs";
 import { failureText } from "@brianjenkins94/editor-api/failures";
+import { serve } from "@brianjenkins94/hub";
 import { fs as workspaceStore } from "@zenfs/core";
 import * as gitEngine from "./git-engine";
 
@@ -183,5 +184,16 @@ export function followProjectSwitches(hub: Hub, open: (project: Project) => Prom
 				});
 			}
 		}, 150);
+	});
+}
+
+/** The GitHub repository the workspace is a clone of — its origin, and the branch it's on — or null, as `git.origin`: the
+ *  shell's binding (where a commit pushes, what an `env/` address compares with), read from the workspace so the two
+ *  can't disagree. */
+export function serveOrigin(hub: Hub): void {
+	serve(hub, "git.origin", async () => {
+		const [owner, repo] = /github\.com\/(.+)\.git$/u.exec(await gitEngine.githubRemote() ?? "")?.[1].split("/") ?? [];
+
+		return owner === undefined || repo === undefined ? null : { "owner": owner, "repo": repo, "branch": (await gitEngine.branches()).current ?? "main" };
 	});
 }

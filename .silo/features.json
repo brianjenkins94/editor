@@ -73,6 +73,7 @@
       "agent tool|git_show",
       "agent tool|git_status",
       "agent tool|terminal_output",
+      "core module|installGitHistory",
       "core module|installWorkspaceTools",
       "hub request|files.delete",
       "hub request|files.edit",
@@ -91,6 +92,7 @@
       "packages/editor/app/tools/files/",
       "packages/editor/app/tools/git/",
       "packages/editor/app/tools/terminal/",
+      "packages/editor/workbench/git-history.ts",
       "packages/editor/workbench/workspace-tools.ts"
     ]
   },
@@ -900,6 +902,7 @@
       "agent tool|git_checkout",
       "agent tool|git_pull",
       "agent tool|git_push",
+      "core module|installGitPush",
       "hub request|git.branch",
       "hub request|git.checkout",
       "hub request|git.identity",
@@ -910,7 +913,8 @@
     "paths": [
       "packages/editor/shared/git-remote.ts",
       "packages/editor/shell/git-push.ts",
-      "packages/editor/shell/push.ts"
+      "packages/editor/shell/push.ts",
+      "packages/editor/workbench/git-push.ts"
     ]
   },
   "Real effects, decided per call": {
@@ -987,7 +991,8 @@
     ],
     "paths": [
       "packages/editor/shell/reset-popover.tsx",
-      "packages/editor/shell/reset.ts"
+      "packages/editor/shell/reset.ts",
+      "packages/editor/workbench/unpushed.ts"
     ],
     "tests": [
       "packages/editor/test/reset.test.mjs"

@@ -4,7 +4,7 @@
  * (not the vscode SCM viewlet). Built on Web Awesome components (wa-checkbox / wa-textarea / wa-button / wa-badge) and
  * utility classes in a preact tree; what's left in theme/styles/git-panel is the rows' hover/current states and
  * the side-by-side diff renderer's grid. It's a pure hub consumer: it calls
- * `git.status` / `git.review` / `git.commit` / `git.discard` (served by git-service.ts in the workbench realm) over the
+ * `git.status` / `git.review` / `git.commit` / `git.discard` (served by git-service.ts and git-review.ts in the workbench realm) over the
  * shell hub, and refreshes on `git.changed`. What a pick of lines commits or discards is the service's (shared/git-hunks.ts),
  * as it is for an agent's `git_commit` / `git_discard` by hunk: the panel only says which rows. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
  * decoupling was for. The diff opens in a shell-owned overlay the codehike island mounts into (overlay.body).

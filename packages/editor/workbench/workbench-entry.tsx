@@ -41,16 +41,19 @@ import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./de
 import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
-import { installGitReview } from "./git-review";
+import { installGitHistory } from "./git-history";
+import { installGitPush } from "./git-push";
+import { commitPart, installGitReview } from "./git-review";
 import { installGitService } from "./git-service";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
-import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS } from "./project";
+import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS, serveOrigin } from "./project";
 import { markReady, whenDebuggerUp } from "./readiness";
 import { createBashProcess, serveTerminalState } from "./terminal";
 import { installTarballs } from "./tarballs";
 import { installTestRuns } from "./test-runs";
 import { followSystemTheme, showVsCodeTheme } from "./theme-follow";
+import { serveUnpushed } from "./unpushed";
 import { pinned, watchVersions } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -395,10 +398,19 @@ function maybeBoot(): void {
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
 					// shell's review panel, and VS Code's Source Control view (the source-control extension, by the editor.git.* commands). See
 					// git-service.ts / git-engine.ts.
-				const git = installGitService(api as typeof import("vscode"), workbenchHub, paneLog);
+				const git = installGitService(api as typeof import("vscode"), workbenchHub, paneLog, { "part": commitPart });
 
-				// The review: the changes as hunks (git-review.ts).
+				// The review: the changes as hunks, committed or discarded in part (git-review.ts).
 				installGitReview(workbenchHub, git);
+				// Branches, and a branch pulled from or pushed to GitHub through the shell's sign-in (git-push.ts).
+				const remote = installGitPush(workbenchHub, paneLog);
+
+				// Diff, log, show and blame, for agents' git tools (git-history.ts).
+				installGitHistory(api as typeof import("vscode"), workbenchHub, remote);
+				// The repository the workspace is a clone of, for the shell's binding (project.ts); and what only it holds,
+				// for Reset (unpushed.ts).
+				serveOrigin(workbenchHub);
+				serveUnpushed(workbenchHub);
 				// What's been decided about a file or a name: the history extension's reading of the ledger and docs (decisions.ts).
 				installDecisions(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
