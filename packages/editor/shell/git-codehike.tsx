@@ -23,7 +23,6 @@
  * `script-src 'wasm-unsafe-eval'` and `connect-src https://lighter.codehike.org` IF a CSP is ever added (our app
  * sets none today).
  */
-import type { ChangeKind } from "@brianjenkins94/editor-api/git";
 import type { AnnotationHandler, HighlightedCode, Tokens } from "codehike/code";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -56,9 +55,6 @@ export interface DiffInput {
 	"onRowSelection"?: (deselected: number[]) => void;
 	/** Discard the given change rows (revert them to HEAD in the working tree). */
 	"onDiscardRows"?: (rows: number[]) => void;
-	/** Classify the whole change with BABLR — called lazily after the diff is shown (BABLR is slow). Returns the
-	 *  whole-file verdict plus the WORKING line numbers that carry a semantic (node-level) change. */
-	"classify"?: () => Promise<{ "verdict": ChangeKind | "none"; "changedLines": number[] }>;
 }
 
 const ADD_BG = "#2ea04326";
@@ -83,8 +79,7 @@ interface Rendered { "row": number; "type": DiffRowInfo["type"]; "index": number
 interface FoldRegion { "id": string; "startRow": number; "endRow": number; "count": number }
 interface FoldHeader { "id": string; "folded": boolean; "count": number }
 
-/** Background tint for a changed line: del/mod red on the left, add/mod green on the right. De-emphasis of cosmetic
- *  changes is done per-line with opacity (the `.faded` class), driven by node-level identity — not by the tint. */
+/** Background tint for a changed line: del/mod red on the left, add/mod green on the right. */
 function tint(type: DiffRowInfo["type"], side: "left" | "right"): string | undefined {
 	const changed = side === "left" ? type === "del" || type === "mod" : type === "add" || type === "mod";
 
@@ -292,25 +287,6 @@ function buildPlan(
 	return { "leftLineToRow": leftLineToRow, "rightLineToRow": rightLineToRow, "spacers": spacers, "gaps": gaps, "leftFoldHeaders": leftFoldHeaders, "rightFoldHeaders": rightFoldHeaders, "indexToGrid": indexToGrid };
 }
 
-/** How the verdict banner reads, per verdict. */
-const VERDICT_LABELS: Record<ChangeKind, string> = {
-	"cosmetic": "Cosmetic change — whitespace & comments only",
-	"semantic": "Semantic change",
-	"unparsable": "Couldn’t parse — showing the raw text diff"
-};
-
-/** The Web Awesome variant a verdict's banner is drawn in: quiet when nothing moved, a warning when the meaning did. */
-const VERDICT_VARIANTS: Record<ChangeKind, string> = { "cosmetic": "neutral", "semantic": "warning", "unparsable": "danger" };
-
-/** The BABLR verdict banner above the diff (nothing for a non-classified change). */
-function banner(verdict: ChangeKind | "none"): ReactNode {
-	if (verdict === "none") {
-		return null;
-	}
-
-	return createElement("div", { "className": "sxs-verdict wa-cluster wa-flex-nowrap wa-gap-xs wa-font-size-2xs wa-font-weight-semibold wa-" + VERDICT_VARIANTS[verdict] }, createElement("span", { "className": "sxs-dot wa-border-radius-circle" }), VERDICT_LABELS[verdict]);
-}
-
 /** A line's fold slot: its chevron when it heads a block, else empty. */
 function foldSlotOf(header: FoldHeader | undefined, onToggleFold: (id: string) => void): ReactNode {
 	return createElement("span", { "className": "sxs-fold-slot wa-cluster wa-flex-nowrap wa-align-items-start wa-justify-content-center", "key": "b" }, header !== undefined
@@ -357,7 +333,6 @@ function indentStyleOf(indent: number, foldedHeader: FoldHeader | undefined): { 
 function sideHandlers(
 	side: "left" | "right",
 	lineToRow: Map<number, Rendered>,
-	fadedRows: ReadonlySet<number>,
 	foldHeaders: Map<number, FoldHeader> | undefined,
 	onToggleFold: (id: string) => void,
 	deselectedRows: ReadonlySet<number>,
@@ -426,7 +401,7 @@ function sideHandlers(
 			const highlighted = side === "right" && highlightedLines.has(props.lineNumber);
 
 			return createElement("div", {
-				"className": "sxs-line " + side + (at.type !== "ctx" ? " chg" : "") + (fadedRows.has(at.index) ? " faded" : "") + (highlighted ? " hl" : ""),
+				"className": "sxs-line " + side + (at.type !== "ctx" ? " chg" : "") + (highlighted ? " hl" : ""),
 				"style": {
 					"display": "grid",
 					"gridTemplateColumns": "subgrid",
@@ -488,15 +463,10 @@ function Diff(props: {
 	"deselectedRows"?: number[];
 	"onRowSelection"?: (deselected: number[]) => void;
 	"onDiscardRows"?: (rows: number[]) => void;
-	"classify"?: () => Promise<{ "verdict": ChangeKind | "none"; "changedLines": number[] }>;
 }): ReactNode {
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
 	const [deselectedRows, setDeselectedRows] = useState<ReadonlySet<number>>(() => new Set(props.deselectedRows));
-	// The BABLR verdict + per-node changed lines arrive LAZILY (parsing is slow); until then the diff shows at full
-	// strength, then the changed lines that DON'T carry a semantic node fade down. "none" = not yet known / n/a.
-	const [verdict, setVerdict] = useState<ChangeKind | "none">("none");
-	const [changedLines, setChangedLines] = useState<ReadonlySet<number>>(() => new Set());
 	const [menu, setMenu] = useState<{ "x": number; "y": number; "rows": number[] } | null>(null);
 	const [highlight, setHighlight] = useState<HighlightRange>(currentHighlight);
 	const menuRef = useRef<HTMLElement | null>(null);
@@ -512,31 +482,7 @@ function Diff(props: {
 	if (lastContentKey.current !== props.contentKey) {
 		lastContentKey.current = props.contentKey;
 		setDeselectedRows(new Set(props.deselectedRows));
-		setVerdict("none");
-		setChangedLines(new Set());
 	}
-
-	// Kick off classification after paint; drop the result if the content changed underneath (a stale verdict).
-	const { classify } = props;
-
-	useEffect(() => {
-		if (classify === undefined) {
-			return undefined;
-		}
-
-		let live = true;
-
-		void classify().then((result) => {
-			if (live) {
-				setVerdict(result.verdict);
-				setChangedLines(new Set(result.changedLines));
-			}
-		});
-
-		return () => {
-			live = false;
-		};
-	}, [classify, props.contentKey]);
 
 	const toggleRow = (index: number): void => {
 		const next = new Set(deselectedRows);
@@ -607,28 +553,6 @@ function Diff(props: {
 		props.onRowSelection?.([...next]);
 	};
 
-	// Per-line focus: once BABLR reports back, a CHANGED row whose working line carries no semantic (node-level) change
-	// fades down, so the eye stays on real edits. A deletion falls back to the whole-file verdict. Nothing fades until
-	// the verdict resolves (verdict "none"/"unparsable" ⇒ show everything at full strength).
-	const classified = verdict === "cosmetic" || verdict === "semantic";
-	const fadedRows = new Set<number>();
-
-	if (classified) {
-		props.rows.forEach((row, index) => {
-			if (row.type === "ctx") {
-				return;
-			}
-
-			if (row.rightNo !== undefined) {
-				if (!changedLines.has(row.rightNo)) {
-					fadedRows.add(index);
-				}
-			} else if (verdict === "cosmetic") {
-				fadedRows.add(index);
-			}
-		});
-	}
-
 	// Lines (right-side / working coords) the hovered chunk spotlights.
 	const highlightedLines = new Set<number>();
 
@@ -662,7 +586,7 @@ function Diff(props: {
 		"className": "sxs-gap",
 		"style": { "gridRow": gap.row },
 		"onClick": () => { expand(gap.id); }
-	}, "⋯ " + gap.count + " unchanged lines")), createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, fadedRows, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }), createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, fadedRows, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }));
+	}, "⋯ " + gap.count + " unchanged lines")), createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }), createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }));
 
 	// Right-click discard menu (a hunk at a time): a wa-dropdown opened where the click was, on a fixed point as its
 	// trigger (keyed by it, so a second right-click moves it). Web Awesome closes it on an outside click or Escape. React
@@ -698,7 +622,7 @@ function Diff(props: {
 
 	const menuEl = menu === null ? null : createElement("wa-dropdown", { "key": menu.x + "," + menu.y, "ref": menuRef, "open": true, "size": "small", "placement": "bottom-start" }, menuTrigger, menuItem);
 
-	return createElement("div", { "className": "sxs-wrap wa-stack wa-gap-0" }, banner(verdict), grid, menuEl);
+	return createElement("div", { "className": "sxs-wrap wa-stack wa-gap-0" }, grid, menuEl);
 }
 
 /** Render (or re-render) the side-by-side diff for one file into `host`. */
@@ -725,5 +649,5 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 	// A cheap identity for the file's content — changes after a (partial) commit so the diff re-adopts the selection.
 	const contentKey = input.head.length + ":" + input.working.length + ":" + input.rows.length;
 
-	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "foldRegions": foldRegions, "contentKey": contentKey, "deselectedRows": input.deselectedRows, "onRowSelection": input.onRowSelection, "onDiscardRows": input.onDiscardRows, "classify": input.classify }));
+	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "foldRegions": foldRegions, "contentKey": contentKey, "deselectedRows": input.deselectedRows, "onRowSelection": input.onRowSelection, "onDiscardRows": input.onDiscardRows }));
 }

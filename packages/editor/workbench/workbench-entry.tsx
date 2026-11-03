@@ -43,7 +43,6 @@ import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
-import { startBablr } from "./bablr";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
@@ -643,8 +642,6 @@ function maybeBoot(): void {
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner
 				// (worker) is shared by every terminal.
 				const nodeRunner = createNodeRunner(workbenchHub);
-				// The editor's BABLR, in its worker: the classifier's verdicts queue on it (bablr.ts).
-				const bablr = startBablr(workbenchHub);
 
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 
@@ -665,12 +662,12 @@ function maybeBoot(): void {
 					// git-service.ts / git-engine.ts.
 				const git = installGitService(api as typeof import("vscode"), workbenchHub, paneLog);
 
-				// The review: the changes as hunks, with BABLR's verdicts and the features they're in (git-review.ts).
-				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
+				// The review: the changes as hunks (git-review.ts).
+				installGitReview(workbenchHub, git);
 				// What's been decided about a file or a name: the history extension's reading of the ledger and docs (decisions.ts).
 				installDecisions(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
-				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
+				installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner);
 
 					// Editor theme follows the OS, like the shell chrome. `window.autoDetectColorScheme` isn't wired to
 					// `prefers-color-scheme` in this monaco-vscode-api build, so drive `workbench.colorTheme` ourselves.

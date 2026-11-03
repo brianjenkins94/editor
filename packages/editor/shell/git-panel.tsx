@@ -114,11 +114,9 @@ const prefersDark = (): boolean => window.matchMedia("(prefers-color-scheme: dar
 /** A file's status letter, by the Web Awesome variant it's drawn in: added, modified, deleted. */
 const STATUS_VARIANTS: Record<GitFileChange["status"], string> = { "A": "success", "M": "warning", "D": "danger" };
 
-/** One changed-file row: tri-state pick, status, name, and a tail (cosmetic badge, discard). */
-function FileRow({ file, cosmetic, state, current, onPick, onOpen, onDiscard }: {
+/** One changed-file row: tri-state pick, status, name, and a tail (discard). */
+function FileRow({ file, state, current, onPick, onOpen, onDiscard }: {
 	"file": GitFileChange;
-	/** Its change is formatting or comments only (BABLR's verdict). */
-	"cosmetic": boolean;
 	"state": "all" | "partial" | "off";
 	"current": boolean;
 	"onPick": (checked: boolean) => void;
@@ -159,10 +157,9 @@ function FileRow({ file, cosmetic, state, current, onPick, onOpen, onDiscard }: 
 
 			<wa-badge class="gp-status" variant={STATUS_VARIANTS[file.status]} appearance="filled">{file.status}</wa-badge>
 
-			<span class={"gp-name wa-text-truncate" + (cosmetic ? " wa-color-text-quiet" : "")}><bdi dir="ltr">{file.path}</bdi></span>
+			<span class="gp-name wa-text-truncate"><bdi dir="ltr">{file.path}</bdi></span>
 
 			<span class="wa-cluster wa-flex-nowrap wa-gap-2xs">
-				{cosmetic && <wa-badge variant="neutral">cosmetic</wa-badge>}
 
 				<wa-button class={"gp-discard" + (armed ? " armed" : "")} appearance="plain" size="small" variant="danger" title="Discard changes" aria-label="Discard changes" onClick={clickDiscard}>{armed ? "Discard?" : "⨯"}</wa-button>
 			</span>
@@ -178,8 +175,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const rpc = rpcRef.current;
 
 	const [files, setFiles] = useState<GitFileChange[]>([]);
-	/** The changed files whose change is cosmetic, by path (BABLR's verdict, asked as they're listed). */
-	const [cosmetic, setCosmetic] = useState<ReadonlySet<string>>(new Set());
 	const [selected, setSelected] = useState<string | undefined>(undefined);
 	const [committing, setCommitting] = useState(false);
 	const [commitError, setCommitError] = useState(false);
@@ -235,20 +230,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	};
 
 	/** The working tree as `git.review` has it, for the files given (default, every change). */
-	const review = async (request: { "paths"?: string[]; "texts"?: boolean; "verdicts"?: boolean }): Promise<ReviewFile[]> => (await rpc.request("git.review", request, { "timeoutMs": 600_000 }) as Review).files;
-
-	/** Which changes are cosmetic, by BABLR (asked after the list shows: it's slow), badged — the latest list's answer only. */
-	const verdicts = useRef(0);
-
-	const classifyAll = async (): Promise<void> => {
-		verdicts.current += 1;
-		const asked = verdicts.current;
-		const files = await review({ "verdicts": true }).catch(() => undefined);
-
-		if (files !== undefined && asked === verdicts.current) {
-			setCosmetic(new Set(files.filter((file) => file.verdict?.verdict === "cosmetic").map((file) => file.path)));
-		}
-	};
+	const review = async (request: { "paths"?: string[]; "texts"?: boolean }): Promise<ReviewFile[]> => (await rpc.request("git.review", request, { "timeoutMs": 600_000 }) as Review).files;
 
 	const showDiff = async (path: string): Promise<void> => {
 		setSelected(path);
@@ -293,11 +275,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 					deselected.delete(path); // touching lines means the file is (partially) IN, not fully excluded
 					force();
 				},
-				"classify": async () => {
-					const [classified] = await review({ "paths": [path], "verdicts": true }).catch(() => []);
-
-					return { "verdict": classified?.verdict?.verdict ?? "none", "changedLines": classified?.verdict?.changedLines ?? [] };
-				},
 				"onDiscardRows": async (hunkRows) => {
 					await rpc.request("git.discard", { "path": path, "rows": hunkRows });
 				}
@@ -316,7 +293,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const refresh = async (options?: { "timeoutMs": number }): Promise<void> => {
 		const { "files": next } = await rpc.request("git.status", undefined, options) as { "files": GitFileChange[] };
 
-		void classifyAll();
 		const stillChanged = (path: string): boolean => next.some((file) => file.path === path);
 
 		for (const path of [...deselected]) {
@@ -501,7 +477,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 							<Fragment key={file.path}>
 								<FileRow
 									file={file}
-									cosmetic={cosmetic.has(file.path)}
 									state={fileState(file.path)}
 									current={file.path === selected}
 									onPick={(checked) => { pickFile(file.path, checked); }}

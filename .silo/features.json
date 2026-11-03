@@ -874,16 +874,16 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "The working tree's changes as hunks with ids, each with BABLR's cosmetic verdict and the features whose code it's in; a commit or a discard takes some of a file's hunks, by an agent's ids or the review panel's line picks.",
+    "what": "The working tree's changes as hunks with ids; a commit or a discard takes some of a file's hunks, by an agent's ids or the review panel's line picks.",
     "ways": [
       "agent tool|git_discard",
       "agent tool|git_review",
       "core module|installGitReview",
-      "hub request|bablr.verdict",
       "hub request|git.review"
     ],
     "paths": [
-      "packages/editor/shared/git-hunks.ts"
+      "packages/editor/shared/git-hunks.ts",
+      "packages/editor/workbench/git-review.ts"
     ],
     "tests": [
       "packages/editor/test/git-hunks.test.mjs"
@@ -1120,13 +1120,12 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "Which tests a change reaches, by the traces of their runs here (stale when they ran code it has altered, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
+    "what": "Which tests a change reaches, by the traces of their runs here (each stale, as a changed file is all it can tell by, and the test files never run named), and test files run in the debugger with each test's result as data: outcome, error, a failed assertion's sides, time, and how it came out before.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "ways": [
       "agent tool|runs_affected",
       "agent tool|runs_tests",
       "core module|installTestRuns",
-      "hub request|bablr.spans",
       "hub request|tests.affected",
       "hub request|tests.run"
     ]

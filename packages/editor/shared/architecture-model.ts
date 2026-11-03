@@ -114,7 +114,6 @@ export const nodes: NodeSpec[] = [
 	{ "id": "bridge", "label": "Bridge", "container": "workbench", "hub": true, "detail": "hub · the bridge extension", "description": "The bridge extension's hub (in the LocalProcess extension host): the debug workers link to it, and it serves capability.decide.", "observedBy": "its hub reporter" },
 	{ "id": "node", "label": "Dev-server worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev servers", "description": "Hosts the preview dev servers (almostnode's Vite) and answers virtual.request — a debug run's own server's port it hands to that run (virtual.debug.<port>). Never terminated: stopping a run can't take a dev server with it.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
 	{ "id": "debug-worker", "label": "Debug worker", "container": "debugWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the bridge's debug adapter, which drives it by messages (the debug protocol). Its hub link is the workspace runtime's (editor-api's connectRuntime): a server its program starts answers the preview through it, and its log and spans are the editor's.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
-	{ "id": "bablr", "label": "BABLR worker", "container": "workers", "hub": true, "detail": "hub · the editor's BABLR", "description": "The editor's BABLR, off the UI thread: classifies git changes as cosmetic or semantic and groups edit bursts (the git SCM and the review panel), and finds the span ids runtime evidence keys on.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
 	{ "id": "eslint", "label": "ESLint worker", "container": "extHostWorker", "hub": true, "detail": "hub · real ESLint under almostnode", "description": "The eslint extension's worker: real ESLint and the preset under almostnode, from the toolchain the build packs beside it (lsp/eslint-toolchain.tgz). Its hub link is the workspace runtime's (editor-api's connectRuntime), through which it reads the workspace — as tooling reads, never asked about; the extension sends it documents to lint and fix by messages of their own.", "observedBy": "its hub reporter", "condition": "once the eslint extension starts" },
@@ -147,7 +146,6 @@ export const hubLinks: [string, string][] = [
 	["root", "debug-mcp"],
 	["workbench", "bridge"],
 	["workbench", "node"],
-	["workbench", "bablr"],
 	["node", "provoke"],
 	["bridge", "debug-worker"],
 	["workbench", "eslint"]
@@ -307,7 +305,6 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.prompt", "from": ["bridge"], "to": ["shell"] },
 	{ "pattern": "capability.watched", "from": ["bridge"], "to": ["shell"] },
 	// ── workers ──
-	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"] },
 	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] }
 ];
 
@@ -334,7 +331,6 @@ export const channels: ChannelSpec[] = [
 	{ "a": "shell", "b": "net:*", "protocol": "HTTP", "transport": "fetch, before the service worker controls the page", "reason": "platform", "description": "A first visit on the dev server: the shell renders (its WebAwesome icons, …) before the newly registered service worker claims the page, so those requests go straight out. Once it's controlled, they go through the service worker." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "reason": "storage", "description": "User data, logs, storage, workspace-fs." },
 	{ "a": "shell", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (editor-session)", "reason": "storage", "description": "The sign-in's DPoP key (shell/session.ts): a non-extractable CryptoKeyPair, made once and kept until sign-out — usable to sign the API's proofs, never readable as bytes." },
-	{ "a": "bablr", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (bablr)", "reason": "storage", "description": "The BABLR worker's cache of parses, by git blob oid and parse version — derived, its own database (not the workspace's fixed buffer)." },
 	// the preview pipeline
 	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "reason": "isolation", "description": "Into the iframe: HMR updates (vite-hmr). Everything else of a window rides its hub link (the page tap's hub: its console and errors, capability requests and new windows — preview.decide, preview.open — and its workers', which join that hub through their page: worker-tap.ts)." },
 	{ "a": "webview-sw", "b": "webview:*", "protocol": "VS Code webview resources", "transport": "fetch, through VS Code's webview service worker", "reason": "platform", "description": "A webview's resources by URL (asWebviewUri) — answered with errors here (see webview-sw)." },

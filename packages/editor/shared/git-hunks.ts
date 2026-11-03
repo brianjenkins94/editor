@@ -5,7 +5,7 @@
  * by rows, an agent's `git_commit` / `git_discard` by hunk ids — run by the git service (workbench/git-service.ts,
  * `git.review`, `git.commit`, `git.discard`).
  */
-import type { ChangeVerdict, GitFileChange } from "@brianjenkins94/editor-api/git";
+import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { ArrayChange } from "diff";
 import { diffArrays } from "diff";
 
@@ -31,17 +31,11 @@ export interface Hunk {
 	"working": { "start": number; "lines": number };
 	"removed": string[];
 	"added": string[];
-	/** BABLR found nothing in it but formatting and comments (`git.review` with `verdicts`). */
-	"cosmetic"?: boolean;
-	/** The features whose code it's in, `Area / Name` (`git.review` with `owners`). */
-	"owners"?: string[];
 }
 
 /** One changed file as `git.review` answers it. */
 export interface ReviewFile extends GitFileChange {
 	"hunks": Hunk[];
-	/** What BABLR says of the whole change (`verdicts`; a modified code file only). */
-	"verdict"?: ChangeVerdict;
 	/** The texts and the aligned rows the hunks index (`texts`). */
 	"head"?: string;
 	"working"?: string;

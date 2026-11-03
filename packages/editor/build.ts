@@ -335,11 +335,9 @@ export async function preBuild(): Promise<void> {
 		"base": "./",
 		// `dedupe` collapses the two physical typescript installs (almostnode's own dep + tsval's) to ONE, so the
 		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
-		// `@brianjenkins94/bablr` → its BUILT, browser-safe dist (the BABLR worker's CST engine): the alias uses
-		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
 		// (and hub/observability to the editor's own: a debugger's worker connects through editor-api's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
-		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", ...SHARED_PACKAGES] },
+		"resolve": { "dedupe": ["typescript", ...SHARED_PACKAGES] },
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
 		"plugins": [unenvResolve()],
@@ -356,10 +354,7 @@ export async function preBuild(): Promise<void> {
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
 				"input": {
-					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
-					// The editor's BABLR worker (core's, not the bridge's), served from lsp/ like the other worker chunks.
-					// Started and queued by bablr.ts.
-					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts")
+					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
