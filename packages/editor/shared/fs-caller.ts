@@ -60,3 +60,51 @@ export function callerFs<T extends object>(fs: T, name: string): T {
 		}
 	});
 }
+
+/** A frame of a stack as V8 hands it to `Error.prepareStackTrace`: the parts naming whose call it is. */
+interface CallSite { "getTypeName": () => string | null; "getFunctionName": () => string | null }
+
+/** VS Code's file service and the overlays between it and a provider: the asker is past these on a call's stack. */
+const FILE_SERVICE = /^(?:FileService|FileServiceOverride|OverlayFileSystemProvider)$/u;
+
+/** A class on a stack that says nothing of who's asking: a language's own, or a stack's way through a callback. */
+const NOBODY = new Set(["Object", "Array", "Promise", "Map", "Set", "Function", "Generator", "AsyncGenerator", "Window", "global"]);
+
+/** How many frames are read for the asker: VS Code's file service is a few deep, and the asker just past it. */
+const STACK_FRAMES = 30;
+
+/**
+ * Who in VS Code is calling its file service, from the provider it reached: the class of the first method on the
+ * stack past the file service — awaits included, as V8 keeps them — such as `WorkspaceSearch` (file search's walk) or
+ * `MainThreadFileSystem` (an extension's `workspace.fs`), or `vscode` where the stack doesn't reach one (it ends at a
+ * `Promise.all`). Read from the stack's call sites, not its text: about 2 µs, against a provider call's 70.
+ */
+export function vscodeCaller(): string {
+	const prepare = Error.prepareStackTrace;
+	const limit = Error.stackTraceLimit;
+	let sites: CallSite[];
+
+	Error.prepareStackTrace = (_, frames) => frames;
+	Error.stackTraceLimit = STACK_FRAMES;
+
+	try {
+		sites = new Error("caller").stack as unknown as CallSite[];
+	} finally {
+		Error.prepareStackTrace = prepare;
+		Error.stackTraceLimit = limit;
+	}
+
+	let past = false;
+
+	for (const site of sites) {
+		const type = site.getTypeName();
+
+		if (type !== null && FILE_SERVICE.test(type)) {
+			past = true;
+		} else if (past && type !== null && !NOBODY.has(type)) {
+			return type;
+		}
+	}
+
+	return "vscode";
+}

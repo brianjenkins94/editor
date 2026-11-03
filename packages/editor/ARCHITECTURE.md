@@ -605,8 +605,10 @@ service into the workspace provider (`provider`) and the node_modules one (`node
 timed (`zenfs`, `zenfs-local`), the write-back (`indexeddb`, and a span per flush), the change stream (`changes`), and the workers' file calls
 through the bridge (`runtime-fs`, by the worker's kind: `eslint`, a debugger's — once a span each, thousands a second),
 which is all of theirs: a debug run's reads and stats cross it, and the workers' own mounts of the store make no call;
-git's status walk is a span. Who asked is named by whoever calls the store (shared/fs-caller.ts): the provider
-(`vscode`), the boot (`seed`, `restore`), the write-back (`persist`), type acquisition's probes (`has`), npm's links
+git's status walk is a span. Who asked is named by whoever calls the store (shared/fs-caller.ts): VS Code's file service by the
+class past it on the call's stack, through its awaits (`WorkspaceSearch`, `MainThreadFileSystem` for an extension's
+`workspace.fs`, `BrowserTextFileService`; `vscode` where the stack ends first — read from V8's call sites, about 2 µs a
+call), the boot (`seed`, `restore`), the write-back (`persist`), type acquisition's probes (`has`), npm's links
 (`install`), a project's writes (`project`), the terminal, and git — isomorphic-git through an fs whose promise calls
 are answered by their synchronous twins, since zen-fs's await before reaching the store, past where a name holds. A
 call no one named is sampled (one in 200, its stack's function names: `zenfs-unnamed`); after git's, none were left. The test it passes: the questions of 2026-10-30 and 31 (calls per path, who walks

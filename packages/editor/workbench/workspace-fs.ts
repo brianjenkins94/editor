@@ -33,7 +33,7 @@ import { IndexedDB } from "@zenfs/dom";
 
 import { observeStores, ZENFS_NODE } from "../shared/architecture-zenfs";
 import { countCall, timeCall } from "../shared/fs-boundaries";
-import { fsCaller } from "../shared/fs-caller";
+import { fsCaller, vscodeCaller } from "../shared/fs-caller";
 import { watchWorkspaceStore, WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
 
@@ -587,10 +587,15 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	// holds are served here; genuine misses (a CDN dep) fall through to the lower overlays.
 	// (each call counted at the boundary: VS Code's file service into the workspace, by operation, with its path —
 	// fs-boundaries.ts, the metrics plane's `fs`)
+	// (by who in VS Code asked, from the call's stack: fs-caller.ts's vscodeCaller — its store calls too)
 	for (const method of ["stat", "readFile", "readdir", "writeFile", "mkdir", "delete", "rename"] as const) {
-		const original = as("vscode", provider[method].bind(provider) as (...args: unknown[]) => unknown);
+		const original = provider[method].bind(provider) as (...args: unknown[]) => unknown;
 
-		(provider as unknown as Record<string, unknown>)[method] = (...args: unknown[]): unknown => timeCall("provider", method, "vscode", (args[0] as { "path"?: string } | undefined)?.path, () => original(...args));
+		(provider as unknown as Record<string, unknown>)[method] = (...args: unknown[]): unknown => {
+			const who = vscodeCaller();
+
+			return timeCall("provider", method, who, (args[0] as { "path"?: string } | undefined)?.path, () => as(who, original)(...args));
+		};
 	}
 
 	registerFileSystemOverlay(2, provider);

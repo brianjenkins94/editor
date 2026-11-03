@@ -154,7 +154,10 @@ How it's kept:
      worker's kind: ESLint's first lint of a file here, 9,177 `stat`s for 4,738 paths and 10.6 MB read). The workers'
      own stores need nothing (2026-11-03): a debug run's program reads and stats, and ESLint's, all cross runtime-fs —
      a probe's `statSync` and `readFileSync` arrived there as `debug-worker`'s, and its shared mount made no store
-     call. Left: a single call's span on demand, and VS Code's own callers named apart (all `vscode` now).
+     call. VS Code's callers
+     named apart (2026-11-03): who asked its file service, the class past it on the call's stack — of a load's 3,450
+     provider calls, 3,112 were file search's walk (`WorkspaceSearch`, 20,345 zen-fs calls under it), 323 extensions'
+     `workspace.fs` (`MainThreadFileSystem`), 8 left as `vscode`. Left: a single call's span on demand.
      Before it, so the spans CLAUDE.md asks for (*Spans*) count (a throwing span and hub requests: done 2026-11-02):
      - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
        and this repository's spans take it already; the editor's lint holds them once lib publishes util.

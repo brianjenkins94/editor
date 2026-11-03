@@ -22,6 +22,7 @@ import {
 	FileType
 } from "@brianjenkins94/monaco-vscode-api/main";
 import { timeCall } from "../shared/fs-boundaries";
+import { vscodeCaller } from "../shared/fs-caller";
 import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
 
 /** unpkg `?meta`: the old listing (`type: "directory"`, its immediate `files`), or the current one — `{ prefix, files }`
@@ -305,11 +306,11 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	};
 
 	// (each read counted at the boundary: VS Code's file service into node_modules, by operation, with its path —
-	// fs-boundaries.ts, the metrics plane's `fs`)
+	// fs-boundaries.ts, the metrics plane's `fs` — by who in VS Code asked, fs-caller.ts's vscodeCaller)
 	for (const method of ["stat", "readFile", "readdir"] as const) {
 		const original = provider[method].bind(provider) as (resource: { "path": string }) => unknown;
 
-		(provider as unknown as Record<string, unknown>)[method] = (resource: { "path": string }): unknown => timeCall("node_modules", method, "vscode", resource.path, () => original(resource));
+		(provider as unknown as Record<string, unknown>)[method] = (resource: { "path": string }): unknown => timeCall("node_modules", method, vscodeCaller(), resource.path, () => original(resource));
 	}
 
 	return provider;
