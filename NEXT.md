@@ -175,15 +175,25 @@ How it's kept:
      tombstoned. CI's suites pass locally (realms 4 of 4, performance 5 of 5: boot 1.4 s, a typed hover 1 s, a 1000-file
      load 0.9 s; memory read from the metrics plane through debug-mcp now).
      The reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
+     Then more cut, the same day: BABLR (its last job the review's cosmetic verdicts, whose feature was already out;
+     git_review's verdicts and owners with it), docking (the editor's iframe fills the main region; VS Code's new windows
+     are real ones), error reports and the session timeline (the API keeps its side, for the deployed full editor), the
+     shell's placeholder buttons, Explore Orderings, Playwright tests in the debugger (nothing answered `playwright.run`
+     once previews went; packages/playwright with it), and the architecture model's and view's previews, node worker,
+     ESLint and provoke (71 subject families nothing sent). The core's tests: 4 new (history-ledger, tarballs, runs,
+     shell-feature), and 16 of the core's features name theirs in the ledger. Realms and performance pass (8 of 8).
      Left, in order:
-     - *What's still in the manifest:* tsval's Playwright tests and site sums, the workbench's Live architecture view and
-       extensions by URL, and the extension template's — the core keeps them; they move to the ledger with the rest of
-       the manifest (*Silo, firmed up*). A debug run's own server is still answered (editor-api's runtime link), asked by
-       nothing until previews come back.
+     - *Kept, a decision rather than a cut:* extensions by URL (`?extension=`, `extensions.json`) and the extension
+       template (contrib/) — editor-contrib's site is the editor with its extension added, and contrib.yml syncs
+       contrib/ there, so taking them out is a decision about editor-contrib. The Live architecture view stays: the CI
+       harness reads it.
+     - *What's still in the manifest:* tsval's site sums, the Live architecture view, extensions by URL and the
+       extension template — they move to the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
+       own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
      - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
-       check` caught a removed file named.
-     - *Then:* the core's tests written again, the first of the new suite; `EDITOR_DEPLOYS` set to `off` (production
-       keeps the full editor) and the branch landed on main.
+       check` caught a removed feature named.
+     - *Then:* tests for the core's other 16 features; `EDITOR_DEPLOYS` set to `off` (production keeps the full
+       editor) and the branch landed on main.
      Found while reducing: the editor's runner can't run the theme's budget test (`Unsupported encoding: latin1`) or a
      test that hooks `vscode` (`registerHooks` isn't in almostnode's `node:module`); `git_checkout` can't switch to a
      branch the shallow clone hasn't fetched (`git.show` fetches one; checkout should too); `git_pull` reports
@@ -195,7 +205,9 @@ How it's kept:
      the calls in flight didn't; `files_edit` has no line-range cut, so a 360-line cut is 360 lines in the call (the
      longest cuts were made from a checkout); `runs_stop` doesn't stop a `runs_tests` run (a test that starts a server
      hung in the editor's runner); `files_grep`'s scope argument is `glob`, and `editor_problems` has no severity
-     filter (cspell's infos drown the rest — moot now cspell is out).
+     filter (cspell's infos drown the rest — moot now cspell is out). The bridge's capability decisions still ask the shell's
+     `capability.prompt`, which nothing answers since the shell's prompt went: an undecided call outside a debug run's
+     stops has nobody to ask.
    - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
      tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
      editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
