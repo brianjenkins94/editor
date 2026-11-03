@@ -410,8 +410,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			return said;
 		});
 
-		// (closed meanwhile, or edited: a later lint is on its way)
-		if (messages !== undefined && !document.isClosed && document.version === version) {
+		// (closed meanwhile, or edited: a later lint is on its way; or ESLint turned off for it meanwhile — that lint
+		// cleared it, and this one mustn't put its problems back)
+		if (messages !== undefined && !document.isClosed && document.version === version && validates(document)) {
 			collection.set(document.uri, messages.map((message) => diagnosticOf(document, message)).filter((diagnostic) => diagnostic !== undefined));
 		}
 	};
