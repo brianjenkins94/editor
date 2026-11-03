@@ -226,6 +226,8 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("tsval"),
 			// (its worker: ESLint and the preset under almostnode, from the toolchain built beside it — build/eslint-toolchain.ts)
 			bundledExtension("eslint", { "worker.js": { "worker": "eslint-worker.js" } }),
+			// (its tsserver plugin, as the package the TypeScript extension loads it from)
+			bundledExtension("change-problems", { "node_modules/change-problems-ts-plugin/package.json": { "json": { "name": "change-problems-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "node_modules/change-problems-ts-plugin/index.js": { "script": "ts-plugin.js", "format": "es" } }),
 			bundledExtension("history", HISTORY_FILES),
 			bundledExtension("source-control"),
 			editorSettingsDefaultsPlugin(),

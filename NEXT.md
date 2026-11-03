@@ -257,9 +257,16 @@ How it's kept:
        until it's opened in an editor, and its save isn't fixed — ESLint, in the web worker host, lints the documents that
        host has, and an unshown one isn't; records an extension logs as it activates reached debug-mcp under the tab
        before a reload at least once (not pinned down).
+     - *A change's problems: back* 2026-11-03 — with the UI first (CLAUDE.md, *Agent tools*; the user's choice): each
+       changed file's row in the review panel shows the problems the change made (+N) and fixed (−M), against HEAD, each
+       one's line and message on hover (shell/change-problems.tsx); agents' `code_problems` asks the same `code.problems`.
+       TypeScript's side is its own extension's tsserver plugin (extensions/change-problems, out of history's, which
+       holds the ledger to the program); ESLint's, `_eslint.problems`, ESLint's way in again. Tests: code-problems
+       (the delta), git-views (a fix and a new problem, from the request and on the row), page-tools (the tool).
+       Found: a request sent before anything serves it waits out its timeout (the shell starts before the workbench's
+       services), so the panel waits for a responder first.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
-     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_problems` (Problems shows the
-     current set, not a change's), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
+     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
      alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`
      and `runs_ledger` (the tests-by-feature list would be their view), `workspace_checkpoint` and `workspace_restore`,
      `editor_trace`, `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable

@@ -13,6 +13,7 @@ import { until } from "@brianjenkins94/util/until";
 import { createDebugMcp } from "../../debug-mcp/src/server.ts";
 import { connectTestClient } from "../../debug-mcp/src/testing.ts";
 import { OBSERVABILITY_PROTOCOL, servePageToolSet, TAB_DISCOVER, TAB_HERE } from "../../observability/src/index.ts";
+import code from "../app/tools/code/tools.ts";
 import decisions from "../app/tools/decisions/tools.ts";
 import editor from "../app/tools/editor/tools.ts";
 import files from "../app/tools/files/tools.ts";
@@ -22,7 +23,7 @@ import runs from "../app/tools/runs/tools.ts";
 import terminal from "../app/tools/terminal/tools.ts";
 
 /** Every family's tools, as the tab serves them (tools/index.ts finds the families; Node can't read its glob). */
-const FAMILIES = [decisions, editor, files, git, runs, terminal];
+const FAMILIES = [code, decisions, editor, files, git, runs, terminal];
 
 let debugMcp;
 let mcp;

@@ -1,18 +1,26 @@
 {
   "A change's problems": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "The TypeScript and ESLint problems a change made and the ones it fixed, against HEAD: its changed files and the files importing them, each checked now and as HEAD had it, with what wasn't checked said.",
+    "status": "active",
+    "why": "reintroduced after ESLint (user, 2026-11-03), as what's built on it — with the UI an agent's tool mirrors first: the review panel shows each changed file's (user's choice)",
+    "since": "2026-11-03",
+    "what": "The TypeScript and ESLint problems a change made and the ones it fixed, against HEAD — each changed file's on its row in the review panel, and for agents as code_problems: its changed files and the files importing them, each checked now and as HEAD had it, with what wasn't checked said.",
     "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
     "ways": [
       "agent tool|code_problems",
-      "command|_eslint.problems",
       "core module|installCodeProblems",
       "hub request|code.problems"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/app/tools/code/",
+      "packages/editor/extensions/change-problems/",
+      "packages/editor/shell/change-problems.tsx",
+      "packages/editor/workbench/code-problems.ts"
+    ],
+    "tests": [
+      "packages/editor/test/code-problems.test.mjs",
+      "packages/editor/test/git-views.mjs",
+      "packages/editor/test/page-tools.test.mjs"
+    ]
   },
   "Agent connection": {
     "status": "active",
@@ -381,6 +389,7 @@
     "what": "Real ESLint checks your code as you type, with quick fixes, fix-all on save, formatting, and the usual eslint.* settings.",
     "ways": [
       "code actions provider||eslint/extension.ts",
+      "command|_eslint.problems",
       "diagnostic collection|eslint",
       "diagnostic collection|eslint-config",
       "document formatting edit provider||eslint/extension.ts",

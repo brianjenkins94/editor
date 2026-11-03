@@ -26,6 +26,7 @@ import { createHub, createRpcClient } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
+import changeProblemsExtension from "change-problems:extension";
 import eslintExtension from "eslint:extension";
 import settingsDefaults from "editor:settings-defaults";
 import historyExtension from "history:extension";
@@ -42,6 +43,7 @@ import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./de
 import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
+import { installCodeProblems } from "./code-problems";
 import { installGitHistory } from "./git-history";
 import { installGitPush } from "./git-push";
 import { commitPart, installGitReview } from "./git-review";
@@ -403,6 +405,9 @@ function maybeBoot(): void {
 
 				// The review: the changes as hunks, committed or discarded in part (git-review.ts).
 				installGitReview(workbenchHub, git);
+				// A change's problems against HEAD, TypeScript's and ESLint's (code-problems.ts): the review panel's, each
+				// changed file's, and agents' code_problems.
+				installCodeProblems(api as typeof import("vscode"), workbenchHub, git, paneLog);
 				// Branches, and a branch pulled from or pushed to GitHub through the shell's sign-in (git-push.ts).
 				const remote = installGitPush(workbenchHub, paneLog);
 
@@ -428,9 +433,9 @@ function maybeBoot(): void {
 			builtIn(tsvalExtension, ExtensionHostKind.LocalProcess);
 
 			// The rest run in the web worker host, each from its folder with the files its manifest lists: ESLint (real ESLint
-			// in a worker of its own), history (its tsserver plugin) and Source Control (on the editor's git). Public API only,
-			// but for what ARCHITECTURE.md lists (*Extension points* 3).
-			for (const extension of [eslintExtension, historyExtension, sourceControlExtension]) {
+			// in a worker of its own), a change's problems and history (their tsserver plugins) and Source Control (on the
+			// editor's git). Public API only, but for what ARCHITECTURE.md lists (*Extension points* 3).
+			for (const extension of [eslintExtension, changeProblemsExtension, historyExtension, sourceControlExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -438,7 +443,7 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "history", "source-control"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "change-problems", "history", "source-control"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

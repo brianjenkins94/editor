@@ -13,10 +13,12 @@ import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
 import type { DiffRowInfo, Review, ReviewFile } from "../shared/git-hunks";
+import type { FileProblems } from "./change-problems";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { Fragment, render } from "preact";
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
 import { caption } from "theme/recipes";
+import { ProblemCounts, useChangeProblems } from "./change-problems";
 import "theme/components/checkbox";
 import "theme/components/textarea";
 import "theme/components/button";
@@ -115,8 +117,9 @@ const prefersDark = (): boolean => window.matchMedia("(prefers-color-scheme: dar
 const STATUS_VARIANTS: Record<GitFileChange["status"], string> = { "A": "success", "M": "warning", "D": "danger" };
 
 /** One changed-file row: tri-state pick, status, name, and a tail (discard). */
-function FileRow({ file, state, current, onPick, onOpen, onDiscard }: {
+function FileRow({ file, state, current, problems, onPick, onOpen, onDiscard }: {
 	"file": GitFileChange;
+	"problems"?: FileProblems;
 	"state": "all" | "partial" | "off";
 	"current": boolean;
 	"onPick": (checked: boolean) => void;
@@ -159,6 +162,8 @@ function FileRow({ file, state, current, onPick, onOpen, onDiscard }: {
 
 			<span class="gp-name wa-text-truncate"><bdi dir="ltr">{file.path}</bdi></span>
 
+			<ProblemCounts problems={problems} />
+
 			<span class="wa-cluster wa-flex-nowrap wa-gap-2xs">
 
 				<wa-button class={"gp-discard" + (armed ? " armed" : "")} appearance="plain" size="small" variant="danger" title="Discard changes" aria-label="Discard changes" onClick={clickDiscard}>{armed ? "Discard?" : "⨯"}</wa-button>
@@ -175,6 +180,8 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const rpc = rpcRef.current;
 
 	const [files, setFiles] = useState<GitFileChange[]>([]);
+	// (what the change made and fixed in each file: change-problems.tsx)
+	const problems = useChangeProblems(hub);
 	const [selected, setSelected] = useState<string | undefined>(undefined);
 	const [committing, setCommitting] = useState(false);
 	const [commitError, setCommitError] = useState(false);
@@ -479,6 +486,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 									file={file}
 									state={fileState(file.path)}
 									current={file.path === selected}
+									problems={problems.get(file.path)}
 									onPick={(checked) => { pickFile(file.path, checked); }}
 									onOpen={() => { void showDiff(file.path); }}
 									onDiscard={() => { void rpc.request("git.discard", { "path": file.path }); }}

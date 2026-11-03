@@ -1,0 +1,26 @@
+{
+  "name": "change-problems",
+  "displayName": "A change's problems",
+  "description": "TypeScript's side of a change's problems against HEAD: a tsserver plugin comparing the changed files and their importers now and at HEAD, for core's code.problems (the review panel's, and agents' code_problems).",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "files": ["node_modules/change-problems-ts-plugin/package.json", "node_modules/change-problems-ts-plugin/index.js"],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
+  "contributes": {
+    "typescriptServerPlugins": [
+      {
+        "name": "change-problems-ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ]
+  }
+}
