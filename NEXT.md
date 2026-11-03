@@ -249,10 +249,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   purpose, no allowance for undeclared code; code no feature explicitly owns is an error (silo README, decision 22);
   the test suite eliminated and rebuilt with the features, declared, so CI can run fewer of them by resting and
   vouches.
-  Open: what the core is; where the full editor is worked in while main is the core (the last full build kept
-  deployed, or the reduction on a branch until the core can host its own work); decision 22's grain (a file, or a
-  declaration); whose a note migrated from a comment is (the repository's, or its `git blame` author's); decision 21
-  above, which its ledger step waits on.
+  Decided 2026-11-02 too: main is reduced, the last full state tagged `full-editor` (and fetched by the editor to read
+  from), production keeping the full editor by skipping only its deploy step; the core is step 2's candidates plus
+  running tests; the ledger holds what the manifest did (`what`, `docs`, `paths`, `ways`, `tests`) and becomes the
+  source of truth, `silo check` erroring on drift; ownership by file, runs, tests and traces giving continuous
+  coverage. Open: whose a note migrated from a comment is (the repository's, or its `git blame` author's).
 
 ## Parked
 

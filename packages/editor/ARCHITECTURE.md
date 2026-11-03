@@ -1191,16 +1191,24 @@ other realms' boundaries (the workers, BABLR, TypeScript's servers) are held to 
 **Progress is the ledger**: what's core, what's out, what's back, shown in the features map, each with its pass's
 score. No new silo subcommand.
 
+**Decided (the user, 2026-11-02):**
+- **main is reduced; the full editor stays deployed.** History is the features coming back, commit by commit, on main.
+  The last full state is tagged `full-editor` before the reduction: browsable on GitHub, a worktree away locally, and
+  read from in the editor (which fetches the tag: its clone is otherwise one commit deep). Production keeps the full
+  editor by skipping only its deploy step while the rewrite runs (the API, admin and site deploy as before), so the
+  full editor works on main until the core can host its own work.
+- **The core is the candidates in step 2 plus running tests** (tsval and the test runner), so the core's tests run, and
+  are vouched for, in the editor from the first commit.
+- **A declared feature's ledger entry holds what the manifest held, and the ledger becomes the source of truth**:
+  `what`, `docs`, `paths`, `ways` and `tests` beside `status`, `why` and `since`. `silo check` errors on any drift
+  between it and the code, as it does on the manifest's now; the manifest goes when its entries have moved
+  (packages/silo/README.md, decision 21).
+- **Ownership is checked by file** (decision 22): a feature's `paths`. Runs, tests and traces give continuous coverage —
+  what each feature's code is seen doing — and show where a declaration and the code's use of it disagree.
+
 **Open:**
-- **Where the full editor is worked in while main is the core.** The rebuild is done in the editor, and the core can't
-  do all of what doing it takes at first (running the tests, debugging). Either main is reduced and the work is done
-  in the last full editor, kept deployed (production not promoted past it, or a build of it kept), until the core
-  can host its own work; or the reduction happens on a branch the full editor works on, merged once the core can.
-  The first is the bench doing its job: the full editor, deployed, working on this repository.
-- **What the core is**: the candidates in step 2.
 - **Whose a migrated note is.** Notes are kept per author, and only a note's author rewrites it when its code moves. A
   comment's note could be the repository's (an owner of its own), or its `git blame` author's.
-- **Decision 21** (packages/silo/README.md): what a declared feature's ledger entry holds. Step 1 waits on it.
 
 ## Workspace tools (2026-10-10)
 

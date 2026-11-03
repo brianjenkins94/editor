@@ -1004,15 +1004,17 @@ From *Tests by feature* (above), for the rewrite:
 20. **CI's entry point**: a silo subcommand any CI calls (reopening decision 9, which kept selection out of the command
     line while it was only the editor's and its CI's), or a library call each project's CI script makes. And which
     runner reports silo reads first.
-21. **What a declared feature's ledger entry holds**: the code it owns — its ways in and paths, the manifest's columns
-    now — and the tests it claims. The manifest itself is superseded (2026-11-02): tracking features and their tests,
-    and attributing code from them, replaces it; it isn't kept up.
+21. ~~**What a declared feature's ledger entry holds.**~~ Decided 2026-11-02: what the manifest held — `what` (what it's
+    for), `docs`, `paths` (the code it owns), `ways` (its ways in) — and the `tests` it owns, beside the decision's
+    `status`, `why` and `since`. The ledger becomes the source of truth: `silo check` errors on any drift between it and
+    the code, as it does on the manifest's now, and the manifest goes once its entries have moved.
 22. ~~**Code no feature owns.**~~ Decided 2026-11-02: an error. Code a feature doesn't explicitly own — by its ledger
     entry, not inferred from reach or tests — fails `silo check`, in CI and in the editor's Problems; a test's file is
     code too. Runs and coverage are how code shared between features is found (2026-11-02): code that more than one
     feature's runs and tests reach is shown as shared, to be made a feature of its own or split, so a declaration
     that names one owner is checked against what runs show. No allowance for code not yet declared: the editor's
     rebuild reduces to a declared core first and reintroduces features one at a time (packages/editor/ARCHITECTURE.md,
-    *The rewrite, in place*), so the check holds from the start. Open: the grain (a file by its path, or a
-    declaration).
+    *The rewrite, in place*), so the check holds from the start. The grain, decided 2026-11-02: by file, through a
+    feature's `paths`; runs, tests and traces give continuous coverage beside it — what each feature's code is seen
+    doing, and where that disagrees with the declaration.
 
