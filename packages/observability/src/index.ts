@@ -18,7 +18,7 @@
  * trip intact and stitch across contexts; the collector tags each by `context.source`.
  */
 import type { Hub, LinkPermissions, Transport } from "@brianjenkins94/hub";
-import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
+import type { Logger, LogRecord, Span } from "@brianjenkins94/util/logger";
 import { portTransport, websocketTransport, windowTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
@@ -131,7 +131,43 @@ export function relayLoggerToHub(hub: Hub, source: string, { max = 1000 } = {}):
 	// Its records ride the hub now: what the console sink prints of them is an echo (CONSOLE_ECHO).
 	markConsoleEchoes(relaySinks);
 
-	return logger({ "source": source });
+	const log = logger({ "source": source });
+
+	// (a hub before its rpcTracer just doesn't call it)
+	(hub as Hub & { "rpcTracer"?: RpcTracer }).rpcTracer = rpcTracer(log);
+
+	return log;
+}
+
+/** The hub's `RpcTracer`, by its shape: observability builds against the published hub, which may not have it yet. */
+interface RpcTracer {
+	"call": (name: string) => { "traceContext"?: { "traceId": string; "parentSpanId": string }; "end": (error?: string) => void };
+	"serve": (name: string, traceContext: { "traceId": string; "parentSpanId": string } | undefined, from: string | undefined) => { "end": (error?: string) => void };
+}
+
+/** Each request this context makes or serves, a span (`request`: its name): a call's carries its trace context to the
+ *  hub that serves it, whose span continues the trace — so a hub request is one trace across its contexts. */
+function rpcTracer(log: Logger): RpcTracer {
+	const ender = (span: Span) => (error?: string): void => {
+		if (error !== undefined) {
+			span.error("request failed", { "message": error.slice(0, 200) });
+		}
+
+		span.end();
+	};
+
+	return {
+		"call": (name) => {
+			const span = log.span("observability.call", { "request": name });
+
+			return { "traceContext": { "traceId": span.traceId, "parentSpanId": span.id }, "end": ender(span) };
+		},
+		"serve": (name, remote, from) => {
+			const attrs = { "request": name, ...from === undefined ? {} : { "from": from } };
+
+			return { "end": ender(remote === undefined ? log.span("observability.serve", attrs) : log.continueSpan(remote, "observability.serve", attrs)) };
+		}
+	};
 }
 
 /** Where a root sends a linking collector the records it logged before it could receive them (see `logBacklog`) —

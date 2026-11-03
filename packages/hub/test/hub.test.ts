@@ -206,6 +206,33 @@ test("request/reply across a link: relay calls a tool the far hub serves", async
 	await assert.rejects(rpc.request("boom"), /nope/); // served errors surface as a rejection
 });
 
+test("a request's tracer: the call's trace context reaches the hub serving it, and each says how it ended", async () => {
+	const [a, b] = pipe();
+	const caller = createHub({ "id": "caller" });
+	const server = createHub({ "id": "server" });
+	const seen: string[] = [];
+
+	caller.link(a);
+	server.link(b);
+	caller.rpcTracer = {
+		"call": (name) => ({ "traceContext": { "traceId": "t1", "parentSpanId": "s1" }, "end": (error) => { seen.push(`call ${name} ${error ?? "ok"}`); } }),
+		"serve": () => { throw new Error("the caller doesn't serve"); }
+	};
+	server.rpcTracer = {
+		"call": () => { throw new Error("the server doesn't call"); },
+		"serve": (name, remote, from) => ({ "end": (error) => { seen.push(`serve ${name} ${remote?.traceId ?? "-"}/${remote?.parentSpanId ?? "-"} ${from ?? "-"} ${error ?? "ok"}`); } })
+	};
+	serve(server, "add", (args) => (args as { "x": number }).x + 1);
+	serve(server, "boom", () => { throw new Error("nope"); });
+
+	const rpc = createRpcClient(caller);
+
+	await flush();
+	assert.equal(await rpc.request("add", { "x": 1 }), 2);
+	await assert.rejects(rpc.request("boom"), /nope/u);
+	assert.deepEqual(seen, ["serve add t1/s1 caller ok", "call add ok", "serve boom t1/s1 caller nope", "call boom nope"]);
+});
+
 test("request times out when nothing serves the tool", async () => {
 	const relay = createHub({ "id": "solo-relay" });
 	const rpc = createRpcClient(relay);

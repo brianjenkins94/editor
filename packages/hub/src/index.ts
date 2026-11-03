@@ -398,8 +398,18 @@ function crosses(from: Link | undefined, to: Link): boolean {
 	return from === undefined || from.transit || to.transit;
 }
 
+/** How a hub's requests are traced, by whoever traces (observability installs one with the context's logger; the hub
+ *  imports none): a call going out — the trace context its message carries — and a call being served, which continues
+ *  the caller's trace when it sent one. Each answers with how it ended: nothing, or why it failed. */
+export interface RpcTracer {
+	"call": (name: string) => { "traceContext"?: Envelope["traceContext"]; "end": (error?: string) => void };
+	"serve": (name: string, traceContext: Envelope["traceContext"] | undefined, from: string | undefined) => { "end": (error?: string) => void };
+}
+
 export class Hub {
 	public readonly id: string;
+	/** Traces this hub's requests, made and served (RpcTracer), when something installed one. */
+	public rpcTracer: RpcTracer | undefined;
 
 	private readonly links = new Set<Link>();
 	// subject pattern → local handlers subscribed to it.
@@ -1448,11 +1458,23 @@ export function createRpcClient(hub: Hub): RpcClient {
 
 			signal?.throwIfAborted();
 
-			if (options.waitForResponderMs !== undefined && !(await raceAbort(hub.whenInterested(RPC_CALL + "." + name, options.waitForResponderMs), signal))) {
-				throw new RpcError("no-responder", `rpc "${name}": no responder within ${options.waitForResponderMs}ms`);
-			}
+			const traced = hub.rpcTracer?.call(name);
 
-			return call(name, args, options.timeoutMs, signal, cause);
+			try {
+				if (options.waitForResponderMs !== undefined && !(await raceAbort(hub.whenInterested(RPC_CALL + "." + name, options.waitForResponderMs), signal))) {
+					throw new RpcError("no-responder", `rpc "${name}": no responder within ${options.waitForResponderMs}ms`);
+				}
+
+				const result = await call(name, args, options.timeoutMs, signal, cause, traced?.traceContext);
+
+				traced?.end();
+
+				return result;
+			} catch (error) {
+				traced?.end(error instanceof Error ? error.message : String(error));
+
+				throw error;
+			}
 		},
 		"dispose": () => {
 			untap();
@@ -1471,7 +1493,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 		}
 	};
 
-	function call(name: string, args: unknown, timeoutMs = 15000, signal?: AbortSignal, cause?: string): Promise<unknown> {
+	function call(name: string, args: unknown, timeoutMs = 15000, signal?: AbortSignal, cause?: string, traceContext?: Envelope["traceContext"]): Promise<unknown> {
 		return new Promise((resolve, reject) => {
 			const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
 			const entry: Pending = { "resolve": resolve, "reject": reject };
@@ -1496,7 +1518,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 			};
 			signal?.addEventListener("abort", onAbort, { "once": true });
 			pending.set(id, entry);
-			hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": replyTo(), "args": args } satisfies RpcCall, cause === undefined ? {} : { "cause": cause });
+			hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": replyTo(), "args": args } satisfies RpcCall, { ...cause === undefined ? {} : { "cause": cause }, ...traceContext === undefined ? {} : { "traceContext": traceContext } });
 		});
 	}
 }
@@ -1542,6 +1564,7 @@ export function serve(hub: Hub, name: string, handler: (args: unknown, context: 
 		}
 
 		const controller = new AbortController();
+		const traced = hub.rpcTracer?.serve(name, envelope.traceContext, envelope.from);
 
 		inFlight.set(key, controller);
 
@@ -1549,10 +1572,14 @@ export function serve(hub: Hub, name: string, handler: (args: unknown, context: 
 			try {
 				const result = await handler(args, { "signal": controller.signal, "from": envelope.from, "link": origin.link });
 
+				traced?.end();
+
 				if (!controller.signal.aborted) {
 					hub.publish(RPC_REPLY + "." + replyTo, { "id": id, "result": result } satisfies RpcReply, { "cause": envelope.id });
 				}
 			} catch (error) {
+				traced?.end(error instanceof Error ? error.message : String(error));
+
 				if (!controller.signal.aborted) {
 					hub.publish(RPC_REPLY + "." + replyTo, { "id": id, "error": error instanceof Error ? error.message : String(error) } satisfies RpcReply, { "cause": envelope.id });
 				}
