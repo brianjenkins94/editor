@@ -94,8 +94,6 @@ export const containers: ContainerSpec[] = [
 	{ "id": "debugWorkers", "label": "Debug workers", "caption": "a debug worker per tsval session (spawned top-level from the LocalProcess host)", "parent": "workbenchIframe", "kind": "realm" },
 	{ "id": "extHostIframe", "label": "Extension host iframe", "caption": "hidden iframe · relays its worker", "parent": "workbenchIframe", "kind": "origin" },
 	{ "id": "extHostWorker", "label": "Web worker extension host", "caption": "LocalWebWorker extensions, tsserver", "parent": "extHostIframe", "kind": "realm" },
-	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell, any number per server (preview:<port>, preview:<port>~<n>) · served from /__virtual__/<tab>/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
-	{ "id": "previewApp", "label": "App", "caption": "the previewed app's own hubs, workers and frames, per window (joined through the shell, named <window>/<hub>) · its architecture, not the editor's", "parent": "previews", "kind": "group" },
 	{ "id": "browserChannels", "label": "Browser channels", "caption": "BroadcastChannels and Web Locks — shared by every tab and worker of the origin, past the hub", "column": 3, "kind": "group" },
 	{ "id": "stores", "label": "Stores", "caption": "what the editor keeps — tools' files by shape — discovered from what's written and read", "column": 3, "kind": "group" },
 	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
@@ -112,18 +110,15 @@ export const nodes: NodeSpec[] = [
 	{ "id": "workbench", "label": "Workbench", "container": "workbench", "hub": true, "detail": "hub · workbench-entry.tsx", "description": "The monaco-vscode-api boot: services, editors, the main side of every extension host, the git service, run targets.", "observedBy": "its hub reporter + the monaco probes + network probes" },
 	{ "id": "exthost:LocalProcess:0", "label": "Local extension host", "container": "workbench", "detail": "the bridge, tsval", "description": "Extension host sharing the workbench realm: the bridge, the bridge — core's vscode API is its — and tsval, the stepping debugger, an extension of its own beside it (it spawns its debug workers top-level too).", "observedBy": "RPCProtocol logger on its ExtensionHostManager" },
 	{ "id": "bridge", "label": "Bridge", "container": "workbench", "hub": true, "detail": "hub · the bridge extension", "description": "The bridge extension's hub (in the LocalProcess extension host): the debug workers link to it, and it serves capability.decide.", "observedBy": "its hub reporter" },
-	{ "id": "node", "label": "Dev-server worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev servers", "description": "Hosts the preview dev servers (almostnode's Vite) and answers virtual.request — a debug run's own server's port it hands to that run (virtual.debug.<port>). Never terminated: stopping a run can't take a dev server with it.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
 	{ "id": "debug-worker", "label": "Debug worker", "container": "debugWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the bridge's debug adapter, which drives it by messages (the debug protocol). Its hub link is the workspace runtime's (editor-api's connectRuntime): a server its program starts answers the preview through it, and its log and spans are the editor's.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
-	{ "id": "eslint", "label": "ESLint worker", "container": "extHostWorker", "hub": true, "detail": "hub · real ESLint under almostnode", "description": "The eslint extension's worker: real ESLint and the preset under almostnode, from the toolchain the build packs beside it (lsp/eslint-toolchain.tgz). Its hub link is the workspace runtime's (editor-api's connectRuntime), through which it reads the workspace — as tooling reads, never asked about; the extension sends it documents to lint and fix by messages of their own.", "observedBy": "its hub reporter", "condition": "once the eslint extension starts" },
 	{ "id": "idb", "label": "IndexedDB", "container": "browser", "detail": "user data, logs, workspace-fs", "description": "monaco's user data / logs / storage, and the workspace filesystem snapshot.", "observedBy": "IDBObjectStore probe" },
 	{ "id": "net:origin", "label": "Page origin", "container": "network", "detail": "app, node_modules overlay, ATA", "description": "The app's own server (dev server or Pages): bundles, the node_modules CDN overlay, type acquisition.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:unpkg.com", "label": "unpkg", "container": "network", "detail": "CDN node_modules", "description": "The service worker's upstream for the node_modules overlay.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:registry.npmjs.org", "label": "npm registry", "container": "network", "detail": "type acquisition", "description": "typescript-language-features' automatic type acquisition, from the worker extension host (package metadata for @types lookups); and the workbench's dependency resolver (workbench/versions.ts), each resolved version's own dependencies.", "observedBy": "the service worker's fetch probe", "condition": "when a file imports a package, or a project's dependencies change" },
 	{ "id": "net:api.deps.dev", "label": "deps.dev", "container": "network", "detail": "dependency versions", "description": "The workbench's dependency resolver (workbench/versions.ts): every version of each dependency and when it was published, so nothing younger than a week is resolved into .silo/versions.json.", "observedBy": "the service worker's fetch probe", "condition": "when a project's dependencies change" },
 	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands to the node worker (over the hub) and to each debug run's worker (in its launch), which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock. Shared memory notifies nobody, so each realm watches its own mount's writes and reports them as workspace.changed; the workbench persists every one to IndexedDB and announces it to VS Code, whoever wrote (the provider, isomorphic-git, the terminal, a node script).", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
-	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (the previews_provoke tool's hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp provoke_transform" },
 	{ "id": "net:brianjenkins94.github.io", "label": "GitHub Pages", "container": "network", "detail": "preview packages", "description": "A previewed app's tarball dependencies (a URL in its package.json — e.g. @brianjenkins94/hub), fetched once by the node worker's dev server and served from /@pkg/.", "observedBy": "the service worker's fetch probe", "condition": "when a previewed app depends on a tarball" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
 	{ "id": "net:cdn.jsdelivr.net", "label": "jsDelivr", "container": "network", "detail": "preview DevTools", "description": "A preview's DevTools: chobitsu (the CDP implementation added to the previewed page) and Chrome's DevTools frontend (chii's build).", "observedBy": "the service worker's fetch probe", "condition": "while a preview's DevTools is open" },
@@ -139,44 +134,32 @@ export const nodes: NodeSpec[] = [
 
 export const hubLinks: [string, string][] = [
 	["shell", "root"],
-	// An app's own hubs, in a preview (observability's linkPreviewHost; permissioned, non-transit — shell-preview.ts).
-	["shell", "preview:*"],
 	["root", "workbench"],
 	["root", "sw"],
 	["root", "debug-mcp"],
 	["workbench", "bridge"],
-	["workbench", "node"],
-	["node", "provoke"],
-	["bridge", "debug-worker"],
-	["workbench", "eslint"]
+	["bridge", "debug-worker"]
 ];
 
 export const subjects: SubjectFamily[] = [
 	// ── observability ──
 	{ "pattern": "$sys.log.>", "from": ["*"], "to": ["root", "debug-mcp", "shell"] },
 	{ "pattern": "$sys.metrics.>", "from": ["*"], "to": ["bridge", "debug-mcp", "shell"] },
-	{ "pattern": "$sys.backlog.log", "from": ["root", "preview:*"], "to": ["debug-mcp"] },
+	{ "pattern": "$sys.backlog.log", "from": ["root"], "to": ["debug-mcp"] },
 	// The architecture plane itself (observability's arch.ts): every context's reports, to the live view and debug-mcp, and
 	// their ask for full state. Not observed — it's what observation rides — so declared for the source scan's sake.
 	{ "pattern": "$sys.arch.sync", "from": ["workbench", "debug-mcp"], "to": ["*"] },
 	{ "pattern": "$sys.arch.>", "from": ["*"], "to": ["workbench", "debug-mcp"] },
-	{ "pattern": "tab.discover", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
-	{ "pattern": "tab.here", "from": ["root", "preview:*"], "to": ["debug-mcp"] },
-	{ "pattern": "page_tools.changed", "from": ["root", "shell", "preview:*"], "to": ["debug-mcp"] },
-	// Inside a preview window: its page's workers report and ask through the page tap's hub (page-tap.ts, worker-tap.ts) —
-	// the app's own contexts, which conformance doesn't check; declared for the source scan's sake.
-	{ "pattern": "tap.worker.>", "from": ["preview:*"], "to": ["preview:*"] },
-	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root", "preview:*"] },
-	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
+	{ "pattern": "tab.discover", "from": ["debug-mcp", "root"], "to": ["root"] },
+	{ "pattern": "tab.here", "from": ["root"], "to": ["debug-mcp"] },
+	{ "pattern": "page_tools.changed", "from": ["root", "shell"], "to": ["debug-mcp"] },
+	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root"] },
+	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root"] },
 	// ── the shell ⇄ the app and the workbench ──
-	// What the session timeline and error reports need (packages/api/README.md O6): the root's collected uncaught
-	// errors, the workbench's commands, panes and runs, to the shell, which holds the sign-in that sends them.
 	{ "pattern": "project.>", "from": ["shell"], "to": ["root"] },
-	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"] },
 	{ "pattern": "workbench.init", "from": ["workbench"], "to": ["root"] },
 	{ "pattern": "workbench.online", "from": ["workbench"], "to": ["root"] },
 	{ "pattern": "workbench.save", "from": ["workbench"], "to": ["root"] },
-	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "architecture.violations", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.status", "from": ["shell", "bridge", "root"], "to": ["workbench"] },
@@ -198,109 +181,39 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "git.identity", "from": ["workbench"], "to": ["shell"] },
 	{ "pattern": "github.actions", "from": ["workbench"], "to": ["shell"] },
 	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell", "bridge"] },
-	{ "pattern": "parse.status", "from": ["workbench"], "to": ["bridge"] },
-	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "packages.tarball", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "tasks.list", "from": ["shell"], "to": ["bridge"] },
-	{ "pattern": "tasks.run", "from": ["shell"], "to": ["bridge"] },
-	{ "pattern": "terminal.run", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "terminal.out.*", "from": ["workbench"], "to": ["bridge"] },
-	{ "pattern": "terminal.exit.*", "from": ["workbench"], "to": ["bridge"] },
-	{ "pattern": "terminal.in.*", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "terminal.stop.*", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "runs.list", "from": ["shell", "root", "bridge"], "to": ["workbench"] },
 	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "evidence.observed", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "run.effects", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "runs.begin", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "theme.colors", "from": ["workbench"], "to": ["shell"] },
-	{ "pattern": "dock.closeEditor", "from": ["shell"], "to": ["workbench"] },
-	// ── previews ──
-	{ "pattern": "preview.start", "from": ["root", "workbench"], "to": ["node"] },
-	{ "pattern": "preview.provoke", "from": ["root", "workbench"], "to": ["node"] },
-	{ "pattern": "preview.open", "from": ["workbench", "shell", "bridge"], "to": ["shell", "root"] },
-	{ "pattern": "preview.open", "from": ["preview:*"], "to": ["shell"] },
-	{ "pattern": "preview.ready", "from": ["root"], "to": ["shell"] },
-	{ "pattern": "preview.close", "from": ["workbench", "shell"], "to": ["root", "workbench", "node", "shell"] },
-	{ "pattern": "preview.hmr.*", "from": ["node"], "to": ["shell", "workbench"] },
-	{ "pattern": "evidence.preview", "from": ["preview:*"], "to": ["workbench"] },
-	{ "pattern": "stops.preview", "from": ["preview:*"], "to": ["bridge"] },
-	{ "pattern": "preview.stops", "from": ["bridge"], "to": ["node"] },
-	{ "pattern": "evidence.level", "from": ["node"], "to": ["workbench"] },
-	{ "pattern": "preview.version", "from": ["workbench", "bridge"], "to": ["node"] },
-	{ "pattern": "evidence.flush", "from": ["workbench"], "to": ["preview:*"] },
-	{ "pattern": "preview.decide", "from": ["preview:*"], "to": ["shell"] },
-	{ "pattern": "preview.cdp", "from": ["root", "shell"], "to": ["shell"] },
-	{ "pattern": "preview.cdp.event.*", "from": ["shell"], "to": ["shell"] },
-	{ "pattern": "preview.profile", "from": ["root"], "to": ["shell"] },
-	{ "pattern": "preview.profiled", "from": ["shell"], "to": ["workbench"] },
-	{ "pattern": "virtual.request.*", "from": ["sw"], "to": ["root"] },
-	{ "pattern": "virtual.request", "from": ["root", "workbench"], "to": ["node"] },
 	// ── the workspace ──
-	{ "pattern": "workspace.changed", "from": ["workbench", "node"], "to": ["workbench", "node"] },
-	{ "pattern": "workspace.buffer", "from": ["node"], "to": ["workbench"] },
-	{ "pattern": "workspace.checkpoint", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "workspace.restore", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "workspace.changed", "from": ["workbench"], "to": ["workbench"] },
 	// ── running node ──
 	{ "pattern": "node.out.*", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "node.exit.*", "from": ["bridge", "workbench"], "to": ["workbench", "bridge"] },
 	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "node.listening.*", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "virtual.debug.*", "from": ["node"], "to": ["debug-worker"] },
-	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"] },
 	// ── debugging ──
 	{ "pattern": "debug.launch", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "debug.stop", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "debug.declined.*", "from": ["bridge"], "to": ["workbench"] },
-	{ "pattern": "debug.state", "from": ["bridge"], "to": ["shell"] },
-	{ "pattern": "debug.command", "from": ["shell"], "to": ["bridge"] },
-	{ "pattern": "debug.sessions", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "debug.start", "from": ["root", "shell"], "to": ["bridge"] },
-	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "debug.session.*.state", "from": ["root", "workbench"], "to": ["bridge"] },
-	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "margin.state", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "editor.state", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "editor.trace", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "problems.list", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "files.*", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "notes.add", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "code.*", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "decisions.for", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "ci.status", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "script.run", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "tests.*", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "notifications.list", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "rules.state", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "terminal.state", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "runs.ledger", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "preview.windows", "from": ["root", "workbench"], "to": ["shell"] },
-	{ "pattern": "playwright.run", "from": ["debug-worker"], "to": ["shell"] },
-	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "debug.session.*.decide", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "debug.session.*.setValue", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "debug.session.*.pace", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "debug.session.*.stdin", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "bridge.ready", "from": ["debug-worker"], "to": ["bridge"] },
 	{ "pattern": "runtime.fs.attach", "from": ["debug-worker"], "to": ["bridge"] },
-	// (a runtime link from the web worker extension host — eslint's worker — reaches the bridge through the workbench)
-	{ "pattern": "bridge.ready", "from": ["eslint", "workbench"], "to": ["workbench", "bridge"] },
-	{ "pattern": "runtime.fs.attach", "from": ["eslint", "workbench", "bridge"], "to": ["workbench", "bridge", "eslint"] },
-	{ "pattern": "production.launch", "from": ["workbench"], "to": ["bridge"] },
-	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["bridge"] },
-	{ "pattern": "production.exit.*", "from": ["workbench"], "to": ["bridge"] },
-	{ "pattern": "production.stop.*", "from": ["bridge"], "to": ["workbench"] },
+	// (a runtime link from the web worker extension host reaches the bridge through the workbench)
+	{ "pattern": "bridge.ready", "from": ["workbench"], "to": ["workbench", "bridge"] },
+	{ "pattern": "runtime.fs.attach", "from": ["workbench", "bridge"], "to": ["workbench", "bridge"] },
 	// ── capabilities ──
-	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"] },
-	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["bridge"] },
-	{ "pattern": "capability.record.*", "from": ["sw"], "to": ["root"] },
-	{ "pattern": "capability.record", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "capability.recorded", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "capability.prompt", "from": ["bridge"], "to": ["shell"] },
-	{ "pattern": "capability.watched", "from": ["bridge"], "to": ["shell"] },
-	// ── workers ──
-	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] }
+	{ "pattern": "capability.prompt", "from": ["bridge"], "to": ["shell"] }
 ];
 
 export const channels: ChannelSpec[] = [
@@ -308,7 +221,6 @@ export const channels: ChannelSpec[] = [
 	{ "a": "bridge", "b": "debug-worker", "protocol": "the debug protocol (ToWorker / WorkerEvent); the runtime's file calls (editor-api's mailbox)", "transport": "Worker.postMessage; SharedArrayBuffer + Atomics", "reason": "isolation", "description": "The adapter drives its run by messages of their own — launch, steps, decisions; values, stops, coverage back — not over the hub: the worker's hub link is only the workspace runtime's (editor-api), what any debugger's worker is given. And a debugger's worker reads and writes the workspace synchronously through its mailbox (handed over once, runtime.fs.attach): it writes a call and waits; the bridge answers it (runtime-fs.ts), the policy deciding the program's calls. tsval's reads its files from the workspace's buffer instead; another debugger's (editor-contrib's) has only the mailbox." },
 	{ "a": "workbench", "b": "ext:*", "protocol": "the workspace runtime's hub link (editor-api's observeExtension)", "transport": "MessagePort (through the web worker host's probe port)", "reason": "isolation", "description": "Any extension in the web worker host on the observability plane — a contributed one too: its logs and metrics ride the hub as ext:<name>'s, and nothing of the editor's services crosses. The Margin's warnings, say." },
 	{ "a": "bridge", "b": "ext:*", "protocol": "the workspace runtime's hub link (editor-api's observeExtension)", "transport": "MessagePort", "reason": "isolation", "description": "Any extension in the bridge's host on the observability plane, as in the web worker host's: its logs and metrics as ext:<name>'s." },
-	{ "a": "workbench", "b": "eslint", "protocol": "the workspace runtime's hub link (editor-api); the runtime's file calls (its mailbox)", "transport": "MessagePort (through the web worker host's probe port); SharedArrayBuffer + Atomics", "reason": "isolation", "description": "eslint's worker reads the workspace through the runtime link its extension hands it (workspaceRuntime().connect): its mailbox handed over once (runtime.fs.attach), then each read a synchronous call the bridge answers — as the loader's own, never decided or counted. Linting and fixing are the extension's messages to it, not the hub's." },
 	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "reason": "platform", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
 	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "reason": "platform", "description": "NLS bootstrap, then the MessagePort handoff." },
 	{ "a": "workbench", "b": "exthost:LocalWebWorker:*", "protocol": "RPCProtocol", "transport": "MessagePort (transferred ArrayBuffers)", "reason": "platform", "description": "MainThread / ExtHost proxies." },
@@ -326,24 +238,15 @@ export const channels: ChannelSpec[] = [
 	{ "a": "shell", "b": "net:*", "protocol": "HTTP", "transport": "fetch, before the service worker controls the page", "reason": "platform", "description": "A first visit on the dev server: the shell renders (its WebAwesome icons, …) before the newly registered service worker claims the page, so those requests go straight out. Once it's controlled, they go through the service worker." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "reason": "storage", "description": "User data, logs, storage, workspace-fs." },
 	{ "a": "shell", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (editor-session)", "reason": "storage", "description": "The sign-in's DPoP key (shell/session.ts): a non-extractable CryptoKeyPair, made once and kept until sign-out — usable to sign the API's proofs, never readable as bytes." },
-	// the preview pipeline
-	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "reason": "isolation", "description": "Into the iframe: HMR updates (vite-hmr). Everything else of a window rides its hub link (the page tap's hub: its console and errors, capability requests and new windows — preview.decide, preview.open — and its workers', which join that hub through their page: worker-tap.ts)." },
 	{ "a": "webview-sw", "b": "webview:*", "protocol": "VS Code webview resources", "transport": "fetch, through VS Code's webview service worker", "reason": "platform", "description": "A webview's resources by URL (asWebviewUri) — answered with errors here (see webview-sw)." },
 	{ "a": "workbench", "b": "webview:*", "protocol": "VS Code webview protocol", "transport": "window.postMessage", "reason": "platform", "description": "A webview's iframe — the insights Monitor, a Markdown preview: its document set inline, its messages VS Code's webview postMessage (an extension's postMessage/onDidReceiveMessage ride it)." },
-	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "reason": "platform", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
-	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "reason": "platform", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
-	{ "a": "node", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "The dev servers' own requests (their dependencies), like every controlled context's." },
 	{ "a": "debug-worker", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "A run's fetches the policy allows (RUNNING.md, *Effects are real, decided per call*: decided in the margin, made for real), like every controlled context's requests." },
-	{ "a": "eslint", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "ESLint's worker loading its toolchain (the build's eslint-toolchain.tgz) and its preset's chunks — seen since a runtime link probes its worker's network as the editor's realms do (editor-api's connectRuntime)." },
-	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
 	{ "a": "debug-worker", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "A debug run's own http.createServer, reached from a preview (the dev-server worker hands its port's requests over: virtual.debug.<port>)." },
 	{ "a": "workbench", "b": "channel:vscode-web-state-db-global", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "reason": "platform", "description": "VS Code's global web storage (IndexedDB-backed) telling the editor's other tabs what changed." },
 	{ "a": "workbench", "b": "channel:vscode-web-state-db-global-shared", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "reason": "platform", "description": "VS Code's shared global web storage, the same across tabs." },
 	{ "a": "workbench", "b": "channel:vscode.indexedDB.vscode-userdata.changes", "protocol": "VS Code user-data sync", "transport": "BroadcastChannel", "reason": "platform", "description": "The user-data filesystem (settings, keybindings, snippets) announcing its changes to the editor's other tabs." },
 	// the workspace filesystem (shared memory)
 	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "reason": "shared memory", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
-	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "almostnode: the preview dev servers' module loading and transforms." },
-	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "A cold transform round reads the workspace." },
 	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs, silo-local)", "reason": "storage", "description": "Provider writes, flushed every 500ms and restored at boot (workspace-fs); and silo's local/, a mount of its own store (silo-local)." }
 ];
 
@@ -564,7 +467,7 @@ export function seenChannels(observed: ObservedChannel[]): Map<ChannelSpec, numb
 }
 
 /** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:", "ext:", "store:"];
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "server:", "channel:", "lock:", "rtc:", "webview:", "ext:", "store:"];
 
 /** The hub messages on `channel`, a hub link, that no family sends the way they went: into `violations`. */
 function checkSubjects(channel: ObservedChannel, violations: Violation[]): void {
@@ -589,10 +492,7 @@ function checkSubjects(channel: ObservedChannel, violations: Violation[]): void 
 /** Compare what's observed with the model. */
 export function checkConformance(observed: { "nodes": string[]; "channels": ObservedChannel[]; "topology": Map<string, ObservedTopology> }): Violation[] {
 	const violations: Violation[] = [];
-	// A previewed app's own contexts are its architecture, not the editor's: nothing to check them against.
-	const app = appNodes(observed);
-
-	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b))) {
+	for (const channel of observed.channels) {
 		const declared = declaredOn(channel);
 
 		if (declared === undefined) {
@@ -602,7 +502,7 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 		}
 	}
 
-	for (const [hub, snapshot] of [...observed.topology].filter(([id]) => !app.has(id))) {
+	for (const [hub, snapshot] of observed.topology) {
 		const peers = new Map<string, number>();
 
 		for (const link of snapshot.links) {
@@ -618,7 +518,7 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 		}
 	}
 
-	for (const id of observed.nodes.filter((candidate) => !app.has(candidate))) {
+	for (const id of observed.nodes) {
 		const dynamic = DYNAMIC_PREFIXES.some((prefix) => id.startsWith(prefix));
 
 		if (!dynamic && nodeSpec(id) === undefined) {
@@ -629,75 +529,8 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 	return violations;
 }
 
-/**
- * A previewed app's own context: `<window>/<hub>` — the hub's own id, under the preview window it runs in. An app's hub
- * ids are its own choice (every window of one app has a `page`), so the shell scopes an app's observability as it
- * enters the editor's tree, per window (shell-preview.ts, observability's scopeObservability): its reports and records
- * name its contexts `preview:<port>/<id>` (or `preview:<port>~<n>/<id>` for the port's n-th window).
- */
-export function isAppNode(id: string): boolean {
-	return /^preview:[^/]+\/./u.test(id);
-}
-
-/** The preview window an app context runs in (`preview:<port>` or `preview:<port>~<n>`). */
-export function appWindowOf(id: string): string | undefined {
-	return isAppNode(id) ? id.slice(0, id.indexOf("/")) : undefined;
-}
-
-/** A previewed app's own contexts, among what's observed (isAppNode). None of it is the editor's architecture. */
-export function appNodes(observed: { "nodes"?: string[]; "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology> }): Set<string> {
-	return new Set([...observed.nodes ?? [], ...observed.topology.keys(), ...observed.channels.flatMap((channel) => [channel.a, channel.b])].filter(isAppNode));
-}
-
 /** Where a reporting hub runs (observability's ArchRealm). */
 export interface ObservedRealm { "kind": "window" | "worker"; "url": string; "parent"?: string }
-
-export interface AppLayout {
-	/** The previewed apps' contexts (appNodes). */
-	"nodes": Set<string>;
-	/** Where each app context runs, as its realm says: a frame in the window (or frame) at its parent address, a worker
-	 *  under the realm that started it (observability's REALM_PARENT, which the preview's tap sets) — within its own
-	 *  preview window, whose page reports as the window itself (`preview:<port>`: the edge names it). */
-	"parent": Map<string, string>;
-}
-
-/** A preview window's id (`preview:<port>`, `preview:<port>~<n>`): the shell's name for it, and its page's. */
-function isWindowNode(id: string): boolean {
-	return /^preview:[^/]+$/u.test(id);
-}
-
-/**
- * How a previewed app's contexts nest, per preview window — read off what each realm reports, nothing inferred: its
- * parent address names the realm holding (or that started) it, looked up among the realms of the same preview window
- * (two windows of one app have the same addresses). An app context whose parent isn't known sits in its window.
- */
-export function appLayout(observed: { "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology>; "realms": Map<string, ObservedRealm> }): AppLayout {
-	const nodes = appNodes(observed);
-	const parent = new Map<string, string>();
-	const windowOf = (id: string): string => (isWindowNode(id) ? id : appWindowOf(id));
-	// Each window realm by its address, per preview window — the window itself first, where a realm holds several hubs.
-	const byUrl = new Map<string, string>();
-	const holders = [...observed.realms].filter(([id, realm]) => realm.kind === "window" && (nodes.has(id) || isWindowNode(id)));
-
-	for (const [id, realm] of holders.toSorted(([left], [right]) => Number(isWindowNode(right)) - Number(isWindowNode(left)))) {
-		const key = windowOf(id) + "\0" + realm.url;
-
-		if (!byUrl.has(key)) {
-			byUrl.set(key, id);
-		}
-	}
-
-	for (const id of nodes) {
-		const holder = observed.realms.get(id)?.parent;
-		const at = holder === undefined ? undefined : byUrl.get(windowOf(id) + "\0" + holder);
-
-		if (at !== undefined && at !== id) {
-			parent.set(id, at);
-		}
-	}
-
-	return { "nodes": nodes, "parent": parent };
-}
 
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
@@ -801,19 +634,11 @@ export function discoveredStores(observed: { "channels": { "a": string; "b": str
 }
 
 export function dynamicContainer(id: string): string | undefined {
-	if (isAppNode(id)) {
-		return "previewApp";
-	}
-
-	if (id.startsWith("preview:") || id.startsWith("devtools:")) {
-		return "previews";
-	}
-
 	if (id.startsWith("webview:")) {
 		return "workbenchIframe";
 	}
 
-	if (id.startsWith("vite:") || id.startsWith("server:") || id.startsWith("worker:")) {
+	if (id.startsWith("server:") || id.startsWith("worker:")) {
 		return "workers";
 	}
 
@@ -843,7 +668,7 @@ export interface TourSnapshot {
 
 /** An instance's id, as one of a kind: a port, a webview, a numbered server is the same part each run. */
 function generalId(id: string, label: string | undefined): string {
-	return id.replace(/^(preview|vite|server):\d+(?:~\d+)?$/u, "$1:*").replace(/^webview:.*$/u, `webview:${label ?? "*"}`).replace(/ #\d+$/u, "");
+	return id.replace(/^server:\d+$/u, "server:*").replace(/^webview:.*$/u, `webview:${label ?? "*"}`).replace(/ #\d+$/u, "");
 }
 
 /** Does a store operation change the store? (A tool's file: storeShape's operations; a database: IndexedDB's.) */
@@ -856,7 +681,7 @@ function writesStore(operation: string): boolean {
  * things run (the containers): every context, extension and store seen, and what joined them, as a Mermaid flowchart; then
  * the stores, with who writes and who reads each; then each hub's components by namespace (the registering functions'
  * names don't survive a minified build, and the diagram has to be the same from either). Instances read as one of a kind
- * (`preview:<port>`), no counts: the same tour renders the same diagram, so a change to it is a change to the editor.
+ * (`server:<port>`), no counts: the same tour renders the same diagram, so a change to it is a change to the editor.
  */
 export function tourDiagram(snapshot: TourSnapshot): string {
 	// A page's own requests before the service worker controls it (a first visit's: `shell ⇄ net:*`) aren't the editor's
@@ -864,7 +689,7 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 	const firstVisit = (channel: { "a": string; "b": string }): boolean => [channel.a, channel.b].some((end) => end.startsWith("net:")) && channel.a !== "sw" && channel.b !== "sw";
 	const channels = snapshot.channels.filter((channel) => !firstVisit(channel));
 	const reached = new Set(channels.flatMap((channel) => [channel.a, channel.b]));
-	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && !isAppNode(node.id) && nodeSpec(node.id)?.cacheDependent !== true && (!node.id.startsWith("net:") || reached.has(node.id))).map((node) => [node.id, node]));
+	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && nodeSpec(node.id)?.cacheDependent !== true && (!node.id.startsWith("net:") || reached.has(node.id))).map((node) => [node.id, node]));
 	const general = (id: string): string => generalId(id, seen.get(id)?.spec?.label);
 	const label = (id: string): string => (seen.get(id)?.spec?.label ?? nodeSpec(id)?.label ?? id).replace(/^store:/u, "").replace(/:\d{4,5}\b/u, ":*").replace(/ #\d+$/u, "").replace(/ \(\d+\)$/u, "");
 	// Mermaid reads `<` and `"` as its own.

@@ -5,7 +5,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import test from "node:test";
 import { classifyUrl, identifyWorker } from "../../editor-api/src/probes.ts";
-import { allowedOnLink, appLayout, appNodes, channels, checkConformance, declaredBetween, declaredOn, familiesOnLink, nodes, subjectMatches, subjectOfLabel, subjects } from "../shared/architecture-model.ts";
+import { allowedOnLink, channels, checkConformance, declaredBetween, declaredOn, familiesOnLink, nodes, subjectMatches, subjectOfLabel, subjects } from "../shared/architecture-model.ts";
 
 const patterns = (from, to) => familiesOnLink(from, to).map((family) => family.pattern);
 
@@ -14,16 +14,9 @@ test("a subject family may only cross the tree links between its senders and rec
 	assert.ok(patterns("shell", "root").includes("git.discard"));
 	assert.ok(patterns("root", "workbench").includes("git.discard"));
 	assert.ok(!patterns("workbench", "bridge").includes("git.discard"));
-	// capability.decide: bridge serves, root (for the sw) and shell call — so it crosses root⇄workbench, workbench⇄bridge,
-	// shell⇄root; the sw only ever asks its tab's root (capability.decide.<tab>), never the bridge directly
-	for (const [from, to] of [["root", "workbench"], ["workbench", "bridge"], ["shell", "root"]]) {
-		assert.ok(patterns(from, to).includes("capability.decide"), `${from}⇄${to}`);
-	}
-
-	assert.ok(!patterns("sw", "root").includes("capability.decide"));
-	assert.ok(patterns("sw", "root").includes("capability.decide.*"));
-
-	assert.ok(!patterns("workbench", "node").includes("capability.decide"));
+	// runs.begin: the bridge asks the workbench, over their one link
+	assert.ok(patterns("workbench", "bridge").includes("runs.begin"));
+	assert.ok(!patterns("shell", "root").includes("runs.begin"));
 	// logs go everywhere
 	assert.ok(patterns("bridge", "debug-worker").includes("$sys.log.>"));
 });
@@ -37,15 +30,12 @@ test("and only in its direction: an event or a call from its senders to its rece
 	// an event goes publisher → subscriber
 	assert.ok(allowedOnLink("git.changed", "workbench", "root"));
 	assert.ok(!allowedOnLink("git.changed", "root", "workbench"), "the shell doesn't announce git changes");
-	// a dynamic hub is its pattern's: a preview window's page asks the shell, never the other way
-	assert.ok(allowedOnLink("preview.decide()", "preview:5173", "shell"));
-	assert.ok(!allowedOnLink("preview.decide()", "shell", "preview:5173~2"));
 	// what isn't declared may cross nowhere
 	assert.ok(!allowedOnLink("runs.changed", "workbench", "root"));
 });
 
 test("every family names who sends it and who it's for, as hubs in the tree", () => {
-	const hubs = new Set(["*", ...nodes.filter((node) => node.hub === true).map((node) => node.id), "preview:*", "debug-mcp"]);
+	const hubs = new Set(["*", ...nodes.filter((node) => node.hub === true).map((node) => node.id), "debug-mcp"]);
 
 	for (const family of subjects) {
 		assert.ok(Array.isArray(family.from) && Array.isArray(family.to), family.pattern);
@@ -81,10 +71,10 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 			{ "a": "workbench", "b": "bridge", "labels": labels("git.discard()") }, // discarding is the shell's alone
 			// counted by direction: the shell's git.changed would be the wrong way round
 			{ "a": "root", "b": "shell", "labels": new Map([["git.changed", { "count": 3, "hub": 3, "forward": 2, "backward": 1 }]]) },
-			{ "a": "shell", "b": "node", "labels": labels("x") }, // no such link or channel
+			{ "a": "shell", "b": "bridge", "labels": labels("x") }, // no such link or channel
 			{ "a": "workbench", "b": "worker:TextMateWorker", "labels": labels("$acceptNewModel") },
 			// a probe-observed message on a pair that is ALSO a hub link isn't a subject
-			{ "a": "workbench", "b": "node", "labels": new Map([["ws-control", { "count": 1, "hub": 0 }]]) }
+			{ "a": "workbench", "b": "bridge", "labels": new Map([["ws-control", { "count": 1, "hub": 0 }]]) }
 		],
 		"topology": new Map([["sw", { "links": [{ "peerId": "root" }, { "peerId": "root" }] }]])
 	});
@@ -92,7 +82,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 	assert.deepEqual(violations, [
 		{ "type": "unexpected-subject", "a": "workbench", "b": "bridge", "subject": "git.discard", "count": 1 },
 		{ "type": "unexpected-subject", "a": "shell", "b": "root", "subject": "git.changed", "count": 1 },
-		{ "type": "undeclared-channel", "a": "shell", "b": "node" },
+		{ "type": "undeclared-channel", "a": "shell", "b": "bridge" },
 		{ "type": "duplicate-peer", "hub": "sw", "peer": "root", "links": 2 },
 		{ "type": "unknown-node", "id": "mystery" } // a webview (webview:1) is known: an inline document is fine here
 	]);
@@ -101,7 +91,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 test("every declared channel endpoint and hub link names a declared node (or a pattern)", () => {
 	const ids = new Set(nodes.map((node) => node.id));
 
-	for (const pair of [["exthost:LocalWebWorker:0", "nested:tsserver"], ["preview:5173", "sw"], ["exthost:LocalWebWorker:0", "ext:cspell/cspell"], ["workbench", "webview:abc"]]) {
+	for (const pair of [["exthost:LocalWebWorker:0", "nested:tsserver"], ["worker:TextMateWorker", "sw"], ["exthost:LocalWebWorker:0", "ext:cspell/cspell"], ["workbench", "webview:abc"]]) {
 		assert.notEqual(declaredBetween(...pair), undefined, pair.join("⇄"));
 	}
 
@@ -131,23 +121,23 @@ test("the tour's diagram: what was seen, one of a kind each, without counts", as
 	const { tourDiagram } = await import("../shared/architecture-model.ts");
 	const node = (id, extra = {}) => ({ "id": id, "state": "alive", ...extra });
 	const snapshot = (count) => ({
-		"nodes": [node("shell"), node("preview:5173", { "spec": { "label": "Preview :5173" } }), node("preview:5174", { "spec": { "label": "Preview :5174" } }), node("workbench"), node("ext:notes", { "spec": { "label": "notes", "container": "extHostWorker" } }), node("store:.silo/notes/…/<file>.jsonl"), node("net:esm.sh", { "state": "declared" }), node("net:ka-f.fontawesome.com")],
+		"nodes": [node("shell"), node("debug-worker"), node("server:3000", { "spec": { "label": "Server :3000" } }), node("server:3001", { "spec": { "label": "Server :3001" } }), node("workbench"), node("ext:notes", { "spec": { "label": "notes", "container": "extHostWorker" } }), node("store:.silo/notes/…/<file>.jsonl"), node("net:esm.sh", { "state": "declared" }), node("net:ka-f.fontawesome.com")],
 		"channels": [
-			{ "a": "shell", "b": "preview:5173", "labels": { "hello": { "count": count } } },
-			{ "a": "shell", "b": "preview:5174", "labels": { "hello": { "count": 1 } } },
+			{ "a": "debug-worker", "b": "server:3000", "labels": { "GET 200": { "count": count } } },
+			{ "a": "debug-worker", "b": "server:3001", "labels": { "GET 200": { "count": 1 } } },
 			{ "a": "shell", "b": "net:ka-f.fontawesome.com", "labels": { "GET 200": { "count": 1 } } },
 			{ "a": "ext:notes", "b": "store:.silo/notes/…/<file>.jsonl", "labels": { "read": { "count": count }, "write": { "count": 1 } } }
 		],
-		"topology": { "preview:5173": { "subscriptions": ["evidence.flush", "$sys.arch.sync"] }, "preview:5174": { "subscriptions": ["evidence.flush"] }, "workbench": { "subscriptions": ["$rpc.call.annotations.resolve", "$rpc.reply.abc"] } }
+		"topology": { "workbench": { "subscriptions": ["$rpc.call.annotations.resolve", "$rpc.reply.abc"] } }
 	});
 	const diagram = tourDiagram(snapshot(1));
 
 	assert.equal(diagram, tourDiagram(snapshot(500)), "counts don't change it");
-	assert.equal(diagram.match(/\["Preview :\*"\]/gu)?.length, 1, "two previews are one part");
-	assert.match(diagram, /n_preview__ <==> n_shell/u);
+	assert.equal(diagram.match(/\["Server :\*"\]/gu)?.length, 1, "two servers are one part");
+	assert.match(diagram, /n_debug_worker <-.->\|"in-realm calls"\| n_server__/u);
 	assert.match(diagram, /n_ext_notes -->\|"reads, writes"\| n_store__silo_notes____file__jsonl/u);
 	assert.match(diagram, /\| `\.silo\/notes\/…\/<file>\.jsonl` \| notes \| notes \|/u);
-	assert.match(diagram, /\| Hub \| Component \| Serves and hears \|\n\| --- \| --- \| --- \|\n\| Workbench \| annotations \| `annotations\.resolve\(\)` \|/u, "components by namespace, the standing hubs' only (no preview's: it comes and goes), no $sys");
+	assert.match(diagram, /\| Hub \| Component \| Serves and hears \|\n\| --- \| --- \| --- \|\n\| Workbench \| annotations \| `annotations\.resolve\(\)` \|/u, "components by namespace, the standing hubs' only, no $sys");
 	assert.doesNotMatch(diagram, /esm\.sh/u, "only what was seen");
 	assert.doesNotMatch(diagram, /fontawesome/u, "not a first visit's requests, past the service worker");
 });
@@ -158,88 +148,6 @@ test("each pair of contexts is declared as one channel (a second one could never
 	const duplicates = pairs.filter((pair, index) => pairs.indexOf(pair) !== index);
 
 	assert.deepEqual(duplicates, []);
-});
-
-/** One preview window's worth of a netsim-shaped app, as the editor observes it: named by the shell as it enters (the
- *  edge names — observability's scopedTransport): its page IS `window`, its other hubs under it. */
-function appWindow(window) {
-	const at = (id) => window + "/" + id;
-	const base = "http://localhost:5173/__virtual__/t1/5173/";
-	const instance = base + "instance.html?id=client-0";
-
-	return {
-		"topology": [
-			[window, { "links": [{ "peerId": "shell" }, { "peerId": at("referee") }] }],
-			[at("referee"), { "links": [{ "peerId": window }, { "peerId": at("client-0") }] }],
-			[at("client-0"), { "links": [{ "peerId": at("referee") }, { "peerId": at("client-0/ui") }] }],
-			[at("client-0/ui"), { "links": [{ "peerId": at("client-0") }] }]
-		],
-		"channels": [
-			{ "a": "shell", "b": window, "labels": new Map([["tab.here", { "count": 1, "hub": 1 }]]) },
-			{ "a": window, "b": at("referee"), "labels": new Map([["netsim.local.join()", { "count": 1, "hub": 1 }]]) },
-			{ "a": at("client-0"), "b": at("client-0/ui"), "labels": new Map([["netsim.local.view.client-0", { "count": 9, "hub": 9 }]]) }
-		],
-		// Both windows of one port load the same addresses. A worker says who started it (the preview tap's tag).
-		"realms": [
-			[window, { "kind": "window", "url": base }],
-			[at("client-0/ui"), { "kind": "window", "url": instance, "parent": base }],
-			[at("referee"), { "kind": "worker", "url": base + "src/browser/referee.worker.ts", "parent": base }],
-			[at("client-0"), { "kind": "worker", "url": base + "src/browser/client.worker.ts", "parent": instance }]
-		]
-	};
-}
-
-test("a previewed app's contexts are its own: scoped under their preview window, and not checked against the model", () => {
-	const app = appWindow("preview:5173");
-	const topology = new Map([
-		["shell", { "links": [{ "peerId": "root" }, { "peerId": "preview:5173" }] }],
-		["root", { "links": [{ "peerId": "shell" }, { "peerId": "mystery" }] }],
-		...app.topology
-	]);
-	const channels = [...app.channels, { "a": "root", "b": "mystery", "labels": new Map() }];
-
-	assert.deepEqual([...appNodes({ "channels": channels, "topology": topology })].sort(), ["preview:5173/client-0", "preview:5173/client-0/ui", "preview:5173/referee"], "its page is the window, not an app context");
-
-	const violations = checkConformance({ "nodes": ["shell", "root", "preview:5173", ...app.topology.map(([id]) => id), "mystery"], "channels": channels, "topology": topology });
-
-	assert.deepEqual(violations.map((violation) => (violation.type === "unknown-node" ? "unknown " + violation.id : violation.type + " " + violation.a + "⇄" + violation.b)).sort(), ["undeclared-channel root⇄mystery", "unknown mystery"], "the editor's own unknowns are still flagged");
-	// An unscoped undeclared hub linked to the shell is a finding, not an app.
-	assert.ok(checkConformance({ "nodes": ["page"], "channels": [{ "a": "shell", "b": "page", "labels": new Map() }], "topology": new Map([["page", { "links": [{ "peerId": "shell" }] }]]) }).some((violation) => violation.type === "unknown-node" && violation.id === "page"));
-});
-
-test("a previewed app's layout: frames in the realm at their parent address, workers under the realm that started them", () => {
-	const app = appWindow("preview:5173");
-	const layout = appLayout({ "channels": app.channels, "topology": new Map(app.topology), "realms": new Map(app.realms) });
-
-	assert.deepEqual(Object.fromEntries(layout.parent), { "preview:5173/client-0/ui": "preview:5173", "preview:5173/referee": "preview:5173", "preview:5173/client-0": "preview:5173/client-0/ui" });
-});
-
-test("two windows on one port: each window's contexts apart, nested within that window only, none flagged", () => {
-	const first = appWindow("preview:5173");
-	const second = appWindow("preview:5173~2");
-	const topology = new Map([["shell", { "links": [{ "peerId": "root" }, { "peerId": "preview:5173" }, { "peerId": "preview:5173~2" }] }], ["root", { "links": [{ "peerId": "shell" }] }], ...first.topology, ...second.topology]);
-	const channels = [...first.channels, ...second.channels];
-	const layout = appLayout({ "channels": channels, "topology": topology, "realms": new Map([...first.realms, ...second.realms]) });
-
-	assert.equal(layout.nodes.size, 6);
-	// Same addresses in both windows, yet each sits in its own window.
-	assert.equal(layout.parent.get("preview:5173/client-0/ui"), "preview:5173");
-	assert.equal(layout.parent.get("preview:5173~2/client-0/ui"), "preview:5173~2");
-	assert.equal(layout.parent.get("preview:5173~2/client-0"), "preview:5173~2/client-0/ui");
-	assert.deepEqual(checkConformance({ "nodes": ["shell", "root", "preview:5173", "preview:5173~2", ...layout.nodes], "channels": channels, "topology": topology }), []);
-});
-
-test("nothing is guessed: a context that doesn't say where it runs sits in its window, and a hub across windows is its own", () => {
-	// netsim's players: the player window's client links to the host window's referee over a BroadcastChannel, so its
-	// link's peer is named under the player's window — drawn as it's named, not matched up with the host's by name.
-	const topology = new Map([
-		["preview:5173~2", { "links": [{ "peerId": "shell" }, { "peerId": "preview:5173~2/player-1" }] }],
-		["preview:5173~2/player-1", { "links": [{ "peerId": "preview:5173~2" }, { "peerId": "preview:5173~2/player-1/referee" }] }]
-	]);
-	const layout = appLayout({ "channels": [{ "a": "preview:5173~2/player-1", "b": "preview:5173~2/player-1/referee" }], "topology": topology, "realms": new Map() });
-
-	assert.deepEqual([...layout.nodes].sort(), ["preview:5173~2/player-1", "preview:5173~2/player-1/referee"]);
-	assert.equal(layout.parent.size, 0);
 });
 
 test("a pair meeting through a medium only they use is judged by the medium's declaration", () => {

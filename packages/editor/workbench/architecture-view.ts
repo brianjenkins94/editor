@@ -11,13 +11,12 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type WaButton from "theme/components/button";
-import type { AppLayout, ContainerSpec, Violation } from "../shared/architecture-model";
+import type { ContainerSpec, Violation } from "../shared/architecture-model";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import { architectureViewStyles } from "theme/styles/architecture-view";
 import { toolbar } from "theme/recipes";
-import { appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, DYNAMIC_PREFIXES, dynamicContainer, hubLinks, nodeSpec, subjectOfLabel } from "../shared/architecture-model";
-import { windowTitle } from "../shared/virtual-path";
+import { checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, nodes as declaredNodes, declaredOn, DYNAMIC_PREFIXES, dynamicContainer, hubLinks, nodeSpec, subjectOfLabel } from "../shared/architecture-model";
 import "theme/components/badge";
 import "theme/components/button";
 import "theme/components/input";
@@ -170,12 +169,7 @@ function formatRate(rate: number): string {
 	return rate >= 10 ? Math.round(rate) + "/s" : rate.toFixed(1) + "/s";
 }
 
-function containerOf(node: RuntimeNode, app: ReadonlySet<string> = new Set()): string {
-	// A previewed app's own context (see appNodes): in its preview, not wherever an unknown context would land.
-	if (app.has(node.id)) {
-		return "previewApp";
-	}
-
+function containerOf(node: RuntimeNode): string {
 	const declared = nodeSpec(node.id)?.container ?? node.spec.container;
 
 	if (declared !== undefined && containers.some((container) => container.id === declared)) {
@@ -190,16 +184,11 @@ function containerOf(node: RuntimeNode, app: ReadonlySet<string> = new Set()): s
 }
 
 function labelOf(store: ArchitectureStore, id: string): string {
-	const window = appWindowOf(id);
-
-	// A previewed app's context by its own name — its window says which preview it's in (detailOf).
-	return nodeSpec(id)?.label ?? store.nodes.get(id)?.spec.label ?? (window === undefined ? id : id.slice(window.length + 1));
+	return nodeSpec(id)?.label ?? store.nodes.get(id)?.spec.label ?? id;
 }
 
 function detailOf(node: RuntimeNode): string {
-	const window = appWindowOf(node.id);
-
-	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? (window === undefined ? "" : "in " + windowTitle(window));
+	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? "";
 }
 
 function isVisible(node: RuntimeNode, now: number, showDeclared: boolean): boolean {
@@ -297,17 +286,13 @@ function saveCollapsed(collapsed: ReadonlySet<string>): void {
 /** Nodes drawn as a box of their own container (ContainerSpec.node) rather than a row inside it: node id → container. */
 const drawnAsContainer = new Map(containers.filter((container) => container.node !== undefined).map((container) => [container.node, container.id]));
 
-/** How far a previewed app's context is indented in its box, per level it's nested (see appLayout). */
-const APP_INDENT = 14;
-
 /** A hub's component, as a node id: its lines meet its row. */
 function componentId(hub: string, component: string): string {
 	return `component:${hub}:${component}`;
 }
 
 /** `components`: each hub's components, drawn as rows in its box. */
-function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, appInfo: AppLayout, components: ReadonlyMap<string, string[]>): Layout {
-	const app = appInfo.nodes;
+function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, components: ReadonlyMap<string, string[]>): Layout {
 	const heightOf = (id: string): number => NODE_HEIGHT + ((components.get(id)?.length ?? 0) > 0 ? components.get(id).length * COMPONENT_HEIGHT + 4 : 0);
 	const order = new Map(declaredNodes.map((node, index) => [node.id, index]));
 	const byContainer = new Map<string, RuntimeNode[]>();
@@ -315,42 +300,15 @@ function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, a
 
 	for (const node of visible) {
 		if (!drawnAsContainer.has(node.id)) {
-			const list = byContainer.get(containerOf(node, app)) ?? [];
+			const list = byContainer.get(containerOf(node)) ?? [];
 
 			list.push(node);
-			byContainer.set(containerOf(node, app), list);
+			byContainer.set(containerOf(node), list);
 		}
 	}
 
 	for (const list of byContainer.values()) {
 		list.sort((left, right) => ((order.get(left.id) ?? Infinity) - (order.get(right.id) ?? Infinity)) || left.id.localeCompare(right.id));
-	}
-
-	// A previewed app's contexts, as the tree they run in: each under the window (or preview) holding it, indented.
-	const depth = new Map<string, number>();
-	const appList = byContainer.get("previewApp");
-
-	if (appList !== undefined) {
-		const inBox = new Set(appList.map((node) => node.id));
-		const childrenOf = (id: string | undefined): RuntimeNode[] => appList.filter((node) => {
-			const holder = appInfo.parent.get(node.id);
-
-			return id === undefined ? holder === undefined || !inBox.has(holder) : holder === id;
-		});
-		const ordered: RuntimeNode[] = [];
-		const walk = (list: RuntimeNode[], level: number): void => {
-			// Workers before frames, each by id.
-			for (const node of list.toSorted((left, right) => Number(left.id.includes(".")) - Number(right.id.includes(".")) || left.id.localeCompare(right.id))) {
-				if (!depth.has(node.id)) {
-					depth.set(node.id, level);
-					ordered.push(node);
-					walk(childrenOf(node.id), level + 1);
-				}
-			}
-		};
-
-		walk(childrenOf(undefined), 0);
-		byContainer.set("previewApp", [...ordered, ...appList.filter((node) => !depth.has(node.id))]);
 	}
 
 	const children = (container: ContainerSpec): ContainerSpec[] => containers.filter((candidate) => candidate.parent === container.id);
@@ -408,18 +366,16 @@ function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, a
 		const inner = width - PADDING * 2;
 
 		for (const node of byContainer.get(container.id) ?? []) {
-			const indent = (depth.get(node.id) ?? 0) * APP_INDENT;
-
-			layout.nodes.set(node.id, { "x": x + PADDING + indent, "y": cursor, "width": inner - indent, "height": NODE_HEIGHT });
+			layout.nodes.set(node.id, { "x": x + PADDING, "y": cursor, "width": inner, "height": NODE_HEIGHT });
 
 			// Its components, each a row beneath it, indented.
 			if ((components.get(node.id)?.length ?? 0) > 0) {
 				const top = cursor;
 
-				layout.boxes.set(node.id, { "x": x + PADDING + indent, "y": top, "width": inner - indent, "height": heightOf(node.id) });
+				layout.boxes.set(node.id, { "x": x + PADDING, "y": top, "width": inner, "height": heightOf(node.id) });
 
 				for (const [index, component] of components.get(node.id).entries()) {
-					layout.nodes.set(componentId(node.id, component), { "x": x + PADDING + indent + 16, "y": top + NODE_HEIGHT + index * COMPONENT_HEIGHT, "width": inner - indent - 24, "height": COMPONENT_HEIGHT - 2 });
+					layout.nodes.set(componentId(node.id, component), { "x": x + PADDING + 16, "y": top + NODE_HEIGHT + index * COMPONENT_HEIGHT, "width": inner - 24, "height": COMPONENT_HEIGHT - 2 });
 				}
 			}
 
@@ -680,9 +636,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	// ── diagram
 	let layout: Layout | undefined;
-	/** A previewed app's own contexts, and how they nest, as of the last render (see appLayout). */
-	let appInfo: AppLayout = { "nodes": new Set(), "parent": new Map() };
-	let app: ReadonlySet<string> = appInfo.nodes;
 	let edges = new Map<string, EdgeView>();
 	let edgesByNode = new Map<string, EdgeView[]>();
 	/** The Stores box's header, its stores, and the contexts with a line to every one of them — whose lines end at the
@@ -728,15 +681,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		return { "toAll": toAll, "from": from, "to": to };
 	}
 
-	/** An edge's type: what the model declares it as, else a previewed app's own channel or undeclared (see addEdge). */
-	function edgeTypeOf(declared: ReturnType<typeof declaredOn>, endA: string, endB: string): EdgeView["type"] {
-		if (declared !== undefined) {
-			return declared.type;
-		}
-
-		return app.has(endA) || app.has(endB) ? "channel" : "undeclared";
-	}
-
 	function addEdge(id: string, endA: string, endB: string, channel: ChannelStats | undefined): void {
 		// A context's line to a store, when it has one to every store: to the Stores box's header instead.
 		const { toAll, from, to } = edgeEnds(endA, endB);
@@ -747,8 +691,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 
 		const declared = channel === undefined ? declaredBetween(endA, endB) : declaredOn(channel);
-		// A previewed app's own lines are its business, not undeclared editor traffic.
-		const type = edgeTypeOf(declared, endA, endB);
+		const type: EdgeView["type"] = declared?.type ?? "undeclared";
 		const observed = channel !== undefined && (channel.count > 0 || channel.linked);
 		const pathData = edgePath(from, to);
 		const path = svgElement("path", { "d": pathData, "class": `arch-edge type-${type} status-${edgeStatus(type, observed)}` });
@@ -791,12 +734,12 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	}
 
 	/** Each hub's components (its subscriptions by registering function, or namespace), past the reporter's own
-	 *  `$sys.arch` (every hub has it, and its traffic isn't counted) — not a previewed app's, nor a box's (sw). */
+	 *  `$sys.arch` (every hub has it, and its traffic isn't counted) — not a box's (sw). */
 	function componentsNow(ids: string[]): Map<string, string[]> {
 		return new Map(ids.flatMap((id) => {
 			const topology = store.topology.get(id);
 
-			if (topology === undefined || app.has(id) || drawnAsContainer.has(id)) {
+			if (topology === undefined || drawnAsContainer.has(id)) {
 				return [];
 			}
 
@@ -865,15 +808,12 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			}
 		}
 
-		appInfo = appLayout({ "channels": [...store.channels.values()], "topology": store.topology, "realms": store.realms });
-		app = appInfo.nodes;
-
 		const drawn = visible;
 		const visibleIds = new Set(drawn.map((node) => node.id));
 
 		drawnIds = drawn.map((node) => node.id);
 		components = componentsNow(drawnIds);
-		layout = computeLayout(drawn, collapsed, appInfo, components);
+		layout = computeLayout(drawn, collapsed, components);
 		svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
 		fit();
 		clearPulses();
@@ -958,7 +898,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	 *  its header — one strand from each (a box's lines to a collapsed box do the same). */
 	function storesStrand(drawn: RuntimeNode[], visibleIds: ReadonlySet<string>): typeof toStores {
 		const storesBox = layout.containers.get("stores");
-		const storeIds = new Set(drawn.filter((node) => containerOf(node, app) === "stores" && !layout.hidden.has(node.id)).map((node) => node.id));
+		const storeIds = new Set(drawn.filter((node) => containerOf(node) === "stores" && !layout.hidden.has(node.id)).map((node) => node.id));
 		const reached = new Map<string, Set<string>>();
 
 		for (const { a, b } of store.channels.values()) {
@@ -1050,9 +990,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	function drawNode(node: RuntimeNode): void {
 		const rect = layout.nodes.get(node.id);
 		const declared = nodeSpec(node.id);
-		// Declared by id, created at runtime under a prefix the model declares (preview:, vite:, worker: …), or the
-		// previewed app's own.
-		const known = declared !== undefined || DYNAMIC_PREFIXES.some((prefix) => node.id.startsWith(prefix)) || app.has(node.id);
+		// Declared by id, or created at runtime under a prefix the model declares (worker:, server: …).
+		const known = declared !== undefined || DYNAMIC_PREFIXES.some((prefix) => node.id.startsWith(prefix));
 		const group = svgElement("g", { "class": `arch-node state-${node.state}${declared?.hub === true ? " is-hub" : ""}`, "data-node": node.id });
 
 		group.append(

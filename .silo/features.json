@@ -376,6 +376,7 @@
       "command|tsval.explore",
       "command|tsval.exploreOrderings"
     ],
+    "in": "fcc92752",
     "restore": "from the full-editor tag: debug-adapter.ts's exploreProgram and its two commands, debug-worker.ts's exploreOrderings (tsval's explore, still in packages/tsval)"
   },
   "Feature ledger drift in Problems": {
@@ -684,6 +685,7 @@
       "packages/editor/extensions/tsval/playwright-test.js",
       "packages/playwright"
     ],
+    "in": "fcc92752",
     "restore": "from the full-editor tag: packages/playwright, tsval's playwright-test.js and its host half in debug-worker.ts, editor-api's RuntimeConnection.playwright — with previews, which served it"
   },
   "Preview CPU profiles": {
