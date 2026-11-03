@@ -127,7 +127,10 @@ How it's kept:
      works). Still to do, by the step it blocks:
      - *Working in it at all:* one agent session per machine drives the editor (debug-mcp's port), and a session that
        couldn't start one has no tools with nothing saying why; two tabs back from a reset both cloned into one
-       workspace; a tab sometimes missing from `tabs_list`.
+       workspace; a tab sometimes missing from `tabs_list`. The workspace's store is a fixed 64 MB, and this
+       repository's fresh clone and its types take half (32 MB, 2026-11-03); a day of pulls filled the rest (91%: a
+       pack each, and nothing collects them), and the merge's pull failed (`sbfs: no free extent is large enough`, nothing
+       half-written) — a Reset and a fresh clone was the way out.
      - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced); CI's reach
        covers the architecture suites only, and there `activate` is reached by nearly every test; `decisions_for` named five
        features for one file; nothing shows code with its comments stripped (the zero-knowledge pass's first
