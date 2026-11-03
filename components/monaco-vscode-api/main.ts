@@ -628,9 +628,6 @@ async function hideViewContainers(ids: string[]): Promise<void> {
 	storage.store(key, JSON.stringify(entries), StorageScope.PROFILE, StorageTarget.USER);
 }
 
-/** Every registered extension's contribution under `key` in its manifest (`contributes[key]`) — whichever extension host
- *  it runs in, built in or loaded from outside — with the extension's id. A key VS Code doesn't know (the editor's own:
- *  `paneViews`) is kept in the manifest all the same. */
 /** A trace window going (`traceLog`): what it keeps and where it goes, and when it closes; one at a time. */
 let tracing: { "matches": (message: string) => boolean; "forward": (level: string, message: string) => void; "until": number } | undefined;
 
@@ -792,16 +789,8 @@ export type {
 export { registerCustomView, viewContainerRegistry } from "@codingame/monaco-vscode-api/service-override/tools/views";
 export { ViewContainerLocation } from "@codingame/monaco-vscode-api/vscode/vs/workbench/common/views";
 
-// The live architecture diagram: probes for the channels monaco-vscode-api opens (workers, extension host RPC,
-// webviews) — they patch VSCode internals, so they must come from THIS bundle — and its editor pane.
+// The architecture reports: probes for the channels monaco-vscode-api opens (workers, extension host RPC, webviews) —
+// they patch VSCode internals, so they must come from THIS bundle.
 export type { ArchNodeSpec, ArchSink, NodeState, TrafficKind } from "./architecture/protocol";
 export type { MonacoProbeOptions, WorkerIdentity } from "./architecture/probes";
 export { installMonacoProbes, monacoWorkerId, extensionHostId, EXT_HOST_IFRAME, WEBVIEW_SERVICE_WORKER } from "./architecture/probes";
-export type { LiveArchitectureOptions } from "./architecture/pane";
-export { OPEN_ARCHITECTURE_COMMAND, registerLiveArchitecture } from "./architecture/pane";
-
-// Editor tabs whose content is the consumer's own DOM, by slot — a panel of the page around the workbench, dropped in.
-export type { HostedEditorOptions } from "./hosted-editor";
-export type { PaneEntry, PaneMark, PaneRender, PaneRunBall, PaneView } from "./pane";
-export { renderMarkdown, rollPaneBall, showPane, showPaneRuns, showPaneViews } from "./pane";
-export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

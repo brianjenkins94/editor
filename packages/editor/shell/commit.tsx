@@ -46,7 +46,7 @@ function CommitControl({ shell }: { "shell": ShellContext }) {
 		setError(undefined);
 		setResult(undefined);
 
-		const span = githubLog.span("editor.shell.githubCommit", { "repo": boundRepo.owner + "/" + boundRepo.repo });
+		const span = githubLog.span("editor.shell.commit.githubCommit", { "repo": boundRepo.owner + "/" + boundRepo.repo });
 		let made: string | undefined;
 
 		try {

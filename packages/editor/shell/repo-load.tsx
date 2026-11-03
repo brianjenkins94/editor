@@ -36,7 +36,7 @@ async function loadRepo(input = state.get().input): Promise<void> {
 
 	state.set({ "loading": true, "error": undefined });
 
-	const span = githubLog.span("editor.shell.githubLoadRepo", { "repo": input.trim() });
+	const span = githubLog.span("editor.shell.repo-load.githubLoadRepo", { "repo": input.trim() });
 
 	try {
 		const [, owner, repo] = match;

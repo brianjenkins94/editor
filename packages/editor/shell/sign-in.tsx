@@ -57,7 +57,7 @@ async function start(): Promise<void> {
 	window.addEventListener("shell:signedOut", signedOut);
 
 	const session = await import("./session");
-	const span = githubLog.span("editor.shell.githubSession");
+	const span = githubLog.span("editor.shell.sign-in.githubSession");
 
 	try {
 		if (await session.completeSignIn()) {
