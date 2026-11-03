@@ -8,7 +8,8 @@
  * for `file:` (`registerSearchResultProvider` keeps the last one registered): it walks each folder of the query through
  * the file service, and decides what's in with VS Code's own QueryGlobTester — the include and exclude expressions
  * (the query's and each folder's), against paths relative to the folder, the way the desktop's local search does —
- * pruning excluded folders rather than walking them. Text search reads what's in and matches it as the override did.
+ * pruning excluded folders rather than walking them; searches walking at once share each folder's listing. Text search
+ * reads what's in and matches it as the override did.
  */
 import type { IFileService } from "@codingame/monaco-vscode-api/vscode/vs/platform/files/common/files.service";
 import type { IFileMatch, IFileQuery, IFolderQuery, ISearchComplete, ISearchProgressItem, ISearchResultProvider, ITextQuery, ITextSearchResult } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/search/common/search";
@@ -23,17 +24,24 @@ import { ISearchService } from "@codingame/monaco-vscode-api/vscode/vs/workbench
 /** A file bigger than this isn't searched for text (a bundle, a lockfile): the override's limit too, in effect. */
 const MAX_TEXT_BYTES = 1024 * 1024;
 
+/** A folder's listing, as the file service resolves it: its children, each a file or a folder. */
+type Listing = Awaited<ReturnType<IFileService["resolve"]>> | undefined;
+
+/** A folder's listing as a walk running has it: being resolved for the first walk that asked (`settled` once it is),
+ *  and the others' waits for it. */
+interface Shared { "settled": boolean; "listing": Listing; "waiting": ((listing: Listing) => void)[] }
+
 /** How much a search walked, as the search service's stats count it. */
 interface Walked { "directoriesWalked": number; "filesWalked": number }
 
 /** Every file under `folderQuery`'s folder that `query` includes, in walk order, each with its path relative to the
- *  folder — stopping once `limit` are found or `token` is cancelled. Excluded folders aren't walked into. Adds what it
- *  walked to `walked`. */
-async function filesOf(fileService: IFileService, query: IFileQuery | ITextQuery, folderQuery: IFolderQuery, limit: number, token: CancellationToken | undefined, walked: Walked = { "directoriesWalked": 0, "filesWalked": 0 }): Promise<{ "uri": URI; "path": string }[]> {
+ *  folder (each folder listed by `list`) — stopping once `limit` are found or `token` is cancelled. Excluded folders
+ *  aren't walked into. Adds what it walked to `walked`. */
+async function filesOf(list: (folder: URI) => Promise<Listing>, query: IFileQuery | ITextQuery, folderQuery: IFolderQuery, limit: number, token: CancellationToken | undefined, walked: Walked = { "directoriesWalked": 0, "filesWalked": 0 }): Promise<{ "uri": URI; "path": string }[]> {
 	const tester = new QueryGlobTester(query, folderQuery);
 	const found: { "uri": URI; "path": string }[] = [];
 	const walk = async (folder: URI, prefix: string): Promise<void> => {
-		const stat = await fileService.resolve(folder).catch(() => undefined);
+		const stat = await list(folder);
 
 		walked.directoriesWalked += 1;
 
@@ -102,6 +110,13 @@ function matchesIn(text: string, regexp: RegExp, query: ITextQuery, limit: numbe
 class WorkspaceSearch implements ISearchResultProvider {
 	private readonly fileService: IFileService;
 
+	/** Each folder's listing while a walk is in flight, shared by the searches walking at once (a project opening asks
+	 *  for its package.jsons, its tsconfigs and its versions' manifests together: one walk, not three), and forgotten
+	 *  once the last of them ends — a listing is never older than the walks running. */
+	private readonly listings = new Map<string, Shared>();
+
+	private walking = 0;
+
 	public constructor(fileService: IFileService) {
 		this.fileService = fileService;
 	}
@@ -111,13 +126,66 @@ class WorkspaceSearch implements ISearchResultProvider {
 	}
 
 	public async fileSearch(query: IFileQuery, token?: CancellationToken): Promise<ISearchComplete> {
+		return this.walk(async () => this.searchFiles(query, token));
+	}
+
+	public async textSearch(query: ITextQuery, onProgress?: (item: ISearchProgressItem) => void, token?: CancellationToken): Promise<ISearchComplete> {
+		return this.walk(async () => this.searchText(query, onProgress, token));
+	}
+
+	public async clearCache(): Promise<void> { /* nothing kept past the walks running */ }
+
+	/** `run`'s walk, its listings shared with the others running. */
+	private async walk<T>(run: () => Promise<T>): Promise<T> {
+		this.walking += 1;
+
+		try {
+			return await run();
+		} finally {
+			this.walking -= 1;
+
+			if (this.walking === 0) {
+				this.listings.clear();
+			}
+		}
+	}
+
+	/** `folder`'s listing: the one a walk running has, or the file service's now. Only the walk that asked first awaits
+	 *  the file service, the others its answer: V8 follows an await back up the stack only through a promise one thing
+	 *  waits on, and the file service's calls are named by who's on it (fs-caller.ts's vscodeCaller). */
+	private async listing(folder: URI): Promise<Listing> {
+		const key = folder.toString();
+		const shared = this.listings.get(key);
+
+		if (shared !== undefined) {
+			return shared.settled ? shared.listing : new Promise((resolve) => {
+				shared.waiting.push(resolve);
+			});
+		}
+
+		const asked: Shared = { "settled": false, "listing": undefined, "waiting": [] };
+
+		this.listings.set(key, asked);
+		asked.listing = await this.fileService.resolve(folder).catch(() => undefined);
+		asked.settled = true;
+
+		for (const resolve of asked.waiting) {
+			resolve(asked.listing);
+		}
+
+		return asked.listing;
+	}
+
+	private readonly list = (folder: URI): Promise<Listing> => this.listing(folder);
+
+	private async searchFiles(query: IFileQuery, token?: CancellationToken): Promise<ISearchComplete> {
 		const limit = query.maxResults ?? Number.MAX_SAFE_INTEGER;
 		const results: IFileMatch[] = [];
 		const started = Date.now();
 		const walked: Walked = { "directoriesWalked": 0, "filesWalked": 0 };
 
 		for (const folderQuery of query.folderQueries) {
-			for (const { uri, path } of await filesOf(this.fileService, query, folderQuery, limit + 1 - results.length, token, walked)) {
+			for (const { uri, path } of await filesOf(this.list, query, folderQuery, limit + 1 - results.length, token, walked)) {
 				// Quick Open's typed text, fuzzily, against the path in the folder.
 				if (query.filePattern === undefined || query.filePattern === "" || fuzzyContains(path, query.filePattern)) {
 					results.push({ "resource": uri });
@@ -131,7 +199,7 @@ class WorkspaceSearch implements ISearchResultProvider {
 		return { "results": results.slice(0, limit), "limitHit": results.length > limit, "messages": [], "stats": { "type": "fileSearchProvider", "fromCache": false, "resultCount": resultCount, "detailStats": { "fileWalkTime": Date.now() - started, ...walked, "cmdTime": 0, "cmdResultCount": resultCount } }, "exit": SearchCompletionExitCode.Normal } as ISearchComplete;
 	}
 
-	public async textSearch(query: ITextQuery, onProgress?: (item: ISearchProgressItem) => void, token?: CancellationToken): Promise<ISearchComplete> {
+	private async searchText(query: ITextQuery, onProgress?: (item: ISearchProgressItem) => void, token?: CancellationToken): Promise<ISearchComplete> {
 		const { contentPattern } = query;
 		let regexp: RegExp;
 
@@ -146,7 +214,7 @@ class WorkspaceSearch implements ISearchResultProvider {
 		let found = 0;
 
 		for (const folderQuery of query.folderQueries) {
-			for (const { uri } of await filesOf(this.fileService, query, folderQuery, Number.MAX_SAFE_INTEGER, token)) {
+			for (const { uri } of await filesOf(this.list, query, folderQuery, Number.MAX_SAFE_INTEGER, token)) {
 				if (found >= limit || token?.isCancellationRequested === true) {
 					break;
 				}
@@ -166,8 +234,6 @@ class WorkspaceSearch implements ISearchResultProvider {
 
 		return { "results": results, "limitHit": found >= limit, "messages": [], "stats": { "type": "textSearchProvider" }, "exit": SearchCompletionExitCode.Normal } as ISearchComplete;
 	}
-
-	public async clearCache(): Promise<void> { /* nothing cached: each search walks the folders as they are */ }
 }
 
 /** Answer `file:` file and text searches with WorkspaceSearch (in place of the override's). Call once the services are up. */

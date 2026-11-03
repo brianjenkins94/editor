@@ -157,7 +157,11 @@ How it's kept:
      call. VS Code's callers
      named apart (2026-11-03): who asked its file service, the class past it on the call's stack — of a load's 3,450
      provider calls, 3,112 were file search's walk (`WorkspaceSearch`, 20,345 zen-fs calls under it), 323 extensions'
-     `workspace.fs` (`MainThreadFileSystem`), 8 left as `vscode`. Left: a single call's span on demand.
+     `workspace.fs` (`MainThreadFileSystem`), 8 left as `vscode`. The walk was three
+     searches at once as the project opens — type acquisition's package.jsons and tsconfigs (one search now, a span:
+     `editor.workbench.ata.project`) and versions' package.jsons — and searches walking at once now share each folder's
+     listing (the component's workspace-search.ts): a load's search readdirs 1,556 → 519, one walk. Left: a single
+     call's span on demand.
      Before it, so the spans CLAUDE.md asks for (*Spans*) count (a throwing span and hub requests: done 2026-11-02):
      - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
        and this repository's spans take it already; the editor's lint holds them once lib publishes util.

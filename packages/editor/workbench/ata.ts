@@ -549,7 +549,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	// What the PROJECT needs that no source file imports: every package.json's `@types/*` dependencies (the ambient
 	// `process` of @types/node), every tsconfig's `compilerOptions.types`, and the configs a tsconfig `extends` — a
 	// monorepo's packages' as well as the root's, hoisted into the root's node_modules.
-	const runProject = async (): Promise<void> => {
+	const runProject = async (): Promise<void> => log.span("editor.workbench.ata.project", {}, async (span) => {
 		const root = workspaceFolder.replace(/\/$/u, "");
 		const read = async (uri: vscode.Uri): Promise<Record<string, unknown> | undefined> => {
 			try {
@@ -559,9 +559,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			}
 		};
 
-		const all = async (name: string): Promise<(Record<string, unknown> | undefined)[]> => Promise.all((await api.workspace.findFiles(new api.RelativePattern(api.Uri.file(root), `**/${name}`), "**/node_modules/**")).map(read));
-
-		const [manifests, tsconfigs] = await Promise.all([all("package.json"), all("tsconfig.json")]);
+		// (both in one search: each is a walk of the whole tree)
+		const found = await api.workspace.findFiles(new api.RelativePattern(api.Uri.file(root), "**/{package.json,tsconfig.json}"), "**/node_modules/**");
+		const named = async (name: string): Promise<(Record<string, unknown> | undefined)[]> => Promise.all(found.filter((uri) => uri.path.endsWith("/" + name)).map(read));
+		const [manifests, tsconfigs] = await Promise.all([named("package.json"), named("tsconfig.json")]);
 		const declared = manifests.flatMap((manifest) => Object.keys({ ...manifest?.["dependencies"] as object, ...manifest?.["devDependencies"] as object })).filter((name) => name.startsWith("@types/"));
 		const listed = tsconfigs.flatMap((tsconfig) => {
 			const types = (tsconfig?.["compilerOptions"] as { "types"?: unknown } | undefined)?.types;
@@ -579,7 +580,9 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		if (packages.length > 0) {
 			acquire({ "file": root + "/{package.json,tsconfig.json}" }, packages);
 		}
-	};
+
+		span.end({ "manifests": manifests.length, "tsconfigs": tsconfigs.length, "count": packages.length, "configs": configs.length });
+	});
 
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let projectTimer: ReturnType<typeof setTimeout> | undefined;
