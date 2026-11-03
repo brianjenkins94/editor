@@ -7,31 +7,24 @@
  * below, whose response carries no CORP header, keeps working — except in WebKit, which has no credentialless:
  * there coi.ts registers this worker with `?coep=require-corp`, and that is what it stamps.
  *
- * ONE service worker owns three roles, over one path space and with no magic module namespaces:
+ * ONE service worker owns two roles, over one path space and with no magic module namespaces:
  *   • node_modules resolver — for a request under /workspace/node_modules/, it fetches the package from the CDN
  *     internally and hands it back same-origin (the fold-in that RETIRED the old `__proxy__` route — the worker's
  *     own fetch follows the CDN's unversioned 302s and isn't bound by the document's COEP), so go-to-definition
  *     and runtime type acquisition can read dep source over ordinary fetch. Any other /workspace/ request falls
  *     through to the network, so the resolver only ADDS node_modules serving. The real workspace SOURCE is NOT
  *     served here: the editor, type-checker and LSP workers read it through the zen-fs FileSystemProvider (and
- *     the shared SharedArrayBuffer, see workspace-fs.ts / zenfs-vfs.ts), and the preview runs its own in-page
- *     dev server — so the old IndexedDB "vfs store" serving path was retired.
- *   • Dev-server bridge — a preview's dev server (almostnode's ViteDevServer) runs in the node worker; we answer
- *     `/__virtual__/<tab>/<port>/…` fetches by calling it over the hub (`virtual.request`), so the preview iframe
- *     reaches it over ordinary HTTP — both bodies streamed (editor-api's exchanges), and a preview's request for
- *     localhost:<port> sent to the server on that port. (This used to be almostnode's ServerBridge: a MessagePort to a
- *     relay in the page. The hub already links us to the page, so the port and the relay are gone.)
+ *     the shared SharedArrayBuffer, see workspace-fs.ts / zenfs-vfs.ts) — so the old IndexedDB "vfs store" serving
+ *     path was retired.
  *   • COI stamping — every other response is passed through with the isolation headers added.
  *
  * Registered by coi.ts (in prod to provide isolation; in dev, additionally, for the resolver). Pattern
  * adapted from github.com/gzuidhof/coi-serviceworker (MIT). Bundled as an ES MODULE (sw.config.ts) so it can
  * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
-import { esmPackage } from "@brianjenkins94/editor-api/recorded";
-import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
+import { createHub, portTransport } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "./shared/architecture";
-import { parseVirtual } from "./shared/virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
 // errors) is recorded through a source-scoped logger whose records — timed SPANS included — ride the hub to
@@ -41,216 +34,28 @@ import { parseVirtual } from "./shared/virtual-path";
 // The SW holds NO state worth keeping: the browser stops an idle one and starts a fresh global on the next event,
 // so everything it needs is asked for per request (over the hub) and nothing is remembered between them.
 //
-// One SW serves EVERY tab of the origin, and each tab's root hub links to it. Those links are non-transit — tabs are
-// never joined through the SW — and what the SW asks on a tab's behalf is ADDRESSED to that tab: a preview's URL
-// names its tab (/__virtual__/<tab>/<port>/), a node worker names its tab on the decide route, and the SW calls
-// `virtual.request.<tab>` / `capability.decide.<tab>`, which only that tab's root answers (from its own tree).
+// One SW serves EVERY tab of the origin, and each tab's root hub links to it. Those links are non-transit: tabs are
+// never joined through the SW.
 const swHub = createHub({ "id": "sw" });
-// Its logs and uncaught errors, and its hub + upstream requests (CDN) on $sys.arch, plus what it serves previews and
-// relays to the dev server.
-const { "log": swLog, architecture } = observe(swHub, { "network": NETWORK_PROBES });
+// Its logs and uncaught errors, and its hub + upstream requests (CDN) on $sys.arch.
+const { "log": swLog } = observe(swHub, { "network": NETWORK_PROBES });
 
-// The preview a request came from: its own /__virtual__/<tab>/<port>/ URL, else the preview document that asked for it.
-async function previewOf(event, pathname) {
-	const preview = parseVirtual(pathname) || await previewClientOf(event);
-
-	return preview === undefined ? undefined : "preview:" + preview.port;
-}
-
-// A preview's request, as `preview:<port> → sw`, and the SW's answer back to it.
-function recordPreviewRequest(event, pathname, label, responsePromise) {
-	void previewOf(event, pathname).then((preview) => {
-		if (preview === undefined) {
-			return;
-		}
-
-		architecture.record(preview, architecture.self, "request", event.request.method + " " + label);
-		responsePromise.then((response) => {
-			if (response.type === "error") {
-				architecture.record(architecture.self, preview, "error", "failed " + label);
-
-				return;
-			}
-
-			architecture.record(architecture.self, preview, response.status >= 400 ? "error" : "reply", response.status + " " + label);
-		}, () => {
-			architecture.record(architecture.self, preview, "error", "failed " + label);
-		});
-	});
-}
-
-// The capability gate. The SW holds NO policy: it asks the ext host's decision endpoint over the hub — swHub →
-// root → workbench → bridgeHub reaches the bridge's "capability.decide" serve, which owns the popup / grant store /
-// redline and resolves a preview's port to the run that owns it — then allows or blocks. It FAILS CLOSED: if no
-// decider can be reached (the hub isn't linked yet after a restart and doesn't link within RESPONDER_WAIT_MS, or the
-// call errors), the answer is deny. A long timeout, so a deliberating user isn't cut off.
-const rpc = createRpcClient(swHub);
-const RESPONDER_WAIT_MS = 10000;
-const DECIDE = { "timeoutMs": 300000, "waitForResponderMs": RESPONDER_WAIT_MS };
-
-async function decide(call, tab) {
-	try {
-		return (await rpc.request(tab ? "capability.decide." + tab : "capability.decide", call, DECIDE)) !== false;
-	} catch (error) {
-		swLog.error("capability.decide unreachable — denying (fail-closed)", { "kind": call && call.kind, "error": String(error) });
-
-		return false;
-	}
-}
-
-// A preview's fetch, decided: true (made), false (refused), { give, by } (a result given in its place — a rule's, or its
-// recording when nobody's watching the preview) or { halt } (nobody's watching, and it never ran for real). Fails closed.
-async function decideFetch(call, tab) {
-	try {
-		const answer = await rpc.request("capability.decide." + tab, { ...call, "fetch": true }, DECIDE);
-
-		return answer !== null && typeof answer === "object" ? answer : answer !== false;
-	} catch (error) {
-		swLog.error("capability.decide unreachable — denying (fail-closed)", { "kind": call.kind, "error": String(error) });
-
-		return false;
-	}
-}
-
-// A result given in a fetch's place, as the page reads one: JSON for a value, its text for a string.
-function givenResponse(value, by) {
-	const text = typeof value === "string";
-
-	return new Response(text ? value : JSON.stringify(value), { "status": 200, "headers": { "content-type": text ? "text/plain; charset=utf-8" : "application/json", "x-silo-given": by } });
-}
-
-// The preview a request belongs to ({ tab, port }): the /__virtual__/<tab>/<port>/ document that made it (or is
-// being navigated to).
-async function previewClientOf(event) {
-	try {
-		const client = await globalThis.clients.get(event.clientId || event.resultingClientId);
-
-		return (client ? parseVirtual(new URL(client.url).pathname) : null) || undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-// A package a preview loads from esm.sh (the dev server maps its bare imports there, and each module esm.sh serves
-// imports what it depends on from there too): asked about by name@version, as a `load` — an org's policy may ban it, and
-// then it isn't fetched at all. Asked once per package at a time: a page's burst of its modules shares the answer.
-const loading = new Map();
-
-function mayLoad(served, preview) {
-	const key = preview.tab + "\0" + preview.port + "\0" + served.name + "@" + (served.version || "");
-
-	if (!loading.has(key)) {
-		const asked = decide({ "kind": "load", "package": served.version === undefined ? served.name : served.name + "@" + served.version, "port": preview.port }, preview.tab);
-
-		loading.set(key, asked);
-		void asked.finally(() => { loading.delete(key); });
-	}
-
-	return loading.get(key);
-}
-
-// Gate a previewed app's DATA fetches (destination "" = fetch/XHR, not a subresource/module load) to http(s),
-// then fetch or block. Non-preview clients and non-data requests pass straight through — same as before.
-async function gateAndFetch(event, request, requestUrl) {
-	const served = esmPackage(request.url);
-
-	if (served !== undefined && event.clientId) {
-		const preview = await previewClientOf(event);
-
-		if (preview !== undefined && !(await mayLoad(served, preview))) {
-			return new Response("Blocked by policy: " + served.name + (served.version === undefined ? "" : "@" + served.version) + " may not be loaded", { "status": 403, "statusText": "Package banned" });
-		}
-	}
-
-	if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
-		const preview = await previewClientOf(event);
-
-		// A preview client's fetch → gate it, in its tab (the decider attributes it to the run that owns the port) — or give
-		// it a result in its place (RUNNING.md, *A call's result*), or halt it, nobody watching (*Unattended runs*).
-		const decided = preview === undefined ? true : await decideFetch({ "kind": "net", "args": [request.url], "port": preview.port }, preview.tab);
-
-		if (decided === false) {
-			return new Response("Blocked by capability policy: net " + requestUrl.host, { "status": 403, "statusText": "Capability denied" });
-		}
-
-		if (typeof decided === "object" && "give" in decided) {
-			return givenResponse(decided.give, decided.by);
-		}
-
-		if (typeof decided === "object") {
-			return new Response("Halted: " + decided.halt, { "status": 503, "statusText": "Halted" });
-		}
-	}
-
-	const fetched = fetch(request).then(stamp);
-
-	// What an allowed preview fetch returned, recorded (RUNNING.md, *A call's result*): a rule can give it back in the
-	// debugger.
-	if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
-		// (Cloned at once: the page reads its own body as soon as it has it.)
-		void fetched.then((response) => record(event, request.url, response.status === 0 ? undefined : response.clone()), () => undefined);
-	}
-
-	// A request that fails on the network (offline, a host that doesn't answer, the page going away) is a network error for
-	// the page either way: answered as one, rather than a rejection respondWith leaves uncaught here — which the editor
-	// would report as an error of its own.
-	return fetched.catch((error) => {
+// Anything else: fetched, isolation-stamped. A request that fails on the network (offline, a host that doesn't answer,
+// the page going away) is a network error for the page either way: answered as one, rather than a rejection respondWith
+// leaves uncaught here — which the editor would report as an error of its own.
+async function passThrough(request) {
+	return fetch(request).then(stamp).catch((error) => {
 		console.warn("[coi-serviceworker] network error:", request.url, String(error));
 
 		return Response.error();
 	});
 }
 
-// The largest body recorded: a result to give back, not a download.
-const RECORD_MAX = 65536;
-
-// Send a preview's fetch result to its tab (capability.record.<tab> → the bridge's store): a JSON body parsed, a text body
-// as text — not an error, not a body too large or not text. Best-effort: a result not recorded is only not there to give.
-async function record(event, url, response) {
-	if (response === undefined) {
-		return;
-	}
-
-	try {
-		const preview = await previewClientOf(event);
-		const type = response.headers.get("content-type") || "";
-
-		if (preview === undefined || !response.ok || !/json|text|xml|javascript/u.test(type) || Number(response.headers.get("content-length") || 0) > RECORD_MAX) {
-			return;
-		}
-
-		const text = await response.text();
-
-		if (text.length > RECORD_MAX) {
-			return;
-		}
-
-		let value = text;
-
-		if (/json/u.test(type)) {
-			try {
-				value = JSON.parse(text);
-			} catch {
-				// Not JSON after all: kept as its text.
-			}
-		}
-
-		await rpc.request("capability.record." + preview.tab, { "capability": "net", "resource": url, "value": value }, { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS });
-	} catch (error) {
-		swLog.warn("capability.record failed", { "url": url, "error": String(error) });
-	}
-}
-
-globalThis.addEventListener("install", () => globalThis.skipWaiting());
-globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.clients.claim()));
-
 // ── node_modules resolver (CDN fallback) ──────────────────────────────────────────────────────────────────
 const WORKSPACE_ROOT = "/workspace/";                 // requests here resolve deps against node_modules → CDN
 const NODE_MODULES = "/workspace/node_modules/";      // where bare specifiers resolve; CDN-fallback on a miss
 const CDN = "https://unpkg.com";                      // node_modules miss → fetched here, served same-origin
-// Dev-server bridge routes (<base>/__virtual__/<tab>/<port>/…) are recognised under ANY deploy-base prefix — on GitHub
-// Pages the SW is scoped to /editor/ — by virtual-path.ts's parseVirtual. /workspace/ (WORKSPACE_ROOT) is matched the
-// same way below.
+// /workspace/ (WORKSPACE_ROOT) is recognised under ANY deploy-base prefix — on GitHub Pages the SW is scoped to /editor/.
 
 // Split a node_modules-relative path ("<pkg>/<sub>" or "<pkg>") into package + subpath, honouring scopes.
 function splitPackage(rel) {
@@ -349,8 +154,8 @@ async function fetchCdn(pathname, requestUrl) {
 // Resolver: a request under /workspace/node_modules/ resolves the dep from the CDN (served same-origin); any
 // other /workspace/ request passes through to the network, isolation-stamped — so this only ADDS serving of
 // node_modules and can't break a fetch. (The editor + type-checker + LSP workers read the real workspace files
-// through the zen-fs FileSystemProvider / shared SharedArrayBuffer, not through the SW; the preview runs its own
-// in-page dev server. So the SW no longer serves workspace source — only the node_modules CDN fold-in remains.)
+// through the zen-fs FileSystemProvider / shared SharedArrayBuffer, not through the SW. So the SW no longer serves
+// workspace source — only the node_modules CDN fold-in remains.)
 async function serveWorkspace(request, requestUrl, pathname) {
 	if (pathname.startsWith(NODE_MODULES)) {
 		return fetchCdn(pathname, requestUrl);
@@ -388,8 +193,7 @@ globalThis.addEventListener("message", (event) => {
 
 // The browser stops an idle service worker and starts a FRESH one on the next event — a new global, whose hub no
 // page has linked (the page only relinks on controllerchange, which a restart doesn't fire). Unlinked, the SW
-// drops out of the tree: its logs and architecture reports vanish, and neither capability.decide nor the preview's
-// dev servers can be reached (so every preview request fails and the gate denies). So on every start, ask the window clients for a hub port
+// drops out of the tree: its logs and architecture reports vanish. So on every start, ask the window clients for a hub port
 // (only the app realm's linkServiceWorkerHub answers; a first install gets linked twice, harmlessly).
 void globalThis.clients.matchAll({ "type": "window" }).then((clients) => {
 	for (const client of clients) {
@@ -397,215 +201,10 @@ void globalThis.clients.matchAll({ "type": "window" }).then((clients) => {
 	}
 });
 
-// Add the isolation + iframe-embedding headers a virtual (dev-server) response needs — and the JS Self-Profiling policy,
-// so the editor can profile a preview's page (preview-profile.ts): a Profiler can be made only in a document served
-// with it.
-function virtualHeaders(source) {
-	const headers = new Headers(source || {});
-
-	headers.set("Document-Policy", "js-profiling");
-	headers.set("Cross-Origin-Embedder-Policy", COEP);
-	headers.set("Cross-Origin-Opener-Policy", "same-origin");
-	headers.set("Cross-Origin-Resource-Policy", "cross-origin");
-	headers.delete("X-Frame-Options");
-
-	return headers;
-}
-
-// One exchange with the server on `port` (a dev server in the node worker, or a run's own; over the hub — editor-api's
-// `exchanges` is the other end): both bodies stream. A body that fits in its first REQUEST_PIECE goes whole with the
-// request; a longer one follows in writes, each sent once the server has taken the last. The answer comes at its head;
-// the rest of its body is read a piece at a time as the page reads it, and the page going away cancels it. Every call
-// goes the request's way (its route and port), so it reaches the same server.
-const REQUEST_PIECE = 262144;
-const EXCHANGE_CALL = { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS };
-
-// The start of a request's body: up to REQUEST_PIECE of it, and whether there's more (its reader, to go on with).
-async function requestStart(request) {
-	if (request.method === "GET" || request.method === "HEAD") {
-		return { "body": undefined, "rest": undefined };
-	}
-
-	if (request.body === null || request.body === undefined) {
-		return { "body": new Uint8Array(await request.arrayBuffer()), "rest": undefined };
-	}
-
-	const reader = request.body.getReader();
-	const pieces = [];
-	let bytes = 0;
-
-	for (;;) {
-		const { done, value } = await reader.read();
-
-		if (done) {
-			return { "body": joinBytes(pieces), "rest": undefined };
-		}
-
-		pieces.push(value);
-		bytes += value.byteLength;
-
-		if (bytes >= REQUEST_PIECE) {
-			return { "body": joinBytes(pieces), "rest": reader };
-		}
-	}
-}
-
-function joinBytes(pieces) {
-	const joined = new Uint8Array(pieces.reduce((total, piece) => total + piece.byteLength, 0));
-	let at = 0;
-
-	for (const piece of pieces) {
-		joined.set(piece, at);
-		at += piece.byteLength;
-	}
-
-	return joined;
-}
-
-// Send the rest of a request's body in writes: `first` (what requestStart read), then what's left of `reader`.
-async function sendBody(call, first, reader) {
-	try {
-		let ok = (await call({ "write": first })).ok;
-
-		while (ok) {
-			const { done, value } = await reader.read();
-
-			ok = (await call(done ? { "end": true } : { "write": value })).ok && !done;
-		}
-	} catch (error) {
-		swLog.warn("request body not sent", { "error": String(error) });
-	}
-
-	void reader.cancel().catch(() => undefined);
-}
-
-// Answer `request` from the server on `port` in `tab`, as `path` on it. `options.loopback`: the page asked for
-// localhost:<port> — undefined is the answer when nothing serves that port, for the caller to send it to the network.
-async function handleVirtualRequest(request, tab, port, path, options = {}) {
-	// A timed span per request — the collector shows each dev-server round-trip and its duration.
-	const span = swLog.span("editor.coi-serviceworker.virtual", { "tab": tab, "port": port, "method": request.method, "path": path });
-	const route = "virtual.request." + tab;
-	const stream = Math.random().toString(36).slice(2) + Date.now().toString(36);
-	const call = (step) => rpc.request(route, { "port": port, "stream": stream, ...step }, EXCHANGE_CALL);
-
-	try {
-		const headers = {};
-
-		request.headers.forEach((value, key) => {
-			headers[key] = value;
-		});
-
-		if (options.loopback !== undefined) {
-			headers.host = options.loopback;
-		}
-
-		const { body, rest } = await requestStart(request);
-		// A worker's ENTRY script (its imports are mode "cors"): the dev server puts the editor's worker tap first.
-		const entry = (request.destination === "worker" || request.destination === "sharedworker") && request.mode === "same-origin" ? request.destination : undefined;
-		const answering = rpc.request(route, { "port": port, "method": request.method, "url": path, "headers": headers, "body": rest === undefined ? body : undefined, "more": rest === undefined ? undefined : true, "stream": stream, "entry": entry }, EXCHANGE_CALL);
-
-		if (rest !== undefined) {
-			void sendBody(call, body, rest);
-		}
-
-		const response = await answering;
-
-		if (options.loopback !== undefined && response.listening === false) {
-			span.end({ "status": "unrouted" });
-
-			return undefined;
-		}
-
-		span.end({ "status": response.status, "streamed": response.stream !== undefined });
-
-		const nullBody = NULL_BODY.has(response.status) || request.method === "HEAD";
-
-		if (nullBody && response.stream !== undefined) {
-			void call({ "cancel": true }).catch(() => undefined);
-		}
-
-		const content = response.stream === undefined ? response.body : streamedBody(call, response.body);
-
-		return new Response(nullBody ? null : content, { "status": response.status, "statusText": response.statusText, "headers": virtualHeaders(response.headers) });
-	} catch (error) {
-		console.error("[coi-serviceworker] virtual", error);
-		span.error("dev server unreachable", { "error": String(error) });
-		span.end();
-
-		return new Response("dev server unreachable: " + error.message, { "status": 502, "headers": { "content-type": "text/plain" } });
-	}
-}
-
-// The rest of a streamed answer's body, read from the server as the page reads it (a read with nothing yet answers empty
-// after a while, and is asked again), starting with `first`.
-function streamedBody(call, first) {
-	return new ReadableStream({
-		"start": (controller) => {
-			if (first.byteLength > 0) {
-				controller.enqueue(first);
-			}
-		},
-		"pull": async (controller) => {
-			const piece = await call({ "read": true });
-
-			// (not a piece: the server's gone — its run stopped)
-			if (piece === null || typeof piece !== "object" || !(piece.body instanceof Uint8Array)) {
-				controller.close();
-
-				return;
-			}
-
-			if (piece.body.byteLength > 0) {
-				controller.enqueue(piece.body);
-			}
-
-			if (piece.done) {
-				controller.close();
-			}
-		},
-		"cancel": () => {
-			void call({ "cancel": true }).catch(() => undefined);
-		}
-	}, { "highWaterMark": 0 });
-}
-
-// The hosts a page means this machine by: a preview's request to one goes to the server on that port, if one serves it.
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-// A preview's request for localhost:<port> — fetch, XHR, EventSource, an <img> or <script> — answered by the server on
-// that port (a client on 5173 calling its API on 3001); what isn't a preview's, or names a port nothing serves, goes to
-// the network as any other request. (A navigation isn't the SW's to route: it's outside its scope.)
-async function routeLoopback(event, request, requestUrl) {
-	const preview = await previewClientOf(event);
-
-	if (preview !== undefined) {
-		const port = Number(requestUrl.port || (requestUrl.protocol === "https:" ? 443 : 80));
-		const response = await handleVirtualRequest(request.clone(), preview.tab, port, requestUrl.pathname + requestUrl.search, { "loopback": requestUrl.host });
-
-		if (response !== undefined) {
-			return response;
-		}
-	}
-
-	return gateAndFetch(event, request, requestUrl);
-}
-
 globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
 	const pathname = requestUrl.pathname;
-
-	// Dev-server bridge: <base>/__virtual__/<tab>/<port>/…
-	const virtual = parseVirtual(pathname);
-
-	if (virtual !== undefined) {
-		const response = handleVirtualRequest(request, virtual.tab, virtual.port, (virtual.rest || "/") + requestUrl.search);
-
-		recordPreviewRequest(event, pathname, virtual.rest || "/", response);
-		event.respondWith(response);
-
-		return;
-	}
 
 	// Module resolver: <base>/workspace/… (store + node_modules CDN fallback). Strip any base prefix so the
 	// logical /workspace/… path keys the store and reconstructs the CDN URL.
@@ -617,51 +216,11 @@ globalThis.addEventListener("fetch", (event) => {
 		return;
 	}
 
-	// A SAME-ORIGIN request with no /__virtual__ segment but a referer from a virtual page — the app used an
-	// absolute path or navigated. Keep it inside its server: redirect navigations (re-add the prefix), forward
-	// subresources. Origin-guarded so cross-origin CDN imports (react from esm.sh) are never hijacked.
-	if (requestUrl.origin === globalThis.location.origin && request.referrer) {
-		let refVirtual;
-
-		try {
-			refVirtual = parseVirtual(new URL(request.referrer).pathname);
-		} catch (refError) {
-			refVirtual = null;
-		}
-
-		if (refVirtual) {
-			const target = pathname + requestUrl.search;
-
-			const response = request.mode === "navigate"
-				? Promise.resolve(Response.redirect(requestUrl.origin + refVirtual.prefix + target, 302))
-				: handleVirtualRequest(request, refVirtual.tab, refVirtual.port, target);
-
-			recordPreviewRequest(event, refVirtual.prefix + pathname, pathname + " (referer relay)", response);
-			event.respondWith(response);
-
-			return;
-		}
-	}
-
-	if (requestUrl.origin !== globalThis.location.origin && LOOPBACK.has(requestUrl.hostname) && event.clientId) {
-		const response = routeLoopback(event, request, requestUrl);
-
-		recordPreviewRequest(event, pathname, requestUrl.host + pathname + " (localhost)", response);
-		event.respondWith(response);
-
-		return;
-	}
-
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
 	if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
 		return;
 	}
 
-	// Fallback: everything not virtual/workspace/same-origin-relayed. A previewed app's outbound data fetch is
-	// gated here (gateAndFetch resolves the client to tell a preview request from editor/CDN infra); everything
-	// else passes straight through with COI stamping.
-	const response = gateAndFetch(event, request, requestUrl);
-
-	recordPreviewRequest(event, pathname, requestUrl.origin === globalThis.location.origin ? pathname : requestUrl.host + " (passthrough)", response);
-	event.respondWith(response);
+	// Everything else passes straight through with COI stamping.
+	event.respondWith(passThrough(request));
 });

@@ -11,7 +11,6 @@ import * as fs from "@brianjenkins94/util/fs";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, createLogger } from "vite";
-import { coveragePlugin } from "./build/coverage";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
 
@@ -30,10 +29,6 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
  *  In CI none, but production's deploy asks for hidden ones (SOURCE_MAPS=hidden: written, not referenced from the code),
  *  which it keeps per release outside the site for the admin app's stacks (packages/api/scripts/keep-source-maps.ts). */
 const sourcemap: boolean | "hidden" = !isCI || (process.env["SOURCE_MAPS"] === "hidden" ? "hidden" : false);
-
-/** COVERAGE=1 (off by default): our modules instrumented for statement coverage in every pass but the preview taps'
- *  (build/coverage.ts), so each architecture test's reach can be read, for selecting tests by what a change reached. */
-const coverage = (): Plugin[] => (process.env["COVERAGE"] === "1" ? [coveragePlugin()] : []);
 
 /** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */
 const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode", "@awesome.me/webawesome"];
@@ -153,7 +148,7 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 
 			// `vscode` is external only from the tapped module: the extension's own imports of it go to that module first.
 			// The extension host has no `process`; util reads it as it loads.
-			const code = await bundleCode(folder, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, [commandTap(name), ...coverage()], MODULE_PROCESS_SHIM);
+			const code = await bundleCode(folder, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, [commandTap(name)], MODULE_PROCESS_SHIM);
 			// (content-hashed, so a deploy never pairs a new manifest with a stale entry)
 			const entry = `extension-${createHash("sha256").update(code).digest("hex").slice(0, 8)}.js`;
 			const manifest = { ...JSON.parse(fs.readFileSync(resolvePath(`./${folder}/package.json`), "utf8")) as Record<string, unknown>, "browser": entry };
@@ -167,7 +162,7 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 				if ("worker" in made) {
 					source = workerBootstrapSource(made.worker, `${folder}/${path}`.split("/").length - 1, made.hold === true);
 				} else if ("script" in made) {
-					source = await bundleCode(folder, made.script, path.replace(/\.js$/u, ""), made.format, [], coverage());
+					source = await bundleCode(folder, made.script, path.replace(/\.js$/u, ""), made.format, [], []);
 				} else {
 					source = JSON.stringify(made.json, null, "\t") + "\n";
 				}
@@ -232,7 +227,6 @@ function releasePlugin(): Plugin {
 
 export function hostPlugins(): Plugin[] {
 	return [
-		...coverage(),
 		releasePlugin(),
 		// The SHELL (main.tsx → shell.tsx) is built here, and it lazily imports the browser GitHub client
 		// (github.ts → fido → util/env, util/store), which pulls in node builtins: `env.ts` reads `process`/`path`/`url`
@@ -306,8 +300,7 @@ export async function preBuild(): Promise<void> {
 		// still worked.
 		"base": "./",
 		"plugins": [
-			...coverage(),
-			bundledExtension("bridge"),
+				bundledExtension("bridge"),
 			bundledExtension("tsval"),
 			bundledExtension("history", { "node_modules/history-ts-plugin/package.json": { "json": { "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" } } }),
 			bundledExtension("source-control"),
@@ -347,11 +340,10 @@ export async function preBuild(): Promise<void> {
 		// (and hub/observability to the editor's own: a debugger's worker connects through editor-api's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
 		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", ...SHARED_PACKAGES] },
-		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
-		"plugins": [...coverage(), unenvResolve(), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", [])],
-		"worker": { "plugins": coverage, "rollupOptions": { "output": { "sourcemap": sourcemap } } },
+		"plugins": [unenvResolve()],
+		"worker": { "rollupOptions": { "output": { "sourcemap": sourcemap } } },
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
@@ -365,10 +357,6 @@ export async function preBuild(): Promise<void> {
 				"preserveEntrySignatures": "strict",
 				"input": {
 					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
-					"lsp/node-worker": resolvePath("./workers/node-worker.ts"),
-					// provoke child worker (debug affordance): node-worker spawns it per hardReset round to get a cold
-					// almostnode + ts realm. Served at lsp/provoke-worker.js so node-worker's `new URL` resolves it.
-					"lsp/provoke-worker": resolvePath("./workers/provoke-worker.ts"),
 					// The editor's BABLR worker (core's, not the bridge's), served from lsp/ like the other worker chunks.
 					// Started and queued by bablr.ts.
 					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts")
@@ -398,7 +386,7 @@ export async function preBuild(): Promise<void> {
 			"alias": [{ "find": /^typescript(\/.*)?$/u, "replacement": resolvePath("./extensions/history/ts-external.js") }],
 			"conditions": ["browser", "import", "default"]
 		},
-		"plugins": [...coverage(), polyfillNode(), historyTsPlugin()],
+		"plugins": [polyfillNode(), historyTsPlugin()],
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
@@ -417,7 +405,6 @@ export async function preBuild(): Promise<void> {
 	await buildPackage(root, {
 		"customLogger": logger,
 		"base": "./",
-		"plugins": coverage(),
 		"build": {
 			"outDir": "../../docs",
 			"emptyOutDir": false,

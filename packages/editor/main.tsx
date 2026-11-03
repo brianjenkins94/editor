@@ -84,7 +84,6 @@ if (reset === "wait") {
 	const tab = crypto.randomUUID().slice(0, 8);
 	const tabRpc = createRpcClient(rootHub);
 
-	serve(rootHub, "capability.decide." + tab, (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300000, "waitForResponderMs": 10000 }));
 	// What in this tab's architecture needs review (the workbench's conformance check), for debug-mcp's
 	// architecture_state: addressed like a page tool, but not announced as one.
 	serve(rootHub, "tool.architecture_violations." + tab, async () => tabRpc.request("architecture.violations", undefined, { "timeoutMs": 10000, "waitForResponderMs": 5000 }));

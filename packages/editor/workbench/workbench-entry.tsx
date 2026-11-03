@@ -642,7 +642,7 @@ function maybeBoot(): void {
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner
 				// (worker) is shared by every terminal.
-				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
+				const nodeRunner = createNodeRunner(workbenchHub);
 				// The editor's BABLR, in its worker: the classifier's verdicts queue on it (bablr.ts).
 				const bablr = startBablr(workbenchHub);
 

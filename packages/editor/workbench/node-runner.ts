@@ -1,15 +1,11 @@
 /**
- * Main-thread side of running programs and previews: every run is a debug run (RUNNING.md) — `debug` launches one under
- * the tsval debug adapter (the ext host), its output, listening and exit on `node.out/listening/exit.<runId>`, its
- * stdin `node.stdin.<runId>` — and the dev-server worker (workers/node-worker.ts) hosts the preview dev
- * servers. That worker is started once and never stopped, so stopping a run never takes a dev server (and its preview)
- * down with it; it gets the shared workspace SharedArrayBuffer (`workspace.buffer`) so it runs on the SAME zen-fs, and
- * its hub is federated into the workbench hub (its spans reach the page collector).
+ * Main-thread side of running programs: every run is a debug run (RUNNING.md) — `debug` launches one under the tsval
+ * debug adapter (the ext host), its output, listening and exit on `node.out/listening/exit.<runId>`, its stdin
+ * `node.stdin.<runId>` — and what's running, in one registry (runs.ts).
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunRegistry } from "./runs";
-import { watchWorker } from "@brianjenkins94/editor-api/failures";
-import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
+import { serve } from "@brianjenkins94/hub";
 import { createRunRegistry } from "./runs";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
@@ -26,9 +22,6 @@ export interface NodeRunHooks {
 	"noDebug"?: boolean;
 }
 
-/** A response relayed back from an http server running in the worker (the preview bridge). */
-export interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
-
 export interface NodeRunner {
 	/** What's running — every terminal's runs, in one registry (runs.ts). */
 	"runs": RunRegistry;
@@ -43,52 +36,11 @@ export interface NodeRunner {
 	"endStdin": () => void;
 	/** Whether a process is currently running (the terminal routes keystrokes to stdin while it is). */
 	"isRunning": () => boolean;
-	/** Relay a request to an http server the running process is listening with (preview bridge, M0). */
-	"virtualRequest": (port: number, method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<VirtualResponse>;
-	/** Start a ViteDevServer in the worker on `root` of the shared workspace, reachable on `port` (preview, M1). */
-	"startPreview": (port: number, root: string) => Promise<void>;
-	/** Subscribe to HMR updates the worker's preview server emits; `handler` relays them to the iframe. Returns
-	 *  an unsubscribe (M2). */
-	"onPreviewHmr": (port: number, handler: (message: unknown) => void) => () => void;
-	/** Ask the host to open the preview pane on `root` for `port` — the terminal's `vite` command fires this (M3).
-	 *  `port` keys the surface so multiple concurrent previews (multi-server / multiplayer) each get their own
-	 *  window; it defaults to the single-preview port when omitted. */
-	"openPreview": (root: string, port?: number) => void;
-	/** Stop the preview on `port`: the host closes that window and the worker stops its dev server (Ctrl-C on `vite`). */
-	"closePreview": (port?: number) => void;
-	/** When the preview on `port` is stopped from anywhere — Ctrl-C, or its last window closed. */
-	"onPreviewClose": (port: number, handler: () => void) => () => void;
-	/** Ask every preview page to report its runtime evidence now, and wait for `port`'s report to arrive — before a
-	 *  preview's windows close, since they close before its run ends (evidence.ts folds at the end). */
-	"flushPreviewEvidence": (port: number) => Promise<void>;
-	/** Present a long-running production run (the vite preview) as a VS Code debug session: publishes
-	 *  `production.launch` (the ext host starts a `production` attach session) and returns its id. `port`, when the
-	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. `target`
-	 *  is the runnable's stable identity (e.g. the project dir), recorded on the run-grain ledger. `id`: the run's id in
-	 *  the registry, so the session is known by it (a fresh one if it has none). */
-	"startProductionSession": (name: string, port?: number, target?: string, id?: string) => string;
-	/** Stream a line of the run's output to the production debug session's Debug Console. */
-	"emitProductionOutput": (id: string, stream: "out" | "err", data: string) => void;
-	/** The debug session's Stop button (or session close) fired — the driver should tear the run down. */
-	"onProductionStop": (id: string, handler: () => void) => () => void;
-	/** End the production debug session (the run stopped) — terminates the session in the UI. */
-	"endProductionSession": (id: string) => void;
 }
 
-/** Start the dev-server worker, wire it into `hub`, and return the runner the terminal and the buttons drive. */
-export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer): NodeRunner {
+/** The runner the terminal and the test runner drive, on `hub`. */
+export function createNodeRunner(hub: Hub): NodeRunner {
 	let currentRunId: string | undefined;
-
-	// The worker asks for the shared workspace SAB over the hub (a respawned worker asks again) and mounts the SAME
-	// zen-fs at /workspace. Null without cross-origin isolation — it then runs on its own root.
-	serve(hub, "workspace.buffer", () => workspaceBuffer ?? null);
-	const rpc = createRpcClient(hub); // for request/reply calls into the worker (e.g. the preview bridge relay)
-
-	// The dev-server worker: the preview dev servers, answering their requests — started once, never terminated.
-	const nodeWorker = new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" });
-
-	watchWorker(nodeWorker, "node-worker");
-	hub.link(portTransport(nodeWorker));
 
 	// A run: launched under the tsval debug adapter (ext host), on `node.out/exit.<runId>` — the adapter (or its
 	// terminate) relays onto them. The adapter spawns its own debug worker.
@@ -154,38 +106,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 
 	const runs = createRunRegistry(hub);
 
-	// The preview ports whose pages report runtime evidence (evidence.ts's `evidence.preview`): a flush before their windows
-	// close waits for the report, not a fixed moment — a hot update's new version is only told on the next report.
-	const previewPortOf = (data: unknown): number => Number(/^preview:(\d+)/u.exec(String((data as { "window"?: unknown } | null)?.window ?? ""))?.[1]);
-	const reporting = new Set<number>();
-
-	hub.subscribe("evidence.preview", (data) => {
-		reporting.add(previewPortOf(data));
-	});
-
-	// A run's own server, listening: its preview opens (RUNNING.md, *A service is one too*) — the window on its port, no
-	// dev server started (`server`) — and closes when the run ends.
-	const serving = new Map<string, number>();
-
-	hub.subscribe("node.listening.*", (data, envelope) => {
-		const port = (data as { "port"?: unknown } | null)?.port;
-		const runId = envelope.subject.slice("node.listening.".length);
-
-		if (typeof port === "number" && !serving.has(runId)) {
-			serving.set(runId, port);
-			hub.publish("preview.open", { "port": port, "server": true });
-		}
-	});
-	hub.subscribe("node.exit.*", (_data, envelope) => {
-		const runId = envelope.subject.slice("node.exit.".length);
-		const port = serving.get(runId);
-
-		if (port !== undefined) {
-			serving.delete(runId);
-			hub.publish("preview.close", { "port": port });
-		}
-	});
-
 	// A debug session VS Code starts itself (F5, Run and Debug, debug-mcp's debug_start) is a run too — tsval's, or another
 	// extension's debugger's (its debug type the run's runtime): the pod asks for its id as the session starts, and puts it in the session's launch config. Its end is the session's (`node.exit`,
 	// as for a terminal's debug run); stopping it from here stops the session (`debug.stop`).
@@ -226,52 +146,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 				hub.publish(`node.stdin.${currentRunId}`, { "end": true });
 			}
 		},
-		"isRunning": () => currentRunId !== undefined,
-		// The dev-server worker answers these (it's started above, so it only has to finish subscribing).
-		"virtualRequest": async (port, method, url, headers, body) => rpc.request("virtual.request", { "port": port, "method": method, "url": url, "headers": headers, "body": body }, { "timeoutMs": 30000, "waitForResponderMs": 10_000 }) as Promise<VirtualResponse>,
-		"startPreview": async (port, root) => {
-			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000, "waitForResponderMs": 10_000 });
-		},
-		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
-		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "port": port }); },
-		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },
-		"flushPreviewEvidence": async (port) => {
-			const reported = new Promise<void>((resolve) => {
-				const off = hub.subscribe("evidence.preview", (data) => {
-					if (previewPortOf(data) === port) {
-						off();
-						resolve();
-					}
-				});
-
-				// (a page that has never reported may have nothing to tell: a moment, as before)
-				setTimeout(() => {
-					off();
-					resolve();
-				}, reporting.has(port) ? 5000 : 500);
-			});
-
-			hub.publish("evidence.flush", {});
-			await reported;
-			// (and its other windows' pages, a moment behind it)
-			await new Promise((resolve) => {
-				setTimeout(resolve, 100);
-			});
-		},
-		"onPreviewClose": (port, handler) => hub.subscribe("preview.close", (data) => {
-			if ((data as { "port"?: number } | null)?.port === port) {
-				handler();
-			}
-		}),
-		"startProductionSession": (name, port, target, runId) => {
-			const id = runId ?? crypto.randomUUID();
-
-			hub.publish("production.launch", { "id": id, "name": name, "port": port, "target": target });
-
-			return id;
-		},
-		"emitProductionOutput": (id, stream, data) => { hub.publish(`production.out.${id}`, { "stream": stream, "data": data }); },
-		"onProductionStop": (id, handler) => hub.subscribe(`production.stop.${id}`, () => { handler(); }),
-		"endProductionSession": (id) => { hub.publish(`production.exit.${id}`, {}); }
+		"isRunning": () => currentRunId !== undefined
 	};
 }

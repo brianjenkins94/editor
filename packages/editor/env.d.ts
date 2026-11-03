@@ -26,19 +26,6 @@ declare module "editor:settings-defaults" {
 
 	export default defaults;
 }
-
-declare module "previews:page-tap" {
-	const code: string;
-
-	export default code;
-}
-
-declare module "previews:worker-tap" {
-	const code: string;
-
-	export default code;
-}
-
 /** The cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
 declare module "cspell:server-node" {
 	const code: string;

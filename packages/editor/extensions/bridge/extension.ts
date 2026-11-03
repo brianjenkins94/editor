@@ -6,14 +6,11 @@
  * the one that touches the hub.
  */
 import type { CommandTotals } from "../command-tap";
-import type { CapabilityCall } from "./capabilities/decide";
 import { provideWorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
-import { serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import * as vscode from "vscode";
 import { storeNode } from "../../shared/architecture-zenfs";
 import { ARCH_COMMANDS } from "../command-tap";
-import { decideCapability } from "./capabilities/decide";
 import { registerCapabilityStops } from "./capability-stops";
 import { registerDebugEvents } from "./debug-events";
 import { bridgeHub, workspace, workspaceRuntime } from "./hub";
@@ -62,12 +59,6 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 			bridgeLog.info("worker joined", data as Record<string, unknown>);
 		})
 	});
-
-	// ENFORCE — the single capability DECISION ENDPOINT (see ./capabilities/decide). Every thin interceptor (the service
-	// worker's net gate; the almostnode fs/exec shim hook) full-round-trips here over the hub: the SW's swHub → root →
-	// workbench → bridgeHub reaches this serve, and the popup/grant-store/redline logic all lives here (the ext host has
-	// vscode + workspace.fs), never in an interceptor. Returns true=allow, false=deny.
-	context.subscriptions.push({ "dispose": serve(bridgeHub, "capability.decide", (data) => decideCapability(data as CapabilityCall)) });
 
 	// The workspace runtime, for any debugger in this extension host (ARCHITECTURE.md, *Extension points* 2; editor-api's
 	// `workspaceRuntime()`): tsval's — an extension of its own, extensions/tsval — with the workspace's buffer, ours. Its
