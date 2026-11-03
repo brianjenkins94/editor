@@ -1,5 +1,5 @@
-/** What's running and what ran (`runs.list` / `runs.stop`, runs.ts), the run ledger (`runs.ledger`, evidence.ts), and test
- *  runs: which a change reaches and their results as data (`tests.affected` / `tests.run`, test-runs.ts). */
+/** What's running and what ran (`runs.list` / `runs.stop`, runs.ts), and test runs: which a change reaches and their
+ *  results as data (`tests.affected` / `tests.run`, test-runs.ts). */
 import type { PageToolAsk } from "@brianjenkins94/observability";
 import type { PageToolContext, ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
@@ -25,25 +25,6 @@ const runs: ToolFamily = ({ request }) => [
 				"inputSchema": { "id": z.string().describe("The run's id.") }
 			},
 			"handler": async ({ id }, { signal }) => ok({ "stopped": await request("runs.stop", { "id": id }, signal) })
-		})
-	},
-	{
-		"timeoutMs": 15000,
-		"tool": defineTool({
-			"name": "runs_ledger",
-			"config": {
-				"description": "The run ledger (.silo/runs/<user>.jsonl, kept in git): every run that ended — terminal tasks and services, debug sessions, previews — each with its id, title, entry, start/end, exit, who and where it ran, the commit and the blob oid of each file it ran, and its effects: each gated call (capability fs:read / fs:write / net / exec / …, the resource it reached) with how it went — made, denied, skipped or given (a rule's result in its place) — and how many calls. Ask it what touched what: the runs with such an effect, and their effects added up ({ capability, resource, how, calls, runs, first, last }). Returns { total, runs (newest first), effects }.",
-				"inputSchema": {
-					"file": z.string().optional().describe("Runs that ran this file — their entry, or any file they ran (repo-relative, e.g. src/index.ts)."),
-					"capability": z.string().optional().describe("Effects of this capability: fs:read, fs:write, net, exec, eval, net.ws, net.webrtc — or a family (fs)."),
-					"resource": z.string().optional().describe("Effects whose resource (a path, a host, a command) contains this."),
-					"how": z.enum(["made", "denied", "skipped", "given"]).optional().describe("Effects that went this way."),
-					"since": z.string().optional().describe("Runs that ended at or after this ISO time."),
-					"user": z.string().optional().describe("One user's runs (the slug of their git identity)."),
-					"limit": z.number().optional().describe("Runs to return (default 20); the effects add up every run that matched.")
-				}
-			},
-			"handler": async (query, { signal }) => ok(request("runs.ledger", query, signal))
 		})
 	},
 	{

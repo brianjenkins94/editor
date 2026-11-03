@@ -8,51 +8,43 @@
  * instance sees `window.parent !== window` and takes the app branch, booting the workbench into it (fill mode). One
  * entry, one bundle; the shell↔app seam is the hub.
  *
- * The picker talks to the app over the hub: the app `serve`s `project.list` and subscribes `project.open` (main.tsx);
- * here we link a shell hub to the app iframe, pull the catalog, and publish the selected id. File contents never cross
- * this channel — the catalog lives app-side (samples.ts); we send only ids. The RHS review panel (git-panel.tsx, Web Awesome
- * components of its own) is mounted into the `aside` region.
+ * The shell talks to the app over the hub: a shell hub linked to the app iframe, which a loaded repo's files are published
+ * on (`project.openFiles`, main.tsx). The RHS review panel (git-panel.tsx, Web Awesome components of its own) is mounted
+ * into the `aside` region.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
 import type { VsCodeColors } from "theme/vscode-colors";
 import type { RemoteRequest } from "../shared/git-remote";
-import type { SharedWorkspace } from "../shared/playground-link";
-import type { LaunchTarget, RunInfo } from "../shared/runs";
 import type { RepoBinding } from "./github-auth";
+import type { Reporting } from "./reporting";
+import type { Session } from "./session";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { relayLoggerToHub, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import { logger } from "@brianjenkins94/util/logger";
-import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, RotateCcw, Share2 } from "lucide";
+import { ChevronRight, GitBranch, GitCommit, History, LogOut, PanelRight, RotateCcw } from "lucide";
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { code, toolbar } from "theme/recipes";
+import { asidePane, dockHostCss, errorNotice, ghError, ghOk, injectGlobals, mainWrap, overlay, overlayBody, overlayTitle, popoverBody, railRegion, resizer, resizerLeft, sideCol, sideHost, spacer, topBar } from "theme/styles/shell";
+import { applyVsCodeColors } from "theme/vscode-colors";
 import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
-import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
-import { caption, code, toolbar } from "theme/recipes";
-import { applyVsCodeColors } from "theme/vscode-colors";
 import { iconSvg } from "../shared/theme";
-import { envRepo, showRepo, site } from "./address";
+import { envRepo, showRepo } from "./address";
 import { renderGitPanel } from "./git-panel";
-import { resetAddress } from "./reset";
 import { forgetRetired, GITHUB_APP_INSTALL } from "./github-auth";
-import type { Reporting } from "./reporting";
-import type { Session } from "./session";
+import { resetAddress } from "./reset";
 import { createShellDock } from "./shell-dock";
-import { installShellPreview } from "./shell-preview";
 import "theme/components/page";
 import "theme/components/popover";
 import "theme/components/button";
 import "theme/components/callout";
-import "theme/components/card";
 import "theme/components/checkbox";
 import "theme/components/divider";
-import "theme/components/dropdown";
-import "theme/components/dropdown-item";
 import "theme/components/input";
 import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
-import { asidePane, dockHostCss, errorNotice, ghError, ghOk, injectGlobals, mainWrap, navPane, overlay, overlayBody, overlayTitle, picker, popoverBody, projectCard, railRegion, resizer, resizerLeft, resizerRight, sideBody, sideCol, sideHost, spacer, topBar } from "theme/styles/shell";
 
 // The GitHub data plane's logger — spans + records federate to the `$sys.log.>` observability plane (debug-mcp).
 // The shell owns the token and the network calls, so this is where load/commit/connect are traced.
@@ -71,11 +63,9 @@ function errText(error: unknown): string {
 
 const statusOf = (error: unknown): number | undefined => (typeof (error as { "status"?: unknown }).status === "number" ? (error as { "status": number }).status : undefined);
 
-interface SampleInfo { "id": string; "name": string; "description": string }
-
-// Resizable-pane limits (px). Defaults match the former fixed widths; the min keeps each pane usable, the max caps
-// at a fraction of the viewport so a pane can't swallow the editor.
-const PANE = { "navDefault": 260, "asideDefault": 380, "navMin": 200, "asideMin": 300 };
+// The resizable pane's limits (px). The min keeps it usable, the max caps it at a fraction of the viewport so it can't
+// swallow the editor.
+const PANE = { "asideDefault": 380, "asideMin": 300 };
 const paneMax = (): number => Math.min(600, Math.round(window.innerWidth * 0.45));
 
 /** Pick a file to focus after loading a repo: a top-level README, else the first source/markup file, else the first
@@ -106,43 +96,6 @@ function Icon({ node }: { "node": Parameters<typeof iconSvg>[0] }) {
 	return <span dangerouslySetInnerHTML={{ "__html": iconSvg(node, { "size": 17 }) }} />;
 }
 
-/** The projects picker — one Web Awesome button per sample, driven by the hub catalog. `samples` is undefined until
- *  the app answers `project.list`; an empty answer is a real state (no bundled samples), not "still connecting". */
-function Picker({ samples, currentId, onOpen }: { "samples"?: SampleInfo[]; "currentId"?: string; "onOpen": (id: string) => void }) {
-	if (samples === undefined) {
-		return <div class={"wa-stack wa-gap-2xs " + picker()}>Connecting to editor…</div>;
-	}
-
-	if (samples.length === 0) {
-		return <div class={"wa-stack wa-gap-2xs " + picker()}>No bundled projects. Load a GitHub repo from the top bar.</div>;
-	}
-
-	return (
-		<div class={"wa-stack wa-gap-2xs " + picker()}>
-			{samples.map((sample) => (
-				<wa-card
-					key={sample.id}
-					class={projectCard() + (sample.id === currentId ? " selected" : "")}
-					role="button"
-					tabindex={0}
-					aria-current={sample.id === currentId}
-					onClick={() => { onOpen(sample.id); }}
-					onKeyDown={(event: KeyboardEvent) => {
-						if (event.key === "Enter" || event.key === " ") {
-							event.preventDefault();
-							onOpen(sample.id);
-						}
-					}}
-				>
-					<div class="wa-font-weight-semibold">{sample.name}</div>
-
-					<div class="wa-caption-2xs">{sample.description}</div>
-				</wa-card>
-			))}
-		</div>
-	);
-}
-
 interface RailItem {
 	"node": Parameters<typeof iconSvg>[0];
 	"label": string;
@@ -167,27 +120,12 @@ function RailContent({ items }: { "items": RailItem[] }) {
 	);
 }
 
-/** What a run target is, as its row says: a task, the workspace's own script, or the package whose script it is. */
-function targetKind(target: LaunchTarget): string {
-	if (target.package === undefined) {
-		return "task";
-	}
-
-	return target.package === "." ? "script" : target.package;
-}
-
-/** The shell chrome. Owns the shell hub and, once mounted, links it to the app iframe, mounts the review panel into
- *  the aside, and installs the (top-frame) preview window. */
+/** The shell chrome. Owns the shell hub and, once mounted, links it to the app iframe and mounts the review panel into
+ *  the aside. */
 function Shell() {
-	// Both panes start collapsed (as rails) so the editor gets the room by default; expand from the rail when needed.
-	const [lhsCollapsed, setLhsCollapsed] = useState(true);
+	// The pane starts collapsed (as a rail) so the editor gets the room by default; expand from the rail when needed.
 	const [rhsCollapsed, setRhsCollapsed] = useState(true);
-	const [samples, setSamples] = useState<SampleInfo[]>();
-	const [currentId, setCurrentId] = useState<string | undefined>(undefined);
-	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
-	const [targets, setTargets] = useState<LaunchTarget[]>([]);
-	const [runs, setRuns] = useState<RunInfo[]>([]);
 	// Signing in (session.ts), optional: `signedInAs` says who (GitHub's login, or the account's email; undefined = signed
 	// out); `githubUser` is GitHub's login when the sign-in is GitHub's (fetched live through the API's proxy), what private
 	// repos and commits need. The session (oauth4webapi) and the client (fido) are only imported when needed, so they
@@ -219,9 +157,6 @@ function Shell() {
 	const [commitResult, setCommitResult] = useState<string | undefined>(undefined);
 	// (the branch a push goes to: the workspace's own, asked as the popover opens — a checkout since the load moves it)
 	const [commitBranch, setCommitBranch] = useState<string | undefined>(undefined);
-	// Share popover (the top-bar Share button): the workspace as a playground link, copied as it opens.
-	const [shareOpen, setShareOpen] = useState(false);
-	const [share, setShare] = useState<{ "url"?: string; "skipped"?: string[]; "copied"?: boolean; "error"?: string } | undefined>(undefined);
 	// Reset popover (the top-bar Reset button): what a reset would lose — the workspace's uncommitted changes and the
 	// commits no remote has, counted as it opens (null: they couldn't be) — and whether it signs out too.
 	const [resetOpen, setResetOpen] = useState(false);
@@ -239,19 +174,8 @@ function Shell() {
 	const hubRef = useRef<Hub>();
 	const reportingRef = useRef<Reporting>();
 	const [errorId, setErrorId] = useState<string | undefined>(undefined);
-	// Settles once the app answers (below): a repo opened from the address (`env/<owner>/<repo>`) is published only then.
-	const appReadyRef = useRef<{ "promise": Promise<void>; "resolve": () => void }>();
 
-	appReadyRef.current ??= (() => {
-		let resolve: () => void;
-		const promise = new Promise<void>((done) => {
-			resolve = done;
-		});
-
-		return { "promise": promise, "resolve": () => { resolve(); } };
-	})();
-
-	// Mount-once wiring: the shell hub linked to the app iframe, the review panel, and the preview window. A LAYOUT
+	// Mount-once wiring: the shell hub linked to the app iframe, and the review panel. A LAYOUT
 	// effect, so it runs right after the first render: a plain effect waits for the first paint, which a page opened
 	// in a background tab doesn't get (its timers are throttled to about once a second), and everything the editor
 	// loads waits on this iframe.
@@ -269,23 +193,13 @@ function Shell() {
 		// A push from the workspace's git, and who its commits are by: the sign-in's, so the shell's (git-push.ts).
 		serve(shellHub, "git.remote", async (args) => (await import("./git-push")).remote(args as RemoteRequest));
 		serve(shellHub, "git.identity", async () => (await import("./git-push")).identity());
-		// CI's runs, jobs and logs, as the sign-in sees them (github.ts `actions`; the workbench's ci.status).
-		serve(shellHub, "github.actions", async (args) => (await import("./github")).actions(args));
 		const appFrame = dock.editorFrame;
-
-		// A TypeScript Playground link (playground-link.ts) is a one-shot import: it's opened once the app answers below,
-		// and dropped from the address bar now, so a reload keeps the edits made since instead of importing it again.
-		const playground = parsePlaygroundLink(location.hash, location.search);
-
-		if (playground !== undefined) {
-			history.replaceState(history.state, "", location.pathname + location.search);
-		}
 
 		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
 		performance.mark("shell/app-iframe");
 		appFrame.src = location.href;
 
-		const architecture = reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
+		reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
 		// …and its logs and spans (the GitHub data plane's, a repository's load, the reset's), on `$sys.log.shell`, and its
 		// uncaught errors: debug-mcp and the monitor see the shell as they see every other context.
 		relayLoggerToHub(shellHub, "shell");
@@ -297,10 +211,6 @@ function Shell() {
 			reportingRef.current = startReporting(shellHub, setErrorId);
 		});
 		shellHub.link(windowTransport(appFrame.contentWindow));
-
-		// The preview windows live in the top frame so they can roam beyond the editor — every server's (a dev server's, a
-		// program's own), all managed here. See shell-preview.ts.
-		installShellPreview(shellHub, architecture, dock.window);
 		reportShellMetrics(shellHub); // its long frames, on the metrics plane (editor-metrics.ts)
 
 		// The editor (workbench iframe) follows the OS theme too. The shell is the source of truth for the OS
@@ -327,38 +237,7 @@ function Shell() {
 			"close": overlayCloseRef.current
 		}, shellHub, (<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>));
 
-		const rpc = createRpcClient(shellHub);
-
-		rpcRef.current = rpc; // reused by the run picker
-
-		// Pull the catalog once the app iframe's serve interest arrives (asked before it, the call only times out); the
-		// retry is a backstop.
-		void (async () => {
-			for (let attempt = 0; attempt < 20; attempt += 1) {
-				try {
-					const list = await rpc.request("project.list", undefined, { "timeoutMs": 2000, "waitForResponderMs": 10_000 }) as SampleInfo[];
-
-					if (Array.isArray(list)) {
-						setSamples(list);
-						appReadyRef.current?.resolve();
-
-						// The app is listening now. A playground project replaces the workspace like a repo load, and isn't
-						// any repo's, so a commit has nowhere to push until one is opened.
-						if (playground !== undefined) {
-							shellHub.publish("project.openFiles", playground);
-							setBoundRepo(undefined);
-							showRepo(undefined);
-						}
-
-						return;
-					}
-				} catch { /* app not linked yet — retry */ }
-
-				await new Promise((resolve) => {
-					setTimeout(resolve, 500);
-				});
-			}
-		})();
+		rpcRef.current = createRpcClient(shellHub);
 	}, []);
 
 	// The error notice goes after a minute (dismissed sooner, or replaced by the next).
@@ -376,48 +255,30 @@ function Shell() {
 		};
 	}, [errorId]);
 
-	// Apply the pane widths to wa-page's CSS vars (collapsed → 0). Clamp against the live max so a narrow viewport
-	// can't leave a pane wider than the editor. Inline `setProperty` wins over the static `.wa-shell` defaults.
+	// Apply the pane's width to wa-page's CSS var (collapsed → the rail's). Clamp against the live max so a narrow viewport
+	// can't leave it wider than the editor. Inline `setProperty` wins over the static `.wa-shell` defaults.
 	useEffect(() => {
-		const page = pageRef.current;
+		pageRef.current?.style.setProperty("--aside-width", (rhsCollapsed ? RAIL_WIDTH : Math.min(asideWidth, paneMax())) + "px");
+	}, [asideWidth, rhsCollapsed]);
 
-		if (page === null) {
-			return;
-		}
-
-		const max = paneMax();
-
-		page.style.setProperty("--menu-width", (lhsCollapsed ? RAIL_WIDTH : Math.min(navWidth, max)) + "px");
-		page.style.setProperty("--aside-width", (rhsCollapsed ? RAIL_WIDTH : Math.min(asideWidth, max)) + "px");
-	}, [navWidth, asideWidth, lhsCollapsed, rhsCollapsed]);
-
-	// Persist widths so they survive reloads (per browser; localStorage may be unavailable in private mode).
+	// Persist the width so it survives reloads (per browser; localStorage may be unavailable in private mode).
 	useEffect(() => {
 		try {
-			localStorage.setItem("shell:navWidth", String(navWidth));
 			localStorage.setItem("shell:asideWidth", String(asideWidth));
 		} catch { /* private mode / disabled */ }
-	}, [navWidth, asideWidth]);
+	}, [asideWidth]);
 
-	// Drag a pane's inner-edge grip. Pointer capture keeps the drag tracking even over the editor iframe.
-	const startResize = (side: "nav" | "aside") => (event: PointerEvent): void => {
+	// Drag the pane's inner-edge grip. Pointer capture keeps the drag tracking even over the editor iframe.
+	const startResize = (event: PointerEvent): void => {
 		event.preventDefault();
 
 		const handle = event.currentTarget as HTMLElement;
-		const min = side === "nav" ? PANE.navMin : PANE.asideMin;
 		const max = paneMax();
 
 		handle.setPointerCapture(event.pointerId);
 
 		const onMove = (move: PointerEvent): void => {
-			const raw = side === "nav" ? move.clientX : window.innerWidth - move.clientX;
-			const width = Math.max(min, Math.min(max, Math.round(raw)));
-
-			if (side === "nav") {
-				setNavWidth(width);
-			} else {
-				setAsideWidth(width);
-			}
+			setAsideWidth(Math.max(PANE.asideMin, Math.min(max, Math.round(window.innerWidth - move.clientX))));
 		};
 
 		const onUp = (up: PointerEvent): void => {
@@ -430,68 +291,18 @@ function Shell() {
 		handle.addEventListener("pointerup", onUp);
 	};
 
-	// Keyboard resize (the grip is a focusable separator): arrows nudge by 16px — nav grows rightward, aside grows
-	// leftward, mirroring the drag direction.
-	const onResizeKey = (side: "nav" | "aside") => (event: KeyboardEvent): void => {
+	// Keyboard resize (the grip is a focusable separator): arrows nudge by 16px — the pane grows leftward, as it's dragged.
+	const onResizeKey = (event: KeyboardEvent): void => {
 		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
 			return;
 		}
 
 		event.preventDefault();
 
-		const grow = event.key === "ArrowRight" ? side === "nav" : side !== "nav";
-		const min = side === "nav" ? PANE.navMin : PANE.asideMin;
+		const nudge = event.key === "ArrowLeft" ? 16 : -16;
 		const max = paneMax();
-		const clamp = (value: number): number => Math.max(min, Math.min(max, value + (grow ? 16 : -16)));
 
-		if (side === "nav") {
-			setNavWidth(clamp);
-		} else {
-			setAsideWidth(clamp);
-		}
-	};
-
-	// The run picker: as its menu opens, ask what there is to run — VS Code's tasks, through the pod (`tasks.list`: the
-	// workspace's package.json scripts and its own tasks). Picking one runs it as a task (`tasks.run`).
-	const loadRunTargets = (): void => {
-		void (async () => {
-			try {
-				const result = await rpcRef.current?.request("tasks.list", undefined, { "timeoutMs": 4000 });
-
-				setTargets(Array.isArray(result) ? result as LaunchTarget[] : []);
-			} catch {
-				setTargets([]);
-			}
-		})();
-
-		// What's already running, so a running service is offered as itself rather than as a second copy.
-		void rpcRef.current?.request("runs.list", undefined, { "timeoutMs": 4000 }).then((list) => {
-			setRuns(Array.isArray(list) ? list as RunInfo[] : []);
-		}, () => {
-			setRuns([]);
-		});
-	};
-
-	// A target's run, if it's running now (the registry titles a run as it was typed: `npm run dev`, in its directory).
-	const runOf = (target: LaunchTarget): RunInfo | undefined => runs.find((run) => run.state === "running" && run.title === target.command && run.cwd === target.cwd);
-
-	// A running service is already there: show its preview rather than start a second copy (which `vite` refuses). Any
-	// other is the pod's to run — or, running, to show its terminal; one that can't start says why in the workbench.
-	const runTarget = (target: LaunchTarget): void => {
-		const running = runOf(target);
-
-		if (running?.port !== undefined) {
-			hubRef.current?.publish("preview.open", { "port": running.port });
-		} else {
-			void rpcRef.current?.request("tasks.run", { "id": target.id }, { "timeoutMs": 10000 }).catch(() => undefined);
-		}
-	};
-
-	// Run (RUNNING.md): the file in the editor, as every way in runs it — stopping at breakpoints, its process.argv from
-	// the file's stub. It answers at its first stop: nobody waits on it here, and a run that can't start says why in the
-	// workbench (the pod shows it).
-	const runThisFile = (): void => {
-		void rpcRef.current?.request("debug.start", {}, { "timeoutMs": 24 * 60 * 60_000 }).catch(() => undefined);
+		setAsideWidth((value) => Math.max(PANE.asideMin, Math.min(max, value + nudge)));
 	};
 
 	// On load: finish a sign-in this page is the end of, and if signed in, show who as (GitHub's login, fetched live through
@@ -515,7 +326,7 @@ function Shell() {
 					span.info("signed in");
 				}
 			} catch (error) {
-				setGithubError(error instanceof Error && /access_denied/u.test(error.message) ? "Sign-in was cancelled." : "Sign-in didn't complete. Try again.");
+				setGithubError(error instanceof Error && error.message.includes("access_denied") ? "Sign-in was cancelled." : "Sign-in didn't complete. Try again.");
 				setGithubOpen(true);
 				span.error("sign-in failed", { "error": errText(error) });
 			}
@@ -537,8 +348,9 @@ function Shell() {
 
 			// Only a workspace that's no repository's clone is replaced from the address. One the workspace couldn't say
 			// (unanswered) is kept, as is another repository's clone, which asks: either may hold work not pushed anywhere.
-			void appReadyRef.current?.promise.then(async () => {
-				const asked = await rpcRef.current?.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 60_000 }).then((origin) => ({ "origin": origin as RepoBinding | null }), (error: unknown) => ({ "error": errText(error) }));
+			// (asked as the workbench answers: by then the app, which takes a load's files, listens too)
+			void (async () => {
+				const asked = await rpcRef.current?.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 120_000 }).then((origin) => ({ "origin": origin as RepoBinding | null }), (error: unknown) => ({ "error": errText(error) }));
 
 				if (asked === undefined || "error" in asked) {
 					githubLog.warn("the workspace's origin went unanswered: it's kept", asked ?? {});
@@ -564,7 +376,7 @@ function Shell() {
 				}
 
 				await loadRepo(`${wanted.owner}/${wanted.repo}`);
-			});
+			})();
 
 			try {
 				if (session.isSignedIn() && await session.apiDown()) {
@@ -798,23 +610,6 @@ function Shell() {
 		}
 	};
 
-	// Share the workspace as a Playground v2 link (playground-link.ts) on the site's root (not a repo's address): ask the
-	// app for the files and the editor in front, encode them, and copy the link. It opens here, or in the TypeScript Playground.
-	const copyShare = async (url: string): Promise<boolean> => navigator.clipboard.writeText(url).then(() => true, () => false);
-	const openShare = async (): Promise<void> => {
-		setShareOpen(true);
-		setShare(undefined);
-
-		try {
-			const workspace = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
-			const { skipped, url } = playgroundLink(site(), workspace);
-
-			setShare({ "url": url, "skipped": skipped, "copied": await copyShare(url) });
-		} catch (error) {
-			setShare({ "error": errText(error) });
-		}
-	};
-
 	// Commit the workspace's changes and push them: the workbench's git (git-service.ts `git.pull`, `git.commit` with
 	// every change, then `git.push` of the current branch, through this shell's sign-in: git-push.ts), as agents'
 	// git_pull, git_commit and git_push do and the review panel commits a part of. First the branch is brought up to
@@ -886,15 +681,6 @@ function Shell() {
 			span.end();
 			setCommitting(false);
 		}
-	};
-
-	const openProject = (id: string): void => {
-		setCurrentId(id);
-		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
-		hubRef.current?.publish("project.open", { "id": id });
-		// (a sample isn't any repository's: the workspace's git starts again, with no origin)
-		setBoundRepo(undefined);
-		showRepo(undefined);
 	};
 
 	// The Commit popover's body: what it needs first, until it has it — then the repo it pushes to, and the message.
@@ -972,7 +758,7 @@ function Shell() {
 
 	// What a reset would lose, in words: "3 uncommitted changes and 2 commits not pushed (on rehearsal/cosmetic) would be lost."
 	const lossOf = ({ changes, unpushed }: { "changes": number; "unpushed": { "branch": string; "commits": number }[] }): string => {
-		const commits = unpushed.reduce((total, { commits: count }) => total + count, 0);
+		const commits = unpushed.reduce((total, { "commits": count }) => total + count, 0);
 		const parts = [
 			...changes === 0 ? [] : [`${String(changes)} uncommitted change${changes === 1 ? "" : "s"}`],
 			...commits === 0 ? [] : [`${String(commits)} commit${commits === 1 ? "" : "s"} not pushed (on ${unpushed.map(({ branch }) => branch).join(", ")})`]
@@ -989,10 +775,10 @@ function Shell() {
 			{resetLosing === undefined
 				? <span class="wa-caption-2xs">Counting what isn't pushed…</span>
 				: resetLosing === null
-				? <span class={"wa-caption-2xs " + ghError()}>Couldn't count what isn't pushed: anything here not pushed is lost.</span>
-				: resetLosing.changes === 0 && resetLosing.unpushed.length === 0
-				? <span class="wa-caption-2xs">Everything here is committed and pushed.</span>
-				: <span class={"wa-caption-2xs " + ghError()}>{lossOf(resetLosing)}</span>}
+					? <span class={"wa-caption-2xs " + ghError()}>Couldn't count what isn't pushed: anything here not pushed is lost.</span>
+					: resetLosing.changes === 0 && resetLosing.unpushed.length === 0
+						? <span class="wa-caption-2xs">Everything here is committed and pushed.</span>
+						: <span class={"wa-caption-2xs " + ghError()}>{lossOf(resetLosing)}</span>}
 
 			<wa-checkbox size="small" checked={resetSignOut} onChange={(event: Event) => { setResetSignOut((event.target as HTMLInputElement).checked); }}>Sign out too</wa-checkbox>
 
@@ -1001,55 +787,6 @@ function Shell() {
 			</div>
 		</>
 	);
-
-	// The Share popover's body: the link being made, why it couldn't be — or the link, its size, and what it left out.
-	const shareBody = (): ComponentChildren => {
-		if (share === undefined) {
-			return <span class="wa-caption-2xs">Making a link…</span>;
-		}
-
-		if (share.error !== undefined) {
-			return <span class={"wa-caption-2xs " + ghError()}>{share.error}</span>;
-		}
-
-		return (
-			<>
-				<span class={"wa-caption-2xs " + (share.copied === true ? ghOk() : "wa-color-text-quiet")}>
-					{share.copied === true ? "Link copied." : "Copy this link."}
-
-					{" "}
-					It opens this project here, or in the TypeScript Playground.
-				</span>
-
-				<wa-input size="small" readonly value={share.url} aria-label="Share link" />
-
-				<span class="wa-caption-2xs">
-					{(share.url.length / 1024).toFixed(1)}
-
-					{" "}
-					KB
-
-					{share.url.length > 8192 && " — some apps cut links this long"}
-
-					{share.skipped.length > 0 && ` · ${share.skipped.length} binary ${share.skipped.length === 1 ? "file" : "files"} left out`}
-				</span>
-
-				<div class="wa-cluster wa-gap-xs">
-					<wa-button
-						size="small"
-						appearance="outlined"
-						onClick={() => {
-							void copyShare(share.url).then((copied) => {
-								setShare({ ...share, "copied": copied });
-							});
-						}}
-					>
-						Copy
-					</wa-button>
-				</div>
-			</>
-		);
-	};
 
 	// Loading a repo, signed in or out: signed out, only a public one.
 	const loadSection = (): ComponentChildren => (
@@ -1097,99 +834,101 @@ function Shell() {
 
 			{signedInAs !== undefined
 				? (
-					<>
-						<span class="wa-font-size-xs">
-							Signed in as
-							{" "}
+						<>
+							<span class="wa-font-size-xs">
+								Signed in as
+								{" "}
 
-							<strong>{signedInAs}</strong>
-						</span>
+								<strong>{signedInAs}</strong>
+							</span>
 
-						{githubUser !== undefined
-							? (
-								<span class="wa-caption-2xs">
-									A private repo needs the editor's GitHub App on it.
-									{" "}
-
-									<a class="wa-link wa-text-nowrap" href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
-								</span>
-							)
-							: <span class="wa-caption-2xs">Public repos load as signed out. Private repos and commits need a sign-in with GitHub.</span>}
-
-						<div class="wa-cluster wa-gap-xs">
-							<wa-button appearance="outlined" size="small" onClick={() => { void openAccount(); }}>Your account…</wa-button>
-						</div>
-
-						<wa-divider />
-
-						<span class="wa-font-weight-semibold wa-font-size-s">Where you're signed in</span>
-
-						{mySessions === undefined
-							? <span class="wa-caption-2xs">Loading…</span>
-							: mySessions.map((session) => (
-								<div class="wa-split wa-gap-xs" key={session.id}>
-									<span class="wa-stack wa-gap-0">
-										<span class="wa-font-size-xs">
-											{session.label ?? "A browser"}
-											{session.current ? " · this browser" : ""}
-										</span>
-
+							{githubUser !== undefined
+								? (
 										<span class="wa-caption-2xs">
-											last used
+											A private repo needs the editor's GitHub App on it.
 											{" "}
 
-											<wa-relative-time date={new Date(session.lastUsedAt).toISOString()} />
+											<a class="wa-link wa-text-nowrap" href={GITHUB_APP_INSTALL} target="_blank" rel="noreferrer noopener">Choose repositories →</a>
 										</span>
-									</span>
+									)
+								: <span class="wa-caption-2xs">Public repos load as signed out. Private repos and commits need a sign-in with GitHub.</span>}
 
-									{!session.current && <wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { void endOtherSession(session.id); }}>Sign out</wa-button>}
-								</div>
-							))}
+							<div class="wa-cluster wa-gap-xs">
+								<wa-button appearance="outlined" size="small" onClick={() => { void openAccount(); }}>Your account…</wa-button>
+							</div>
 
-						{githubError !== undefined && <span class={"wa-caption-2xs " + ghError()}>{githubError}</span>}
+							<wa-divider />
 
-						<div class="wa-cluster wa-gap-xs">
-							<wa-button appearance="outlined" size="small" disabled={githubBusy} onClick={() => { void signOutGithub(); }}>
-								<Icon node={LogOut} />
+							<span class="wa-font-weight-semibold wa-font-size-s">Where you're signed in</span>
 
-								{" "}
-								Sign out
-							</wa-button>
+							{mySessions === undefined
+								? <span class="wa-caption-2xs">Loading…</span>
+								: mySessions.map((session) => (
+										<div class="wa-split wa-gap-xs" key={session.id}>
+											<span class="wa-stack wa-gap-0">
+												<span class="wa-font-size-xs">
+													{session.label ?? "A browser"}
 
-							<wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { void signOutEverywhere(); }}>Sign out everywhere</wa-button>
-						</div>
+													{session.current ? " · this browser" : ""}
+												</span>
 
-						{confirmingDelete
-							? (
-								<>
-									<span class={"wa-caption-2xs " + ghError()}>{githubUser !== undefined ? "Deleting your account ends every session at once and takes away the editor's GitHub App's access. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you. Your repositories on GitHub aren't touched." : "Deleting your account ends every session at once. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you."}</span>
+												<span class="wa-caption-2xs">
+													last used
+													{" "}
 
-									<div class="wa-cluster wa-gap-xs">
-										<wa-button variant="danger" size="small" disabled={githubBusy} onClick={() => { void deleteAccount(); }}>Delete my account</wa-button>
-										<wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(false); }}>Cancel</wa-button>
-									</div>
-								</>
-							)
-							: <wa-button appearance="plain" variant="danger" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(true); }}>Delete account…</wa-button>}
-					</>
-				)
-				: signInHere && apiDown
-					? <span class="wa-caption-2xs">Signing in is down for maintenance. Everything else works as signed out, and public repos load.</span>
-					: signInHere
-					? (
-						<>
-							<span class="wa-caption-2xs">Optional: everything here works without an account. Sign in with GitHub for private repos and commits (GitHub's token stays on the editor's server: this browser never holds it), or with your email.</span>
+													<wa-relative-time date={new Date(session.lastUsedAt).toISOString()} />
+												</span>
+											</span>
 
-							{githubNotice !== undefined && <span class={"wa-caption-2xs " + ghOk()}>{githubNotice}</span>}
+											{!session.current && <wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { void endOtherSession(session.id); }}>Sign out</wa-button>}
+										</div>
+									))}
 
 							{githubError !== undefined && <span class={"wa-caption-2xs " + ghError()}>{githubError}</span>}
 
 							<div class="wa-cluster wa-gap-xs">
-								<wa-button variant="brand" size="small" disabled={githubBusy} onClick={() => { void signInGithub(); }}>{githubBusy ? "Signing in…" : "Sign in"}</wa-button>
+								<wa-button appearance="outlined" size="small" disabled={githubBusy} onClick={() => { void signOutGithub(); }}>
+									<Icon node={LogOut} />
+
+									{" "}
+									Sign out
+								</wa-button>
+
+								<wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { void signOutEverywhere(); }}>Sign out everywhere</wa-button>
 							</div>
+
+							{confirmingDelete
+								? (
+										<>
+											<span class={"wa-caption-2xs " + ghError()}>{githubUser !== undefined ? "Deleting your account ends every session at once and takes away the editor's GitHub App's access. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you. Your repositories on GitHub aren't touched." : "Deleting your account ends every session at once. It's kept 30 days, when signing in again brings it back; after that nothing we keep points at you."}</span>
+
+											<div class="wa-cluster wa-gap-xs">
+												<wa-button variant="danger" size="small" disabled={githubBusy} onClick={() => { void deleteAccount(); }}>Delete my account</wa-button>
+
+												<wa-button appearance="plain" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(false); }}>Cancel</wa-button>
+											</div>
+										</>
+									)
+								: <wa-button appearance="plain" variant="danger" size="small" disabled={githubBusy} onClick={() => { setConfirmingDelete(true); }}>Delete account…</wa-button>}
 						</>
 					)
-					: <span class="wa-caption-2xs">Signing in isn't available on this copy of the editor.</span>}
+				: signInHere && apiDown
+					? <span class="wa-caption-2xs">Signing in is down for maintenance. Everything else works as signed out, and public repos load.</span>
+					: signInHere
+						? (
+								<>
+									<span class="wa-caption-2xs">Optional: everything here works without an account. Sign in with GitHub for private repos and commits (GitHub's token stays on the editor's server: this browser never holds it), or with your email.</span>
+
+									{githubNotice !== undefined && <span class={"wa-caption-2xs " + ghOk()}>{githubNotice}</span>}
+
+									{githubError !== undefined && <span class={"wa-caption-2xs " + ghError()}>{githubError}</span>}
+
+									<div class="wa-cluster wa-gap-xs">
+										<wa-button variant="brand" size="small" disabled={githubBusy} onClick={() => { void signInGithub(); }}>{githubBusy ? "Signing in…" : "Sign in"}</wa-button>
+									</div>
+								</>
+							)
+						: <span class="wa-caption-2xs">Signing in isn't available on this copy of the editor.</span>}
 
 			<wa-divider />
 
@@ -1197,63 +936,12 @@ function Shell() {
 		</>
 	);
 
-	const shellClass = ["wa-shell", lhsCollapsed ? "lhs-collapsed" : "", rhsCollapsed ? "rhs-collapsed" : ""].filter(Boolean).join(" ");
+	const shellClass = ["wa-shell", rhsCollapsed ? "rhs-collapsed" : ""].filter(Boolean).join(" ");
 
 	return (
 		<wa-page ref={pageRef} class={shellClass} mobile-breakpoint="0" disable-navigation-toggle>
 			<div slot="header" class={"wa-cluster wa-flex-nowrap wa-gap-2xs " + topBar()}>
 				<span class="wa-font-weight-semibold wa-color-text-quiet">editor</span>
-
-				<wa-button appearance="plain" size="small" title="Toggle project panel" aria-label="Toggle project panel" onClick={() => { setLhsCollapsed((value) => !value); }}><Icon node={PanelLeft} /></wa-button>
-
-				<wa-button appearance="plain" size="small" title="Open project" aria-label="Open project"><Icon node={FolderOpen} /></wa-button>
-
-				<wa-dropdown
-					size="small"
-					placement="bottom-start"
-					onwa-show={(event: Event) => {
-						if (event.target === event.currentTarget) {
-							loadRunTargets();
-						}
-					}}
-					onwa-select={(event: CustomEvent<{ "item": HTMLElement & { "value": string } }>) => {
-						const { value } = event.detail.item;
-						const target = targets.find((each) => each.id === value);
-
-						if (target === undefined) {
-							runThisFile();
-						} else {
-							runTarget(target);
-						}
-					}}
-				>
-					<wa-button slot="trigger" appearance="plain" size="small" title="Run" aria-label="Run"><Icon node={Play} /></wa-button>
-
-					<wa-dropdown-item value="" title="Run the file in the editor">The file in the editor</wa-dropdown-item>
-
-					{targets.length === 0 ? (
-						<wa-dropdown-item disabled>No package.json scripts or tasks</wa-dropdown-item>
-					) : (["service", "task"] as const).map((lifecycle) => {
-						const group = targets.filter((target) => target.lifecycle === lifecycle);
-
-						return group.length === 0 ? null : [
-							<h3 key={lifecycle}>{lifecycle === "service" ? "Services" : "Tasks"}</h3>,
-							...group.map((target) => {
-								const running = runOf(target);
-								const port = running?.port === undefined ? "" : ` · :${running.port}`;
-								const state = running === undefined ? "" : `running${port} · `;
-
-								return (
-									<wa-dropdown-item key={target.id} value={target.id} title={`${target.command} — in ${target.cwd}`}>
-										{target.name}
-
-										<span slot="details">{state + targetKind(target)}</span>
-									</wa-dropdown-item>
-								);
-							})
-						];
-					})}
-				</wa-dropdown>
 
 				<wa-button
 					id="shell-commit"
@@ -1291,30 +979,6 @@ function Shell() {
 						<span class="wa-font-weight-semibold wa-font-size-s">Commit and push</span>
 
 						{commitBody()}
-					</div>
-				</wa-popover>
-
-				<wa-button id="shell-share" appearance="plain" size="small" title="Share as a link" aria-label="Share"><Icon node={Share2} /></wa-button>
-
-				<wa-popover
-					for="shell-share"
-					placement="bottom-start"
-					open={shareOpen}
-					onwa-show={(event: Event) => {
-						if (event.target === event.currentTarget) {
-							void openShare();
-						}
-					}}
-					onwa-hide={(event: Event) => {
-						if (event.target === event.currentTarget) {
-							setShareOpen(false);
-						}
-					}}
-				>
-					<div class={"wa-stack wa-gap-xs " + popoverBody()} role="group" aria-label="Share">
-						<span class="wa-font-weight-semibold wa-font-size-s">Share</span>
-
-						{shareBody()}
 					</div>
 				</wa-popover>
 
@@ -1371,40 +1035,6 @@ function Shell() {
 				<wa-button appearance="plain" size="small" title="Toggle history panel" aria-label="Toggle history panel" onClick={() => { setRhsCollapsed((value) => !value); }}><Icon node={PanelRight} /></wa-button>
 			</div>
 
-			<div slot="navigation" class={lhsCollapsed ? "wa-stack wa-gap-m wa-align-items-center " + railRegion() : "wa-stack wa-gap-0 " + sideCol() + " " + navPane()}>
-				{lhsCollapsed ? (
-					<RailContent items={[
-						{ "node": PanelLeft, "label": "Projects", "title": "Expand project panel", "onClick": () => { setLhsCollapsed(false); } },
-						// placeholders to preview the stacked look — settle final contents next
-						{ "node": FolderOpen, "label": "Open", "title": "Open project", "onClick": () => undefined },
-						{ "node": Play, "label": "Run", "title": "Run the file in the editor", "onClick": runThisFile }
-					]}
-					/>
-				) : (
-					<>
-						<div class={caption({ "size": "2xs", "css": { "flex": "none", "padding": "var(--wa-space-2xs) var(--wa-space-xs)" } }) + " wa-split wa-flex-nowrap"}>
-							<span>Projects</span>
-
-							<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
-						</div>
-
-						<div class={sideBody()}>
-							<Picker samples={samples} currentId={currentId} onOpen={openProject} />
-						</div>
-
-						<div
-							class={resizer() + " " + resizerRight()}
-							role="separator"
-							aria-orientation="vertical"
-							aria-label="Resize project panel"
-							tabIndex={0}
-							onPointerDown={startResize("nav")}
-							onKeyDown={onResizeKey("nav")}
-						/>
-					</>
-				)}
-			</div>
-
 			<div class={mainWrap()}>
 				<div ref={dockHostRef} class={dockHostCss()} />
 
@@ -1447,17 +1077,23 @@ function Shell() {
 						aria-orientation="vertical"
 						aria-label="Resize changes panel"
 						tabIndex={0}
-						onPointerDown={startResize("aside")}
-						onKeyDown={onResizeKey("aside")}
+						onPointerDown={startResize}
+						onKeyDown={onResizeKey}
 					/>
 				)}
 			</div>
 
 			{AccountDialog !== undefined && <AccountDialog onClose={() => { setAccountDialog(undefined); }} />}
+
 			{errorId !== undefined && (
 				<wa-callout variant="danger" size="small" class={errorNotice()}>
 					<div class="wa-stack wa-gap-2xs">
-						<span>Something went wrong, and we've been told. If you get in touch about it, quote <strong>{errorId}</strong>.</span>
+						<span>
+							Something went wrong, and we've been told. If you get in touch about it, quote
+							<strong>{errorId}</strong>
+							.
+						</span>
+
 						<wa-button size="small" appearance="plain" onClick={() => { setErrorId(undefined); }}>Dismiss</wa-button>
 					</div>
 				</wa-callout>
@@ -1466,7 +1102,7 @@ function Shell() {
 	);
 }
 
-/** Build the shell chrome, iframe the app, and wire the LHS picker over the hub. */
+/** Build the shell chrome and iframe the app, linked over the hub. */
 export function renderShell(): void {
 	// Load milestones (with main.tsx's shell/import and the app iframe's own), for load investigations.
 	performance.mark("shell/render");

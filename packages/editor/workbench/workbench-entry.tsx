@@ -13,74 +13,51 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 // (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
-import "../shared/hidden-timers";
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
+import "../shared/hidden-timers";
 // First of what runs, before anything loads Lit: Web Awesome's components here move into docked windows (theme/documents).
-import "theme/documents";
+import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 // eslint-disable-next-line perfectionist/sort-imports -- theme/documents above, first on purpose: it has to run before Lit does
 import { failureText } from "@brianjenkins94/editor-api/failures";
-import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, rpcCallSubject, serve } from "@brianjenkins94/hub";
-import { fs as workspaceStore } from "@zenfs/core";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
+import { fs as workspaceStore } from "@zenfs/core";
 import bridgeExtension from "bridge:extension";
-import capabilitiesExtension from "capabilities:extension";
-import cosmeticExtension from "cosmetic:extension";
-import cspellExtension from "cspell:extension";
 import settingsDefaults from "editor:settings-defaults";
-import eslintExtension from "eslint:extension";
-import eventSheetExtension from "event-sheet:extension";
 import historyExtension from "history:extension";
-import insightsExtension from "insights:extension";
-import marginExtension from "margin:extension";
-import notesExtension from "notes:extension";
 import { render } from "preact";
-import runningExtension from "running:extension";
 import sourceControlExtension from "source-control:extension";
 import { mirrorStyles } from "theme/sheet";
 import { followVsCodeTheme, followVsCodeThemeIn } from "theme/vscode";
 import { readVsCodeColors } from "theme/vscode-colors";
 import tsvalExtension from "tsval:extension";
-import typeQueriesExtension from "type-queries:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
-import { registerFeaturesMap } from "./features-map";
 import { installTypeAcquisition } from "./ata";
 import { startBablr } from "./bablr";
-import { installCheckpoints } from "./checkpoints";
-import { installCiStatus } from "./ci-status";
-import { installCodeProblems } from "./code-problems";
 import { installCodeReach } from "./code-reach";
-import { installCodeRefactor } from "./code-refactor";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
-import { markReady } from "./readiness";
-import { installEditHistory } from "./edit-history";
 import { installEditorState } from "./editor-state";
-import { installEvidence } from "./evidence";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import * as gitEngine from "./git-engine";
 import { installGitReview } from "./git-review";
 import { installGitService } from "./git-service";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
-import { installPaneViews } from "./pane-views";
-import { installProfileFiles } from "./profile-files";
-import { registerRuleView } from "./rule-view";
-import { installScriptRun } from "./script-run";
+import { markReady } from "./readiness";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
+import { installTestRuns } from "./test-runs";
 import { pinned } from "./versions";
 import { Workbench } from "./Workbench";
-import { installTestRuns } from "./test-runs";
-import { keepTypeScriptProjects } from "./ts-projects";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
 import { installWorkspaceTools } from "./workspace-tools";
@@ -580,6 +557,7 @@ function maybeBoot(): void {
 				publishColors = () => {
 					workbenchHub.publish("theme.colors", readVsCodeColors(workbench));
 				};
+
 				publishColors();
 			}
 
@@ -661,23 +639,10 @@ function maybeBoot(): void {
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner
 				// (worker) is shared by every terminal.
 				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
-
-				// A preview that ran slow was profiled: save it, source-mapped, for whoever reads profiles (profile-files.ts).
-				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
-				// Each run's envelope — whose, where, on what code — into .silo/runs/ as it ends, and what it observed into
-				// .silo/evidence/ (evidence.ts).
-				// The editor's BABLR, in its worker: the classifier's verdicts and the evidence's span ids queue on it (bablr.ts).
+				// The editor's BABLR, in its worker: the classifier's verdicts queue on it (bablr.ts).
 				const bablr = startBablr(workbenchHub);
 
-				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr);
-				// The pane's views (pane-views.ts): its tabs — the Margin's (extensions/margin) and each extension's — and what
-				// each draws beside the code.
-				installPaneViews(api as typeof import("vscode"));
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
-				// The Rule view: the rule editor, for whoever edits a rule (`editor.rules.edit`, rule-view.ts).
-				registerRuleView(api as typeof import("vscode"));
-				// The features map: the program as its features, a block each, sized by its code (features-map.ts).
-				registerFeaturesMap(api as typeof import("vscode"));
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// And the bridge's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
@@ -700,26 +665,10 @@ function maybeBoot(): void {
 
 				// The review: the changes as hunks, with BABLR's verdicts and the features they're in (git-review.ts).
 				installGitReview(api as typeof import("vscode"), workbenchHub, git, bablr.classify);
-				// The TypeScript server's projects told of files made or deleted on disk, which it isn't in the browser (ts-projects.ts).
-				const typescriptProjects = keepTypeScriptProjects(api as typeof import("vscode"));
-				// A change's problems against HEAD: TypeScript's (the history extension's tsserver plugin) and ESLint's (code-problems.ts).
-				installCodeProblems(api as typeof import("vscode"), workbenchHub, git, typescriptProjects);
-				// What a way in reaches: the history extension's reading of the program (code-reach.ts).
+				// What's been decided about code: the history extension's reading of the program (code-reach.ts).
 				installCodeReach(api as typeof import("vscode"), workbenchHub);
-				// References, rename, and a move with its imports: VS Code's providers, as WorkspaceEdits (code-refactor.ts).
-				installCodeRefactor(api as typeof import("vscode"), workbenchHub, typescriptProjects);
-				// Experiments that undo themselves: the working tree noted, and put back (checkpoints.ts).
-				installCheckpoints(api as typeof import("vscode"), workbenchHub, git);
-				// How a commit did in CI: its GitHub Actions runs, a job's log, through the shell's sign-in (ci-status.ts).
-				installCiStatus(workbenchHub);
-				// JavaScript for what a script is for, the workspace read-only, in the capability-gated realm (script-run.ts).
-				installScriptRun(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, bablr, nodeRunner);
-					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
-					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
-					// edit-history.ts.
-				installEditHistory(api as typeof import("vscode"), workbenchHub, bablr, paneLog);
 
 					// Editor theme follows the OS, like the shell chrome. `window.autoDetectColorScheme` isn't wired to
 					// `prefers-color-scheme` in this monaco-vscode-api build, so drive `workbench.colorTheme` ourselves.
@@ -735,7 +684,7 @@ function maybeBoot(): void {
 
 				// (VS Code has swapped its theme's style when it says so; a frame later, its colours read as the new theme's)
 				themeApi.window.onDidChangeActiveColorTheme(() => {
-					requestAnimationFrame(() => publishColors?.());
+					requestAnimationFrame(() => { publishColors?.(); });
 				});
 
 				workbenchHub.subscribe("theme.colorScheme", (data) => {
@@ -752,13 +701,10 @@ function maybeBoot(): void {
 			// and the workspace runtime the bridge exports.
 			builtIn(tsvalExtension, ExtensionHostKind.LocalProcess);
 
-			// The rest run in the web worker host, each from its folder with the files its manifest lists: eslint (real ESLint
-			// and the preset under almostnode, in its worker); capabilities (static and dynamic halves inside its tsserver
-			// plugin, which finds its engine and canary beside itself; its package worker for the baseline); history (its
-			// tsserver plugin); insights (coverage in the gutter, the metrics monitor); the Margin; the event sheet (its webview's script,
-			// its recognizer worker); running; type queries (`// ^?`); notes; Source Control (on the editor's git); cosmetic changes (BABLR's verdict on them, a file decoration); cspell (the real cspell under almostnode, in its
-			// worker). Public API only, but for what ARCHITECTURE.md lists (*Extension points* 5).
-			for (const extension of [eslintExtension, capabilitiesExtension, historyExtension, insightsExtension, marginExtension, eventSheetExtension, runningExtension, typeQueriesExtension, notesExtension, sourceControlExtension, cosmeticExtension, cspellExtension]) {
+			// The rest run in the web worker host, each from its folder with the files its manifest lists: history (its
+			// tsserver plugin) and Source Control (on the editor's git). Public API only, but for what ARCHITECTURE.md lists
+			// (*Extension points* 5).
+			for (const extension of [historyExtension, sourceControlExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -766,7 +712,7 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "margin", "running", "event-sheet", "type-queries", "notes", "source-control", "cosmetic", "cspell"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "history", "source-control"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
