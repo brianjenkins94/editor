@@ -21,6 +21,7 @@ import type { SharedWorkspace } from "../shared/playground-link";
 import type { LaunchTarget, RunInfo } from "../shared/runs";
 import type { RepoBinding } from "./github-auth";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
+import { relayLoggerToHub, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import { logger } from "@brianjenkins94/util/logger";
 import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, RotateCcw, Share2 } from "lucide";
 import { render } from "preact";
@@ -221,10 +222,10 @@ function Shell() {
 	// Share popover (the top-bar Share button): the workspace as a playground link, copied as it opens.
 	const [shareOpen, setShareOpen] = useState(false);
 	const [share, setShare] = useState<{ "url"?: string; "skipped"?: string[]; "copied"?: boolean; "error"?: string } | undefined>(undefined);
-	// Reset popover (the top-bar Reset button): what a reset would lose — the workspace's uncommitted changes, counted as
-	// it opens (null: they couldn't be) — and whether it signs out too.
+	// Reset popover (the top-bar Reset button): what a reset would lose — the workspace's uncommitted changes and the
+	// commits no remote has, counted as it opens (null: they couldn't be) — and whether it signs out too.
 	const [resetOpen, setResetOpen] = useState(false);
-	const [resetLosing, setResetLosing] = useState<number | null | undefined>(undefined);
+	const [resetLosing, setResetLosing] = useState<{ "changes": number; "unpushed": { "branch": string; "commits": number }[] } | null | undefined>(undefined);
 	const [resetSignOut, setResetSignOut] = useState(false);
 
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
@@ -285,6 +286,10 @@ function Shell() {
 		appFrame.src = location.href;
 
 		const architecture = reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
+		// …and its logs and spans (the GitHub data plane's, a repository's load, the reset's), on `$sys.log.shell`, and its
+		// uncaught errors: debug-mcp and the monitor see the shell as they see every other context.
+		relayLoggerToHub(shellHub, "shell");
+		tapConsoleAndErrors(shellHub, "shell");
 
 		hubRef.current = shellHub;
 		// The session timeline's events and every realm's uncaught errors, to the API (shell/reporting.ts).
@@ -530,15 +535,35 @@ function Shell() {
 			// GitHub popover opens over the load, to show it going and say what went wrong (it closes on success).
 			const wanted = envRepo();
 
+			// Only a workspace that's no repository's clone is replaced from the address. One the workspace couldn't say
+			// (unanswered) is kept, as is another repository's clone, which asks: either may hold work not pushed anywhere.
 			void appReadyRef.current?.promise.then(async () => {
-				const bound = await rpcRef.current?.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 60_000 }).then((origin) => origin as RepoBinding | null ?? undefined, () => undefined);
+				const asked = await rpcRef.current?.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 60_000 }).then((origin) => ({ "origin": origin as RepoBinding | null }), (error: unknown) => ({ "error": errText(error) }));
+
+				if (asked === undefined || "error" in asked) {
+					githubLog.warn("the workspace's origin went unanswered: it's kept", asked ?? {});
+
+					return;
+				}
+
+				const bound = asked.origin ?? undefined;
 
 				setBoundRepo(bound);
 
-				if (wanted !== undefined && `${bound?.owner}/${bound?.repo}`.toLowerCase() !== `${wanted.owner}/${wanted.repo}`.toLowerCase()) {
-					setGithubOpen(true);
-					await loadRepo(`${wanted.owner}/${wanted.repo}`);
+				if (wanted === undefined || `${bound?.owner}/${bound?.repo}`.toLowerCase() === `${wanted.owner}/${wanted.repo}`.toLowerCase()) {
+					return;
 				}
+
+				setGithubOpen(true);
+
+				if (bound !== undefined) {
+					setRepoInput(`${wanted.owner}/${wanted.repo}`);
+					setLoadError(`This workspace is ${bound.owner}/${bound.repo}: Load replaces it, and whatever of it isn't pushed.`);
+
+					return;
+				}
+
+				await loadRepo(`${wanted.owner}/${wanted.repo}`);
 			});
 
 			try {
@@ -936,9 +961,24 @@ function Shell() {
 		setResetOpen(true);
 		setResetLosing(undefined);
 
-		const asked = await rpcRef.current?.request("git.status", undefined, { "timeoutMs": 30_000 }).then((answer) => answer as { "files": unknown[] }, () => undefined);
+		const rpc = rpcRef.current;
+		const [status, unpushed] = await Promise.all([
+			rpc?.request("git.status", undefined, { "timeoutMs": 30_000 }).then((answer) => answer as { "files": unknown[] }, () => undefined),
+			rpc?.request("git.unpushed", undefined, { "timeoutMs": 30_000 }).then((answer) => answer as { "branch": string; "commits": number }[], () => undefined)
+		]);
 
-		setResetLosing(asked === undefined ? null : asked.files.length);
+		setResetLosing(status === undefined || unpushed === undefined ? null : { "changes": status.files.length, "unpushed": unpushed });
+	};
+
+	// What a reset would lose, in words: "3 uncommitted changes and 2 commits not pushed (on rehearsal/cosmetic) would be lost."
+	const lossOf = ({ changes, unpushed }: { "changes": number; "unpushed": { "branch": string; "commits": number }[] }): string => {
+		const commits = unpushed.reduce((total, { commits: count }) => total + count, 0);
+		const parts = [
+			...changes === 0 ? [] : [`${String(changes)} uncommitted change${changes === 1 ? "" : "s"}`],
+			...commits === 0 ? [] : [`${String(commits)} commit${commits === 1 ? "" : "s"} not pushed (on ${unpushed.map(({ branch }) => branch).join(", ")})`]
+		];
+
+		return `${parts.join(" and ")} would be lost.`;
 	};
 
 	// The Reset popover's body: what goes, what it would lose here, and the reset (shell/reset.ts, from the address).
@@ -947,12 +987,12 @@ function Shell() {
 			<span class="wa-caption-2xs">Everything this browser keeps for the editor goes — the workspace and its git, settings, caches, its service worker — and it loads again as new.</span>
 
 			{resetLosing === undefined
-				? <span class="wa-caption-2xs">Counting what isn't committed…</span>
+				? <span class="wa-caption-2xs">Counting what isn't pushed…</span>
 				: resetLosing === null
-				? <span class={"wa-caption-2xs " + ghError()}>Couldn't count what isn't committed: anything here not pushed is lost.</span>
-				: resetLosing === 0
-				? <span class="wa-caption-2xs">Nothing here is uncommitted.</span>
-				: <span class={"wa-caption-2xs " + ghError()}>{`${String(resetLosing)} uncommitted change${resetLosing === 1 ? "" : "s"} here would be lost.`}</span>}
+				? <span class={"wa-caption-2xs " + ghError()}>Couldn't count what isn't pushed: anything here not pushed is lost.</span>
+				: resetLosing.changes === 0 && resetLosing.unpushed.length === 0
+				? <span class="wa-caption-2xs">Everything here is committed and pushed.</span>
+				: <span class={"wa-caption-2xs " + ghError()}>{lossOf(resetLosing)}</span>}
 
 			<wa-checkbox size="small" checked={resetSignOut} onChange={(event: Event) => { setResetSignOut((event.target as HTMLInputElement).checked); }}>Sign out too</wa-checkbox>
 

@@ -10,16 +10,38 @@ import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import { serve } from "@brianjenkins94/hub";
 
-/** How often, and how far apart, History is asked while it hasn't read the program yet. */
-const TRIES = 10;
+/** How often, and how far apart, History is asked while it hasn't read the program yet (within decisions_for's minute). */
+const TRIES = 25;
 const TRY_MS = 2000;
 
 export function installCodeReach(vscode: typeof vscodeApi, hub: Hub): void {
 	// History's answer to `command`, asked again until it has read the program (as the project opens it says it isn't
 	// ready, and before it activates its commands aren't there).
+	// History answers from a TypeScript server's plugin, and VS Code starts TypeScript only for an open TypeScript file:
+	// with none open, one is opened (not shown) so there's a program for History to read.
+	let woken: Promise<void> | undefined;
+	const wake = async (): Promise<void> => {
+		woken ??= (async () => {
+			if (!vscode.workspace.textDocuments.some((document) => /^(?:typescript|javascript)(?:react)?$/u.test(document.languageId))) {
+				const [file] = await vscode.workspace.findFiles("**/*.{ts,tsx}", "**/node_modules/**", 1);
+
+				if (file !== undefined) {
+					await vscode.workspace.openTextDocument(file);
+				}
+			}
+		})().catch(() => { /* no TypeScript to open: History says so */ }).finally(() => {
+			woken = undefined;
+		});
+
+		return woken;
+	};
 	const asked = async (command: string, target: string, signal: AbortSignal): Promise<{ "ready"?: boolean } | undefined> => {
 		const ask = async (): Promise<{ "ready"?: boolean } | undefined> => Promise.resolve(vscode.commands.executeCommand<{ "ready"?: boolean } | undefined>(command, target)).catch(() => undefined);
 		let answer = await ask();
+
+		if (answer === undefined || answer.ready === false) {
+			await wake();
+		}
 
 		for (let tried = 1; (answer === undefined || answer.ready === false) && tried < TRIES && !signal.aborted; tried += 1) {
 			await new Promise((resolve) => {

@@ -1,4 +1,4 @@
-/** The workspace, as an agent works in it — files read, written, edited, found and searched (`files.*`, workspace-tools.ts). */
+/** The workspace, as an agent works in it — files read, written, edited, deleted, found and searched (`files.*`, workspace-tools.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -31,6 +31,19 @@ const files: ToolFamily = ({ request }) => [
 				}
 			},
 			"handler": async ({ path, content }, { signal }) => ok(request("files.write", { "path": path, "content": content }, signal))
+		})
+	},
+	{
+		"timeoutMs": 15000,
+		"tool": defineTool({
+			"name": "files_delete",
+			"config": {
+				"description": "Delete a workspace file, or a folder and what's in it, as the Explorer's Delete does (an open editor of it closes). Not `.git`: the git tools change git's own files. Returns { path, folder }.",
+				"inputSchema": {
+					"path": z.string().describe("The file or folder, relative to the workspace or absolute under it.")
+				}
+			},
+			"handler": async ({ path }, { signal }) => ok(request("files.delete", { "path": path }, signal))
 		})
 	},
 	{

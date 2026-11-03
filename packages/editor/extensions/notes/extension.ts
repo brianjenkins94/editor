@@ -58,12 +58,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	status.text = "$(pin) Place note here";
 	status.tooltip = "Attach the note you're re-placing to the selected code";
 
-	let user: Promise<string> | undefined;
-	// Who you are to git: a slug of the repo config's user (silo's userSlug), `local` until it says.
+	let user: string | undefined;
+	// Who you are to git: a slug of the repo config's user (silo's userSlug; the editor's git writes the signed-in GitHub
+	// user there), `local` until it says — read again until it does, as the sign-in may come after the first note.
 	const me = async (): Promise<string> => {
-		user ??= Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, ".git/config"))).then((bytes) => userSlug(new TextDecoder().decode(bytes)) ?? "local", () => "local");
+		user ??= await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, ".git/config"))).then((bytes) => userSlug(new TextDecoder().decode(bytes)), () => undefined);
 
-		return user;
+		return user ?? "local";
 	};
 
 	const relative = (uri: vscode.Uri): string => vscode.workspace.asRelativePath(uri, false);

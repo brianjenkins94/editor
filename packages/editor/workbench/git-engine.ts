@@ -17,7 +17,7 @@ import { KEPT, localOf } from "@brianjenkins94/editor-api/git";
 import { fs } from "@zenfs/core";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import type { HttpClient } from "isomorphic-git";
-import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
+import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, setConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
 // read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
@@ -37,6 +37,20 @@ let authorOf: () => Promise<{ "name": string; "email": string } | undefined> = (
 /** Where who a commit is by comes from (git-service.ts: the shell's signed-in GitHub user). */
 export function setAuthor(source: typeof authorOf): void {
 	authorOf = source;
+}
+
+/** Who this workspace's git says you are (`user.name`, `user.email` in its config, as `git config user.*` sets them):
+ *  what silo's records name their author by (notes, runs: userSlug), the same who as the commits'. */
+export async function recordIdentity(who: { "name": string; "email": string }): Promise<void> {
+	if (!fs.existsSync(DIR + "/.git")) {
+		return;
+	}
+
+	for (const [path, value] of [["user.name", who.name], ["user.email", who.email]] as const) {
+		if (await getConfig({ "fs": fs, "dir": DIR, "path": path }) !== value) {
+			await setConfig({ "fs": fs, "dir": DIR, "path": path, "value": value });
+		}
+	}
 }
 
 export interface GitChange { "path": string; "status": "A" | "M" | "D" }
@@ -330,7 +344,14 @@ async function committed(message: string): Promise<Committed> {
 	await stageSiloSeeds();
 	await keepExecutables();
 
-	return { "oid": await commit({ "fs": fs, "dir": DIR, "message": message, "author": await authorOf().catch(() => undefined) ?? AUTHOR }) };
+	const author = await authorOf().catch(() => undefined);
+
+	// (a clone since the sign-in brought a config that doesn't name you: it does from this commit on)
+	if (author !== undefined) {
+		await recordIdentity(author).catch(() => { /* the commit's author is what matters here */ });
+	}
+
+	return { "oid": await commit({ "fs": fs, "dir": DIR, "message": message, "author": author ?? AUTHOR }) };
 }
 
 /** Commit what's staged, and only that (`git commit`): the new commit (`Committed`). */
@@ -354,6 +375,33 @@ export async function history(depth?: number, path?: string): Promise<LogEntry[]
 /** The branches, and which one HEAD is on. */
 export async function branches(): Promise<{ "current": string | undefined; "all": string[] }> {
 	return { "current": await currentBranch({ "fs": fs, "dir": DIR }) || undefined, "all": await listBranches({ "fs": fs, "dir": DIR }) };
+}
+
+/** The commits on this workspace's branches that no remote has, by branch: what only this workspace holds (a branch
+ *  never pushed, or one ahead of its push). Counted against every remote ref the workspace knows — not fetched. */
+export async function unpushed(most = 500): Promise<{ "branch": string; "commits": number }[]> {
+	const remotes = await listBranches({ "fs": fs, "dir": DIR, "remote": "origin" }).catch(() => [] as string[]);
+	const known = new Set<string>();
+
+	for (const name of remotes.filter((each) => each !== "HEAD")) {
+		for (const entry of await log({ "fs": fs, "dir": DIR, "ref": `refs/remotes/origin/${name}`, "depth": most }).catch(() => [])) {
+			known.add(entry.oid);
+		}
+	}
+
+	const counts = [];
+
+	for (const branch of await listBranches({ "fs": fs, "dir": DIR })) {
+		const commits = (await log({ "fs": fs, "dir": DIR, "ref": branch, "depth": most }).catch(() => [])).findIndex((entry) => known.has(entry.oid));
+		// (none of its commits on a remote: all of the history the workspace has of it — a shallow clone's ends early)
+		const count = commits === -1 ? (await log({ "fs": fs, "dir": DIR, "ref": branch, "depth": most }).catch(() => [])).length : commits;
+
+		if (count > 0) {
+			counts.push({ "branch": branch, "commits": count });
+		}
+	}
+
+	return counts;
 }
 
 /** Make a branch at HEAD (without switching to it, as `git branch <name>` does). */

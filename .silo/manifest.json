@@ -39,7 +39,9 @@
     "Reset": {
       "what": "Start the editor again as new: everything this browser keeps for it deleted — the workspace and its git, settings, caches, its service worker — keeping the sign-in unless asked, from the top bar or a `?reset` address.",
       "ways": [
-        "button|Reset the editor"
+        "button|Reset the editor",
+        "hub request|git.unpushed",
+        "url parameter|?reset"
       ],
       "paths": [
         "packages/editor/shell/reset.ts"
@@ -711,6 +713,7 @@
       "what": "A note attached to a piece of code follows that code as it moves and changes; when the code is gone, the note waits in Problems to be re-placed or dismissed.",
       "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
       "ways": [
+        "agent tool|notes_add",
         "command|notes.add",
         "command|notes.confirm",
         "command|notes.dismiss",
@@ -718,6 +721,7 @@
         "command|notes.replace",
         "comment controller|notes",
         "diagnostic collection|notes",
+        "hub request|notes.add",
         "status bar item||extension.ts"
       ]
     },
@@ -766,6 +770,7 @@
       "what": "An agent reads, writes, edits, globs and greps the workspace's files, reads what the terminals printed, and checks status, diffs and commits with git: through the editor, not a shell.",
       "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
       "ways": [
+        "agent tool|files_delete",
         "agent tool|files_edit",
         "agent tool|files_glob",
         "agent tool|files_grep",
@@ -780,6 +785,7 @@
         "agent tool|git_status",
         "agent tool|terminal_output",
         "core module|installWorkspaceTools",
+        "hub request|files.delete",
         "hub request|files.edit",
         "hub request|files.glob",
         "hub request|files.grep",

@@ -156,6 +156,58 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		return { "path": relative(uri), "created": !exists, "lines": content.split("\n").length };
 	});
 
+	// A file or a folder deleted, as the Explorer's Delete does (a folder with what's in it). Not the repository's own
+	// git: `.git` is the git tools' to change.
+	serve(hub, "files.delete", async (args) => {
+		const { path } = (args ?? {}) as { "path"?: unknown };
+		const uri = uriOf(path);
+		const at = relative(uri);
+
+		if (at === "" || at === ".git" || at.startsWith(".git/")) {
+			throw new Error(`${at === "" ? "the workspace itself" : at} isn't deleted here: the git tools change git's own files`);
+		}
+
+		const stat = await vscode.workspace.fs.stat(uri).then((found) => found, () => undefined);
+
+		if (stat === undefined) {
+			throw new Error(`there's no ${at} to delete`);
+		}
+
+		await vscode.workspace.fs.delete(uri, { "recursive": true, "useTrash": false });
+
+		return { "path": at, "folder": stat.type === vscode.FileType.Directory };
+	});
+
+	// A note on code, as Add Note does from a selection (the notes extension's `notes.add`, given its text): `at` is the
+	// code it's about, as it's written in the file — found once, else it says so.
+	serve(hub, "notes.add", async (args) => {
+		const { path, at, text } = (args ?? {}) as { "path"?: unknown; "at"?: unknown; "text"?: unknown };
+		const uri = uriOf(path);
+
+		if (typeof at !== "string" || at === "" || typeof text !== "string" || text.trim() === "") {
+			throw new TypeError("notes.add takes { path, at, text }: the code the note is about, as it's written, and the note");
+		}
+
+		const document = await vscode.workspace.openTextDocument(uri);
+		const found = occurrences(document.getText(), at);
+
+		if (found.length !== 1) {
+			throw new Error(found.length === 0 ? `${relative(uri)} has no ${JSON.stringify(at.slice(0, 60))}` : `${relative(uri)} has that code ${String(found.length)} times: give more of it`);
+		}
+
+		const editor = await vscode.window.showTextDocument(document, { "preview": false });
+
+		editor.selection = new vscode.Selection(document.positionAt(found[0]), document.positionAt(found[0] + at.length));
+
+		const added = await vscode.commands.executeCommand<unknown>("notes.add", text);
+
+		if (added === undefined) {
+			throw new Error("the note wasn't added: no code there it can stand on (select a statement or an expression)");
+		}
+
+		return { "path": relative(uri), "line": document.positionAt(found[0]).line + 1 };
+	});
+
 	serve(hub, "files.edit", async (args) => {
 		const { path, old, "new": replacement, all } = (args ?? {}) as { "path"?: unknown; "old"?: unknown; "new"?: unknown; "all"?: unknown };
 		const uri = uriOf(path);

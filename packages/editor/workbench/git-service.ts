@@ -289,7 +289,16 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 	const identity = async (): Promise<{ "name": string; "email": string } | undefined> => {
 		try {
-			return await shell.request("git.identity", undefined, { "timeoutMs": 30_000 }) as { "name": string; "email": string } | null ?? undefined;
+			const who = await shell.request("git.identity", undefined, { "timeoutMs": 30_000 }) as { "name": string; "email": string } | null ?? undefined;
+
+			// …and the workspace's git says so too, for what names its author from git's config (notes, runs).
+			if (who !== undefined) {
+				await engine.recordIdentity(who).catch((error: unknown) => {
+					log.warn("couldn't write who you are to the workspace's git config", { "error": error instanceof Error ? error.message : String(error) });
+				});
+			}
+
+			return who;
 		} catch (error) {
 			log.warn("who a commit is by: unknown, so it's the placeholder's", { "error": error instanceof Error ? error.message : String(error) });
 
@@ -303,6 +312,8 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 	void identity();
 
 	// The branches; with a `name`, one made at HEAD (`git branch <name>`).
+	// The commits only this workspace holds, by branch: what a reset or a load would lose that a status doesn't show.
+	serve(hub, "git.unpushed", async () => engine.unpushed());
 	serve(hub, "git.branch", async (args) => {
 		const name = (args as { "name"?: unknown } | null)?.name;
 
@@ -333,6 +344,13 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		return owner === undefined || repo === undefined ? null : { "owner": owner, "repo": repo, "branch": (await engine.branches()).current ?? "main" };
 	});
 	const remote = remoteHttp(async (request) => await shell.request("git.remote", request, { "timeoutMs": 300_000 }) as RemoteResponse);
+	// A remote's refusal says why in its answer's body (the proxy's `{ "error": … }`, GitHub's "Permission … denied"):
+	// isomorphic-git keeps it on the error and says only "HTTP Error: 403".
+	const said = (error: unknown): never => {
+		const body = (error as { "data"?: { "response"?: unknown } } | null)?.data?.response;
+
+		throw typeof body === "string" && body.trim() !== "" ? new Error(`${(error as Error).message}: ${body.trim().slice(0, 300)}`) : error;
+	};
 
 	// A branch (the current one, by default) brought up to the repository's, when that's a fast-forward: what GitHub has
 	// that this workspace hasn't, its files written over a working tree whose changes are elsewhere (git-engine.ts `pull`).
@@ -344,7 +362,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 			throw new Error("this workspace wasn't loaded from a GitHub repository, so there's nothing to bring it up to");
 		}
 
-		const pulled = await engine.pull(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined);
+		const pulled = await engine.pull(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined).catch(said);
 
 		if (pulled.outcome === "fast-forwarded") {
 			hub.publish("git.changed");
@@ -364,7 +382,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 			throw new Error("this workspace wasn't loaded from a GitHub repository, so there's nowhere to push it");
 		}
 
-		const pushed = await engine.push(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined, force === true);
+		const pushed = await engine.push(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined, force === true).catch(said);
 
 		log.info("git push", { "ref": pushed.ref, "ok": pushed.ok });
 

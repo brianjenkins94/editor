@@ -284,12 +284,13 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		}
 	};
 
-	let user: Promise<string> | undefined;
-	// Who you are to git, read once: the repo's own config names you (a slug of your email); `local` until it does.
+	let user: string | undefined;
+	// Who you are to git: the repo's own config names you (a slug of your email; the editor's git writes the signed-in
+	// GitHub user there); `local` until it does — read again until it does.
 	const currentUser = async (): Promise<string> => {
-		user ??= read(".git/config").then((config) => (config === undefined ? undefined : userSlug(new TextDecoder().decode(config))) ?? "local");
+		user ??= await read(".git/config").then((config) => (config === undefined ? undefined : userSlug(new TextDecoder().decode(config))));
 
-		return user;
+		return user ?? "local";
 	};
 
 	// One write at a time: each appends to the file the last one wrote.
