@@ -74,7 +74,7 @@
           "env": { "GH_TOKEN": "${{ github.token }}" }
         },
         {
-          "run": "pnpm --filter ./packages/editor exec node --test --test-concurrency=1 --test-global-setup=test/architecture-harness.mjs ${{ matrix.files }}",
+          "run": "pnpm --filter ./packages/editor exec node --import tsx --test --test-concurrency=1 --test-global-setup=test/architecture-harness.mjs ${{ matrix.files }}",
           "env": {
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
             "PERF_BASELINE": "/tmp/performance-baseline/performance.json"
