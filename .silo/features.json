@@ -219,6 +219,9 @@
     "what": "Commit every change in the workspace with a message and push it to the repo it was loaded from, on the branch it's on, from the top bar.",
     "ways": [
       "button|Commit"
+    ],
+    "paths": [
+      "packages/editor/shell/commit.tsx"
     ]
   },
   "Coverage in the gutter": {
@@ -775,7 +778,8 @@
     ],
     "paths": [
       "packages/editor/shared/git-remote.ts",
-      "packages/editor/shell/git-push.ts"
+      "packages/editor/shell/git-push.ts",
+      "packages/editor/shell/push.ts"
     ]
   },
   "Real effects, decided per call": {
@@ -822,7 +826,8 @@
     "paths": [
       "packages/editor/shell/address.ts",
       "packages/editor/shell/git-clone.ts",
-      "packages/editor/shell/github.ts"
+      "packages/editor/shell/github.ts",
+      "packages/editor/shell/repo-load.tsx"
     ]
   },
   "Reset": {
@@ -836,6 +841,7 @@
       "url parameter|?reset"
     ],
     "paths": [
+      "packages/editor/shell/reset-popover.tsx",
       "packages/editor/shell/reset.ts"
     ]
   },
@@ -1020,7 +1026,9 @@
     "paths": [
       "packages/editor/shell/account-dialog.tsx",
       "packages/editor/shell/github-auth.ts",
-      "packages/editor/shell/session.ts"
+      "packages/editor/shell/github-control.tsx",
+      "packages/editor/shell/session.ts",
+      "packages/editor/shell/sign-in.tsx"
     ]
   },
   "Source Control for git": {
@@ -1098,6 +1106,17 @@
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "paths": [
       "packages/editor/extensions/tsval/node-test.js"
+    ]
+  },
+  "The shell": {
+    "status": "active",
+    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "The top window: the page, the editor in its iframe, the shell hub linked to the app, and where each of the shell's features is started and its control placed (shell/feature.ts).",
+    "paths": [
+      "packages/editor/shell/feature.ts",
+      "packages/editor/shell/icon.tsx",
+      "packages/editor/shell/shell.tsx"
     ]
   },
   "The workspace terminal": {

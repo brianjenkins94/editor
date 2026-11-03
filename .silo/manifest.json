@@ -253,7 +253,8 @@
         "packages/admin/src/errors.tsx",
         "packages/api/migrations/0016_errors.sql",
         "packages/api/migrations/0017_editor_errors.sql",
-        "packages/api/src/errors.ts"
+        "packages/api/src/errors.ts",
+        "packages/editor/shell/error-notice.tsx"
       ]
     },
     "Email, inbox and the Mail page": {
