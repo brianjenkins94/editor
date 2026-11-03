@@ -182,6 +182,19 @@ How it's kept:
        take a warning in Problems until it parses. `full-editor`'s packages/editor, tests, demo and dist aside: 317 of
        317 files, 62,734 lines, in 17 minutes (about 16 ms a line); main's: 192 of 192, 28,428 lines. Found: after a
        reload, a restored editor tab can say its file wasn't found (package.json, seen each reload today).
+     - *A sample of its comments, sorted* (2026-11-03, read at `.refs/full-editor/` with files_read) — 128 comments in 9
+       files, core and removed, by the realms' shares of the scope's 4,351 comment starts (extensions' insights hover,
+       notes, margin runs, the bridge's capability stops; workbench's checkpoints, git review, readiness; shared's
+       architecture; the shell's git panel): **68 dropped** (53%), **50 notes** (39%), **8 notes citing a doc** (6%), **2
+       kept** (2%: the JSX pragma, an `eslint-disable` with its reason). What sorts which way: the dropped are nearly all
+       JSDoc on a declaration saying what its name and body do (a constant's, a function's, a field's); the notes are
+       whys and gotchas (why one at a time, why a write is serialized, what a race would miss), a contract with another
+       file (who produces or reads it: `runtime-fs.ts`, `history.features`), and history (what a timing or a structure
+       came from). Every file's header is a note, and 6 of 9 cite a doc — a header's "what" is its feature's ledger
+       `what`, its "why" a note. Found on the way: 2 comments stale against their code (shared/architecture.ts's header,
+       "unless already probed", which the code doesn't do; the git panel's `git-panel.css` after the move to Stitches); a
+       cite of a queue entry by number (checkpoints.ts' "NEXT.md item 2"), which drifts as items move; and a JSDoc
+       block on nothing (two in a row before `renderGitPanel`).
    - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
      or kept, each "stays because" reason checked again.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved
