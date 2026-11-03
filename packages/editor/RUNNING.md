@@ -245,8 +245,9 @@ Zapier's filters, rows of *target / operator / argument* combined *all* or *any*
 a rule is `{ when, then }`. The targets, operators, argument types and actions are a **catalog** (lib
 util/silo/policy.ts): adding a seam is adding catalog entries, not a form. A rule is applied now (*Just this once*) or
 saved (*Save as rule*), the same two buttons wherever the editor opens; saved, it goes to the shared contract
-(`.silo/policy.json`) or mine (`.silo/policy/<you>.json`). The one editor is core's (workbench/rule-editor.ts, vanilla
-DOM: the workbench realm loads no Web Awesome, and a webview can't paint here), and it knows no targets.
+(`.silo/policy.json`) or mine (`.silo/policy/<you>.json`). The one editor was core's (vanilla
+DOM: the workbench realm loads no Web Awesome, and a webview can't paint here), and it knew no targets; the rewrite's
+reduction took it out with the rules, until they come back (the `full-editor` tag has it).
 
 **Stored as rows, compiled to JSON Schema** (decided 2026-10-06). Rows, ui-predicate's shape, because they round-trip
 with the editor exactly and keep what was meant (*matches* `/workspace/**` stays a glob); a hand-written schema can use

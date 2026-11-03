@@ -439,7 +439,7 @@ reasons:
 | Automator | here |
 |---|---|
 | The cards, top to bottom | A function's statements, from its BABLR tree, each with a durable identity (*Durable annotations on spans*) |
-| A card's options | A call's arguments; the rule editor already draws an input from a schema (rule-editor.ts) |
+| A card's options | A call's arguments; the full editor's rule editor drew an input from a schema |
 | What flows between cards | The types a run observes at each range |
 | *Results* under a card | The Margin's live values |
 | Step, Stop, Run | The tsval debugger — and back, which Automator can't |
