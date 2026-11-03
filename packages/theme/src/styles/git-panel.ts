@@ -63,27 +63,6 @@ export const gitPanelStyles = stylesheet({
 	".gp-file:hover .gp-discard, .gp-discard.armed": {
 		"visibility": "visible"
 	},
-	// "Your edits" — per-file chunk timeline (Automerge edit-bursts, node-grouped). Hovering a chunk spotlights its
-	// range in the open diff (setDiffHighlight), in the same colour.
-	".gp-chunks": {
-		"padding": "var(--wa-space-3xs) var(--wa-space-s) var(--wa-space-xs) var(--wa-space-xl)",
-		"background": "var(--wa-color-surface-lowered)"
-	},
-	".gp-chunk, .gp-chunk-info": {
-		"padding": "var(--wa-space-3xs) var(--wa-space-2xs)"
-	},
-	".gp-chunk": {
-		"cursor": "pointer",
-		"fontVariantNumeric": "tabular-nums"
-	},
-	".gp-chunk:hover": {
-		"background": "var(--wa-color-warning-fill-quiet)"
-	},
-	".gp-chunk-label": {
-		"flex": "1 1 0",
-		"minWidth": "0",
-		"fontFamily": "var(--wa-font-family-code)"
-	},
 	// BABLR verdict banner — sticky at the top of the diff, in the variant (wa-neutral / wa-warning / wa-danger) of
 	// whether the change moves the meaning.
 	".sxs-wrap": {
