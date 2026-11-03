@@ -167,7 +167,7 @@ How it's kept:
      (notes.add, "Your edits", Share's workspace.files, BABLR's annotations). 45 features are tombstoned in the ledger;
      the 10 more the core keeps are declared there; `silo check` agrees. The core boots, loads this repository and runs
      its tests in the editor (git's, reset's, the workspace's: 20 of 20); the editor's unit tests pass in Node (94 of 94).
-     And the shell split: shell.tsx is its core (the page, the dock, the hub, the theme, the review panel; 1,111 lines to
+     And the shell split: shell.tsx is its core (the page, the hub, the theme, the review panel; 1,111 lines to
      307), and each other part of the top window a feature module started and placed from one list (shell/feature.ts:
      sign-in, repo load, the GitHub popover, Commit, Reset, the push's serves, error reports). And previews out: the node
      worker (the in-browser dev server), the preview taps, the service worker's preview routing and gate, the runner's
@@ -178,10 +178,10 @@ How it's kept:
      Then more cut, the same day: BABLR (its last job the review's cosmetic verdicts, whose feature was already out;
      git_review's verdicts and owners with it), docking (the editor's iframe fills the main region; VS Code's new windows
      are real ones), error reports and the session timeline (the API keeps its side, for the deployed full editor), the
-     shell's placeholder buttons, Explore Orderings, Playwright tests in the debugger (nothing answered `playwright.run`
-     once previews went; packages/playwright with it), and the architecture model's and view's previews, node worker,
+     shell's placeholder buttons, Explore Orderings, the debugger's browser tests (nothing drove a preview's page once
+     previews went; their locator engine's package with them), and the architecture model's and view's previews, node worker,
      ESLint and provoke (71 subject families nothing sent). The core's tests: 4 new (history-ledger, tarballs, runs,
-     shell-feature), and 16 of the core's features name theirs in the ledger. Realms and performance pass (8 of 8).
+     shell-feature), below. Realms and performance pass (8 of 8).
      Left, in order:
      - *Kept, a decision rather than a cut:* extensions by URL (`?extension=`, `extensions.json`) and the extension
        template (contrib/) — editor-contrib's site is the editor with its extension added, and contrib.yml syncs
@@ -192,9 +192,15 @@ How it's kept:
        own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
      - *Docs:* ARCHITECTURE.md, RUNNING.md and RUNTIME-EVIDENCE.md describe the full editor still, but where `silo
        check` caught a removed feature named.
-     - *Then:* tests for the core's other 16 features; `EDITOR_DEPLOYS` set to `off` (production keeps the full
-       editor) and the branch landed on main.
-     Found while reducing: the editor's runner can't run the theme's budget test (`Unsupported encoding: latin1`) or a
+     - *The core's tests:* begun 2026-11-02 — the ledger declares each core feature's tests (`tests`, which `silo check`
+       holds to the files): 16 of the 29 have them, four of those new (history-ledger: decisions and drift in Problems;
+       tarballs; runs; shell-feature). The unit suite passes in Node. Without a test yet: the agent's view of the editor
+       and its workspace tools, capability stops, Commit and Push to GitHub, file search, the review panel, the static
+       host's service worker, sign-in, Source Control, tests for agents and tests run in the debugger, the theme following
+       the system.
+     - *Then:* `EDITOR_DEPLOYS` set to `off` (production keeps the full editor) and the branch landed on main.
+     Found while reducing: the editor's runner has no `globalThis.crypto` (runs.test.mjs fails there, passes in Node);
+     it can't run the theme's budget test (`Unsupported encoding: latin1`) or a
      test that hooks `vscode` (`registerHooks` isn't in almostnode's `node:module`); `git_checkout` can't switch to a
      branch the shallow clone hasn't fetched (`git.show` fetches one; checkout should too); `git_pull` reports
      "diverged" when main moved under a branch (a merge in the editor would settle it); the editor's GitHub Apps
