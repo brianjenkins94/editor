@@ -7,7 +7,8 @@
  *   — or `"into": "margin"` to add to the editor's Margin rather than have a tab of your own.
  * - Provide it with the command `<id>.paneView`: the editor runs it with a file's URI (a string) whenever the view is
  *   shown, the file is, or the file changes, and draws the `PaneContent` it answers (or nothing, for `undefined`).
- * - Tell the editor it changed with `refreshPane(vscode.commands, id, uri?)` — every file's, or one's.
+ * - Tell the editor it changed with `refreshPane(vscode.commands, id, uri?)` — every file's, or one's. Tell it as you
+ *   activate too, if you may have something for a file already shown: it asked before your command was there.
  *
  * Each item says where it is (`at`), and the editor works out the lines that is now — so it follows its code through
  * edits and reformats: a line range in the file as it is, a span reference (`./annotations`'s `refer`), or an offset

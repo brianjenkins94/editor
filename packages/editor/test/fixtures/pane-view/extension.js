@@ -35,4 +35,8 @@ exports.activate = (context) => {
 			await vscode.commands.executeCommand("editor.pane.refresh", "probeView");
 		})
 	);
+
+	// (up after a file was shown: the pane asked before this answered, so it's told there's something now)
+	void vscode.commands.executeCommand("editor.pane.refresh", "probeInto");
+	void vscode.commands.executeCommand("editor.pane.refresh", "probeView");
 };
