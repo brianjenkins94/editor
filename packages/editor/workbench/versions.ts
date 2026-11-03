@@ -23,6 +23,7 @@ import { failureText } from "@brianjenkins94/editor-api/failures";
 import { keptAt } from "@brianjenkins94/editor-api/git";
 import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
+import { markReady } from "./readiness";
 
 /** The youngest a version may be, in days. */
 export const MIN_AGE_DAYS = 7;
@@ -367,7 +368,10 @@ export function watchVersions(vscode: typeof vscodeApi): vscodeApi.Disposable {
 
 	const listeners = [watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed)];
 
-	void syncVersions(vscode);
+	// (the first sync done, resolved or not, a run can pin what it installs: readiness.ts' `versions`)
+	void syncVersions(vscode).then(() => {
+		markReady("versions");
+	});
 
 	return { "dispose": () => {
 		for (const listener of [...listeners, watcher]) {

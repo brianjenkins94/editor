@@ -12,8 +12,8 @@
  *   call the policy leaves undecided) isn't left waiting on a person who isn't watching: one `approved` names (its
  *   key, `runs_tests:<scope>`) is allowed, this once; the first that isn't ends the run there, and the run answers with
  *   its question (`ask`) — which runs_tests puts to the person through debug-mcp (BERNARD, JUDICIAL, then them), and
- *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace and the
- *   debugger), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
+ *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace, the debugger
+ *   and the packages' versions), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
  *   nothing for STALL_MS — no debug session, no output, no question, no word it's computing (the run contract's `busy`)
  *   — is stuck: it's ended, and says where (`stalled`).
  *
@@ -295,9 +295,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		const { signal } = batch.controller;
 
 		// (the editor up first: a run started before the debugger can take it waits out its timeout, saying nothing)
-		batch.now = { "doing": "waiting for the editor to be up (its workspace and debugger)", "since": performance.now() };
+		batch.now = { "doing": "waiting for the editor to be up (its workspace, its debugger and its packages' versions)", "since": performance.now() };
 
-		const waiting = await waitFor(["workspace", "debugger"], READY_MS, signal);
+		const waiting = await waitFor(["workspace", "debugger", "versions"], READY_MS, signal);
 
 		if (waiting.length > 0) {
 			throw new Error(`the editor is still starting — after ${String(READY_MS / 1000)} s, waiting on ${waiting.join(" and ")} (readiness.ts)`);
