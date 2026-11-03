@@ -258,7 +258,6 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "debug.sessions", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "debug.start", "from": ["root", "shell"], "to": ["bridge"] },
 	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["bridge"] },
-	{ "pattern": "debug.explore", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "debug.session.*.state", "from": ["root", "workbench"], "to": ["bridge"] },
 	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "margin.state", "from": ["root"], "to": ["bridge"] },

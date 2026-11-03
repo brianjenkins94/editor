@@ -1,7 +1,7 @@
 {
   "name": "tsval",
   "displayName": "tsval",
-  "description": "The stepping debugger — a program run by tsval's interpreter in a worker: breakpoints, steps back as well as forward, the margin's values, capability stops, Explore Orderings, a deterministic event loop (Skip Waits). An extension of the editor like any debugger's: the run contract (@brianjenkins94/editor-api) is how it tells the editor what a run did, and the workspace runtime — the bridge's export — is how its worker reads the workspace and answers the preview.",
+  "description": "The stepping debugger — a program run by tsval's interpreter in a worker: breakpoints, steps back as well as forward, the margin's values, capability stops, a deterministic event loop (Skip Waits). An extension of the editor like any debugger's: the run contract (@brianjenkins94/editor-api) is how it tells the editor what a run did, and the workspace runtime — the bridge's export — is how its worker reads the workspace and answers the preview.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
@@ -18,12 +18,6 @@
   ],
   "contributes": {
     "commands": [
-      {
-        "command": "tsval.exploreOrderings",
-        "title": "Explore Orderings",
-        "category": "Debug",
-        "icon": "$(type-hierarchy)"
-      },
       {
         "command": "tsval.skipWaits",
         "title": "Skip Waits",
@@ -50,13 +44,6 @@
           "command": "tsval.waitRealTime",
           "when": "debugType == tsval && tsval.skipWaits",
           "group": "navigation@10"
-        }
-      ],
-      "editor/title": [
-        {
-          "command": "tsval.exploreOrderings",
-          "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/",
-          "group": "1_run@1"
         }
       ]
     },

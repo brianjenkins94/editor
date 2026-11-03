@@ -16,12 +16,11 @@ import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 
 import type { Span } from "@brianjenkins94/util/logger";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, Control, CoverageReport, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
-import { loadEffectivePolicy } from "@brianjenkins94/editor-api/policy";
 import { logger } from "@brianjenkins94/util/logger";
-import { EMPTY_POLICY, given as givenBy, placesOf } from "@brianjenkins94/util/silo/policy";
+import { EMPTY_POLICY, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
@@ -59,7 +58,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private replay: (Replay & { "source": string }) | undefined;
 	/** Where it was started and with what environment — a terminal's (`cwd`, `env`); none, the workspace and nothing. */
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
-	/** Where the event loop starts — given by a launch that runs one ordering again (exploreProgram's), else fresh. */
+	/** Where the event loop starts — given by a launch (its clock, its seed, the choices to make), else fresh. */
 	private eventLoop: LoopStart | undefined;
 	private lines: number[] = [];
 	private snapshot: Snapshot | undefined;
@@ -707,8 +706,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.tell("idle", {});
 				break;
 
-			// (an explore's answer: exploreProgram's worker sends it, a session's doesn't)
-			case "explored":
 			default:
 				break;
 		}
@@ -794,11 +791,6 @@ function loopStartOf(value: unknown): LoopStart | undefined {
 	return typeof now === "number" && typeof seed === "number" ? { "now": now, "seed": seed, ...Array.isArray(schedule) ? { "schedule": schedule.map(Number) } : {} } : undefined;
 }
 
-/**
- * Every ordering of `program`'s events (tsval's explore, in a debug worker of its own): with the stand-ins and the rules
- * a debug run has — the arguments a rule gives its process.argv too — each way its host calls' answers, and its timers,
- * can come; the distinct outcomes, each with a schedule to debug it by (a launch's `eventLoop`).
- */
 /** A debug worker: started, given its link into the editor's runtime (the workspace runtime — its servers answer the
  *  preview through it, its log and spans are the editor's) — for debug session `session`, when it runs one — then sent
  *  control messages; its events go to `onEvent`, a failure to load or an uncaught error to `onError` (with whether it had
@@ -837,89 +829,8 @@ function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onE
 	};
 }
 
-export async function exploreProgram(runtime: WorkspaceRuntime, program: string, maxRuns = 100): Promise<Explored> {
-	const uri = vscode.Uri.file(program);
-	const source = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-	// (the policy a launch is given as `__policy` — this runs outside a session, so it reads it as the enforcer does)
-	const policy = await loadEffectivePolicy().catch(() => EMPTY_POLICY);
-	const mocked = givenBy(policy, { "program": vscode.workspace.asRelativePath(uri, false) }, "process.argv")?.values.find((each): each is string[] => Array.isArray(each));
-	let failed: ((reason: Error) => void) | undefined;
-	let resolveExplored: ((explored: Explored) => void) | undefined;
-	const explored = new Promise<Explored>((resolve, reject) => {
-		resolveExplored = resolve;
-		failed = reject;
-	});
-	const worker = startWorker(runtime, undefined, (event) => {
-		if (event.type === "explored") {
-			resolveExplored?.(event.explored);
-		}
-	}, (message) => {
-		failed?.(new Error(`the debug worker failed: ${message}`));
-	});
-
-	try {
-		worker.send({ "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns, ...worker.buffer === undefined ? {} : { "workspace": worker.buffer } });
-
-		return await Promise.race([
-			explored,
-			new Promise<never>((_, reject) => {
-				setTimeout(() => {
-					reject(new Error("exploring took over 2 minutes"));
-				}, 120_000);
-			})
-		]);
-	} finally {
-		worker.close();
-	}
-}
-
-/** One outcome as the Explore Orderings list shows it: what it ends with, how many runs, the events chosen along it. */
-function orderingItem(outcome: Explored["outcomes"][number], index: number): vscode.QuickPickItem & { "index": number } {
-	const last = outcome.output.at(-1);
-
-	return {
-		"index": index,
-		"label": outcome.crash === undefined ? `$(output) ${last ?? "(printed nothing)"}` : `$(error) crashed: ${outcome.crash}`,
-		"description": `${outcome.output.length} line${outcome.output.length === 1 ? "" : "s"} · ${outcome.runs} run${outcome.runs === 1 ? "" : "s"}`,
-		"detail": outcome.path.length === 0 ? "no choice to make" : outcome.path.join("  →  ")
-	};
-}
-
 export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: WorkspaceRuntime): void {
 	context.subscriptions.push(
-		// Explore Orderings (tsval's explore): every way the file's async results and timers can come, run; the distinct
-		// endings listed — a race is more than one — and the one picked debugged, run exactly that way.
-		vscode.commands.registerCommand("tsval.exploreOrderings", async (target?: vscode.Uri) => {
-			const uri = target instanceof vscode.Uri ? target : vscode.window.activeTextEditor?.document.uri;
-
-			if (uri === undefined) {
-				return;
-			}
-
-			const name = uri.path.split("/").pop();
-			const explored = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Notification, "title": `Exploring the orderings of ${name}…` }, () => exploreProgram(runtime, uri.path));
-			const runs = `${explored.runs} run${explored.runs === 1 ? "" : "s"}${explored.complete ? "" : ", cut short"}`;
-
-			if (explored.outcomes.length === 1) {
-				void vscode.window.showInformationMessage(`No race in ${name}: every ordering ends the same way (${runs}).`);
-
-				return;
-			}
-
-			const picked = await vscode.window.showQuickPick(explored.outcomes.map(orderingItem), { "title": `${name}: ${explored.outcomes.length} ways it can end (${runs}) — pick one to debug it`, "matchOnDetail": true });
-
-			if (picked !== undefined) {
-				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index].schedule } });
-			}
-		}),
-		// The same, as data (the bridge's `debug.explore`, for an agent): the distinct outcomes, each with its schedule.
-		vscode.commands.registerCommand("tsval.explore", async (program: unknown, maxRuns?: unknown) => {
-			if (typeof program !== "string") {
-				throw new TypeError("tsval.explore: a program to explore");
-			}
-
-			return exploreProgram(runtime, program, typeof maxRuns === "number" ? maxRuns : undefined);
-		}),
 		// Skip Waits: a tsval session's timers fire without waiting their real delay (the event loop's order unchanged) —
 		// and back. The debug toolbar shows whichever applies.
 		...(["fast", "real"] as const).map((pace) => vscode.commands.registerCommand(pace === "fast" ? "tsval.skipWaits" : "tsval.waitRealTime", async () => {

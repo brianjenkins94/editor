@@ -25,9 +25,8 @@ import type { Told, Traced } from "@brianjenkins94/editor-api/values";
 import type { EscapeEvent, HostGuard, ImpureKind, LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
-import type { Outcome } from "@brianjenkins94/playwright";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, Control, CoverageReport, Crash, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
@@ -38,8 +37,7 @@ import { revive } from "@brianjenkins94/editor-api/recorded";
 import { connectRuntime, layered } from "@brianjenkins94/editor-api/runtime";
 
 import { LiveRecord } from "@brianjenkins94/editor-api/values";
-import { expect as playwrightExpect, Page } from "@brianjenkins94/playwright";
-import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
+import { createVM, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
 import { covers, settledReach } from "@brianjenkins94/util/silo/evidence";
 import { givenResult, packageDisposition, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
@@ -48,7 +46,6 @@ import { capabilityBreakLines, classifyCall, shouldBreak } from "./capability-ca
 import { replayGuard, replayProgram } from "./replay-run";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 import nodeTestSource from "./node-test.js?raw";
-import playwrightTestSource from "./playwright-test.js?raw";
 
 // This worker's link into the editor's runtime (editor-api's workspace runtime), the port the adapter hands over first
 // thing: a server the program starts answers the preview through it, and its log and spans — a step's, its uncaught
@@ -988,33 +985,9 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
  *  as the program's code — a test's awaits on the run's event loop — and nothing tells it as one of the program's files
  *  (its coverage, values and evidence aren't the program's). */
 const NODE_TEST = "/__editor__/node-test.js";
-/** Where `@playwright/test` is served from (playwright-test.js), as NODE_TEST is: Playwright's test API over node:test. */
-const PLAYWRIGHT_TEST = "/__editor__/playwright-test.js";
 /** The editor's modules a program imports as its own code, by the specifier it imports, and their sources. */
-const EDITOR_MODULES = new Map([["node:test", NODE_TEST], ["@playwright/test", PLAYWRIGHT_TEST]]);
-const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource], [PLAYWRIGHT_TEST, playwrightTestSource]]);
-
-/** playwright-test.js's host half (`__editorPlaywright`): a page per test, driving the preview you have open through
- *  the shell (editor-api's `playwright`), and expect — packages/playwright's, run here, not stepped. */
-const editorPlaywright = {
-	"page": () => {
-		const call = async (name: "run" | "goto" | "url" | "title", ...args: unknown[]): Promise<unknown> => {
-			if (editorLink === undefined) {
-				throw new Error("no editor to drive a preview in");
-			}
-
-			return editorLink.playwright({ "call": name, "args": args });
-		};
-
-		return new Page({
-			"run": async (op) => call("run", op) as Promise<Outcome>,
-			"goto": async (url) => { await call("goto", url); },
-			"url": async () => call("url") as Promise<string>,
-			"title": async () => call("title") as Promise<string>
-		});
-	},
-	"expect": playwrightExpect
-};
+const EDITOR_MODULES = new Map([["node:test", NODE_TEST]]);
+const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource]]);
 
 /** The tests a test file's run ran, as each ended (node-test.js tells each start and end). */
 let testsRan: TestReport[] = [];
@@ -1146,7 +1119,7 @@ function programModules(loaded: Runtime): ModuleLoader {
 	const vfs = loaded.getVFS();
 
 	return {
-		// (`node:test` is node-test.js, and `@playwright/test` playwright-test.js, run as the program's own code: EDITOR_MODULES)
+		// (`node:test` is node-test.js, run as the program's own code: EDITOR_MODULES)
 		"resolve": (specifier, fromDir) => (EDITOR_MODULES.has(specifier) ? { "kind": "program", "filename": EDITOR_MODULES.get(specifier) } : loaded.resolve(specifier, fromDir)),
 		"require": (specifier, fromDir) => loaded.require(specifier, fromDir, "program"),
 		"source": (filename) => EDITOR_SOURCES.get(filename) ?? vfs.readFileSync(filename, "utf8"),
@@ -1903,62 +1876,6 @@ function asString(value: unknown): string {
 }
 
 /** The program's console: what it logs goes to the Debug Console (warn/error as stderr), and nothing else happens. */
-/**
- * Every ordering of the program's events (tsval's explore): each run fresh, with the stand-ins a debug run has — so
- * every host call answers at once, and which answer comes first, or whether one comes before a timer, is the choice —
- * no breakpoints, no stops. Each distinct ending: what it printed (a crash too — a throw, or a rejection nothing
- * handled), a schedule that gets there, and the events chosen along it.
- */
-async function exploreOrderings(message: Extract<Control, { "type": "explore" }>): Promise<Explored> {
-	({ policy } = message);
-	const loaded = await runtimeReady(message.workspace);
-
-	const found = await explore(async (schedule) => {
-		const output: string[] = [];
-		const surface = capabilitySurface(message.fileName, message.args ?? []);
-
-		// Each run from scratch: its own modules (the program's evaluated again), its own stand-ins.
-		loaded.clearCache();
-		programBuiltins = surface.modules;
-		programFunctions = functionsIn([surface.modules, surface.globals]);
-		const write = (...args: unknown[]): void => {
-			output.push(args.map(formatLogArg).join(" "));
-		};
-
-		const console = Object.fromEntries(["log", "info", "debug", "dir", "warn", "error", "trace"].map((name) => [name, write]));
-		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...nodeGlobals, ...surface.globals, "console": console }, "modules": programModules(loaded), "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" }, "asyncContext": asyncContext, "sharedGlobals": runGlobal?.own });
-
-		evaluating = vm;
-		let crash: string | undefined;
-		const unhandled = (event: PromiseRejectionEvent): void => {
-			crash ??= event.reason instanceof Error ? event.reason.message : String(event.reason);
-			event.preventDefault();
-		};
-
-		globalThis.addEventListener("unhandledrejection", unhandled);
-
-		try {
-			await runToEnd(vm);
-		} catch (error) {
-			crash = error instanceof Error ? error.message : String(error);
-		} finally {
-			// A rejection nothing handled is told a turn later.
-			await new Promise((resolve) => {
-				setTimeout(resolve, 0);
-			});
-			globalThis.removeEventListener("unhandledrejection", unhandled);
-		}
-
-		return { "outcome": { "output": output, ...crash === undefined ? {} : { "crash": crash } }, "choices": vm.choices };
-	}, { "maxRuns": message.maxRuns ?? 100 });
-
-	return {
-		"runs": found.runs,
-		"complete": found.complete,
-		"eventLoop": message.eventLoop,
-		"outcomes": found.outcomes.map(({ outcome, schedule, choices, runs }) => ({ ...outcome, "schedule": schedule, "path": choices.map((choice) => choice.candidates[choice.picked].label), "runs": runs }))
-	};
-}
 
 function guestConsole(): Record<string, (...args: unknown[]) => void> {
 	// (Not a probe's: it didn't run.)
@@ -2698,7 +2615,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// tsval's event loop (steppedAsync with timers, a virtual clock and a seeded random): async code and timers run
 	// on the stack the debugger steps — its breakpoints, capability stops, rules — and the same way every time, so a
 	// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again; a
-	// launch can give one (an ordering explore found: its clock, seed and schedule).
+	// launch can give one (its clock, seed and schedule).
 	// A server it starts keeps it alive: out of work, it idles, serving.
 	liveRun = message.live === true;
 	recordedResults = liveRun && message.recorded !== undefined ? message.recorded : {};
@@ -2741,7 +2658,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	testsDone = false;
 	functionsRan.clear();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": runGlobal?.own, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "escapes": escapeSeen, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": runGlobal?.own, "globals": { ...nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 
 	evaluating = loaded.vm;
 
@@ -2915,12 +2832,6 @@ globalThis.addEventListener("message", (event: MessageEvent<ToWorker>): void => 
 	const { trace } = event.data;
 
 	switch (message.type) {
-		case "explore":
-			void exploreOrderings(message).then((explored) => {
-				post({ "type": "explored", "explored": explored });
-			});
-			break;
-
 		case "launch": {
 			launch(message, trace);
 			break;

@@ -283,6 +283,7 @@
       "packages/editor/shell/window.ts",
       "packages/theme/src/styles/dock.ts"
     ],
+    "in": "3f3d8152",
     "restore": "from the full-editor tag: shell-dock.ts made the shell's main region a dockview layout, and workbench-entry.tsx's openAuxiliaryWindow asked it for a window"
   },
   "Dormant features marked in History": {
@@ -334,6 +335,7 @@
       "packages/editor/shell/error-notice.tsx",
       "packages/editor/shell/reporting.ts"
     ],
+    "in": "3f3d8152",
     "restore": "from the full-editor tag: the shell's errorReports feature (error-notice.tsx), session.ts's postEvents and reportError, and the session.event publishes in main.tsx, repo-load.tsx, runs.ts and workbench-entry.tsx"
   },
   "Event Sheet": {
@@ -366,14 +368,15 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Explore orderings": {
-    "status": "active",
-    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
     "what": "Runs a program under every ordering of its events and shows the different outcomes, so bugs that depend on order turn up.",
     "ways": [
       "command|tsval.explore",
       "command|tsval.exploreOrderings"
-    ]
+    ],
+    "restore": "from the full-editor tag: debug-adapter.ts's exploreProgram and its two commands, debug-worker.ts's exploreOrderings (tsval's explore, still in packages/tsval)"
   },
   "Feature ledger drift in Problems": {
     "status": "active",
@@ -672,15 +675,16 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Playwright tests in the debugger": {
-    "status": "active",
-    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*); and nothing answered `playwright.run` once previews went",
     "since": "2026-11-02",
     "what": "A Playwright test file (`@playwright/test`) runs in the debugger against the preview you have open: its locators, actions and expect are the editor's own Playwright (packages/playwright), each op run on the preview's page, and its tests told and traced as node:test's are.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "paths": [
       "packages/editor/extensions/tsval/playwright-test.js",
       "packages/playwright"
-    ]
+    ],
+    "restore": "from the full-editor tag: packages/playwright, tsval's playwright-test.js and its host half in debug-worker.ts, editor-api's RuntimeConnection.playwright — with previews, which served it"
   },
   "Preview CPU profiles": {
     "status": "removed",
