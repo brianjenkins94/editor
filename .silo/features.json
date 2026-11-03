@@ -160,6 +160,7 @@
     ],
     "paths": [
       "packages/editor/extensions/bridge/capability-stops.ts",
+      "packages/editor/extensions/tsval/adapter/stops.ts",
       "packages/editor/extensions/tsval/worker/stops.ts"
     ]
   },

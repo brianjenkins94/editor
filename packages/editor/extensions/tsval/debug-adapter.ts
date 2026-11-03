@@ -19,6 +19,7 @@ import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { logger } from "@brianjenkins94/util/logger";
 import { EMPTY_POLICY } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
+import { askEvent, decideControl } from "./adapter/stops";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -36,7 +37,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private state: DebugState = "starting";
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
 	private ended = false;
-	/** What the capability stop it's at asks (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*), until the run resumes. */
+	/** What the capability stop it's at asks (RUNNING.md, *Capability stops*), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
 	/** Breakpoint lines by source path — VS Code sends them per file, and tsval runs one program. */
 	private readonly breakpointLines = new Map<string, number[]>();
@@ -192,13 +193,13 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			return;
 		}
 
-		const { verdict, value, policy, decided } = args as unknown as DecideRequest;
+		const answer = args as unknown as DecideRequest;
 
-		if (policy !== undefined) {
-			this.policy = policy;
+		if (answer.policy !== undefined) {
+			this.policy = answer.policy;
 		}
 
-		this.control({ "type": "decide", ...policy === undefined ? {} : { "policy": policy }, "deny": verdict === "deny", "skip": verdict === "skip", ...verdict === "give" ? { "give": value ?? null } : {}, ...decided === undefined ? {} : { "decided": decided } });
+		this.control(decideControl(answer));
 		this.respond(request);
 		this.goOn("continue");
 	}
@@ -570,10 +571,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		// A capability stop asks on its line (the run contract's `ask`: the margin shows it — capability-stops.ts) — in
 		// the file it's in.
 		if (message.ask !== undefined) {
-			const { file, source, ...ask } = message.ask;
-			const text = file === undefined ? this.source : source;
-
-			this.tell("ask", { ...ask, "file": file ?? this.program, ...text === undefined ? {} : { "source": text } });
+			this.tell("ask", askEvent(message.ask, this.program, this.source));
 		}
 
 		this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
