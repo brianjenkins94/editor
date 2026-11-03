@@ -21,6 +21,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchitectureStore, Gauge } from "@brianjenkins94/observability";
 import { longFrameGauge, memoryGauge, reportMetrics, spanMetrics } from "@brianjenkins94/observability";
+import { fsGauge } from "./fs-boundaries";
 
 /** zen-fs SingleBuffer's (version 2's) superblock, little-endian: magic (u32 at 4), version (u16 at 8), block_size (u32 at
  *  20), total_bytes (u64 at 24), state_offset (u32 at 48). Its state: generation (u64 at 8), then two commits of 60 bytes
@@ -174,6 +175,10 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 	if (workspaceBuffer !== undefined) {
 		metrics.gauge("workspace", () => workspaceFill(workspaceBuffer));
 	}
+
+	// The filesystems' boundaries, counted: calls, time, distinct paths and bytes, by boundary, operation and caller
+	// (fs-boundaries.ts).
+	metrics.gauge("fs", fsGauge);
 
 	return () => {
 		untap();

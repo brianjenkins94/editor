@@ -11,8 +11,12 @@ import type * as vscodeApi from "vscode";
 import type { WorkspaceFs } from "./workspace-fs";
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { serve } from "@brianjenkins94/hub";
-import { fs as workspaceStore } from "@zenfs/core";
+import { fs as store } from "@zenfs/core";
+import { callerFs } from "../shared/fs-caller";
 import * as gitEngine from "./git-engine";
+
+/** The workspace's store as a project is written into it: its calls the project's, in the store's counts (fs-caller.ts). */
+const workspaceStore = callerFs(store, "project");
 
 /** A project to open: its files (text or bytes), the editors to open, and whether it replaces what's there. */
 export interface Project { "files"?: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[]; "openEditors"?: string[]; "replace"?: boolean }
@@ -36,6 +40,7 @@ const SCAFFOLDING = new Set(["editor-ambient.d.ts", ".silo", "node_modules", ".g
 // Keep OVERRIDABLE_DEFAULTS in sync with workspace-fs.ts.
 const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
 const ESLINT_CONFIGS = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"];
+
 export const OVERRIDABLE_DEFAULTS = new Set([...FALLTHROUGH_DEFAULTS, ...ESLINT_CONFIGS, ".gitignore"]);
 
 /** Delete every workspace entry except the editor scaffolding — the "workspace = the repo" reset before a load. */
@@ -170,7 +175,7 @@ export function followProjectSwitches(hub: Hub, open: (project: Project) => Prom
 	let projectTimer: ReturnType<typeof setTimeout> | undefined;
 
 	hub.subscribe("workbench.openProject", (data) => {
-		pendingProject = data as Project;
+		pendingProject = data;
 
 		clearTimeout(projectTimer);
 		projectTimer = setTimeout(() => {

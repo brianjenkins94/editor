@@ -21,6 +21,7 @@ import {
 	FileSystemProviderCapabilities,
 	FileType
 } from "@brianjenkins94/monaco-vscode-api/main";
+import { timeCall } from "../shared/fs-boundaries";
 import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
 
 /** unpkg `?meta`: the old listing (`type: "directory"`, its immediate `files`), or the current one — `{ prefix, files }`
@@ -193,7 +194,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		});
 	};
 
-	return {
+	const provider: IFileSystemProviderWithFileReadWriteCapability = {
 		"capabilities":
 			FileSystemProviderCapabilities.FileReadWrite
 			| FileSystemProviderCapabilities.PathCaseSensitive
@@ -302,4 +303,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		"delete": () => Promise.reject(readOnly()),
 		"rename": () => Promise.reject(readOnly())
 	};
+
+	// (each read counted at the boundary: VS Code's file service into node_modules, by operation, with its path —
+	// fs-boundaries.ts, the metrics plane's `fs`)
+	for (const method of ["stat", "readFile", "readdir"] as const) {
+		const original = provider[method].bind(provider) as (resource: { "path": string }) => unknown;
+
+		(provider as unknown as Record<string, unknown>)[method] = (resource: { "path": string }): unknown => timeCall("node_modules", method, "vscode", resource.path, () => original(resource));
+	}
+
+	return provider;
 }

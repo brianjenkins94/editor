@@ -12,6 +12,8 @@
  * (size 0) in zen-fs — while a read's access-time touch stays quiet.
  */
 
+import { countCall, timeCall } from "./fs-boundaries";
+
 /** Hub subject carrying `WorkspaceChange[]` batches. */
 export const WORKSPACE_CHANGED = "workspace.changed";
 
@@ -90,7 +92,14 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 			const flushed = [...batch].map(([path, type]) => ({ "path": path, "type": type }));
 
 			batch = new Map();
-			onChanges(flushed);
+			// (each batch counted, with its paths: the metrics plane's `fs`, fs-boundaries.ts — the time what hears it takes)
+			timeCall("changes", "batch", "watcher", undefined, () => {
+				onChanges(flushed);
+			});
+
+			for (const { path } of flushed) {
+				countCall("changes", "path", "watcher", 0, path);
+			}
 		}, delayMs);
 	};
 

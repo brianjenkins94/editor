@@ -11,13 +11,17 @@
  * which holds the sign-in (shell/git-push.ts).
  * Who a commit is by is the caller's too (`setAuthor`): the signed-in GitHub user, else a placeholder.
  */
+import type { HttpClient } from "isomorphic-git";
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
 import { KEPT, localOf } from "@brianjenkins94/editor-api/git";
-import { fs } from "@zenfs/core";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
-import type { HttpClient } from "isomorphic-git";
-import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, setConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
+import { fs as zenfs } from "@zenfs/core";
+import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, remove, resetIndex, resolveRef, setConfig, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
+import { callerFs } from "../shared/fs-caller";
+
+/** The workspace's store as git reaches it: each of isomorphic-git's calls git's, in the store's counts (fs-caller.ts). */
+const fs = callerFs(zenfs, "git");
 
 // isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
 // read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
@@ -176,12 +180,12 @@ function readingIgnoresOnce(): typeof fs {
 					seen.set(key, method.call(target, path, ...rest));
 				}
 
-				return seen.get(key)!;
+				return seen.get(key);
 			};
 		}
 	});
 
-	return { ...fs, "promises": promises } as typeof fs;
+	return { ...fs, "promises": promises };
 }
 
 type StatusRow = Awaited<ReturnType<typeof statusMatrix>>[number];

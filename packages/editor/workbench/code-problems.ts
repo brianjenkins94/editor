@@ -143,9 +143,11 @@ async function eslintProblems(vscode: typeof vscodeApi, heads: Map<GitFileChange
 
 export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: GitReader, log: Logger): void {
 	serve(hub, "code.problems", async (args) => {
-		const { paths, depth, limit } = (args ?? {}) as { "paths"?: unknown; "depth"?: unknown; "limit"?: unknown };
+		const { paths, depth, limit, whole } = (args ?? {}) as { "paths"?: unknown; "depth"?: unknown; "limit"?: unknown; "whole"?: unknown };
 		const only = Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "").replace(/\/$/u, "")) : undefined;
-		const changes = (await git.status({ "whole": true })).files.filter((change) => CODE.test(change.path) && (only === undefined || only.some((path) => change.path === path || change.path.startsWith(path + "/"))));
+		// (a walk of the whole tree, unless asked for only what changed since the last — the review panel's, asking as the
+		// changes settle: a whole walk of this repository is ~1.5 s of the page's thread)
+		const changes = (await git.status({ "whole": whole !== false })).files.filter((change) => CODE.test(change.path) && (only === undefined || only.some((path) => change.path === path || change.path.startsWith(path + "/"))));
 		const heads = new Map<GitFileChange, string | null>();
 
 		for (const change of changes) {

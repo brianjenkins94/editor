@@ -32,6 +32,8 @@ import { configure, defaultContext, fs, InMemory, resolveMountConfig, SingleBuff
 import { IndexedDB } from "@zenfs/dom";
 
 import { observeStores, ZENFS_NODE } from "../shared/architecture-zenfs";
+import { countCall, timeCall } from "../shared/fs-boundaries";
+import { fsCaller } from "../shared/fs-caller";
 import { watchWorkspaceStore, WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
 
@@ -302,7 +304,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		(each as { "attributes"?: Map<string, unknown> } | undefined)?.attributes?.set("no_atime", undefined);
 	}
 
-	observeStores(sink, store, { "store": localStore, "at": LOCAL_DIR }, buffer !== undefined, () => caller);
+	// (and whoever names itself to the store: fs-caller.ts — git, by its own fs)
+	observeStores(sink, store, { "store": localStore, "at": LOCAL_DIR }, buffer !== undefined, () => caller ?? fsCaller());
 
 	// Paths seeded read-only (managed configs like tsconfig.json, the baked type surface, ambient files). The
 	// snapshot carries the `readonly` flag; we enforce it here — boot's own seed marks them read-only too, but this
@@ -367,6 +370,12 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		}
 
 		const batch = [...dirty];
+		const started = performance.now();
+		// (the write-back crosses into IndexedDB: its batch's paths, the files it put and their bytes — the transaction
+		// itself commits after, off this thread's clock)
+		const span = log.span("editor.workbench.workspace-fs.flush", { "count": batch.length });
+		let written = 0;
+		let bytes = 0;
 
 		dirty.clear();
 		caller = "persist";
@@ -378,8 +387,11 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 				if (fs.existsSync(path) && !linked(path)) {
 					for (const file of filesUnder(path)) {
 						const contents = fs.readFileSync(file);
+						const encoded = typeof contents === "string" ? new TextEncoder().encode(contents) : contents;
 
-						objects.put(typeof contents === "string" ? new TextEncoder().encode(contents) : contents, file);
+						objects.put(encoded, file);
+						written += 1;
+						bytes += encoded.byteLength;
 					}
 				} else {
 					objects.delete(IDBKeyRange.bound(path + "/", path + "/\uFFFF"));
@@ -397,6 +409,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			log.warn("workspace persistence failed", { "error": String(error) }); // best-effort: the store still has it
 		} finally {
 			caller = undefined;
+			countCall("indexeddb", "flush", "persist", performance.now() - started, undefined, bytes);
+			span.end({ "files": written, "bytes": bytes });
 		}
 	};
 
@@ -445,7 +459,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	const handle: WorkspaceFs = {
 		"reads": 0,
 		"writes": 0,
-		"has": (path) => fs.existsSync(path),
+		// (asked for every file type acquisition might fetch: counted as its own caller)
+		"has": as("has", (path: string) => fs.existsSync(path)),
 		"isReadonly": (path) => readonlyPaths.has(path),
 		"buffer": buffer,
 		"announce": (resources) => {
@@ -570,8 +585,12 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 	// Priority 2 — above boot's in-memory seed (1) and the CDN node_modules overlay (0). Reads for a path zen-fs
 	// holds are served here; genuine misses (a CDN dep) fall through to the lower overlays.
+	// (each call counted at the boundary: VS Code's file service into the workspace, by operation, with its path —
+	// fs-boundaries.ts, the metrics plane's `fs`)
 	for (const method of ["stat", "readFile", "readdir", "writeFile", "mkdir", "delete", "rename"] as const) {
-		(provider as unknown as Record<string, unknown>)[method] = as("vscode", provider[method].bind(provider) as (...args: unknown[]) => unknown);
+		const original = as("vscode", provider[method].bind(provider) as (...args: unknown[]) => unknown);
+
+		(provider as unknown as Record<string, unknown>)[method] = (...args: unknown[]): unknown => timeCall("provider", method, "vscode", (args[0] as { "path"?: string } | undefined)?.path, () => original(...args));
 	}
 
 	registerFileSystemOverlay(2, provider);

@@ -197,10 +197,13 @@
       "packages/editor/shared/architecture-zenfs.ts",
       "packages/editor/shared/architecture.ts",
       "packages/editor/shared/editor-metrics.ts",
+      "packages/editor/shared/fs-boundaries.ts",
+      "packages/editor/shared/fs-caller.ts",
       "packages/editor/workbench/architecture-store.ts"
     ],
     "tests": [
       "packages/editor/test/editor-metrics.test.mjs",
+      "packages/editor/test/fs-boundaries.test.mjs",
       "packages/editor/test/performance.mjs",
       "packages/editor/test/workbench.mjs"
     ]

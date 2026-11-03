@@ -597,7 +597,17 @@ workspace provider and the node_modules provider, zen-fs (its operations timed, 
 lookups), the IndexedDB write-back, the change stream, isomorphic-git's reads, the terminal's fs, runtime-fs, and
 almostnode's. Each with its caller, operation, duration, bytes and parent span, so one call can be followed down through
 the layers. Aggregates are always on (per source and name, as span metrics are); single spans are kept on demand, as
-`editor_trace` keeps VS Code's log. The test it passes: the questions of 2026-10-30 and 31 (calls per path, who walks
+`editor_trace` keeps VS Code's log.
+
+Built so far (2026-11-03): every call at the workbench's boundaries is counted by boundary, operation and caller —
+calls, time, distinct paths, bytes — as the metrics plane's `fs` gauge (shared/fs-boundaries.ts): VS Code's file
+service into the workspace provider (`provider`) and the node_modules one (`node_modules`), every zen-fs store operation
+timed (`zenfs`, `zenfs-local`), the write-back (`indexeddb`, and a span per flush) and the change stream (`changes`);
+git's status walk is a span. Who asked is named by whoever calls the store (shared/fs-caller.ts): the provider
+(`vscode`), the boot (`seed`, `restore`), the write-back (`persist`), type acquisition's probes (`has`), npm's links
+(`install`), a project's writes (`project`), the terminal, and git — isomorphic-git through an fs whose promise calls
+are answered by their synchronous twins, since zen-fs's await before reaching the store, past where a name holds. A
+call no one named is sampled (one in 200, its stack's function names: `zenfs-unnamed`); after git's, none were left. The test it passes: the questions of 2026-10-30 and 31 (calls per path, who walks
 the tree, what the write-back costs) answered from `metrics_query` and `logs_query` alone. The core holds to it; the
 other realms' boundaries (the workers, BABLR, TypeScript's servers) are held to it as their features come back.
 

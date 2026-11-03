@@ -17,7 +17,11 @@
  */
 import type { FileContent, FsStat, IFileSystem, MkdirOptions, RmOptions } from "just-bash/browser";
 
-import { fs as zenfs } from "@zenfs/core";
+import { fs as store } from "@zenfs/core";
+import { callerFs } from "../../shared/fs-caller";
+
+/** The workspace's store as the terminal reaches it past VS Code: its calls the terminal's, in the store's counts. */
+const zenfs = callerFs(store, "terminal");
 
 /** just-bash's `ReadFileOptions` isn't re-exported from its `/browser` entry, so mirror the shape we use. */
 interface ReadOptions { "encoding"?: string | null }

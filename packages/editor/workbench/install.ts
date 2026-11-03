@@ -15,9 +15,13 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Resolved } from "./versions";
-import { fs } from "@zenfs/core";
+import { fs as store } from "@zenfs/core";
+import { callerFs } from "../shared/fs-caller";
 import { tarball } from "./tarballs";
 import { installsLocally } from "./versions";
+
+/** The workspace's store as npm's links are made in it: its calls the install's, in the store's counts (fs-caller.ts). */
+const fs = callerFs(store, "install");
 
 /** What a package.json says, of what installing reads. */
 interface Manifest { "version"?: string; "dependencies"?: Record<string, string>; "peerDependencies"?: Record<string, string>; "optionalDependencies"?: Record<string, string> }

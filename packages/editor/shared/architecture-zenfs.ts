@@ -7,6 +7,7 @@
  */
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { FileSystem } from "@zenfs/core";
+import { countCall } from "./fs-boundaries";
 
 export const ZENFS_NODE = "zenfs";
 
@@ -37,6 +38,19 @@ const OPERATIONS: Record<string, string> = {
 };
 
 const OBSERVED = Symbol.for("architecture.zenfs.observed");
+
+/** One in this many calls nobody named is sampled for who made it. */
+const UNNAMED_SAMPLE = 200;
+
+let unnamed = 0;
+
+/** Who a stack's call is from: the function names of its first frames past this observer (`a<b<c`), as a bundle has
+ *  them — one file for zen-fs and its callers alike, so the names tell them apart. */
+function callerFrame(stack: string | undefined): string {
+	const names = (stack ?? "").split("\n").slice(1).map((line) => /at (?:async )?([\w$.<>]+) /u.exec(line)?.[1] ?? "anonymous").filter((name) => name !== "observed" && name !== "Object.observed");
+
+	return names.slice(0, 8).join("<").replaceAll(".", "_");
+}
 
 /** The operations on a file's content: what a store is made of (a directory's listing or a stat isn't). */
 const CONTENT = new Set(["read", "write", "create", "unlink", "rename"]);
@@ -113,8 +127,12 @@ export function observeZenfs(sink: ArchSink, store: object, options: ZenfsObserv
 	target[OBSERVED] = true;
 	let depth = 0;
 	const wrap = (original: (...parameters: unknown[]) => unknown, operation: string) => function observed(this: unknown, ...args: unknown[]): unknown {
-		if (depth === 0) {
-			const caller = options.caller === undefined ? undefined : (options.caller() ?? options.unattributed ?? "direct");
+		const outermost = depth === 0;
+		const started = outermost ? performance.now() : 0;
+		const who = outermost && options.caller !== undefined ? options.caller() ?? options.unattributed ?? "direct" : "direct";
+
+		if (outermost) {
+			const caller = options.caller === undefined ? undefined : who;
 			const label = caller === undefined ? operation : caller + " · " + operation;
 			const shape = typeof args[0] === "string" && CONTENT.has(operation) ? storeShape((options.mountedAt === undefined ? "" : options.mountedAt + "/") + args[0]) : undefined;
 
@@ -134,6 +152,18 @@ export function observeZenfs(sink: ArchSink, store: object, options: ZenfsObserv
 			return original.apply(this, args);
 		} finally {
 			depth -= 1;
+
+			// (timed too, by who asked: the metrics plane's `fs`, fs-boundaries.ts — an async twin's to its return, where
+			// its synchronous part ends: what it holds the thread for)
+			if (outermost) {
+				countCall(options.mountedAt === undefined ? "zenfs" : "zenfs-local", operation, who, performance.now() - started, typeof args[0] === "string" ? args[0] : undefined, bytesOf(operation, args));
+
+				// (a call nobody named, sampled for who made it: the first frame of its stack outside zen-fs and this
+				// counting — `zenfs-unnamed.<op>.<frame>`, one in UNNAMED_SAMPLE)
+				if (who === "direct" && (unnamed += 1) % UNNAMED_SAMPLE === 0) {
+					countCall("zenfs-unnamed", operation, callerFrame(new Error("sample").stack), 0);
+				}
+			}
 		}
 	};
 

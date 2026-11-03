@@ -54,10 +54,11 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 	// (engine.status); undefined, a walk of the whole tree (the first, or after a change that didn't say where).
 	let changedSince: Set<string> | undefined;
 
-	const walk = async (whole: boolean): Promise<{ "files": GitFileChange[]; "head"?: string }> => {
+	const walk = async (whole: boolean): Promise<{ "files": GitFileChange[]; "head"?: string }> => log.span("editor.workbench.git-service.walk", { "whole": whole }, async (span) => {
 		const changed = whole || changedSince === undefined ? undefined : [...changedSince];
 
 		changedSince = new Set();
+		span.info("walking", { "count": changed?.length ?? -1 });
 
 		const current = await engine.status(changed);
 		const byPath = new Map<string, GitFileChange>();
@@ -84,8 +85,10 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 		const head = await engine.headCommit();
 
+		span.end({ "count": byPath.size });
+
 		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)), ...head === undefined ? {} : { "head": head } };
-	};
+	});
 
 	// One walk for askers that overlap: the Source Control view and the review panel each ask as the working tree
 	// changes, and a walk is a lookup of every file in zen-fs. A walk that began after the last change answers whoever

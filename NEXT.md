@@ -145,6 +145,14 @@ How it's kept:
    - **Visibility first**, so the rewrite is measured from its start: a span at every filesystem boundary, with its
      caller, duration, bytes and parent (*Visibility*). Done when the 2026-10-30/31 load questions are answered from
      `metrics_query` and `logs_query` alone. It serves item 1's load cost too, so it can go ahead of the rest.
+     Begun 2026-11-03: the workbench's boundaries counted as the metrics plane's `fs` (ARCHITECTURE.md, *Visibility*,
+     *Built so far*), every zen-fs call by a named caller. A reload of this repository's workspace, from it alone: VS
+     Code's provider 2.8 `stat`s and 3 `readdir`s per path (2.2 s in `readdir`), zen-fs 7.5 `stat`s per path under them;
+     git the most, 77,779 `stat`s for 3,561 paths (22 a path, 4.5 s) — a third of it the review panel's change problems,
+     each a whole-tree walk (~1.5 s), until the panel asked for only what changed (git's `stat`s 77,779 → 29,927); a
+     write-back 4 ms for 317 KB. Left: the bridge's runtime-fs is still a span per call (a hot path: counted instead),
+     the realms beyond the workbench (the debug and ESLint workers' stores, almostnode's) count but don't report, a
+     single call's span on demand, and VS Code's own callers named apart (all `vscode` now).
      Before it, so the spans CLAUDE.md asks for (*Spans*) count (a throwing span and hub requests: done 2026-11-02):
      - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
        and this repository's spans take it already; the editor's lint holds them once lib publishes util.

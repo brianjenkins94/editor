@@ -62,7 +62,9 @@ export function useChangeProblems(hub: Hub): Map<string, FileProblems> {
 			try {
 				// (sent once something serves it: a request before then isn't delivered when it does, and would wait out its
 				// timeout — the shell starts before the workbench's services)
-				const { added, cleared } = await rpc.request("code.problems", {}, { "timeoutMs": 300_000, "waitForResponderMs": 120_000 }) as { "added": Problem[]; "cleared": Problem[] };
+				// (`whole: false`: the changes since the last walk, as git's service keeps them — not a walk of the whole tree
+				// each time the changes settle)
+				const { added, cleared } = await rpc.request("code.problems", { "whole": false }, { "timeoutMs": 300_000, "waitForResponderMs": 120_000 }) as { "added": Problem[]; "cleared": Problem[] };
 
 				if (!gone) {
 					setProblems(byFile(added, cleared));
