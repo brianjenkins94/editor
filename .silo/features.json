@@ -267,8 +267,8 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Docking editors into windows": {
-    "status": "active",
-    "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
     "what": "Move a VS Code editor into its own window docked around the editor, and show a docked window (such as a preview) as an editor tab.",
     "ways": [
@@ -278,8 +278,12 @@
       "hub subscription|dock.closeWindow"
     ],
     "paths": [
-      "packages/editor/shared/dock-host.ts"
-    ]
+      "packages/editor/shared/dock-host.ts",
+      "packages/editor/shell/shell-dock.ts",
+      "packages/editor/shell/window.ts",
+      "packages/theme/src/styles/dock.ts"
+    ],
+    "restore": "from the full-editor tag: shell-dock.ts made the shell's main region a dockview layout, and workbench-entry.tsx's openAuxiliaryWindow asked it for a window"
   },
   "Dormant features marked in History": {
     "status": "removed",
@@ -316,6 +320,21 @@
     ],
     "in": "e16b2b75",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Error reports from the editor": {
+    "status": "removed",
+    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
+    "since": "2026-11-02",
+    "what": "Every realm's uncaught errors, and a signed-in session's timeline (repo loaded, commands run, panes shown, runs), sent to the API from the shell; an error reported shows its id, to quote.",
+    "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
+    "ways": [
+      "hub subscription|session.event"
+    ],
+    "paths": [
+      "packages/editor/shell/error-notice.tsx",
+      "packages/editor/shell/reporting.ts"
+    ],
+    "restore": "from the full-editor tag: the shell's errorReports feature (error-notice.tsx), session.ts's postEvents and reportError, and the session.event publishes in main.tsx, repo-load.tsx, runs.ts and workbench-entry.tsx"
   },
   "Event Sheet": {
     "status": "removed",
@@ -898,8 +917,7 @@
       "button|Close diff",
       "button|Collapse changes panel",
       "button|Discard changes",
-      "button|History",
-      "button|Toggle history panel",
+      "button|Toggle changes panel",
       "hub request|git.commit",
       "hub request|git.discard",
       "hub request|git.file",

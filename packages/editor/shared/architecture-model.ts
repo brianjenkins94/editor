@@ -171,7 +171,6 @@ export const subjects: SubjectFamily[] = [
 	// ── the shell ⇄ the app and the workbench ──
 	// What the session timeline and error reports need (packages/api/README.md O6): the root's collected uncaught
 	// errors, the workbench's commands, panes and runs, to the shell, which holds the sign-in that sends them.
-	{ "pattern": "session.event", "from": ["root", "workbench"], "to": ["shell"] },
 	{ "pattern": "project.>", "from": ["shell"], "to": ["root"] },
 	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"] },
 	{ "pattern": "workbench.init", "from": ["workbench"], "to": ["root"] },
@@ -216,9 +215,6 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "runs.begin", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "theme.colors", "from": ["workbench"], "to": ["shell"] },
-	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"] },
-	{ "pattern": "dock.closeWindow", "from": ["workbench"], "to": ["shell"] },
-	{ "pattern": "dock.hostEditor", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "dock.closeEditor", "from": ["shell"], "to": ["workbench"] },
 	// ── previews ──
 	{ "pattern": "preview.start", "from": ["root", "workbench"], "to": ["node"] },

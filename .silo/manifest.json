@@ -246,15 +246,11 @@
     "Errors with quotable ids": {
       "what": "Every uncaught error, the API's and the editor's alike, gets an id the person is shown to quote; errors are grouped, and the admin app shows each occurrence with a source-mapped stack and, for a signed-in session, what happened just before.",
       "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
-      "ways": [
-        "hub subscription|session.event"
-      ],
       "paths": [
         "packages/admin/src/errors.tsx",
         "packages/api/migrations/0016_errors.sql",
         "packages/api/migrations/0017_editor_errors.sql",
-        "packages/api/src/errors.ts",
-        "packages/editor/shell/error-notice.tsx"
+        "packages/api/src/errors.ts"
       ]
     },
     "Email, inbox and the Mail page": {

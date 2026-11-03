@@ -1,7 +1,5 @@
 import type { Plugin, RollupOutput } from "vite";
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
 import * as path from "node:path";
 import * as url from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -206,28 +204,8 @@ function historyTsPlugin(): Plugin {
 /** The host site's plugins — shared by the host BUILD (hostBuild) and the DEV server (dev.ts): cross-origin
  *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
  *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
-/** `editor:release`: the commit being built (`git rev-parse --short HEAD`), or "dev" without git: the editor's error
- *  reports say which release they came from (shell/reporting.ts; packages/api/README.md O6). */
-function releasePlugin(): Plugin {
-	const id = "editor:release";
-	let release = "dev";
-
-	try {
-		release = execFileSync("git", ["rev-parse", "--short", "HEAD"], { "encoding": "utf8" }).trim();
-	} catch {
-		/* not a checkout */
-	}
-
-	return {
-		"name": "editor-release",
-		"resolveId": (source) => (source === id ? `\0${id}` : undefined),
-		"load": (moduleId) => (moduleId === `\0${id}` ? `export default ${JSON.stringify(release)};` : undefined)
-	};
-}
-
 export function hostPlugins(): Plugin[] {
 	return [
-		releasePlugin(),
 		// The SHELL (main.tsx → shell.tsx) is built here, and it lazily imports the browser GitHub client
 		// (github.ts → fido → util/env, util/store), which pulls in node builtins: `env.ts` reads `process`/`path`/`url`
 		// at eval and `store.ts` (dynamic, browser-guarded) touches `fs`. `polyfillNode([...])` resolves these to unenv's
@@ -251,38 +229,8 @@ export function hostPlugins(): Plugin[] {
 		editorVersionsPlugin(),
 		nodeModulesCdnPlugin(),
 		vscodePlugin(),
-		workbenchPreloadPlugin(),
-		dockviewCssPlugin()
+		workbenchPreloadPlugin()
 	];
-}
-
-/**
- * `dockview:css` — dockview's stylesheet, as a string. dockview-core publishes none (its UMD bundle injects the sheet
- * as a `<style>`, and the ESM build we import has nothing), but the `dockview` package publishes that same sheet as a
- * file, `dist/styles/dockview.css` — so it's read from there, never lifted out of a bundle's code. The two packages are
- * pinned to one version (package.json), and the build checks that they are: the sheet must match the code it styles.
- */
-function dockviewCssPlugin(): Plugin {
-	const id = "dockview:css";
-
-	return {
-		"name": "dockview-css",
-		"resolveId": (source) => (source === id ? "\0" + id : undefined),
-		"load": (resolved) => {
-			if (resolved !== "\0" + id) {
-				return undefined;
-			}
-
-			const require = createRequire(import.meta.url);
-			const version = (name: string): string => (JSON.parse(fs.readFileSync(require.resolve(name + "/package.json"))) as { "version": string }).version;
-
-			if (version("dockview") !== version("dockview-core")) {
-				throw new Error(`dockview-css: dockview ${version("dockview")} and dockview-core ${version("dockview-core")} must be one version — the stylesheet comes from the first, the code it styles from the second`);
-			}
-
-			return "export default " + JSON.stringify(fs.readFileSync(require.resolve("dockview/dist/styles/dockview.css"))) + ";";
-		}
-	};
 }
 
 /**

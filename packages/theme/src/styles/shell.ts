@@ -28,8 +28,6 @@ export const popoverBody = css({ "width": "300px", "maxWidth": "80vw" });
 export const ghError = css({ "color": "var(--wa-color-danger-on-quiet)" });
 
 // An uncaught error's id (shell/reporting.ts), to quote: over everything, bottom right, until dismissed or a minute on.
-export const errorNotice = css({ "position": "fixed", "insetInlineEnd": "var(--wa-space-m)", "insetBlockEnd": "var(--wa-space-m)", "zIndex": 2147483000, "maxWidth": "360px", "fontSize": "var(--wa-font-size-xs)" });
-
 export const ghOk = css({ "color": "var(--wa-color-success-on-quiet)" });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
@@ -66,7 +64,8 @@ export const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40
 export const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
 
 // The dock fills the `main` region (the editor iframe is its fixed panel); the diff overlay covers it when a file is opened.
-export const dockHostCss = css({ "position": "absolute", "inset": 0 });
+// The editor, filling the main region.
+export const editorFrame = css({ "position": "absolute", "inset": 0, "display": "block", "width": "100%", "height": "100%", "border": 0 });
 
 export const mainWrap = css({ "position": "relative", "height": "100%" });
 

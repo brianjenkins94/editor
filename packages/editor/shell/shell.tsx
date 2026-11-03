@@ -17,23 +17,21 @@ import type { VsCodeColors } from "theme/vscode-colors";
 import type { ShellContext, ShellFeature } from "./feature";
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
 import { relayLoggerToHub, tapConsoleAndErrors } from "@brianjenkins94/observability";
-import { ChevronRight, GitCommit, History, PanelRight } from "lucide";
+import { ChevronRight, PanelRight } from "lucide";
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { code, toolbar } from "theme/recipes";
-import { asidePane, dockHostCss, injectGlobals, mainWrap, overlay, overlayBody, overlayTitle, railRegion, resizer, resizerLeft, sideCol, sideHost, spacer, topBar } from "theme/styles/shell";
+import { asidePane, editorFrame, injectGlobals, mainWrap, overlay, overlayBody, overlayTitle, railRegion, resizer, resizerLeft, sideCol, sideHost, spacer, topBar } from "theme/styles/shell";
 import { applyVsCodeColors } from "theme/vscode-colors";
 import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
 import { commit } from "./commit";
-import { errorReports } from "./error-notice";
 import { renderGitPanel } from "./git-panel";
 import { github } from "./github-control";
 import { Icon } from "./icon";
 import { push } from "./push";
 import { repoLoad } from "./repo-load";
 import { reset } from "./reset-popover";
-import { createShellDock } from "./shell-dock";
 import { signIn } from "./sign-in";
 import "theme/components/page";
 import "theme/components/popover";
@@ -46,7 +44,7 @@ import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
 
 /** The top window's features, started in this order once the hub is linked; their controls placed in it. */
-const FEATURES: ShellFeature[] = [push, signIn, repoLoad, commit, reset, github, errorReports];
+const FEATURES: ShellFeature[] = [push, signIn, repoLoad, commit, reset, github];
 
 // The resizable pane's limits (px). The min keeps it usable, the max caps it at a fraction of the viewport so it can't
 // swallow the editor.
@@ -102,7 +100,7 @@ function Shell() {
 	const [shell, setShell] = useState<ShellContext | undefined>(undefined);
 
 	const pageRef = useRef<HTMLElement>(null);
-	const dockHostRef = useRef<HTMLDivElement>(null);
+	const appFrameRef = useRef<HTMLIFrameElement>(null);
 	const gitPanelRef = useRef<HTMLDivElement>(null);
 	const overlayRef = useRef<HTMLDivElement>(null);
 	const overlayTitleRef = useRef<HTMLSpanElement>(null);
@@ -114,16 +112,13 @@ function Shell() {
 	// in a background tab doesn't get (its timers are throttled to about once a second), and everything the editor
 	// loads waits on this iframe.
 	useLayoutEffect(() => {
-		const dockHost = dockHostRef.current;
+		const appFrame = appFrameRef.current;
 
-		if (dockHost === null) {
+		if (appFrame === null) {
 			return;
 		}
 
 		const shellHub = createHub({ "id": "shell" });
-		// The main region is a dock: the editor iframe is its fixed panel, VS Code's new windows dock around it.
-		const dock = createShellDock(dockHost, shellHub);
-		const appFrame = dock.editorFrame;
 
 		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
 		performance.mark("shell/app-iframe");
@@ -147,8 +142,7 @@ function Shell() {
 
 		publishScheme();
 		scheme.addEventListener("change", publishScheme);
-		// And the shell draws in VS Code's colours, as the editor publishes them (theme/vscode-colors): the dock's windows,
-		// the top bar, the panels and their popovers read as VS Code's.
+		// And the shell draws in VS Code's colours, as the editor publishes them (theme/vscode-colors): the top bar, the panels and their popovers read as VS Code's.
 		shellHub.subscribe("theme.colors", (colors) => {
 			applyVsCodeColors(document.body, colors as VsCodeColors);
 		});
@@ -239,13 +233,11 @@ function Shell() {
 
 				{controls("end")}
 
-				<wa-button appearance="plain" size="small" title="History" aria-label="History"><Icon node={History} /></wa-button>
-
-				<wa-button appearance="plain" size="small" title="Toggle history panel" aria-label="Toggle history panel" onClick={() => { setRhsCollapsed((value) => !value); }}><Icon node={PanelRight} /></wa-button>
+				<wa-button appearance="plain" size="small" title="Toggle changes panel" aria-label="Toggle changes panel" onClick={() => { setRhsCollapsed((value) => !value); }}><Icon node={PanelRight} /></wa-button>
 			</div>
 
 			<div class={mainWrap()}>
-				<div ref={dockHostRef} class={dockHostCss()} />
+				<iframe ref={appFrameRef} class={editorFrame()} title="editor" allow="cross-origin-isolated" />
 
 				<div ref={overlayRef} class={overlay()}>
 					<div class={toolbar({ "density": "compact", "css": { "height": "34px" } }) + " wa-cluster wa-flex-nowrap wa-gap-2xs"}>
@@ -268,10 +260,7 @@ function Shell() {
 					<RailContent
 						key="rail"
 						items={[
-							{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } },
-						// placeholders to preview the stacked look — settle final contents next
-							{ "node": GitCommit, "label": "Commit", "title": "Commit", "onClick": () => undefined },
-							{ "node": History, "label": "History", "title": "History", "onClick": () => undefined }
+							{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } }
 						]}
 					/>
 				)}

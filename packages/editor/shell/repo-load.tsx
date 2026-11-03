@@ -86,8 +86,6 @@ async function loadRepo(input = state.get().input): Promise<void> {
 
 		shared.set({ "boundRepo": binding, "githubOpen": false });
 		showRepo(binding);
-		// (the session timeline's, shell/reporting.ts)
-		shell?.hub.publish("session.event", { "name": "repo.loaded", "detail": `${owner}/${repo}` });
 		state.set({ "input": "" });
 		span.info("loaded", { "branch": meta.default_branch, "files": files.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0) });
 	} catch (error) {

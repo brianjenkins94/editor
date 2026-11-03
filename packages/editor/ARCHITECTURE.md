@@ -580,7 +580,6 @@ flowchart LR
 | Root | workspace | `workspace.files()` |
 | Shell | capability | `capability.prompt()`, `capability.watched()` |
 | Shell | debug | `debug.state` |
-| Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed`, `git.identity()`, `git.remote()` |
 | Shell | github | `github.actions()` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
@@ -592,7 +591,6 @@ flowchart LR
 | Workbench | code | `code.move()`, `code.problems()`, `code.query()`, `code.reach()`, `code.references()`, `code.rename()`, `code.rewrite()` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | decisions | `decisions.for()` |
-| Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
 | Workbench | editor | `editor.state()`, `editor.trace()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | files | `files.edit()`, `files.glob()`, `files.grep()`, `files.read()`, `files.replace()`, `files.write()` |

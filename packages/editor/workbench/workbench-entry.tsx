@@ -14,11 +14,10 @@
  */
 // (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
 import "../shared/hidden-timers";
-import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
+import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { BridgeExports } from "../extensions/bridge/extension";
-import type { ShellDockHost } from "../shared/dock-host";
 import type { WorkspaceFs } from "./workspace-fs";
-// First of what runs, before anything loads Lit: Web Awesome's components here move into docked windows (theme/documents).
+// First of what runs, before anything loads Lit: Web Awesome's components here move into VS Code's new windows (theme/documents).
 import "theme/documents";
 // eslint-disable-next-line perfectionist/sort-imports -- theme/documents above, first on purpose: it has to run before Lit does
 import { failureText } from "@brianjenkins94/editor-api/failures";
@@ -26,19 +25,17 @@ import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient, rpcCallSubject, serve } from "@brianjenkins94/hub";
 import { fs as workspaceStore } from "@zenfs/core";
-import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, registerExtension, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
 import settingsDefaults from "editor:settings-defaults";
 import historyExtension from "history:extension";
 import { render } from "preact";
 import sourceControlExtension from "source-control:extension";
-import { mirrorStyles } from "theme/sheet";
-import { followVsCodeTheme, followVsCodeThemeIn } from "theme/vscode";
+import { followVsCodeTheme } from "theme/vscode";
 import { readVsCodeColors } from "theme/vscode-colors";
 import tsvalExtension from "tsval:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
-import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
@@ -117,29 +114,6 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 // every runtime link is (editor-api's linkRuntime: its own id, carrying only the runtime).
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
-
-// A dock panel of the shell dropped into the editor area (shell-dock.ts): an editor per panel, whose content the shell
-// moves in — through its host on the top window, as element references can't cross the hub.
-function shellDock(): ShellDockHost | undefined {
-	try {
-		return (window.top as unknown as Record<string, ShellDockHost | undefined> | null)?.[SHELL_DOCK_HOST];
-	} catch {
-		return undefined; // a top window that isn't ours
-	}
-}
-
-registerHostedEditors({
-	"render": (slot, element) => { shellDock()?.attach(slot, element); },
-	"onClose": (slot) => { shellDock()?.closed(slot); }
-});
-serve(workbenchHub, "dock.hostEditor", async (args) => {
-	const { slot, title } = args as { "slot": string; "title": string };
-
-	await openHostedEditor(slot, title);
-});
-serve(workbenchHub, "dock.closeEditor", async (args) => {
-	await closeHostedEditor((args as { "slot": string }).slot);
-});
 
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.
@@ -541,8 +515,7 @@ function maybeBoot(): void {
 		"onSave": (path, contents) => {
 			workbenchHub.publish("workbench.save", { "path": path, "contents": contents });
 			paneLog.info("saved", { "path": path, "bytes": contents.length });
-		},
-		"openAuxiliaryWindow": openDockedWindow
+		}
 	})
 		.then(async () => {
 			bootSpan.info("monaco booted");
@@ -716,10 +689,6 @@ function maybeBoot(): void {
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
 			bootSpan.end();
-			// The session timeline (packages/api/README.md O6): commands run and panes shown, by id, to the shell.
-			void onWorkbenchActivity((event) => {
-				workbenchHub.publish("session.event", event);
-			});
 		})
 		.catch((error: unknown) => {
 			bootSpan.error("workbench boot failed", { "error": errText(error) });
@@ -732,39 +701,6 @@ function maybeBoot(): void {
 // was 1.5s of every load); the retry is a backstop. Linking the hub above is itself the announce — the host retargets to
 // this window on the first frame — so there's no separate "ready" ping.
 const paneRpc = createRpcClient(workbenchHub);
-
-/**
- * A VS Code window as a panel of the shell's dock (shell-dock.ts): the shell adds a blank iframe and names it, and
- * we find it on the top window — same origin, so VS Code can move its editors' DOM in. VS Code closes a window by
- * calling `close()`, a no-op on a frame's window, so that asks the shell to remove the panel instead. No shell (the
- * workbench on its own) → undefined, and VS Code opens a real popup.
- */
-async function openDockedWindow(request: AuxiliaryWindowRequest): Promise<Window | undefined> {
-	try {
-		const { name } = await paneRpc.request("dock.openWindow", request, { "timeoutMs": 4000, "waitForResponderMs": 1000 }) as { "name": string };
-		const frame = window.top?.document.querySelector<HTMLIFrameElement>(`iframe[name="${CSS.escape(name)}"]`);
-		const docked = frame?.contentWindow ?? undefined;
-
-		if (docked !== undefined) {
-			// (VS Code copies its own stylesheets into the window; ours — Workbench.tsx's Stitches, the exception sheets —
-			// theme/sheet copies; and Web Awesome on the VS Code theme, theme/vscode adopts there itself)
-			const stopMirroring = mirrorStyles(docked.document);
-			const stopTheme = followVsCodeThemeIn(docked.document);
-
-			docked.close = () => {
-				stopMirroring();
-				stopTheme();
-				workbenchHub.publish("dock.closeWindow", { "name": name });
-			};
-		}
-
-		return docked;
-	} catch (error) {
-		paneLog.info("no dock to open a window in", { "error": errText(error) });
-
-		return undefined;
-	}
-}
 
 void (async () => {
 	for (;;) {
