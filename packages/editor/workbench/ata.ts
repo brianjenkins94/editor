@@ -275,15 +275,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	// Same-origin base the SW intercepts; it proxies /workspace/node_modules/* to the CDN (unversioned → latest).
 	const deployBase = location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/";
 
-	// Drop retired IndexedDB stores from earlier designs (best-effort, one-shot per user):
-	//   • "ata-cache"  — ATA's own cache, retired in M1 (the workspace zen-fs store persists now).
-	//   • "vfs-store"  — the SW's seed-mirror store, retired once the editor/type-checker/LSP workers all read
-	//                    the workspace through the zen-fs FileSystemProvider + shared SharedArrayBuffer.
-	try {
-		indexedDB.deleteDatabase("ata-cache");
-		indexedDB.deleteDatabase("vfs-store");
-	} catch { /* best-effort */ }
-
 	const fetchedPath = new Set<string>();          // node_modules-relative paths already handled this session
 	const seenPackage = new Set<string>();          // packages already acquired this session
 	const metaCache = new Map<string, Set<string>>(); // pkg → its file set (from ?meta)
