@@ -63,7 +63,8 @@ const ask = async (args) => new TextDecoder().decode(await rpc.request("packages
 
 test("a pinned version comes from the lockfile's URL, and its dependencies are fetched alongside it (not a linked folder)", async () => {
 	assert.equal(await ask({ "name": "a", "version": "1.0.0" }), "https://example.test/a-1.0.0.tgz");
-	assert.deepEqual(fetched, ["https://example.test/a-1.0.0.tgz", "https://registry.npmjs.org/b/-/b-2.0.0.tgz"]);
+	// (the dependencies are asked for first, so they're on their way while the package itself comes)
+	assert.deepEqual([...fetched].sort(), ["https://example.test/a-1.0.0.tgz", "https://registry.npmjs.org/b/-/b-2.0.0.tgz"]);
 });
 
 test("a tarball is fetched once a page", async () => {
