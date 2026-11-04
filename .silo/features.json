@@ -662,6 +662,23 @@
       "packages/editor-api/test/lifecycle.test.mjs"
     ]
   },
+  "Editor instances": {
+    "status": "active",
+    "why": "user, 2026-11-04: isolation first. An editor run inside an editor's preview window shared the real one's IndexedDB and localStorage, so a test in it could damage your work, and every test running in the editor needs that to be safe",
+    "since": "2026-11-04",
+    "what": "`?instance=<name>` runs an editor with its own workspace, VS Code state and settings on the same origin, in a tab or a frame, and its reset takes only its own.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Instances*",
+    "ways": [
+      "url parameter|?instance"
+    ],
+    "paths": [
+      "packages/editor/shared/instance.ts"
+    ],
+    "tests": [
+      "packages/editor/test/instance.test.mjs",
+      "packages/editor/test/instances.mjs"
+    ]
+  },
   "Email, inbox and the Mail page": {
     "status": "active",
     "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",

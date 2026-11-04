@@ -122,7 +122,11 @@ function Shell() {
 
 		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
 		performance.mark("shell/app-iframe");
-		appFrame.src = location.href;
+		// (without an instance's name: that says "the top of one", and the app finds it by looking up: shared/instance.ts)
+		const appAddress = new URL(location.href);
+
+		appAddress.searchParams.delete("instance");
+		appFrame.src = appAddress.href;
 
 		reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
 		// …and its logs and spans (the GitHub data plane's, a repository's load, the reset's), on `$sys.log.shell`, and its

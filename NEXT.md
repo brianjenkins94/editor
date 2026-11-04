@@ -361,12 +361,10 @@ How it's kept:
        rather than hangs, but says `received false`, not why.
      - *Every test in the editor: what stands in the way*, tried 2026-11-04: a Playwright test in the debugger navigated a
        preview window to the editor itself, and the editor booted in it, cross-origin isolated, extension host and all.
-       In order: (1) **it shares the outer editor's state**: same origin, so the same `workspace-fs` and `vscode-web-*`
-       IndexedDB databases; it lists the outer workspace's files, so a test there could damage your work, and `?reset`
-       in it would wipe them. A store per instance comes first. (2) **`page.goto` to it never answers**: `playwright.run`
-       timed out at 60 s, though the page had navigated. (3) **Locators stop at a frame, and there's no `frameLocator`**:
-       the workbench is in a nested iframe, so the test can't reach it. (4) **It comes up as the app without the shell**:
-       main.tsx decides which it is by `window.parent === window`. Then the suites' own needs: they ask over the hub
+       In the way: (1) *done 2026-11-04* it shared the outer editor's state: `?instance=<name>` keeps one apart (*Editor
+       instances*), and a frame with the name is the top of itself, with its shell. (2) **`page.goto` to it never
+       answers**: `playwright.run` timed out at 60 s, though the page had navigated. (3) **Locators stop at a frame, and
+       there's no `frameLocator`**: the workbench is in a nested iframe, so the test can't reach it. Then the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
