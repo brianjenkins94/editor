@@ -410,17 +410,19 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Capability prototype": {
-    "status": "parked",
-    "why": "the first capability engine, at the repository's root: nothing imports it and nothing runs its two tests (2026-11-03: traced, last changed for lint in September). Declared, not judged: remove it or say why it stays",
-    "since": "2026-11-03",
+    "status": "removed",
+    "why": "the first capability engine: nothing imports it, nothing ran its tests and they no longer passed (2026-11-03). tsval's debugger and the editor's capability gate took its place",
+    "since": "2026-11-04",
     "what": "The canary, effect journal, preflight, stubs and CST anchoring as first written, before tsval's debugger and the editor's capability gate took their place.",
     "paths": [
-      "src"
-    ],
-    "tests": [
+      "src/anchor.ts",
+      "src/journal.ts",
+      "src/preflight.ts",
+      "src/stub.ts",
       "test/silo-anchor.ts",
       "test/silo-stub.ts"
-    ]
+    ],
+    "restore": "git checkout ecf6a96f -- src/anchor.ts src/bridge.ts src/canary.ts src/journal.ts src/preflight.ts src/stub.ts test/silo-anchor.ts test/silo-stub.ts"
   },
   "Commit to GitHub": {
     "status": "active",

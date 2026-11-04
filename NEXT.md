@@ -425,8 +425,6 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
-- **The capability prototype** (`src/`, `test/silo-*.ts`, the ledger's *Capability prototype*, parked 2026-11-03): nothing
-  imports it and nothing runs its two tests. CI still lints it. Remove it, or say why it stays.
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
