@@ -17,6 +17,10 @@
         "id": "margin",
         "label": "Margin",
         "title": "A stopped run's question, beside the code"
+      },
+      {
+        "id": "coverage",
+        "into": "margin"
       }
     ]
   }

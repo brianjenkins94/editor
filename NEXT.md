@@ -408,6 +408,15 @@ How it's kept:
      custom view in the panel, as core has no way to open a tab of its own without exporting `registerEditorPane` from the
      component; *Features map*, the treemap, stays out. Not yet: `touched` and `resting`, CI's outcomes, coverage, per-test
      effects, or a filter. A UI spec's effects are the spec's, not the editor's it drives.
+   - *Annotations that stay on their code: back* 2026-11-04 — `editor.annotations.spans`, `.refer` and `.resolve` (workbench/bablr.ts,
+     registered there, the bridge sharing its realm), silo's resolver in BABLR's worker, the last 16 parses kept in memory; a reference
+     not found by its id is followed from its commit or a known text, and looked for in other changed files. Not back: verdicts and
+     edit groups, and a span's types for the typed strategy, until a feature needs them.
+   - *Coverage in the gutter: back* 2026-11-04 — the debugger's `coverage` event again, and marks in the Margin's gutter column and the
+     scrollbar (extensions/margin/coverage.ts, into the Margin); tests: in-editor/coverage.spec.mjs. Each program's latest run counts, so
+     a line didn't run only if no run reached it. Runs this session only (the old git evidence stays out), not while paused
+     (`getCoverage`), and a marks-only file shows the Margin's tab and divider over nothing. A UI spec's run marks only the spec's own
+     files: what it drives isn't the debugger's to see.
    - *Capabilities confirmed by runs* 2026-11-04 (the user: re-confirm that code uses a capability, not let it grow and never
      shrink). An allow rule no kept test run has used, after 5 runs since it was added, is a problem on the rule with a quick fix
      (workbench/capability-confirm.ts), and a test's row says what it newly uses or has stopped using against its run before. Runs
@@ -524,6 +533,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
   since 2026-10-29: core watches for code files made or deleted and tells the projects (ts-projects.ts,
   `_history.files`). The fix is the extension's path mapping in its watcher (the vendored build,
   components/monaco-vscode-api).
+
+- **tsval runs a file with a syntax error** (found 2026-11-04): a spec with a stray `});` ran and passed in the debugger, where Node
+  throws a SyntaxError before anything runs, so a test that wouldn't parse elsewhere can pass here. Lint caught this one. It
+  should fail as Node does: the parse's diagnostics are there to read.
 
 - **A save can be dropped, silently:** VS Code abandons a save when its code actions on save are cancelled, and
   getCodeActions cancels itself when a code action provider is registered while it waits (as extensions starting up do). Seen

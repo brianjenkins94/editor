@@ -9,7 +9,7 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { Effect, TestReport } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, TestReport } from "@brianjenkins94/editor-api";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
@@ -79,6 +79,7 @@ export type WorkerEvent =
 	/** The run's effects so far — each gated call made, denied, skipped or given — told with its coverage, for its envelope
 	 *  in the run ledger (each telling has them all). */
 	| { "type": "effects"; "effects": Effect[] }
+	| { "type": "coverage"; "coverage": CoverageEvent }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
 	/** A test file's tests (node:test, node-test.js), each with the statements it ran — just before `terminated`. */
 	| { "type": "tests"; "tests": TestReport[] }

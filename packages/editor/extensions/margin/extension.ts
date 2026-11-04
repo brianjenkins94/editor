@@ -7,14 +7,15 @@
  * a notification can be dismissed, and then nothing says it's stopped (the user, 2026-11-03). So there's no pane until a
  * run asks, and the question stays until it's answered or the run moves on.
  *
- * From every debugger's `ask` event (the run contract). What else the Margin showed (`full-editor`'s: a run's values,
- * cards, coverage, Rule…) comes back with those features.
+ * From every debugger's `ask` event (the run contract). Coverage's marks are its gutter column's (coverage.ts). What else the
+ * Margin showed (`full-editor`'s: a run's values, cards, Rule…) comes back with those features.
  */
 import type { AskEvent, CapabilityChoice } from "@brianjenkins94/editor-api";
 import type { PaneAction, PaneContent, PaneItem } from "@brianjenkins94/editor-api/pane";
 import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
+import { installCoverage } from "./coverage";
 
 /** The view the Margin is, in the pane. */
 const VIEW = "margin";
@@ -58,6 +59,9 @@ function questionOf({ session, ask }: Asking): PaneContent {
 
 export function activate(context: vscode.ExtensionContext): void {
 	const observed = observeExtension(VIEW);
+
+	installCoverage(context);
+
 	/** The question each file is asking, by its URI. */
 	const asks = new Map<string, Asking>();
 	const redraw = (uri: string): void => {

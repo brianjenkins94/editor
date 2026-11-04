@@ -17,7 +17,7 @@ import { EXITED, held, listening, readsStdin } from "./process";
 import { editorPlaywright, programModules, runtimeReady, whereOf } from "./runtime";
 import { post, state, workerLog } from "./state";
 import { askAt } from "./stops";
-import { startTests, tellTests, testsOver, testTold } from "./tests";
+import { startTests, tellCoverage, tellTests, testsOver, testTold } from "./tests";
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => {
@@ -436,6 +436,7 @@ function finish(exitCode = 0, crash?: Crash): void {
 	state.stepSpan?.end();
 
 	tellEffects();
+	tellCoverage();
 
 	post({ "type": "terminated", "exitCode": tellTests(exitCode), ...crash === undefined ? {} : { "crash": crash } });
 }

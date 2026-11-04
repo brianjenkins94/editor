@@ -218,26 +218,23 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Annotations that stay on their code": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "gutter coverage's marks have to stay on their code through edits, and so does whatever comes back on annotations (user, 2026-11-04)",
+    "since": "2026-11-04",
     "what": "Notes, rules and evidence placed on a piece of code, by the editor or an extension, stay on that code through edits, moves and reformatting.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
     "ways": [
       "command|editor.annotations.refer",
       "command|editor.annotations.resolve",
       "command|editor.annotations.spans",
-      "hub request|annotations.refer",
-      "hub request|annotations.resolve",
-      "hub request|annotations.spans",
-      "hub request|bablr.follow",
-      "hub request|bablr.pick",
       "hub request|bablr.refer",
       "hub request|bablr.resolve",
       "hub request|bablr.spans"
     ],
-    "in": "e5772e5d",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "tests": [
+      "packages/editor-api/test/annotations.test.mjs",
+      "packages/editor/test/in-editor/coverage.spec.mjs"
+    ]
   },
   "Answer a call where it stops": {
     "status": "active",
@@ -253,7 +250,8 @@
     ],
     "paths": [
       "packages/editor/extensions/bridge/capability-stops.ts",
-      "packages/editor/extensions/margin/",
+      "packages/editor/extensions/margin/extension.ts",
+      "packages/editor/extensions/margin/package.json",
       "packages/editor/extensions/tsval/adapter/stops.ts",
       "packages/editor/extensions/tsval/worker/stops.ts"
     ],
@@ -509,17 +507,21 @@
     ]
   },
   "Coverage in the gutter": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "After a run, marks beside each line show whether it ran and how often, and the same colors appear in the scrollbar.",
+    "status": "active",
+    "why": "shows on the code what ran, and is a check on the reach data; the first of what the live loop needs (user, 2026-11-04)",
+    "since": "2026-11-04",
+    "what": "After a run, marks beside each line say whether any run this session reached it and how often, the same colors in the scrollbar, and they stay on their code as it's edited.",
     "ways": [
       "command|coverage.paneView",
-      "core module|installCoverage",
-      "text editor decoration type||margin/coverage.ts"
+      "text editor decoration type||margin/coverage.ts",
+      "core module|installCoverage"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/margin/coverage.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/coverage.spec.mjs"
+    ]
   },
   "Debug toolbar in the preview title bar": {
     "status": "removed",

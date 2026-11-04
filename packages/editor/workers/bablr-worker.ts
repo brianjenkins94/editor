@@ -6,14 +6,22 @@
  * (`bablr`, its own database, not the workspace's store), under PARSE_VERSION, so a grammar change asks again: a file
  * is parsed once however often it's asked about.
  *
- * What's built on a parse — spans, annotations, verdicts (`full-editor`'s worker) — comes back with the features that
- * need it. A parse yields as it goes, so a cancelled call's signal ends it mid-parse and the worker stays.
+ * And what's placed on code stays on it (RUNTIME-EVIDENCE.md, *Durable annotations on spans*; editor-api's annotations.ts is its
+ * contract): `bablr.spans`, a text's spans; `bablr.refer`, a reference to the span standing for each range; `bablr.resolve`,
+ * where references' spans are now, by silo's resolver: by id, followed from a text they were made against, or in another file.
+ * The last few parses are kept here for these: a text is asked about many times running, and a parse of one being typed
+ * isn't worth keeping on disk.
+ *
+ * What else is built on a parse — verdicts (`full-editor`'s worker) — comes back with the features that need it. A parse
+ * yields as it goes, so a cancelled call's signal ends it mid-parse and the worker stays.
  */
 import "./bablr-fast-freeze"; // first: neutralizes record freezing before the BABLR bundle captures Object.freeze
 // (A comment, so sorting leaves the freeze first.)
-import { cstSpansAsync, PARSE_VERSION } from "@brianjenkins94/bablr";
+import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
+import { atomsOf, cstSpansAsync, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
+import { OBSERVED, PIPELINE, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
 import { NETWORK_PROBES } from "../shared/architecture";
 
 const hub = createHub({ "id": "bablr" });
@@ -129,4 +137,189 @@ serve(hub, "bablr.parse", async (args, { signal }) => {
 	}
 
 	return { ...answer, "cached": false };
+});
+
+// ── what's placed on code ──
+
+interface CstSpan { "type": string | null; "start": number; "end": number; "token": boolean; "trivia": boolean; "text"?: string }
+interface Cst { "spans": CstSpan[]; "length": number; "hash": string }
+interface Anchor { "type": string | null; "start": number; "end": number; "id": string }
+type Parsed = { "cst": Cst } | { "why": string };
+
+/** How many texts' parses are kept: enough for a file and what it's being compared with. */
+const KEPT_PARSES = 16;
+const parses = new Map<string, Parsed>();
+
+/** A text's parse, or why BABLR can't: the most recently asked about kept. */
+async function parsed(source: string, signal: AbortSignal): Promise<Parsed> {
+	const known = parses.get(source);
+
+	if (known !== undefined) {
+		parses.delete(source);
+		parses.set(source, known);
+
+		return known;
+	}
+
+	const answer = await log.span("editor.workers.bablr-worker.spans", { "bytes": source.length }, async (): Promise<Parsed> => {
+		try {
+			return { "cst": await cstSpansAsync(source, "Program", { "signal": signal }) as Cst };
+		} catch (error) {
+			if (signal.aborted) {
+				throw error;
+			}
+
+			return { "why": error instanceof Error ? error.message : String(error) };
+		}
+	});
+
+	parses.set(source, answer);
+
+	for (const oldest of [...parses.keys()].slice(0, Math.max(0, parses.size - KEPT_PARSES))) {
+		parses.delete(oldest);
+	}
+
+	return answer;
+}
+
+const anchorsOf = (source: string, cst: Cst): Anchor[] => spanAnchors(source, "Program", cst) as Anchor[];
+
+/** Each span of a text with its shape: its id, type, offsets and the code's tokens in it. */
+function shapesOf(source: string, cst: Cst): SpanShape[] {
+	const tokens = cst.spans.filter((span) => span.token && !span.trivia).toSorted((left, right) => left.start - right.start);
+	const firstAt = (offset: number): number => {
+		let low = 0;
+		let high = tokens.length;
+
+		while (low < high) {
+			const middle = (low + high) >> 1;
+
+			if (tokens[middle].start < offset) {
+				low = middle + 1;
+			} else {
+				high = middle;
+			}
+		}
+
+		return low;
+	};
+
+	return anchorsOf(source, cst).filter((span): span is Anchor & { "type": string } => span.type !== null).map((span) => {
+		const atoms: string[] = [];
+
+		for (let at = firstAt(span.start); at < tokens.length && tokens[at].end <= span.end; at += 1) {
+			atoms.push(tokens[at].text ?? "");
+		}
+
+		return { "id": span.id, "type": span.type, "start": span.start, "end": span.end, "atoms": atoms };
+	});
+}
+
+serve(hub, "bablr.spans", async (args, { signal }) => {
+	const { source } = args as { "source": string };
+
+	if (source === "") {
+		return { "spans": [] };
+	}
+
+	const answer = await parsed(source, signal);
+
+	return "why" in answer ? { "unparsable": answer.why } : { "spans": anchorsOf(source, answer.cst).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end })) };
+});
+
+serve(hub, "bablr.refer", async (args, { signal }) => {
+	const { source, ranges, file } = args as { "source": string; "ranges": { "start": number; "end": number }[]; "file": string };
+
+	if (source === "") {
+		return { "refs": ranges.map(() => null) };
+	}
+
+	const answer = await parsed(source, signal);
+
+	if ("why" in answer) {
+		return { "unparsable": answer.why };
+	}
+
+	const shapes = shapesOf(source, answer.cst);
+	const blob = await blobOid(source);
+
+	return { "refs": ranges.map((range) => {
+		const id = pickAnchor(shapes, range.start, range.end) as string | undefined;
+
+		return (id === undefined ? undefined : referTo(shapes, id, file, blob)) ?? null;
+	}) };
+});
+
+serve(hub, "bablr.resolve", async (args, { signal }) => {
+	const { source, file, refs, "baselines": fromGit = {}, texts = [], others = {}, observed = false, types = {} } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "texts"?: string[]; "others"?: Record<string, string>; "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }> };
+
+	if (source === "") {
+		return { "resolutions": refs.map(() => ({ "status": "orphaned", "alternatives": [] })) };
+	}
+
+	const answer = await parsed(source, signal);
+
+	if ("why" in answer) {
+		return { "unparsable": answer.why };
+	}
+
+	const { cst } = answer;
+	const baselines: Record<string, string> = { ...fromGit };
+
+	for (const text of texts) {
+		baselines[await blobOid(text)] = text;
+	}
+
+	const shapes = shapesOf(source, cst);
+	const ids = new Set(shapes.map((shape) => shape.id));
+	const anchors = anchorsOf(source, cst);
+	const blob = await blobOid(source);
+	const elsewhere = new Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }>();
+
+	// (the other files' spans only when a reference isn't here)
+	if (!observed && refs.some((ref) => !ids.has(ref.span))) {
+		for (const [path, text] of Object.entries(others)) {
+			const theirs = await parsed(text, signal);
+
+			if ("cst" in theirs) {
+				const theirShapes = shapesOf(text, theirs.cst);
+				const theirBlob = await blobOid(text);
+
+				for (const shape of theirShapes) {
+					if (!elsewhere.has(shape.id)) {
+						elsewhere.set(shape.id, { "file": path, "shape": shape, "shapes": theirShapes, "blob": theirBlob });
+					}
+				}
+			}
+		}
+	}
+
+	const resolutions = [];
+
+	for (const ref of refs) {
+		let reidentified: { "id": string; "how": "kept" | "replaced" } | undefined;
+		const baseline = ref.baseline === undefined ? undefined : baselines[ref.baseline.blob];
+
+		if (!observed && baseline !== undefined && !ids.has(ref.span)) {
+			const was = await parsed(baseline, signal);
+			const index = "cst" in was ? anchorsOf(baseline, was.cst).findIndex((anchor) => anchor.id === ref.span) : -1;
+			const found = "cst" in was && index !== -1 ? follow(atomsOf(was.cst), atomsOf(cst), index) as { "to": number; "how": "kept" | "replaced" } | undefined : undefined;
+
+			reidentified = found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
+		}
+
+		const resolution = resolve(ref, {
+			"file": file,
+			"shapes": shapes,
+			"types": (id: string) => types[id],
+			...elsewhere.size === 0 ? {} : { "elsewhere": (id: string) => elsewhere.get(id) },
+			...reidentified === undefined ? {} : { "reidentified": () => reidentified }
+		}, observed ? OBSERVED : PIPELINE);
+		const at = resolution.status === "attached" ? undefined : resolution.candidate;
+		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": blob } : elsewhere.get(at.span);
+
+		resolutions.push({ ...resolution, ...at === undefined || there === undefined ? {} : { "ref": referTo(there.shapes, at.span, at.file, there.blob) } });
+	}
+
+	return { "resolutions": resolutions };
 });

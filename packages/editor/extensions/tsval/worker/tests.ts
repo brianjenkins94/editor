@@ -2,7 +2,7 @@
  * A test file's tests as node-test.js tells them (`__editorTest`): each one's outcome, what it threw, a failed
  * assertion's sides, its time, and the statements it ran.
  */
-import type { TestReport } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, TestReport } from "@brianjenkins94/editor-api";
 import type { Vm } from "./state";
 import ts from "typescript";
 import { held, readsStdin } from "./process";
@@ -55,6 +55,31 @@ function ranSince(started: Map<ts.SourceFile, number[]>): TestReport["files"] {
 
 		return statements.length === 0 ? [] : [{ "file": file.fileName, "statements": statements }];
 	});
+}
+
+/** What the run ran of the program's files, each with its text, as a run ends (the run contract's `coverage`): every statement
+ *  that could run, with how often it did. Not what's installed: the program's own. */
+export function tellCoverage(): void {
+	const reports = [...state.current?.coverage ?? []].filter(([file]) => !EDITOR_SOURCES.has(file.fileName) && !file.fileName.includes("/node_modules/")).map(([file, entry]): CoverageEvent => {
+		const at = (offset: number): [number, number] => {
+			const { line, character } = file.getLineAndCharacterOfPosition(offset);
+
+			return [line, character];
+		};
+
+		return { "file": file.fileName, "source": file.text, "sites": [], "statements": entry.statements.map((node, index) => {
+			// (what anchors a statement with a body: its name or condition, whose span outlives an edit inside it)
+			const { name, expression } = node as ts.Node & { "name"?: ts.Node; "expression"?: ts.Node };
+			const head = "body" in node || "thenStatement" in node || "statement" in node ? name ?? expression : undefined;
+
+			return { "start": at(node.getStart(file)), "end": at(node.getEnd()), "count": entry.counts[index] ?? 0, ...head === undefined ? {} : { "anchor": [head.getStart(file), head.getEnd()] as [number, number] } };
+		}) };
+	});
+	const [first, ...others] = reports;
+
+	if (first !== undefined) {
+		post({ "type": "coverage", "coverage": { ...first, "files": others } });
+	}
 }
 
 /** A run's tests, none yet: its launch. */

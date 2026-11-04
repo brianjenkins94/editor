@@ -518,6 +518,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.tell("effects", { "effects": message.effects });
 				break;
 
+			// What the run ran of the program's files, as it ends: the gutter's marks (the Margin's coverage).
+			case "coverage":
+				this.tell("coverage", message.coverage);
+				break;
+
 			// A test file's tests, each with what it ran (the run contract's `tests`): kept as traces of them.
 			case "tests":
 				this.tell("tests", { "file": this.program, "tests": message.tests });

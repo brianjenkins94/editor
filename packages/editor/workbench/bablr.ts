@@ -10,20 +10,30 @@
  *
  * And a text with its comments blanked (`stripped`), for the code alone (git-refs.ts' `.refs/<name>~stripped/`).
  *
+ * And what's placed on code stays on it: `editor.annotations.spans`, `.refer` and `.resolve`, for anything an extension attaches to
+ * code (editor-api's annotations.ts is their contract; RUNTIME-EVIDENCE.md, *Durable annotations on spans*). A reference not
+ * found by its own id is looked for further: followed from the commit or text it was made against, and in the other changed files.
+ *
  * BABLR runs in its own worker (workers/bablr-worker.ts), started the first time it's asked — not at boot: it's a big
  * bundle — and asked one text at a time, each kept by its blob oid there, so a file is parsed once. A file whose warning
  * shows is parsed again as it's saved.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
+import type { SpanRef } from "@brianjenkins94/util/silo/annotations";
 import type * as vscodeApi from "vscode";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
+import { blobText, status } from "./git-engine";
 
 const DIR = "/workspace";
 
 /** The files BABLR's grammar may take. */
 const CODE_FILES = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
+
+/** Where a moved span may be looked for, and in how many changed files at most. */
+const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
+const MOST_OTHERS = 50;
 
 /** A why, at most this long in a warning or an answer (BABLR's can carry the parser's state). */
 const MOST_WHY = 300;
@@ -54,7 +64,14 @@ interface Checked {
 
 export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): Bablr {
 	const diagnostics = vscode.languages.createDiagnosticCollection("BABLR");
-	let started: { "request": (source: string, signal?: AbortSignal) => Promise<Parse> } | undefined;
+	let started: { "ask": <T>(name: string, args: unknown, signal?: AbortSignal) => Promise<T> } | undefined;
+
+	const warn = (uri: vscodeApi.Uri, why: string): void => {
+		const warning = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 0), `BABLR can't parse this file, so nothing can be attached to its code (notes, runtime evidence): ${why.slice(0, MOST_WHY)}`, vscode.DiagnosticSeverity.Warning);
+
+		warning.source = "BABLR";
+		diagnostics.set(uri, [warning]);
+	};
 
 	/** The worker, started on first use, asked one text at a time: BABLR is slow, and a check is many. */
 	const worker = (): NonNullable<typeof started> => {
@@ -74,10 +91,10 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		});
 
 		started = {
-			"request": async (source, signal) => {
+			"ask": async <T>(name: string, args: unknown, signal?: AbortSignal): Promise<T> => {
 				const combined = signal === undefined ? dead.signal : AbortSignal.any([signal, dead.signal]);
 				// (no timeout: the first waits out the worker's bundle loading, and a parse takes what it takes)
-				const run = tail.then(async () => rpc.request("bablr.parse", { "source": source }, { "timeoutMs": Infinity, "waitForResponderMs": 60_000, "signal": combined }) as Promise<Parse>);
+				const run = tail.then(async () => rpc.request(`bablr.${name}`, args, { "timeoutMs": Infinity, "waitForResponderMs": 60_000, "signal": combined }) as Promise<T>);
 
 				tail = run.catch(() => undefined);
 
@@ -90,16 +107,12 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 
 	/** `uri`'s text parsed, and its warning set or cleared by what BABLR says. */
 	const parse = async (uri: vscodeApi.Uri, text: string, signal?: AbortSignal): Promise<Parse> => {
-		const answer = await worker().request(text, signal);
+		const answer = await worker().ask<Parse>("parse", { "source": text }, signal);
 
 		if (answer.parsed) {
 			diagnostics.delete(uri);
 		} else {
-			const why = (answer.why ?? "BABLR can't parse it").slice(0, MOST_WHY);
-			const warning = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 0), `BABLR can't parse this file, so nothing can be attached to its code (notes, runtime evidence): ${why}`, vscode.DiagnosticSeverity.Warning);
-
-			warning.source = "BABLR";
-			diagnostics.set(uri, [warning]);
+			warn(uri, answer.why ?? "BABLR can't parse it");
 		}
 
 		return answer;
@@ -189,6 +202,70 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		}
 	});
 
+	/** `file` parses, or doesn't and why: its warning, as a check's, until it does. */
+	const told = (file: string, why: string | undefined): void => {
+		const uri = vscode.Uri.file(`${DIR}/${file}`);
+
+		if (why === undefined) {
+			diagnostics.delete(uri);
+		} else {
+			warn(uri, why);
+		}
+	};
+
+	/** An annotation's question, answered as editor-api's Answer: the value, or why BABLR can't parse the text. */
+	const answering = async (file: string | undefined, name: string, args: unknown, take: (answer: Record<string, unknown[]>) => unknown): Promise<unknown> => {
+		const answer = await worker().ask<Record<string, unknown[]> & { "unparsable"?: string }>(name, args);
+
+		if (file !== undefined) {
+			told(file, answer.unparsable);
+		}
+
+		return answer.unparsable === undefined ? { "value": take(answer) } : { "unparsable": answer.unparsable };
+	};
+
+	/** The other changed files, for a span that may have moved to one. */
+	const changedFiles = async (file: string): Promise<Record<string, string>> => {
+		const { files } = await status();
+		const others = files.filter((change) => change.status !== "D" && change.path !== file && CODE_FILE.test(change.path)).slice(0, MOST_OTHERS);
+		const texts = await Promise.all(others.map(async ({ path }): Promise<[string, string]> => [path, new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(`${DIR}/${path}`)))]));
+
+		return Object.fromEntries(texts);
+	};
+
+	vscode.commands.registerCommand("editor.annotations.spans", async (source: string) => answering(undefined, "spans", { "source": source }, ({ spans }) => spans));
+	vscode.commands.registerCommand("editor.annotations.refer", async (source: string, file: string, ranges: unknown[]) => answering(file, "refer", { "source": source, "file": file, "ranges": ranges }, ({ refs }) => refs.map((ref) => ref ?? undefined)));
+	vscode.commands.registerCommand("editor.annotations.resolve", async (source: string, file: string, refs: SpanRef[], options: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] } = {}) => log.span("editor.workbench.bablr.resolve", { "path": file, "count": refs.length }, async (span) => {
+		const asked = { "source": source, "file": file, "refs": refs, "observed": options.observed === true, "types": options.types ?? {}, "texts": options.texts ?? [] };
+		const first = await answering(file, "resolve", asked, ({ resolutions }) => resolutions) as { "value"?: { "status": string }[] };
+		// (one that's what ran fades instead of being looked for; one made by a person is looked for further)
+		const lost = options.observed === true || first.value === undefined ? [] : refs.flatMap((ref, index) => (first.value?.[index]?.status === "attached" ? [] : [{ "ref": ref, "index": index }]));
+
+		span.end({ "lost": lost.length });
+
+		if (lost.length === 0) {
+			return first;
+		}
+
+		const blobs = [...new Set(lost.flatMap(({ ref }) => (ref.baseline === undefined ? [] : [ref.baseline.blob])))];
+		const baselines = Object.fromEntries((await Promise.all(blobs.map(async (blob) => [blob, await blobText(blob)] as const))).filter(([, text]) => text !== undefined));
+		const others = await changedFiles(file).catch(() => ({}));
+
+		if (Object.keys(baselines).length === 0 && Object.keys(others).length === 0 && asked.texts.length === 0) {
+			return first;
+		}
+
+		const again = await worker().ask<{ "resolutions"?: { "status": string }[] }>("resolve", { ...asked, "refs": lost.map(({ ref }) => ref), "baselines": baselines, "others": others });
+
+		for (const [at, { index }] of lost.entries()) {
+			if (again.resolutions?.[at] !== undefined && first.value !== undefined) {
+				first.value[index] = again.resolutions[at];
+			}
+		}
+
+		return first;
+	}));
+
 	serve(hub, "bablr.check", async (args, { signal }) => {
 		const { path, exclude } = (args ?? {}) as { "path"?: unknown; "exclude"?: unknown };
 
@@ -201,7 +278,7 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 
 	return {
 		"stripped": async (text, signal) => {
-			const { parsed, comments = [] } = await worker().request(text, signal);
+			const { parsed, comments = [] } = await worker().ask<Parse>("parse", { "source": text }, signal);
 
 			if (!parsed) {
 				return undefined;
