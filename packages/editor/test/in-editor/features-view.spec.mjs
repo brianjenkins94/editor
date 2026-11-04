@@ -5,12 +5,14 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { openEditor, runCommand } from "./editor.mjs";
+import { codeOf, openEditor, openFile, runCommand } from "./editor.mjs";
 
 const entry = (what, tests) => ({ "status": "active", "why": what, "since": "2026-11-04", "what": what, ...tests === undefined ? {} : { "tests": tests } });
 const unit = (body) => `import assert from "node:assert/strict";\nimport * as fs from "node:fs";\nimport { test } from "node:test";\n\n${body}\n`;
 const LEDGER = {
 	"Adding": entry("Adds.", ["add.test.mjs"]),
+	"Adding too": entry("Adds, again.", ["again.test.mjs"]),
+	"Multiplying": entry("Multiplies.", ["times.test.mjs"]),
 	"Breaking": entry("Fails on purpose.", ["break.test.mjs"]),
 	"Nothing yet": entry("Has no tests."),
 	"Viewing": entry("A suite and a spec.", ["suite.mjs", "view.spec.mjs"]),
@@ -20,7 +22,10 @@ const LEDGER = {
 const WRITES = "test(\"writes\", () => {\n\tfs.writeFileSync(\"/workspace/shared.txt\", \"x\");\n\tassert.ok(fs);\n});";
 const files = {
 	".silo/features.json": JSON.stringify(LEDGER, null, 2) + "\n",
-	"add.test.mjs": unit("test(\"adds\", () => {\n\tassert.equal(1 + 1, 2);\n});"),
+	"math.mjs": "export function add(one, other) {\n\treturn one + other;\n}\n\nexport function times(one, other) {\n\treturn one * other;\n}\n",
+	"add.test.mjs": unit("import { add } from \"./math.mjs\";\n\ntest(\"adds\", () => {\n\tassert.equal(add(1, 1), 2);\n});"),
+	"again.test.mjs": unit("import { add } from \"./math.mjs\";\n\ntest(\"adds again\", () => {\n\tassert.equal(add(2, 2), 4);\n});"),
+	"times.test.mjs": unit("import { times } from \"./math.mjs\";\n\ntest(\"times\", () => {\n\tassert.equal(times(2, 2), 4);\n});"),
 	"break.test.mjs": unit("test(\"keeps\", () => {\n\tassert.ok(true);\n});\n\ntest(\"breaks\", () => {\n\tassert.equal(1, 2);\n});"),
 	"suite.mjs": "import { startSession } from \"./architecture-harness.mjs\";\n",
 	"view.spec.mjs": "import { test } from \"@playwright/test\";\n",
@@ -62,6 +67,26 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await row("break.test.mjs").locator(".fv-toggle").click();
 	await expect(row("keeps")).toBeVisible();
 	await expect(row("breaks")).toContainText("fail");
+
+	// How much each reaches, and how much only it does.
+	await run("times.test.mjs");
+	await expect(row("times.test.mjs")).toContainText(/\d+ lines · \d+ only here/u, { "timeout": 60_000 });
+	await run("again.test.mjs");
+	await expect(row("again.test.mjs")).toContainText("nothing only here", { "timeout": 60_000 });
+	await expect(row("add.test.mjs")).toContainText("nothing only here");
+
+	// A save touches what reached that file, not what didn't, and they run from there.
+	await openFile(workbench, "math.mjs");
+	await codeOf(workbench).pressSequentially("// ");
+	await codeOf(workbench).press("ControlOrMeta+s");
+	await expect(row("add.test.mjs")).toContainText("touched", { "timeout": 30_000 });
+	await expect(row("break.test.mjs")).not.toContainText("touched");
+
+	const touched = workbench.locator("wa-button[aria-label='Run touched']");
+
+	await touched.click();
+	await expect(touched).toHaveCount(0, { "timeout": 60_000 });
+	await expect(row("add.test.mjs")).not.toContainText("touched");
 
 	// Two that write one file: each says it can't run in parallel, and why.
 	await run("one.test.mjs");

@@ -2,10 +2,10 @@
  * Tests for agents: which tests a change reaches, and their results as data (RUNNING.md, *Tests*). Their readers:
  * agents' `runs_affected` and `runs_tests`.
  *
- * - `tests.affected` { paths? }: the tests whose kept traces (`.silo/local/traces/<file>.jsonl`: what each test ran of
- *   each file) ran code in the changed files — each with its last outcome, and `stale`: the file has changed since
- *   (a change in a file is all it can tell by: every test that reached a changed file is). And the test files no trace names (`untraced`): what they reach isn't known
- *   until they run, so an answer without them isn't the whole of it.
+ * - `tests.affected` { paths? }: the tests whose last run here ran code in the changed files (`tests.reach`), or that are in
+ *   one — each with its last outcome, and `stale`: the file has changed since that run (a whole file is all it goes by, not
+ *   its lines). And the test files with no reach kept (`untraced`): what they reach isn't known until they run, so an answer
+ *   without them isn't the whole of it.
  * - `tests.run` { files?, affected? }: test files run one at a time, as `node --test` runs each (in the debugger), and
  *   each test's result: its outcome, what it threw, what a failed assertion compared, its time, and how it came out
  *   last before this run. `affected` runs the files of the affected tests that are stale. A capability stop (a gated
@@ -21,18 +21,16 @@
  *   its id, what it's doing and for how long, and the files done so far (`running`) — and `{ run }` waits on it again.
  *   So a run that's slow, stuck before a file's clock starts, or in a tab that went away reads as that to an agent,
  *   rather than as its tool call never coming back.
+ * - `tests.reach`: what each test last ran, by file and line, kept here (`.silo/local/reach/`, this machine's).
  * - `tests.history`: the runs kept here (`.silo/local/runs.jsonl`, this machine's): each file's run, when, how long, each
  *   test's outcome and time, and what it did to the world (its effects). What the table of features and tests reads.
  */
 import type { Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
-import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import type * as vscodeApi from "vscode";
 import type { GitReader } from "./git-service";
 import type { NodeRunner } from "./node-runner";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { localTracesPath } from "@brianjenkins94/util/silo/layout";
-import { parseTraces } from "@brianjenkins94/util/silo/traces";
 import { waitFor } from "./readiness";
 import { isTestFile } from "./terminal/commands/node/node";
 
@@ -48,8 +46,9 @@ const READY_MS = 300_000;
  *  inside what an agent's tool call waits for, so a run that's slow, stuck or gone reads as that and not as silence. */
 const ANSWER_MS = 50_000;
 
-/** Where runs are kept, and how many of each file's. */
+/** Where runs are kept, and how many of each file's; and what each test last ran, by its file. */
 const HISTORY = ".silo/local/runs.jsonl";
+const REACH = ".silo/local/reach";
 const KEPT_RUNS = 30;
 
 /** Runs kept to be asked about by id: the latest that have ended, and any still going. */
@@ -83,6 +82,23 @@ interface Asked { "message": string; "key": string; "scope": string; "request": 
 
 /** A test file's result, as a run answers it. */
 interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[] }
+
+/** Statements as the lines they cover, as few ranges as they make (first and last line, from 0). */
+function rangesOf(statements: [[number, number], [number, number]][]): [number, number][] {
+	const ranges: [number, number][] = [];
+
+	for (const [[from], [to]] of statements.toSorted(([one], [other]) => one[0] - other[0])) {
+		const last = ranges.at(-1);
+
+		if (last !== undefined && from <= last[1] + 1) {
+			last[1] = Math.max(last[1], to);
+		} else {
+			ranges.push([from, to]);
+		}
+	}
+
+	return ranges;
+}
 
 /** One file's run, as it's kept: what the table of features and tests reads. */
 export interface RunRecord {
@@ -134,58 +150,51 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
-	const tracesOf = async (path: string): Promise<RunTrace[]> => parseTraces(await read(localTracesPath(path)) ?? "").filter((trace) => trace.test !== undefined);
-
-	/** Every test a trace names, by its file: what's been run here. */
-	const tracedTestFiles = async (): Promise<Set<string>> => {
-		const files = new Set<string>();
-		// (walked: a search leaves dot folders out)
+	/** What each test last ran: each code file's lines, by the test's id. */
+	const readReach = async (): Promise<Record<string, Record<string, [number, number][]>>> => {
+		const reach: Record<string, Record<string, [number, number][]>> = {};
 		const walk = async (folder: vscodeApi.Uri): Promise<void> => {
 			for (const [name, type] of await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscodeApi.FileType][])) {
 				const uri = vscode.Uri.joinPath(folder, name);
 
 				if (type === vscode.FileType.Directory) {
 					await walk(uri);
-				} else if (name.endsWith(".jsonl")) {
-					for (const trace of parseTraces(decoder.decode(await vscode.workspace.fs.readFile(uri)))) {
-						if (trace.test !== undefined) {
-							files.add(trace.test.id.split(" › ")[0]);
-						}
-					}
+				} else if (name.endsWith(".json")) {
+					Object.assign(reach, JSON.parse(decoder.decode(await vscode.workspace.fs.readFile(uri))));
 				}
 			}
 		};
 
-		await walk(vscode.Uri.file(`${ROOT}/.silo/local/traces`));
+		await walk(vscode.Uri.file(`${ROOT}/${REACH}`));
 
-		return files;
+		return reach;
 	};
 
 	const affected = async (paths?: string[]): Promise<{ "tests": Affected[]; "changed": string[]; "untraced": string[] }> => {
 		const changed = paths ?? (await git.status({ "whole": true })).files.filter((change) => change.status !== "D").map((change) => change.path);
-		const tests = new Map<string, Affected>();
+		const code = new Set(changed.filter((each) => CODE.test(each)));
+		const reach = await readReach();
+		const lastRuns = new Map((await readHistory()).map((run) => [run.file, run]));
+		const changedAt = new Map(await Promise.all([...code].map(async (path): Promise<[string, number]> => [path, await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${ROOT}/${path}`))).then((stat) => stat.mtime, () => 0)])));
+		const tests: Affected[] = [];
 
-		for (const path of changed.filter((each) => CODE.test(each))) {
-			const traces = await tracesOf(path);
+		for (const [id, files] of Object.entries(reach)) {
+			const file = id.split(" › ")[0];
+			const reaches = [...code].filter((path) => path === file || Object.hasOwn(files, path));
 
-			for (const trace of traces) {
-				const { test } = trace;
-				const known = tests.get(test.id);
+			if (reaches.length > 0) {
+				const run = lastRuns.get(file);
+				const at = run?.at ?? "";
 
-				// (a test's latest trace on each file: its outcome is its last run's)
-				if (known === undefined || trace.at > known.at) {
-					tests.set(test.id, { "id": test.id, "file": test.id.split(" › ")[0], "outcome": test.outcome, "at": trace.at, "stale": true, "reaches": [...new Set([...known?.reaches ?? [], path])] });
-				} else {
-					known.reaches = [...new Set([...known.reaches, path])];
-				}
+				tests.push({ "id": id, "file": file, "outcome": run?.tests.find((test) => test.id === id)?.outcome ?? "", "at": at, "stale": reaches.some((path) => (changedAt.get(path) ?? 0) > Date.parse(at === "" ? "0" : at)), "reaches": reaches });
 			}
 		}
 
-		const traced = await tracedTestFiles();
+		const traced = new Set(Object.keys(reach).map((id) => id.split(" › ")[0]));
 		const testFiles = (await vscode.workspace.findFiles("**/*.{js,mjs,cjs,ts,mts,cts}", "**/{node_modules,.*}/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isTestFile(path));
 
 		return {
-			"tests": [...tests.values()].sort((left, right) => Number(right.stale) - Number(left.stale) || left.id.localeCompare(right.id)),
+			"tests": tests.sort((left, right) => Number(right.stale) - Number(left.stale) || left.id.localeCompare(right.id)),
 			"changed": changed,
 			"untraced": testFiles.filter((path) => !traced.has(path)).sort((left, right) => left.localeCompare(right))
 		};
@@ -215,6 +224,15 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	};
 
 	serve(hub, "tests.history", async () => ({ "history": await readHistory() }));
+
+	/** What each test of `file` ran, its last run's: each code file's lines, as ranges. A file's run replaces its own. */
+	const keepReach = async (file: string, tests: TestReport[]): Promise<void> => {
+		const reach = Object.fromEntries(tests.map((test) => [[file, ...test.titles].join(" › "), Object.fromEntries(test.files.map((ran) => [ran.file.replace(/^\/workspace\//u, ""), rangesOf(ran.statements)]))]));
+
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(`${ROOT}/${REACH}/${file}.json`), new TextEncoder().encode(JSON.stringify(reach)));
+	};
+
+	serve(hub, "tests.reach", async () => ({ "reach": await readReach() }));
 
 	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A
 	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). One that
@@ -374,6 +392,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				return { "ask": result.asked };
 			}
 
+			await keepReach(file, result.tests);
 			await keep({
 				"file": file,
 				"at": new Date().toISOString(),

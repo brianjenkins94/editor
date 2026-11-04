@@ -66,10 +66,8 @@ break-glass, JUDICIAL if it's set, else the person by MRTR); re-invoked with the
 once and goes on. And a call answers within 50 seconds, done or not (2026-10-31): a run still going answers with its
 id, what it's doing and for how long, and the files done so far, and `runs_tests` with that `run` waits on it again.
 
-`runs_affected` reads the tests' traces (`.silo/local/traces`: lib util/silo/traces, each test's run on each file it
-ran), so the tests a change reaches are the ones whose last run here ran code in the changed files, each stale until it
-runs again; the test files no trace names are listed apart. Nothing in the core writes traces now (their writer went
-with runtime evidence), so until it comes back every test file reads as untraced.
+`runs_affected` reads what each test last ran (`.silo/local/reach/`: each test's lines of each file it ran, this machine's),
+and the table of features and tests shows the same: a file whose code has changed since it last ran is *touched*.
 
 **`@playwright/test` is the editor's too** (extensions/tsval/playwright-test.js): Playwright's test API over node-test.js, so a
 Playwright test is told and traced as any other. Its `page` drives the preview you have open (the preview window used

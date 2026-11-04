@@ -408,9 +408,16 @@ How it's kept:
      custom view in the panel, as core has no way to open a tab of its own without exporting `registerEditorPane` from the
      component; *Features map*, the treemap, stays out. Not yet: `touched` and `resting`, CI's outcomes, coverage, per-test
      effects, or a filter. A UI spec's effects are the spec's, not the editor's it drives.
-   - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set): silo's *Selection by test*, by reach, and
-     tests that reach nothing another doesn't offered for a person to drop. Then rerun as you write, checking coverage and
-     capability expansion (silo README; removed: *Live runs after an edit*, *Coverage in the gutter*, *capability engine*).
+   - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Each test's reach is kept, its lines of each
+     file (`.silo/local/reach/`, test-runs.ts), `tests.affected` reads it (traces had no writer), and the table shows each file's
+     reach, what only it reaches, and *touched*, with a button to run those. Measured, 386 passing tests of 64 files in the
+     debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
+     line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
+     the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test
+     here reaches, so selection can't be trusted yet: what it needs is reach for what's untested here, the UI specs' most. Same
+     reach isn't the same check: a drop wants a person's decision, and mutation testing could show it. Then rerun as you write,
+     checking coverage and capability expansion (silo README; removed: *Live runs after an edit*, *Coverage in the gutter*,
+     *capability engine*).
    - **Tests at once** (2026-11-04; the user: tests are to be written to run in parallel, and a prominent column says which
      aren't). Unit files in one editor: 56 files, 261 s one at a time, 155 at 2, 89 at 4, 85 at 8, all 285 tests passing, and
      none fails beside a copy of itself; `tests.run` was dropping a run still going once 20 had ended since, which parallel

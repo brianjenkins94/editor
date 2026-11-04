@@ -2,8 +2,9 @@
 /**
  * Features and tests (packages/silo/README.md, *Tests by feature, in your face*), a table in the panel: each feature of the
  * ledger, with its test files under it, each opening to its tests. A file's row says what kind of test it is, whether it can't
- * run beside the others and why, the effects its last run had, when it last passed and failed, how long it typically takes, and
- * a button that runs it. Tests are meant to run at once, so only one that can't says anything in that column.
+ * run beside the others and why, the effects its last run had, how much code it reaches and how much of that only it does, when
+ * it last passed and failed, how long it typically takes, whether code it ran has changed since, and a button that runs it. Tests
+ * are meant to run at once, so only one that can't says anything in that column.
  *
  * What it says comes from the ledger and the runs kept here (test-runs.ts, `tests.history`); a file not run here says so.
  */
@@ -41,6 +42,10 @@ interface Model {
 	"files": Map<string, string[]>;
 	"kinds": Map<string, Kind>;
 	"history": RunRecord[];
+	/** What each test file reaches, in lines of code, and how many of them no other file does. */
+	"reach": Map<string, { "lines": number; "only": number }>;
+	/** The test files whose code has changed since they last ran. */
+	"touched": Set<string>;
 }
 
 const KIND_TITLE: Record<Kind, string> = {
@@ -73,6 +78,35 @@ const lasted = (ms: number | undefined): string => (ms === undefined ? "" : ms <
 
 /** The run in `runs` (latest last) that came out `passed`. */
 const lastWhere = (runs: RunRecord[], passed: boolean): RunRecord | undefined => runs.findLast((run) => (run.tests.length > 0 && run.tests.every((test) => test.outcome === "pass")) === passed);
+
+/** Code a test's reach counts: not a test's own, nor what's installed. */
+const isCode = (path: string): boolean => !path.includes("node_modules/") && !isTestFile(path);
+
+/** What each test file reaches, from what each test ran. */
+function reachOf(reach: Record<string, Record<string, [number, number][]>>): Model["reach"] {
+	const byFile = new Map<string, Set<string>>();
+	const reachers = new Map<string, Set<string>>();
+
+	for (const [id, files] of Object.entries(reach)) {
+		const file = id.split(" › ")[0];
+		const lines = byFile.get(file) ?? new Set();
+
+		byFile.set(file, lines);
+
+		for (const [code, ranges] of Object.entries(files).filter(([path]) => isCode(path))) {
+			for (const [from, to] of ranges) {
+				for (let line = from; line <= to; line += 1) {
+					const key = `${code}:${String(line)}`;
+
+					lines.add(key);
+					reachers.set(key, (reachers.get(key) ?? new Set()).add(file));
+				}
+			}
+		}
+	}
+
+	return new Map([...byFile].map(([file, lines]) => [file, { "lines": lines.size, "only": [...lines].filter((key) => reachers.get(key)?.size === 1).length }]));
+}
 
 /** Why `file` can't run beside the others, if it can't: what stops it, or what it touches that another does too. */
 function blockOf(file: string, kind: Kind, writers: Map<string, Set<string>>, runs: RunRecord[]): string | undefined {
@@ -137,10 +171,11 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 			<div class="wa-cluster wa-gap-s">
 				<wa-checkbox size="small" checked={all} onChange={() => { setAll(!all); }}>Show features with no tests</wa-checkbox>
 				<span class="wa-caption-s">{`${String(shown.length)} of ${String(model.features.length)} features`}</span>
+				{model.touched.size === 0 ? null : <wa-button size="small" variant="brand" aria-label="Run touched" onClick={() => { onRun([...model.touched]); }}>{`Run the ${String(model.touched.size)} touched`}</wa-button>}
 			</div>
 			<table class="fv-table">
 				<thead>
-					<tr><th>Test</th><th>Type</th><th>Can't run in parallel</th><th>Effects</th><th>Last passed</th><th>Last failed</th><th>Typical</th><th /></tr>
+					<tr><th>Test</th><th>Type</th><th>Can't run in parallel</th><th>Effects</th><th>Reach</th><th>Last passed</th><th>Last failed</th><th>Typical</th><th /></tr>
 				</thead>
 				<tbody>
 					{shown.flatMap(([name, entry]) => {
@@ -151,7 +186,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 						return [
 							<tr key={name} class="fv-feature" title={entry.what ?? entry.why}>
 								<td>{name}</td>
-								<td colSpan={5}>
+								<td colSpan={6}>
 									<span class="wa-cluster wa-gap-3xs">
 										{entry.status === "active" ? null : <wa-badge appearance="outlined" variant="neutral">{entry.status}</wa-badge>}
 										<span>{files.length === 0 ? "no tests" : `${String(files.length)} ${files.length === 1 ? "file" : "files"}`}</span>
@@ -168,16 +203,21 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 								const block = blockOf(file, kind, writers, runs);
 								const typical = median(runs.filter((run) => run.tests.every((test) => test.outcome === "pass")).map((run) => run.ms));
 								const opened = open.has(file);
+								const reached = model.reach.get(file);
 
 								return [
 									<tr key={file}>
 										<td class="fv-test" title={file}>
 											<span class="fv-toggle" onClick={() => { const next = new Set(open); if (opened) { next.delete(file); } else { next.add(file); } setOpen(next); }}>{last === undefined ? "  " : opened ? "▾ " : "▸ "}</span>
 											<a href="#" onClick={(event) => { event.preventDefault(); onOpen(file); }}>{file.split("/").findLast((part) => part !== "")}</a>
+											{model.touched.has(file) ? <wa-badge variant="warning" title="Code it ran has changed since it last ran."> touched</wa-badge> : null}
 										</td>
 										<td title={KIND_TITLE[kind]}>{kind}</td>
 										<td>{block === undefined ? null : <wa-badge variant="danger">{block}</wa-badge>}</td>
 										<td><Effects run={last} /></td>
+										<td title="Lines of code it ran, and how many no other test file runs.">
+											{reached === undefined || reached.lines === 0 ? null : reached.only > 0 ? `${String(reached.lines)} lines · ${String(reached.only)} only here` : <span class="wa-cluster wa-gap-3xs">{`${String(reached.lines)} lines`}<wa-badge appearance="outlined" variant="neutral">nothing only here</wa-badge></span>}
+										</td>
 										<td><When run={lastWhere(runs, true)} /></td>
 										<td><When run={lastWhere(runs, false)} /></td>
 										<td>{last === undefined ? <span class="wa-caption-s">not run</span> : lasted(typical)}</td>
@@ -186,7 +226,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 									...opened ? (last?.tests ?? []).map((test) => (
 										<tr key={test.id} title={test.error}>
 											<td class="fv-case">{test.id.split(" › ").slice(1).join(" › ")}</td>
-											<td colSpan={5}>{test.outcome === "pass" ? null : <wa-badge variant="danger">{test.outcome}</wa-badge>}</td>
+											<td colSpan={6}>{test.outcome === "pass" ? null : <wa-badge variant="danger">{test.outcome}</wa-badge>}</td>
 											<td>{lasted(test.ms)}</td>
 											<td />
 										</tr>
@@ -206,7 +246,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	const ledgerUri = vscode.Uri.file(`${ROOT}/${ledgerPath()}`);
 	const approved: string[] = [];
 	const running = new Set<string>();
-	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [] };
+	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set() };
 	const redraws = new Set<() => void>();
 	const redraw = (): void => {
 		for (const each of redraws) {
@@ -235,7 +275,10 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		const kinds = new Map(await Promise.all([...new Set([...files.values()].flat())].map(async (file): Promise<[string, Kind]> => [file, kindOf(await textOf(vscode.Uri.file(`${ROOT}/${file}`)) ?? "")])));
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history };
+		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
+		const { "tests": affected } = await rpc.request("tests.affected", {}, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[] };
+
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)) };
 		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length });
 		redraw();
 	});
@@ -306,6 +349,11 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	vscode.commands.registerCommand("editor.features.show", async () => {
 		await vscode.commands.executeCommand("editor.features.focus");
 		await read();
+	});
+
+	// (a save may have touched a test's code)
+	vscode.workspace.onDidSaveTextDocument(() => {
+		void read();
 	});
 
 	// (a run anyone started: an agent's, or one of the table's own)
