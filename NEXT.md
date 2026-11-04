@@ -418,10 +418,13 @@ How it's kept:
      reach isn't the same check: a drop wants a person's decision, and mutation testing could show it. With the specs and browser
      suites too, by COVERAGE=1 (test/in-editor.mjs runs specs one at a time there; a stopgap, *What each test ran*): 426 tests of 80
      files reach 48,196 of about 105,800 lines. 101 tests reach the same lines, 9 reach 90%, as most of it is an editor booting; by
-     file 50 of 80, 538 s of 699. Replayed over the last 80 commits by a rule of nothing for no code, all for a file nothing reaches,
-     else what its changed lines reach, all of it read at HEAD's line numbers: 27 ran nothing, 20 everything, 33 a median 14 files, 34% of the time.
-     Over-selects: a browser test's reach includes the session's own editor. Not checked: whether a selection would have caught
-     what CI did. The table's reach is the debugger's alone. Then rerun as you write,
+     file 50 of 80, 538 s of 699. Replayed over the last 80 commits by a rule of nothing for docs alone, a test for itself, a test's helper for the
+     browser tests, everything for config, scripts or code nothing reaches, else what its changed lines reach (read at HEAD's line
+     numbers): 15 ran nothing, 34 everything, 31 a median 16 files, 52% of the time. Forcing everything most: code nothing reaches
+     (37 files), package.json (21) and the workflow (15).
+     Checked against CI's history: of 885 failures on main, 10 are of tests that exist today, too few to call it safe: 6 selected, and
+     4 not, each apparently a flake, 3 of them on commits that changed only docs. Most history's tests are gone. A browser test's
+     reach also over-selects, including the session's own editor. The table's reach is the debugger's alone. Then rerun as you write,
      checking coverage and capability expansion (silo README; removed: *Live runs after an edit*, *Coverage in the gutter*,
      *capability engine*).
    - **Tests at once** (2026-11-04; the user: tests are to be written to run in parallel, and a prominent column says which
