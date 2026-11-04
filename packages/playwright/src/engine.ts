@@ -765,12 +765,18 @@ function setValue(element: HTMLInputElement | HTMLTextAreaElement, value: string
 }
 
 /** A key as Playwright names it (`Enter`, `a`, `Control+a`, `Shift+Tab`): the key, and its modifiers. */
+/** What's used of an EditContext (not in TypeScript's DOM yet). */
+interface TextContext extends EventTarget { "selectionStart": number; "selectionEnd": number; "updateText": (start: number, end: number, text: string) => void; "updateSelection": (start: number, end: number) => void }
+
+/** Whether `ControlOrMeta` means Meta here, as Playwright's. */
+const onMac = (): boolean => /Mac/u.test(globalThis.navigator?.platform ?? "");
+
 function parseKey(combo: string): { "key": string; "ctrlKey": boolean; "shiftKey": boolean; "altKey": boolean; "metaKey": boolean } {
 	const parts = combo === "+" ? ["+"] : combo.split("+");
 	const key = parts.at(-1) ?? "";
 	const has = (name: string): boolean => parts.slice(0, -1).includes(name);
 
-	return { "key": key, "ctrlKey": has("Control") || has("ControlOrMeta"), "shiftKey": has("Shift"), "altKey": has("Alt"), "metaKey": has("Meta") };
+	return { "key": key, "ctrlKey": has("Control") || (has("ControlOrMeta") && !onMac()), "shiftKey": has("Shift"), "altKey": has("Alt"), "metaKey": has("Meta") || (has("ControlOrMeta") && onMac()) };
 }
 
 /** Press one key on `element` (focused): keydown, the key's effect unless prevented — a character typed, Backspace,
@@ -785,6 +791,20 @@ function pressKey(element: Element, combo: string): void {
 	const field = element.tagName === "INPUT" || element.tagName === "TEXTAREA" ? element as HTMLInputElement | HTMLTextAreaElement : undefined;
 	const proceed = element.dispatchEvent(new view.KeyboardEvent("keydown", init));
 	const modified = parsed.ctrlKey || parsed.metaKey || parsed.altKey;
+	// An EditContext's element (Monaco's) takes its text from the browser, not from key events: what the browser does for a
+	// real key, it updates the context's text and tells it.
+	const context = (element as HTMLElement & { "editContext"?: TextContext | null }).editContext;
+
+	if (proceed && context !== undefined && context !== null && parsed.key.length === 1 && !modified) {
+		const start = context.selectionStart;
+		const end = context.selectionEnd;
+		const after = start + parsed.key.length;
+
+		context.updateText(start, end, parsed.key);
+		context.updateSelection(after, after);
+		context.dispatchEvent(new (view as unknown as { "TextUpdateEvent": new (type: string, init: Record<string, unknown>) => Event }).TextUpdateEvent("textupdate", { "text": parsed.key, "updateRangeStart": start, "updateRangeEnd": end, "selectionStart": after, "selectionEnd": after }));
+	}
+
 
 	if (proceed && field !== undefined) {
 		const start = field.selectionStart ?? field.value.length;

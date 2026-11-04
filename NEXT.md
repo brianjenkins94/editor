@@ -371,11 +371,11 @@ How it's kept:
        person does, through locators, the palette and what's on screen, so a UI that's missing or broken fails it. An
        instance starts with the files a test gives it, by its address (`&seed=`), and `page.goto` opens a window if none is.
        *First suite moved:* in-editor/bablr.spec.mjs (test/in-editor.mjs runs them, in CI's `workbench`): palette, its
-       toast, the warning in Problems. **Next blocker: typing.** Monaco takes text only from real input, through
-       EditContext, and a test in the browser has none (Playwright has trusted input, by the DevTools Protocol); xterm didn't
-       take synthetic keys either, in two tries, cause not found. So a test can't yet edit a file: test/bablr.mjs stays
-       for a warning going once a file's fixed, for the parses kept, and for the agents' request. A way in: dispatching
-       `textupdate` on an EditContext, unproven. And the suites' own needs: they ask over the hub
+       toast, the warning in Problems. **Typing:** an element with an EditContext (Monaco's) takes text as the browser gives it, the context updated and
+       `textupdate` told, held to real keys in engine.test, so a test edits a file, and saves with the keyboard. Gaps:
+       `ControlOrMeta+a` doesn't select in Monaco, nor is Select All in the palette there; xterm didn't take synthetic keys in
+       two tries, cause not found, and draws to a canvas, so a test can't read a terminal. test/bablr.mjs stays for the
+       parses kept and the agents' request, which have no UI to read. And the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
