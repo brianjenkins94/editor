@@ -46,7 +46,7 @@ import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
-import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, isOwnedCode, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, isOwnedCode, ledgerText, ownersOf, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 
@@ -274,9 +274,11 @@ export async function coverageOf(repo: string, options: { "since"?: string; "unt
 	const analyzer = await analyzerOf(repo);
 	const objects = gitObjects(repo);
 	const steps: CoverageStep[] = [];
+	const ledger = ledgerOf(repo);
 
 	try {
-		for await (const step of coverageReplay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer, "place": placeSpans })) {
+		// (told by whose the code is declared to be now: the one attribution, decision 22)
+		for await (const step of coverageReplay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer, "place": placeSpans, "owners": (file) => ownersOf(ledger, file) })) {
 			steps.push(step);
 		}
 	} finally {
@@ -622,7 +624,7 @@ export const app = subcommands({
 				const steps = await coverageOf(repo, { "ref": config.get("ref"), ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
 				const span = since === "" ? steps : steps.slice(1);
 
-				process.stdout.write(config.get("json") ? JSON.stringify(span.map((step) => ({ ...step, "features": Object.fromEntries(step.features) })), undefined, "\t") + "\n" : coverageMarkdown(span, { "title": "Coverage of " + path.basename(repo) }));
+				process.stdout.write(config.get("json") ? JSON.stringify(span, undefined, "\t") + "\n" : coverageMarkdown(span, { "title": "Coverage of " + path.basename(repo) }));
 
 				// What ran but isn't counted, because its code couldn't be parsed: said again where it can't be missed, and
 				// the command fails.

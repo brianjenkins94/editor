@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 
-import { currentFeatures, historyOf, installArgs } from "../src/cli.ts";
+import { coverageOf, currentFeatures, historyOf, installArgs } from "../src/cli.ts";
 
 const CLI = path.join(import.meta.dirname, "../src/cli.ts");
 
@@ -212,3 +212,38 @@ test("prices, dormant ways in, silo remove and silo restore", async () => {
 	assert.equal(JSON.parse(fs.readFileSync(path.join(notes, ".silo/features.json")))["adder"], undefined);
 });
 
+test("coverage: what ran is told by the feature declared to own its file, what none owns by its folder", async () => {
+	const owned = "function go() { return 1; }\nfunction idle() { return 2; }\ngo();\n";
+	const free = "export function loose() { return 3; }\nloose();\n";
+	const { cstSpansAsync, spanAnchors } = await import("@brianjenkins94/bablr") as unknown as { "cstSpansAsync": (source: string, language: string) => Promise<unknown>; "spanAnchors": (source: string, language: string, cst: unknown) => { "id": string; "start": number; "end": number; "type": string | null }[] };
+	const spanIn = async (source: string, inside: string): Promise<string> => {
+		const at = source.indexOf(inside);
+		const spans = spanAnchors(source, "Program", await cstSpansAsync(source, "Program")).filter((span) => span.type !== null && span.start <= at && at + inside.length <= span.end);
+
+		return spans.sort((one, other) => (one.end - one.start) - (other.end - other.start))[0]!.id; // (filter's own copy)
+	};
+	const reached = (span: string): string => JSON.stringify({ "span": span, "key": "bablr1", "kind": "reached", "w": 1, "runs": 1, "ever": 1, "lastRun": "r1", "lastAt": "2026-10-02T00:00:00.000Z" }) + "\n";
+	const run = JSON.stringify({ "type": "run", "id": "r1", "title": "node", "entry": "notes/app.ts", "cwd": ".", "startedAt": "2026-10-02T00:00:00.000Z", "endedAt": "2026-10-02T00:00:00.000Z", "exit": 0, "user": "ada", "environment": { "runtime": "tsval", "engine": "node-24", "os": "macos", "cores": 8, "name": "default" }, "files": {} }) + "\n";
+	const fresh = await repository({
+		"2026-10-01": {
+			"tsconfig.json": JSON.stringify({ "compilerOptions": { "module": "esnext", "moduleResolution": "bundler", "target": "esnext" } }),
+			".silo/features.json": JSON.stringify({ "Notes": { "status": "active", "why": "w", "since": "2026-10-01", "what": "Notes.", "paths": ["notes"] } }),
+			"notes/app.ts": owned,
+			"tools/free.ts": free
+		},
+		"2026-10-02": {
+			".silo/runs/ada.jsonl": run,
+			".silo/evidence/ada/default/notes/app.ts.jsonl": reached(await spanIn(owned, "return 1")),
+			".silo/evidence/ada/default/tools/free.ts.jsonl": reached(await spanIn(free, "return 3"))
+		}
+	});
+	const changes = (await coverageOf(fresh)).flatMap((step) => step.changes);
+
+	assert.deepEqual(changes.find((change) => change.declaration === "notes/app.ts#go")?.features, ["Notes"]);
+	assert.equal(changes.find((change) => change.declaration === "notes/app.ts#go")?.kind, "started");
+	assert.deepEqual(changes.find((change) => change.declaration === "tools/free.ts#loose")?.features, [], "nobody's: told by its folder");
+
+	const told = spawnSync("npx", ["tsx", CLI, "coverage", fresh], { "encoding": "utf8" });
+
+	assert.match(told.stdout, /\*\*Notes\*\* — started running: `app\.ts#go`/u);
+});
