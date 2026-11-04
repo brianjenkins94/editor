@@ -69,6 +69,19 @@ import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
 import { installWorkspaceTools } from "./workspace-tools";
 
+// TEMPORARY (PR #16): who raises a cancellation in this realm, with its stack: a save participant's silently drops the save.
+Object.defineProperty(Error.prototype, "name", {
+	"configurable": true,
+	"get": () => "Error",
+	"set": function(value: string) {
+		Object.defineProperty(this, "name", { "value": value, "configurable": true, "writable": true, "enumerable": true });
+
+		if (value === "Canceled") {
+			setTimeout(() => { console.log(`[cancel-probe] ${String(Date.now())} ${(this as Error).message} ${String((this as Error).stack).split("\n").slice(1, 14).map((line) => line.trim().replace(/https?:\/\/[^/]+/u, "")).join(" | ")}`); }, 0);
+		}
+	}
+});
+
 // Boot milestones on the performance timeline (beside VS Code's own code/* marks), for load investigations.
 performance.mark("editor/entry");
 

@@ -38,6 +38,7 @@ async function ran(spec) {
 
 	console.log(`${spec}: ${String(Date.now() - started)} ms`);
 
+	console.log(`[in-editor] cancels: ${String(session.printed().filter((line) => line.startsWith("[cancel-probe]")).length)}`);
 	return answer.files[0];
 }
 
@@ -74,6 +75,7 @@ async function sayWhatHappened() {
 		}
 	}
 
+	console.log(`[in-editor] cancellations:\n${[...new Set(session.printed().filter((line) => line.startsWith("[cancel-probe]") && !line.includes("UniqueContainer.value")).map((line) => line.replace(/^\[cancel-probe\] \d+ /u, "").slice(0, 1400)))].slice(-14).join("\n")}`);
 	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => !/^\{"context|^%c|^console\.group|^\s*$|^[←→]|observability\.|node_modules|ata\.|\.cdn/u.test(line)).slice(-120).map((line) => line.slice(0, 220)).join("\n  ")}`);
 }
 
