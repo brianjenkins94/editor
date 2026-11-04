@@ -372,9 +372,11 @@ How it's kept:
        instance starts with the files a test gives it, by its address (`&seed=`), and `page.goto` opens a window if none is.
        *First suite moved:* in-editor/bablr.spec.mjs (test/in-editor.mjs runs them, in CI's `workbench`): palette, its
        toast, the warning in Problems. **Typing:** an element with an EditContext (Monaco's) takes text as the browser gives it, the context updated and
-       `textupdate` told, held to real keys in engine.test, so a test edits a file, and saves with the keyboard. Gaps:
-       `ControlOrMeta+a` doesn't select in Monaco, nor is Select All in the palette there; xterm didn't take synthetic keys in
-       two tries, cause not found, and draws to a canvas, so a test can't read a terminal. test/bablr.mjs stays for the
+       `textupdate` told, held to real keys in engine.test, so a test edits a file, and saves with the keyboard.
+       **A terminal too** (in-editor/terminal.spec.mjs): keys go to its helper textarea, punctuation arriving once key codes
+       were a real keyboard's (with the old ones `.`, `-` and `&&` were lost), and a test reads it as DOM rows, by seeding
+       `terminal.integrated.gpuAcceleration` off (READABLE_TERMINAL), as it draws on a canvas otherwise, so it reads a renderer
+       a default setup doesn't draw with. `ControlOrMeta+a` selects in Monaco now; why it didn't before wasn't found. test/bablr.mjs stays for the
        parses kept and the agents' request, which have no UI to read. And the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
@@ -385,8 +387,7 @@ How it's kept:
        that threw on its way to Problems. Now a message with no place goes on the first line, and the worker lends a root
        with no tsconfig an empty one (only it sees that; a real one wins). The engine sent a character's own code as its
        legacy keyCode, so Monaco took `.` for Delete and `"` for PageDown; a key's code and keyCode are now a US keyboard's,
-       held to real Playwright, and typing in an email or number field no longer throws. Not looked at: whether that
-       is what stopped `ControlOrMeta+a` or xterm. Seen once in six runs, not pinned down: `frame.evaluate: Execution
+       held to real Playwright, and typing in an email or number field no longer throws. Seen once in six runs, not pinned down: `frame.evaluate: Execution
        context was destroyed` from the outer workbench while eslint.spec ran. A test run's results come only at its end, so
        a stall (120 s quiet: test-runs.ts) loses the tests that passed before it.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,

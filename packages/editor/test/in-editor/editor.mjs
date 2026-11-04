@@ -61,3 +61,17 @@ export async function problems(workbench) {
 
 /** Where a person's typing goes in the open file. */
 export const codeOf = (workbench) => workbench.locator(".editor-instance .native-edit-context").first();
+
+/** What a workspace is seeded with for a test to read its terminal: drawn as DOM rows, as this setting has it, not on a canvas. */
+export const READABLE_TERMINAL = { ".vscode/settings.json": "{ \"terminal.integrated.gpuAcceleration\": \"off\" }\n" };
+
+/** A new terminal, at its prompt: where its keys go, and what it shows (READABLE_TERMINAL). */
+export async function openTerminal(workbench) {
+	await runCommand(workbench, "Terminal: Create New Terminal");
+
+	const output = workbench.locator(".xterm-rows").last();
+
+	await expect(output).toContainText("/workspace $", { "timeout": 30_000 });
+
+	return { "input": workbench.locator(".xterm-helper-textarea").last(), "output": output };
+}
