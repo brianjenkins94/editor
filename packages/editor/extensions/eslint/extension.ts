@@ -30,6 +30,8 @@ import * as vscode from "vscode";
  *  activated in the editor, else a logger of its own. */
 let log: Logger = logger({ "source": "eslint" });
 
+/** How long after a save's code actions are cancelled it's tried again: once the save it was part of has given up. */
+const SAVE_AGAIN_MS = 100;
 const LANGUAGES = ["javascript", "javascriptreact", "typescript", "typescriptreact"];
 const FIX_ALL = vscode.CodeActionKind.SourceFixAll.append("eslint");
 /** How long edits settle before a document is linted again. */
@@ -472,13 +474,27 @@ export function activate(context: vscode.ExtensionContext): void {
 			});
 		}),
 		vscode.languages.registerCodeActionsProvider(selector, {
-			"provideCodeActions": async (document, _range, codeContext) => {
+			"provideCodeActions": async (document, _range, codeContext, token) => {
 				// Only as a source action (save / "Fix all"), never as a lightbulb on every cursor move.
 				if (codeContext.only === undefined || !FIX_ALL.intersects(codeContext.only)) {
 					return [];
 				}
 
-				const output = await fixAll(document);
+				// VS Code abandons a save, saying nothing, when these are cancelled because a provider registered meanwhile, as
+				// extensions starting up do. Nobody asked for that: the text as it was, still unsaved, once it's over, is saved
+				// again. (Skipped, it saves anyway; edited, it isn't this text.)
+				const { version } = document;
+				const cancelled = token.onCancellationRequested(() => {
+					setTimeout(() => {
+						if (!document.isClosed && document.isDirty && document.version === version) {
+							void document.save();
+						}
+					}, SAVE_AGAIN_MS);
+				});
+
+				const output = await fixAll(document).finally(() => {
+					cancelled.dispose();
+				});
 
 				if (output === undefined) {
 					return [];

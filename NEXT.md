@@ -518,11 +518,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
   components/monaco-vscode-api).
 
 - **A save can be dropped, silently:** VS Code abandons a save when its code actions on save are cancelled, and
-  getCodeActions cancels itself when a code action provider is registered while it waits (as extensions starting up do).
-  Seen 2026-11-04: bablr.spec's first save, on every CI run. ESLint's fix no longer waits for its worker to load, so that
-  save goes unfixed instead of waiting seconds (`extensions/eslint/extension.ts`, `fixAll`); what's left is the few
-  milliseconds a loaded ESLint takes. The agents' `files_edit` / `files_write` still try again (workspace-tools.ts
-  `applyAndSave`); a person's save isn't retried.
+  getCodeActions cancels itself when a code action provider is registered while it waits (as extensions starting up do). Seen
+  2026-11-04, on CI's first saves. ESLint's fix doesn't wait for its worker to load, and saves again when it sees that cancel
+  (`extensions/eslint/extension.ts`). Another provider that's slow to answer could still lose a save. The agents' `files_edit` /
+  `files_write` still try again (workspace-tools.ts `applyAndSave`).
 
 ## Decisions
 
