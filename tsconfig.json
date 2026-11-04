@@ -2,6 +2,10 @@
   "extends": "@tsconfig/node-lts/tsconfig.json",
   "compilerOptions": {
     "customConditions": ["source"],
+    // A pre-built package ships only dist, so its manifest can't name source: types come from here, and its exports stay what's published.
+    "paths": {
+      "@brianjenkins94/monaco-vscode-api/main": ["./components/monaco-vscode-api/main.ts"]
+    },
     "alwaysStrict": true,
     "forceConsistentCasingInFileNames": false,
     "isolatedModules": true,

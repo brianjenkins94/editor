@@ -53,7 +53,6 @@
     "zod": "latest"
   },
   "devDependencies": {
-    "@brianjenkins94/monaco-vscode-api": "file:../../components/monaco-vscode-api",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

@@ -23,9 +23,6 @@
     "dist"
   ],
   "exports": {
-    "./main": {
-      "source": "./main.ts",
-      "default": "./dist/main.js"
-    }
+    "./main": "./dist/main.js"
   }
 }
