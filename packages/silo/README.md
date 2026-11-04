@@ -463,7 +463,11 @@ commit (decision 12). Two rows are never hidden:
 - **Unattributed**: tests no feature claims and files no feature owns, counted. With features declared first it's
   empty: code no feature explicitly owns is an error (decision 22).
 - **Declared against observed**: a test that declares one feature but whose reach is mostly another's code. That's how
-  a boundary drawn in the wrong place shows itself.
+  a boundary drawn in the wrong place shows itself. `silo observed <reach>`, from a folder of each suite's reach
+  (`COVERAGE=1` locally, a dispatched architecture run in CI, as artifacts). By statement, among those few tests ran: by
+  file, a session loading nearly everything makes nearly everything look shared (a test's median share of its own features'
+  code was 6% by file, 40% by statement, 2026-11-03). Much of what it shows is a dependency (ESLint's tests run almostnode),
+  not a mistake: it says, and a person decides.
 
 An editor shows it as a panel, a status bar count ("2 features touched, 1 failing"), a mark on a feature's own code and
 an agent tool; the command line as a table and as data for CI. A sketch of it (2026-10-29) was a list: features as

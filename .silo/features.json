@@ -2518,6 +2518,20 @@
     "in": "e16b2b75",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
+  "What each test ran": {
+    "status": "experiment",
+    "why": "a stopgap (user, 2026-11-03): the end goal is every test running in the editor, in the browser, with in-editor Playwright driving previews and tsval running the tests, where what a test ran is its trace. This records reach from outside until then, to reassess sharing now. Remove it as Preview windows and Playwright tests in the debugger come back",
+    "since": "2026-11-03",
+    "until": "2027-02-01",
+    "what": "With COVERAGE=1, the editor's own modules are instrumented in every realm and the browser suites record which statements of which files each test ran. `silo observed` compares that with what each test's file declares.",
+    "docs": "packages/silo/README.md, *Declared against observed*",
+    "ways": [
+      "cli command|observed"
+    ],
+    "paths": [
+      "packages/editor/build/coverage.ts"
+    ]
+  },
   "What went through this code, on hover": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",

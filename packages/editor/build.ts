@@ -10,6 +10,7 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, createLogger } from "vite";
 import { commandTap, TAPPED_VSCODE } from "./build/command-tap";
+import { coveragePlugin } from "./build/coverage";
 import { eslintToolchain } from "./build/eslint-toolchain";
 import { buildHistory, HISTORY_FILES } from "./build/history";
 import { editorTypesPlugin, editorVersionsPlugin, nodeModulesCdnPlugin } from "./build/package-types";
@@ -32,6 +33,10 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
  *  In CI none, but production's deploy asks for hidden ones (SOURCE_MAPS=hidden: written, not referenced from the code),
  *  which it keeps per release outside the site for the admin app's stacks (packages/api/scripts/keep-source-maps.ts). */
 const sourcemap: boolean | "hidden" = !isCI || (process.env["SOURCE_MAPS"] === "hidden" ? "hidden" : false);
+
+/** COVERAGE=1 (off by default): our modules instrumented in every pass, so each architecture test's reach can be read
+ *  (build/coverage.ts). */
+const coverage = (): Plugin[] => (process.env["COVERAGE"] === "1" ? [coveragePlugin()] : []);
 
 /** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */
 const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode", "@awesome.me/webawesome"];
@@ -78,7 +83,7 @@ async function bundleCode(folder: string, file: string, id: string, format: "cjs
 		// One util, hub and observability — the editor's: editor-api's modules, linked from its own folder, would find
 		// the copies its dev dependencies installed beside it (a stale util once cost a rule its package).
 		"resolve": { "dedupe": SHARED_PACKAGES },
-		"plugins": plugins,
+		"plugins": [...coverage(), ...plugins],
 		"build": {
 			"write": false,
 			"minify": isCI,
@@ -180,6 +185,7 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
  *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
 export function hostPlugins(): Plugin[] {
 	return [
+		...coverage(),
 		// The SHELL (main.tsx → shell.tsx) is built here, and it lazily imports the browser GitHub client
 		// (github.ts → fido → util/env, util/store), which pulls in node builtins: `env.ts` reads `process`/`path`/`url`
 		// at eval and `store.ts` (dynamic, browser-guarded) touches `fs`. `polyfillNode([...])` resolves these to unenv's
@@ -222,6 +228,7 @@ export async function preBuild(): Promise<void> {
 		// still worked.
 		"base": "./",
 		"plugins": [
+			...coverage(),
 			bundledExtension("bridge"),
 			bundledExtension("tsval"),
 			// (its worker: ESLint and the preset under almostnode, from the toolchain built beside it — build/eslint-toolchain.ts)
@@ -268,8 +275,8 @@ export async function preBuild(): Promise<void> {
 		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", ...SHARED_PACKAGES] },
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
-		"plugins": [unenvResolve()],
-		"worker": { "rollupOptions": { "output": { "sourcemap": sourcemap } } },
+		"plugins": [...coverage(), unenvResolve()],
+		"worker": { "plugins": coverage, "rollupOptions": { "output": { "sourcemap": sourcemap } } },
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
