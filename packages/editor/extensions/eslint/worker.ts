@@ -5,7 +5,8 @@
  * /node_modules — the folder Node looks in last, above the workspace — laid out as npm lays out node_modules; the
  * workspace is the editor's, through the workspace runtime (its files as the editor has them — an open editor's unsaved
  * text included), read as tooling reads: never asked about, never counted. typescript-eslint's project service reads the
- * workspace's tsconfig and the files it imports, so the type-aware rules have their types.
+ * workspace's tsconfig and the files it imports, so the type-aware rules have their types; a root with none is lent an
+ * empty one, here only.
  *
  * The config is the workspace's own, as ESLint finds it for each file — the nearest `eslint.config.*` above it, so a
  * package's own in a monorepo — from the working directory the extension gives (`eslint.workingDirectories`, as the
@@ -28,7 +29,7 @@ import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 import { RuntimeVfs } from "@brianjenkins94/editor-api/runtime-vfs";
 
 /** What a lint says of a file: eslint's messages, as LintMessage has them (what the extension shows). */
-interface Message { "line": number; "column": number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
+interface Message { "line"?: number; "column"?: number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
 /** Which config linted a file: its path (none: the preset), and why it isn't the file's own when that failed to load. */
 interface Using { "config"?: string; "error"?: string }
@@ -52,6 +53,11 @@ function packageOf(path: string): string | undefined {
 	return first.startsWith("@") && second !== undefined ? `${first}/${second}` : first;
 }
 
+/** What the preset's type-aware rules read where the workspace's root has no tsconfig: its project service won't start
+ *  without one, and every TypeScript file would be a parse error. Only this worker sees it, and a real one wins. */
+const ROOT_TSCONFIG = "/workspace/tsconfig.json";
+const STAND_IN_TSCONFIG = new TextEncoder().encode("{}\n");
+
 /** The workspace's files, read as tooling reads them — the loader's own (`load`), never the editor's to decide or count —
  *  and never written: ESLint only reads, and its fixes come back as text. The workspace's installs of the toolchain's
  *  packages (`shadowed`) aren't there, so resolution goes on to the toolchain's, at /node_modules. */
@@ -72,9 +78,19 @@ function readOnly(files: RuntimeFs, shadowed: Set<string>): RuntimeFs {
 				throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { "code": "ENOENT" });
 			}
 
+			if (path === ROOT_TSCONFIG && files.stat(path, { "load": true }) === undefined) {
+				return STAND_IN_TSCONFIG;
+			}
+
 			return files.readFile(path, { "load": true });
 		},
-		"stat": (path) => (hidden(path) ? undefined : files.stat(path, { "load": true })),
+		"stat": (path) => {
+			if (hidden(path)) {
+				return undefined;
+			}
+
+			return files.stat(path, { "load": true }) ?? (path === ROOT_TSCONFIG ? { "type": "file", "size": STAND_IN_TSCONFIG.length, "mtime": 0 } : undefined);
+		},
 		"readdir": (path) => files.readdir(path, { "load": true }).filter((name) => !hidden(`${path}/${name}`)),
 		"writeFile": refuse,
 		"mkdir": refuse,

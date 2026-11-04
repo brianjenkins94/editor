@@ -779,15 +779,35 @@ function parseKey(combo: string): { "key": string; "ctrlKey": boolean; "shiftKey
 	return { "key": key, "ctrlKey": has("Control") || (has("ControlOrMeta") && !onMac()), "shiftKey": has("Shift"), "altKey": has("Alt"), "metaKey": has("Meta") || (has("ControlOrMeta") && onMac()) };
 }
 
+/** What a real key sends for what it types, on a US keyboard as Playwright's: each pair the key's two characters, its `code`
+ *  and its legacy `keyCode`. Not the character's own code: 46, `.`'s, is Delete's keyCode, and 34, `"`'s, PageDown's. */
+const PAIRS: [string, string, number][] = [
+	["1!", "Digit1", 49], ["2@", "Digit2", 50], ["3#", "Digit3", 51], ["4$", "Digit4", 52], ["5%", "Digit5", 53],
+	["6^", "Digit6", 54], ["7&", "Digit7", 55], ["8*", "Digit8", 56], ["9(", "Digit9", 57], ["0)", "Digit0", 48],
+	[";:", "Semicolon", 186], ["=+", "Equal", 187], [",<", "Comma", 188], ["-_", "Minus", 189], [".>", "Period", 190], ["/?", "Slash", 191],
+	["`~", "Backquote", 192], ["[{", "BracketLeft", 219], ["\\|", "Backslash", 220], ["]}", "BracketRight", 221], ["'\"", "Quote", 222], [" ", "Space", 32]
+];
+const NAMED: Record<string, number> = { "Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8, "PageUp": 33, "PageDown": 34, "End": 35, "Home": 36, "ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40, "Insert": 45, "Delete": 46, "F1": 112 };
+
+/** The `code` and legacy `keyCode` of `key`, as the key that sends it has them. */
+function keyCodes(key: string): { "code": string; "keyCode": number } {
+	if (key.length !== 1) {
+		return { "code": key, "keyCode": NAMED[key] ?? 0 };
+	}
+
+	const pair = PAIRS.find(([characters]) => characters.includes(key));
+
+	return pair === undefined ? { "code": `Key${key.toUpperCase()}`, "keyCode": key.toUpperCase().codePointAt(0)! } : { "code": pair[1], "keyCode": pair[2] };
+}
+
 /** Press one key on `element` (focused): keydown, the key's effect unless prevented — a character typed, Backspace,
  *  Enter submitting a field's form or breaking a textarea's line, select-all — then keyup. */
 function pressKey(element: Element, combo: string): void {
 	const view = windowOf(element);
 	const parsed = parseKey(combo);
-	// (and the legacy codes a real key sends, which plenty still read: xterm, for one)
-	const codes: Record<string, number> = { "Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8, "ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40, "Delete": 46, "F1": 112 };
-	const keyCode = parsed.key.length === 1 ? parsed.key.toUpperCase().codePointAt(0)! : codes[parsed.key] ?? 0;
-	const init = { ...parsed, "bubbles": true, "cancelable": true, "composed": true, "code": parsed.key.length === 1 ? `Key${parsed.key.toUpperCase()}` : parsed.key, "keyCode": keyCode, "which": keyCode, "view": view };
+	// (and the legacy codes a real key sends, which plenty still read: xterm, Monaco)
+	const { code, keyCode } = keyCodes(parsed.key);
+	const init = { ...parsed, "bubbles": true, "cancelable": true, "composed": true, "code": code, "keyCode": keyCode, "which": keyCode, "view": view };
 	const field = element.tagName === "INPUT" || element.tagName === "TEXTAREA" ? element as HTMLInputElement | HTMLTextAreaElement : undefined;
 	const proceed = element.dispatchEvent(new view.KeyboardEvent("keydown", init));
 	const modified = parsed.ctrlKey || parsed.metaKey || parsed.altKey;
@@ -809,17 +829,23 @@ function pressKey(element: Element, combo: string): void {
 	if (proceed && field !== undefined) {
 		const start = field.selectionStart ?? field.value.length;
 		const end = field.selectionEnd ?? field.value.length;
+		// (an email or number field has no selection to set: it goes on from the end of its value)
+		const select = (at: number): void => {
+			if (field.selectionStart !== null) {
+				field.setSelectionRange(at, at);
+			}
+		};
 
 		if (parsed.key.length === 1 && !modified) {
 			if (element.dispatchEvent(new view.KeyboardEvent("keypress", { ...init, "keyCode": parsed.key.codePointAt(0)!, "charCode": parsed.key.codePointAt(0)!, "which": parsed.key.codePointAt(0)! }))) {
 				setValue(field, field.value.slice(0, start) + parsed.key + field.value.slice(end));
-				field.setSelectionRange(start + 1, start + 1);
+				select(start + 1);
 			}
 		} else if (parsed.key === "Backspace") {
 			const from = start === end ? Math.max(0, start - 1) : start;
 
 			setValue(field, field.value.slice(0, from) + field.value.slice(end));
-			field.setSelectionRange(from, from);
+			select(from);
 		} else if (parsed.key === "Enter") {
 			if (field.tagName === "TEXTAREA") {
 				setValue(field, field.value.slice(0, start) + "\n" + field.value.slice(end));

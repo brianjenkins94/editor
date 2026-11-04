@@ -40,7 +40,7 @@ const SEVERITY_NAMES: Record<vscode.DiagnosticSeverity, string> = { [vscode.Diag
 const UNUSED_RULES = new Set(["no-unused-imports", "no-unused-private-class-members", "no-unused-vars"]);
 
 /** What the worker says of a file (eslint's messages). */
-interface Message { "line": number; "column": number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
+interface Message { "line"?: number; "column"?: number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
 /** The names ESLint finds a config by, in any folder (worker.ts: ESLint's own lookup). */
 const CONFIG_GLOB = "**/eslint.config.{js,mjs,cjs,ts,mts,cts}";
@@ -306,7 +306,8 @@ function diagnosticOf(document: vscode.TextDocument, message: Message): vscode.D
 		return undefined;
 	}
 
-	const start = new vscode.Position(Math.max(0, message.line - 1), Math.max(0, message.column - 1));
+	// (a message may have no place: a parser that couldn't start says so of the whole file, and it goes on the first line)
+	const start = new vscode.Position(Math.max(0, (message.line ?? 1) - 1), Math.max(0, (message.column ?? 1) - 1));
 	const end = message.endLine === undefined || message.endColumn === undefined ? start.translate(0, 1) : new vscode.Position(message.endLine - 1, message.endColumn - 1);
 	const diagnostic = new vscode.Diagnostic(document.validateRange(new vscode.Range(start, end)), message.message, severity);
 	const rule = message.ruleId?.slice(message.ruleId.lastIndexOf("/") + 1) ?? "";

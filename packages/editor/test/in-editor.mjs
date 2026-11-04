@@ -46,6 +46,6 @@ for (const spec of SPECS) {
 		const file = await ran(spec);
 
 		assert.deepEqual(file.tests.filter(({ outcome }) => outcome !== "pass").map(({ id, error }) => `${id}: ${error}`), []);
-		assert.ok(file.tests.length > 0, "it ran something");
+		assert.ok(file.tests.length > 0, file.stalled ?? file.output ?? "it ran something");
 	});
 }

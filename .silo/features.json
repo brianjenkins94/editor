@@ -589,6 +589,7 @@
     ],
     "tests": [
       "packages/editor/test/eslint.mjs",
+      "packages/editor/test/in-editor/eslint.spec.mjs",
       "packages/editor/test/performance.mjs"
     ]
   },
