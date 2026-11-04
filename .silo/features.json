@@ -2679,6 +2679,7 @@
       "cli command|check"
     ],
     "paths": [
+      ".github/workflows/silo.yml",
       "packages/silo/src/cli.ts"
     ],
     "tests": [
