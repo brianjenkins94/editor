@@ -61,18 +61,29 @@ test("drift in Problems: none when the docs don't name what was removed", async 
 	assert.deepEqual(fake.diagnostics.get("silo").get(".silo/features.json"), []);
 });
 
-test("a code file no feature owns, in a folder .silo/owned.json names, is a problem on that file", async () => {
+test("a code file no feature owns, tests and scripts among them, is a problem on that file; what's installed isn't", async () => {
 	const { view } = workspace("# Next\n");
 
-	fake.files.set(".silo/owned.json", JSON.stringify(["src"]));
+	fake.files.set(".silo/features.json", JSON.stringify({ ...LEDGER, "Loading": { ...LEDGER["Loading"], "what": "Loads." } }, null, "\t"));
 	fake.files.set("src/stray.ts", "export const stray = 1;\n");
-	fake.files.set("tools/free.ts", "export const free = 1;\n");
+	fake.files.set("test/stray.test.mjs", "export const stray = 1;\n");
+	fake.files.set("dist/built.js", "export const built = 1;\n");
 	await view.check(new Map());
 
 	const silo = fake.diagnostics.get("silo");
 
 	assert.match(silo.get("src/stray.ts")?.[0]?.message ?? "", /^unowned file: src\/stray\.ts is owned by no feature/u);
 	assert.equal(silo.get("src/load.ts"), undefined, "owned by Loading");
-	assert.equal(silo.get("tools/free.ts"), undefined, "outside the owned folders");
+	assert.match(silo.get("test/stray.test.mjs")?.[0]?.message ?? "", /^unowned file: test\/stray\.test\.mjs/u);
+	assert.equal(silo.get("dist/built.js"), undefined, "built, not code to own");
 	assert.deepEqual(silo.get(".silo/features.json"), []);
+});
+
+test("a repository whose ledger declares no feature isn't held to owners", async () => {
+	const { view } = workspace("# Next\n");
+
+	fake.files.set("src/stray.ts", "export const stray = 1;\n");
+	await view.check(new Map());
+
+	assert.equal(fake.diagnostics.get("silo").get("src/stray.ts"), undefined);
 });

@@ -47,6 +47,8 @@ without a profiler. Not `console.*`, and not a pair of `performance.now()`s.
 The feature ledger (`.silo/features.json`; packages/silo/README.md, *The feature ledger*) is what's been decided about
 features, and `silo check` (CI's lint) holds the code to it:
 
+- **Everything is attributed** — the rewrite's outcome is every code file owned by one feature, tests, scripts and
+  vendored code included. A check covering less than that means the work isn't finished.
 - **Replacing an approach removes the old one in the same change** — `silo remove "<name>" "<why>"` (what only it
   reaches, its package manifests' entries, a tombstone), or delete it and `silo status` it removed with where it went.
 - **The ledger declares the features** — an entry holds what a feature is for (`what`, `docs`) and what it owns (`ways`,

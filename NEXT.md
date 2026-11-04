@@ -233,7 +233,8 @@ How it's kept:
      assert.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
      fit* answered. The manifest is done (2026-11-03: its 66 features in the ledger, marked `moved from the manifest`, and
-     its readers on the ledger). Left of decision 22: `.silo/owned.json` holds only packages/editor; widen it.
+     its readers on the ledger), and every code file in the repository has one owner (decision 22). Left of those:
+     packages/admin/src/views.tsx holds four features' pages under one owner, to split as one is reached.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.
@@ -273,9 +274,8 @@ How it's kept:
        own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
      - *Docs:* done 2026-11-02 — ARCHITECTURE.md (1,277 lines to 688) and RUNNING.md (320 to 126) describe the core;
        RUNTIME-EVIDENCE.md says it's out, kept as the design its features come back to.
-     - *Every file one feature's:* done 2026-11-03 — `silo check` fails on a code file under packages/editor no live
-       feature's `paths` (or `tests`) holds, and on one two features' `paths` both hold (`.silo/owned.json`; silo README,
-       decision 22), in CI's lint and in the editor's Problems. Then the files that mixed features split along their
+     - *Every file one feature's:* done 2026-11-03 — `silo check` fails on a code file no live feature's `paths` (or
+       `tests`) holds, and on one two features' `paths` both hold (silo README, decision 22), in CI's lint and in the editor's Problems. Then the files that mixed features split along their
        lines, each part into a module of its feature's: the debug worker (worker/, a module per feature) and the
        adapter's stops; workbench-entry down to the boot and its wiring (project.ts, theme-follow.ts, bridge-link.ts);
        workspace-fs's stores report to architecture-zenfs.ts; git-service.ts to git alone (git-push.ts, git-history.ts,
@@ -414,6 +414,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
+- **The capability prototype** (`src/`, `test/silo-*.ts`, the ledger's *Capability prototype*, parked 2026-11-03): nothing
+  imports it and nothing runs its two tests. Remove it, or say why it stays.
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,

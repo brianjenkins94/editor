@@ -1017,7 +1017,9 @@ From *Tests by feature* (above), for the rewrite:
     entry, not inferred from reach or tests — fails `silo check`, in CI and in the editor's Problems; a test's file is
     code too. Runs and coverage are how code shared between features is found (2026-11-02): code that more than one
     feature's runs and tests reach is shown as shared, to be made a feature of its own or split, so a declaration
-    that names one owner is checked against what runs show. No allowance for code not yet declared: the editor's
+    that names one owner is checked against what runs show. Everything: once a repository's ledger declares a feature,
+    every code file is held to an owner, tests, scripts and vendored code among them (2026-11-03: `.silo/owned.json`,
+    which rolled this out a folder at a time, went when the editor's files were all attributed). No allowance for code not yet declared: the editor's
     rebuild reduces to a declared core first and reintroduces features one at a time (packages/editor/ARCHITECTURE.md,
     *The rewrite, in place*), so the check holds from the start. The grain, decided 2026-11-02: by file, through a
     feature's `paths`; runs, tests and traces give continuous coverage beside it — what each feature's code is seen

@@ -45,8 +45,8 @@ import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
-import { ledgerPath, ownedPath } from "@brianjenkins94/util/silo/layout";
-import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, ledgerText, parseLedger, parseOwned, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, isOwnedCode, ledgerText, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 
@@ -153,8 +153,6 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 
 	const exists = (each: string): boolean => fs.existsSync(path.join(repo, each));
 	const code = files.filter((file) => includeByDefault(file) && /\.[cm]?[jt]sx?$/u.test(file));
-	// (the folders whose every code file a feature must own: decision 22)
-	const owned = exists(ownedPath()) ? parseOwned(fs.readFileSync(path.join(repo, ownedPath()))) : [];
 
 	return [...drift(ledger, {
 		"today": today,
@@ -162,7 +160,8 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 		"exists": exists,
 		"docs": files.filter((file) => file.endsWith(".md")).map(read),
 		"code": code.map(read),
-		...owned.length === 0 ? {} : { "owned": { "scope": owned, "files": code } }
+		// (every code file a feature's, tests and vendored code among them: decision 22; a repository declaring none isn't held)
+		...declaredFeatures(ledger).length === 0 ? {} : { "owned": { "files": files.filter(isOwnedCode) } }
 	}), ...declaredDrift(ledger, { "ways": ways, "exists": exists })];
 }
 
