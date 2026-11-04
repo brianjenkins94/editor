@@ -1,7 +1,6 @@
 /**
  * Which files BABLR parses (workbench/bablr.ts), as a person finds out: the command, what it says, and the warning in
- * Problems. Runs in the editor: test/in-editor.mjs. A file's warning going once it's fixed waits on typing in a test (NEXT.md),
- * and is still test/bablr.mjs's, with the parses kept and the agents' request.
+ * Problems, gone once the file's fixed. Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 
@@ -24,4 +23,15 @@ test("a folder checked says what BABLR parses, with a file it can't a warning in
 	await toast.getByRole("button", { "name": "Show Problems" }).click();
 	await expect(workbench.locator(".markers-panel").getByText(/BABLR can't parse this file/u)).toBeVisible({ "timeout": 30_000 });
 	await expect(workbench.locator(".markers-panel").getByText("broken.ts")).toBeVisible();
+
+	// Fixed in the editor and saved, it parses: its warning goes.
+	await workbench.locator(".markers-panel").getByText(/BABLR can't parse this file/u).dblclick();
+
+	const code = workbench.locator(".editor-instance .native-edit-context").first();
+
+	await code.pressSequentially("// ");
+	await expect(workbench.locator(".editor-instance .view-lines")).toHaveText("// export const = ;");
+	await code.press("ControlOrMeta+s");
+	await expect(workbench.locator(".tab.dirty")).toHaveCount(0, { "timeout": 30_000 });
+	await expect(workbench.locator(".markers-panel").getByText(/BABLR can't parse this file/u)).toHaveCount(0, { "timeout": 60_000 });
 });

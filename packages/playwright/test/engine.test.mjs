@@ -301,6 +301,64 @@ test("into open shadow roots, as Playwright goes: selectors crossing them, roles
 	await expect(ours.getByRole("textbox", { "name": "Named" })).toHaveValue("changed");
 });
 
+test("typing into an EditContext, as real keys do: the same events, the same text", async () => {
+	const set = async () => {
+		await page.setContent("<!doctype html><div id=typed tabindex=0 style='width:200px;height:50px'>x</div>");
+		await page.addScriptTag({ "content": ENGINE });
+		await page.evaluate(() => {
+			const element = document.querySelector("#typed");
+
+			element.editContext = new EditContext();
+			globalThis.updates = [];
+			element.editContext.addEventListener("textupdate", ({ text, updateRangeStart, updateRangeEnd, selectionStart, selectionEnd }) => {
+				globalThis.updates.push({ text, updateRangeStart, updateRangeEnd, selectionStart, selectionEnd });
+			});
+			element.focus();
+		});
+	};
+	const seen = () => page.evaluate(() => ({ "updates": globalThis.updates, "text": document.querySelector("#typed").editContext.text }));
+
+	await set();
+	await page.locator("#typed").pressSequentially("abc");
+
+	const theirs = await seen();
+
+	assert.equal(theirs.text, "abc", "real keys, through Playwright");
+
+	await set();
+	await ours.locator("#typed").pressSequentially("abc");
+	assert.deepEqual(await seen(), theirs);
+});
+
+test("keys, as real ones send them: each key's code and legacy keyCode, punctuation's not its character's", async () => {
+	const seenBy = async (press) => {
+		await fresh();
+		await page.evaluate(() => {
+			globalThis.seen = [];
+			document.addEventListener("keydown", ({ key, code, keyCode, which }) => {
+				globalThis.seen.push({ key, code, keyCode, which });
+			}, true);
+		});
+		await press();
+
+		return page.evaluate(() => globalThis.seen);
+	};
+	const keys = ["a", "A", "1", "!", ".", ">", "\"", "'", ":", "{", "/", " ", "Home", "End", "PageDown", "Enter", "Delete", "F1"];
+	const theirs = await seenBy(async () => {
+		for (const key of keys) {
+			await page.getByLabel("Email address").press(key);
+		}
+	});
+	const mine = await seenBy(async () => {
+		for (const key of keys) {
+			await ours.getByLabel("Email address").press(key);
+		}
+	});
+
+	assert.equal(theirs.length, keys.length);
+	assert.deepEqual(mine, theirs);
+});
+
 test("into frames, as Playwright goes: what's in one, and in one in it, and not what's outside", async () => {
 	const inner = "<!doctype html><button>Deep</button>";
 	const middle = `<!doctype html><h2>In a frame</h2><button>Framed</button><iframe id=deeper srcdoc='${inner}'></iframe>`;

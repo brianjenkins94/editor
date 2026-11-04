@@ -371,13 +371,24 @@ How it's kept:
        person does, through locators, the palette and what's on screen, so a UI that's missing or broken fails it. An
        instance starts with the files a test gives it, by its address (`&seed=`), and `page.goto` opens a window if none is.
        *First suite moved:* in-editor/bablr.spec.mjs (test/in-editor.mjs runs them, in CI's `workbench`): palette, its
-       toast, the warning in Problems. **Next blocker: typing.** Monaco takes text only from real input, through
-       EditContext, and a test in the browser has none (Playwright has trusted input, by the DevTools Protocol); xterm didn't
-       take synthetic keys either, in two tries, cause not found. So a test can't yet edit a file: test/bablr.mjs stays
-       for a warning going once a file's fixed, for the parses kept, and for the agents' request. A way in: dispatching
-       `textupdate` on an EditContext, unproven. And the suites' own needs: they ask over the hub
+       toast, the warning in Problems. **Typing:** an element with an EditContext (Monaco's) takes text as the browser gives it, the context updated and
+       `textupdate` told, held to real keys in engine.test, so a test edits a file, and saves with the keyboard. Gaps:
+       `ControlOrMeta+a` doesn't select in Monaco, nor is Select All in the palette there; xterm didn't take synthetic keys in
+       two tries, cause not found, and draws to a canvas, so a test can't read a terminal. test/bablr.mjs stays for the
+       parses kept and the agents' request, which have no UI to read. And the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
+       *Second suite moved:* in-editor/eslint.spec.mjs, each case a seeded instance and what's on screen: the preset, a
+       folder's own config, a broken one said on itself, fix-all on save, `eslint.enable` off and on by editing and saving
+       settings.json. test/eslint.mjs keeps what has no UI to read: the agents' request and the span. **What moving it
+       found:** a workspace with no root tsconfig got nothing and no word, every TypeScript file a parse error with no line
+       that threw on its way to Problems. Now a message with no place goes on the first line, and the worker lends a root
+       with no tsconfig an empty one (only it sees that; a real one wins). The engine sent a character's own code as its
+       legacy keyCode, so Monaco took `.` for Delete and `"` for PageDown; a key's code and keyCode are now a US keyboard's,
+       held to real Playwright, and typing in an email or number field no longer throws. Not looked at: whether that
+       is what stopped `ControlOrMeta+a` or xterm. Seen once in six runs, not pinned down: `frame.evaluate: Execution
+       context was destroyed` from the outer workbench while eslint.spec ran. A test run's results come only at its end, so
+       a stall (120 s quiet: test-runs.ts) loses the tests that passed before it.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
      alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`
@@ -451,11 +462,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `_history.files`). The fix is the extension's path mapping in its watcher (the vendored build,
   components/monaco-vscode-api).
 
-- **A person's first Ctrl+S after load can be dropped**, silently: VS Code abandons a save when its code actions on
-  save are cancelled, and getCodeActions cancels itself when a code action provider is registered while it waits (as
-  extensions starting up do; ESLint's first fix waits seconds for its worker). The agents' `files_edit` / `files_write`
-  try again (workspace-tools.ts `applyAndSave`); a person's save isn't retried. If it's seen, warm ESLint's worker
-  before the first save, or retry in a save participant.
+- **A save can be dropped, silently:** VS Code abandons a save when its code actions on save are cancelled, and
+  getCodeActions cancels itself when a code action provider is registered while it waits (as extensions starting up do).
+  Seen 2026-11-04: bablr.spec's first save, on every CI run. ESLint's fix no longer waits for its worker to load, so that
+  save goes unfixed instead of waiting seconds (`extensions/eslint/extension.ts`, `fixAll`); what's left is the few
+  milliseconds a loaded ESLint takes. The agents' `files_edit` / `files_write` still try again (workspace-tools.ts
+  `applyAndSave`); a person's save isn't retried.
 
 ## Decisions
 

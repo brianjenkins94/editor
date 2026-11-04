@@ -35,7 +35,7 @@ Playwright page in Chromium, and our `Page` running our engine in that same page
 - **States** read as Playwright's: visible is a non-empty box and not `visibility: hidden`; disabled includes a disabled
   fieldset's descendants.
 
-Frames: `frameLocator` goes into a same-origin iframe, as deep as they nest. Open shadow roots are gone into, by selectors crossing them too, as Playwright's are. Not here: closed ones, other origins' frames, `page.frames()`, `page.route`, screenshots, file uploads, drag and drop, and the `>>` selector syntax.
+Frames: `frameLocator` goes into a same-origin iframe, as deep as they nest. Typing reaches an EditContext (Monaco's) as real keys do. Open shadow roots are gone into, by selectors crossing them too, as Playwright's are. Not here: closed ones, other origins' frames, `page.frames()`, `page.route`, screenshots, file uploads, drag and drop, and the `>>` selector syntax.
 
 ```bash
 node --test packages/playwright/test/engine.test.mjs

@@ -40,7 +40,7 @@ const SEVERITY_NAMES: Record<vscode.DiagnosticSeverity, string> = { [vscode.Diag
 const UNUSED_RULES = new Set(["no-unused-imports", "no-unused-private-class-members", "no-unused-vars"]);
 
 /** What the worker says of a file (eslint's messages). */
-interface Message { "line": number; "column": number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
+interface Message { "line"?: number; "column"?: number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
 /** The names ESLint finds a config by, in any folder (worker.ts: ESLint's own lookup). */
 const CONFIG_GLOB = "**/eslint.config.{js,mjs,cjs,ts,mts,cts}";
@@ -51,7 +51,7 @@ const PROJECT_MARKS = new Set(["package.json", ".eslintignore", "eslint.config.j
 interface Using { "config"?: string; "error"?: string }
 
 /** The worker: lint a text, or fix it, as `file` from the working directory `cwd` — until it's disposed. */
-interface Worker { "lint": (file: string, text: string, cwd: string) => Promise<Message[]>; "fix": (file: string, text: string, cwd: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
+interface Worker { "loaded": () => boolean; "lint": (file: string, text: string, cwd: string) => Promise<Message[]>; "fix": (file: string, text: string, cwd: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
 
 /** ESLint's worker (worker.ts, through its bootstrap `worker.js`), given its link into the workspace runtime once it
  *  listens; `onUsing` hears which config each answer came from. Undefined where there's no workspace runtime (no editor
@@ -75,6 +75,7 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 	});
 	let next = 0;
 	let failure: Error | undefined;
+	let loaded = false;
 	const failAll = (error: Error): void => {
 		failure = error;
 
@@ -108,6 +109,7 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 		}
 
 		if (data["booted"] === true) {
+			loaded = true;
 			booting.end({ "loadMs": data["ms"] as number });
 
 			return;
@@ -154,6 +156,7 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 		: Promise.reject(failure));
 
 	return {
+		"loaded": () => loaded,
 		"lint": async (file, text, cwd) => (await ask({ "lint": { "file": file, "text": text, "cwd": cwd } }))["messages"] as Message[],
 		"fix": async (file, text, cwd) => {
 			const answer = await ask({ "fix": { "file": file, "text": text, "cwd": cwd } });
@@ -306,7 +309,8 @@ function diagnosticOf(document: vscode.TextDocument, message: Message): vscode.D
 		return undefined;
 	}
 
-	const start = new vscode.Position(Math.max(0, message.line - 1), Math.max(0, message.column - 1));
+	// (a message may have no place: a parser that couldn't start says so of the whole file, and it goes on the first line)
+	const start = new vscode.Position(Math.max(0, (message.line ?? 1) - 1), Math.max(0, (message.column ?? 1) - 1));
 	const end = message.endLine === undefined || message.endColumn === undefined ? start.translate(0, 1) : new vscode.Position(message.endLine - 1, message.endColumn - 1);
 	const diagnostic = new vscode.Diagnostic(document.validateRange(new vscode.Range(start, end)), message.message, severity);
 	const rule = message.ruleId?.slice(message.ruleId.lastIndexOf("/") + 1) ?? "";
@@ -381,6 +385,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		const text = document.getText();
 
 		return log.span("editor.extensions.eslint.fix", { "path": document.uri.fsPath, "bytes": text.length }, async (span) => {
+			// (not while ESLint loads: VS Code drops a save, saying nothing, if a code action provider registers while it waits
+			// on code actions, as extensions starting up do. This save goes unfixed, its problems show, and the next one fixes.)
+			if (!worker.loaded()) {
+				span.end({ "fixed": false, "loading": true });
+
+				return undefined;
+			}
+
 			const { output, fixed } = await worker.fix(document.uri.fsPath, text, await workingDirectoryOf(document));
 
 			span.end({ "fixed": fixed });
