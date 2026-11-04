@@ -492,9 +492,18 @@ export async function startSession(options = {}) {
 			const exists = await workbench().locator(".xterm").first().isVisible().catch(() => false);
 
 			if (fresh || !exists) {
+				const terminals = async () => workbench().evaluate(() => globalThis.__architecture.request("terminal.state", { "lines": 5 }, 10_000)).catch(() => []);
+				const before = (await terminals()).length;
+
 				await focusWorkbench();
 				await runCommand("Terminal: Create New Terminal");
-				await page.waitForTimeout(1500); // the new terminal takes focus
+				// Its prompt, and it focused: what's typed before then goes nowhere (a fixed wait lost it, late in a loaded shard).
+				await eventually("the new terminal's prompt", async () => {
+					const now = await terminals();
+
+					return now.length > before && /\$\s*$/u.test(now.at(-1).output) ? true : undefined;
+				}, 30_000);
+				await workbench().locator(".xterm-helper-textarea").last().focus();
 			} else {
 				await workbench().locator(".xterm").first().click();
 			}

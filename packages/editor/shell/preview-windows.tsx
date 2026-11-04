@@ -30,6 +30,9 @@ const HEIGHT = 480;
 
 interface Server { "url": string; "windows": Set<HTMLElement>; "opened": number; "offUpdates": () => void }
 
+/** A window with no server (a test's page, before it goes anywhere): its own, as a server's port is. */
+const NO_SERVER = 0;
+
 /** A window's frame and every frame its app nests: each has a client of its own, which acts only on what it loaded. */
 function framesUnder(root: Window): Window[] {
 	return [root, ...Array.from({ "length": root.frames.length }, (_, index) => framesUnder(root.frames[index]!)).flat()];
@@ -57,13 +60,13 @@ function install(hub: Hub): void {
 		const at = FIRST_AT + server.opened * CASCADE;
 
 		frame.className = previewFrame();
-		frame.title = `Preview :${String(port)}`;
+		frame.title = port === NO_SERVER ? "Preview" : `Preview :${String(port)}`;
 		frame.allow = "cross-origin-isolated";
 		frame.src = server.url;
 		render(<wa-button appearance="plain" size="small" title="Another window onto this server" aria-label="Another window onto this server" onClick={() => { open(port); }}><Icon node={AppWindow} /></wa-button>, another);
 
 		const element = appWindow({
-			"label": `Preview :${String(port)}`,
+			"label": port === NO_SERVER ? "Preview" : `Preview :${String(port)}`,
 			"closable": true,
 			"width": WIDTH,
 			"bodyHeight": HEIGHT,
@@ -74,7 +77,7 @@ function install(hub: Hub): void {
 				used.splice(used.indexOf(element) >>> 0, 1);
 				server.windows.delete(element);
 
-				if (server.windows.size === 0) {
+				if (server.windows.size === 0 && port !== NO_SERVER) {
 					hub.publish("preview.close", { "port": port });
 				}
 			}
@@ -132,6 +135,13 @@ function install(hub: Hub): void {
 
 	serve(hub, "playwright.run", async (args) => {
 		const { call, "args": given = [] } = args as PlaywrightCall;
+
+		// (a page exists to go somewhere from, as Playwright's does: going somewhere with no window open opens one)
+		if (call === "goto" && used.length === 0) {
+			servers.set(NO_SERVER, servers.get(NO_SERVER) ?? { "url": "about:blank", "windows": new Set(), "opened": 0, "offUpdates": () => undefined });
+			open(NO_SERVER);
+		}
+
 		const page = used.at(-1)?.querySelector("iframe")?.contentWindow;
 
 		if (page === null || page === undefined) {

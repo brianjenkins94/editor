@@ -60,6 +60,19 @@ export function ownKeys(): string[] {
 	return instance === undefined ? keys : keys.flatMap((key) => ownName(instance, key) ?? []);
 }
 
+/** The files an instance starts with, in its address (`&seed=`: base64 of JSON, each path from the workspace's root, with its
+ *  text), in place of the starter: what a test sets up, with nothing crossing from another instance. Only an instance has
+ *  them, and what it keeps is written over them. */
+export function seedFiles(search: string): Record<string, string> | undefined {
+	const seed = new URLSearchParams(search).get("seed");
+
+	if (instance === undefined || seed === null) {
+		return undefined;
+	}
+
+	return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(seed), (character) => character.codePointAt(0)!))) as Record<string, string>;
+}
+
 /** IndexedDB and Storage, from here on, as `name`'s only. */
 export function isolate(name: string, factory: Pick<IDBFactory, "open" | "deleteDatabase" | "databases">, storage: Pick<Storage, "getItem" | "setItem" | "removeItem" | "clear">, entries: (store: Storage) => string[]): void {
 	const { open, deleteDatabase, databases } = factory;

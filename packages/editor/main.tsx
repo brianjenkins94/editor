@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 // (first, before anything takes the realm's own: an instance's storage apart, a hidden tab's timers kept)
-import { isEditorTop } from "./shared/instance";
+import { isEditorTop, seedFiles } from "./shared/instance";
 import "./shared/hidden-timers";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
@@ -43,7 +43,9 @@ if (reset === "wait") {
 	// becomes an additional source mode later. Both load DYNAMICALLY: the type surface is ~480KB the shell (top
 	// level) never uses, and the app only needs them to answer the workbench's `workbench.init`, well after it
 	// creates the workbench iframe — so neither is on the path to that.
-	const files = Promise.all([import("editor:workspace"), import("editor:types")]).then(([workspace, types]) => [...workspace.default, ...types.default]);
+	// (an instance seeded by its address has those files in place of the starter: shared/instance.ts)
+	const seeded = seedFiles(location.search);
+	const files = Promise.all([import("editor:workspace"), import("editor:types")]).then(([workspace, types]) => [...seeded === undefined ? workspace.default : Object.entries(seeded).map(([path, contents]) => ({ "path": `/workspace/${path}`, "contents": contents })), ...types.default]);
 
 	// The root hub — top of the composable-hub tree. A collector renders every context's spans/records off the
 	// `$sys.log.>` observability plane (the service worker now, the pod + workers next); the SW links in over a
@@ -100,7 +102,7 @@ if (reset === "wait") {
 		"moduleVersions": moduleVersions,
 		"rootHub": rootHub,
 		"tab": tab,
-		"openEditors": ["/workspace/src/index.ts"],
+		"openEditors": seeded === undefined ? ["/workspace/src/index.ts"] : [],
 		"onSave": (path: string, contents: string) => {
 			hostLog.info("saved", { "path": path, "bytes": contents.length });
 		}

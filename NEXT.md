@@ -366,8 +366,16 @@ How it's kept:
        frame's document to change, not a `load` on the window navigation replaces. (3) *done* `frameLocator`, as deep as
        frames nest, held to real Playwright. A Playwright test in the debugger now drives a whole editor in a preview window,
        apart from the real one: through its frames, clicking a file in its Explorer and seeing its tab open
-       (playwright-in-editor.mjs). Still in the way: **open shadow roots**, which Playwright goes into and ours doesn't,
-       so a Web Awesome control's insides aren't found (the shell's Reset, by title or role). Then the suites' own needs: they ask over the hub
+       (playwright-in-editor.mjs). And (4) *done* open shadow roots, gone into as Playwright goes, selectors crossing them
+       too, so Web Awesome's controls are found. **No `evaluate`** (decided 2026-11-04, with the user): a test does what a
+       person does, through locators, the palette and what's on screen, so a UI that's missing or broken fails it. An
+       instance starts with the files a test gives it, by its address (`&seed=`), and `page.goto` opens a window if none is.
+       *First suite moved:* in-editor/bablr.spec.mjs (test/in-editor.mjs runs them, in CI's `workbench`): palette, its
+       toast, the warning in Problems. **Next blocker: typing.** Monaco takes text only from real input, through
+       EditContext, and a test in the browser has none (Playwright has trusted input, by the DevTools Protocol); xterm didn't
+       take synthetic keys either, in two tries, cause not found. So a test can't yet edit a file: test/bablr.mjs stays
+       for a warning going once a file's fixed, for the parses kept, and for the agents' request. A way in: dispatching
+       `textupdate` on an EditContext, unproven. And the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,

@@ -235,6 +235,72 @@ test("expect: waits until it holds, and .not", async () => {
 	expect("abc").not.toContain("z");
 });
 
+test("into open shadow roots, as Playwright goes: selectors crossing them, roles, names, text and actions", async () => {
+	await page.setContent(`<!doctype html><section id=top><x-button id=plain title="Reset it">Save</x-button><x-button id=hidden aria-hidden=true>Gone</x-button><x-panel></x-panel><button id=light>Light</button></section>`);
+	await page.evaluate(() => {
+		const define = (name, html) => {
+			customElements.define(name, class extends HTMLElement {
+				constructor() {
+					super();
+					this.attachShadow({ "mode": "open" }).innerHTML = html;
+				}
+			});
+		};
+
+		globalThis.clicked = [];
+		define("x-button", "<button part=base><slot></slot></button>");
+		define("x-panel", "<h2 class=title>A panel</h2><div class=body><x-button id=nested>Inner</x-button><input aria-label=Named placeholder=Hint value=typed></div><label>Plain<input id=labelled></label>");
+		document.addEventListener("click", (event) => {
+			globalThis.clicked.push(event.composedPath()[0].tagName);
+		}, true);
+	});
+	await page.addScriptTag({ "content": ENGINE });
+
+	const same = async (call, expected, read = (locator) => locator.count()) => {
+		const [theirs, mine] = [await read(call(page)), await read(call(ours))];
+
+		assert.deepEqual(theirs, expected, `Playwright's own: ${String(call)}`);
+		assert.deepEqual(mine, theirs, String(call));
+	};
+	const texts = (locator) => locator.allTextContents();
+
+	// Selectors: inside one, across one by descendant and by child, from a host, and through two.
+	await same((p) => p.locator("button"), 4);
+	await same((p) => p.locator("h2.title"), 1);
+	await same((p) => p.locator("x-button button"), 3);
+	await same((p) => p.locator("#plain > button"), 1);
+	await same((p) => p.locator("x-panel .body button"), 1);
+	await same((p) => p.locator("section x-panel #nested button"), 1);
+	await same((p) => p.locator("h2 + .body"), 1);
+	await same((p) => p.locator("h2 ~ label"), 1);
+	await same((p) => p.locator("x-panel h2, #light"), 2);
+	await same((p) => p.locator("[title='Reset it']"), 1);
+	await same((p) => p.locator("#plain").locator("button"), 1);
+	await same((p) => p.locator("x-panel").locator("input"), 2);
+
+	// Text, roles and names, as a person's tools would read them.
+	await same((p) => p.getByText("A panel"), ["A panel"], texts);
+	await same((p) => p.getByText("Inner"), 1);
+	await same((p) => p.getByRole("heading"), 1);
+	await same((p) => p.getByRole("button", { "name": "Save" }), 1);
+	await same((p) => p.getByRole("button", { "name": "Inner" }), 1);
+	await same((p) => p.getByRole("button", { "name": "Gone" }), 0);
+	await same((p) => p.getByRole("button", { "name": "Gone", "includeHidden": true }), 1);
+	await same((p) => p.getByRole("button", { "name": "Reset it" }), 0);
+	await same((p) => p.getByTitle("Reset it"), 1);
+	await same((p) => p.getByRole("textbox", { "name": "Named" }), 1);
+	await same((p) => p.getByLabel("Named"), 1);
+	await same((p) => p.getByPlaceholder("Hint"), 1);
+	await same((p) => p.locator("#plain"), ["Save"], texts);
+
+	// An action on what's inside one, not covered by its own host.
+	await ours.getByRole("button", { "name": "Inner" }).click();
+	await ours.locator("#plain").click();
+	assert.deepEqual(await page.evaluate(() => globalThis.clicked.slice(-2)), ["BUTTON", "X-BUTTON"]);
+	await ours.getByRole("textbox", { "name": "Named" }).fill("changed");
+	await expect(ours.getByRole("textbox", { "name": "Named" })).toHaveValue("changed");
+});
+
 test("into frames, as Playwright goes: what's in one, and in one in it, and not what's outside", async () => {
 	const inner = "<!doctype html><button>Deep</button>";
 	const middle = `<!doctype html><h2>In a frame</h2><button>Framed</button><iframe id=deeper srcdoc='${inner}'></iframe>`;
