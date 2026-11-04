@@ -109,6 +109,16 @@ commands). That's how `history` is built.
   (*Extension points* 2). No messages at all, so the architecture reports observe the workspace by wrapping each realm's
   `/workspace` mount (`architecture-zenfs.ts`).
 
+### Instances
+
+`?instance=<name>` runs an editor apart from any other on the origin (shared/instance.ts): its own workspace, VS Code state
+and settings. Same origin means the same IndexedDB and localStorage, and VS Code names its own databases, so it works
+underneath everything: imported first in each realm on the page's thread, it wraps IndexedDB's and Storage's methods to add
+the name. A frame with the name in its own address is that instance's top, with its own shell; the frames under it find the
+name by looking up. An instance's reset takes only its own and leaves the one service worker, which serves them all, each by
+its tab; resetting the real editor takes its instances with it. Workers aren't covered: the only database one opens is
+BABLR's parses, kept by the text's hash, safe to share.
+
 ### The dev server
 
 `vite` in the terminal (or a project's `"dev": "vite"`) starts almostnode's in-browser Vite dev server in the dev-server

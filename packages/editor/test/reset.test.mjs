@@ -28,3 +28,10 @@ test("nothing of another site's on the origin is touched", () => {
 	assert.ok(!databases.includes("games-saves") && !databases.includes("keyval-store"));
 	assert.ok(!keys.includes("war2:settings") && !keys.includes("theme"));
 });
+
+test("resetting the real editor takes its instances with it", () => {
+	const { databases, keys } = editorStores(["instance:one:workspace-fs", "someone-elses"], ["instance:one:shell:navWidth", "someone-elses"], false);
+
+	assert.deepEqual(databases, ["instance:one:workspace-fs"]);
+	assert.deepEqual(keys, ["instance:one:shell:navWidth"]);
+});

@@ -10,8 +10,12 @@
  * The editor's other tabs hold the same databases open, and a database can't be deleted while one does: the reset tells
  * them (a BroadcastChannel), and each lets go — it goes to `?reset=wait`, which opens nothing — and comes back once the
  * reset is done.
+ *
+ * An instance (shared/instance.ts) resets only itself, and leaves the service worker, which serves everyone; resetting the
+ * real editor takes its instances with it.
  */
 import { logger } from "@brianjenkins94/util/logger";
+import { anyInstance, instance, ownKeys } from "../shared/instance";
 
 const log = logger({ "source": "shell" });
 
@@ -37,7 +41,7 @@ const KEY_PREFIXES = [
 const KEYS = new Set(["debug", "DefaultOverridesCacheExists"]);
 /** Where a reset tells the editor's other tabs it's begun and it's done; and the mark it's going on, for a tab that
  *  opens in the middle of it. */
-const CHANNEL = "editor.reset";
+const CHANNEL = instance === undefined ? "editor.reset" : `editor.reset.${instance}`;
 const UNDERWAY_KEY = "shell:resetting";
 
 /** Say how a reset goes, in place of the page. */
@@ -63,8 +67,8 @@ function withReset(reset?: string): string {
 /** Of an origin's databases and localStorage keys, the editor's: what a reset deletes. Nothing else on the origin. */
 export function editorStores(databases: string[], keys: string[], signOut: boolean): { "databases": string[]; "keys": string[] } {
 	return {
-		"databases": databases.filter((name) => DATABASES.has(name) || name.startsWith(DATABASE_PREFIX) || (signOut && name === SIGN_IN_DATABASE)),
-		"keys": keys.filter((key) => (KEYS.has(key) || KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) && (signOut || !SIGN_IN_KEYS.has(key)))
+		"databases": databases.filter((name) => anyInstance(name) || DATABASES.has(name) || name.startsWith(DATABASE_PREFIX) || (signOut && name === SIGN_IN_DATABASE)),
+		"keys": keys.filter((key) => (anyInstance(key) || KEYS.has(key) || KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) && (signOut || !SIGN_IN_KEYS.has(key)))
 	};
 }
 
@@ -121,7 +125,8 @@ export async function resetEditor(base: string, signOut: boolean): Promise<void>
 
 	await log.span("editor.shell.reset.reset", { "signOut": signOut }, async (span) => {
 		const scope = new URL(base, location.origin).href;
-		const workers = (await navigator.serviceWorker?.getRegistrations() ?? []).filter((registration) => registration.scope.startsWith(scope));
+		// (one serves every instance: only the real editor's reset takes it)
+		const workers = instance !== undefined ? [] : (await navigator.serviceWorker?.getRegistrations() ?? []).filter((registration) => registration.scope.startsWith(scope));
 
 		await Promise.all(workers.map(async (registration) => registration.unregister()));
 
@@ -129,7 +134,7 @@ export async function resetEditor(base: string, signOut: boolean): Promise<void>
 		const listed = typeof indexedDB.databases === "function"
 			? (await indexedDB.databases()).map((database) => database.name ?? "")
 			: [...DATABASES, SIGN_IN_DATABASE];
-		const { databases, keys } = editorStores(listed, Object.keys(localStorage), signOut);
+		const { databases, keys } = editorStores(listed, ownKeys(), signOut);
 
 		for (const name of databases) {
 			await new Promise<void>((resolve, reject) => {

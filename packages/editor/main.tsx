@@ -1,5 +1,6 @@
 /** @jsxImportSource preact */
-// (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
+// (first, before anything takes the realm's own: an instance's storage apart, a hidden tab's timers kept)
+import { isEditorTop } from "./shared/instance";
 import "./shared/hidden-timers";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
@@ -16,14 +17,14 @@ import { followResets, resetAsked, resetEditor, waitForReset } from "./shell/res
 // un-isolated first load this returns false and schedules that reload, so we skip booting until the page
 // comes back isolated.
 // `?reset` (shell/reset.ts): before any of that — the service worker and the workbench would hold what it deletes.
-const reset = window.parent === window ? resetAsked() : undefined;
+const reset = isEditorTop() ? resetAsked() : undefined;
 const isolated = reset === undefined && ensureCrossOriginIsolated();
 
 if (reset === "wait") {
 	waitForReset();
 } else if (reset !== undefined) {
 	void resetEditor((import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/", reset === "all");
-} else if (isolated && window.parent === window) {
+} else if (isolated && isEditorTop()) {
 	followResets();
 	// TOP LEVEL: render the outer shell — the app's main layout (chrome + RHS review panel). It
 	// iframes THIS same page back in; that nested instance sees `window.parent !== window` and takes the app
