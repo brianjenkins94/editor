@@ -32,6 +32,7 @@ test("a folder checked says what BABLR parses, with a file it can't a warning in
 	await code.pressSequentially("// ");
 	await expect(workbench.locator(".editor-instance .view-lines")).toHaveText("// export const = ;");
 	await code.press("ControlOrMeta+s");
-	await expect(workbench.locator(".tab.dirty")).toHaveCount(0, { "timeout": 15_000 });
+	// (a first save waits on ESLint's fix-all, and so on its worker's load: seconds here, more on a loaded runner)
+	await expect(workbench.locator(".tab.dirty")).toHaveCount(0, { "timeout": 60_000 });
 	await expect(workbench.locator(".markers-panel").getByText(/BABLR can't parse this file/u)).toHaveCount(0, { "timeout": 60_000 });
 });
