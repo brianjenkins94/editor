@@ -53,6 +53,7 @@ test("saving fixes what can be fixed", async ({ page }) => {
 	await codeOf(workbench).press("ControlOrMeta+s");
 	await expect(lines).not.toContainText("var value", { "timeout": 60_000 });
 	await expect(lines).toContainText(/(?:const|let)\s+value\s*=\s*1/u);
+	await expect(workbench.locator(".tab.dirty")).toHaveCount(0, { "timeout": 30_000 });
 });
 
 test("a folder's own eslint.config.js lints the files under it, and only its rules", async ({ page }) => {

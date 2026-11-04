@@ -462,11 +462,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `_history.files`). The fix is the extension's path mapping in its watcher (the vendored build,
   components/monaco-vscode-api).
 
-- **A person's first Ctrl+S after load can be dropped**, silently: VS Code abandons a save when its code actions on
-  save are cancelled, and getCodeActions cancels itself when a code action provider is registered while it waits (as
-  extensions starting up do; ESLint's first fix waits seconds for its worker). The agents' `files_edit` / `files_write`
-  try again (workspace-tools.ts `applyAndSave`); a person's save isn't retried. If it's seen, warm ESLint's worker
-  before the first save, or retry in a save participant.
+- **A save can be dropped, silently:** VS Code abandons a save when its code actions on save are cancelled, and
+  getCodeActions cancels itself when a code action provider is registered while it waits (as extensions starting up do).
+  Seen 2026-11-04: bablr.spec's first save, on every CI run. ESLint's fix no longer waits for its worker to load, so that
+  save goes unfixed instead of waiting seconds (`extensions/eslint/extension.ts`, `fixAll`); what's left is the few
+  milliseconds a loaded ESLint takes. The agents' `files_edit` / `files_write` still try again (workspace-tools.ts
+  `applyAndSave`); a person's save isn't retried.
 
 ## Decisions
 

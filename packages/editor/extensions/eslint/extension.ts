@@ -51,7 +51,7 @@ const PROJECT_MARKS = new Set(["package.json", ".eslintignore", "eslint.config.j
 interface Using { "config"?: string; "error"?: string }
 
 /** The worker: lint a text, or fix it, as `file` from the working directory `cwd` — until it's disposed. */
-interface Worker { "lint": (file: string, text: string, cwd: string) => Promise<Message[]>; "fix": (file: string, text: string, cwd: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
+interface Worker { "loaded": () => boolean; "lint": (file: string, text: string, cwd: string) => Promise<Message[]>; "fix": (file: string, text: string, cwd: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
 
 /** ESLint's worker (worker.ts, through its bootstrap `worker.js`), given its link into the workspace runtime once it
  *  listens; `onUsing` hears which config each answer came from. Undefined where there's no workspace runtime (no editor
@@ -75,6 +75,7 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 	});
 	let next = 0;
 	let failure: Error | undefined;
+	let loaded = false;
 	const failAll = (error: Error): void => {
 		failure = error;
 
@@ -108,6 +109,7 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 		}
 
 		if (data["booted"] === true) {
+			loaded = true;
 			booting.end({ "loadMs": data["ms"] as number });
 
 			return;
@@ -154,6 +156,7 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 		: Promise.reject(failure));
 
 	return {
+		"loaded": () => loaded,
 		"lint": async (file, text, cwd) => (await ask({ "lint": { "file": file, "text": text, "cwd": cwd } }))["messages"] as Message[],
 		"fix": async (file, text, cwd) => {
 			const answer = await ask({ "fix": { "file": file, "text": text, "cwd": cwd } });
@@ -382,6 +385,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		const text = document.getText();
 
 		return log.span("editor.extensions.eslint.fix", { "path": document.uri.fsPath, "bytes": text.length }, async (span) => {
+			// (not while ESLint loads: VS Code drops a save, saying nothing, if a code action provider registers while it waits
+			// on code actions, as extensions starting up do. This save goes unfixed, its problems show, and the next one fixes.)
+			if (!worker.loaded()) {
+				span.end({ "fixed": false, "loading": true });
+
+				return undefined;
+			}
+
 			const { output, fixed } = await worker.fix(document.uri.fsPath, text, await workingDirectoryOf(document));
 
 			span.end({ "fixed": fixed });
