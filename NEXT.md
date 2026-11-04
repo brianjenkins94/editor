@@ -358,8 +358,17 @@ How it's kept:
      - *Playwright tests in the debugger: back* 2026-11-03 — a `@playwright/test` file runs in the debugger against the
        preview window you have open, each op on its page through the shell (playwright-in-editor.mjs, in CI's `workbench`).
        packages/playwright came back as it was, held to real Playwright by its own tests. With no window, a test fails
-       rather than hangs, but says `received false`, not why. This is the way to every test in the editor: next, the
-       editor's own suites driven this way, what that finds, and a page's console and errors (the tap).
+       rather than hangs, but says `received false`, not why.
+     - *Every test in the editor: what stands in the way*, tried 2026-11-04: a Playwright test in the debugger navigated a
+       preview window to the editor itself, and the editor booted in it, cross-origin isolated, extension host and all.
+       In order: (1) **it shares the outer editor's state**: same origin, so the same `workspace-fs` and `vscode-web-*`
+       IndexedDB databases; it lists the outer workspace's files, so a test there could damage your work, and `?reset`
+       in it would wipe them. A store per instance comes first. (2) **`page.goto` to it never answers**: `playwright.run`
+       timed out at 60 s, though the page had navigated. (3) **Locators stop at a frame, and there's no `frameLocator`**:
+       the workbench is in a nested iframe, so the test can't reach it. (4) **It comes up as the app without the shell**:
+       main.tsx decides which it is by `window.parent === window`. Then the suites' own needs: they ask over the hub
+       (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
+       page's console and errors (the tap) follow.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
      alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`

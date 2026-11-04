@@ -37,7 +37,7 @@ test("reads its own file", () => { assert.match(readFileSync("/workspace/debugge
 async function runTests(files, approved) {
 	let answer = await session.request("tests.run", { "files": files, ...approved === undefined ? {} : { "approved": approved } }, 120_000);
 
-	for (let asked = 1; answer.counts === undefined && answer.ask === undefined && typeof answer.run === "string" && asked < 10; asked++) {
+	for (let asked = 1; answer.running !== undefined && answer.ask === undefined && asked < 10; asked++) {
 		answer = await session.request("tests.run", { "run": answer.run }, 120_000);
 	}
 
