@@ -88,15 +88,19 @@ function runs() {
 	return answers;
 }
 
+async function closeWindows() {
+	await session.page.evaluate(() => {
+		for (const element of document.querySelectorAll("app-window[data-preview-port]")) {
+			element.remove();
+		}
+	});
+}
+
 for (const spec of SPECS) {
 	test(spec, async () => {
 		// (the windows the spec before left, its counts read)
 		if (COUNTING) {
-			await session.page.evaluate(() => {
-				for (const element of document.querySelectorAll("app-window[data-preview-port]")) {
-					element.remove();
-				}
-			});
+			await closeWindows();
 		}
 
 		const file = COUNTING ? await ran(spec) : await runs().get(spec).promise;
