@@ -44,6 +44,8 @@ export interface NodeRunner {
 	"stopDevServer": (port: number) => Promise<void>;
 	/** Each hot update of the dev server on `port`. Returns an unsubscribe. */
 	"onDevServerUpdate": (port: number, handler: (message: unknown) => void) => () => void;
+	/** When the dev server on `port` is dismissed from elsewhere: its last window closed. Returns an unsubscribe. */
+	"onDevServerClosed": (port: number, handler: () => void) => () => void;
 }
 
 /** The runner the terminal and the test runner drive, on `hub`. */
@@ -177,13 +179,24 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			// (this tab's, as the one service worker serves every tab: the app realm knows which it is)
 			const tab = await rpc.request("virtual.tab", undefined, { "timeoutMs": 5000, "waitForResponderMs": 5000 }) as string;
 
-			return virtualUrl(location.href.split("__vscode__/")[0]!, tab, port);
+			const url = virtualUrl(location.href.split("__vscode__/")[0]!, tab, port);
+
+			// (what shows it: the shell's windows)
+			hub.publish("preview.ready", { "port": port, "url": url });
+
+			return url;
 		},
 		"stopDevServer": async (port) => {
+			hub.publish("preview.close", { "port": port });
 			await rpc.request("preview.stop", { "port": port }, { "timeoutMs": 10_000 }).catch(() => undefined);
 		},
 		"onDevServerUpdate": (port, handler) => hub.subscribe(`preview.hmr.${String(port)}`, (message) => {
 			handler(message);
+		}),
+		"onDevServerClosed": (port, handler) => hub.subscribe("preview.close", (data) => {
+			if ((data as { "port"?: number }).port === port) {
+				handler();
+			}
 		})
 	};
 }

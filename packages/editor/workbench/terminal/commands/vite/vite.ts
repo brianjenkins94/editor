@@ -1,6 +1,7 @@
 /**
  * The terminal's `vite`: starts almostnode's dev server in the dev-server worker (real Vite can't run in a browser), says
- * its address, and blocks like a real dev server, streaming its hot updates, until Ctrl-C or the running list's Stop. A
+ * its address, which opens a preview window, and blocks like a real dev server, streaming its hot updates, until Ctrl-C,
+ * the running list's Stop or its last window closing. A
  * project's `"dev": "vite"` maps here, so `npm run dev` composes onto it.
  */
 import type { CommandHost, Handler } from "../../catalog";
@@ -62,6 +63,8 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 			writeLive("out", `  ${stamp()} [vite] ${update.type === "full-reload" ? "page reload" : "hmr update"} ${update.path ?? ""}\n`);
 		});
 
+		let offClosed = (): void => { /* set once it's blocking */ };
+
 		await new Promise<void>((resolve) => {
 			if (ctx.signal?.aborted === true) {
 				resolve();
@@ -73,9 +76,11 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 				resolve();
 			}, { "once": true });
 			stop = resolve;
+			offClosed = runner.onDevServerClosed(port, resolve);
 		});
 
 		off();
+		offClosed();
 		await runner.stopDevServer(port);
 		inUse.delete(port);
 		run.end(130, true);
