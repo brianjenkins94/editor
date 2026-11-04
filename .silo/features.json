@@ -2350,7 +2350,8 @@
       "packages/editor/test/terminal-integration.test.mjs",
       "packages/editor/test/terminal-session.test.mjs",
       "packages/editor/workbench/terminal/commands/npm/npm.test.mjs",
-      "packages/editor/workbench/terminal/commands/ps/ps.test.mjs"
+      "packages/editor/workbench/terminal/commands/ps/ps.test.mjs",
+      "packages/editor/test/in-editor/terminal.spec.mjs"
     ]
   },
   "Theme follows VS Code's color theme": {

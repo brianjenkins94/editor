@@ -39,11 +39,13 @@ test("saving fixes what can be fixed", async ({ page }) => {
 	const workbench = await openEditor(page, { "lint/fix.ts": "export const other = 2;\n" });
 
 	await openFile(workbench, "lint/fix.ts");
-	await codeOf(workbench).pressSequentially("var value = 1; export { value }; ");
+	await codeOf(workbench).press("ControlOrMeta+a");
+	await codeOf(workbench).pressSequentially("var value = 1; export { value };");
 
 	const lines = workbench.locator(".editor-instance .view-lines");
 
 	await expect(lines).toContainText("var value");
+	await expect(lines).not.toContainText("other");
 
 	// (ESLint up first: a save before it answers isn't fixed. Its first problem says it's there.)
 	const rows = await problems(workbench);
