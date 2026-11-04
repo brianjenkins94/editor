@@ -396,6 +396,9 @@ How it's kept:
        compiled module, 503 once stopped), which have no UI. Found: a click on a button whose icon is slotted into it was called
        covered, the engine's walk up skipping the slot; held to real Playwright. A window of the size of the preview it opens in
        covers the whole inner workbench, so a spec opens its file first and works by keyboard, and the palette takes Enter, not a click.
+       *Fifth moved:* in-editor/pane-views.spec.mjs, its extension by its address (`?extension=`, which now takes a path on the
+       site), with no server or interception. `editor.pane.toggleNative` had no UI, so it has a palette entry now
+       (Pane: Switch Between Beside the Code and Annotations). test/pane-views.mjs is gone.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
      alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`
