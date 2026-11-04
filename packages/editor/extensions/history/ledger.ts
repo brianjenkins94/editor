@@ -3,7 +3,7 @@
  * says, held to the workspace as it is:
  * - **Drift, in Problems** (lib's util/silo/ledger `drift`, the same checks): each a problem on `.silo/features.json`, at
  *   the entry it's about (a dead end the ledger doesn't name, at its top), with both ways out — and a code file no
- *   feature owns, or two do, on that file (decision 22: the folders `.silo/owned.json` names).
+ *   feature owns, or two do, on that file (decision 22: all of it, once the ledger declares a feature).
  * - **What's been decided about a file or a name** (`history.decisions`, core's `decisions.for`, agents' `decisions_for`):
  *   the ledger's entries naming it (or whose paths hold the file, or ways in name it), and each line of the docs naming it, under its heading — NEXT.md's items, the design sections — so a reason isn't re-derived.
  * Its ways in are History's reading (the TypeScript server plugin's, edits included); the docs and code it searches are
@@ -11,8 +11,8 @@
  */
 import type { Feature } from "@brianjenkins94/util/silo/features";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
-import { ledgerPath, ownedPath } from "@brianjenkins94/util/silo/layout";
-import { drift, parseLedger, parseOwned } from "@brianjenkins94/util/silo/ledger";
+import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { declaredFeatures, drift, isOwnedCode, parseLedger } from "@brianjenkins94/util/silo/ledger";
 import * as vscode from "vscode";
 
 /** The files drift reads: docs, and code. */
@@ -20,7 +20,6 @@ const READ = "**/*.{md,ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 const EXCLUDE = "**/node_modules/**";
 
 /** A code file, as ownership counts one. */
-const CODE = /\.[cm]?[jt]sx?$/u;
 
 /** The doc lines `history.decisions` lists, at most. */
 const DOC_LINES = 60;
@@ -131,14 +130,13 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri): 
 			const there = await load();
 			const ledgerText = texts.get(ledgerPath()) ?? await textOf(ledgerUri);
 			const ledger = parseLedger(ledgerText);
-			const owned = parseOwned(await textOf(vscode.Uri.joinPath(root, ownedPath())));
 			const found = drift(ledger, {
 				"today": today(),
 				"ways": [...features.values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides })),
 				"exists": (path) => there.has(path) || [...there].some((file) => file.startsWith(path.replace(/\/+$/u, "") + "/")),
 				"docs": [...texts].filter(([path]) => path.endsWith(".md")).map(([path, text]) => ({ "file": path, "text": text })),
 				"code": [...texts].filter(([path]) => !path.endsWith(".md") && includeByDefault(path)).map(([path, text]) => ({ "file": path, "text": text })),
-				...owned.length === 0 ? {} : { "owned": { "scope": owned, "files": [...there].filter((path) => includeByDefault(path) && CODE.test(path)) } }
+				...declaredFeatures(ledger).length === 0 ? {} : { "owned": { "files": [...there].filter(isOwnedCode) } }
 			});
 			const lines = (ledgerText ?? "").split("\n");
 			// (a file no feature owns, or two do: on that file — its path the message's start)

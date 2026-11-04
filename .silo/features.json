@@ -74,6 +74,9 @@
       "packages/admin/src/session.ts",
       "packages/api/src/admin.ts",
       "packages/api/src/rbac.ts"
+    ],
+    "tests": [
+      "packages/api/test/admin.test.ts"
     ]
   },
   "Admin: sign-ins and their timelines": {
@@ -84,9 +87,12 @@
     "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
     "paths": [
       "packages/admin/src/timeline.tsx",
-      "packages/admin/src/views.tsx",
       "packages/api/src/session-events.ts",
       "packages/api/src/timeline.ts"
+    ],
+    "tests": [
+      "packages/api/test/session-events.test.ts",
+      "packages/api/test/timeline.test.ts"
     ]
   },
   "Agent connection": {
@@ -269,6 +275,7 @@
       "output channel|File Calls"
     ],
     "paths": [
+      "components/monaco-vscode-api/architecture",
       "packages/editor/build/command-tap.ts",
       "packages/editor/extensions/command-tap.ts",
       "packages/editor/shared/architecture-zenfs.ts",
@@ -348,6 +355,7 @@
     "since": "2026-11-02",
     "what": "The editor's build (build.ts, build/vite.ts: the workbench, its extensions and workers; each feature's own part in build/, by its name), its dev server (dev.ts), the dependency patches applied after install, and the ambient types the build provides.",
     "paths": [
+      "components/monaco-vscode-api/vite.config.ts",
       "packages/editor/build.ts",
       "packages/editor/build/vite.ts",
       "packages/editor/dev.ts",
@@ -401,6 +409,19 @@
     "in": "517144b7",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
+  "Capability prototype": {
+    "status": "parked",
+    "why": "the first capability engine, at the repository's root: nothing imports it and nothing runs its two tests (2026-11-03: traced, last changed for lint in September). Declared, not judged: remove it or say why it stays",
+    "since": "2026-11-03",
+    "what": "The canary, effect journal, preflight, stubs and CST anchoring as first written, before tsval's debugger and the editor's capability gate took their place.",
+    "paths": [
+      "src"
+    ],
+    "tests": [
+      "test/silo-anchor.ts",
+      "test/silo-stub.ts"
+    ]
+  },
   "Commit to GitHub": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -425,6 +446,11 @@
     "paths": [
       "packages/hub/src/index.ts",
       "packages/hub/src/network.ts"
+    ],
+    "tests": [
+      "packages/hub/test/hub.test.ts",
+      "packages/hub/test/model.test.ts",
+      "packages/hub/test/network.test.ts"
     ]
   },
   "Conformance suites": {
@@ -435,7 +461,8 @@
     "docs": "packages/tsval/README.md, *Conformance: test262*",
     "paths": [
       "packages/tsval/scripts",
-      "packages/tsval/test/differential"
+      "packages/tsval/test/differential",
+      "packages/tsval/vendor"
     ]
   },
   "Connected tabs and hub tree health": {
@@ -451,7 +478,14 @@
     ],
     "paths": [
       "packages/debug-mcp/src/forward.ts",
+      "packages/debug-mcp/src/tools/tabs.ts",
+      "packages/debug-mcp/src/tools/tree.ts",
       "packages/observability/src/tabs.ts"
+    ],
+    "tests": [
+      "packages/debug-mcp/test/outdated.test.ts",
+      "packages/debug-mcp/test/preview-tabs.test.ts",
+      "packages/debug-mcp/test/tabs.test.ts"
     ]
   },
   "Coverage in the gutter": {
@@ -564,6 +598,9 @@
     "paths": [
       "packages/editor-api/src/anchors.ts",
       "packages/editor-api/src/annotations.ts"
+    ],
+    "tests": [
+      "packages/editor-api/test/annotations.test.mjs"
     ]
   },
   "Editor API: capability policy and gate": {
@@ -577,6 +614,10 @@
       "packages/editor-api/src/gated-eval.ts",
       "packages/editor-api/src/policy.ts",
       "packages/editor-api/src/rules.ts"
+    ],
+    "tests": [
+      "packages/editor-api/test/effects.test.mjs",
+      "packages/editor-api/test/gate.test.mjs"
     ]
   },
   "Editor API: run contract for debuggers": {
@@ -592,7 +633,14 @@
       "packages/editor-api/src/probes.ts",
       "packages/editor-api/src/recorded.ts",
       "packages/editor-api/src/runtime-vfs.ts",
+      "packages/editor-api/src/runtime.ts",
       "packages/editor-api/src/values.ts"
+    ],
+    "tests": [
+      "packages/editor-api/test/exchanges.test.mjs",
+      "packages/editor-api/test/layer.test.mjs",
+      "packages/editor-api/test/mailbox.test.mjs",
+      "packages/editor-api/test/values.test.mjs"
     ]
   },
   "Editor API: what the editor keeps": {
@@ -606,6 +654,10 @@
       "packages/editor-api/src/failures.ts",
       "packages/editor-api/src/git.ts",
       "packages/editor-api/src/lifecycle.ts"
+    ],
+    "tests": [
+      "packages/editor-api/test/cpuprofile.test.mjs",
+      "packages/editor-api/test/lifecycle.test.mjs"
     ]
   },
   "Email, inbox and the Mail page": {
@@ -622,6 +674,9 @@
       "packages/api/src/owner-alert.html",
       "packages/api/src/owner-alert.txt",
       "packages/api/src/smoke.ts"
+    ],
+    "tests": [
+      "packages/api/test/email.test.ts"
     ]
   },
   "Error reports from the editor": {
@@ -651,6 +706,9 @@
       "packages/api/migrations/0016_errors.sql",
       "packages/api/migrations/0017_editor_errors.sql",
       "packages/api/src/errors.ts"
+    ],
+    "tests": [
+      "packages/api/test/errors.test.ts"
     ]
   },
   "Event Sheet": {
@@ -690,6 +748,10 @@
     "paths": [
       "packages/tsval/src/event-loop.ts",
       "packages/tsval/src/explore.ts"
+    ],
+    "tests": [
+      "packages/tsval/test/vm/event-loop.test.ts",
+      "packages/tsval/test/vm/explore.test.ts"
     ]
   },
   "Explore orderings": {
@@ -830,6 +892,9 @@
     "docs": "packages/api/README.md, *The proxy*",
     "paths": [
       "packages/api/src/proxy.ts"
+    ],
+    "tests": [
+      "packages/api/test/proxy.test.ts"
     ]
   },
   "Host seams, modules and types": {
@@ -843,6 +908,16 @@
       "packages/tsval/src/modules.ts",
       "packages/tsval/src/typed.ts",
       "packages/tsval/src/values.ts"
+    ],
+    "tests": [
+      "packages/tsval/test/vm/coverage.test.ts",
+      "packages/tsval/test/vm/escapes.test.ts",
+      "packages/tsval/test/vm/host-boundary.test.ts",
+      "packages/tsval/test/vm/modules.test.ts",
+      "packages/tsval/test/vm/observe.test.ts",
+      "packages/tsval/test/vm/profile.test.ts",
+      "packages/tsval/test/vm/trace.test.ts",
+      "packages/tsval/test/vm/types.test.ts"
     ]
   },
   "Hosted sign-in and DPoP tokens for client apps": {
@@ -887,6 +962,9 @@
     "docs": "packages/hub/README.md, *Beside the hub*",
     "paths": [
       "packages/hub/src/rtc.ts"
+    ],
+    "tests": [
+      "packages/hub/test/rtc.test.ts"
     ]
   },
   "Hub request/reply": {
@@ -898,9 +976,7 @@
       "hub subscription|RPC_CALL + \".\" + name",
       "hub subscription|RPC_REPLY + \".\" + id"
     ],
-    "paths": [
-      "packages/hub/src/index.ts"
-    ]
+    "paths": []
   },
   "In-browser Node runtime (almostnode)": {
     "status": "active",
@@ -913,7 +989,9 @@
       "packages/almostnode/config",
       "packages/almostnode/create-runtime.ts",
       "packages/almostnode/dev-server.ts",
+      "packages/almostnode/frameworks",
       "packages/almostnode/index.ts",
+      "packages/almostnode/run-global.ts",
       "packages/almostnode/runtime-interface.ts",
       "packages/almostnode/runtime.ts",
       "packages/almostnode/server-bridge.ts",
@@ -922,6 +1000,9 @@
       "packages/almostnode/unenv-resolve.ts",
       "packages/almostnode/utils",
       "packages/almostnode/virtual-fs.ts"
+    ],
+    "tests": [
+      "packages/almostnode/test"
     ]
   },
   "In-browser dev server": {
@@ -951,7 +1032,12 @@
       "packages/admin/src/maintenance.tsx",
       "packages/api/migrations/0014_maintenance.sql",
       "packages/api/migrations/0018_switches.sql",
+      "packages/api/scripts/maintenance.ts",
       "packages/api/src/maintenance.ts"
+    ],
+    "tests": [
+      "packages/api/test/maintenance.test.ts",
+      "packages/api/test/switches.test.ts"
     ]
   },
   "Link sign-in methods and merge accounts": {
@@ -963,6 +1049,9 @@
     "paths": [
       "packages/api/src/identities.ts",
       "packages/api/src/link.ts"
+    ],
+    "tests": [
+      "packages/api/test/link.test.ts"
     ]
   },
   "Live architecture and payload capture": {
@@ -980,10 +1069,19 @@
       "hub subscription|SYNC_SUBJECT"
     ],
     "paths": [
+      "packages/debug-mcp/src/tools/architecture.ts",
+      "packages/debug-mcp/src/tools/payloads.ts",
       "packages/observability/src/arch-probes.ts",
       "packages/observability/src/arch-store.ts",
       "packages/observability/src/arch.ts",
       "packages/observability/src/flows.ts"
+    ],
+    "tests": [
+      "packages/debug-mcp/test/capture.test.ts",
+      "packages/observability/test/arch.test.ts",
+      "packages/observability/test/flows.test.ts",
+      "packages/observability/test/media.test.ts",
+      "packages/observability/test/probes.test.ts"
     ]
   },
   "Live architecture diagram": {
@@ -1045,6 +1143,10 @@
     "paths": [
       "packages/api/migrations/0005_soft_delete.sql",
       "packages/api/src/account.ts"
+    ],
+    "tests": [
+      "packages/api/test/account.test.ts",
+      "packages/api/test/sessions.test.ts"
     ]
   },
   "Metrics": {
@@ -1057,7 +1159,11 @@
       "hub subscription|METRICS_SUBJECT + \".>\""
     ],
     "paths": [
+      "packages/debug-mcp/src/tools/metrics.ts",
       "packages/observability/src/metrics.ts"
+    ],
+    "tests": [
+      "packages/observability/test/metrics.test.ts"
     ]
   },
   "Mock a value": {
@@ -1107,6 +1213,17 @@
     "paths": [
       "packages/observability/src/index.ts",
       "packages/observability/src/scope.ts"
+    ],
+    "tests": [
+      "packages/observability/test/backlog.test.ts",
+      "packages/observability/test/errors.test.ts",
+      "packages/observability/test/observe.test.ts",
+      "packages/observability/test/preview.test.ts",
+      "packages/observability/test/realm.test.ts",
+      "packages/observability/test/records.test.ts",
+      "packages/observability/test/relay.test.ts",
+      "packages/observability/test/scope.test.ts",
+      "packages/observability/test/until.ts"
     ]
   },
   "Package scripts as tasks and the run picker": {
@@ -1164,6 +1281,10 @@
     "paths": [
       "packages/debug-mcp/src/page-tools.ts",
       "packages/observability/src/page-tools.ts"
+    ],
+    "tests": [
+      "packages/debug-mcp/test/page-tools.test.ts",
+      "packages/observability/test/page-tools.test.ts"
     ]
   },
   "Pane beside every editor": {
@@ -1194,6 +1315,7 @@
       "packages/theme/src/styles/pane-views.ts"
     ],
     "tests": [
+      "packages/editor/test/fixtures/pane-view",
       "packages/editor/test/pane-views.mjs"
     ]
   },
@@ -1203,12 +1325,19 @@
     "since": "2026-11-03",
     "what": "Our own BABLR grammar for the TypeScript subset tsval runs; it parses source into a syntax tree that keeps every character, as spans (sync or async), and has a command-line parser and a parse version for checking caches.",
     "paths": [
+      "packages/bablr-language-ts/lib/anchors.ts",
+      "packages/bablr-language-ts/lib/cosmetic.ts",
       "packages/bablr-language-ts/lib/grammar.ts",
+      "packages/bablr-language-ts/lib/history-identity.ts",
+      "packages/bablr-language-ts/lib/identity.ts",
       "packages/bablr-language-ts/lib/spans.ts",
       "packages/bablr-language-ts/run.mjs",
       "packages/bablr/shims/record.js",
       "packages/bablr/src/index.js",
       "packages/bablr/vite.config.ts"
+    ],
+    "tests": [
+      "packages/bablr-language-ts/test"
     ]
   },
   "Past runs, as balls": {
@@ -1278,6 +1407,9 @@
     "ways": [
       "hub request|runtime.fs.attach",
       "hub subscription|bridge.ready"
+    ],
+    "paths": [
+      "components/monaco-vscode-api/runtime.worker.ts"
     ]
   },
   "Preview CPU profiles": {
@@ -1446,6 +1578,8 @@
       "hub subscription|LOG_SUBJECT + \".>\""
     ],
     "paths": [
+      "packages/debug-mcp/src/tools/logs.ts",
+      "packages/debug-mcp/src/tools/spans.ts",
       "packages/observability/src/log-subject.ts"
     ]
   },
@@ -1477,20 +1611,6 @@
     ],
     "tests": [
       "packages/editor/test/capabilities.test.mjs"
-    ]
-  },
-  "Recipes, surface styles and Stitches": {
-    "status": "active",
-    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
-    "since": "2026-11-03",
-    "what": "Gives each part of the app its own styles, written with Stitches in an ordered set of style layers.",
-    "docs": "packages/theme/README.md, *Surface styles: `theme/styles/*`*",
-    "paths": [
-      "packages/theme/src/component.ts",
-      "packages/theme/src/documents.js",
-      "packages/theme/src/sheet.js",
-      "packages/theme/src/stitches.ts",
-      "packages/theme/src/styles"
     ]
   },
   "Redacted logging": {
@@ -1534,7 +1654,8 @@
       ".github/workflows/cd.yml",
       ".github/workflows/ci.yml",
       ".github/workflows/contrib.yml",
-      ".github/workflows/production.yml"
+      ".github/workflows/production.yml",
+      "eslint.config.js"
     ]
   },
   "Repo load from GitHub": {
@@ -1680,9 +1801,16 @@
     "paths": [
       "packages/tsval/src/frontend.ts",
       "packages/tsval/src/globals.ts",
+      "packages/tsval/src/handlers",
       "packages/tsval/src/handlers.ts",
       "packages/tsval/src/index.ts",
       "packages/tsval/src/interpret.ts"
+    ],
+    "tests": [
+      "packages/tsval/test/vm/globals.test.ts",
+      "packages/tsval/test/vm/handler-modules.test.ts",
+      "packages/tsval/test/vm/regressions.test.ts",
+      "packages/tsval/test/vm/toplevel-await.test.ts"
     ]
   },
   "Run a file in the debugger": {
@@ -1794,6 +1922,10 @@
     "paths": [
       "packages/api/src/github.ts",
       "packages/api/src/signin.ts"
+    ],
+    "tests": [
+      "packages/api/test/github.test.ts",
+      "packages/api/test/signin.test.ts"
     ]
   },
   "Sign in with a passkey": {
@@ -1807,6 +1939,9 @@
       "packages/api/public/passkey.js",
       "packages/api/public/webauthn.js",
       "packages/api/src/passkeys.ts"
+    ],
+    "tests": [
+      "packages/api/test/passkeys.test.ts"
     ]
   },
   "Sign in with a password, and reset it": {
@@ -1821,6 +1956,9 @@
       "packages/api/src/action-codes.ts",
       "packages/api/src/password-hash.ts",
       "packages/api/src/password.ts"
+    ],
+    "tests": [
+      "packages/api/test/password.test.ts"
     ]
   },
   "Sign-in and account": {
@@ -1851,6 +1989,8 @@
     "paths": [
       "packages/admin/deployment.ts",
       "packages/admin/public/_headers",
+      "packages/admin/src/deployment.d.ts",
+      "packages/admin/vite.config.ts",
       "packages/site/admin.jsonc",
       "packages/site/editor.jsonc",
       "packages/site/public/_redirects",
@@ -1897,6 +2037,9 @@
     "docs": "contrib/README.md, *The renderer — `src/renderer.ts`*",
     "ways": [
       "custom editor provider|contrib.renderer"
+    ],
+    "paths": [
+      "contrib/src/renderer.ts"
     ]
   },
   "Starter interpreter": {
@@ -1911,8 +2054,12 @@
       "worker||src/worker.ts"
     ],
     "paths": [
+      "contrib/eslint.config.mjs",
       "contrib/scripts/dev.mjs",
-      "contrib/src/interpreter.ts"
+      "contrib/src/extension.ts",
+      "contrib/src/interpreter.ts",
+      "contrib/src/worker.ts",
+      "contrib/vite.config.mjs"
     ]
   },
   "Stepping debugger with step back": {
@@ -1942,6 +2089,25 @@
       "packages/editor/test/debugger-runs.mjs"
     ]
   },
+  "Surface styles and Stitches": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Gives each part of the app its own styles, written with Stitches in an ordered set of style layers.",
+    "docs": "packages/theme/README.md, *Surface styles: `theme/styles/*`*",
+    "paths": [
+      "packages/theme/src/component.ts",
+      "packages/theme/src/documents.d.ts",
+      "packages/theme/src/documents.js",
+      "packages/theme/src/sheet.d.ts",
+      "packages/theme/src/sheet.js",
+      "packages/theme/src/stitches.ts",
+      "packages/theme/src/styles/admin.ts",
+      "packages/theme/src/styles/git-panel.ts",
+      "packages/theme/src/styles/shell.ts",
+      "packages/theme/src/styles/workbench.ts"
+    ]
+  },
   "Tamper-evident audit log": {
     "status": "active",
     "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
@@ -1949,10 +2115,13 @@
     "what": "Records every security event (sign-ins, refusals, account changes) in D1 and in locked R2 copies that can't be changed or deleted, and shows the log in the admin app.",
     "docs": "packages/api/README.md, *A tamper-evident audit log*",
     "paths": [
-      "packages/admin/src/views.tsx",
+      "packages/api/scripts/audit.ts",
       "packages/api/src/audit-copies.ts",
       "packages/api/src/audit.ts",
       "packages/api/src/refusals.ts"
+    ],
+    "tests": [
+      "packages/api/test/audit-copies.test.ts"
     ]
   },
   "Terminal commands beyond the core's": {
@@ -2046,6 +2215,37 @@
       "packages/editor/test/debugger-runs.mjs"
     ]
   },
+  "The API Worker": {
+    "status": "active",
+    "why": "declared 2026-11-03 so every code file has an owner (decision 22): the Worker's entry and bindings, what every API feature is routed through",
+    "since": "2026-11-03",
+    "what": "The API's Cloudflare Worker: its entry, which routes each request to the feature that answers it, and its bindings.",
+    "docs": "packages/api/README.md",
+    "paths": [
+      "packages/api/scripts/keep-source-maps.ts",
+      "packages/api/src/env.ts",
+      "packages/api/src/index.ts",
+      "packages/api/src/text.d.ts"
+    ],
+    "tests": [
+      "packages/api/test/api.test.ts"
+    ]
+  },
+  "The API's local harness": {
+    "status": "active",
+    "why": "declared 2026-11-03 so every code file has an owner (decision 22)",
+    "since": "2026-11-03",
+    "what": "`npm run harness`: the API run locally in Wrangler's test harness, with a page beside it showing everything it stores and what each step of a flow wrote; and what the API's tests share.",
+    "docs": "packages/api/README.md, C0",
+    "paths": [
+      "packages/api/harness"
+    ],
+    "tests": [
+      "packages/api/test/browser.ts",
+      "packages/api/test/harness.test.ts",
+      "packages/api/test/helpers.ts"
+    ]
+  },
   "The bridge": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -2110,6 +2310,7 @@
     "since": "2026-11-02",
     "what": "A bash-like terminal on the workspace's files with npm, node, git, vite and other commands, which VS Code tasks also run in.",
     "paths": [
+      "components/monaco-vscode-api/terminal-backend.ts",
       "packages/editor/workbench/terminal/"
     ],
     "tests": [
@@ -2126,8 +2327,10 @@
     "what": "Maps the theme onto whichever VS Code color theme is active in the workbench.",
     "docs": "packages/theme/README.md, *In VS Code's document: `theme/vscode`*",
     "paths": [
+      "packages/theme/src/vscode-colors.d.ts",
       "packages/theme/src/vscode-colors.js",
       "packages/theme/src/vscode-skin.ts",
+      "packages/theme/src/vscode.d.ts",
       "packages/theme/src/vscode.js"
     ]
   },
@@ -2154,9 +2357,12 @@
     "what": "Shows Cloudflare's traffic analytics (top paths, user agents, status codes) in the admin app, checks the account's spend every hour, and alerts or pauses if usage runs away.",
     "docs": "packages/api/README.md, *The cost guard (O2)*",
     "paths": [
-      "packages/admin/src/views.tsx",
       "packages/api/src/spend.ts",
       "packages/api/src/traffic.ts"
+    ],
+    "tests": [
+      "packages/api/test/spend.test.ts",
+      "packages/api/test/traffic.test.ts"
     ]
   },
   "Tripwire": {
@@ -2167,6 +2373,9 @@
     "docs": "packages/api/README.md, *The tripwire (O3)*",
     "paths": [
       "packages/api/src/tripwire.ts"
+    ],
+    "tests": [
+      "packages/api/test/tripwire.test.ts"
     ]
   },
   "Two-factor sign-in": {
@@ -2221,9 +2430,12 @@
     "what": "Scores each sign-in's requests and client against a learned model of normal behavior (without keeping the actual values), and lists the unusual ones, worst first, in the admin app.",
     "docs": "packages/api/README.md, *Behavior (B7–B9)*",
     "paths": [
-      "packages/admin/src/views.tsx",
       "packages/api/migrations/0006_behavior.sql",
       "packages/api/src/behavior.ts"
+    ],
+    "tests": [
+      "packages/api/test/behavior.test.ts",
+      "packages/api/test/detection.test.ts"
     ]
   },
   "VS Code look for Web Awesome": {
@@ -2244,7 +2456,12 @@
     "what": "The only way for app code to load the Web Awesome components it is allowed to use.",
     "docs": "packages/theme/README.md, *Components: `theme/components/*`*",
     "paths": [
+      "packages/admin/src/wa-jsx.d.ts",
+      "packages/api/scripts/webawesome.ts",
       "packages/theme/src/components"
+    ],
+    "tests": [
+      "packages/theme/test/web-awesome.mjs"
     ]
   },
   "Web Awesome lint rules": {
@@ -2357,6 +2574,7 @@
       "url parameter|?pane"
     ],
     "paths": [
+      "components/monaco-vscode-api/main.ts",
       "packages/editor/app/logging.ts",
       "packages/editor/app/vscode.tsx",
       "packages/editor/main.tsx",
@@ -2431,12 +2649,19 @@
     "since": "2026-11-03",
     "what": "Runs a local collector that the editor's hubs connect to over a WebSocket, and offers what they send to an agent as MCP tools over stdio.",
     "paths": [
+      "packages/debug-mcp/agent-hook.mjs",
+      "packages/debug-mcp/src/agent.ts",
       "packages/debug-mcp/src/bin.ts",
       "packages/debug-mcp/src/mcp.ts",
       "packages/debug-mcp/src/server.ts",
       "packages/debug-mcp/src/store.ts",
+      "packages/debug-mcp/src/testing.ts",
       "packages/debug-mcp/src/tools/context.ts",
       "packages/debug-mcp/src/tools/index.ts"
+    ],
+    "tests": [
+      "packages/debug-mcp/test/agent.test.ts",
+      "packages/debug-mcp/test/store.test.ts"
     ]
   },
   "derived history": {
@@ -2448,13 +2673,16 @@
     "status": "active",
     "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
     "since": "2026-11-03",
-    "what": "Reports where the feature ledger or this manifest and the code disagree (a stopped feature still in the code, a removed one still documented, a way in no feature owns) and fails CI on it.",
+    "what": "Reports where the feature ledger and the code disagree (a stopped feature still in the code, a removed one still documented, a way in no feature owns, code no feature owns) and fails CI on it.",
     "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
     "ways": [
       "cli command|check"
     ],
     "paths": [
       "packages/silo/src/cli.ts"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo coverage": {
@@ -2509,7 +2737,7 @@
     "status": "active",
     "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
     "since": "2026-11-03",
-    "what": "Takes a feature out of the code (the files only it uses, plus its manifest entries) and leaves a tombstone that can bring it back later.",
+    "what": "Takes a feature out of the code (the files only it uses, plus its package manifests' entries) and leaves a tombstone that can bring it back later.",
     "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
     "ways": [
       "cli command|remove",
@@ -2550,6 +2778,15 @@
       "packages/tsval/src/frame.ts",
       "packages/tsval/src/scope.ts",
       "packages/tsval/src/vm.ts"
+    ],
+    "tests": [
+      "packages/tsval/test/vm/call-steps.test.ts",
+      "packages/tsval/test/vm/fork.test.ts",
+      "packages/tsval/test/vm/step.test.ts",
+      "packages/tsval/test/vm/stepped-async.test.ts",
+      "packages/tsval/test/vm/stepped-patterns.test.ts",
+      "packages/tsval/test/vm/stepping.test.ts",
+      "packages/tsval/test/vm/throw-site.test.ts"
     ]
   }
 }
