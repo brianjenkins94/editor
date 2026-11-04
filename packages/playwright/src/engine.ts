@@ -80,7 +80,32 @@ function elementText(element: Element): string {
 		}
 	}
 
+	// (an open shadow root's too, as Playwright reads it)
+	for (const child of element.shadowRoot?.childNodes ?? []) {
+		if (child.nodeType === 3) {
+			text += child.nodeValue ?? "";
+		} else if (child.nodeType === 1 && !NOT_TEXT.has((child as Element).tagName)) {
+			text += elementText(child as Element);
+		}
+	}
+
 	return text;
+}
+
+/** Whether `host` holds `element`, across shadow roots. */
+function isHostOf(host: Element, element: Element): boolean {
+	for (let at = composedParent(element); at !== null; at = composedParent(at)) {
+		if (at === host) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/** An element's parent, or the host of the shadow root it's at the top of. */
+function composedParent(element: Element): Element | null {
+	return element.parentElement ?? (element.getRootNode() as ShadowRoot).host ?? null;
 }
 
 // ── visibility and state ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -108,7 +133,7 @@ export function isVisible(element: Element): boolean {
 /** Hidden from assistive technology: not rendered (display: none or hidden up the tree), `visibility: hidden`, or under
  *  `aria-hidden="true"`. */
 function hiddenForAria(element: Element): boolean {
-	for (let at: Element | null = element; at !== null; at = at.parentElement) {
+	for (let at: Element | null = element; at !== null; at = composedParent(at)) {
 		if (at.getAttribute("aria-hidden") === "true") {
 			return true;
 		}
@@ -123,7 +148,8 @@ function hiddenForAria(element: Element): boolean {
 	// (checkVisibility is false for anything in a display: none subtree; an <option> renders through its <select>)
 	const check = (element as Element & { "checkVisibility"?: () => boolean }).checkVisibility;
 
-	return element.tagName !== "OPTION" && check !== undefined && !check.call(element);
+	// (nor is `display: contents`, a slot's, hidden for having no box of its own: what's in it renders)
+	return element.tagName !== "OPTION" && style.display !== "contents" && check !== undefined && !check.call(element);
 }
 
 const DISABLEABLE = new Set(["BUTTON", "INPUT", "SELECT", "TEXTAREA", "OPTION", "OPTGROUP", "FIELDSET"]);
@@ -145,7 +171,7 @@ export function isDisabled(element: Element): boolean {
 		}
 	}
 
-	for (let at: Element | null = element; at !== null; at = at.parentElement) {
+	for (let at: Element | null = element; at !== null; at = composedParent(at)) {
 		if (at.getAttribute("aria-disabled") === "true") {
 			return true;
 		}
@@ -246,8 +272,11 @@ const NAME_FROM_CONTENT = new Set(["button", "cell", "checkbox", "columnheader",
  *  around what renders as a block. */
 function contentName(element: Element, includeHidden: boolean): string {
 	let text = "";
+	// (what it renders: an open shadow root's instead of its own children, and a slot's assigned nodes, or else its fallback)
+	const assigned = element.tagName === "SLOT" ? (element as HTMLSlotElement).assignedNodes() : [];
+	const children = element.shadowRoot?.childNodes ?? (assigned.length > 0 ? assigned : element.childNodes);
 
-	for (const child of element.childNodes) {
+	for (const child of children) {
 		if (child.nodeType === 3) {
 			text += child.nodeValue ?? "";
 			continue;
@@ -436,16 +465,154 @@ function labelTexts(element: Element): string[] {
 
 type Scope = Document | Element;
 
-/** Every element within `scope`, in document order. */
-function within(scope: Scope): Element[] {
-	return [...scope.querySelectorAll("*")];
+/** Every element within `scope`, in document order, going into open shadow roots: each root's after its host. */
+function within(scope: Scope | ShadowRoot): Element[] {
+	const found: Element[] = [];
+	const shadow = (scope as Element).shadowRoot;
+
+	if (shadow !== undefined && shadow !== null) {
+		found.push(...within(shadow));
+	}
+
+	for (const element of scope.querySelectorAll("*")) {
+		found.push(element);
+
+		if (element.shadowRoot !== null) {
+			found.push(...within(element.shadowRoot));
+		}
+	}
+
+	return found;
+}
+
+/** A selector list's complex selectors, each its compounds and the combinator before each: split only at the top level,
+ *  not inside a string, `[…]` or `(…)`. Each compound is the browser's own to match. */
+function splitSelector(selector: string): { "combinator": string; "compound": string }[][] {
+	const complexes: { "combinator": string; "compound": string }[][] = [[]];
+	let compound = "";
+	let combinator = "";
+	let depth = 0;
+	let quote = "";
+
+	const finish = (): void => {
+		if (compound !== "") {
+			complexes.at(-1)!.push({ "combinator": combinator, "compound": compound });
+			compound = "";
+			combinator = "";
+		}
+	};
+
+	for (let at = 0; at < selector.length; at += 1) {
+		const character = selector[at]!;
+
+		if (quote !== "") {
+			compound += character;
+
+			if (character === "\\") {
+				at += 1;
+				compound += selector[at] ?? "";
+			} else if (character === quote) {
+				quote = "";
+			}
+		} else if (character === "\"" || character === "'") {
+			quote = character;
+			compound += character;
+		} else if (character === "\\") {
+			at += 1;
+			compound += character + (selector[at] ?? "");
+		} else if (character === "(" || character === "[") {
+			depth += 1;
+			compound += character;
+		} else if (character === ")" || character === "]") {
+			depth -= 1;
+			compound += character;
+		} else if (depth > 0) {
+			compound += character;
+		} else if (character === ",") {
+			finish();
+			complexes.push([]);
+		} else if (character === ">" || character === "+" || character === "~") {
+			finish();
+			combinator = character;
+		} else if (/\s/u.test(character)) {
+			finish();
+
+			if (combinator === "" && complexes.at(-1)!.length > 0) {
+				combinator = " ";
+			}
+		} else {
+			compound += character;
+		}
+	}
+
+	finish();
+
+	return complexes;
+}
+
+/** Whether `element` matches `compounds[index]` and what's before it, across shadow boundaries. */
+function matchesFrom(element: Element, compounds: { "combinator": string; "compound": string }[], index: number, scope: Scope): boolean {
+	const { compound, combinator } = compounds[index]!;
+
+	if (compound === ":scope" ? element !== scope : !element.matches(compound)) {
+		return false;
+	}
+
+	if (index === 0) {
+		return combinator === "" || combinator === " ";
+	}
+
+	switch (combinator) {
+		case ">": {
+			const parent = composedParent(element);
+
+			return parent !== null && matchesFrom(parent, compounds, index - 1, scope);
+		}
+		case "+": {
+			const sibling = element.previousElementSibling;
+
+			return sibling !== null && matchesFrom(sibling, compounds, index - 1, scope);
+		}
+		case "~": {
+			for (let sibling = element.previousElementSibling; sibling !== null; sibling = sibling.previousElementSibling) {
+				if (matchesFrom(sibling, compounds, index - 1, scope)) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+		default: {
+			for (let parent = composedParent(element); parent !== null; parent = composedParent(parent)) {
+				if (matchesFrom(parent, compounds, index - 1, scope)) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+	}
+}
+
+/** What a CSS selector finds within `scope`, going into open shadow roots, as Playwright's does. */
+function byCss(scope: Scope, selector: string): Iterable<Element> {
+	const everything = within(scope);
+
+	// (no shadow root in reach: the browser's own, as nothing needs crossing)
+	if (!everything.some((element) => element.getRootNode() !== scope.ownerDocument && element.getRootNode() !== scope)) {
+		return scope.querySelectorAll(selector);
+	}
+
+	const complexes = splitSelector(selector);
+
+	return everything.filter((element) => complexes.some((compounds) => compounds.length > 0 && matchesFrom(element, compounds, compounds.length - 1, scope)));
 }
 
 /** What a text step finds: the elements whose text matches and none of whose child elements' does — the smallest that
  *  holds the text, as Playwright's getByText. */
 function byText(scope: Scope, text: TextMatch, exact: boolean | undefined): Element[] {
 	// (the scope itself too, as Playwright's: `locator("h2").getByText(…)` can find the h2)
-	return [...scope.nodeType === 1 ? [scope as Element] : [], ...within(scope)].filter((element) => !NOT_TEXT.has(element.tagName) && element.closest("head") === null && matches(elementText(element), text, exact) && ![...element.children].some((child) => matches(elementText(child), text, exact)));
+	return [...scope.nodeType === 1 ? [scope as Element] : [], ...within(scope)].filter((element) => !NOT_TEXT.has(element.tagName) && element.closest("head") === null && matches(elementText(element), text, exact) && ![...element.children, ...element.shadowRoot?.children ?? []].some((child) => matches(elementText(child), text, exact)));
 }
 
 function stepFrom(scopes: Scope[], step: Step): Element[] {
@@ -458,7 +625,7 @@ function stepFrom(scopes: Scope[], step: Step): Element[] {
 
 	for (const scope of scopes) {
 		switch (step.kind) {
-			case "css": add(scope.querySelectorAll(step.selector)); break;
+			case "css": add(byCss(scope, step.selector)); break;
 			case "role": add(within(scope).filter((element) => roleMatches(element, step))); break;
 			case "text": add(byText(scope, step.text, step.exact)); break;
 			case "label": add(within(scope).filter((element) => labelTexts(element).some((text) => matches(text, step.text, step.exact)))); break;
@@ -470,8 +637,13 @@ function stepFrom(scopes: Scope[], step: Step): Element[] {
 		}
 	}
 
-	// (in document order, as a selector's matches are, whichever scope found them)
-	return [...found].sort((one, other) => (one === other ? 0 : one.compareDocumentPosition(other) & 4 ? -1 : 1));
+	// (in document order, as a selector's matches are, whichever scope found them; what's across a shadow boundary has no
+	// order to compare, and stays in the order found)
+	return [...found].sort((one, other) => {
+		const position = one === other ? 1 : one.compareDocumentPosition(other);
+
+		return position & 1 ? 0 : position & 4 ? -1 : 1;
+	});
 }
 
 /** The elements `steps` find from `scopes`, in document order: each step within what the one before found. */
@@ -533,9 +705,26 @@ function notActionable(element: Element, needsEnabled: boolean): string | undefi
 	element.scrollIntoView({ "block": "center", "inline": "center" });
 
 	const box = element.getBoundingClientRect();
-	const hit = element.ownerDocument.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+	let hit = element.ownerDocument.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
 
-	if (hit !== null && hit !== element && !element.contains(hit)) {
+	// (the browser answers with the host: on into its shadow root, for what's really there)
+	for (let inside = hit?.shadowRoot?.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); inside !== null && inside !== undefined && inside !== hit; inside = hit?.shadowRoot?.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)) {
+		hit = inside;
+	}
+
+
+	const inElement = (found: Element): boolean => {
+		for (let at: Element | null = found; at !== null; at = composedParent(at)) {
+			if (at === element) {
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	// (nor is it covered by its own host: a slot's content, or a button in a shadow root, hits what holds it)
+	if (hit !== null && !inElement(hit) && !isHostOf(hit, element)) {
 		return `${describe(hit)} is on top of ${describe(element)}`;
 	}
 

@@ -366,8 +366,8 @@ How it's kept:
        frame's document to change, not a `load` on the window navigation replaces. (3) *done* `frameLocator`, as deep as
        frames nest, held to real Playwright. A Playwright test in the debugger now drives a whole editor in a preview window,
        apart from the real one: through its frames, clicking a file in its Explorer and seeing its tab open
-       (playwright-in-editor.mjs). Still in the way: **open shadow roots**, which Playwright goes into and ours doesn't,
-       so a Web Awesome control's insides aren't found (the shell's Reset, by title or role). Then the suites' own needs: they ask over the hub
+       (playwright-in-editor.mjs). And (4) *done* open shadow roots, gone into as Playwright goes, selectors crossing them
+       too, so Web Awesome's controls are found. Next, the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
