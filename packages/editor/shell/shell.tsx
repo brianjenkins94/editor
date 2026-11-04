@@ -20,8 +20,7 @@ import { relayLoggerToHub, tapConsoleAndErrors } from "@brianjenkins94/observabi
 import { ChevronRight, PanelRight } from "lucide";
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { code, toolbar } from "theme/recipes";
-import { asidePane, editorFrame, injectGlobals, mainWrap, overlay, overlayBody, overlayTitle, railRegion, resizer, resizerLeft, sideCol, sideHost, spacer, topBar } from "theme/styles/shell";
+import { asidePane, editorFrame, injectGlobals, mainWrap, overlay, overlayBar, overlayBody, overlayTitle, railRegion, resizer, resizerLeft, sideCol, sideHost, spacer, topBar } from "theme/styles/shell";
 import { applyVsCodeColors } from "theme/vscode-colors";
 import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
@@ -240,8 +239,8 @@ function Shell() {
 				<iframe ref={appFrameRef} class={editorFrame()} title="editor" allow="cross-origin-isolated" />
 
 				<div ref={overlayRef} class={overlay()}>
-					<div class={toolbar({ "density": "compact", "css": { "height": "34px" } }) + " wa-cluster wa-flex-nowrap wa-gap-2xs"}>
-						<span ref={overlayTitleRef} class={code() + " wa-font-size-xs wa-text-truncate " + overlayTitle()} />
+					<div class={overlayBar() + " wa-cluster wa-flex-nowrap wa-gap-2xs"}>
+						<span ref={overlayTitleRef} class={"wa-font-size-xs wa-text-truncate " + overlayTitle()} />
 
 						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>
 					</div>

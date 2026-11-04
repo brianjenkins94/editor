@@ -19,13 +19,12 @@
     },
     "./vscode-theme": "./src/vscode-theme.ts",
     "./stitches": "./src/stitches.ts",
+    "./component": "./src/component.ts",
     "./sheet": {
       "types": "./src/sheet.d.ts",
       "default": "./src/sheet.js"
     },
-    "./recipes": "./src/recipes.ts",
     "./styles/*": "./src/styles/*.ts",
-    "./app-window": "./src/app-window.ts",
     "./documents": {
       "types": "./src/documents.d.ts",
       "default": "./src/documents.js"

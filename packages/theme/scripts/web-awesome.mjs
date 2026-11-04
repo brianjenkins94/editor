@@ -26,12 +26,12 @@ const dist = path.dirname(path.dirname(path.dirname(createRequire(path.join(root
 const styles = path.join(dist, "styles");
 const read = (file) => fs.readFileSync(file, "utf8");
 
-/** The components, and the theme's sources each publishes (its entry re-exports them, by relative path). */
+/** The components, and each one's source: its entry, and a source of the theme's it re-exports by relative path. */
 const components = fs.readdirSync(path.join(root, "components")).filter((name) => fs.existsSync(path.join(root, "components", name, "src", name + ".ts")));
 const sourceOf = (name) => {
 	const entry = path.join(root, "components", name, "src", name + ".ts");
 
-	return [...read(entry).matchAll(/from "(\.\.?\/[^"]+)"/gu)].map((match) => read(path.resolve(path.dirname(entry), match[1]) + ".ts")).join("\n");
+	return [read(entry), ...[...read(entry).matchAll(/from "(\.\.?\/[^"]+)"/gu)].map((match) => read(path.resolve(path.dirname(entry), match[1]) + ".ts"))].join("\n");
 };
 const sources = Object.fromEntries(components.map((name) => [name, sourceOf(name)]));
 

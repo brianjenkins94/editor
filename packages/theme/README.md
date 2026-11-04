@@ -78,19 +78,15 @@ then `app` (`app.base`, `app.recipes`, `app.styles`, `app.overrides`) ([*The lay
 into a docked window only the stylesheets it made (each marked `data-vscode`), so `mirrorStyles()` copies the app's
 (rules, not text, since Stitches inserts its), and the rules Stitches adds to them later.
 
-## Recipes and composed components: `theme/recipes`, `theme/app-window`
+## Composed components: `components/<name>`
 
-`theme/recipes` is the app's shapes as Stitches recipes, a class for any element, from any framework:
-`toolbar({ "density": "compact" })`, `caption({ "size": "2xs" })`. Overridable, least reach first: their variants;
-their component tokens (`--app-toolbar-padding-inline`, `--app-caption-color`, …) set on an ancestor; a use-site
-override, `toolbar({ "css": { … } })`, which wins by layer; or a new recipe composed from one, made here
-([*Overriding a recipe*](#overriding-a-recipe)). `theme/app-window` is `<app-window>`, a movable, collapsible window in
-light DOM: give it a `label`, `closable`, `storage-key`, a `slot="header-actions"` child and a body. `appWindow()` is
-the same as a function (`theme/component`).
+`@brianjenkins94/app-window` is `<app-window>`, a movable, collapsible window in light DOM: give it a `label`,
+`closable`, `storage-key`, a `slot="header-actions"` child and a body. `appWindow()` is the same as a function
+(`theme/component`). It holds its own source, in `components/app-window`.
 
 ## Surface styles: `theme/styles/*`
 
-What a surface draws with beyond Web Awesome and the recipes, made here with Stitches, one module per surface: the
+What a surface draws with beyond Web Awesome, made here with Stitches, one module per surface: the
 shell, its dock, the preview, VS Code's document (`workbench`: VS Code's baseline, its overrides on `--vscode-*`), and
 each view's (architecture-view, pane-views, margin, rule-view, rule-editor, git-panel, event-sheet, insights-monitor,
 admin, account). The app imports their named styles, or calls a surface's `stylesheet()` once; it doesn't call
@@ -108,16 +104,13 @@ doesn't.
 
 ## Published: `components/<name>`
 
-The recipes and composed components publish as packages of their own from `components/`: `app-window`, `toolbar`,
-`caption`, `frame`, `code`, and `vscode-theme`, the look in one call (`vscodeTheme(element?)`), each
-`@brianjenkins94/<name>`, released by cd.yml like any package. The source stays here
-([*Published components*](#published-components)).
+`app-window` and `vscode-theme`, the look in one call (`vscodeTheme(element?)`), publish as packages of their own, each
+`@brianjenkins94/<name>`, released by cd.yml like any package ([*Published components*](#published-components)).
 
 ## The budget
 
 What's left is budgeted (`budget.json`, checked by `test/budget.mjs`): the surfaces' declarations (`theme/styles/*`,
-and a use-site `css` override wherever it is), and the comments that turn a `webawesome/*` rule off. The recipes,
-components and tokens aren't: they're the vocabulary. Each may only go down; a raise means editing `budget.json`, where
+and the comments that turn a `webawesome/*` rule off. The components and tokens aren't: they're the vocabulary. Each may only go down; a raise means editing `budget.json`, where
 the diff shows it, and a drop means lowering it, so the room a removal made isn't spent unseen.
 
 ## This starter
@@ -249,24 +242,20 @@ dockview's.
 - Layers rank in the order they're first declared, and where Web Awesome's sheets are adopted (`theme/vscode`) they
   come after every `<style>`, so the order is put first in each document's head, once.
 
-### Overriding a recipe
+### Overriding a component
 
 Consumers are three kinds of code: vanilla DOM (the workbench's views, the webviews), Preact (the shell, admin) and
-React (the diff), so a component can't be one framework's. Most of it is recipes: a class string fits `class=`,
-`className=` and `element(tag, className)` alike, and the markup stays the consumer's. Where markup and behaviour
-repeat, a composed component is a light-DOM custom element (`<app-window>`): not a shadow root, so utilities, recipes
-and a consumer's override still cascade into it, and it works the same from every framework. Not DOM helper functions
-(like the event sheet's `heading()`): React would need its own copy of each, so two implementations of everything.
+React (the diff), so a component can't be one framework's. Where markup and behaviour repeat, a composed component is a
+light-DOM custom element (`<app-window>`): not a shadow root, so utilities and a consumer's override still cascade into
+it, and it works the same from every framework. Not DOM helper functions (like the event sheet's `heading()`): React
+would need its own copy of each, so two implementations of everything.
 
-Override and extend, from the least reach to the most:
+A component reads its own custom properties (`--app-window-z`), Web Awesome's as the fallback, so an ancestor retunes it
+without CSS: Web Awesome's own pattern, and it reaches vanilla DOM and webviews too.
 
-1. **Variants**: the options a recipe offers (`density`, `size`), defined in the theme.
-2. **Component tokens**: a recipe reads its own custom properties, Web Awesome's as the fallback, and sets them only
-   by a variant, so an ancestor retunes it without CSS and a variant still wins on its element: Web Awesome's own
-   pattern, and it reaches vanilla DOM and webviews too.
-3. **A use-site override**: `toolbar({ "css": { … } })`, Stitches' own one-off, in `app.overrides`, so it wins by layer
-   wherever it's inserted; `css-in-js-tokens` holds it to the tokens and the budget counts it.
-4. **Extension**: a new recipe composed from one (`recipe(toolbar, { … })`), made in the theme, where it's reviewed.
+The theme had recipes too until 2026-11-03: `toolbar()`, `caption()`, `frame()` and `code()`, classes from a call, each a
+package. Fourteen call sites, eleven of them `code()` in the admin app, `frame()` none, and they were what kept every
+component's source out of its package. Web Awesome's utilities and a surface's styles do it.
 
 ### Why the shell skips native styles
 
@@ -298,16 +287,17 @@ reading, keeping Web Awesome's own look for admin, misunderstood it.)
 
 ### Published components
 
-The user's direction: the recipes and composed components publish themselves from `components/`, one package each, as
-monaco-vscode-api does (released by the same pipeline as `packages/*`, registry-less). The theme keeps the look's
-source, the surfaces' styles, the rules and the budget.
+The composed components publish themselves from `components/`, one package each, as monaco-vscode-api does (released by
+the same pipeline as `packages/*`, registry-less). The theme keeps the look's source, the surfaces' styles, the rules and
+the budget.
 
-- **Internal use is on the source.** A build goes stale until it's rebuilt, and this is UI edited all the time, so
-  the source stays in the theme and each `components/<name>` re-exports it by relative path; util-publish bundles it
-  with what it uses (each published one has its own Stitches instance, the layer order shared).
-- **The theme's source imports nothing outside itself.** CI's pnpm copies the theme into its store as a `file:`
-  dependency, where a relative path out of it doesn't resolve; here it's a symlink, where it does. (The sources first
-  moved into `components/`, the theme re-exporting them, and the editor's build failed in CI and not here.)
+- **A component holds its own source**, and imports what it shares by name (`theme/stitches`, `theme/component`).
+  util-publish bundles a package that names a `customElements` manifest: everything it imports but its peers, so its
+  tarball needs nothing of ours, and each has its own Stitches instance, the layer order shared.
+- **The theme imports no component.** CI's pnpm copies the theme into its store as a `file:` dependency, where a relative
+  path out of it doesn't resolve; here it's a symlink, where it does (the sources first moved into `components/`, the
+  theme re-exporting them, and the editor's build failed in CI and not here). So `vscode-theme`, which the theme itself
+  uses, stays here: `components/vscode-theme` is its one entry over it, by relative path.
 - **A component is a function too** (`theme/component`): its definition (attributes, slots, events) gives it typed
   options, slots as arrays, `children` for the default one, and `on*` handlers with the `app-` / `wa-` prefix dropped,
   and gives the package its `custom-elements.json`. Preact and React use the same element in JSX. Recipes stay as they
@@ -341,7 +331,7 @@ gzipped) take about 16 ms to parse, run and define, cold, and 2 ms with the code
   Lit decides that by, so Lit puts a `<style>` in each shadow root, which goes wherever its component goes. Nothing
   else reads it, and the browser shares identical `<style>`s' parsed contents (boot 1154 vs 1142 ms).
 - **A webview's body padding.** VS Code's default webview styles give `body` padding, unlayered, so no layered rule
-  can take it back: a webview's view is the `frame()` recipe (`position: fixed`), rather than a style on `body`.
+  can take it back: a webview's view is `position: fixed`, rather than a style on `body`.
 
 ### Open
 

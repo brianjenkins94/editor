@@ -69,6 +69,15 @@ export const editorFrame = css({ "position": "absolute", "inset": 0, "display": 
 
 export const mainWrap = css({ "position": "relative", "height": "100%" });
 
+/** The overlay's bar of controls, ruled off from what's under it. */
+export const overlayBar = css({
+	"flex": "none",
+	"boxSizing": "border-box",
+	"height": "34px",
+	"padding": "var(--wa-space-3xs) var(--wa-space-xs)",
+	"borderBottom": "var(--wa-border-width-s) solid var(--wa-color-surface-border)"
+});
+
 export const overlay = css({
 	"position": "absolute",
 	"inset": 0,
@@ -79,6 +88,6 @@ export const overlay = css({
 	"&.open": { "display": "flex" }
 });
 
-export const overlayTitle = css({ "flex": "1 1 auto" });
+export const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-font-family-code)" });
 
 export const overlayBody = css({ "flex": "1 1 auto", "overflow": "auto", "minHeight": 0 });

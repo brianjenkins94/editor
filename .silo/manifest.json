@@ -600,27 +600,21 @@
       ]
     },
     "Recipes, surface styles and Stitches": {
-      "what": "Gives each part of the app its own styles and the app's shared shapes as recipe classes, all written with Stitches in an ordered set of style layers.",
-      "docs": "packages/theme/README.md, *Recipes and composed components: `theme/recipes`, `theme/app-window`*",
+      "what": "Gives each part of the app its own styles, written with Stitches in an ordered set of style layers.",
+      "docs": "packages/theme/README.md, *Surface styles: `theme/styles/*`*",
       "paths": [
         "packages/theme/src/component.ts",
         "packages/theme/src/documents.js",
-        "packages/theme/src/recipes.ts",
         "packages/theme/src/sheet.js",
         "packages/theme/src/stitches.ts",
         "packages/theme/src/styles"
       ]
     },
     "Published theme components": {
-      "what": "Components published for use outside the app: the movable, collapsible <app-window> element (and an appWindow() function), plus caption, code, frame and toolbar recipes, each a class you get from a function call.",
+      "what": "Components published for use outside the app: the movable, collapsible <app-window> element (and an appWindow() function).",
       "docs": "packages/theme/README.md, *Published: `components/<name>`*",
       "paths": [
-        "components/app-window",
-        "components/caption",
-        "components/code",
-        "components/frame",
-        "components/toolbar",
-        "packages/theme/src/app-window.ts"
+        "components/app-window"
       ]
     },
     "VS Code look for Web Awesome": {

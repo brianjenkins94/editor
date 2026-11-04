@@ -18,6 +18,11 @@ export const gitPanelStyles = stylesheet({
 	".gp-head": {
 		"flex": "none",
 		"boxSizing": "border-box",
+		"color": "var(--wa-color-text-quiet)",
+		"fontSize": "var(--wa-font-size-xs)",
+		"fontWeight": "var(--wa-font-weight-semibold)",
+		"letterSpacing": "0.04em",
+		"textTransform": "uppercase",
 		"padding": "var(--wa-space-2xs) var(--wa-space-xs) var(--wa-space-2xs) var(--wa-space-s)"
 	},
 	".gp-files": {

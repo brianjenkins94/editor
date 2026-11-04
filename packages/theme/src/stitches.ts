@@ -1,15 +1,14 @@
 /**
  * theme/stitches — the app's one Stitches instance (README.md, *Stitches only, in the theme*), the theme's own: its styles are made here, in
- * the theme — the recipes and composed components (components/*, through theme/recipes and theme/app-window) and each surface's styles
- * (theme/styles/<surface>) — and the app imports those, never this (webawesome/through-theme fails it outside the
- * theme, as it does `@stitches/core`). webawesome/css-in-js-tokens holds their values to the `--wa-*` tokens.
+ * the theme — each surface's styles (theme/styles/<surface>) — and in the composed components (components/<name>), and the app
+ * imports those, never this (webawesome/through-theme fails it elsewhere, as it does `@stitches/core`). webawesome/css-in-js-tokens holds their values to the `--wa-*` tokens.
  *
  *     import { css, globalCss } from "../stitches";   // in packages/theme/src/styles/<surface>.ts
  *
  * Its output is layered, the way Panda layers its own, in the `app` layer after Web Awesome's (theme/sheet's layer
- * order, which this puts first in the document's head): `globalCss()` in `app.base`; `recipe()`, the theme's
- * vocabulary (theme/recipes), in `app.recipes`; `css()`, a surface's own styles, in `app.styles`; and a use-site
- * override — `toolbar({ "css": { … } })`, Stitches' one-off on any of them — in `app.overrides`, above them all, so
+ * order, which this puts first in the document's head): `globalCss()` in `app.base`; `recipe()`, a composed component's
+ * own, in `app.recipes`; `css()`, a surface's own styles, in `app.styles`; and a use-site override — `{ "css": { … } }`,
+ * Stitches' one-off on any of them — in `app.overrides`, above them all, so
  * it wins wherever it's inserted (README.md, *The layers*). So which rule wins follows the layers, not specificity or which sheet
  * was inserted last: a Stitches class wins over Web Awesome's utilities and the recipes (`app.recipes`), and over the
  * DOM it styles that isn't ours when that DOM's sheet is in the `vendor` layer, under everything (dockview's; codehike
@@ -111,7 +110,7 @@ function overridable<Component extends (...arguments_: any[]) => any>(component:
 
 export const css = ((...arguments_: any[]) => overridable(stitches.css(...arguments_.map(layered("app.styles"))))) as typeof stitches.css;
 
-/** A recipe: the theme's own vocabulary (theme/recipes, the components), under every surface's styles; Web Awesome's
+/** A recipe: a composed component's own styles (components/<name>), under every surface's styles; Web Awesome's
  *  tokens in it fall back to their defaults. */
 export const recipe = ((...arguments_: any[]) => overridable(stitches.css(...arguments_.map(withDefaults).map(layered("app.recipes"))))) as typeof stitches.css;
 

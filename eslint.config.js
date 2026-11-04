@@ -23,7 +23,7 @@ const WEB_AWESOME_COMPONENTS = WEB_AWESOME === undefined ? [] : readdirSync(path
 
 // The class names something styles (packages/theme/README.md, *Class names, a closed set*; webawesome/known-classes): Web Awesome's utilities (and the families it
 // matches by prefix, `[class*='wa-stack']`) from its installed CSS, and every class the theme's Stitches styles declare
-// (its recipes, its surfaces' styles).
+// (its surfaces' styles).
 const WEB_AWESOME_STYLES = WEB_AWESOME === undefined ? undefined : path.join(WEB_AWESOME, "styles");
 const cssFiles = (folder) => readdirSync(folder, { "recursive": true }).filter((file) => String(file).endsWith(".css")).map((file) => readFileSync(path.join(folder, String(file)), "utf8"));
 const classesIn = (text) => [...text.replaceAll(/\/\*[\s\S]*?\*\//gu, "").matchAll(/\.(-?[_a-zA-Z][\w-]*)/gu)].map((match) => match[1]);
@@ -106,10 +106,10 @@ export default [
 		}
 	},
 	{
-		// The ways in to Web Awesome that aren't the theme's re-exports: the theme itself; the API's sign-in pages, which
+		// The ways in to Web Awesome that aren't the theme's re-exports: the theme itself, and a composed component; the API's sign-in pages, which
 		// bundle Web Awesome themselves (the api doesn't depend on theme: packages/theme/README.md, *Outside the rules*); and this plugin, whose maps name
 		// Web Awesome's components as data.
-		"files": ["packages/theme/**", "packages/api/scripts/webawesome.ts", "packages/eslint-plugin-webawesome/**"],
+		"files": ["packages/theme/**", "components/app-window/**", "packages/api/scripts/webawesome.ts", "packages/eslint-plugin-webawesome/**"],
 		"rules": { "webawesome/through-theme": "off", "webawesome/known-components": "off", "webawesome/known-classes": "off" }
 	},
 	{

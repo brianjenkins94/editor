@@ -356,6 +356,13 @@ How it's kept:
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
 packages/editor (`--all`, `--runs N`, `--json`).
 
+- **When deploys are on again** (`EDITOR_DEPLOYS` is `off`, so no tarball has published since 2026-11-03): the first
+  publish of `@brianjenkins94/app-window` is the first bundled one (util-publish bundles a package that names a
+  `customElements` manifest, everything inlined but its peers). Checked locally against lib's script and
+  example-consumer; `example-consumer` installs from `@latest`, so it's what proves the published one. It needs a
+  `util` with that publish.ts published first. The retired `toolbar`, `caption`, `code` and `frame` tarballs stay on
+  Pages at their last versions, and stop updating.
+
 - **Reported errors, as of 2026-10-27** (the admin app's Errors pages; reporting fixed the same day: stack frames kept
   out of redaction, the workbench's errors with their stack, nothing reported once the page is going, a 7/30/90-day
   window). An error without a stack was grouped by its route alone, so dev's `Error` group (432eb90f62ef1ddc, 32)

@@ -721,7 +721,7 @@ const cssInJsTokens = {
 		// (`theme/stitches` from outside, `./stitches` inside the theme); and the modules of recipes, whose calls' `css` is
 		// a use-site override (packages/theme/README.md, *Overriding a recipe*), held to the tokens the same way.
 		const sources = (context.options[0]?.sources ?? ["^theme/stitches$", "^\\./stitches(?:\\.ts)?$"]).map((source) => new RegExp(source, "u"));
-		const recipeSources = (context.options[0]?.recipes ?? ["^theme/recipes$", "^\\./recipes(?:\\.ts)?$"]).map((source) => new RegExp(source, "u"));
+		const recipeSources = (context.options[0]?.recipes ?? []).map((source) => new RegExp(source, "u"));
 		const stitches = new Set();
 		const recipes = new Set();
 
@@ -901,7 +901,7 @@ const cssOnlyInTheme = {
 /** The theme package's way in to `source`, a Web Awesome or Stitches module. */
 function throughThemeFor(source) {
 	if (source.startsWith("@stitches/") || source === "theme/stitches") {
-		return "a style the theme makes with it: theme/styles/<surface>, or a recipe (theme/recipes) — styles are made in the theme (packages/theme/README.md, *Stitches only, in the theme*)";
+		return "a style the theme makes with it: theme/styles/<surface> — styles are made in the theme (packages/theme/README.md, *Stitches only, in the theme*)";
 	}
 
 	const component = /\/dist\/components\/([a-z-]+)\//u.exec(source);
@@ -912,7 +912,7 @@ function throughThemeFor(source) {
 const throughTheme = {
 	"meta": {
 		"type": "problem",
-		"docs": { "description": "Reach Web Awesome and Stitches only through the theme package, which re-exports what the app may use: theme/components/<name> for a component, theme / theme/chrome / theme/vscode for Web Awesome's styles, and the styles it makes with Stitches (theme/styles/*, theme/recipes); theme/stitches itself is the theme's own." },
+		"docs": { "description": "Reach Web Awesome and Stitches only through the theme package, which re-exports what the app may use: theme/components/<name> for a component, theme / theme/chrome / theme/vscode for Web Awesome's styles, and the styles it makes with Stitches (theme/styles/*); theme/stitches itself is the theme's own." },
 		"messages": { "direct": "`{{source}}` is reached only through the theme package — import {{instead}} instead (packages/theme/README.md, *Only through the theme*)." },
 		"schema": []
 	},
@@ -1004,7 +1004,7 @@ const knownClasses = {
 	"meta": {
 		"type": "problem",
 		"docs": { "description": "Use only class names something styles or declares: a Web Awesome utility, or a class the theme styles (a surface's styles in theme/styles/*). A bespoke class needs its style in the theme, which shows in review." },
-		"messages": { "unknown": "`{{name}}` is no Web Awesome utility and no class the theme styles — use a utility or a recipe (theme/recipes), or style it in its surface's styles, packages/theme/src/styles/<surface>.ts." },
+		"messages": { "unknown": "`{{name}}` is no Web Awesome utility and no class the theme styles — use a utility, or style it in its surface's styles, packages/theme/src/styles/<surface>.ts." },
 		"schema": [{
 			"type": "object",
 			"properties": {

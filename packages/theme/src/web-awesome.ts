@@ -12,11 +12,7 @@ export const tokens: Readonly<Record<string, string>> = {
 	"--wa-color-surface-default": "white",
 	"--wa-color-surface-raised": "white",
 	"--wa-color-text-normal": "#1b1d26",
-	"--wa-color-text-quiet": "#545868",
 	"--wa-font-family-body": "ui-sans-serif, system-ui, sans-serif",
-	"--wa-font-family-code": "ui-monospace, monospace",
-	"--wa-font-size-2xs": "round(calc(round(calc(round(calc(calc(1rem * 1) / 1.125), 1px) / 1.125), 1px) / 1.125), 1px)",
-	"--wa-font-size-xs": "round(calc(round(calc(calc(1rem * 1) / 1.125), 1px) / 1.125), 1px)",
 	"--wa-font-weight-semibold": "500",
 	"--wa-panel-border-radius": "calc(1 * 0.75rem)",
 	"--wa-panel-border-style": "solid",
@@ -25,8 +21,7 @@ export const tokens: Readonly<Record<string, string>> = {
 	"--wa-space-2xs": "calc(1 * 0.25rem)",
 	"--wa-space-3xs": "calc(1 * 0.125rem)",
 	"--wa-space-m": "calc(1 * 1rem)",
-	"--wa-space-s": "calc(1 * 0.75rem)",
-	"--wa-space-xs": "calc(1 * 0.5rem)"
+	"--wa-space-s": "calc(1 * 0.75rem)"
 };
 
 export const natives = {
