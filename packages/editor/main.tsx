@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 // (first: a hidden tab's timers kept, before anything takes the realm's own — shared/hidden-timers.ts)
 import "./shared/hidden-timers";
-import { createHub, windowTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import moduleVersions from "editor:versions";
 import { ensureCrossOriginIsolated } from "./app/coi";
@@ -74,6 +74,12 @@ if (reset === "wait") {
 	const tab = crypto.randomUUID().slice(0, 8);
 
 	linkServiceWorkerHub(rootHub);
+	// What the service worker relays for this tab (it serves every tab: `/__virtual__/<tab>/<port>/` names which) to its
+	// dev-server worker, below this root; and which tab this is, for an address (workbench/node-runner.ts).
+	const tabRpc = createRpcClient(rootHub);
+
+	serve(rootHub, `virtual.request.${tab}`, async (args) => tabRpc.request("virtual.request", args, { "timeoutMs": 30_000, "waitForResponderMs": 10_000 }));
+	serve(rootHub, "virtual.tab", () => tab);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	// Dev-only: this tab's MCP tools, which debug-mcp registers while it's connected — under this tab's id, so it can
 	// address one tab of several: every page's page_eval / page_query, and the editor's own (the debugger, the preview's

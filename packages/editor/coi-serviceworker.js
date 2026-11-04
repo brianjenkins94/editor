@@ -22,9 +22,10 @@
  * adapted from github.com/gzuidhof/coi-serviceworker (MIT). Bundled as an ES MODULE (sw.config.ts) so it can
  * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
-import { createHub, portTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "./shared/architecture";
+import { parseVirtual } from "./shared/virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
 // errors) is recorded through a source-scoped logger whose records — timed SPANS included — ride the hub to
@@ -201,10 +202,177 @@ void globalThis.clients.matchAll({ "type": "window" }).then((clients) => {
 	}
 });
 
+const rpc = createRpcClient(swHub);
+// (a tab's root links only after this worker starts: a request may get here first)
+const RESPONDER_WAIT_MS = 10_000;
+
+// Add the isolation and iframe-embedding headers a dev server's response needs.
+function virtualHeaders(source) {
+	const headers = new Headers(source || {});
+
+	headers.set("Cross-Origin-Embedder-Policy", COEP);
+	headers.set("Cross-Origin-Opener-Policy", "same-origin");
+	headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+	headers.delete("X-Frame-Options");
+
+	return headers;
+}
+
+// One exchange with the server on `port` (a dev server in the node worker, or a run's own; over the hub — editor-api's
+// `exchanges` is the other end): both bodies stream. A body that fits in its first REQUEST_PIECE goes whole with the
+// request; a longer one follows in writes, each sent once the server has taken the last. The answer comes at its head;
+// the rest of its body is read a piece at a time as the page reads it, and the page going away cancels it. Every call
+// goes the request's way (its route and port), so it reaches the same server.
+const REQUEST_PIECE = 262144;
+const EXCHANGE_CALL = { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS };
+
+// The start of a request's body: up to REQUEST_PIECE of it, and whether there's more (its reader, to go on with).
+async function requestStart(request) {
+	if (request.method === "GET" || request.method === "HEAD") {
+		return { "body": undefined, "rest": undefined };
+	}
+
+	if (request.body === null || request.body === undefined) {
+		return { "body": new Uint8Array(await request.arrayBuffer()), "rest": undefined };
+	}
+
+	const reader = request.body.getReader();
+	const pieces = [];
+	let bytes = 0;
+
+	for (;;) {
+		const { done, value } = await reader.read();
+
+		if (done) {
+			return { "body": joinBytes(pieces), "rest": undefined };
+		}
+
+		pieces.push(value);
+		bytes += value.byteLength;
+
+		if (bytes >= REQUEST_PIECE) {
+			return { "body": joinBytes(pieces), "rest": reader };
+		}
+	}
+}
+
+function joinBytes(pieces) {
+	const joined = new Uint8Array(pieces.reduce((total, piece) => total + piece.byteLength, 0));
+	let at = 0;
+
+	for (const piece of pieces) {
+		joined.set(piece, at);
+		at += piece.byteLength;
+	}
+
+	return joined;
+}
+
+// Send the rest of a request's body in writes: `first` (what requestStart read), then what's left of `reader`.
+async function sendBody(call, first, reader) {
+	try {
+		let ok = (await call({ "write": first })).ok;
+
+		while (ok) {
+			const { done, value } = await reader.read();
+
+			ok = (await call(done ? { "end": true } : { "write": value })).ok && !done;
+		}
+	} catch (error) {
+		swLog.warn("request body not sent", { "error": String(error) });
+	}
+
+	void reader.cancel().catch(() => undefined);
+}
+
+// Answer `request` from the server on `port` in `tab`, as `path` on it.
+async function handleVirtualRequest(request, tab, port, path) {
+	const span = swLog.span("editor.coi-serviceworker.virtual", { "tab": tab, "port": port, "method": request.method, "path": path });
+	const route = `virtual.request.${tab}`;
+	const stream = Math.random().toString(36).slice(2) + Date.now().toString(36);
+	const call = (step) => rpc.request(route, { "port": port, "stream": stream, ...step }, EXCHANGE_CALL);
+
+	try {
+		const headers = {};
+
+		request.headers.forEach((value, key) => {
+			headers[key] = value;
+		});
+
+		const { body, rest } = await requestStart(request);
+		const answering = rpc.request(route, { "port": port, "method": request.method, "url": path, "headers": headers, "body": rest === undefined ? body : undefined, "more": rest === undefined ? undefined : true, "stream": stream }, EXCHANGE_CALL);
+
+		if (rest !== undefined) {
+			void sendBody(call, body, rest);
+		}
+
+		const response = await answering;
+
+		span.end({ "status": response.status, "streamed": response.stream !== undefined });
+
+		const nullBody = NULL_BODY.has(response.status) || request.method === "HEAD";
+
+		if (nullBody && response.stream !== undefined) {
+			void call({ "cancel": true }).catch(() => undefined);
+		}
+
+		const content = response.stream === undefined ? response.body : streamedBody(call, response.body);
+
+		return new Response(nullBody ? null : content, { "status": response.status, "statusText": response.statusText, "headers": virtualHeaders(response.headers) });
+	} catch (error) {
+		span.error("dev server unreachable", { "error": String(error) });
+		span.end();
+
+		return new Response(`dev server unreachable: ${error.message}`, { "status": 502, "headers": { "content-type": "text/plain" } });
+	}
+}
+
+// The rest of a streamed answer's body, read from the server as the page reads it (a read with nothing yet answers empty
+// after a while, and is asked again), starting with `first`.
+function streamedBody(call, first) {
+	return new ReadableStream({
+		"start": (controller) => {
+			if (first.byteLength > 0) {
+				controller.enqueue(first);
+			}
+		},
+		"pull": async (controller) => {
+			const piece = await call({ "read": true });
+
+			// (not a piece: the server's gone — its run stopped)
+			if (piece === null || typeof piece !== "object" || !(piece.body instanceof Uint8Array)) {
+				controller.close();
+
+				return;
+			}
+
+			if (piece.body.byteLength > 0) {
+				controller.enqueue(piece.body);
+			}
+
+			if (piece.done) {
+				controller.close();
+			}
+		},
+		"cancel": () => {
+			void call({ "cancel": true }).catch(() => undefined);
+		}
+	}, { "highWaterMark": 0 });
+}
+
 globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
 	const pathname = requestUrl.pathname;
+
+	// A dev server's address: <base>/__virtual__/<tab>/<port>/…
+	const virtual = parseVirtual(pathname);
+
+	if (virtual !== undefined) {
+		event.respondWith(handleVirtualRequest(request, virtual.tab, virtual.port, (virtual.rest || "/") + requestUrl.search));
+
+		return;
+	}
 
 	// Module resolver: <base>/workspace/… (store + node_modules CDN fallback). Strip any base prefix so the
 	// logical /workspace/… path keys the store and reconstructs the CDN URL.
@@ -214,6 +382,20 @@ globalThis.addEventListener("fetch", (event) => {
 		event.respondWith(serveWorkspace(request, requestUrl, pathname.slice(wsIndex)));
 
 		return;
+	}
+
+	// A same-origin request with no address, but a referer from a page of a server: the app used an absolute path or
+	// navigated. Keep it inside its server. Origin-guarded, so a cross-origin import (react from the CDN) is never hijacked.
+	if (requestUrl.origin === globalThis.location.origin && request.referrer) {
+		const from = parseVirtual(new URL(request.referrer).pathname);
+
+		if (from !== undefined) {
+			const target = pathname + requestUrl.search;
+
+			event.respondWith(request.mode === "navigate" ? Response.redirect(requestUrl.origin + from.prefix + target, 302) : handleVirtualRequest(request, from.tab, from.port, target));
+
+			return;
+		}
 	}
 
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
