@@ -20,6 +20,8 @@ export type Step =
 	| { "kind": "text" | "label" | "placeholder" | "altText" | "title"; "text": TextMatch; "exact"?: boolean }
 	| { "kind": "testId"; "id": TextMatch }
 	| { "kind": "nth"; "index": number }
+	// (from the iframes found, into their documents: a frame locator)
+	| { "kind": "frame" }
 	| { "kind": "filter"; "hasText"?: TextMatch; "hasNotText"?: TextMatch; "has"?: Step[]; "hasNot"?: Step[]; "visible"?: boolean };
 
 /** What to do with what a locator finds. */
@@ -442,7 +444,8 @@ function within(scope: Scope): Element[] {
 /** What a text step finds: the elements whose text matches and none of whose child elements' does — the smallest that
  *  holds the text, as Playwright's getByText. */
 function byText(scope: Scope, text: TextMatch, exact: boolean | undefined): Element[] {
-	return within(scope).filter((element) => !NOT_TEXT.has(element.tagName) && element.closest("head") === null && matches(elementText(element), text, exact) && ![...element.children].some((child) => matches(elementText(child), text, exact)));
+	// (the scope itself too, as Playwright's: `locator("h2").getByText(…)` can find the h2)
+	return [...scope.nodeType === 1 ? [scope as Element] : [], ...within(scope)].filter((element) => !NOT_TEXT.has(element.tagName) && element.closest("head") === null && matches(elementText(element), text, exact) && ![...element.children].some((child) => matches(elementText(child), text, exact)));
 }
 
 function stepFrom(scopes: Scope[], step: Step): Element[] {
@@ -473,10 +476,15 @@ function stepFrom(scopes: Scope[], step: Step): Element[] {
 
 /** The elements `steps` find from `scopes`, in document order: each step within what the one before found. */
 function resolveFrom(scopes: Scope[], steps: Step[]): Element[] {
+	let from = scopes;
 	let current: Element[] | undefined;
 
 	for (const step of steps) {
-		if (step.kind === "nth") {
+		if (step.kind === "frame") {
+			// (what isn't an iframe, or isn't loaded, or is another origin's has no document here: nothing to find in it, yet)
+			from = (current ?? []).flatMap((element) => (element as HTMLIFrameElement).contentDocument ?? []);
+			current = undefined;
+		} else if (step.kind === "nth") {
 			const list = current ?? [];
 			const at = step.index < 0 ? list.length + step.index : step.index;
 
@@ -488,7 +496,7 @@ function resolveFrom(scopes: Scope[], steps: Step[]): Element[] {
 				&& (step.hasNot === undefined || resolveFrom([element], step.hasNot).length === 0)
 				&& (step.visible === undefined || isVisible(element) === step.visible));
 		} else {
-			current = stepFrom(current ?? scopes, step);
+			current = stepFrom(current ?? from, step);
 		}
 	}
 

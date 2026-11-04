@@ -362,9 +362,12 @@ How it's kept:
      - *Every test in the editor: what stands in the way*, tried 2026-11-04: a Playwright test in the debugger navigated a
        preview window to the editor itself, and the editor booted in it, cross-origin isolated, extension host and all.
        In the way: (1) *done 2026-11-04* it shared the outer editor's state: `?instance=<name>` keeps one apart (*Editor
-       instances*), and a frame with the name is the top of itself, with its shell. (2) **`page.goto` to it never
-       answers**: `playwright.run` timed out at 60 s, though the page had navigated. (3) **Locators stop at a frame, and
-       there's no `frameLocator`**: the workbench is in a nested iframe, so the test can't reach it. Then the suites' own needs: they ask over the hub
+       instances*), and a frame with the name is the top of itself, with its shell. (2) *done* `page.goto` waits for the
+       frame's document to change, not a `load` on the window navigation replaces. (3) *done* `frameLocator`, as deep as
+       frames nest, held to real Playwright. A Playwright test in the debugger now drives a whole editor in a preview window,
+       apart from the real one: through its frames, clicking a file in its Explorer and seeing its tab open
+       (playwright-in-editor.mjs). Still in the way: **open shadow roots**, which Playwright goes into and ours doesn't,
+       so a Web Awesome control's insides aren't found (the shell's Reset, by title or role). Then the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
