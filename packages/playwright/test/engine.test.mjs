@@ -234,3 +234,37 @@ test("expect: waits until it holds, and .not", async () => {
 	expect({ "a": [1] }).toEqual({ "a": [1] });
 	expect("abc").not.toContain("z");
 });
+
+test("into frames, as Playwright goes: what's in one, and in one in it, and not what's outside", async () => {
+	const inner = "<!doctype html><button>Deep</button>";
+	const middle = `<!doctype html><h2>In a frame</h2><button>Framed</button><iframe id=deeper srcdoc='${inner}'></iframe>`;
+
+	await page.setContent(`<!doctype html><button>Top</button><iframe id=one srcdoc="${middle}"></iframe><iframe id=two srcdoc="<button>Other</button>"></iframe>`);
+	await page.waitForFunction(() => document.querySelector("#one").contentDocument.querySelector("#deeper")?.contentDocument?.querySelector("button") !== null && document.querySelector("#one").contentDocument.querySelector("#deeper")?.contentDocument?.querySelector("button") !== undefined && document.querySelector("#two").contentDocument.querySelector("button") !== null);
+	await page.addScriptTag({ "content": ENGINE });
+
+	const both = async (call) => [await call(page).allTextContents(), await call(ours).allTextContents()];
+	const same = async (call, expected) => {
+		const [theirs, mine] = await both(call);
+
+		assert.deepEqual(theirs, expected, "Playwright's own");
+		assert.deepEqual(mine, theirs);
+	};
+
+	await same((p) => p.getByRole("button"), ["Top"]);
+	await same((p) => p.frameLocator("#one").getByRole("button"), ["Framed"]);
+	await same((p) => p.frameLocator("#one").getByRole("heading"), ["In a frame"]);
+	await same((p) => p.frameLocator("#two").locator("button"), ["Other"]);
+	await same((p) => p.frameLocator("#one").frameLocator("#deeper").getByText("Deep"), ["Deep"]);
+	await same((p) => p.frameLocator("iframe").first().getByRole("button"), ["Framed"]);
+	await same((p) => p.frameLocator("iframe").last().getByRole("button"), ["Other"]);
+	await same((p) => p.frameLocator("iframe").nth(1).getByRole("button"), ["Other"]);
+	await same((p) => p.frameLocator("#nothing").getByRole("button"), []);
+	await same((p) => p.frameLocator("#one").locator("h2").getByText("In a frame"), ["In a frame"]);
+	await same((p) => p.locator("button").getByText("Top"), ["Top"]);
+
+	// An action inside one, and waiting on it.
+	await ours.frameLocator("#one").getByRole("button").click();
+	await expect(ours.frameLocator("#one").frameLocator("#deeper").getByRole("button")).toHaveText("Deep");
+	await assert.rejects(expect(ours.frameLocator("#nothing").getByRole("button")).toBeVisible({ "timeout": 200 }), /toBeVisible\(\) failed/u);
+});

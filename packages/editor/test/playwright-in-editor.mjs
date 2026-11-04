@@ -67,6 +67,43 @@ test("a test file in the debugger drives the preview you have open", async () =>
 	assert.equal(await session.page.evaluate(() => document.querySelector("app-window[data-preview-port] iframe").contentDocument.querySelector("button").textContent), "clicked 1");
 });
 
+test("a test in the debugger drives a whole editor, in a preview window, apart from the real one", async () => {
+	await session.request("files.write", { "path": "drive.spec.mjs", "content": [
+		"import { expect, test } from \"@playwright/test\";",
+		"",
+		"test(\"an editor, driven\", async ({ page }) => {",
+		`\tawait page.goto(${JSON.stringify(new URL("?instance=driven", session.page.url()).href)});`,
+		"",
+		"\t// Its shell, in the window; its app in that; the workbench in that.",
+		"\tconst workbench = page.frameLocator(\"iframe[title='editor']\").frameLocator(\"iframe\");",
+		"\tconst file = workbench.getByRole(\"treeitem\", { \"name\": \"index.html\" });",
+		"",
+		"\tawait expect(file).toBeVisible({ \"timeout\": 120000 });",
+		"",
+		"\t// The real editor's workspace isn't this one's.",
+		"\tawait expect(workbench.getByRole(\"treeitem\", { \"name\": \"pwapp\" })).toHaveCount(0);",
+		"",
+		"\t// Used as a person would.",
+		"\tawait file.click();",
+		"\tawait expect(workbench.getByRole(\"tab\", { \"name\": /index\\.html/u })).toBeVisible({ \"timeout\": 30000 });",
+		"});",
+		""
+	].join("\n") }, 30_000);
+
+	const { files: [file] } = await ran(["drive.spec.mjs"]);
+
+	assert.deepEqual(file.tests.map(({ id, outcome, error }) => [id, outcome, error]), [["drive.spec.mjs › an editor, driven", "pass", undefined]]);
+	assert.equal(file.exitCode, 0);
+
+	// And nothing of it reached the real editor.
+	assert.equal(await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		return api.workspace.fs.stat(api.Uri.file("/workspace/pwapp/index.html")).then(() => true, () => false);
+	}), true, "the real workspace, as it was");
+	assert.ok((await session.page.evaluate(async () => (await indexedDB.databases()).map(({ name }) => name))).includes("instance:driven:workspace-fs"));
+});
+
 test("with no window open, a test fails instead of hanging", async () => {
 	await session.terminal("ps", { "fresh": true });
 

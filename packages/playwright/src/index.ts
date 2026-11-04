@@ -6,4 +6,4 @@ export { run } from "./engine.ts";
 export { windowDriver } from "./driver.ts";
 export { expect } from "./expect.ts";
 export type { Driver } from "./locator.ts";
-export { Locator, Page, TimeoutError } from "./locator.ts";
+export { FrameLocator, Locator, Page, TimeoutError } from "./locator.ts";

@@ -81,6 +81,11 @@ abstract class Finder {
 		return this.further(filtered === undefined ? steps : [...steps, filtered], more);
 	}
 
+	/** Into an iframe's document, as Playwright's: what it finds is in that frame. */
+	public frameLocator(selector: string): FrameLocator {
+		return new FrameLocator(this.driver, this.page, [...this.steps, { "kind": "css", "selector": selector }], `${this.description}.frameLocator(${JSON.stringify(selector)})`);
+	}
+
 	public getByRole(role: string, options: RoleOptions = {}): Locator {
 		const { name, ...rest } = options;
 
@@ -171,6 +176,44 @@ export class Page extends Finder {
 		await new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
+	}
+}
+
+/** Playwright's FrameLocator: a way into an iframe, whose locators find what's in its document. An iframe not there yet, or
+ *  not loaded, finds nothing yet, so what's asked of them waits as any locator's does. */
+export class FrameLocator extends Finder {
+	protected readonly driver: Driver;
+	protected readonly page: Page;
+	/** The iframe's steps, before going into it. */
+	private readonly frame: Step[];
+	protected readonly description: string;
+
+	public constructor(driver: Driver, page: Page, frame: Step[], description: string) {
+		super();
+		this.driver = driver;
+		this.page = page;
+		this.frame = frame;
+		this.description = description;
+	}
+
+	protected get "steps"(): Step[] {
+		return [...this.frame, { "kind": "frame" }];
+	}
+
+	protected further(steps: Step[], more: string): Locator {
+		return new Locator(this.driver, this.page, [...this.steps, ...steps], `${this.description}.${more}`);
+	}
+
+	public first(): FrameLocator {
+		return this.nth(0);
+	}
+
+	public last(): FrameLocator {
+		return this.nth(-1);
+	}
+
+	public nth(index: number): FrameLocator {
+		return new FrameLocator(this.driver, this.page, [...this.frame, { "kind": "nth", "index": index }], `${this.description}.nth(${String(index)})`);
 	}
 }
 
