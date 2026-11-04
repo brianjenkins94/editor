@@ -483,7 +483,7 @@ at a time, each with a purpose.
 
 1. **Measured first**, while all the code is there: the zero-knowledge baseline, what BABLR parses, the comments sorted
    (below), and the whole test suite run one last time for each test's reach and outcome (*Tests*, below). The manifest
-   is the record of what there was (superseded, kept as that snapshot: *Silo, firmed up*).
+   was the record of what there was (in git at `full-editor`; its entries are in the ledger now).
 2. **The core, declared**: the least the editor needs to be worked in, since the rebuild is worked in it. Candidates,
    not decided: the shell and the workbench's boot, the workspace filesystem, git (clone, review, commit, push), the
    hub and observability, the agents' workspace tools, the ledger and `silo check`. Each is declared in the ledger, so
@@ -553,14 +553,14 @@ note (its "what" is the feature's ledger entry), and 6 of 9 headers cite a doc. 
 drifts; a doc's section title doesn't.
 
 Agents read notes where they'd have read the comments: `decisions_for` returns a file's or a name's notes beside the
-ledger, the manifest and the docs. `files_read` can show them inline, where the comment was. `files_edit` says when an
+ledger and the docs. `files_read` can show them inline, where the comment was. `files_edit` says when an
 edit leaves a note without its code. A file BABLR can't parse can't hold notes, so what of the scope it parses is
 measured first: all of it, 2026-11-03 (`full-editor`'s packages/editor, tests and demo aside: 317 of 317 files, 62,734
 lines, at about 16 ms a line; main's 192 of 192 — BABLR: Check Which Files Parse…, workbench/bablr.ts).
 
 **What's self-explanatory: the zero-knowledge pass.** Per feature, a fixed set of questions: what it's for, its ways
-in, what owns a given piece, why it's the way it is, what removing it takes. They're drawn from the manifest (what) and
-the ledger and docs (why), which are the answers. Agents answer them through the editor's tools in three conditions:
+in, what owns a given piece, why it's the way it is, what removing it takes. They're drawn from the ledger (what and why) and
+the docs, which are the answers. Agents answer them through the editor's tools in three conditions:
 - the code alone, comments stripped;
 - the code as it is;
 - the code, comments stripped, with notes through the tools.
@@ -614,11 +614,10 @@ ranges in a text that ran place nothing yet.
 **Silo, firmed up.** Silo's capabilities grew session by session (packages/silo/README.md, *The four jobs*, *What
 doesn't fit*). The rewrite settles each one: the job it serves, where it lives (lib `util/silo`, pure; the command
 line; the editor), and what supersedes what. Where it starts:
-- **The manifest is superseded** by tracking features and their tests and attributing code from them (CLAUDE.md,
-  *Features*). What reads it moves to the ledger's declared features and that attribution, or goes:
-  - `silo check`'s drift, `silo features --score`, and `removalOf`'s rewrite of it;
-  - History's `history.features`, which feeds the features map, `git_review`'s features per hunk, and focus;
-  - `history.decisions` and `history.reach`, which agents call as `decisions_for` and `code_reach`.
+- **The manifest is gone** (2026-11-03): its entries moved into the ledger, and what read it reads the ledger's declared
+  features (`silo check`'s drift, `silo features --score`, `removalOf`, `history.decisions`). `history.features` and
+  `history.reach`, and what they fed (the features map, `git_review`'s features per hunk, focus, `code_reach`), come back
+  on the ledger with their features.
 - **Code no feature owns is an error** (decided 2026-11-02; packages/silo/README.md, decision 22): owned by
   declaration, in the ledger, not inferred. Attribution from runs and tests checks a declaration (*Declared against
   observed*), it doesn't stand in for one. Runs and coverage are also how code shared between features is found:
@@ -670,8 +669,7 @@ score. No new silo subcommand.
   are vouched for, in the editor from the first commit.
 - **A declared feature's ledger entry holds what the manifest held, and the ledger becomes the source of truth**:
   `what`, `docs`, `paths`, `ways` and `tests` beside `status`, `why` and `since`. `silo check` errors on any drift
-  between it and the code, as it does on the manifest's now; the manifest goes when its entries have moved
-  (packages/silo/README.md, decision 21).
+  between it and the code; the manifest went once its entries had moved (packages/silo/README.md, decision 21).
 - **Ownership is checked by file** (decision 22): a feature's `paths`. Runs, tests and traces give continuous coverage —
   what each feature's code is seen doing — and show where a declaration and the code's use of it disagree.
 
@@ -710,7 +708,7 @@ tools*). What the code doesn't say:
   nothing: it's a delayed instance behind a proxy.
 - `decisions_for` (2026-10-30; History's ledger.ts `history.decisions`, asked through workbench/decisions.ts) is what's
   been decided about a file or a name before it's changed. It returns the ledger's entries that name it or whose paths
-  hold the file, the manifest's features owning it, and each docs line naming it, under its heading (NEXT.md's items
+  hold the file or whose ways in name it, and each docs line naming it, under its heading (NEXT.md's items
   and the design sections among them), so a reason is read rather than worked out again. A path is matched as itself
   and by its file name, a name as a word.
 - `runs_tests` and `runs_affected` (test-runs.ts) run test files in the debugger, one at a time as `node --test` runs

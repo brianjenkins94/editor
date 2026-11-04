@@ -231,8 +231,9 @@ How it's kept:
      file). Found on the way, CI's `workbench` shard red on 3 of 4 pushes while local runs passed: two tests read the shell
      before the reports they assert reached it (the theme's colours, the extensions' reports), fixed to wait for what they
      assert.
-   - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; the manifest's readers moved
-     to declared features and attribution, or removed; silo README's *What doesn't fit* answered; decision 21.
+   - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
+     fit* answered. The manifest is done (2026-11-03: its 66 features in the ledger, marked `moved from the manifest`, and
+     its readers on the ledger). Left of decision 22: `.silo/owned.json` holds only packages/editor; widen it.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.
@@ -267,8 +268,8 @@ How it's kept:
      - *Kept, a decision rather than a cut:* extensions by URL (`?extension=`, `extensions.json`) and the extension
        template (contrib/) — editor-contrib's site is the editor with its extension added, and contrib.yml syncs
        contrib/ there, so taking them out is a decision about editor-contrib.
-     - *What's still in the manifest:* tsval's site sums, the architecture reports and metrics, extensions by URL and
-       the extension template — they move to the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
+     - *What the reduction left:* tsval's site sums, the architecture reports and metrics, extensions by URL and
+       the extension template, declared in the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
        own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
      - *Docs:* done 2026-11-02 — ARCHITECTURE.md (1,277 lines to 688) and RUNNING.md (320 to 126) describe the core;
        RUNTIME-EVIDENCE.md says it's out, kept as the design its features come back to.
@@ -417,8 +418,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
   a weekly full run; CI reruns a vouched test after 7 days. Open: decision 15 (tests that lean on each other), 17–19
-  (the audit rate, whose vouches count, different runtimes), 20 (CI's entry point) and 21 (what the ledger holds for a
-  declared feature; the AI-written manifest is superseded, 2026-11-02).
+  (the audit rate, whose vouches count, different runtimes), and 20 (CI's entry point).
 - **The rewrite** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Decided 2026-11-02: in place, in this
   repository, worked in the editor; reduced to a minimal core, then features reintroduced one at a time with a
   purpose, no allowance for undeclared code; code no feature explicitly owns is an error (silo README, decision 22);
