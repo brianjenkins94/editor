@@ -2,11 +2,14 @@
  * The program's module system (packages/tsval/README.md, *Modules*): almostnode on the shared workspace, its built-ins
  * the capability stand-ins, and the editor's own modules a program imports as its code (node:test).
  */
+import type { Outcome } from "@brianjenkins94/playwright";
 import type { ModuleLoader } from "@brianjenkins94/tsval";
 import type { Control } from "../debug-protocol";
 import { REFS_DIR } from "@brianjenkins94/editor-api/git";
+import { expect as playwrightExpect, Page } from "@brianjenkins94/playwright";
 import { packageDisposition } from "@brianjenkins94/util/silo/policy";
 import nodeTestSource from "../node-test.js?raw";
+import playwrightTestSource from "../playwright-test.js?raw";
 import { tally } from "./gate";
 import { installPackage } from "./install";
 import { packageBuiltin, packageFetch, packageOf, packagesRan } from "./package-calls";
@@ -148,16 +151,41 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
  *  (its coverage, values and evidence aren't the program's). */
 const NODE_TEST = "/__editor__/node-test.js";
 
-/** The editor's modules a program imports as its own code, by the specifier it imports, and their sources. */
-const EDITOR_MODULES = new Map([["node:test", NODE_TEST]]);
+/** Where `@playwright/test` is served from (playwright-test.js), as NODE_TEST is: Playwright's test API over node:test. */
+const PLAYWRIGHT_TEST = "/__editor__/playwright-test.js";
 
-export const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource]]);
+/** The editor's modules a program imports as its own code, by the specifier it imports, and their sources. */
+const EDITOR_MODULES = new Map([["node:test", NODE_TEST], ["@playwright/test", PLAYWRIGHT_TEST]]);
+
+export const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource], [PLAYWRIGHT_TEST, playwrightTestSource]]);
+
+/** playwright-test.js's host half (`__editorPlaywright`): a page per test, driving the preview you have open through the
+ *  shell (editor-api's `playwright`), and expect: packages/playwright's, run here, not stepped. */
+export const editorPlaywright = {
+	"page": () => {
+		const call = async (name: "run" | "goto" | "url" | "title", ...args: unknown[]): Promise<unknown> => {
+			if (state.editorLink === undefined) {
+				throw new Error("no editor to drive a preview in");
+			}
+
+			return state.editorLink.playwright({ "call": name, "args": args });
+		};
+
+		return new Page({
+			"run": async (op) => call("run", op) as Promise<Outcome>,
+			"goto": async (url) => { await call("goto", url); },
+			"url": async () => call("url") as Promise<string>,
+			"title": async () => call("title") as Promise<string>
+		});
+	},
+	"expect": playwrightExpect
+};
 
 export function programModules(loaded: Runtime): ModuleLoader {
 	const vfs = loaded.getVFS();
 
 	return {
-		// (`node:test` is node-test.js, run as the program's own code: EDITOR_MODULES)
+		// (`node:test` is node-test.js, and `@playwright/test` playwright-test.js, run as the program's own code: EDITOR_MODULES)
 		"resolve": (specifier, fromDir) => (EDITOR_MODULES.has(specifier) ? { "kind": "program", "filename": EDITOR_MODULES.get(specifier) } : loaded.resolve(specifier, fromDir)),
 		"require": (specifier, fromDir) => loaded.require(specifier, fromDir, "program"),
 		"source": (filename) => EDITOR_SOURCES.get(filename) ?? vfs.readFileSync(filename, "utf8"),

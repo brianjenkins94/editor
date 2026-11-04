@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head><title>Fixture</title><style>.covered { position: relative; } .cover { position: absolute; inset: 0; background: white; }</style></head>
+<body>
+	<header><h1>Shop</h1><nav aria-label="Main"><a href="/home">Home</a> <a href="/cart" title="Your cart">Cart</a> <a>No href</a></nav></header>
+	<main>
+		<h2>Products</h2>
+		<h3 aria-level="4">Level four</h3>
+		<div role="heading" aria-level="2">Role heading</div>
+		<section aria-label="Featured"><p>Featured things</p></section>
+		<section><p>An unnamed section</p></section>
+
+		<button>Save</button>
+		<button aria-label="Close dialog">×</button>
+		<button><span>Save</span> draft</button>
+		<button disabled>Disabled save</button>
+		<input type="submit" value="Send">
+		<input type="button" value="Click me">
+		<input type="submit">
+		<div role="button" tabindex="0">Div button</div>
+		<span id="label-a">Labelled</span> <span id="label-b">by two</span>
+		<button aria-labelledby="label-a label-b">ignored text</button>
+		<button aria-pressed="true">Bold</button>
+		<button aria-expanded="false">Menu</button>
+		<button style="display: none">Hidden by display</button>
+		<button style="visibility: hidden">Hidden by visibility</button>
+		<div aria-hidden="true"><button>Hidden by aria</button></div>
+		<button hidden>Hidden attribute</button>
+
+		<form aria-label="Sign in" id="signin">
+			<label for="email">Email address</label> <input id="email" type="email" placeholder="you@example.com">
+			<label>Password <input type="password" name="password"></label>
+			<input aria-label="Search the shop" type="search">
+			<input placeholder="Only a placeholder">
+			<textarea aria-label="Notes"></textarea>
+			<label><input type="checkbox" checked> Remember me</label>
+			<label><input type="checkbox"> Subscribe</label>
+			<div role="checkbox" aria-checked="true" tabindex="0">Custom check</div>
+			<fieldset>
+				<legend>Plan</legend>
+				<label><input type="radio" name="plan" value="free" checked> Free</label>
+				<label><input type="radio" name="plan" value="pro"> Pro</label>
+			</fieldset>
+			<fieldset disabled><legend>Locked</legend><input aria-label="Locked field"></fieldset>
+			<select aria-label="Size"><option>Small</option><option selected>Medium</option><option>Large</option></select>
+			<select aria-label="Toppings" multiple><option>Cheese</option><option>Olives</option></select>
+			<input aria-label="Read only" readonly value="fixed">
+			<button type="submit">Sign in</button>
+		</form>
+
+		<p>Hello <span>world</span></p>
+		<p><span>Hello</span></p>
+		<div>  Spaced    out   text  </div>
+		<div>Case Sensitive</div>
+		<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="A red apple">
+		<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="">
+		<span title="Tooltip text">Hover me</span>
+		<div data-testid="product-card"><h4>Apples</h4><button>Add to cart</button></div>
+		<div data-testid="product-card"><h4>Pears</h4><button>Add to cart</button></div>
+		<div data-testid="product-card" style="display: none"><h4>Plums</h4><button>Add to cart</button></div>
+		<ul><li>One</li><li>Two</li><li>Three</li></ul>
+		<table><caption>Prices</caption><thead><tr><th>Item</th><th>Price</th></tr></thead><tbody><tr><th>Apple</th><td>1</td></tr></tbody></table>
+		<dialog open aria-label="Notice"><p>Dialog text</p></dialog>
+		<div class="covered"><button>Under the cover</button><div class="cover"></div></div>
+		<progress value="3" max="10" aria-label="Loading"></progress>
+		<hr>
+		<template id="late"><button>Late button</button></template>
+	</main>
+	<footer><p>Footer text</p></footer>
+</body>
+</html>

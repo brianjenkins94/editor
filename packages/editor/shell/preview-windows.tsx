@@ -7,10 +7,15 @@
  * Each server's hot updates (`preview.hmr.<port>`) are posted into every window of it, and every frame its app nests, where
  * the dev server's client in the page applies them. Closing a window closes just it, but closing a server's last one stops
  * the server (`preview.close`), which is how a preview is dismissed; a server stopped elsewhere closes its windows.
+ *
+ * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): on the
+ * window you have open, the one last used. A preview's frame is same-origin with the shell, so its DOM is right here.
  */
+import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ShellFeature } from "./feature";
 import { appWindow } from "@brianjenkins94/app-window";
+import { serve } from "@brianjenkins94/hub";
 import { AppWindow } from "lucide";
 import { render } from "preact";
 import { previewFrame } from "theme/styles/shell";
@@ -32,6 +37,13 @@ function framesUnder(root: Window): Window[] {
 
 function install(hub: Hub): void {
 	const servers = new Map<number, Server>();
+	/** The windows, the one last used last. */
+	const used: HTMLElement[] = [];
+
+	const useWindow = (element: HTMLElement): void => {
+		used.splice(used.indexOf(element) >>> 0, 1);
+		used.push(element);
+	};
 
 	const open = (port: number): void => {
 		const server = servers.get(port);
@@ -59,6 +71,7 @@ function install(hub: Hub): void {
 			"children": [frame],
 			"onClose": () => {
 				element.remove();
+				used.splice(used.indexOf(element) >>> 0, 1);
 				server.windows.delete(element);
 
 				if (server.windows.size === 0) {
@@ -73,6 +86,10 @@ function install(hub: Hub): void {
 		server.opened += 1;
 		server.windows.add(element);
 		document.body.append(element);
+		useWindow(element);
+		element.addEventListener("pointerdown", () => {
+			useWindow(element);
+		});
 	};
 
 	hub.subscribe("preview.ready", (data) => {
@@ -106,10 +123,29 @@ function install(hub: Hub): void {
 
 			for (const element of server.windows) {
 				element.remove();
+				used.splice(used.indexOf(element) >>> 0, 1);
 			}
 
 			servers.delete(port);
 		}
+	});
+
+	serve(hub, "playwright.run", async (args) => {
+		const { call, "args": given = [] } = args as PlaywrightCall;
+		const page = used.at(-1)?.querySelector("iframe")?.contentWindow;
+
+		if (page === null || page === undefined) {
+			if (call === "run") {
+				return { "done": false, "why": "no preview window is open" };
+			}
+
+			throw new Error("no preview window is open");
+		}
+
+		// (dynamically: only a test file that drives a page needs it)
+		const { windowDriver } = await import("@brianjenkins94/playwright");
+
+		return (windowDriver(page)[call] as (...rest: unknown[]) => Promise<unknown>)(...given);
 	});
 }
 
