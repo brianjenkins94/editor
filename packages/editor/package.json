@@ -20,6 +20,7 @@
     "@automerge/automerge": "latest",
     "@awesome.me/webawesome": "latest",
     "@brianjenkins94/almostnode": "file:../almostnode",
+    "@brianjenkins94/bablr": "file:../bablr",
     "@brianjenkins94/editor-api": "file:../editor-api",
     "@brianjenkins94/hub": "file:../hub",
     "@brianjenkins94/observability": "file:../observability",
@@ -52,6 +53,7 @@
     "zod": "latest"
   },
   "devDependencies": {
+    "@brianjenkins94/monaco-vscode-api": "file:../../components/monaco-vscode-api",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

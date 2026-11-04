@@ -358,6 +358,11 @@ How it's kept:
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
 packages/editor (`--all`, `--runs N`, `--json`).
 
+- **main's ruleset** (GitHub ruleset 26500207, 2026-11-03, in GitHub's settings, not this repository): pull requests to main
+  need `silo / silo check`. Repository admins can bypass, so direct pushes and the editor's own commit flow keep working,
+  and rely on `cd` not deploying after a red `ci`. Close that once the bench works through pull requests. A push from the
+  editor's commit flow hasn't been tried against it: if one's refused, look here first.
+
 - **silo as a reusable workflow** (`.github/workflows/silo.yml`, 2026-11-03): its default runs `packages/silo@latest.tgz`,
   and the tarball published now can't install (`file:../bablr`; fixed, not published, as deploys are off). A clean install
   of one built locally ran on this repository, on lib (its ledger declares nothing, so it passes) and failed a stray file
@@ -421,7 +426,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
 ## Decisions
 
 - **The capability prototype** (`src/`, `test/silo-*.ts`, the ledger's *Capability prototype*, parked 2026-11-03): nothing
-  imports it and nothing runs its two tests. Remove it, or say why it stays.
+  imports it and nothing runs its two tests. Since tsconfig's `paths` went, its imports don't resolve for TypeScript either
+  (the root declares no dependencies). Remove it, or say why it stays.
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,

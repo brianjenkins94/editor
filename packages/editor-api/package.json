@@ -30,6 +30,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@brianjenkins94/almostnode": "https://brianjenkins94.github.io/editor/packages/almostnode@latest.tgz",
     "@brianjenkins94/hub": "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz",
     "@brianjenkins94/observability": "https://brianjenkins94.github.io/editor/packages/observability@latest.tgz",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
