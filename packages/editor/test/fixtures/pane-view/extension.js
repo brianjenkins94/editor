@@ -1,4 +1,4 @@
-// A pane view from outside the editor (test/pane-views.mjs): a tab of its own ("Probe") with each kind of item, placed
+// A pane view from outside the editor (in-editor/pane-views.spec.mjs): a tab of its own ("Probe") with each kind of item, placed
 // by its lines (a span reference and a range in a text that ran come back with BABLR's annotations) — and items into the
 // Margin.
 const vscode = require("vscode");
