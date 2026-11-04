@@ -233,8 +233,9 @@ How it's kept:
      assert.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
      fit* answered. The manifest is done (2026-11-03: its 66 features in the ledger, marked `moved from the manifest`, and
-     its readers on the ledger), and every code file in the repository has one owner (decision 22). Left of those:
-     packages/admin/src/views.tsx holds four features' pages under one owner, to split as one is reached.
+     its readers on the ledger), and every code file in the repository has an owner (decision 22). One owner a file is
+     where that starts: once silo ingests coverage from runs and traces, reassess how to handle sharing from what they
+     show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case).
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.
