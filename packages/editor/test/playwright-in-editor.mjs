@@ -26,7 +26,7 @@ const pageCounts = "let count = 0;\nconst button = document.querySelector(\"butt
 async function ran(files) {
 	let answer = await session.request("tests.run", { "files": files }, 120_000);
 
-	for (let asked = 1; answer.counts === undefined && answer.ask === undefined && typeof answer.run === "string" && asked < 10; asked++) {
+	for (let asked = 1; answer.running !== undefined && asked < 10; asked++) {
 		answer = await session.request("tests.run", { "run": answer.run }, 120_000);
 	}
 
