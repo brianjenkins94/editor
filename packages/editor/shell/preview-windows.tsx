@@ -178,7 +178,8 @@ function install(hub: Hub): void {
 
 			claimed.delete(asking);
 
-			if (element !== undefined && openedForPage.delete(element) && given[0] !== true) {
+			// (nor is one closed while its counts are to be read, COVERAGE=1's: the harness closes it, having read them)
+			if (element !== undefined && openedForPage.delete(element) && given[0] !== true && !("__evidence" in globalThis)) {
 				element.remove();
 				used.splice(used.indexOf(element) >>> 0, 1);
 				servers.get(NO_SERVER)?.windows.delete(element);

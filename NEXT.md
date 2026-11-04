@@ -415,7 +415,13 @@ How it's kept:
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test
      here reaches, so selection can't be trusted yet: what it needs is reach for what's untested here, the UI specs' most. Same
-     reach isn't the same check: a drop wants a person's decision, and mutation testing could show it. Then rerun as you write,
+     reach isn't the same check: a drop wants a person's decision, and mutation testing could show it. With the specs and browser
+     suites too, by COVERAGE=1 (test/in-editor.mjs runs specs one at a time there; a stopgap, *What each test ran*): 426 tests of 80
+     files reach 48,196 of about 105,800 lines. 101 tests reach the same lines, 9 reach 90%, as most of it is an editor booting; by
+     file 50 of 80, 538 s of 699. Replayed over the last 80 commits by a rule of nothing for no code, all for a file nothing reaches,
+     else what its changed lines reach, all of it read at HEAD's line numbers: 27 ran nothing, 20 everything, 33 a median 14 files, 34% of the time.
+     Over-selects: a browser test's reach includes the session's own editor. Not checked: whether a selection would have caught
+     what CI did. The table's reach is the debugger's alone. Then rerun as you write,
      checking coverage and capability expansion (silo README; removed: *Live runs after an edit*, *Coverage in the gutter*,
      *capability engine*).
    - **Tests at once** (2026-11-04; the user: tests are to be written to run in parallel, and a prominent column says which

@@ -58,7 +58,8 @@ if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined)
 
 				const id = String(realmIds.get(realm));
 				const known = [...statementsOf.keys()].filter((key) => key.startsWith(`${id}\0`)).map((key) => key.slice(id.length + 1));
-				const modules = await realm.evaluate((told) => (globalThis.__evidence?.evidence() ?? []).map(({ file, version, statements }) => ({ "file": file, "version": version, "counts": statements.map(({ count }) => count), ...told.includes(`${file}\0${version}`) ? {} : { "statements": statements.map(({ start, end }) => [...start, ...end]) } })), known).catch(() => []);
+				// (not forever: a worker blocked on the shared workspace, or going away, answers nothing; it's read again next time)
+				const modules = await Promise.race([realm.evaluate((told) => (globalThis.__evidence?.evidence() ?? []).map(({ file, version, statements }) => ({ "file": file, "version": version, "counts": statements.map(({ count }) => count), ...told.includes(`${file}\0${version}`) ? {} : { "statements": statements.map(({ start, end }) => [...start, ...end]) } })), known).catch(() => []), new Promise((resolve) => { setTimeout(() => { resolve([]); }, 2000); })]).catch(() => []);
 
 				for (const { file, version, counts: each, statements } of modules) {
 					const key = `${id}\0${file}\0${version}`;

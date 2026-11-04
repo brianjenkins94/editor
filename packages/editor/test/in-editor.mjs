@@ -56,6 +56,9 @@ async function sayWhatHappened() {
 
 /** How many specs run at once: each has an editor of its own in a window of its own. */
 const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 3);
+/** COVERAGE=1 reads each test's counts around it (architecture-harness.mjs), so a spec is run in its test, one at a time, each
+ *  with the page to itself. */
+const COUNTING = process.env.COVERAGE === "1";
 let answers;
 
 /** Every spec's run, started once, `AT_ONCE` at a time: each test here awaits its own. */
@@ -87,7 +90,16 @@ function runs() {
 
 for (const spec of SPECS) {
 	test(spec, async () => {
-		const file = await runs().get(spec).promise;
+		// (the windows the spec before left, its counts read)
+		if (COUNTING) {
+			await session.page.evaluate(() => {
+				for (const element of document.querySelectorAll("app-window[data-preview-port]")) {
+					element.remove();
+				}
+			});
+		}
+
+		const file = COUNTING ? await ran(spec) : await runs().get(spec).promise;
 
 		if (file.tests.length === 0 || file.tests.some(({ outcome }) => outcome !== "pass")) {
 			await sayWhatHappened();

@@ -107,6 +107,15 @@ test("a test in the debugger drives a whole editor, in a preview window, apart f
 });
 
 test("with no window open, a test fails instead of hanging", async () => {
+	// (COVERAGE=1 leaves a test's window for its counts to be read: the one the test before left)
+	if (process.env.COVERAGE === "1") {
+		await session.page.evaluate(() => {
+			for (const element of document.querySelectorAll("app-window[data-preview-port]:not([label^='Preview :'])")) {
+				element.remove();
+			}
+		});
+	}
+
 	await session.terminal("ps", { "fresh": true });
 
 	const output = async () => (await session.request("terminal.state", { "lines": 60 }, 10_000)).map((each) => each.output).join("\n");
