@@ -45,7 +45,7 @@ without a profiler. Not `console.*`, and not a pair of `performance.now()`s.
 ## Features
 
 The feature ledger (`.silo/features.json`; packages/silo/README.md, *The feature ledger*) is what's been decided about
-features, and `silo check` (CI's lint) holds the code to it:
+features, and `silo check` (CI's `silo` job, `.github/workflows/silo.yml`) holds the code to it:
 
 - **Everything is attributed** — the rewrite's outcome is every code file owned by a feature, tests, scripts and vendored
   code included. A check covering less than that means the work isn't finished. One owner per file is where it starts,

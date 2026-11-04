@@ -772,6 +772,17 @@ Open: **off isn't stopped** (a flag off by default ships but doesn't run: its ow
 **restoring across a move** (a tombstone's paths mapped through the moves `history` detects); **what counts as one
 feature** (often "a path set people name", not a way in).
 
+### In another repository's CI
+
+`.github/workflows/silo.yml` is `silo check` as a reusable workflow, failing on drift and on code no feature owns:
+
+```json
+"silo": { "uses": "brianjenkins94/editor/.github/workflows/silo.yml@main" }
+```
+
+It installs silo's published tarball; a ledger declaring no features passes, so a repository can adopt it first and declare
+later. This repository calls it with its own source (`command`), so a change to silo is checked by itself.
+
 ### The feature manifest: every feature, named (2026-10-26)
 
 **Gone, 2026-11-03** (decision 21): its entries moved into the ledger (their area in the `why`), and `.silo/manifest.json`

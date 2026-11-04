@@ -1,0 +1,32 @@
+{
+  "name": "silo",
+  # Reusable: the feature ledger's check, for any repository (packages/silo/README.md, *The feature ledger*). It fails on
+  # drift from the ledger, and once the ledger declares a feature, on any code file no feature owns. A repository whose
+  # ledger declares none passes. Call it from a repo's own ci:
+  #   "silo": { "uses": "brianjenkins94/editor/.github/workflows/silo.yml@main" }
+  # By default it runs silo's published tarball; this repository runs its own source, so a change to silo is checked by
+  # itself.
+  "on": {
+    "workflow_call": {
+      "inputs": {
+        "command": { "type": "string", "required": false, "default": "npx --yes https://brianjenkins94.github.io/editor/packages/silo@latest.tgz check", "description": "How to run `silo check`." },
+        "workspace-packages": { "type": "string", "required": false, "default": "", "description": "Forwarded to lib's setup action: the package globs of an ephemeral pnpm workspace." }
+      }
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "check": {
+      "name": "silo check",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "${{ inputs.workspace-packages }}" } },
+        { "run": "${{ inputs.command }}" }
+      ],
+      "timeout-minutes": 15
+    }
+  }
+}

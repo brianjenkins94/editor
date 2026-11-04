@@ -30,11 +30,18 @@
         # workspace-packages makes CI an ephemeral pnpm workspace (editor uses npm locally, no committed
         # pnpm-workspace.yaml) so sibling packages link — a `"*"` dep on a sibling resolves locally, not 404.
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
-        { "run": "pnpm run --if-present ${{ matrix.script }}" },
-        # The feature ledger's drift (packages/silo/README.md, *The feature ledger*): an error since it's been quiet here.
-        { "if": "${{ matrix.script == 'lint' }}", "run": "pnpm --filter ./packages/silo run silo check" }
+        { "run": "pnpm run --if-present ${{ matrix.script }}" }
       ],
       "timeout-minutes": 15
+    },
+    # The feature ledger's drift and code no feature owns (packages/silo/README.md, *The feature ledger*): its own job, so
+    # lint failing first can't hide it. Reusable, from silo's own source here.
+    "silo": {
+      "uses": "./.github/workflows/silo.yml",
+      "with": {
+        "command": "pnpm --filter ./packages/silo run silo check",
+        "workspace-packages": "packages/*,components/*,contrib"
+      }
     }
   }
 }

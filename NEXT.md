@@ -358,6 +358,11 @@ How it's kept:
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
 packages/editor (`--all`, `--runs N`, `--json`).
 
+- **silo as a reusable workflow** (`.github/workflows/silo.yml`, 2026-11-03): its default runs `packages/silo@latest.tgz`,
+  and the tarball published now can't install (`file:../bablr`; fixed, not published, as deploys are off). A clean install
+  of one built locally ran on this repository, on lib (its ledger declares nothing, so it passes) and failed a stray file
+  in a repository declaring a feature. lib adopts it once deploys are on: a `silo` job in its ci, and its own ledger.
+
 - **When deploys are on again** (`EDITOR_DEPLOYS` is `off`, so no tarball has published since 2026-11-03): the first
   publish of `@brianjenkins94/app-window` is the first bundled one (util-publish bundles a package that names a
   `customElements` manifest, everything inlined but its peers). Checked locally against lib's script and
