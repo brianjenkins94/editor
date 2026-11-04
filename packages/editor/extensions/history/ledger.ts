@@ -5,16 +5,14 @@
  *   the entry it's about (a dead end the ledger doesn't name, at its top), with both ways out — and a code file no
  *   feature owns, or two do, on that file (decision 22: the folders `.silo/owned.json` names).
  * - **What's been decided about a file or a name** (`history.decisions`, core's `decisions.for`, agents' `decisions_for`):
- *   the ledger's entries naming it (or whose paths hold the file), the manifest's features owning it, and each line of
- *   the docs naming it, under its heading — NEXT.md's items, the design sections — so a reason isn't re-derived.
+ *   the ledger's entries naming it (or whose paths hold the file, or ways in name it), and each line of the docs naming it, under its heading — NEXT.md's items, the design sections — so a reason isn't re-derived.
  * Its ways in are History's reading (the TypeScript server plugin's, edits included); the docs and code it searches are
  * the workspace's files, read once and kept as they change.
  */
 import type { Feature } from "@brianjenkins94/util/silo/features";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
-import { ledgerPath, manifestPath, ownedPath } from "@brianjenkins94/util/silo/layout";
+import { ledgerPath, ownedPath } from "@brianjenkins94/util/silo/layout";
 import { drift, parseLedger, parseOwned } from "@brianjenkins94/util/silo/ledger";
-import { featuresOfManifest, parseManifest } from "@brianjenkins94/util/silo/manifest";
 import * as vscode from "vscode";
 
 /** The files drift reads: docs, and code. */
@@ -109,9 +107,7 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri): 
 			await load();
 
 			const ledger = parseLedger(await ledgerNow());
-			const entries = Object.entries(ledger).filter(([name, entry]) => said(name) || said(entry.why) || said(entry.key) || holds(entry.paths)).map(([name, entry]) => ({ "name": name, ...entry }));
-			const manifest = parseManifest(await textOf(vscode.Uri.joinPath(root, manifestPath())) ?? "");
-			const features = manifest === undefined ? [] : featuresOfManifest(manifest).filter(([, , feature]) => holds(feature.paths) || (feature.ways ?? []).some((key) => said(key))).map(([area, name, feature]) => ({ "feature": `${area} / ${name}`, "what": feature.what, ...feature.docs === undefined ? {} : { "docs": feature.docs } }));
+			const entries = Object.entries(ledger).filter(([name, entry]) => said(name) || said(entry.why) || said(entry.key) || holds(entry.paths) || (entry.ways ?? []).some((key) => said(key))).map(([name, entry]) => ({ "name": name, ...entry }));
 			const docs: { "doc": string; "line": number; "heading": string; "text": string }[] = [];
 
 			for (const [file, text] of [...texts].filter(([path]) => path.endsWith(".md")).sort(([left], [right]) => left.localeCompare(right))) {
@@ -126,7 +122,7 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri): 
 				}
 			}
 
-			return { "target": wanted, "ledger": entries, "features": features, "docs": docs.slice(0, DOC_LINES), "counts": { "docs": docs.length } };
+			return { "target": wanted, "ledger": entries, "docs": docs.slice(0, DOC_LINES), "counts": { "docs": docs.length } };
 		})
 	);
 

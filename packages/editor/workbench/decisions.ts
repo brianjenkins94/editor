@@ -1,6 +1,6 @@
 /**
  * What's been decided about a file or a name: `decisions.for` { target } — History's `history.decisions`, the ledger's
- * entries, the manifest's features and the docs' lines naming it. Its reader: agents' `decisions_for`.
+ * entries and the docs' lines naming it. Its reader: agents' `decisions_for`.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";

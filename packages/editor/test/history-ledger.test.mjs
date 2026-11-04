@@ -17,11 +17,10 @@ const LEDGER = {
 	"Notes on code": { "status": "removed", "why": "out until reintroduced", "since": "2026-11-02", "paths": ["src/notes.ts"] }
 };
 
-/** A workspace: the ledger, an empty manifest, a doc and the code it's about — and the ledger view on it. */
+/** A workspace: the ledger, a doc and the code it's about — and the ledger view on it. */
 function workspace(docs) {
 	fake.reset();
 	fake.files.set(".silo/features.json", JSON.stringify(LEDGER, null, "\t"));
-	fake.files.set(".silo/manifest.json", "{}");
 	fake.files.set("NEXT.md", docs);
 	fake.files.set("src/load.ts", "export const load = 1;\n");
 

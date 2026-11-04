@@ -41,6 +41,54 @@
       "packages/editor/test/git-views.mjs"
     ]
   },
+  "Admin: architecture": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Admin app: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Shows the API as it describes itself: its routes, data stores and tables, the GitHub calls it passes through, who calls it, and what it calls.",
+    "docs": "packages/api/README.md, *The architecture page*",
+    "paths": [
+      "packages/admin/src/architecture.tsx",
+      "packages/api/src/architecture.ts"
+    ]
+  },
+  "Admin: overview and users": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Admin app: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Shows an overview page and the list of accounts, and for each user their identities, sessions and audit rows.",
+    "docs": "packages/api/README.md, *The UI*",
+    "paths": [
+      "packages/admin/src/views.tsx"
+    ]
+  },
+  "Admin: sign-in and roles": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Admin app: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Gives the admin app its own sign-in, separate from the editor's, and shows each person only the pages their roles allow.",
+    "docs": "packages/api/README.md, *Roles and permissions*",
+    "paths": [
+      "packages/admin/src/logins.ts",
+      "packages/admin/src/main.tsx",
+      "packages/admin/src/session.ts",
+      "packages/api/src/admin.ts",
+      "packages/api/src/rbac.ts"
+    ]
+  },
+  "Admin: sign-ins and their timelines": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Admin app: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lists live sign-ins and lets an admin revoke one or open its timeline: the requests, editor events, audit rows and errors in order.",
+    "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
+    "paths": [
+      "packages/admin/src/timeline.tsx",
+      "packages/admin/src/views.tsx",
+      "packages/api/src/session-events.ts",
+      "packages/api/src/timeline.ts"
+    ]
+  },
   "Agent connection": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -238,6 +286,33 @@
       "packages/editor/test/workbench.mjs"
     ]
   },
+  "Architecture suites and performance budgets": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Repository: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Browser suites tour the real editor (runs, previews, capabilities, sessions), record what each test reached for CI's evidence, and hold boot time, hover latency, a large repo's load and memory to budgets.",
+    "paths": [
+      ".github/workflows/architecture.yml",
+      "packages/editor/test/performance-budgets.json",
+      "packages/editor/test/performance.mjs"
+    ]
+  },
+  "Brand theme": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Sets up Web Awesome with its design tokens adjusted for the brand, following the system's light or dark mode, with or without Web Awesome's native styles, and kept within a size budget.",
+    "docs": "packages/theme/README.md, *Usage*",
+    "paths": [
+      "packages/theme/budget.json",
+      "packages/theme/scripts/web-awesome.mjs",
+      "packages/theme/src/chrome.js",
+      "packages/theme/src/index.js",
+      "packages/theme/src/tokens.ts",
+      "packages/theme/src/web-awesome.ts",
+      "packages/theme/test/budget.mjs"
+    ]
+  },
   "Breakpoints in a page's code": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -339,6 +414,44 @@
     ],
     "tests": [
       "packages/editor/test/commit.test.mjs"
+    ]
+  },
+  "Composable message hubs": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Hub: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "A message bus for each window, frame or worker, linked into a tree with permissions on each link, so a message crosses a boundary only when something on the other side wants it; it comes with a simulated network for deterministic tests.",
+    "docs": "packages/hub/README.md, *What it promises*",
+    "paths": [
+      "packages/hub/src/index.ts",
+      "packages/hub/src/network.ts"
+    ]
+  },
+  "Conformance suites": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area tsval: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Tests tsval against test262 and TypeScript's own test cases, with scripts to fetch, sample and report on them.",
+    "docs": "packages/tsval/README.md, *Conformance: test262*",
+    "paths": [
+      "packages/tsval/scripts",
+      "packages/tsval/test/differential"
+    ]
+  },
+  "Connected tabs and hub tree health": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Finds the editor tabs and preview apps connected right now (flagging ones on an outdated protocol) so tools can target one, and gives a health snapshot of the hub tree.",
+    "ways": [
+      "agent tool|tabs_list",
+      "agent tool|tree_state",
+      "hub subscription|TAB_DISCOVER",
+      "hub subscription|TAB_HERE"
+    ],
+    "paths": [
+      "packages/debug-mcp/src/forward.ts",
+      "packages/observability/src/tabs.ts"
     ]
   },
   "Coverage in the gutter": {
@@ -443,6 +556,74 @@
       "packages/editor/test/performance.mjs"
     ]
   },
+  "Editor API: annotations": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Libraries: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets an extension attach things to a range of code so they stay with that code as the file changes, and add a tab beside every editor drawn from its own data.",
+    "paths": [
+      "packages/editor-api/src/anchors.ts",
+      "packages/editor-api/src/annotations.ts"
+    ]
+  },
+  "Editor API: capability policy and gate": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Libraries: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets an extension read the capability policy and a run's effects, get the gate's verdict, run untrusted code in a locked-down realm, and read or edit rules.",
+    "paths": [
+      "packages/editor-api/src/effects.ts",
+      "packages/editor-api/src/gate.ts",
+      "packages/editor-api/src/gated-eval.ts",
+      "packages/editor-api/src/policy.ts",
+      "packages/editor-api/src/rules.ts"
+    ]
+  },
+  "Editor API: run contract for debuggers": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Libraries: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "What a debugger extension and its worker send and answer during a run: custom debug events (values, coverage, effects, ended, ask and others), requests (decide, stdin, getCoverage), a live-values recorder, recorded values for replay, the workspace's files as almostnode's VirtualFS, and the editor's network probes.",
+    "ways": [
+      "hub request|`virtual.debug.${listening}`"
+    ],
+    "paths": [
+      "packages/editor-api/src/index.ts",
+      "packages/editor-api/src/probes.ts",
+      "packages/editor-api/src/recorded.ts",
+      "packages/editor-api/src/runtime-vfs.ts",
+      "packages/editor-api/src/values.ts"
+    ]
+  },
+  "Editor API: what the editor keeps": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Libraries: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets an extension read the runtime evidence kept for a file, CPU profiles, whether something is a service or a task, how a worker failed, and the editor's git status with BABLR's verdict on each change.",
+    "paths": [
+      "packages/editor-api/src/cpuprofile.ts",
+      "packages/editor-api/src/evidence.ts",
+      "packages/editor-api/src/failures.ts",
+      "packages/editor-api/src/git.ts",
+      "packages/editor-api/src/lifecycle.ts"
+    ]
+  },
+  "Email, inbox and the Mail page": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Sends the API's email, receives mail for its own addresses, runs a full email sign-in smoke test, sends alerts to the owner, and shows all of this on the admin app's Mail page.",
+    "docs": "packages/api/README.md, *The Mail page*",
+    "paths": [
+      "packages/admin/src/mail.tsx",
+      "packages/api/src/inbox.ts",
+      "packages/api/src/mail-report.ts",
+      "packages/api/src/mail.ts",
+      "packages/api/src/owner-alert.html",
+      "packages/api/src/owner-alert.txt",
+      "packages/api/src/smoke.ts"
+    ]
+  },
   "Error reports from the editor": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -458,6 +639,19 @@
     ],
     "in": "3f3d8152",
     "restore": "from the full-editor tag: the shell's errorReports feature (error-notice.tsx), session.ts's postEvents and reportError, and the session.event publishes in main.tsx, repo-load.tsx, runs.ts and workbench-entry.tsx"
+  },
+  "Errors with quotable ids": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Every uncaught error, the API's and the editor's alike, gets an id the person is shown to quote; errors are grouped, and the admin app shows each occurrence with a source-mapped stack and, for a signed-in session, what happened just before.",
+    "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
+    "paths": [
+      "packages/admin/src/errors.tsx",
+      "packages/api/migrations/0016_errors.sql",
+      "packages/api/migrations/0017_editor_errors.sql",
+      "packages/api/src/errors.ts"
+    ]
   },
   "Event Sheet": {
     "status": "removed",
@@ -487,6 +681,16 @@
     ],
     "in": "e16b2b75",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Explore event-loop schedules": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area tsval: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Runs a program under every distinct event-loop ordering to find all its possible outcomes and races, each with a schedule that replays it.",
+    "paths": [
+      "packages/tsval/src/event-loop.ts",
+      "packages/tsval/src/explore.ts"
+    ]
   },
   "Explore orderings": {
     "status": "removed",
@@ -618,6 +822,45 @@
       "packages/editor/workbench/terminal/commands/git/git.test.mjs"
     ]
   },
+  "GitHub API proxy": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Passes the editor's GitHub API calls, a clone's git reads, a push, and CI's reads (a commit's runs, a run's jobs, a job's log) through to GitHub with the user's GitHub token kept on the server, and refuses anything else.",
+    "docs": "packages/api/README.md, *The proxy*",
+    "paths": [
+      "packages/api/src/proxy.ts"
+    ]
+  },
+  "Host seams, modules and types": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area tsval: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets a host inspect every value and call that crosses in from the host, watch statements and coverage, hook async calls, resolve imports (almostnode does this in the editor), and optionally add TypeScript's type checker.",
+    "docs": "packages/tsval/README.md, *Host seams*",
+    "paths": [
+      "packages/tsval/src/errors.ts",
+      "packages/tsval/src/modules.ts",
+      "packages/tsval/src/typed.ts",
+      "packages/tsval/src/values.ts"
+    ]
+  },
+  "Hosted sign-in and DPoP tokens for client apps": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Gives every client app one locked-down sign-in page on the API (started by a pushed authorization request), so no app's own page ever sees a password; the app then gets short-lived DPoP-bound access tokens and rotating refresh tokens, plus OAuth metadata and a JWKS.",
+    "docs": "packages/api/README.md, *Tokens and the flow*",
+    "paths": [
+      "packages/api/public/sign-in.css",
+      "packages/api/public/sign-in.html",
+      "packages/api/public/sign-in.js",
+      "packages/api/src/attempt.ts",
+      "packages/api/src/clients.ts",
+      "packages/api/src/grant.ts",
+      "packages/api/src/tokens.ts"
+    ]
+  },
   "How a commit did in CI": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -636,6 +879,51 @@
     "in": "e16b2b75",
     "restore": "git checkout full-editor -- packages/editor/workbench/ci-status.ts"
   },
+  "Hub links over WebRTC, and tab lobbies": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Hub: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Links hubs in two pages over a WebRTC data channel, and groups a browser's open tabs into a lobby with one tab chosen as host.",
+    "docs": "packages/hub/README.md, *Beside the hub*",
+    "paths": [
+      "packages/hub/src/rtc.ts"
+    ]
+  },
+  "Hub request/reply": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Hub: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets one context serve a named request and another context call it across the hub tree, with timeouts and an error when nobody answers.",
+    "ways": [
+      "hub subscription|RPC_CALL + \".\" + name",
+      "hub subscription|RPC_REPLY + \".\" + id"
+    ],
+    "paths": [
+      "packages/hub/src/index.ts"
+    ]
+  },
+  "In-browser Node runtime (almostnode)": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Libraries: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Runs bundled Node programs, such as language servers, on the browser's main thread, with Node's built-in modules, an in-memory file system, and HTTP servers that a service worker routes requests to.",
+    "docs": "packages/almostnode/README.md, *Node's built-ins: unenv, Node's own code, and ours where we must differ*",
+    "paths": [
+      "packages/almostnode/builtins.ts",
+      "packages/almostnode/config",
+      "packages/almostnode/create-runtime.ts",
+      "packages/almostnode/dev-server.ts",
+      "packages/almostnode/index.ts",
+      "packages/almostnode/runtime-interface.ts",
+      "packages/almostnode/runtime.ts",
+      "packages/almostnode/server-bridge.ts",
+      "packages/almostnode/shims",
+      "packages/almostnode/types",
+      "packages/almostnode/unenv-resolve.ts",
+      "packages/almostnode/utils",
+      "packages/almostnode/virtual-fs.ts"
+    ]
+  },
   "In-browser dev server": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -652,6 +940,51 @@
     ],
     "in": "517144b7",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Kill switch and switches": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets the owner pause the whole API (maintenance mode) or smaller parts of it from the admin app, and the health and status endpoints report it.",
+    "docs": "packages/api/README.md, *The kill switch (O1) and narrower switches (O8)*",
+    "paths": [
+      "packages/admin/src/maintenance.tsx",
+      "packages/api/migrations/0014_maintenance.sql",
+      "packages/api/migrations/0018_switches.sql",
+      "packages/api/src/maintenance.ts"
+    ]
+  },
+  "Link sign-in methods and merge accounts": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets a person add a GitHub account or another email address to their account, and merge in a separate account that already had it.",
+    "docs": "packages/api/README.md, *Linking accounts, and roles*",
+    "paths": [
+      "packages/api/src/identities.ts",
+      "packages/api/src/link.ts"
+    ]
+  },
+  "Live architecture and payload capture": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Reports every context (hubs, workers, extension hosts, webviews, network endpoints) and the traffic between them, with optional capture of message payloads, for an agent and for the editor's architecture view.",
+    "ways": [
+      "agent tool|architecture_state",
+      "agent tool|payloads_capture",
+      "core module|installNetworkProbes",
+      "core module|installWindowMessageProbe",
+      "core module|installWorkerProbe",
+      "hub subscription|ARCH_SUBJECT + \".>\"",
+      "hub subscription|SYNC_SUBJECT"
+    ],
+    "paths": [
+      "packages/observability/src/arch-probes.ts",
+      "packages/observability/src/arch-store.ts",
+      "packages/observability/src/arch.ts",
+      "packages/observability/src/flows.ts"
+    ]
   },
   "Live architecture diagram": {
     "status": "removed",
@@ -703,6 +1036,30 @@
     "in": "e16b2b75",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
+  "Manage your sign-ins and delete your account": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets a person see the sessions signed in as them, revoke one or all of them, and delete their account; deleted data is purged after a grace period.",
+    "docs": "packages/api/README.md, *Identity and the data we keep*",
+    "paths": [
+      "packages/api/migrations/0005_soft_delete.sql",
+      "packages/api/src/account.ts"
+    ]
+  },
+  "Metrics": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Samples gauges in every context once a second (memory, frame rate, long frames, durations, data channels) and lets an agent query them.",
+    "ways": [
+      "agent tool|metrics_query",
+      "hub subscription|METRICS_SUBJECT + \".>\""
+    ],
+    "paths": [
+      "packages/observability/src/metrics.ts"
+    ]
+  },
   "Mock a value": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -738,6 +1095,19 @@
     ],
     "in": "e5772e5d",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Observe an app (opt-in debug link)": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "One call that sends an app's logs, console output and errors onto its hub, keeps a preview app's records under their own scope, and connects to debug-mcp on localhost or when ?debug is set.",
+    "ways": [
+      "url parameter|?debug"
+    ],
+    "paths": [
+      "packages/observability/src/index.ts",
+      "packages/observability/src/scope.ts"
+    ]
   },
   "Package scripts as tasks and the run picker": {
     "status": "removed",
@@ -779,6 +1149,23 @@
       "packages/editor/test/tarballs.test.mjs"
     ]
   },
+  "Page tools": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets a page offer its own tools, such as evaluating JavaScript or running a CSS selector in the live page, which debug-mcp passes to an agent for one tab.",
+    "ways": [
+      "agent tool|page_eval",
+      "agent tool|page_query",
+      "hub request|PAGE_TOOL + \".\" + name + \".\" + tab",
+      "hub request|PAGE_TOOLS + \".\" + tab",
+      "hub subscription|PAGE_TOOLS_CHANGED"
+    ],
+    "paths": [
+      "packages/debug-mcp/src/page-tools.ts",
+      "packages/observability/src/page-tools.ts"
+    ]
+  },
   "Pane beside every editor": {
     "status": "active",
     "why": "the Margin is where a stopped run asks, and it's a pane view; reintroduced 2026-11-03 for that (user: a notification can be dismissed, and then it's unclear the program is stopped)",
@@ -808,6 +1195,20 @@
     ],
     "tests": [
       "packages/editor/test/pane-views.mjs"
+    ]
+  },
+  "Parse TypeScript into a lossless CST": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Language and parsing: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Our own BABLR grammar for the TypeScript subset tsval runs; it parses source into a syntax tree that keeps every character, as spans (sync or async), and has a command-line parser and a parse version for checking caches.",
+    "paths": [
+      "packages/bablr-language-ts/lib/grammar.ts",
+      "packages/bablr-language-ts/lib/spans.ts",
+      "packages/bablr-language-ts/run.mjs",
+      "packages/bablr/shims/record.js",
+      "packages/bablr/src/index.js",
+      "packages/bablr/vite.config.ts"
     ]
   },
   "Past runs, as balls": {
@@ -867,6 +1268,17 @@
     ],
     "in": "fcc92752",
     "restore": "from the full-editor tag: packages/playwright, tsval's playwright-test.js and its host half in debug-worker.ts, editor-api's RuntimeConnection.playwright — with previews, which served it"
+  },
+  "Plug an interpreter into Run": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Extension template: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Another extension's debugger can be the one Run starts; its worker reads and writes the workspace through the editor, under the same policy as any run.",
+    "docs": "packages/editor/RUNNING.md, *Another interpreter*",
+    "ways": [
+      "hub request|runtime.fs.attach",
+      "hub subscription|bridge.ready"
+    ]
   },
   "Preview CPU profiles": {
     "status": "removed",
@@ -983,6 +1395,16 @@
     "in": "e16b2b75",
     "restore": "git checkout full-editor -- packages/editor/app/samples.ts"
   },
+  "Published theme components": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Components published for use outside the app: the movable, collapsible <app-window> element (and an appWindow() function).",
+    "docs": "packages/theme/README.md, *Published: `components/<name>`*",
+    "paths": [
+      "components/app-window"
+    ]
+  },
   "Push to GitHub": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1011,6 +1433,32 @@
       "packages/editor/test/git-push.test.mjs"
     ]
   },
+  "Query logs and spans": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets an agent query the live editor's log records and timed spans from all its contexts, or wait until a matching record arrives.",
+    "ways": [
+      "agent tool|logs_query",
+      "agent tool|logs_wait",
+      "agent tool|spans_query",
+      "hub subscription|LOG_BACKLOG",
+      "hub subscription|LOG_SUBJECT + \".>\""
+    ],
+    "paths": [
+      "packages/observability/src/log-subject.ts"
+    ]
+  },
+  "Rate limits": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Refuses sign-in, token and error-report requests that go over per-IP or per-target limits, before doing the work.",
+    "docs": "packages/api/README.md, *Hardening*",
+    "paths": [
+      "packages/api/src/limits.ts"
+    ]
+  },
   "Real effects, decided per call": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1029,6 +1477,30 @@
     ],
     "tests": [
       "packages/editor/test/capabilities.test.mjs"
+    ]
+  },
+  "Recipes, surface styles and Stitches": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Gives each part of the app its own styles, written with Stitches in an ordered set of style layers.",
+    "docs": "packages/theme/README.md, *Surface styles: `theme/styles/*`*",
+    "paths": [
+      "packages/theme/src/component.ts",
+      "packages/theme/src/documents.js",
+      "packages/theme/src/sheet.js",
+      "packages/theme/src/stitches.ts",
+      "packages/theme/src/styles"
+    ]
+  },
+  "Redacted logging": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Sends all of the API's logs and traces through one allowlist, so nothing personal or secret is ever logged.",
+    "docs": "packages/api/README.md, *Visibility, and the redaction rule*",
+    "paths": [
+      "packages/api/src/log.ts"
     ]
   },
   "Refactoring for agents": {
@@ -1052,6 +1524,18 @@
     ],
     "in": "e16b2b75",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
+  "Release pipeline": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Repository: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Each push to main tests, builds and publishes every package as a GitHub release tarball and deploys the site, with no npm registry.",
+    "paths": [
+      ".github/workflows/cd.yml",
+      ".github/workflows/ci.yml",
+      ".github/workflows/contrib.yml",
+      ".github/workflows/production.yml"
+    ]
   },
   "Repo load from GitHub": {
     "status": "active",
@@ -1187,6 +1671,20 @@
     "in": "e16b2b75",
     "restore": "git checkout full-editor -- packages/editor/extensions/capabilities/placed-rules.ts"
   },
+  "Run TypeScript in the interpreter": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area tsval: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Runs TypeScript source straight from its syntax tree, synchronously or async, and returns the value of the last expression.",
+    "docs": "packages/tsval/README.md, *Usage*",
+    "paths": [
+      "packages/tsval/src/frontend.ts",
+      "packages/tsval/src/globals.ts",
+      "packages/tsval/src/handlers.ts",
+      "packages/tsval/src/index.ts",
+      "packages/tsval/src/interpret.ts"
+    ]
+  },
   "Run a file in the debugger": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1272,6 +1770,59 @@
     "in": "e16b2b75",
     "restore": "git checkout full-editor -- packages/editor/workbench/script-run.ts"
   },
+  "Sign in by email code": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Signs a person in with a one-time code emailed to their address, which they type in or reach through the email's link.",
+    "docs": "packages/api/README.md, *Email (C2)*",
+    "ways": [
+      "url parameter|?code"
+    ],
+    "paths": [
+      "packages/api/src/email-code.html",
+      "packages/api/src/email-code.txt",
+      "packages/api/src/email.ts"
+    ]
+  },
+  "Sign in with GitHub": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Signs a person in to the editor or the admin app with their GitHub account, through a GitHub App that reads only their numeric GitHub id.",
+    "docs": "packages/api/README.md, *A GitHub App, not an OAuth App*",
+    "paths": [
+      "packages/api/src/github.ts",
+      "packages/api/src/signin.ts"
+    ]
+  },
+  "Sign in with a passkey": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets a person register passkeys, sign in with one instead of a password, and remove them.",
+    "docs": "packages/api/README.md, *Passkeys*",
+    "paths": [
+      "packages/api/public/passkey.html",
+      "packages/api/public/passkey.js",
+      "packages/api/public/webauthn.js",
+      "packages/api/src/passkeys.ts"
+    ]
+  },
+  "Sign in with a password, and reset it": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lets a person set a password, sign in with their email and password, and reset a forgotten password using a code sent by email.",
+    "docs": "packages/api/README.md, *Passwords and reset (C3, C4)*",
+    "paths": [
+      "packages/api/src/action-code.html",
+      "packages/api/src/action-code.txt",
+      "packages/api/src/action-codes.ts",
+      "packages/api/src/password-hash.ts",
+      "packages/api/src/password.ts"
+    ]
+  },
   "Sign-in and account": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1289,6 +1840,23 @@
     ],
     "tests": [
       "packages/editor/test/workbench.mjs"
+    ]
+  },
+  "Sites on unusuallygood.dev": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Hosting: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Serves the root domain (which redirects browsers to the editor and asks anything else to pay over x402), the editor and the admin app as Cloudflare sites; only the root domain runs a Worker.",
+    "docs": "packages/api/README.md, *A7 · production*",
+    "paths": [
+      "packages/admin/deployment.ts",
+      "packages/admin/public/_headers",
+      "packages/site/admin.jsonc",
+      "packages/site/editor.jsonc",
+      "packages/site/public/_redirects",
+      "packages/site/public/robots.txt",
+      "packages/site/src/gate.ts",
+      "packages/site/wrangler.jsonc"
     ]
   },
   "Source Control for git": {
@@ -1321,6 +1889,32 @@
     "in": "e16b2b75",
     "restore": "git checkout full-editor -- packages/editor/extensions/cspell"
   },
+  "Starter code renderer": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Extension template: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "The template's Reopen Editor With → Rendered view: a custom editor that shows a file rendered and writes your changes back to its text.",
+    "docs": "contrib/README.md, *The renderer — `src/renderer.ts`*",
+    "ways": [
+      "custom editor provider|contrib.renderer"
+    ]
+  },
+  "Starter interpreter": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Extension template: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "A template extension you can fork, whose interpreter runs a file when you press Run, and which is rebuilt and reloaded into the editor as you change it.",
+    "docs": "contrib/README.md, *The interpreter — `src/interpreter.ts`*",
+    "ways": [
+      "debug adapter descriptor provider|contrib",
+      "debugger|contrib",
+      "worker||src/worker.ts"
+    ],
+    "paths": [
+      "contrib/scripts/dev.mjs",
+      "contrib/src/interpreter.ts"
+    ]
+  },
   "Stepping debugger with step back": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1346,6 +1940,19 @@
     ],
     "tests": [
       "packages/editor/test/debugger-runs.mjs"
+    ]
+  },
+  "Tamper-evident audit log": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Records every security event (sign-ins, refusals, account changes) in D1 and in locked R2 copies that can't be changed or deleted, and shows the log in the admin app.",
+    "docs": "packages/api/README.md, *A tamper-evident audit log*",
+    "paths": [
+      "packages/admin/src/views.tsx",
+      "packages/api/src/audit-copies.ts",
+      "packages/api/src/audit.ts",
+      "packages/api/src/refusals.ts"
     ]
   },
   "Terminal commands beyond the core's": {
@@ -1512,6 +2119,18 @@
       "packages/editor/workbench/terminal/commands/ps/ps.test.mjs"
     ]
   },
+  "Theme follows VS Code's color theme": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Maps the theme onto whichever VS Code color theme is active in the workbench.",
+    "docs": "packages/theme/README.md, *In VS Code's document: `theme/vscode`*",
+    "paths": [
+      "packages/theme/src/vscode-colors.js",
+      "packages/theme/src/vscode-skin.ts",
+      "packages/theme/src/vscode.js"
+    ]
+  },
   "Theme follows your system": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1526,6 +2145,39 @@
     ],
     "tests": [
       "packages/editor/test/workbench.mjs"
+    ]
+  },
+  "Traffic and cost guard": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Shows Cloudflare's traffic analytics (top paths, user agents, status codes) in the admin app, checks the account's spend every hour, and alerts or pauses if usage runs away.",
+    "docs": "packages/api/README.md, *The cost guard (O2)*",
+    "paths": [
+      "packages/admin/src/views.tsx",
+      "packages/api/src/spend.ts",
+      "packages/api/src/traffic.ts"
+    ]
+  },
+  "Tripwire": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Checks every row a signed-in request reads and treats any row that belongs to another user as an incident, alerting the owner.",
+    "docs": "packages/api/README.md, *The tripwire (O3)*",
+    "paths": [
+      "packages/api/src/tripwire.ts"
+    ]
+  },
+  "Two-factor sign-in": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Adds a second step to sign-in: a code from an authenticator app or an emailed code, plus recovery codes for getting back in.",
+    "docs": "packages/api/README.md, *Two-factor (C5, C6)*",
+    "paths": [
+      "packages/api/src/mfa-state.ts",
+      "packages/api/src/mfa.ts"
     ]
   },
   "Type queries": {
@@ -1560,6 +2212,58 @@
     ],
     "tests": [
       "packages/editor/test/bablr.mjs"
+    ]
+  },
+  "Unusual sign-ins": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area API protection and operations: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Scores each sign-in's requests and client against a learned model of normal behavior (without keeping the actual values), and lists the unusual ones, worst first, in the admin app.",
+    "docs": "packages/api/README.md, *Behavior (B7–B9)*",
+    "paths": [
+      "packages/admin/src/views.tsx",
+      "packages/api/migrations/0006_behavior.sql",
+      "packages/api/src/behavior.ts"
+    ]
+  },
+  "VS Code look for Web Awesome": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "A published Web Awesome theme in VS Code's default colors that follows the live color theme when used inside VS Code or a webview.",
+    "docs": "packages/theme/README.md, *The look: Web Awesome as VS Code*",
+    "paths": [
+      "components/vscode-theme",
+      "packages/theme/src/vscode-theme.ts"
+    ]
+  },
+  "Web Awesome components through the theme": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Theme and components: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "The only way for app code to load the Web Awesome components it is allowed to use.",
+    "docs": "packages/theme/README.md, *Components: `theme/components/*`*",
+    "paths": [
+      "packages/theme/src/components"
+    ]
+  },
+  "Web Awesome lint rules": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Libraries: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "ESLint rules that flag native HTML elements that have a Web Awesome equivalent, and HTML or CSS written inside strings.",
+    "docs": "packages/theme/README.md, *The four lint gaps*",
+    "paths": [
+      "packages/eslint-plugin-webawesome/src/index.js"
+    ]
+  },
+  "Weekly ledger cleanup": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Repository: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Each week CI runs `silo check` and opens one pull request deleting the first dormant way in that `silo remove` can take out.",
+    "paths": [
+      ".github/workflows/ledger.yml"
     ]
   },
   "What a way in reaches": {
@@ -1689,6 +2393,17 @@
       "packages/editor/test/workspace-changes.test.mjs"
     ]
   },
+  "Your account page": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Accounts and sign-in: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "One Preact account page, shared by the editor and the admin app, for managing ways to sign in, passkeys, two-factor and a password.",
+    "paths": [
+      "packages/account/src/account.tsx",
+      "packages/api/src/account-routes.ts",
+      "packages/theme/src/styles/account.ts"
+    ]
+  },
   "Your edits since the last commit": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -1710,10 +2425,106 @@
     "since": "2026-11-02",
     "in": "e16b2b75"
   },
+  "debug-mcp server": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Runs a local collector that the editor's hubs connect to over a WebSocket, and offers what they send to an agent as MCP tools over stdio.",
+    "paths": [
+      "packages/debug-mcp/src/bin.ts",
+      "packages/debug-mcp/src/mcp.ts",
+      "packages/debug-mcp/src/server.ts",
+      "packages/debug-mcp/src/store.ts",
+      "packages/debug-mcp/src/tools/context.ts",
+      "packages/debug-mcp/src/tools/index.ts"
+    ]
+  },
   "derived history": {
     "status": "parked",
     "why": "its ways-in list is this repository's alone; features from tests are the portable way in (silo README, *Derived history*)",
     "since": "2026-10-23"
+  },
+  "silo check": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Reports where the feature ledger or this manifest and the code disagree (a stopped feature still in the code, a removed one still documented, a way in no feature owns) and fails CI on it.",
+    "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
+    "ways": [
+      "cli command|check"
+    ],
+    "paths": [
+      "packages/silo/src/cli.ts"
+    ]
+  },
+  "silo coverage": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Shows what the runs saved in .silo/ executed, commit by commit: what started or stopped running, and what was never reached.",
+    "docs": "packages/silo/README.md, *Which tests reach what (designed 2026-10-22; the record built 2026-10-23)*",
+    "ways": [
+      "cli command|coverage"
+    ]
+  },
+  "silo features": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Lists every way into a program (commands, views, settings, buttons, agent tools, hub requests and more) by reading its code.",
+    "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
+    "ways": [
+      "cli command|features"
+    ]
+  },
+  "silo history": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Tells what changed in a program from snapshots of its code along git's first-parent history, never from commit messages.",
+    "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
+    "ways": [
+      "cli command|history"
+    ]
+  },
+  "silo init": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Sets up .silo/ in a repository, with its git settings and a baseline of what the code imports.",
+    "ways": [
+      "cli command|init"
+    ]
+  },
+  "silo install": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Installs dependencies with the project's package manager, skipping anything published in the last week.",
+    "ways": [
+      "cli command|install"
+    ]
+  },
+  "silo remove and restore": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Takes a feature out of the code (the files only it uses, plus its manifest entries) and leaves a tombstone that can bring it back later.",
+    "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
+    "ways": [
+      "cli command|remove",
+      "cli command|restore"
+    ]
+  },
+  "silo status": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Records a decision about a feature (active, experimental, stopped and so on) in the shared feature ledger.",
+    "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
+    "ways": [
+      "cli command|status"
+    ]
   },
   "terminal_run": {
     "status": "removed",
@@ -1727,6 +2538,18 @@
     "since": "2026-10-23",
     "paths": [
       "packages/tsval/bench/compile-ceiling.ts"
+    ]
+  },
+  "tsval step debugger": {
+    "status": "active",
+    "why": "moved from the manifest (decision 21), area tsval: outside the editor's reduction, kept as it was",
+    "since": "2026-11-03",
+    "what": "Steps through a run one step at a time, pauses and resumes it, sets breakpoints, and snapshots or forks the running state.",
+    "docs": "packages/tsval/README.md, *Usage*",
+    "paths": [
+      "packages/tsval/src/frame.ts",
+      "packages/tsval/src/scope.ts",
+      "packages/tsval/src/vm.ts"
     ]
   }
 }

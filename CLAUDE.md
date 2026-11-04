@@ -48,12 +48,10 @@ The feature ledger (`.silo/features.json`; packages/silo/README.md, *The feature
 features, and `silo check` (CI's lint) holds the code to it:
 
 - **Replacing an approach removes the old one in the same change** — `silo remove "<name>" "<why>"` (what only it
-  reaches, its manifest entries, a tombstone), or delete it and `silo status` it removed with where it went.
-- **The manifest is superseded, not maintained** — `.silo/manifest.json` was a one-off, AI-written enumeration of
-  every feature and the ways in it owns (packages/silo/README.md, *The feature manifest*). Tracking features and their
-  tests, and attributing code to features from them (*Tests by feature, in your face*), supersedes it; it isn't kept
-  up into that. Until that's built, `silo check` still fails on a way in no feature owns, so a new command, view,
-  setting, tool or hub request is placed in the feature it serves, only to keep CI green.
+  reaches, its package manifests' entries, a tombstone), or delete it and `silo status` it removed with where it went.
+- **The ledger declares the features** — an entry holds what a feature is for (`what`, `docs`) and what it owns (`ways`,
+  `paths`, `tests`). `silo check` fails on a way in no feature owns, so a new command, view, setting, tool or hub
+  request goes in the `ways` of the feature it serves, in the same change.
 - **An experiment starts with an entry** — `silo status "<name>" experiment "<why>" --until <date>`; it expires by
   default, and `silo check` says so.
 - **A dormant way in** (`silo check` lists them: their files load in CI's runs, their code never runs) is a decision to

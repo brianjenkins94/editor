@@ -50,8 +50,8 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features` (`--score`: derivations against the manifest), `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `manifest`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`, `manifest.json`; `local/traces/` |
-| Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's and the manifest's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features` (`--score`: derivations against the declared features), `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
+| Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
 ## What the prototype had, and where it is now
 
@@ -418,9 +418,9 @@ to build on it (*Dogfooding in the editor*, at the end).
 - **Features**, declared, in the feature ledger (`.silo/features.json`, *The feature ledger*): what's been decided
   about each feature, which is what lasts. Declared first, an entry is where a feature starts, before its code: its
   name, what it's for, its status, the code it owns and the tests it claims, so a test belongs to a feature by
-  declaration, not by inference. (`.silo/manifest.json`, *The feature manifest*, is something else: an AI-written
-  inventory of this repository's features, an oracle for derivations and the rewrite's port list. It came to be
-  treated as the lasting record; what of it moves into the ledger is decision 21.)
+  declaration, not by inference. (`.silo/manifest.json`, *The feature manifest*, was an AI-written inventory of this
+  repository's features that came to be treated as the lasting record; it moved into the ledger and went, 2026-11-03:
+  decision 21.)
 - **Tests and their outcomes**: a test is its file and its titles; outcomes come from the runner's own report (TAP,
   JUnit XML, a runner's reporter API), so any runner that reports works.
 - **Reach**: what code each test ran, by declaration (a file's top-level name, `Class.member`), with an identity a
@@ -722,7 +722,7 @@ computed facts, no model. It's Remember (what was decided) and Gate (the checks 
   time it's idle, decoded, from each frame's and worker's resource timing — the shell, the workbench, the extension
   host, TypeScript's servers, ESLint, cSpell held to budgets about a tenth over what they were, warning past 5% over
   the last green run.
-- **`silo remove` / `silo restore`:** remove takes out what only the entry reaches, its manifest entries and the
+- **`silo remove` / `silo restore`:** remove takes out what only the entry reaches, its package manifests' entries and the
   tombstone, lists the docs that name it, and leaves a change for review; restore runs the tombstone.
 - **Agents:** replacing an approach removes the old one in the same change; an experiment starts with an entry, so it
   expires by default; a scheduled run of `silo check` and the dormant list opens one deletion pull request a week.
@@ -762,7 +762,7 @@ import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the
 
 **Built (2026-10-26): leases in the editor.** History (the extension that holds the ledger's drift in Problems) marks
 each dormant way in where it's registered, in the evidence's purple, with a Hint saying its price; the lightbulb offers
-Keep for 90 days (asking why) and Remove (asking why: the files only it reaches deleted, its manifest entries taken out,
+Keep for 90 days (asking why) and Remove (asking why: the files only it reaches deleted, its package manifests' entries taken out,
 its tombstone, what's left by hand in the History output; nothing committed). Both write what `silo status` and `silo
 remove` write: what's dormant and what a removal is are lib's (`ledger.ts` `dormantWays`, `removalOf`, `removalText`),
 the CLI and the editor running the same code. What's dormant is by CI's records, as `silo check`'s: a repository
@@ -773,6 +773,11 @@ Open: **off isn't stopped** (a flag off by default ships but doesn't run: its ow
 feature** (often "a path set people name", not a way in).
 
 ### The feature manifest: every feature, named (2026-10-26)
+
+**Gone, 2026-11-03** (decision 21): its entries moved into the ledger (their area in the `why`), and `.silo/manifest.json`
+and lib's `manifest.ts` went. Its checks are the ledger's (`declaredDrift`), a repository declaring no features has none
+of them, and a removal takes what it takes out of the other features declaring it. Below is how it was written and
+measured, which is still what a derivation is held to.
 
 The ledger says what's been decided about a feature. Nothing yet said which features there are: `features` finds the ways
 in (368 here), not what they add up to. `.silo/manifest.json` is that list. It names each feature, by area, and says what
@@ -930,9 +935,9 @@ themselves (packages/editor/RUNNING.md, *Tests*). Tried first, and dropped: a tr
 anything), and a treemap of every declaration by folder (it showed files, not features). Not built: a way to give
 unowned code a feature from the map; a pane of the open file's features.
 
-Where: lib `util/silo/manifest.ts` (`manifestDrift`, `parseManifest`, `manifestText`, `manifestWithout`, `scoreGrouping`, `codeOwners`), read by `silo check` and the features map; `derive.ts`, read by `silo features --score`. Not built:
-manifest drift in the editor's Problems (only CI's `silo check` reports it), and a ledger entry naming the manifest's
-feature (they share names by convention, unchecked).
+Where: lib `util/silo/ledger.ts` (`declaredFeatures`, `declaredDrift`, `withoutRemoved`), read by `silo check`;
+`derive.ts` (`scoreGrouping`, `codeOwners`), read by `silo features --score`. Not built: declared features' drift in the
+editor's Problems (only CI's `silo check` reports it).
 
 ### Decided
 
@@ -1007,7 +1012,7 @@ From *Tests by feature* (above), for the rewrite:
 21. ~~**What a declared feature's ledger entry holds.**~~ Decided 2026-11-02: what the manifest held — `what` (what it's
     for), `docs`, `paths` (the code it owns), `ways` (its ways in) — and the `tests` it owns, beside the decision's
     `status`, `why` and `since`. The ledger becomes the source of truth: `silo check` errors on any drift between it and
-    the code, as it does on the manifest's now, and the manifest goes once its entries have moved.
+    the code, and the manifest goes once its entries have moved (they have: 2026-11-03).
 22. ~~**Code no feature owns.**~~ Decided 2026-11-02: an error. Code a feature doesn't explicitly own — by its ledger
     entry, not inferred from reach or tests — fails `silo check`, in CI and in the editor's Problems; a test's file is
     code too. Runs and coverage are how code shared between features is found (2026-11-02): code that more than one

@@ -10,7 +10,7 @@
  *   silo check [repo] [--prices] [--json]              the ledger's drift from the code (each with what deleting its
  *                                                        feature would free), the dormant ways in, and what the runs'
  *                                                        packages did beyond the baseline
- *   silo remove <entry> [why] [--key …] [--paths …]    take a feature out: what only it reaches, its manifest entries,
+ *   silo remove <entry> [why] [--key …] [--paths …]    take a feature out: what only it reaches, its package manifests' entries,
  *                                                        and a tombstone in the ledger — left for review
  *   silo restore <entry>                               bring a removed feature back, from its tombstone
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
@@ -27,7 +27,7 @@ import type { Price } from "@brianjenkins94/util/silo/cost";
 import type { Analyzer, DeclarationGraph } from "@brianjenkins94/util/silo/graph";
 import type { Drift, Ledger, LedgerStatus, WayCode } from "@brianjenkins94/util/silo/ledger";
 import type { Step } from "@brianjenkins94/util/silo/history";
-import type { GroupingScore } from "@brianjenkins94/util/silo/manifest";
+import type { GroupingScore } from "@brianjenkins94/util/silo/derive";
 import type { Rolldown } from "@brianjenkins94/util/silo/slice";
 import type { TypeScriptModules } from "@brianjenkins94/util/silo/typescript";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -40,14 +40,13 @@ import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianje
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
 import { installCommand, packageManagerOf, pinOfRequest, workspacePins } from "@brianjenkins94/util/silo/install";
-import { byFile, byFolder, byReach, byTests, linkedBySubjects, testsFromRecords } from "@brianjenkins94/util/silo/derive";
+import { byFile, byFolder, byReach, byTests, codeOwners, linkedBySubjects, scoreGrouping, testsFromRecords } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
-import { ledgerPath, manifestPath, ownedPath } from "@brianjenkins94/util/silo/layout";
-import { CI_RECORDS, dormantWays, drift, ledgerText, parseLedger, parseOwned, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
-import { codeOwners, featuresOfLedger, manifestDrift, parseManifest, scoreGrouping } from "@brianjenkins94/util/silo/manifest";
+import { ledgerPath, ownedPath } from "@brianjenkins94/util/silo/layout";
+import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, ledgerText, parseLedger, parseOwned, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 
@@ -164,29 +163,10 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 		"docs": files.filter((file) => file.endsWith(".md")).map(read),
 		"code": code.map(read),
 		...owned.length === 0 ? {} : { "owned": { "scope": owned, "files": code } }
-	}), ...manifestDriftOf(repo, ways, exists)];
+	}), ...declaredDrift(ledger, { "ways": ways, "exists": exists })];
 }
 
-/** The features' drift from the ways in (lib util/silo/manifest): the manifest's and the ledger's declared ones (decision
- *  21: the ledger's are the source of truth; the manifest's go as they move). Throws for a manifest that isn't one. */
-function manifestDriftOf(repo: string, ways: Parameters<typeof manifestDrift>[1]["ways"], exists: (path: string) => boolean): Drift[] {
-	const ledger = ledgerOf(repo);
-
-	// (a repository that declares no features anywhere isn't held to them)
-	if (!exists(manifestPath()) && featuresOfLedger(ledger).length === 0) {
-		return [];
-	}
-
-	const manifest = exists(manifestPath()) ? parseManifest(fs.readFileSync(path.join(repo, manifestPath()))) : {};
-
-	if (manifest === undefined) {
-		throw new Error(`${manifestPath()} isn't a manifest: areas of features by name, each with its \`what\``);
-	}
-
-	return manifestDrift(manifest, { "ways": ways, "exists": exists }, ledger);
-}
-
-/** How many of the manifest's features own each declaration (lib util/silo/manifest `codeOwners`). */
+/** How many of the declared features own each declaration (lib util/silo/derive `codeOwners`). */
 interface Ownership {
 	"declarations": number;
 	"one": number;
@@ -199,13 +179,13 @@ interface Ownership {
 	"unowned": { "folder": string; "declarations": number }[];
 }
 
-/** Each derivation of features from `repo`'s code (lib util/silo/derive), scored against its manifest — by feature and
- *  by area — and who owns the code. Throws without a manifest. */
-export async function derivationScores(repo: string): Promise<{ "derivations": { "derivation": string; "features": GroupingScore; "areas": GroupingScore }[]; "ownership": Ownership }> {
-	const manifest = fs.existsSync(path.join(repo, manifestPath())) ? parseManifest(fs.readFileSync(path.join(repo, manifestPath()))) : undefined;
+/** Each derivation of features from `repo`'s code (lib util/silo/derive), scored against the features its ledger
+ *  declares, and who owns the code. Throws when it declares none. */
+export async function derivationScores(repo: string): Promise<{ "derivations": { "derivation": string; "features": GroupingScore }[]; "ownership": Ownership }> {
+	const declared = declaredFeatures(ledgerOf(repo));
 
-	if (manifest === undefined) {
-		throw new Error(`no feature manifest to score against (${manifestPath()}: silo README, *The feature manifest*)`);
+	if (declared.length === 0) {
+		throw new Error(`no declared features to score against (${ledgerPath()}: silo README, *The feature ledger*)`);
 	}
 
 	const { features, graph } = await currentProgram(repo);
@@ -221,7 +201,7 @@ export async function derivationScores(repo: string): Promise<{ "derivations": {
 		...records === undefined ? [] : [["by tests", byTests(ways, graph, testsFromRecords(records))] as [string, Map<string, string>]]
 	];
 
-	const owners = codeOwners(manifest, features, graph);
+	const owners = codeOwners(declared, features, graph);
 	const declarations = [...graph.fingerprints.keys()];
 	const unowned = new Map<string, number>();
 
@@ -234,7 +214,7 @@ export async function derivationScores(repo: string): Promise<{ "derivations": {
 	const counted = (test: (count: number) => boolean): number => declarations.filter((id) => test(owners.get(id)?.size ?? 0)).length;
 
 	return {
-		"derivations": groupings.map(([derivation, grouping]) => ({ "derivation": derivation, "features": scoreGrouping(manifest, grouping), "areas": scoreGrouping(manifest, grouping, { "areas": true }) })),
+		"derivations": groupings.map(([derivation, grouping]) => ({ "derivation": derivation, "features": scoreGrouping(declared, grouping) })),
 		"ownership": { "declarations": declarations.length, "one": counted((count) => count === 1), "shared": counted((count) => count > 1 && count <= 5), "ambient": counted((count) => count > 5), "none": counted((count) => count === 0), "unowned": [...unowned].sort((left, right) => right[1] - left[1]).slice(0, 8).map(([folder, count]) => ({ "folder": folder, "declarations": count })) }
 	};
 }
@@ -246,14 +226,13 @@ function scoresText({ "derivations": scored, ownership }: Awaited<ReturnType<typ
 	const row = (each: GroupingScore): string => [`${each.groups}`, `${each.placed}/${each.ways}`, `${each.whole}`, `${each.split}`, `${each.merged}`, `${each.splitAndMerged}`, `${each.partly + each.unseen}`, each.precision.toFixed(2), each.recall.toFixed(2), each.f.toFixed(2)].join(" | ");
 
 	return [
-		first === undefined ? "" : `Features from the code alone, against the manifest's ${first.features} features with ways in (and its areas):`,
+		first === undefined ? "" : `Features from the code alone, against the ${first.features} declared features with ways in:`,
 		"",
 		"| Derivation | Groups | Ways in placed | Whole | Split | Merged | Both | Partly or unseen | Precision | Recall | F |",
 		"|---|---|---|---|---|---|---|---|---|---|---|",
 		...scored.map((each) => `| ${each.derivation} | ${row(each.features)} |`),
-		...scored.map((each) => `| ${each.derivation}, by area | ${row(each.areas)} |`),
 		"",
-		`Who owns the code: of its ${ownership.declarations} declarations, what the manifest's features reach from their ways in and from what registers them:`,
+		`Who owns the code: of its ${ownership.declarations} declarations, what the declared features reach from their ways in and from what registers them:`,
 		"",
 		"| One feature | Shared (2–5) | Ambient (more) | None |",
 		"|---|---|---|---|",
@@ -500,7 +479,7 @@ export const app = subcommands({
 				}
 
 				if (drifted.length === 0) {
-					process.stdout.write("The ledger, the manifest and the code agree.\n");
+					process.stdout.write("The ledger and the code agree.\n");
 				} else {
 					process.stdout.write(`Drift (${drifted.length}):\n${drifted.map((each) => `  ${each.check}: ${each.message}\n    change the code: ${each.code}; or the decision: ${each.decision}` + (priceOfEntry(each.entry) === undefined ? "" : `\n    deleting it ${priceText(priceOfEntry(each.entry) as Price)}`)).join("\n")}\n`);
 				}
@@ -659,7 +638,7 @@ export const app = subcommands({
 		command({
 			"name": "features",
 			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject; by CI's tests), each grouping scored against the feature manifest (.silo/manifest.json): how many of its features each finds whole, splits or merges, and its precision and recall; and who owns the code: how many of the manifest's features reach each declaration, from their ways in and what registers them.",
-			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the feature manifest (silo README, *The feature manifest*)." } }),
+			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the ledger's declared features (silo README, *The feature manifest*)." } }),
 			"handler": async (config) => {
 				const repo = repoOf(config.get("repo"));
 
