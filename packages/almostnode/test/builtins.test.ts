@@ -59,6 +59,8 @@ const FLOORS: Record<string, number> = {
 	"repl": 2,
 	"stream": 21,
 	"stream/promises": 2,
+	"stream/consumers": 5,
+	"stream/web": 17,
 	"string_decoder": 1,
 	"sys": 17,
 	"timers": 7,
@@ -95,6 +97,19 @@ test("each built-in has at least as much of Node's API as it did", () => {
 	}
 
 	assert.deepEqual(short, []);
+});
+
+test("stream/consumers reads a stream to its end, a Node stream's or a web one's", async () => {
+	const runtime = new Runtime(new VirtualFS());
+	const said = await runtime.execute(`
+const { text, json, buffer } = require("stream/consumers");
+const { Readable } = require("stream");
+const { ReadableStream } = require("stream/web");
+const web = (value) => new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(value)); controller.close(); } });
+module.exports = Promise.all([text(Readable.from(["a", "b"])), json(web("[1]")), buffer(web("hi")).then((whole) => whole.toString())]);
+`, "/consumers.js").exports;
+
+	assert.deepEqual(said, ["ab", [1], "hi"]);
 });
 
 test("assert is Node's: a failure says what differed, and deep equality looks inside", () => {

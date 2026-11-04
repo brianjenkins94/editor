@@ -180,6 +180,44 @@ function cwd(): string {
 	return (globalThis as { "process"?: { "cwd"?: () => string } }).process?.cwd?.() ?? "/";
 }
 
+/** `stream/web`: Node's names for the web streams, which a browser has as globals. */
+function streamWeb(): Namespace {
+	const names = ["ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamBYOBReader", "ReadableStreamBYOBRequest", "ReadableByteStreamController", "ReadableStreamDefaultController", "TransformStream", "TransformStreamDefaultController", "WritableStream", "WritableStreamDefaultWriter", "WritableStreamDefaultController", "ByteLengthQueuingStrategy", "CountQueuingStrategy", "TextEncoderStream", "TextDecoderStream", "CompressionStream", "DecompressionStream"];
+	const host = globalThis as unknown as Record<string, unknown>;
+
+	return Object.fromEntries(names.filter((name) => name in host).map((name) => [name, host[name]])) as unknown as Namespace;
+}
+
+/** `stream/consumers`: all of a stream (Node's, or a web one: each is async iterable), read to its end. */
+function streamConsumers({ "Buffer": bufferClass }: { "Buffer": typeof Buffer }): Namespace {
+	const bytes = async (stream: AsyncIterable<unknown>): Promise<Uint8Array> => {
+		const chunks: Uint8Array[] = [];
+
+		for await (const chunk of stream) {
+			chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk as Uint8Array);
+		}
+
+		const whole = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
+		let at = 0;
+
+		for (const chunk of chunks) {
+			whole.set(chunk, at);
+			at += chunk.byteLength;
+		}
+
+		return whole;
+	};
+	const text = async (stream: AsyncIterable<unknown>): Promise<string> => new TextDecoder().decode(await bytes(stream));
+
+	return {
+		"arrayBuffer": async (stream: AsyncIterable<unknown>) => (await bytes(stream)).slice().buffer,
+		"blob": async (stream: AsyncIterable<unknown>) => new Blob([(await bytes(stream)).slice()]),
+		"buffer": async (stream: AsyncIterable<unknown>) => bufferClass.from(await bytes(stream)),
+		"json": async (stream: AsyncIterable<unknown>) => JSON.parse(await text(stream)) as unknown,
+		"text": text
+	} as unknown as Namespace;
+}
+
 /** The built-ins, by name (`node:` stripped), but `fs` and `process` (each runtime's own). `own`: almostnode's modules
  *  the runtime makes (its console), unenv filling in what they lack. */
 export function nodeBuiltins(own: { "console": Namespace }): Record<string, unknown> {
@@ -258,6 +296,8 @@ export function nodeBuiltins(own: { "console": Namespace }): Record<string, unkn
 		"assert/strict": (nodeAssert as unknown as { "strict": unknown }).strict,
 		"stream": stream,
 		"stream/promises": stream.promises,
+		"stream/web": streamWeb(),
+		"stream/consumers": streamConsumers(unenvBuffer as unknown as { "Buffer": typeof Buffer }),
 		"string_decoder": stringDecoder
 	};
 }

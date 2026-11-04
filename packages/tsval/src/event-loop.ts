@@ -55,6 +55,8 @@ export interface Timer { "id": number; "due": number; "seq": number; "fn": unkno
  *  since the machine went idle — the host's microtasks are flushed, so a timer may fire. */
 export interface Loop {
 	"clock": number;
+	/** The clock when it started: where `performance.now` counts from. */
+	"started": number;
 	"seq": number;
 	"ids": number;
 	"timers": Map<number, Timer>;
@@ -100,6 +102,7 @@ const TIMER_ID = Symbol("tsval.timer");
 export function createLoop(options: EventLoopOptions): Loop {
 	return {
 		"clock": options.now ?? RealDate.now(),
+		"started": options.now ?? RealDate.now(),
 		"seq": 0,
 		"ids": 0,
 		"timers": new Map(),
@@ -319,6 +322,50 @@ const VirtualMath = Object.defineProperties(Object.create(Object.getPrototypeOf(
 	"random": { "value": intrinsic(function random() { return Math.random(); }, (machine) => random(loopOf(machine))), "writable": true, "configurable": true }
 });
 
+/** `count` bytes from the loop's seeded generator. */
+function randomBytes(loop: Loop, count: number): number[] {
+	return Array.from({ "length": count }, () => Math.floor(random(loop) * 256));
+}
+
+/** The intrinsic `crypto`: its random numbers the loop's seeded generator, as `Math.random`'s are, so a run replays; and
+ *  `subtle`, the host's, which is a function of what it's given but for what it generates (a key). */
+const VirtualCrypto = {
+	"getRandomValues": intrinsic(function getRandomValues(array: unknown) { return array; }, (machine, _thisArg, [array]) => {
+		if (!ArrayBuffer.isView(array) || array instanceof Float32Array || array instanceof Float64Array || array instanceof DataView) {
+			throw new TypeError("The data argument must be an integer-type TypedArray");
+		}
+
+		new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(randomBytes(loopOf(machine), array.byteLength));
+
+		return array;
+	}),
+	"randomUUID": intrinsic(function randomUUID() { return ""; }, (machine) => {
+		const bytes = randomBytes(loopOf(machine), 16);
+
+		// (version 4, its variant)
+		bytes[6] = (bytes[6] & 0x0F) | 0x40;
+		bytes[8] = (bytes[8] & 0x3F) | 0x80;
+
+		const hex = bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+		return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+	}),
+	"subtle": globalThis.crypto?.subtle
+};
+
+/** The intrinsic `performance`: `now` on the virtual clock, from where the loop started, so it moves only as a timer fires, as
+ *  `Date.now` does, and a run replays. Its timeline records nothing. */
+const VirtualPerformance = {
+	"now": intrinsic(function now() { return 0; }, (machine) => { const loop = loopOf(machine); return loop.clock - loop.started; }),
+	"mark": () => undefined,
+	"measure": () => undefined,
+	"clearMarks": () => undefined,
+	"clearMeasures": () => undefined,
+	"getEntries": () => [],
+	"getEntriesByName": () => [],
+	"getEntriesByType": () => []
+};
+
 /** The globals an event loop gives the guest. */
 export function loopGlobals(): Record<string, unknown> {
 	return {
@@ -339,6 +386,8 @@ export function loopGlobals(): Record<string, unknown> {
 			void Promise.resolve().then(() => run());
 		}),
 		"Date": VirtualDate,
-		"Math": VirtualMath
+		"Math": VirtualMath,
+		"crypto": VirtualCrypto,
+		"performance": VirtualPerformance
 	};
 }

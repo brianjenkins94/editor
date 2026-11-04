@@ -36,12 +36,13 @@ export function workspaceRuntime(vfs: VirtualFS, options: Omit<RuntimeOptions, "
 }
 
 /** The web's globals Node has too (a program run natively sees the worker's, which has them). */
-const NODE_WEB_GLOBALS = ["URL", "URLSearchParams", "TextEncoder", "TextDecoder", "structuredClone", "AbortController", "AbortSignal", "atob", "btoa", "Blob", "Event", "EventTarget", "Headers", "Request", "Response", "FormData", "DOMException", "WebAssembly"];
+const NODE_WEB_GLOBALS = ["URL", "URLSearchParams", "TextEncoder", "TextDecoder", "structuredClone", "AbortController", "AbortSignal", "atob", "btoa", "Blob", "Event", "EventTarget", "Headers", "Request", "Response", "FormData", "DOMException", "WebAssembly", "CustomEvent", "ReadableStream", "WritableStream", "TransformStream", "ByteLengthQueuingStrategy", "CountQueuingStrategy", "TextDecoderStream", "TextEncoderStream", "CompressionStream", "DecompressionStream", "MessageChannel", "MessagePort", "MessageEvent", "navigator"];
 
 /** The globals a program has on Node beyond ECMAScript's — the web's Node has, and `Buffer` (almostnode's) — for a host
  *  evaluating the program's files itself (the debug worker: tsval's own are ECMAScript's alone), so a program has the
  *  same globals however it runs (RUNNING.md). Not what varies run to run (`performance`, `crypto`): a run's clock and
- *  randomness are its event loop's. */
+ *  randomness are its event loop's, which has those two itself. Nor `BroadcastChannel`, Node's being a process's and this one
+ *  reaching every tab of the origin, the editor's own included. */
 export function programGlobals(runtime: Runtime): Record<string, unknown> {
 	const host = globalThis as unknown as Record<string, unknown>;
 	const web = Object.fromEntries(NODE_WEB_GLOBALS.filter((name) => name in host).map((name) => [name, host[name]]));

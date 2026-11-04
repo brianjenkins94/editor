@@ -141,3 +141,27 @@ test("event loop: paced to real time, a timer waits its delay; fast, it doesn't 
 	assert.ok(await time("real") >= 50);
 	assert.ok(await time("fast") < 40);
 });
+
+test("event loop: `crypto`'s random numbers are its seeded generator's, and `performance.now` its clock: the same run every time", async () => {
+	const run = async (seed: number): Promise<unknown[]> => {
+		const { lines, globals } = logged();
+		const { vm } = createVM(`
+const bytes = crypto.getRandomValues(new Uint8Array(4));
+log(crypto.randomUUID());
+log([...bytes]);
+log(performance.now());
+setTimeout(() => { log(performance.now()); }, 250);
+`, { "globals": globals, "eventLoop": { "now": 1_000_000, "seed": seed, "pace": "fast" } });
+
+		await toEnd(vm);
+
+		return lines;
+	};
+	const first = await run(7);
+
+	assert.deepEqual(await run(7), first);
+	assert.notDeepEqual(await run(8), first);
+	assert.match(String(first[0]), /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u);
+	assert.equal(first[2], 0, "from where the loop started");
+	assert.equal(first[3], 250, "it moves as a timer fires");
+});

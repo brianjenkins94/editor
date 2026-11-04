@@ -32,8 +32,9 @@ the network. A call the policy hasn't decided stops at its line and asks (*Capab
 asks, no popups. A denied call fails as Node's would. Stand-ins remain only for a skipped or denied call.
 
 **Deterministic.** tsval's event loop has a virtual clock, a seeded random and an ordering it can replay; its waits can
-be skipped (*Skip Waits*) or made real. A run's globals are Node's, but not what varies run to run (`performance`,
-`crypto`).
+be skipped (*Skip Waits*) or made real. A run's globals are Node's, with what varies run to run the event loop's own:
+`performance.now` is its clock, and `crypto`'s random numbers its generator. `BroadcastChannel` isn't there: this one reaches
+every tab of the origin, the editor's own included.
 
 **Output goes where it was started.** A run from the terminal prints there, reads its stdin there, and has the args, cwd
 and env the command line gave; one from F5 uses the Debug Console. **What's running** is one registry (workbench/runs.ts):
