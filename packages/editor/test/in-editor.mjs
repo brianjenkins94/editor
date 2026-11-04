@@ -41,9 +41,26 @@ async function ran(spec) {
 	return answer.files[0];
 }
 
+/** What's on screen in each frame still open, and what the extensions printed: why a spec failed on a runner nobody can watch. */
+async function sayWhatHappened() {
+	for (const frame of session.page.frames()) {
+		const shown = await frame.evaluate(() => [...document.querySelectorAll(".tab, .notification-toast, .monaco-dialog-box, .quick-input-widget:not([style*='display: none'])")].map((element) => `${element.className.split(" ").slice(0, 3).join(".")}: ${element.textContent.slice(0, 200)}`)).catch(() => []);
+
+		if (shown.length > 0) {
+			console.log(`[in-editor] on screen in ${frame.url().slice(0, 100)}:\n  ${shown.join("\n  ")}`);
+		}
+	}
+
+	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => /^\[ext:|save|participant/iu.test(line)).slice(-60).map((line) => line.slice(0, 220)).join("\n  ")}`);
+}
+
 for (const spec of SPECS) {
 	test(spec, async () => {
 		const file = await ran(spec);
+
+		if (file.tests.length === 0 || file.tests.some(({ outcome }) => outcome !== "pass")) {
+			await sayWhatHappened();
+		}
 
 		assert.deepEqual(file.tests.filter(({ outcome }) => outcome !== "pass").map(({ id, error }) => `${id}: ${error}`), []);
 		assert.ok(file.tests.length > 0, file.stalled ?? file.output ?? "it ran something");
