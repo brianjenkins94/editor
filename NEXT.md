@@ -396,6 +396,17 @@ How it's kept:
        compiled module, 503 once stopped), which have no UI. Found: a click on a button whose icon is slotted into it was called
        covered, the engine's walk up skipping the slot; held to real Playwright. A window of the size of the preview it opens in
        covers the whole inner workbench, so a spec opens its file first and works by keyboard, and the palette takes Enter, not a click.
+   - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
+     into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
+     green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,
+     `stream/web` and `stream/consumers` there, 57 and 398. A run's clock and randomness stay its event loop's, so step-back
+     still replays. What holds the rest, by tests: the Worker runtime (`workerd`, `miniflare`: packages/api, 170); real
+     Playwright launching a browser (`engine.test`, 78); `registerHooks` (73); silent for 120 s, slow or hung, not known which
+     (52; a stall loses what passed before it); the script's own copying of `zod` and `typescript` (47, not measured); the
+     capability policy, on `/tmp` and `exec` (32). `BroadcastChannel` is left out on purpose: this one reaches every tab of
+     the origin, the editor's own included, so its 2 tests want one of the run's own. 19 of the 32 files under
+     packages/almostnode/test and packages/bablr-language-ts/test are scripts, not tests. A UI spec's coverage isn't visible to
+     tsval (the editor it drives runs as a plain bundle) until everything runs in tsval, as it's meant to.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
      alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`

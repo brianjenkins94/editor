@@ -826,6 +826,11 @@ export class Machine implements VM {
 				}
 			}
 
+			const loopCrypto = this.loopFns?.["crypto"] as Record<string, unknown> | undefined;
+
+			clock.set((this.loopFns?.["performance"] as Record<string, unknown> | undefined)?.["now"], { "name": "performance.now" });
+			clock.set(loopCrypto?.["randomUUID"], { "name": "crypto.randomUUID" });
+			clock.set(loopCrypto?.["getRandomValues"], { "name": "crypto.getRandomValues" });
 			clock.set(host["performance"]?.["now"], { "name": "performance.now" });
 			clock.set(host["crypto"]?.["randomUUID"], { "name": "crypto.randomUUID" });
 			clock.set(host["crypto"]?.["getRandomValues"], { "name": "crypto.getRandomValues" });
