@@ -20,6 +20,7 @@
     "@automerge/automerge": "latest",
     "@awesome.me/webawesome": "latest",
     "@brianjenkins94/almostnode": "file:../almostnode",
+    "@brianjenkins94/bablr": "file:../bablr",
     "@brianjenkins94/editor-api": "file:../editor-api",
     "@brianjenkins94/hub": "file:../hub",
     "@brianjenkins94/observability": "file:../observability",
