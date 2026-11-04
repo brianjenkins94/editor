@@ -14,7 +14,7 @@ import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffe
 import { dropUnpinned, readPins } from "./install";
 import { packagesRan, readBaseline } from "./package-calls";
 import { EXITED, held, listening, readsStdin } from "./process";
-import { programModules, runtimeReady, whereOf } from "./runtime";
+import { editorPlaywright, programModules, runtimeReady, whereOf } from "./runtime";
 import { post, state, workerLog } from "./state";
 import { askAt } from "./stops";
 import { startTests, tellTests, testsOver, testTold } from "./tests";
@@ -709,7 +709,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	startTests();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold }, "modules": modules });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
 
 	state.evaluating = loaded.vm;
 

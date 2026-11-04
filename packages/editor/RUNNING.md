@@ -70,6 +70,15 @@ ran), so the tests a change reaches are the ones whose last run here ran code in
 runs again; the test files no trace names are listed apart. Nothing in the core writes traces now (their writer went
 with runtime evidence), so until it comes back every test file reads as untraced.
 
+**`@playwright/test` is the editor's too** (extensions/tsval/playwright-test.js): Playwright's test API over node-test.js, so a
+Playwright test is told and traced as any other. Its `page` drives the preview you have open (the preview window used
+last): packages/playwright's `Page`, `Locator` and `expect`, run in the debug worker (not stepped), each of a locator's ops
+run on the preview's page by the shell (`playwright.run`, shell/preview-windows.tsx). An action waits for its element there
+as Playwright's do, and an `expect` until it holds. What's there: `test` with `page` and `browserName`, `.skip` (declared, or
+called in a test), `.fixme`, `.describe` and its modifiers, the four hooks, `step`, `info`. Not yet: `test.extend`,
+`test.use`'s options, other browsers, contexts, `request`, timeouts, and `playwright` itself (a browser launched). With no
+window open, a test fails rather than hangs, though what it says doesn't yet say why.
+
 ## Capability stops
 
 A call the policy hasn't decided (a write, a fetch, a spawn) stops the run at its line, with what the call would do from

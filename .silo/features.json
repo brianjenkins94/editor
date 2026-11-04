@@ -1395,17 +1395,22 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Playwright tests in the debugger": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*); and nothing answered `playwright.run` once previews went",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced (user, 2026-11-03): \"we made our own fake playwright so we could drive previews so we can run everything in editor in the browser, that's the end goal\". packages/playwright as it was, held to real Playwright by its own tests",
+    "since": "2026-11-03",
     "what": "A Playwright test file (`@playwright/test`) runs in the debugger against the preview you have open: its locators, actions and expect are the editor's own Playwright (packages/playwright), each op run on the preview's page, and its tests told and traced as node:test's are.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
+    "ways": [
+      "hub request|playwright.run"
+    ],
     "paths": [
       "packages/editor/extensions/tsval/playwright-test.js",
       "packages/playwright"
     ],
-    "in": "fcc92752",
-    "restore": "from the full-editor tag: packages/playwright, tsval's playwright-test.js and its host half in debug-worker.ts, editor-api's RuntimeConnection.playwright — with previews, which served it"
+    "tests": [
+      "packages/editor/test/playwright-in-editor.mjs",
+      "packages/playwright/test/engine.test.mjs"
+    ]
   },
   "Plug an interpreter into Run": {
     "status": "active",
