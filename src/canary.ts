@@ -19,9 +19,9 @@
 
 import ts from "typescript";
 // tsval — the interpreter (dev-linked via tsconfig `paths` to ../tsval until it publishes as this package).
-import type { HostGuard, InterpretOptions, VM } from "@brianjenkins94/tsval";
-import { createVM, isUncatchable, UNCATCHABLE } from "@brianjenkins94/tsval";
-import { createTypedVM, typeOfNode } from "@brianjenkins94/tsval/typed";
+import type { HostGuard, InterpretOptions, VM } from "../packages/tsval/src/index";
+import { createVM, isUncatchable, UNCATCHABLE } from "../packages/tsval/src/index";
+import { createTypedVM, typeOfNode } from "../packages/tsval/src/typed";
 
 /** One capability the guest reached at runtime, shaped like silo's `Reach`. */
 /** Every capability the canary can record — the permissive predicted set for callers that want the complete

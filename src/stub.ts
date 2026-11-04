@@ -10,9 +10,9 @@
  * means to replace (the guard sees EVERY host call, including an incidental `new URL(...)` in an argument list).
  */
 
-import type { TypedHostGuard } from "@brianjenkins94/tsval/typed";
-import { interpret, ts } from "@brianjenkins94/tsval";
-import { createTypedVM } from "@brianjenkins94/tsval/typed";
+import type { TypedHostGuard } from "../packages/tsval/src/typed";
+import { interpret, ts } from "../packages/tsval/src/index";
+import { createTypedVM } from "../packages/tsval/src/typed";
 
 /** A recursive, undefined-safe stand-in: every property / call / construct yields another auto-stub, so
  *  `res.a.b[0].c()` never throws while you explore downstream. Carries no real data — a peek shows a stub.

@@ -12,7 +12,7 @@
  * Dev-linked to ../tsval through ./canary; kept out of the CI sweep until tsval publishes.
  */
 
-import { interpret } from "@brianjenkins94/tsval";
+import { interpret } from "../packages/tsval/src/index";
 import { ALL_CAPABILITIES, runCanary } from "./canary";
 
 /** One effect in program order. `value` is the resolved resource (Axis-2); `callee`+`capability` its identity. */

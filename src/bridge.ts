@@ -10,9 +10,9 @@
  * the CI sweep until those publish.
  */
 
-import { cstSpans } from "@brianjenkins94/bablr";
-import { ts } from "@brianjenkins94/tsval";
-import { createTypedProgram, typeAtNode } from "@brianjenkins94/tsval/typed";
+import { cstSpans } from "../packages/bablr/src/index.js";
+import { ts } from "../packages/tsval/src/index";
+import { createTypedProgram, typeAtNode } from "../packages/tsval/src/typed";
 
 /** A CST node as the bridge and the anchors see it (the subset of a `cstSpans` span that survives serialization). */
 export interface CstNode {

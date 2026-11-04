@@ -21,7 +21,7 @@
  */
 
 import type { CstNode, Edit, Span } from "./bridge";
-import { cstSpans } from "@brianjenkins94/bablr";
+import { cstSpans } from "../packages/bablr/src/index.js";
 import { findReach } from "@brianjenkins94/util/silo/reach";
 import { cstNodeAtSpan, openDrift, prepare } from "./bridge";
 import { ALL_CAPABILITIES, runCanary } from "./canary";
