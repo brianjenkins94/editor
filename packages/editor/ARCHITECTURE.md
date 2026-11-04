@@ -622,7 +622,8 @@ line; the editor), and what supersedes what. Where it starts:
   declaration, in the ledger, not inferred. Attribution from runs and tests checks a declaration (*Declared against
   observed*), it doesn't stand in for one. Runs and coverage are also how code shared between features is found:
   what more than one feature's runs reach is made a feature of its own, or split.
-- **One attribution of runs to features**, where there are two (`coverage` and `exercise`, *What doesn't fit* 4).
+- **One attribution of runs to features**: the ledger's (lib `ownersOf`). `coverage` tells what ran by owning feature, and
+  `exercise` went (*What doesn't fit* 4).
 - **History's three features** (above) are split by what's silo's and what's the editor's view of it.
 - **The rest of *What doesn't fit*** (two stores of what code can do, the subcommands, the leftovers) answered, or
   carried on with a reason, and decision 21 with them.

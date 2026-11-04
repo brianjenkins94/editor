@@ -235,7 +235,9 @@ How it's kept:
      fit* answered. The manifest is done (2026-11-03: its 66 features in the ledger, marked `moved from the manifest`, and
      its readers on the ledger), and every code file in the repository has an owner (decision 22). One owner a file is
      where that starts: once silo ingests coverage from runs and traces, reassess how to handle sharing from what they
-     show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case).
+     show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case). One attribution is
+     settled (the ledger's: silo README, *What doesn't fit* 4). Next for sharing: record each of today's tests' reach,
+     then *Declared against observed*.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.

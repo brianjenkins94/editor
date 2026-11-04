@@ -50,7 +50,7 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by feature), `features` (`--score`: derivations against the declared features), `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `exercise`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by owning feature), `features` (`--score`: derivations against the declared features), `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
 | Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
 ## What the prototype had, and where it is now
@@ -100,8 +100,11 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
 3. **Two stores of what code can do.** `baseline.json` holds what packages can do (Anticipate). `capabilities.json` and
    `capabilities/<user>.json` hold what the code can do and what it was seen doing (the capabilities extension's). How
    they relate isn't written down.
-4. **Two attributions of runs to features.** `coverage` (the command line) and `exercise` (the history extension) both
-   say which features ran. Both rest on the feature list, which is specific to this repo (*Derived history*, below: why it's parked).
+4. ~~**Two attributions of runs to features.**~~ Decided 2026-11-03: one, the ledger's. A file's features are who declares
+   it (lib `ownersOf`, decision 22), and `coverage` tells what ran by them. `exercise` had no callers left and went. What
+   runs and traces show is compared with the declaration, and doesn't stand in for it. That comparison isn't built:
+   *Declared against observed*, which is also how sharing gets reassessed, and it needs per-test reach recorded against
+   today's tests (`.silo/last-run/reach.json` is `full-editor`'s, whose tests are gone).
 5. **Which subcommands belong.** By the four jobs, all seven do: three for Track, two for Anticipate (with overlap),
    three for Remember, none for Gate. But they aren't grouped that way, the file's own header lists five of them, and
    `features` and `history` rest on the parked feature layer.
@@ -655,12 +658,8 @@ Built since:
   holds, unsaved edits included (`ts-analysis.ts`, `_history.read`), replays it on each pause and tells the History
   output channel what changed. **Nothing derived from edits is kept** (decided 2026-10-12): once you commit, the commit
   tells it; tries undone before any commit leave no trace.
-- **What runs say** (`exercise.ts`): **exercised** (a statement of its own code ran: its registration's handler and the
-  declarations it names, not what they reach further, nor the registering call), **dormant** (its file ran, its code
-  never did), **unobserved**. Evidence is on BABLR spans, placed by the editor's resolver; `exercise.ts` compares those
-  ranges with the TypeScript reading's, so analysis never touches BABLR.
 
-Where: lib's `util/silo` — `features.ts`, `graph.ts`, `history.ts`, `exercise.ts`, `ts-analysis.ts`, and in Node
+Where: lib's `util/silo` — `features.ts`, `graph.ts`, `history.ts`, `ts-analysis.ts`, and in Node
 `typescript.ts` and `git-snapshots.ts`; the command line's `silo features [repo]` and `silo history [repo] [--since]
 [--until]` (`--json`); the editor's `extensions/history`.
 
