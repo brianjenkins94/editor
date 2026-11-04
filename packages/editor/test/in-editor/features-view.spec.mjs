@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, runCommand } from "./editor.mjs";
+import { codeOf, openEditor, openFile, retype, runCommand } from "./editor.mjs";
 
 const entry = (what, tests) => ({ "status": "active", "why": what, "since": "2026-11-04", "what": what, ...tests === undefined ? {} : { "tests": tests } });
 const unit = (body) => `import assert from "node:assert/strict";\nimport * as fs from "node:fs";\nimport { test } from "node:test";\n\n${body}\n`;
@@ -17,11 +17,16 @@ const LEDGER = {
 	"Nothing yet": entry("Has no tests."),
 	"Viewing": entry("A suite and a spec.", ["suite.mjs", "view.spec.mjs"]),
 	"Writing": entry("Two tests on one file.", ["one.test.mjs", "two.test.mjs"]),
+	"Growing": entry("A test that comes to write.", ["grow.test.mjs"]),
 	"Gone": { "status": "removed", "why": "out", "since": "2026-11-04", "what": "Was here." }
 };
+const rule = (capability, resource) => ({ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": capability }, { "target_id": "resource", "operator_id": "matches", "argument": resource }] }, "then": [{ "action_id": "allow" }] });
 const WRITES = "test(\"writes\", () => {\n\tfs.writeFileSync(\"/workspace/shared.txt\", \"x\");\n\tassert.ok(fs);\n});";
 const files = {
 	".silo/features.json": JSON.stringify(LEDGER, null, 2) + "\n",
+	// (one rule these tests use, one none does: what's confirmed by running, and what isn't)
+	".silo/policy.json": JSON.stringify({ "version": 1, "rules": [rule("fs:write", "/workspace/*"), rule("net", "https://nobody.example/*")] }, null, 2) + "\n",
+	"grow.test.mjs": unit("test(\"grows\", () => {\n\tassert.ok(fs);\n});"),
 	"math.mjs": "export function add(one, other) {\n\treturn one + other;\n}\n\nexport function times(one, other) {\n\treturn one * other;\n}\n",
 	"add.test.mjs": unit("import { add } from \"./math.mjs\";\n\ntest(\"adds\", () => {\n\tassert.equal(add(1, 1), 2);\n});"),
 	"again.test.mjs": unit("import { add } from \"./math.mjs\";\n\ntest(\"adds again\", () => {\n\tassert.equal(add(2, 2), 4);\n});"),
@@ -37,9 +42,6 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	const workbench = await openEditor(page, files);
 	const row = (text) => workbench.locator(".fv-table tbody tr", { "hasText": text });
 	const run = async (file) => row(file).locator(`wa-button[aria-label='Run ${file}']`).click();
-	const allow = async () => {
-		await workbench.locator(".notification-toast").getByRole("button", { "name": "Allow" }).click({ "timeout": 30_000 });
-	};
 
 	await runCommand(workbench, "Features and Tests: Show");
 
@@ -90,9 +92,32 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 
 	// Two that write one file: each says it can't run in parallel, and why.
 	await run("one.test.mjs");
-	await allow();
 	await expect(row("one.test.mjs").locator("wa-badge", { "hasText": "fs:write" })).toHaveCount(1, { "timeout": 60_000 });
 	await run("two.test.mjs");
 	await expect(row(/^\S+ two\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, as one.test.mjs does", { "timeout": 60_000 });
 	await expect(row(/^\S+ one\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, as two.test.mjs does");
+
+	// A test that comes to use something says so, on its row.
+	await run("grow.test.mjs");
+	await expect(row("grow.test.mjs").locator("wa-relative-time")).toHaveCount(1, { "timeout": 60_000 });
+	await expect(row("grow.test.mjs")).not.toContainText("new");
+	await openFile(workbench, "grow.test.mjs");
+	await retype(workbench, "import * as fs from \"node:fs\"; import { test } from \"node:test\"; test(\"grows\", () => { fs.writeFileSync(\"/workspace/grown.txt\", \"x\"); });");
+	await run("grow.test.mjs");
+	await expect(row("grow.test.mjs").locator("wa-badge", { "hasText": "1 new" })).toHaveCount(1, { "timeout": 60_000 });
+
+	// And an allow rule no run has used is a problem, on the rule; one a run has used isn't. A person takes it out.
+	await runCommand(workbench, "View: Focus Problems");
+	// (filtered to it: the list draws only the rows it has room for)
+	await workbench.locator(".viewpane-filter input").fill("No test run");
+
+	const unused = workbench.locator(".markers-panel .monaco-list-row", { "hasText": "No test run has used this allow rule" });
+
+	await expect(unused).toHaveCount(1, { "timeout": 30_000 });
+	await unused.dblclick();
+	await codeOf(workbench).press("ControlOrMeta+.");
+	await workbench.locator(".action-widget .action-item, .action-widget .monaco-list-row", { "hasText": "Take this rule out" }).first().click({ "timeout": 15_000 });
+	await expect(workbench.locator(".editor-instance .view-lines")).not.toContainText("nobody.example", { "timeout": 15_000 });
+	await codeOf(workbench).press("ControlOrMeta+s");
+	await expect(unused).toHaveCount(0, { "timeout": 30_000 });
 });

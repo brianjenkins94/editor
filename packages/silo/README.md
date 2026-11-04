@@ -178,7 +178,10 @@ signals are in the gaps:
 - **A call the join didn't predict.** A blind spot in the analysis, or a package hiding what it does. It never just
   happens: the gate stops it before it's made and asks (allow, allow always, deny), and the answer is recorded in the
   run as an exception to the policy.
-- **The join allows what no run used.** A candidate for a narrower policy (least privilege).
+- **The join allows what no run used.** A candidate for a narrower policy (least privilege). In the editor, from its test
+  runs: an allow rule none of the runs kept has used is a problem on the rule, with a quick fix that takes it out, and never
+  removed by itself (workbench/capability-confirm.ts). Not yet: the same for the baseline's join, or the static half, whether
+  the code could still make the call.
 
 What this asks of the design:
 

@@ -408,6 +408,11 @@ How it's kept:
      custom view in the panel, as core has no way to open a tab of its own without exporting `registerEditorPane` from the
      component; *Features map*, the treemap, stays out. Not yet: `touched` and `resting`, CI's outcomes, coverage, per-test
      effects, or a filter. A UI spec's effects are the spec's, not the editor's it drives.
+   - *Capabilities confirmed by runs* 2026-11-04 (the user: re-confirm that code uses a capability, not let it grow and never
+     shrink). An allow rule no kept test run has used, after 5 runs since it was added, is a problem on the rule with a quick fix
+     (workbench/capability-confirm.ts), and a test's row says what it newly uses or has stopped using against its run before. Runs
+     are tests', so a rule only a person's debug run or a preview uses reads as unused. Not yet: the static half, whether the code
+     could still make the call, with *Capability findings in the code*; the baseline's join; capabilities by feature.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Each test's reach is kept, its lines of each
      file (`.silo/local/reach/`, test-runs.ts), `tests.affected` reads it (traces had no writer), and the table shows each file's
      reach, what only it reaches, and *touched*, with a button to run those. Measured, 386 passing tests of 64 files in the

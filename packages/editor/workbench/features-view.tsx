@@ -127,11 +127,21 @@ function blockOf(file: string, kind: Kind, writers: Map<string, Set<string>>, ru
 	return undefined;
 }
 
-function Effects({ run }: { "run": RunRecord | undefined }): JSX.Element | null {
+/** An effect as runs of a test compare: not what's different every time, a temporary folder's name or an address's query. */
+const shapeOf = ({ capability, resource }: RunRecord["effects"][number]): string => `${capability} ${resource.replace(/^(\/tmp\/[^/]*?)-?[A-Za-z0-9]{6}(?=\/|$)/u, "$1*").replace(/\?.*$/u, "")}`;
+
+function Effects({ run, before }: { "run": RunRecord | undefined; "before": RunRecord | undefined }): JSX.Element | null {
 	const byKind = Map.groupBy(run?.effects ?? [], (effect) => effect.capability);
+	const was = new Set(before?.effects.map(shapeOf));
+	const now = new Set(run?.effects.map(shapeOf));
+	// (what it uses now that it didn't, and what it's stopped: how its reach of the world changes, run to run)
+	const grew = before === undefined ? [] : [...now].filter((shape) => !was.has(shape));
+	const shrank = before === undefined ? [] : [...was].filter((shape) => !now.has(shape));
 
 	return (
 		<span class="wa-cluster wa-gap-3xs">
+			{grew.length === 0 ? null : <wa-badge variant="danger" title={grew.join("\n")}>{`${String(grew.length)} new`}</wa-badge>}
+			{shrank.length === 0 ? null : <wa-badge variant="success" title={shrank.join("\n")}>{`${String(shrank.length)} stopped`}</wa-badge>}
 			{[...byKind].map(([capability, effects]) => (
 				<wa-badge key={capability} appearance="outlined" variant={capability === "page:goto" || capability.endsWith(":write") ? "warning" : "neutral"} title={effects.map((effect) => `${effect.resource} (${String(effect.calls)}×, ${effect.how})`).join("\n")}>
 					{capability} {String(effects.length)}
@@ -214,7 +224,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										</td>
 										<td title={KIND_TITLE[kind]}>{kind}</td>
 										<td>{block === undefined ? null : <wa-badge variant="danger">{block}</wa-badge>}</td>
-										<td><Effects run={last} /></td>
+										<td><Effects run={last} before={runs.at(-2)} /></td>
 										<td title="Lines of code it ran, and how many no other test file runs.">
 											{reached === undefined || reached.lines === 0 ? null : reached.only > 0 ? `${String(reached.lines)} lines · ${String(reached.only)} only here` : <span class="wa-cluster wa-gap-3xs">{`${String(reached.lines)} lines`}<wa-badge appearance="outlined" variant="neutral">nothing only here</wa-badge></span>}
 										</td>
