@@ -49,6 +49,29 @@ async function sayWhatHappened() {
 		if (shown.some((line) => line.startsWith("tab "))) {
 			console.log(`[in-editor] on screen in ${frame.url().slice(0, 100)}:\n  ${shown.join("\n  ")}`);
 		}
+
+		// (a tab still unsaved: whether saving again gets through, which tells a dropped save from one stuck in its queue)
+		const again = await frame.evaluate(async () => {
+			const { api } = globalThis.__editor ?? {};
+
+			if (api === undefined || document.querySelector(".tab") === null) {
+				return undefined;
+			}
+
+			if (document.querySelector(".tab.dirty") === null) {
+				return "no tab unsaved";
+			}
+
+			const dirty = () => api.workspace.textDocuments.filter((document_) => document_.isDirty).map((document_) => document_.uri.path);
+			const before = dirty();
+			const saved = await Promise.race([api.workspace.saveAll(false), new Promise((resolve) => { setTimeout(() => { resolve("no answer in 20 s"); }, 20_000); })]);
+
+			return { "before": before, "saved": saved, "after": dirty(), "stillShownDirty": document.querySelector(".tab.dirty") !== null };
+		}).catch((error) => String(error));
+
+		if (again !== undefined) {
+			console.log(`[in-editor] saving again: ${JSON.stringify(again)}`);
+		}
 	}
 
 	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => !/^\{"context|^%c|^console\.group|^\s*$|^[←→]|observability\.|node_modules|ata\.|\.cdn/u.test(line)).slice(-120).map((line) => line.slice(0, 220)).join("\n  ")}`);
