@@ -354,7 +354,7 @@ How it's kept:
        a real page of it running in a frame, a save reaching it, a second server in one folder refused, stopping it.
      - *Preview windows: back* 2026-11-03 — `vite` opens a window onto its server (shell/preview-windows.tsx, on
        `app-window`), its page running, a save reaching it, as many windows as you open, the last closing stopping the
-       server. Tested in preview-windows.mjs, in CI's `workbench`. Out with its tap for now: a page's console and errors.
+       server. Tested in in-editor/preview-windows.spec.mjs, in CI's `workbench`. Out with its tap for now: a page's console and errors.
      - *Playwright tests in the debugger: back* 2026-11-03 — a `@playwright/test` file runs in the debugger against the
        preview window you have open, each op on its page through the shell (playwright-in-editor.mjs, in CI's `workbench`).
        packages/playwright came back as it was, held to real Playwright by its own tests. With no window, a test fails
@@ -390,6 +390,12 @@ How it's kept:
        held to real Playwright, and typing in an email or number field no longer throws. Seen once in six runs, not pinned down: `frame.evaluate: Execution
        context was destroyed` from the outer workbench while eslint.spec ran. A test run's results come only at its end, so
        a stall (120 s quiet: test-runs.ts) loses the tests that passed before it.
+       *Third and fourth moved:* in-editor/dev-server.spec.mjs and preview-windows.spec.mjs: `vite` typed in the inner editor's
+       terminal, its page running in the inner shell's window, a save retyped in Monaco reaching it, another window, closing,
+       `kill`. test/preview-windows.mjs is gone; test/dev-server.mjs keeps the service worker's answers (isolation headers, the
+       compiled module, 503 once stopped), which have no UI. Found: a click on a button whose icon is slotted into it was called
+       covered, the engine's walk up skipping the slot; held to real Playwright. A window of the size of the preview it opens in
+       covers the whole inner workbench, so a spec opens its file first and works by keyboard, and the palette takes Enter, not a click.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
      alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`

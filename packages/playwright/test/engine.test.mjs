@@ -330,6 +330,35 @@ test("typing into an EditContext, as real keys do: the same events, the same tex
 	assert.deepEqual(await seen(), theirs);
 });
 
+test("a click on a button whose icon is slotted into it, the icon what's under the pointer: not covered, on either side", async () => {
+	const clicks = async (click) => {
+		await page.setContent("<x-iconed><svg width=40 height=40 style='display:block'><rect width=40 height=40 /></svg></x-iconed>");
+		await page.addScriptTag({ "content": ENGINE });
+		await page.evaluate(() => {
+			if (customElements.get("x-iconed") === undefined) {
+				customElements.define("x-iconed", class extends HTMLElement {
+					constructor() {
+						super();
+						this.attachShadow({ "mode": "open" }).innerHTML = "<button style='padding:0;border:0'><slot></slot></button>";
+					}
+				});
+			}
+
+			globalThis.clicked = 0;
+			document.querySelector("x-iconed").shadowRoot.querySelector("button").addEventListener("click", () => {
+				globalThis.clicked += 1;
+			});
+		});
+		await click();
+
+		return page.evaluate(() => globalThis.clicked);
+	};
+
+	assert.equal(await clicks(async () => page.locator("x-iconed button").click({ "timeout": 2000 })), 1);
+	assert.equal(await clicks(async () => ours.locator("x-iconed button").click({ "timeout": 2000 })), 1);
+	await fresh();
+});
+
 test("keys, as real ones send them: each key's code and legacy keyCode, punctuation's not its character's", async () => {
 	const seenBy = async (press) => {
 		await fresh();

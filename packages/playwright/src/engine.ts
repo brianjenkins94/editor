@@ -720,7 +720,8 @@ function notActionable(element: Element, needsEnabled: boolean): string | undefi
 
 
 	const inElement = (found: Element): boolean => {
-		for (let at: Element | null = found; at !== null; at = composedParent(at)) {
+		// (through the slot it's assigned to, as the browser draws it and Playwright goes: an icon slotted into a shadow root's button is in that button)
+		for (let at: Element | null = found; at !== null; at = at.assignedSlot ?? composedParent(at)) {
 			if (at === element) {
 				return true;
 			}
