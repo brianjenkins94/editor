@@ -16,7 +16,8 @@
  *   (DAP's `exited`: extension.ts's `node.exit`).
  */
 import type { AskEvent, ListeningEvent, StdinRequest } from "@brianjenkins94/editor-api";
-import { createRpcClient } from "@brianjenkins94/hub";
+import { takeEffects } from "@brianjenkins94/editor-api/effects";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { asked, policyFor } from "./capability-stops";
 import { bridgeHub } from "./hub";
@@ -33,6 +34,9 @@ function terminalRun(session: vscode.DebugSession): string | undefined {
 }
 
 export function registerDebugEvents(context: vscode.ExtensionContext): void {
+	// What a run did through the editor, kept here as it did it (runtime-fs.ts): its workspace's files. Taken as the run ends.
+	serve(bridgeHub, "run.effects", (args) => ({ "effects": takeEffects((args as { "run": string }).run) }));
+
 	const rpc = createRpcClient(bridgeHub);
 	/** Each terminal's run's stdin subscription, by its session. */
 	const typing = new Map<string, () => void>();

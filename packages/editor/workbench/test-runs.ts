@@ -21,15 +21,16 @@
  *   its id, what it's doing and for how long, and the files done so far (`running`) — and `{ run }` waits on it again.
  *   So a run that's slow, stuck before a file's clock starts, or in a tab that went away reads as that to an agent,
  *   rather than as its tool call never coming back.
- * - `tests.outcomes`: how every test last came out, by its traces: what the side bar of features and tests shows.
+ * - `tests.history`: the runs kept here (`.silo/local/runs.jsonl`, this machine's): each file's run, when, how long, each
+ *   test's outcome and time, and what it did to the world (its effects). What the table of features and tests reads.
  */
-import type { TestReport, TestsEvent } from "@brianjenkins94/editor-api";
+import type { Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import type * as vscodeApi from "vscode";
 import type { GitReader } from "./git-service";
 import type { NodeRunner } from "./node-runner";
-import { serve } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { localTracesPath } from "@brianjenkins94/util/silo/layout";
 import { parseTraces } from "@brianjenkins94/util/silo/traces";
 import { waitFor } from "./readiness";
@@ -46,6 +47,10 @@ const READY_MS = 300_000;
 /** How long a call waits on its run before it answers with where the run is (it goes on, asked again by its id): well
  *  inside what an agent's tool call waits for, so a run that's slow, stuck or gone reads as that and not as silence. */
 const ANSWER_MS = 50_000;
+
+/** Where runs are kept, and how many of each file's. */
+const HISTORY = ".silo/local/runs.jsonl";
+const KEPT_RUNS = 30;
 
 /** Runs kept to be asked about by id: the latest that have ended, and any still going. */
 const KEPT = 20;
@@ -78,6 +83,17 @@ interface Asked { "message": string; "key": string; "scope": string; "request": 
 
 /** A test file's result, as a run answers it. */
 interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[] }
+
+/** One file's run, as it's kept: what the table of features and tests reads. */
+export interface RunRecord {
+	"file": string;
+	"at": string;
+	"ms": number;
+	"exitCode": number;
+	"stalled"?: string;
+	"tests": { "id": string; "outcome": string; "ms"?: number; "error"?: string }[];
+	"effects": Effect[];
+}
 
 /** A run of test files (tests.run): what it was asked, what it's doing, each file's result as it comes, and its end. */
 interface Batch {
@@ -115,6 +131,7 @@ interface Affected {
 }
 
 export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitReader, runner: NodeRunner): void {
+	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
 	const tracesOf = async (path: string): Promise<RunTrace[]> => parseTraces(await read(localTracesPath(path)) ?? "").filter((trace) => trace.test !== undefined);
@@ -180,36 +197,29 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return affected(Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "")) : undefined);
 	});
 
-	// How every test last came out, by its traces: what's been run here (features-view.ts).
-	serve(hub, "tests.outcomes", async () => {
-		const latest = new Map<string, Affected>();
-		const walk = async (folder: vscodeApi.Uri): Promise<void> => {
-			for (const [name, type] of await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscodeApi.FileType][])) {
-				const uri = vscode.Uri.joinPath(folder, name);
+	/** The runs kept, oldest first; each write waits for the one before, as files run at once end at once. */
+	let keeping: Promise<unknown> = Promise.resolve();
+	const historyUri = vscode.Uri.file(`${ROOT}/${HISTORY}`);
+	const readHistory = async (): Promise<RunRecord[]> => (await read(HISTORY) ?? "").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as RunRecord);
+	const keep = async (record: RunRecord): Promise<void> => {
+		keeping = keeping.then(async () => {
+			const runs = [...await readHistory(), record];
+			const ofThisFile = runs.filter((run) => run.file === record.file);
+			const dropped = new Set(ofThisFile.slice(0, Math.max(0, ofThisFile.length - KEPT_RUNS)));
 
-				if (type === vscode.FileType.Directory) {
-					await walk(uri);
-				} else if (name.endsWith(".jsonl")) {
-					for (const trace of parseTraces(decoder.decode(await vscode.workspace.fs.readFile(uri)))) {
-						const { test } = trace;
+			await vscode.workspace.fs.writeFile(historyUri, new TextEncoder().encode(runs.filter((run) => !dropped.has(run)).map((run) => JSON.stringify(run) + "\n").join("")));
+		}).catch(() => undefined);
 
-						if (test !== undefined && (latest.get(test.id)?.at ?? "") < trace.at) {
-							latest.set(test.id, { "id": test.id, "file": test.id.split(" › ")[0], "outcome": test.outcome, "at": trace.at, "stale": false, "reaches": [] });
-						}
-					}
-				}
-			}
-		};
+		await keeping;
+		hub.publish("tests.kept", { "file": record.file });
+	};
 
-		await walk(vscode.Uri.file(`${ROOT}/.silo/local/traces`));
-
-		return { "tests": [...latest.values()].map(({ id, file, outcome }) => ({ "id": id, "file": file, "outcome": outcome })) };
-	});
+	serve(hub, "tests.history", async () => ({ "history": await readHistory() }));
 
 	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A
 	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). One that
 	 *  does nothing for STALL_MS ends too (`stalled`: where it was). */
-	const runFile = async (file: string, signal: AbortSignal, approved: string[]): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "output": string; "attached": boolean; "asked"?: Asked; "stalled"?: string }> => {
+	const runFile = async (file: string, signal: AbortSignal, approved: string[]): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "asked"?: Asked; "stalled"?: string }> => {
 		const controller = new AbortController();
 		const stop = (): void => {
 			controller.abort();
@@ -219,6 +229,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stop);
 		let reported: TestsEvent | undefined;
+		let effects: Effect[] = [];
 		let asked: Asked | undefined;
 		let stalled: string | undefined;
 		let output = "";
@@ -263,7 +274,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			active = performance.now();
 
-			if (event.event === "tests") {
+			if (event.event === "effects") {
+				({ effects } = event.body as { "effects": Effect[] });
+			} else if (event.event === "tests") {
 				reported = event.body as TestsEvent;
 			} else if (event.event === "ask") {
 				const { line, callee, capability, resource, resolved, "file": where = `${ROOT}/${file}` } = event.body as { "line": number; "callee": string; "capability": string; "resource": string; "resolved"?: boolean; "file"?: string };
@@ -300,7 +313,12 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			run.end(debugged.attached ? debugged.exitCode : 1, controller.signal.aborted);
 
-			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
+			// (a workspace file's call is the editor's to make and to keep, so it isn't among what the debugger told)
+			const { "effects": kept } = await rpc.request("run.effects", { "run": run.id }, { "timeoutMs": 5000, "waitForResponderMs": 5000 }).catch(() => ({ "effects": [] as Effect[] })) as { "effects": Effect[] };
+
+			effects = [...effects, ...kept];
+
+			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "effects": effects, "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
 		} finally {
 			clearInterval(watching);
 			starting.dispose();
@@ -355,6 +373,16 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			if (result.asked !== undefined) {
 				return { "ask": result.asked };
 			}
+
+			await keep({
+				"file": file,
+				"at": new Date().toISOString(),
+				"ms": result.ms,
+				"exitCode": result.exitCode,
+				...result.stalled === undefined ? {} : { "stalled": result.stalled },
+				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.error === undefined ? {} : { "error": test.error } })),
+				"effects": result.effects
+			});
 
 			batch.ran.push({
 				"file": file,

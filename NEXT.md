@@ -399,12 +399,18 @@ How it's kept:
        *Fifth moved:* in-editor/pane-views.spec.mjs, its extension by its address (`?extension=`, which now takes a path on the
        site), with no server or interception. `editor.pane.toggleNative` had no UI, so it has a palette entry now
        (Pane: Switch Between Beside the Code and Annotations). test/pane-views.mjs is gone.
-   - *Features and tests: back* 2026-11-04 — the design's list view (silo README, *Tests by feature, in your face*), a side
-     bar: the ledger's features by status, each opening to its test files and tests, how each last came out here, and a button
-     that runs them (workbench/features-view.ts; tests: in-editor/features-view.spec.mjs). It's the view `runs_affected` and
-     `runs_tests` lacked. Not yet: `touched` and `resting`, CI's outcomes, coverage, or a test's history; a test's outcome is
-     its traces' or this session's run's, and its time this session's alone. *Features map*, the treemap, stays out. From here
-     the user means to look at which tests can share an editor and run in parallel.
+   - *Features and tests: back* 2026-11-04 — a table in the panel (workbench/features-view.tsx; Features and Tests: Show): the
+     ledger's features with their test files under them, each file's kind, whether it can't run in parallel and why, its last
+     run's effects, when it last passed and failed, its typical time, and a button that runs it; tests:
+     in-editor/features-view.spec.mjs. It reads the run record test-runs.ts now keeps, `.silo/local/runs.jsonl` (each file's
+     last 30 runs: time, each test's outcome and time, effects), and refreshes as any run ends. It's the view `runs_affected`
+     and `runs_tests` lacked. The flag so far: a browser suite, or a file that writes a path another does, by last runs only. A
+     custom view in the panel, as core has no way to open a tab of its own without exporting `registerEditorPane` from the
+     component; *Features map*, the treemap, stays out. Not yet: `touched` and `resting`, CI's outcomes, coverage, per-test
+     effects, or a filter. A UI spec's effects are the spec's, not the editor's it drives.
+   - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set): silo's *Selection by test*, by reach, and
+     tests that reach nothing another doesn't offered for a person to drop. Then rerun as you write, checking coverage and
+     capability expansion (silo README; removed: *Live runs after an edit*, *Coverage in the gutter*, *capability engine*).
    - **Tests at once** (2026-11-04; the user: tests are to be written to run in parallel, and a prominent column says which
      aren't). Unit files in one editor: 56 files, 261 s one at a time, 155 at 2, 89 at 4, 85 at 8, all 285 tests passing, and
      none fails beside a copy of itself; `tests.run` was dropping a run still going once 20 had ended since, which parallel

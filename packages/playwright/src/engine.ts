@@ -714,15 +714,19 @@ function notActionable(element: Element, needsEnabled: boolean): string | undefi
 		element.scrollIntoView({ "block": "center", "inline": "center" });
 	}
 
-	const box = element.getBoundingClientRect();
-	let hit = element.ownerDocument.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+	const hitAtMiddle = (): Element | null => {
+		const box = element.getBoundingClientRect();
+		const x = box.left + box.width / 2;
+		const y = box.top + box.height / 2;
+		let hit = element.ownerDocument.elementFromPoint(x, y);
 
-	// (the browser answers with the host: on into its shadow root, for what's really there)
-	for (let inside = hit?.shadowRoot?.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); inside !== null && inside !== undefined && inside !== hit; inside = hit?.shadowRoot?.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)) {
-		hit = inside;
-	}
+		// (the browser answers with the host: on into its shadow root, for what's really there)
+		for (let inside = hit?.shadowRoot?.elementFromPoint(x, y); inside !== null && inside !== undefined && inside !== hit; inside = hit?.shadowRoot?.elementFromPoint(x, y)) {
+			hit = inside;
+		}
 
-
+		return hit;
+	};
 	const inElement = (found: Element): boolean => {
 		// (through the slot it's assigned to, as the browser draws it and Playwright goes: an icon slotted into a shadow root's button is in that button)
 		for (let at: Element | null = found; at !== null; at = at.assignedSlot ?? composedParent(at)) {
@@ -733,10 +737,18 @@ function notActionable(element: Element, needsEnabled: boolean): string | undefi
 
 		return false;
 	};
-
 	// (nor is it covered by its own host: a slot's content, or a button in a shadow root, hits what holds it)
-	if (hit !== null && !inElement(hit) && !isHostOf(hit, element)) {
-		return `${describe(hit)} is on top of ${describe(element)}`;
+	const covered = (hit: Element | null): hit is Element => hit !== null && !inElement(hit) && !isHostOf(hit, element);
+
+	if (covered(hitAtMiddle())) {
+		// (scrolled out of a scrolling box, in view of the window: scrolled to, as Playwright does when a click is blocked)
+		element.scrollIntoView({ "block": "center", "inline": "center" });
+
+		const hit = hitAtMiddle();
+
+		if (covered(hit)) {
+			return `${describe(hit)} is on top of ${describe(element)}`;
+		}
 	}
 
 	return undefined;
