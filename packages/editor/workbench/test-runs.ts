@@ -21,6 +21,7 @@
  *   its id, what it's doing and for how long, and the files done so far (`running`) — and `{ run }` waits on it again.
  *   So a run that's slow, stuck before a file's clock starts, or in a tab that went away reads as that to an agent,
  *   rather than as its tool call never coming back.
+ * - `tests.outcomes`: how every test last came out, by its traces: what the side bar of features and tests shows.
  */
 import type { TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
@@ -177,6 +178,32 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		const { paths } = (args ?? {}) as { "paths"?: unknown };
 
 		return affected(Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "")) : undefined);
+	});
+
+	// How every test last came out, by its traces: what's been run here (features-view.ts).
+	serve(hub, "tests.outcomes", async () => {
+		const latest = new Map<string, Affected>();
+		const walk = async (folder: vscodeApi.Uri): Promise<void> => {
+			for (const [name, type] of await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscodeApi.FileType][])) {
+				const uri = vscode.Uri.joinPath(folder, name);
+
+				if (type === vscode.FileType.Directory) {
+					await walk(uri);
+				} else if (name.endsWith(".jsonl")) {
+					for (const trace of parseTraces(decoder.decode(await vscode.workspace.fs.readFile(uri)))) {
+						const { test } = trace;
+
+						if (test !== undefined && (latest.get(test.id)?.at ?? "") < trace.at) {
+							latest.set(test.id, { "id": test.id, "file": test.id.split(" › ")[0], "outcome": test.outcome, "at": trace.at, "stale": false, "reaches": [] });
+						}
+					}
+				}
+			}
+		};
+
+		await walk(vscode.Uri.file(`${ROOT}/.silo/local/traces`));
+
+		return { "tests": [...latest.values()].map(({ id, file, outcome }) => ({ "id": id, "file": file, "outcome": outcome })) };
 	});
 
 	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A

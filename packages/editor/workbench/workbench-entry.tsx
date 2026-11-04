@@ -44,6 +44,7 @@ import { wireWorkbenchHub } from "./bridge-link";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installDecisions } from "./decisions";
 import { installBablr } from "./bablr";
+import { installFeaturesView } from "./features-view";
 import { installEditorState } from "./editor-state";
 import { installFsTrace } from "./fs-trace";
 import { installPaneViews } from "./pane-views";
@@ -434,6 +435,8 @@ function maybeBoot(): void {
 				installDecisions(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner);
+				// Features and their tests, a side bar (features-view.ts).
+				installFeaturesView(api as typeof import("vscode"), workbenchHub, paneLog);
 
 				// The editor's theme follows the system's, as the shell's does (theme-follow.ts).
 				followSystemTheme(api as typeof import("vscode"), workbenchHub, () => publishColors?.());

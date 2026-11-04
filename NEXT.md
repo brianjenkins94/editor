@@ -399,6 +399,12 @@ How it's kept:
        *Fifth moved:* in-editor/pane-views.spec.mjs, its extension by its address (`?extension=`, which now takes a path on the
        site), with no server or interception. `editor.pane.toggleNative` had no UI, so it has a palette entry now
        (Pane: Switch Between Beside the Code and Annotations). test/pane-views.mjs is gone.
+   - *Features and tests: back* 2026-11-04 — the design's list view (silo README, *Tests by feature, in your face*), a side
+     bar: the ledger's features by status, each opening to its test files and tests, how each last came out here, and a button
+     that runs them (workbench/features-view.ts; tests: in-editor/features-view.spec.mjs). It's the view `runs_affected` and
+     `runs_tests` lacked. Not yet: `touched` and `resting`, CI's outcomes, coverage, or a test's history; a test's outcome is
+     its traces' or this session's run's, and its time this session's alone. *Features map*, the treemap, stays out. From here
+     the user means to look at which tests can share an editor and run in parallel.
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,

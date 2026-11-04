@@ -13,7 +13,52 @@
     "onDebug"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "editor-features",
+          "title": "Features and Tests",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "editor-features": [
+        {
+          "id": "editor.features",
+          "name": "Features and Tests"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "editor.features.refresh",
+          "when": "view == editor.features",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "editor.features.run",
+          "when": "view == editor.features && viewItem == runnable",
+          "group": "inline"
+        }
+      ]
+    },
     "commands": [
+      {
+        "command": "editor.features.refresh",
+        "title": "Refresh",
+        "category": "Features and Tests",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "editor.features.run",
+        "title": "Run Its Tests",
+        "category": "Features and Tests",
+        "icon": "$(run)"
+      },
       {
         "command": "editor.fs.trace",
         "title": "Trace File Calls…",
