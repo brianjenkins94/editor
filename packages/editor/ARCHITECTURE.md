@@ -120,10 +120,17 @@ stays inside its server, by its referer. A change to the workspace, however it w
 starts with the first server, or the first run's server to answer, and is never stopped, so stopping a run takes no
 server with it. A debug run's own server is answered the same way (`virtual.debug.<port>`, editor-api's runtime link).
 
+### Preview windows
+
+`preview.ready` opens a movable window in the shell (shell/preview-windows.tsx), the top frame, so it can go anywhere over the
+editor: an iframe on the server's address, as many per server as you open. Each server's hot updates are posted into every
+window of it and every frame its app nests, where the dev server's client in the page applies them. Closing a server's last
+window stops the server; a server stopped elsewhere closes its windows.
+
 ### Previews (out until reintroduced)
 
-The rewrite took the rest of previews out (*The rewrite, in place*): the preview windows, their taps and evidence, and the
-service worker's localhost route and capability gate. How they worked is this file at the `full-editor` tag.
+The rewrite took the rest of previews out (*The rewrite, in place*): their taps and evidence, and the service worker's
+localhost route and capability gate. How they worked is this file at the `full-editor` tag.
 
 **The service worker keeps no state.** The browser stops an idle service worker and starts a fresh global on the
 next event, so it remembers nothing between requests: it asks the page for a hub link whenever it starts

@@ -90,4 +90,7 @@ export const overlay = css({
 
 export const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-font-family-code)" });
 
+/** A preview window's page, filling its body, on a browser page's own background (a frame is transparent). */
+export const previewFrame = css({ "display": "block", "width": "100%", "height": "100%", "border": "none", "background": "Canvas" });
+
 export const overlayBody = css({ "flex": "1 1 auto", "overflow": "auto", "minHeight": 0 });

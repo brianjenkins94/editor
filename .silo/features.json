@@ -1456,23 +1456,22 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Preview windows": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Running a dev server opens movable windows onto your app, as many per server as you like, hot-reloading on every change and showing your app's console and errors in the editor.",
-    "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
+    "status": "active",
+    "why": "reintroduced (user, 2026-11-03): what in-editor Playwright drives, the end goal being every test running in the editor. Written again without DevTools, profiling, debug toolbars and capability prompts, each a feature of its own; a page's console and errors come back with its tap",
+    "since": "2026-11-03",
+    "what": "Running a dev server opens movable windows onto your app, as many per server as you like, hot-reloading on every change.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Preview windows*",
     "ways": [
-      "core module|installConsoleTap",
-      "hub subscription|`preview.hmr.${port}`",
+      "button|Another window onto this server",
       "hub subscription|preview.close",
-      "hub subscription|tap.worker.log"
+      "hub subscription|preview.ready"
     ],
     "paths": [
-      "packages/editor/previews/tap-shared.ts",
-      "packages/editor/previews/worker-tap.ts"
+      "packages/editor/shell/preview-windows.tsx"
     ],
-    "in": "517144b7",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "tests": [
+      "packages/editor/test/preview-windows.mjs"
+    ]
   },
   "Preview's dev server as a debug session": {
     "status": "removed",

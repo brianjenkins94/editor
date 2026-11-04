@@ -352,7 +352,10 @@ How it's kept:
      - *In-browser dev server: back* 2026-11-03 — `vite` in the terminal serves a project from the dev-server worker,
        answered at its address by the service worker, with hot updates. Tested in dev-server.mjs, in CI's `workbench`:
        a real page of it running in a frame, a save reaching it, a second server in one folder refused, stopping it.
-       Next: *Preview windows*, then *Playwright tests in the debugger*, the end goal being every test in the editor.
+     - *Preview windows: back* 2026-11-03 — `vite` opens a window onto its server (shell/preview-windows.tsx, on
+       `app-window`), its page running, a save reaching it, as many windows as you open, the last closing stopping the
+       server. Tested in preview-windows.mjs, in CI's `workbench`. Out with its tap for now: a page's console and errors.
+       Next: the tap, then *Playwright tests in the debugger*, the end goal being every test in the editor.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
      as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
      alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`
