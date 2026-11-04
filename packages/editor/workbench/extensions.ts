@@ -46,7 +46,7 @@ export function registerExtensionFolder(manifest: Manifest, base: URL, kind: Ext
  *  its code come from. */
 function folderOf(given: string): URL | undefined {
 	try {
-		const url = new URL(given);
+		const url = new URL(given, location.href);
 		const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
 
 		if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) {

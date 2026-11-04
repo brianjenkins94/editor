@@ -2,7 +2,7 @@
   "name": "pane-view-probe",
   "publisher": "editor-tests",
   "version": "0.0.1",
-  "description": "A pane view from outside the editor, for test/pane-views.mjs: a tab of its own, and items into the Margin.",
+  "description": "A pane view from outside the editor, for in-editor/pane-views.spec.mjs: a tab of its own, and items into the Margin.",
   "engines": { "vscode": "^1.100.0" },
   "browser": "./extension.js",
   "activationEvents": ["*"],

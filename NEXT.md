@@ -396,6 +396,9 @@ How it's kept:
        compiled module, 503 once stopped), which have no UI. Found: a click on a button whose icon is slotted into it was called
        covered, the engine's walk up skipping the slot; held to real Playwright. A window of the size of the preview it opens in
        covers the whole inner workbench, so a spec opens its file first and works by keyboard, and the palette takes Enter, not a click.
+       *Fifth moved:* in-editor/pane-views.spec.mjs, its extension by its address (`?extension=`, which now takes a path on the
+       site), with no server or interception. `editor.pane.toggleNative` had no UI, so it has a palette entry now
+       (Pane: Switch Between Beside the Code and Annotations). test/pane-views.mjs is gone.
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,

@@ -25,6 +25,11 @@
         "category": "Git"
       },
       {
+        "command": "editor.pane.toggleNative",
+        "title": "Switch Between Beside the Code and Annotations",
+        "category": "Pane"
+      },
+      {
         "command": "editor.bablr.check",
         "title": "Check Which Files Parse…",
         "category": "BABLR"

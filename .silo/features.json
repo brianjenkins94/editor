@@ -1344,7 +1344,7 @@
     ],
     "tests": [
       "packages/editor/test/fixtures/pane-view",
-      "packages/editor/test/pane-views.mjs"
+      "packages/editor/test/in-editor/pane-views.spec.mjs"
     ]
   },
   "Parse TypeScript into a lossless CST": {
