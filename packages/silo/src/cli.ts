@@ -10,6 +10,8 @@
  *   silo check [repo] [--prices] [--json]              the ledger's drift from the code (each with what deleting its
  *                                                        feature would free), the dormant ways in, and what the runs'
  *                                                        packages did beyond the baseline
+ *   silo observed <reach> [--repo …] [--json]          each test against the features its file declares: what its reach
+ *                                                        (a folder of `<suite>.json`) says of the ledger's boundaries
  *   silo remove <entry> [why] [--key …] [--paths …]    take a feature out: what only it reaches, its package manifests' entries,
  *                                                        and a tombstone in the ledger — left for review
  *   silo restore <entry>                               bring a removed feature back, from its tombstone
@@ -40,6 +42,7 @@ import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianje
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
 import { installCommand, packageManagerOf, pinOfRequest, workspacePins } from "@brianjenkins94/util/silo/install";
+import { observedAgainstDeclared, observedText, parseReach } from "@brianjenkins94/util/silo/observed";
 import { byFile, byFolder, byReach, byTests, codeOwners, linkedBySubjects, scoreGrouping, testsFromRecords } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
@@ -634,6 +637,33 @@ export const app = subcommands({
 					process.stderr.write(`silo coverage: ${unparsed.length} file${unparsed.length === 1 ? "" : "s"} ran but couldn't be parsed, so what ran there isn't counted:\n${unparsed.map((line) => "  " + line).join("\n")}\n`);
 					process.exitCode = 1;
 				}
+			}
+		}),
+		command({
+			"name": "observed",
+			"description": "Each test against the features its file declares, by the statements few tests ran: where what runs shows disagrees with what the ledger says, and what sharing there is to reassess. Reads a folder of `<suite>.json`, as COVERAGE=1 writes them and a dispatched architecture run uploads them.",
+			"config": juvy({
+				"reach": { "format": String, "default": "", "positional": true, "doc": "The folder of each suite's reach." },
+				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." },
+				"json": jsonFlag
+			}),
+			"handler": (config) => {
+				const repo = repoOf(config.get("repo"));
+				const folder = path.resolve(config.get("reach"));
+				const tracked = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n");
+				const tests = fs.readdirSync(folder).filter((file) => file.endsWith(".json")).flatMap((file) => {
+					const suite = file.replace(/\.json$/u, "");
+					const candidates = tracked.filter((each) => new RegExp(`(^|/)test/(.*/)?${suite.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\.[cm]?[jt]s$`, "u").test(each));
+
+					if (candidates.length !== 1) {
+						throw new Error(`${file}: expected one test file named ${suite}, found ${String(candidates.length)}`);
+					}
+
+					return parseReach(candidates[0]!, fs.readFileSync(path.join(folder, file)));
+				});
+				const observed = observedAgainstDeclared(ledgerOf(repo), tests);
+
+				process.stdout.write(config.get("json") ? JSON.stringify(observed, undefined, "\t") + "\n" : observedText(observed));
 			}
 		}),
 		command({

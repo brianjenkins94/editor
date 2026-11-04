@@ -247,3 +247,43 @@ test("coverage: what ran is told by the feature declared to own its file, what n
 
 	assert.match(told.stdout, /\*\*Notes\*\* — started running: `app\.ts#go`/u);
 });
+
+test("observed: each test against what its file declares, from a folder of its suite's reach", async () => {
+	const reach = await fs.mkdtemp(path.join(fs.tmpdir(), "silo-reach-"));
+	const fresh = await repository({ "2026-10-01": {
+		".silo/features.json": JSON.stringify({ "Notes": { "status": "active", "why": "w", "since": "2026-10-01", "what": "N.", "paths": ["notes.ts"], "tests": ["test/notes.mjs"] }, "Git": { "status": "active", "why": "w", "since": "2026-10-01", "what": "G.", "paths": ["git.ts"] } }),
+		"notes.ts": "",
+		"git.ts": "",
+		"test/notes.mjs": ""
+	} });
+	const statements = (from: number): number[][] => Array.from({ "length": 25 }, (_, index) => [from + index]);
+
+	fs.writeFileSync(path.join(reach, "notes.json"), JSON.stringify({ "stray": { "git.ts": statements(0) }, "own": { "notes.ts": statements(100) } }));
+
+	const told = spawnSync("npx", ["tsx", CLI, "observed", reach, "--repo", fresh], { "encoding": "utf8" });
+
+	assert.equal(told.status, 0, told.stderr);
+	assert.match(told.stdout, /\| 0% \| 25 \| notes\.mjs: stray \| Git 25 \|/u);
+	assert.match(told.stdout, /\| 100% \| 25 \| notes\.mjs: own \| Notes 25 \|/u);
+
+	fs.writeFileSync(path.join(reach, "nowhere.json"), "{}");
+	assert.match(spawnSync("npx", ["tsx", CLI, "observed", reach, "--repo", fresh], { "encoding": "utf8" }).stderr, /nowhere\.json: expected one test file named nowhere, found 0/u);
+});
+
+test("remove: the tests only it names go with it, one another feature names stays, and its restore has them", async () => {
+	const entry = (paths: string[], tests: string[]): unknown => ({ "status": "active", "why": "w", "since": "2026-10-01", "what": "W.", "paths": paths, "tests": tests });
+	const fresh = await repository({ "2026-10-01": {
+		".silo/features.json": JSON.stringify({ "Old": entry(["old/a.ts"], ["test/old.mjs", "test/both.mjs"]), "Kept": entry(["kept.ts"], ["test/both.mjs"]) }),
+		"old/a.ts": "export const a = 1;\n",
+		"kept.ts": "export const kept = 1;\n",
+		"test/old.mjs": "",
+		"test/both.mjs": ""
+	} });
+	const removed = spawnSync("npx", ["tsx", CLI, "remove", "Old", "gone", "--repo", fresh], { "encoding": "utf8" });
+
+	assert.equal(removed.status, 0, removed.stderr + removed.stdout);
+	assert.equal(fs.existsSync(path.join(fresh, "test/old.mjs")), false);
+	assert.equal(fs.existsSync(path.join(fresh, "test/both.mjs")), true);
+	assert.equal(fs.existsSync(path.join(fresh, "old/a.ts")), false);
+	assert.match(JSON.parse(fs.readFileSync(path.join(fresh, ".silo/features.json")))["Old"].restore, /old\/a\.ts.*test\/old\.mjs/u);
+});

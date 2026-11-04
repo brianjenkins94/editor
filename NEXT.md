@@ -236,8 +236,11 @@ How it's kept:
      its readers on the ledger), and every code file in the repository has an owner (decision 22). One owner a file is
      where that starts: once silo ingests coverage from runs and traces, reassess how to handle sharing from what they
      show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case). One attribution is
-     settled (the ledger's: silo README, *What doesn't fit* 4). Next for sharing: record each of today's tests' reach,
-     then *Declared against observed*.
+     settled (the ledger's: silo README, *What doesn't fit* 4), and `silo observed` compares each test's reach with it. Next
+     for sharing: dispatch the architecture workflow for CI's reach, read what it says, and decide. That route is a stopgap
+     (the ledger's *What each test ran*, an experiment): the end goal is every test running in the editor, in the browser,
+     with in-editor Playwright driving previews and tsval running the tests, so what a test ran is its trace. It needs
+     *Preview windows* and *Playwright tests in the debugger* back, and `silo observed` reading traces.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.

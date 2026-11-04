@@ -82,8 +82,16 @@
           "run": "pnpm --filter ./packages/editor exec node --import tsx --test --test-concurrency=1 --test-global-setup=test/architecture-harness.mjs ${{ matrix.files }}",
           "env": {
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
-            "PERF_BASELINE": "/tmp/performance-baseline/performance.json"
+            "PERF_BASELINE": "/tmp/performance-baseline/performance.json",
+            # Dispatched by hand, what each test ran is recorded (build/coverage.ts), for `silo observed`. Not on every run:
+            # instrumented modules are slower, and not while performance measures.
+            "COVERAGE": "${{ github.event_name == 'workflow_dispatch' && matrix.shard != 'performance' && '1' || '' }}"
           }
+        },
+        {
+          "if": "${{ always() && github.event_name == 'workflow_dispatch' && matrix.shard != 'performance' }}",
+          "uses": "actions/upload-artifact@v4",
+          "with": { "name": "reach-${{ matrix.shard }}", "path": "/tmp/architecture-reach/*.json", "if-no-files-found": "error" }
         },
         # This run's results — the next one's baseline — and something to look at when a budget fails.
         {
