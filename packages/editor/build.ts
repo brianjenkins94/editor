@@ -294,7 +294,9 @@ export async function preBuild(): Promise<void> {
 					// toolchain beside it
 					"lsp/eslint-worker": resolvePath("./extensions/eslint/worker.ts"),
 					// BABLR's worker (workbench/bablr.ts starts it): which files its grammar takes
-					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts")
+					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts"),
+					// (the dev servers' worker, started for the first one)
+					"lsp/node-worker": resolvePath("./workers/node-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",

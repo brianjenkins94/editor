@@ -1,11 +1,14 @@
 /**
  * Main-thread side of running programs: every run is a debug run (RUNNING.md) — `debug` launches one under the tsval
  * debug adapter (the ext host), its output, listening and exit on `node.out/listening/exit.<runId>`, its stdin
- * `node.stdin.<runId>` — and what's running, in one registry (runs.ts).
+ * `node.stdin.<runId>` — what's running, in one registry (runs.ts), and the dev servers: the dev-server worker
+ * (workers/node-worker.ts), started for the first one and never stopped, so stopping a run takes no server with it.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunRegistry } from "./runs";
-import { serve } from "@brianjenkins94/hub";
+import { watchWorker } from "@brianjenkins94/editor-api/failures";
+import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
+import { virtualUrl } from "../shared/virtual-path";
 import { createRunRegistry } from "./runs";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
@@ -36,11 +39,30 @@ export interface NodeRunner {
 	"endStdin": () => void;
 	/** Whether a process is currently running (the terminal routes keystrokes to stdin while it is). */
 	"isRunning": () => boolean;
+	/** Start a dev server on `root` of the shared workspace, on `port`. Its address, which the service worker answers. */
+	"startDevServer": (port: number, root: string) => Promise<string>;
+	"stopDevServer": (port: number) => Promise<void>;
+	/** Each hot update of the dev server on `port`. Returns an unsubscribe. */
+	"onDevServerUpdate": (port: number, handler: (message: unknown) => void) => () => void;
 }
 
 /** The runner the terminal and the test runner drive, on `hub`. */
-export function createNodeRunner(hub: Hub): NodeRunner {
+export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer): NodeRunner {
 	let currentRunId: string | undefined;
+	const rpc = createRpcClient(hub);
+	let devWorker: Worker | undefined;
+
+	/** The dev-server worker, started once: for the first dev server, or the first run's server to answer. */
+	const startWorker = (): void => {
+		if (devWorker === undefined) {
+			devWorker = new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" });
+			watchWorker(devWorker, "node-worker");
+			hub.link(portTransport(devWorker));
+		}
+	};
+
+	// (what it mounts: the same zen-fs. Null without cross-origin isolation: it then runs on its own root.)
+	serve(hub, "workspace.buffer", () => workspaceBuffer ?? null);
 
 	// A run: launched under the tsval debug adapter (ext host), on `node.out/exit.<runId>` — the adapter (or its
 	// terminate) relays onto them. The adapter spawns its own debug worker.
@@ -57,6 +79,7 @@ export function createNodeRunner(hub: Hub): NodeRunner {
 		});
 		// It listens: a service, with its port.
 		const offListening = hub.subscribe(`node.listening.${runId}`, (data) => {
+			startWorker();
 			hooks.onListening?.((data as { "port": number }).port);
 		});
 
@@ -146,6 +169,21 @@ export function createNodeRunner(hub: Hub): NodeRunner {
 				hub.publish(`node.stdin.${currentRunId}`, { "end": true });
 			}
 		},
-		"isRunning": () => currentRunId !== undefined
+		"isRunning": () => currentRunId !== undefined,
+		"startDevServer": async (port, root) => {
+			startWorker();
+			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 });
+
+			// (this tab's, as the one service worker serves every tab: the app realm knows which it is)
+			const tab = await rpc.request("virtual.tab", undefined, { "timeoutMs": 5000, "waitForResponderMs": 5000 }) as string;
+
+			return virtualUrl(location.href.split("__vscode__/")[0]!, tab, port);
+		},
+		"stopDevServer": async (port) => {
+			await rpc.request("preview.stop", { "port": port }, { "timeoutMs": 10_000 }).catch(() => undefined);
+		},
+		"onDevServerUpdate": (port, handler) => hub.subscribe(`preview.hmr.${String(port)}`, (message) => {
+			handler(message);
+		})
 	};
 }

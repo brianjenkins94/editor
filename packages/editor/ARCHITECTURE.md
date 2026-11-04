@@ -109,12 +109,21 @@ commands). That's how `history` is built.
   (*Extension points* 2). No messages at all, so the architecture reports observe the workspace by wrapping each realm's
   `/workspace` mount (`architecture-zenfs.ts`).
 
+### The dev server
+
+`vite` in the terminal (or a project's `"dev": "vite"`) starts almostnode's in-browser Vite dev server in the dev-server
+worker (workers/node-worker.ts), on the shared workspace filesystem, and says its address:
+`<base>/__virtual__/<tab>/<port>/`. Every request to that address is answered by the **service worker**, which calls the
+server over the hub: `virtual.request.<tab>` to that tab's root, which asks its worker. An absolute path a page of it uses
+stays inside its server, by its referer. A change to the workspace, however it was made, reaches the worker as
+`workspace.changed`, and each server under whose folder it is sends its hot update on `preview.hmr.<port>`. The worker
+starts with the first server, or the first run's server to answer, and is never stopped, so stopping a run takes no
+server with it. A debug run's own server is answered the same way (`virtual.debug.<port>`, editor-api's runtime link).
+
 ### Previews (out until reintroduced)
 
-The rewrite took previews out (*The rewrite, in place*): the node worker's in-browser Vite dev server, the preview
-windows, their taps and evidence, and the service worker's `/__virtual__/` routing and capability gate. How they
-worked is this file at the `full-editor` tag. A debug run's own server is still answered (the workspace runtime's
-`answerServer`, editor-api's runtime link), with nothing asking it until previews come back.
+The rewrite took the rest of previews out (*The rewrite, in place*): the preview windows, their taps and evidence, and the
+service worker's localhost route and capability gate. How they worked is this file at the `full-editor` tag.
 
 **The service worker keeps no state.** The browser stops an idle service worker and starts a fresh global on the
 next event, so it remembers nothing between requests: it asks the page for a hub link whenever it starts

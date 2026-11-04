@@ -387,7 +387,7 @@ function maybeBoot(): void {
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner
 				// (worker) is shared by every terminal.
-				const nodeRunner = createNodeRunner(workbenchHub);
+				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
 
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 				installFsTrace(workbenchHub, api as typeof import("vscode"), paneLog);

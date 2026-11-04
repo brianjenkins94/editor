@@ -1008,21 +1008,28 @@
     ]
   },
   "In-browser dev server": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Your app's dev server (Vite) runs inside the browser on the workspace's files, and a program's own server is served to the preview the same way; an agent can force its cold-start race to check for transform errors.",
-    "docs": "packages/editor/ARCHITECTURE.md, *The live preview, end to end*",
+    "status": "active",
+    "why": "reintroduced (user, 2026-11-03: the end goal is every test running in the editor, with in-editor Playwright driving previews): what Preview windows and Playwright stand on. The agent's forced cold-start race (provoke) stays out, having no UI, and instrumenting, recorded stops and taps come back with their own features",
+    "since": "2026-11-03",
+    "what": "Your app's dev server (Vite) runs inside the browser on the workspace's files, started by `vite` or `npm run dev` in the terminal: its pages answered at their own address by the service worker, hot updates on every change, and a program's own server answered the same way.",
+    "docs": "packages/editor/ARCHITECTURE.md, *The dev server*",
     "ways": [
-      "hub request|`virtual.debug.${listening}`",
-      "hub request|preview.provoke",
+      "hub request|`virtual.request.${tab}`",
       "hub request|preview.start",
-      "hub request|preview.stops",
-      "hub request|provoke.round",
-      "hub request|virtual.request"
+      "hub request|preview.stop",
+      "hub request|virtual.request",
+      "hub request|virtual.tab",
+      "hub request|workspace.buffer",
+      "hub subscription|`preview.hmr.${String(port)}`"
     ],
-    "in": "517144b7",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/shared/virtual-path.ts",
+      "packages/editor/workers/node-worker.ts"
+    ],
+    "tests": [
+      "packages/editor/test/dev-server.mjs",
+      "packages/editor/test/virtual-path.test.mjs"
+    ]
   },
   "Kill switch and switches": {
     "status": "active",
