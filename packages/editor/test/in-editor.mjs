@@ -54,15 +54,46 @@ async function sayWhatHappened() {
 	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => !/^\{"context|^%c|^console\.group|^\s*$|^[←→]|observability\.|node_modules|ata\.|\.cdn/u.test(line)).slice(-120).map((line) => line.slice(0, 220)).join("\n  ")}`);
 }
 
+/** How many specs run at once: each has an editor of its own in a window of its own. */
+const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 3);
+let answers;
+
+/** Every spec's run, started once, `AT_ONCE` at a time: each test here awaits its own. */
+function runs() {
+	if (answers === undefined) {
+		const left = [...SPECS];
+		const settled = new Map(SPECS.map((spec) => {
+			let finish;
+			const promise = new Promise((resolve) => { finish = resolve; });
+
+			return [spec, { "promise": promise, "finish": finish }];
+		}));
+		const started = Date.now();
+
+		answers = settled;
+		void Promise.all(Array.from({ "length": AT_ONCE }, async () => {
+			while (left.length > 0) {
+				const spec = left.shift();
+
+				settled.get(spec).finish(await ran(spec).catch((error) => ({ "tests": [], "error": String(error) })));
+			}
+		})).then(() => {
+			console.log(`all specs, ${String(AT_ONCE)} at once: ${String(Date.now() - started)} ms`);
+		});
+	}
+
+	return answers;
+}
+
 for (const spec of SPECS) {
 	test(spec, async () => {
-		const file = await ran(spec);
+		const file = await runs().get(spec).promise;
 
 		if (file.tests.length === 0 || file.tests.some(({ outcome }) => outcome !== "pass")) {
 			await sayWhatHappened();
 		}
 
 		assert.deepEqual(file.tests.filter(({ outcome }) => outcome !== "pass").map(({ id, error }) => `${id}: ${error}`), []);
-		assert.ok(file.tests.length > 0, file.stalled ?? file.output ?? "it ran something");
+		assert.ok(file.tests.length > 0, file.stalled ?? file.error ?? file.output ?? "it ran something");
 	});
 }

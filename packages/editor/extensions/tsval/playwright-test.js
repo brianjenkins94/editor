@@ -1,7 +1,7 @@
 /**
  * `@playwright/test`, as a test file run in the editor has it: Playwright's test API over the editor's node:test
  * (node-test.js, so each test is told and traced as any other, and stepping and breakpoints work in it), with a `page`
- * per test that drives the preview you have open. The page and `expect` are packages/playwright's, handed over by the
+ * per test that has a window of its own: the preview you have open, or the one it opens by going somewhere. The page and `expect` are packages/playwright's, handed over by the
  * debug worker (`__editorPlaywright`): they run in the worker, not stepped, and each op runs on the preview's page in
  * the shell (`playwright.run`).
  *
@@ -35,6 +35,8 @@ function fixturesOf(context) {
 
 		known = { "page": host.page(), "browserName": "chromium" };
 		fixtures.set(context, known);
+		// (its window, done with as the test ends; a failed test's left open, to look at)
+		context.after?.(async () => host.release(known.page, context.passed === false));
 	}
 
 	return known;

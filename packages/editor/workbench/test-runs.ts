@@ -47,7 +47,7 @@ const READY_MS = 300_000;
  *  inside what an agent's tool call waits for, so a run that's slow, stuck or gone reads as that and not as silence. */
 const ANSWER_MS = 50_000;
 
-/** Runs kept to be asked about by id: the latest. */
+/** Runs kept to be asked about by id: the latest that have ended, and any still going. */
 const KEPT = 20;
 
 /** How long a file's run may do nothing (no session, output, question or `busy`) before it's ended as stuck. */
@@ -379,7 +379,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		};
 	};
 
-	/** The runs, by id, to be asked about again: the latest KEPT. */
+	/** The runs, by id, to be asked about again: any still going, and the latest of the rest. */
 	const batches = new Map<string, Batch>();
 	const startBatch = (args: Record<string, unknown>): Batch => {
 		const batch: Batch = { "id": crypto.randomUUID().slice(0, 8), "args": args, "ran": [], "controller": new AbortController(), "done": Promise.resolve() };
@@ -393,7 +393,10 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		});
 		batches.set(batch.id, batch);
 
-		for (const id of [...batches.keys()].slice(0, Math.max(0, batches.size - KEPT))) {
+		// (the oldest that have ended: one still going is still being asked about, however many have started and ended since)
+		const ended = [...batches].filter(([, each]) => each.result !== undefined || each.error !== undefined).map(([id]) => id);
+
+		for (const id of ended.slice(0, Math.max(0, batches.size - KEPT))) {
 			batches.delete(id);
 		}
 

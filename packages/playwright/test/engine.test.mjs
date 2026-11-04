@@ -359,6 +359,41 @@ test("a click on a button whose icon is slotted into it, the icon what's under t
 	await fresh();
 });
 
+test("a frame driven as a page keeps its focus when another takes it, and is told focus moving within it", async () => {
+	await page.setContent("<iframe id=a srcdoc='<input id=one><input id=two>'></iframe><iframe id=b srcdoc='<input id=other>'></iframe>");
+	await page.addScriptTag({ "content": ENGINE });
+
+	const told = await page.evaluate(async () => {
+		const [a, b] = ["a", "b"].map((id) => document.getElementById(id));
+
+		await new Promise((resolve) => { setTimeout(resolve, 50); });
+
+		const run = (frame, id) => globalThis.__engine.run(frame.contentDocument, { "action": "focus", "args": [], "steps": [{ "kind": "css", "selector": `#${id}` }] });
+		const lost = [];
+
+		a.contentDocument.getElementById("one").addEventListener("blur", () => { lost.push("one"); });
+		run(a, "one");
+		run(b, "other");
+
+		await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+		const whileAway = [...lost];
+		const stayed = a.contentDocument.activeElement.id;
+
+		run(a, "two");
+		await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+		return { "whileAway": whileAway, "stayed": stayed, "after": lost, "hasFocus": a.contentDocument.hasFocus() };
+	});
+
+	assert.equal(told.stayed, "one", "what it had focused, it still has");
+
+	assert.deepEqual(told.whileAway, [], "another frame taking focus isn't focus leaving, to this one");
+	assert.deepEqual(told.after, ["one"], "focus moving within it is");
+	assert.equal(told.hasFocus, true);
+	await fresh();
+});
+
 test("keys, as real ones send them: each key's code and legacy keyCode, punctuation's not its character's", async () => {
 	const seenBy = async (press) => {
 		await fresh();

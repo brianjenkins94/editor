@@ -9,7 +9,7 @@
  *
  * What's here: `test` (`it`), `describe` (`suite`), their `.skip` and `.todo` (and `.only`, run as any other), the
  * `skip` and `todo` options, `before`, `after`, `beforeEach`, `afterEach`, and a test's context: `name`, `diagnostic`,
- * `skip`, `todo`, `test`, `after` and `assert` (node:assert). Callback tests (`(t, done)`) too. Not here: `mock`,
+ * `skip`, `todo`, `test`, `after`, `passed` and `assert` (node:assert). Callback tests (`(t, done)`) too. Not here: `mock`,
  * snapshots, `only` filtering, timeouts and concurrency — a test that never settles ends with the run.
  */
 "use strict";
@@ -176,6 +176,7 @@ async function runTest(node, titles, suite, depth) {
 	const afters = [];
 	let skipped;
 	let todoed = todo !== undefined && todo !== false ? todo : undefined;
+	let error;
 	const context = {
 		"name": node.name,
 		"assert": assert,
@@ -183,6 +184,7 @@ async function runTest(node, titles, suite, depth) {
 		"skip": (message) => { skipped = message ?? true; },
 		"todo": (message) => { todoed = message ?? true; },
 		"after": (fn) => { afters.push(fn); },
+		get "passed"() { return error === undefined; },
 		"test": (...args) => {
 			const { name, options, fn } = parse(...args);
 			const child = { "kind": "test", "name": String(name), "options": options, "fn": fn, "children": [], "hooks": hooks(), "parent": node };
@@ -194,7 +196,6 @@ async function runTest(node, titles, suite, depth) {
 		}
 	};
 	const suites = chain(suite);
-	let error;
 
 	tell("start", JSON.stringify(titles));
 

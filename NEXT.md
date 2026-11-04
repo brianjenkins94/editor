@@ -405,6 +405,15 @@ How it's kept:
      `runs_tests` lacked. Not yet: `touched` and `resting`, CI's outcomes, coverage, or a test's history; a test's outcome is
      its traces' or this session's run's, and its time this session's alone. *Features map*, the treemap, stays out. From here
      the user means to look at which tests can share an editor and run in parallel.
+   - **Tests at once** (2026-11-04; the user: tests are to be written to run in parallel, and a prominent column says which
+     aren't). Unit files in one editor: 56 files, 261 s one at a time, 155 at 2, 89 at 4, 85 at 8, all 285 tests passing, and
+     none fails beside a copy of itself; `tests.run` was dropping a run still going once 20 had ended since, which parallel
+     runs hit. An editor opens in about 1 s, so a test keeps one of its own. Specs: each test's page has a window of its own,
+     released as it ends and left open if it failed (shell/preview-windows.tsx), and a frame driven as a page keeps its focus when
+     another takes it (packages/playwright, `keepFocus`), since only one frame on a page can really have it. All 7 specs: 50 s
+     one at a time, 40 s at 3, 41 s at 5, the ESLint spec the floor; test/in-editor.mjs runs 3. At 7 the page crashed, cause not
+     found. `page.goto` is among a run's effects (`page:goto`), for the column to flag. To come: what a test touches (the gate's
+     effects) as the source of that flag; each grant re-confirmed by the code and by runs, so capabilities can shrink.
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,

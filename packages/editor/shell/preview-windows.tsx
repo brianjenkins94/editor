@@ -8,8 +8,9 @@
  * the dev server's client in the page applies them. Closing a window closes just it, but closing a server's last one stops
  * the server (`preview.close`), which is how a preview is dismissed; a server stopped elsewhere closes its windows.
  *
- * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): on the
- * window you have open, the one last used. A preview's frame is same-origin with the shell, so its DOM is right here.
+ * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): each
+ * test's page has a window of its own while it runs, so tests can run at once: the one it opens by going somewhere, or else
+ * the one you've used last that no other page has. A preview's frame is same-origin with the shell, so its DOM is right here.
  */
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
@@ -48,11 +49,11 @@ function install(hub: Hub): void {
 		used.push(element);
 	};
 
-	const open = (port: number): void => {
+	const open = (port: number): HTMLElement | undefined => {
 		const server = servers.get(port);
 
 		if (server === undefined) {
-			return;
+			return undefined;
 		}
 
 		const frame = document.createElement("iframe");
@@ -93,6 +94,8 @@ function install(hub: Hub): void {
 		element.addEventListener("pointerdown", () => {
 			useWindow(element);
 		});
+
+		return element;
 	};
 
 	hub.subscribe("preview.ready", (data) => {
@@ -133,16 +136,58 @@ function install(hub: Hub): void {
 		}
 	});
 
-	serve(hub, "playwright.run", async (args) => {
-		const { call, "args": given = [] } = args as PlaywrightCall;
+	/** The window each test's page has, while its test runs; and which of them it opened. */
+	const claimed = new Map<string, HTMLElement>();
+	const openedForPage = new Set<HTMLElement>();
 
-		// (a page exists to go somewhere from, as Playwright's does: going somewhere with no window open opens one)
-		if (call === "goto" && used.length === 0) {
-			servers.set(NO_SERVER, servers.get(NO_SERVER) ?? { "url": "about:blank", "windows": new Set(), "opened": 0, "offUpdates": () => undefined });
-			open(NO_SERVER);
+	/** `page`'s window: the one it has; else going somewhere opens it one of its own, and anything else takes the one you've
+	 *  used last that no other page has. */
+	const windowOf = (page: string, opening: boolean): HTMLElement | undefined => {
+		const known = claimed.get(page);
+
+		if (known?.isConnected === true) {
+			return known;
 		}
 
-		const page = used.at(-1)?.querySelector("iframe")?.contentWindow;
+		const others = new Set(claimed.values());
+		let found: HTMLElement | undefined;
+
+		if (opening) {
+			servers.set(NO_SERVER, servers.get(NO_SERVER) ?? { "url": "about:blank", "windows": new Set(), "opened": 0, "offUpdates": () => undefined });
+			found = open(NO_SERVER);
+
+			if (found !== undefined) {
+				openedForPage.add(found);
+			}
+		} else {
+			found = used.filter((element) => !others.has(element)).at(-1);
+		}
+
+		if (found !== undefined) {
+			claimed.set(page, found);
+		}
+
+		return found;
+	};
+
+	serve(hub, "playwright.run", async (args) => {
+		const { call, "args": given = [], "page": asking = "" } = args as PlaywrightCall;
+
+		if (call === "release") {
+			const element = claimed.get(asking);
+
+			claimed.delete(asking);
+
+			if (element !== undefined && openedForPage.delete(element) && given[0] !== true) {
+				element.remove();
+				used.splice(used.indexOf(element) >>> 0, 1);
+				servers.get(NO_SERVER)?.windows.delete(element);
+			}
+
+			return undefined;
+		}
+
+		const page = windowOf(asking, call === "goto")?.querySelector("iframe")?.contentWindow;
 
 		if (page === null || page === undefined) {
 			if (call === "run") {

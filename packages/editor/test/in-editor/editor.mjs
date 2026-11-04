@@ -4,15 +4,11 @@
  */
 import { expect } from "@playwright/test";
 
-let instances = 0;
-
 /** An editor of its own, holding `files` (each path from its workspace's root, with its text): its workbench, once it's up. `extension`: one from outside the editor, by its address. */
 export async function openEditor(page, files, { extension } = {}) {
-	instances += 1;
-
 	const seed = encodeURIComponent(Buffer.from(JSON.stringify(files)).toString("base64"));
 
-	await page.goto(`?instance=test-${String(Date.now())}-${String(instances)}&seed=${seed}${extension === undefined ? "" : `&extension=${encodeURIComponent(extension)}`}`);
+	await page.goto(`?instance=test-${crypto.randomUUID()}&seed=${seed}${extension === undefined ? "" : `&extension=${encodeURIComponent(extension)}`}`);
 
 	const workbench = page.frameLocator("iframe[title='editor']").frameLocator("iframe");
 

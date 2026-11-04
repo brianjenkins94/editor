@@ -2,6 +2,7 @@
  * The program's module system (packages/tsval/README.md, *Modules*): almostnode on the shared workspace, its built-ins
  * the capability stand-ins, and the editor's own modules a program imports as its code (node:test).
  */
+import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Outcome } from "@brianjenkins94/playwright";
 import type { ModuleLoader } from "@brianjenkins94/tsval";
 import type { Control } from "../debug-protocol";
@@ -159,24 +160,42 @@ const EDITOR_MODULES = new Map([["node:test", NODE_TEST], ["@playwright/test", P
 
 export const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource], [PLAYWRIGHT_TEST, playwrightTestSource]]);
 
-/** playwright-test.js's host half (`__editorPlaywright`): a page per test, driving the preview you have open through the
+/** playwright-test.js's host half (`__editorPlaywright`): a page per test, each driving a window of its own through the
  *  shell (editor-api's `playwright`), and expect: packages/playwright's, run here, not stepped. */
+const pageIds = new WeakMap<Page, string>();
+const playwrightCall = async (id: string, name: PlaywrightCall["call"], ...args: unknown[]): Promise<unknown> => {
+	if (state.editorLink === undefined) {
+		throw new Error("no editor to drive a preview in");
+	}
+
+	return state.editorLink.playwright({ "page": id, "call": name, "args": args });
+};
+
 export const editorPlaywright = {
 	"page": () => {
-		const call = async (name: "run" | "goto" | "url" | "title", ...args: unknown[]): Promise<unknown> => {
-			if (state.editorLink === undefined) {
-				throw new Error("no editor to drive a preview in");
-			}
-
-			return state.editorLink.playwright({ "call": name, "args": args });
-		};
-
-		return new Page({
-			"run": async (op) => call("run", op) as Promise<Outcome>,
-			"goto": async (url) => { await call("goto", url); },
-			"url": async () => call("url") as Promise<string>,
-			"title": async () => call("title") as Promise<string>
+		const id = crypto.randomUUID();
+		const page = new Page({
+			"run": async (op) => playwrightCall(id, "run", op) as Promise<Outcome>,
+			// (among the run's effects, by where it went: going somewhere changes a page, so a test that does is told apart)
+			"goto": async (url) => {
+				tally("page:goto", url, "made");
+				await playwrightCall(id, "goto", url);
+			},
+			"url": async () => playwrightCall(id, "url") as Promise<string>,
+			"title": async () => playwrightCall(id, "title") as Promise<string>
 		});
+
+		pageIds.set(page, id);
+
+		return page;
+	},
+	/** A test's page, done with: its window let go, and closed if the page opened it, unless it's `kept` to look at. */
+	"release": async (page: Page, kept: boolean) => {
+		const id = pageIds.get(page);
+
+		if (id !== undefined) {
+			await playwrightCall(id, "release", kept);
+		}
 	},
 	"expect": playwrightExpect
 };

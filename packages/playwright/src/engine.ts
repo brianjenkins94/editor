@@ -655,6 +655,10 @@ function resolveFrom(scopes: Scope[], steps: Step[]): Element[] {
 		if (step.kind === "frame") {
 			// (what isn't an iframe, or isn't loaded, or is another origin's has no document here: nothing to find in it, yet)
 			from = (current ?? []).flatMap((element) => (element as HTMLIFrameElement).contentDocument ?? []);
+
+			for (const each of from) {
+				keepFocus(each as Document);
+			}
 			current = undefined;
 		} else if (step.kind === "nth") {
 			const list = current ?? [];
@@ -891,8 +895,92 @@ function selectOptions(select: HTMLSelectElement, wanted: unknown[]): string[] |
 const POINTER_ACTIONS = new Set<Action>(["click", "dblclick", "hover", "check", "uncheck"]);
 const MANY = new Set<Action>(["count", "allTextContents", "allInnerTexts", "waitFor"]);
 
+const keeping = new WeakSet<Document>();
+/** A blur this frame is told after all, because focus stayed in it. */
+const toldAfterAll = new WeakSet<Event>();
+
+/** A page keeps its focus when another page takes it, as Playwright's does (it emulates focus for each): here pages are frames
+ *  of one window, and only one frame can really have it, so without this a second test's click closes the first's command
+ *  palette. A frame losing focus to another blurs its element just as focus moving within it does, and only then its window,
+ *  so a blur is held to the end of the task: if the frame no longer has focus it's dropped, and the frame goes on saying it
+ *  has focus and what its active element was. Otherwise it's told, a moment late. */
+function keepFocus(document: Document): void {
+	const view = document.defaultView as (Window & typeof globalThis) | null;
+
+	if (view === null || keeping.has(document)) {
+		return;
+	}
+
+	keeping.add(document);
+
+	const reallyHasFocus = view.Document.prototype.hasFocus.bind(document);
+	const descriptor = Object.getOwnPropertyDescriptor(view.Document.prototype, "activeElement")
+		?? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(view.Document.prototype) as object, "activeElement");
+	const really = (): Element | null => (descriptor?.get?.call(document) as Element | null | undefined) ?? null;
+	let kept: Element | null = null;
+
+	document.hasFocus = () => true;
+	Object.defineProperty(document, "activeElement", {
+		"configurable": true,
+		"get": () => (reallyHasFocus() || kept === null || !kept.isConnected ? really() : kept)
+	});
+	/** Whether what it kept was blurred, and it wasn't told: coming back to something else, it's told then. */
+	let owed = false;
+
+	view.addEventListener("focusin", (event) => {
+		if (owed && kept !== null && kept !== event.target) {
+			for (const [type, bubbles] of [["blur", false], ["focusout", true]] as const) {
+				const late = new view.FocusEvent(type, { "relatedTarget": event.target as Element, "bubbles": bubbles, "composed": true });
+
+				toldAfterAll.add(late);
+				kept.dispatchEvent(late);
+			}
+		}
+
+		owed = false;
+		kept = event.target as Element;
+	}, true);
+
+	const hold = (event: Event): void => {
+		if (event.target === view) {
+			event.stopImmediatePropagation();
+
+			return;
+		}
+
+		if (toldAfterAll.has(event)) {
+			return;
+		}
+
+		event.stopImmediatePropagation();
+
+		const { "target": target, "type": type } = event;
+		const { relatedTarget, bubbles, composed } = event as FocusEvent;
+
+		queueMicrotask(() => {
+			if (!reallyHasFocus()) {
+				owed = true;
+
+				return;
+			}
+
+			kept = really();
+
+			const again = new view.FocusEvent(type, { "relatedTarget": relatedTarget, "bubbles": bubbles, "composed": composed });
+
+			toldAfterAll.add(again);
+			target?.dispatchEvent(again);
+		});
+	};
+
+	view.addEventListener("blur", hold, true);
+	view.addEventListener("focusout", hold, true);
+}
+
 /** Answer `op` once in `document` (see the header). */
 export function run(document: Document, op: Op): Outcome {
+	keepFocus(document);
+
 	const found = resolve(document, op.steps);
 	const args = op.args ?? [];
 

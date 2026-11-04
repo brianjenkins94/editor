@@ -540,7 +540,12 @@ export interface RuntimeVerdict { "allow": boolean; "decided": NonNullable<Effec
 /** A worker's link into the editor's runtime. */
 /** A Playwright call on a preview window's page (packages/playwright's `Driver`: `run` an op, `goto`, `url`, `title`),
  *  served by the shell: on the window you have open. */
-export interface PlaywrightCall { "call": "run" | "goto" | "url" | "title"; "args"?: unknown[] }
+export interface PlaywrightCall {
+	"call": "run" | "goto" | "url" | "title" | "release";
+	"args"?: unknown[];
+	/** Which page is asking: each has a window of its own while its test runs, so tests can run at once. */
+	"page"?: string;
+}
 
 export interface RuntimeConnection {
 	/** A preview's page, driven: a Playwright call there (PlaywrightCall), answered when it's done (once `ready`). */
