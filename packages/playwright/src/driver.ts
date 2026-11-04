@@ -17,7 +17,8 @@ export function windowDriver(window: Window | (() => Window)): Driver {
 		"goto": async (url) => {
 			const target = current();
 			const before = target.document;
-			const from = new URL(target.location.href);
+			// (a blank page's address is no base: its frame's parent's is)
+			const from = new URL(target.location.href === "about:blank" ? target.parent.location.href : target.location.href);
 			const to = new URL(url, from);
 
 			from.hash = to.hash;

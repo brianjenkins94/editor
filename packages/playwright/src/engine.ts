@@ -702,7 +702,13 @@ function notActionable(element: Element, needsEnabled: boolean): string | undefi
 		return `${describe(element)} is disabled`;
 	}
 
-	element.scrollIntoView({ "block": "center", "inline": "center" });
+	// (only if it's out of view, as Playwright's: scrolling regardless moves every ancestor, across frames too)
+	const seen = element.getBoundingClientRect();
+	const view = windowOf(element);
+
+	if (seen.top < 0 || seen.left < 0 || seen.bottom > view.innerHeight || seen.right > view.innerWidth) {
+		element.scrollIntoView({ "block": "center", "inline": "center" });
+	}
 
 	const box = element.getBoundingClientRect();
 	let hit = element.ownerDocument.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
@@ -772,7 +778,10 @@ function parseKey(combo: string): { "key": string; "ctrlKey": boolean; "shiftKey
 function pressKey(element: Element, combo: string): void {
 	const view = windowOf(element);
 	const parsed = parseKey(combo);
-	const init = { ...parsed, "bubbles": true, "cancelable": true, "composed": true, "code": parsed.key.length === 1 ? `Key${parsed.key.toUpperCase()}` : parsed.key, "view": view };
+	// (and the legacy codes a real key sends, which plenty still read: xterm, for one)
+	const codes: Record<string, number> = { "Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8, "ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40, "Delete": 46, "F1": 112 };
+	const keyCode = parsed.key.length === 1 ? parsed.key.toUpperCase().codePointAt(0)! : codes[parsed.key] ?? 0;
+	const init = { ...parsed, "bubbles": true, "cancelable": true, "composed": true, "code": parsed.key.length === 1 ? `Key${parsed.key.toUpperCase()}` : parsed.key, "keyCode": keyCode, "which": keyCode, "view": view };
 	const field = element.tagName === "INPUT" || element.tagName === "TEXTAREA" ? element as HTMLInputElement | HTMLTextAreaElement : undefined;
 	const proceed = element.dispatchEvent(new view.KeyboardEvent("keydown", init));
 	const modified = parsed.ctrlKey || parsed.metaKey || parsed.altKey;
@@ -782,7 +791,7 @@ function pressKey(element: Element, combo: string): void {
 		const end = field.selectionEnd ?? field.value.length;
 
 		if (parsed.key.length === 1 && !modified) {
-			if (element.dispatchEvent(new view.KeyboardEvent("keypress", init))) {
+			if (element.dispatchEvent(new view.KeyboardEvent("keypress", { ...init, "keyCode": parsed.key.codePointAt(0)!, "charCode": parsed.key.codePointAt(0)!, "which": parsed.key.codePointAt(0)! }))) {
 				setValue(field, field.value.slice(0, start) + parsed.key + field.value.slice(end));
 				field.setSelectionRange(start + 1, start + 1);
 			}
