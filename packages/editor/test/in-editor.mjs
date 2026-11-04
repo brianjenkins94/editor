@@ -41,17 +41,17 @@ async function ran(spec) {
 	return answer.files[0];
 }
 
-/** What's on screen in each frame still open, and what the extensions printed: why a spec failed on a runner nobody can watch. */
+/** What's on screen in each frame still open, and what the page printed: why a spec failed on a runner nobody can watch. */
 async function sayWhatHappened() {
 	for (const frame of session.page.frames()) {
-		const shown = await frame.evaluate(() => [...document.querySelectorAll(".tab, .notification-toast, .monaco-dialog-box, .quick-input-widget:not([style*='display: none'])")].map((element) => `${element.className.split(" ").slice(0, 3).join(".")}: ${element.textContent.slice(0, 200)}`)).catch(() => []);
+		const shown = await frame.evaluate(() => [...document.querySelectorAll(".tab, .notification-list-item, .monaco-dialog-box, .statusbar-item.left, .quick-input-widget:not([style*='display: none'])")].map((element) => `${element.className}: ${element.textContent.slice(0, 200)}`).filter((line) => !/: $/u.test(line))).catch(() => []);
 
-		if (shown.length > 0) {
+		if (shown.some((line) => line.startsWith("tab "))) {
 			console.log(`[in-editor] on screen in ${frame.url().slice(0, 100)}:\n  ${shown.join("\n  ")}`);
 		}
 	}
 
-	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => /^\[ext:|save|participant/iu.test(line)).slice(-60).map((line) => line.slice(0, 220)).join("\n  ")}`);
+	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => !/^\{"context|^%c|^console\.group|^\s*$|^[←→]|observability\.|node_modules|ata\.|\.cdn/u.test(line)).slice(-120).map((line) => line.slice(0, 220)).join("\n  ")}`);
 }
 
 for (const spec of SPECS) {
