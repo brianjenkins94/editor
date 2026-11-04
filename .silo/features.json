@@ -1046,6 +1046,7 @@
     ],
     "tests": [
       "packages/editor/test/dev-server.mjs",
+      "packages/editor/test/in-editor/dev-server.spec.mjs",
       "packages/editor/test/virtual-path.test.mjs"
     ]
   },
@@ -1495,7 +1496,7 @@
       "packages/editor/shell/preview-windows.tsx"
     ],
     "tests": [
-      "packages/editor/test/preview-windows.mjs"
+      "packages/editor/test/in-editor/preview-windows.spec.mjs"
     ]
   },
   "Preview's dev server as a debug session": {

@@ -28,7 +28,8 @@ export async function runCommand(workbench, title) {
 	const input = workbench.locator(".quick-input-widget input[type='text'], .quick-input-widget input:not([type])").first();
 
 	await input.fill(`>${title}`);
-	await workbench.locator(".quick-input-list .monaco-list-row", { "hasText": title }).first().click();
+	await expect(workbench.locator(".quick-input-list .monaco-list-row.focused", { "hasText": title }).first()).toBeVisible({ "timeout": 15_000 });
+	await input.press("Enter");
 }
 
 /** A file from the Explorer, by its path: each folder opened on the way, as a person goes. */
@@ -75,3 +76,21 @@ export async function openTerminal(workbench) {
 
 	return { "input": workbench.locator(".xterm-helper-textarea").last(), "output": output };
 }
+
+/** The open file's text replaced, as a person does it, and saved. */
+export async function retype(workbench, text) {
+	await codeOf(workbench).press("ControlOrMeta+a");
+	await codeOf(workbench).pressSequentially(text);
+	await codeOf(workbench).press("ControlOrMeta+s");
+	await expect(workbench.locator(".tab.dirty")).toHaveCount(0, { "timeout": 30_000 });
+}
+
+/** A page of a dev server: it puts `said` in `#app`, in TypeScript, so running at all says it was compiled. */
+export const devApp = (folder, said) => ({
+	...READABLE_TERMINAL,
+	[`${folder}/index.html`]: "<!doctype html><html><body><div id=\"app\"></div><script type=\"module\" src=\"/src/main.ts\"></script></body></html>\n",
+	[`${folder}/src/main.ts`]: `const said: string = ${JSON.stringify(said)};\n\ndocument.querySelector("#app")!.textContent = said;\n`
+});
+
+/** What a dev server's window is: as many as are open. */
+export const previewWindows = (page) => page.locator("app-window[data-preview-port]");
