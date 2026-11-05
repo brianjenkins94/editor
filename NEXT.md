@@ -435,8 +435,9 @@ How it's kept:
    - **TypeScript's error sometimes never comes, on CI, since the capabilities plugin** (found 2026-11-05): agent-tools' *the
      editor as data* waits 120 s for it. 2 of 3 runs since `ce77effd` (it took 6 s in the third), 0 of the 31 before. Not
      reproduced here: 5 of 5 pass on this Mac's slow cores, and with the browser's CPU throttled 8×. The server's alive after it
-     (later suites get its answers). No cause known. Ideas not tried: `_capabilities.findings` is asked at once as a document
-     opens, racing its `updateOpen`; the canary's work on the server's thread. The test now prints what it saw when it happens.
+     (later suites get its answers). No cause known. It said, twice: the file open and active, no problems at all, and `_capabilities.findings`
+     asked of files nobody's looking at, each retried. So since 2026-11-05 it's asked only of what's in an editor, once settled;
+     see whether that holds. Not tried: the canary's work on the server's thread. The test prints what it saw when it happens.
    - **F5 runs the wrong thing with a panel's editor focused** (found 2026-11-04): with the Output view focused, the active editor
      is its channel, and the run fails with "Failed to read extension-output-…". *Run a file in the debugger*'s button should
      say which file it runs, and F5 shouldn't try an output's.

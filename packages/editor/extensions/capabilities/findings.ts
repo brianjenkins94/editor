@@ -4,9 +4,11 @@
  * "capabilities", code 900100; a dangerous capability a warning, the rest a hint — so they're squiggles, in Problems
  * (the warnings) and in the hover.
  *
- * Asked as a document opens and once its edits settle, and again while the canary is still running (`pending`) or the
- * server isn't up yet. The plugin only answers: nothing is put into the TypeScript server's own diagnostics, so whatever
- * hosts the readings later (TypeScript 7's API connection) answers the same request.
+ * Asked of what's in an editor: once it's shown and has settled, once its edits have, and again while the canary is still
+ * running (`pending`) or the server isn't up yet. Not of every document VS Code holds, nor the moment one opens: that's a request
+ * to the server per model, a few of them each retried, before the server has been told of the file. The plugin only answers:
+ * nothing is put into the TypeScript server's own diagnostics, so whatever hosts the readings later (TypeScript 7's API
+ * connection) answers the same request.
  */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
@@ -14,6 +16,8 @@ import * as vscode from "vscode";
 const LANGUAGES = new Set(["typescript", "typescriptreact", "javascript", "javascriptreact"]);
 /** How long edits settle before a document is asked about. */
 const SETTLE_MS = 300;
+/** How long a document's been shown before it's asked about: the TypeScript extension tells the server of it first. */
+const SHOWN_MS = 1000;
 /** How long apart, and how often, a document is asked again while its answer isn't final. */
 const AGAIN_MS = 1000;
 const AGAIN = 30;
@@ -28,9 +32,14 @@ interface Answer {
 export function publishFindings(context: vscode.ExtensionContext, log?: ObservedExtension["log"]): void {
 	const collection = vscode.languages.createDiagnosticCollection("capabilities");
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
-	const shown = (document: vscode.TextDocument): boolean => document.uri.scheme === "file" && LANGUAGES.has(document.languageId);
+	const shown = (document: vscode.TextDocument): boolean => document.uri.scheme === "file" && LANGUAGES.has(document.languageId) && vscode.window.visibleTextEditors.some((editor) => editor.document === document);
 
 	const asked = async (document: vscode.TextDocument, again: number): Promise<void> => {
+		// (no longer in an editor: asked again when it's back)
+		if (document.isClosed || !shown(document)) {
+			return;
+		}
+
 		const { version } = document;
 		const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: Answer } | undefined>("typescript.tsserverRequest", "_capabilities.findings", { "file": document.uri })).catch(() => undefined);
 		const answer = response?.body;
@@ -75,9 +84,11 @@ export function publishFindings(context: vscode.ExtensionContext, log?: Observed
 
 	context.subscriptions.push(
 		collection,
-		vscode.workspace.onDidOpenTextDocument((document) => {
-			if (shown(document)) {
-				schedule(document, 0);
+		vscode.window.onDidChangeVisibleTextEditors((editors) => {
+			for (const { document } of editors) {
+				if (shown(document) && !timers.has(document.uri.toString())) {
+					schedule(document, SHOWN_MS);
+				}
 			}
 		}),
 		vscode.workspace.onDidChangeTextDocument((event) => {
@@ -97,7 +108,9 @@ export function publishFindings(context: vscode.ExtensionContext, log?: Observed
 		} }
 	);
 
-	for (const document of vscode.workspace.textDocuments.filter(shown)) {
-		schedule(document, 0);
+	for (const { document } of vscode.window.visibleTextEditors) {
+		if (shown(document)) {
+			schedule(document, SHOWN_MS);
+		}
 	}
 }
