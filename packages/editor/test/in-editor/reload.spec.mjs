@@ -13,9 +13,15 @@ const TABS_KEPT_MS = 20_000;
 
 test("the open file comes back as it was saved", async ({ page }) => {
 	const workbench = await openEditor(page, { "kept.mjs": "const kept = 1;\n", "other.mjs": "const other = 2;\n" });
-	const comesBack = async () => {
-		await expect(workbench.locator(".tab.active")).toContainText("kept.mjs", { "timeout": 120_000 });
-		await expect(workbench.locator(".view-lines").first()).toContainText("const kept = 2;", { "timeout": 30_000 });
+	/** The file open again, saying what's there if it isn't: under the run's own limit for silence, so this says it and not that. */
+	const comesBack = async (after) => {
+		try {
+			await expect(workbench.getByRole("treeitem").first()).toBeVisible({ "timeout": 60_000 });
+			await expect(workbench.locator(".tab.active")).toContainText("kept.mjs", { "timeout": 30_000 });
+			await expect(workbench.locator(".view-lines").first()).toContainText("const kept = 2;", { "timeout": 20_000 });
+		} catch (error) {
+			throw new Error(`after ${after}: ${error.message.slice(0, 160)}; tree ${JSON.stringify(await workbench.getByRole("treeitem").allTextContents())}, tabs ${JSON.stringify(await workbench.locator(".tab").allTextContents())}, code ${JSON.stringify(await workbench.locator(".view-lines").allTextContents())}, says ${JSON.stringify(await workbench.locator(".editor-group-container .monaco-editor-pane-placeholder, .editor-placeholder").allTextContents())}`, { "cause": error });
+		}
 	};
 
 	await openFile(workbench, "kept.mjs");
@@ -24,10 +30,10 @@ test("the open file comes back as it was saved", async ({ page }) => {
 
 	// The page opened again.
 	await page.goto(`${await page.url()}&again`);
-	await comesBack();
+	await comesBack("opening the page again");
 
 	// And VS Code's own command, which does wait.
 	await runCommand(workbench, "Developer: Reload Window");
 	await page.waitForTimeout(5000);
-	await comesBack();
+	await comesBack("Developer: Reload Window");
 });
