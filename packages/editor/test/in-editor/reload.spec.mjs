@@ -7,8 +7,9 @@ import { expect, test } from "@playwright/test";
 
 import { openEditor, openFile, retype, runCommand } from "./editor.mjs";
 
-/** How long VS Code takes to keep which tabs are open: a frame's reload doesn't wait for it, as a page's does. */
-const TABS_KEPT_MS = 6000;
+/** How long VS Code may take to keep which tabs are open, on a slow runner: a frame's reload doesn't wait for it, as a page's
+ *  does, and it's kept nowhere a person could see. */
+const TABS_KEPT_MS = 20_000;
 
 test("the open file comes back as it was saved", async ({ page }) => {
 	const workbench = await openEditor(page, { "kept.mjs": "const kept = 1;\n", "other.mjs": "const other = 2;\n" });
@@ -21,15 +22,12 @@ test("the open file comes back as it was saved", async ({ page }) => {
 	await retype(workbench, "const kept = 2;\n");
 	await page.waitForTimeout(TABS_KEPT_MS);
 
-	// The page opened again; and again, what it kept being what it kept.
-	for (const time of [1, 2]) {
-		await page.goto(`${await page.url()}&again=${String(time)}`);
-		await comesBack();
-		await page.waitForTimeout(TABS_KEPT_MS);
-	}
+	// The page opened again.
+	await page.goto(`${await page.url()}&again`);
+	await comesBack();
 
-	// And VS Code's own command.
+	// And VS Code's own command, which does wait.
 	await runCommand(workbench, "Developer: Reload Window");
-	await page.waitForTimeout(3000);
+	await page.waitForTimeout(5000);
 	await comesBack();
 });

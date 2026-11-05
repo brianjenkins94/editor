@@ -25,7 +25,8 @@
   # holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json, and warns on a rise
   # since the last green run here — whose `performance` artifact is its baseline. Each on a runner of its own, so
   # nothing shares the CPU while performance measures. They catch a wiring regression or an upstream monaco-vscode-api
-  # release (the component installs the latest) before it ships. Its own workflow, not a job in `ci`, so it doesn't gate
+  # release (the component installs the latest) before it ships. `specs` is what runs in an editor, as a person uses it
+  # (test/in-editor.mjs), a shard of its own: 9 minutes here, which went past `workbench`'s time beside the rest. Its own workflow, not a job in `ci`, so it doesn't gate
   # the deploy.
   #
   # The rewrite (packages/editor/ARCHITECTURE.md, *The rewrite, in place*) reduced these to the core's: the tours, the
@@ -43,7 +44,8 @@
         "matrix": {
           "include": [
             { "shard": "realms", "files": "test/worker-realms.mjs test/debugger-runs.mjs" },
-            { "shard": "workbench", "files": "test/git-views.mjs test/agent-tools.mjs test/workbench.mjs test/eslint.mjs test/bablr.mjs test/dev-server.mjs test/playwright-in-editor.mjs test/instances.mjs test/in-editor.mjs" },
+            { "shard": "workbench", "files": "test/git-views.mjs test/agent-tools.mjs test/workbench.mjs test/eslint.mjs test/bablr.mjs test/dev-server.mjs test/playwright-in-editor.mjs test/instances.mjs" },
+            { "shard": "specs", "files": "test/in-editor.mjs" },
             { "shard": "performance", "files": "test/performance.mjs" }
           ]
         }
