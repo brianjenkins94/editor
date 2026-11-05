@@ -37,6 +37,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private state: DebugState = "starting";
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
 	private ended = false;
+	/** The program's files the Margin has values of, each with the text that ran (sent with its first values). */
+	private readonly told = new Map<string, string>();
 	/** What the capability stop it's at asks (RUNNING.md, *Capability stops*), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
 	/** Breakpoint lines by source path — VS Code sends them per file, and tsval runs one program. */
@@ -469,7 +471,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		this.ended = true;
 
-		const sources = new Map([[this.program, this.source]]);
+		const sources = new Map([[this.program, this.source], ...this.told]);
 
 		// A question asked in another of the program's files.
 		if (this.ask?.file !== undefined && !sources.has(this.ask.file)) {
@@ -511,6 +513,10 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		switch (message.type) {
 			case "stopped":
 				this.onStopped(message);
+				break;
+
+			case "values":
+				this.onValues(message);
 				break;
 
 			// What the run did to the world so far (each telling has it all), for its envelope in the run ledger.
@@ -581,6 +587,15 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 		this.settle("stopped");
+	}
+
+	/** The run's values, on to the Margin: the file they're of, the text that ran once a file, what's new. */
+	private onValues(message: Extract<WorkerEvent, { "type": "values" }>): void {
+		const file = message.file ?? this.program;
+		const source = message.file === undefined ? this.source : message.source ?? this.told.get(file) ?? "";
+
+		this.tell("values", { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
+		this.told.set(file, source);
 	}
 
 	private onTerminated(message: Extract<WorkerEvent, { "type": "terminated" }>): void {

@@ -13,7 +13,8 @@ import { startSession } from "./architecture-harness.mjs";
 
 let session;
 const FOLDER = new URL("in-editor/", import.meta.url);
-const SPECS = fs.readdirSync(FOLDER).filter((file) => file.endsWith(".spec.mjs"));
+/** IN_EDITOR_ONLY=<part of a name>: only the specs it names, while writing one. */
+const SPECS = fs.readdirSync(FOLDER).filter((file) => file.endsWith(".spec.mjs") && file.includes(process.env.IN_EDITOR_ONLY ?? ""));
 
 before(async () => {
 	session = await startSession();

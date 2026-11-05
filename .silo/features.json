@@ -1192,18 +1192,24 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Live values in the margin": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Beside the code, each line shows the values it produced when it ran, one column per turn of a loop; you can hold a column or pick a call to look at, and while stopped the latest value appears inline.",
+    "status": "active",
+    "why": "reintroduced from the reduction (user 2026-11-04): what a run computed, line by line, is what the surrounding features and the live loop build on",
+    "since": "2026-11-04",
+    "what": "Beside the code, each line shows the values it produced when it ran, one column per turn of a loop; you can hold a column or pick a call to look at, and while stopped the latest value appears inline. Where a run crashed or was stopped is marked on its line.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live values*",
     "ways": [
       "command|margin.hold",
       "command|margin.pick",
-      "inline values provider||margin/margin.ts"
+      "inline values provider||margin/values.ts",
+      "core module|installValues"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/margin/values.ts",
+      "packages/editor/extensions/tsval/worker/values.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/live-values.spec.mjs"
+    ]
   },
   "Manage your sign-ins and delete your account": {
     "status": "active",

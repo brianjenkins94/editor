@@ -340,6 +340,9 @@ The pane's tabs are pane views (ARCHITECTURE.md, *Extension points* 4); the Marg
 
 ### The margin, always open
 
+Not since the rewrite's reduction: reintroduced on 2026-11-04, the pane opens once a file has something to show (values, a
+question, how a run ended), and the rest of this section stands. Whether it's open from the start again is undecided.
+
 - **Coverage moved into the margin's gutter column.** Gutter icons cost breakpoints: VS Code won't set one on a line
   whose glyph margin holds another extension's icon (`marginFreeFromNonDebugDecorations`, which lets through only
   codicons and its own test coverage's class, a class an extension's decoration can't choose). So the margin draws it

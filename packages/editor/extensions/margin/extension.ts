@@ -1,14 +1,15 @@
 /**
- * The Margin: the file's runtime column, a pane view beside the code (ARCHITECTURE.md, *Extension points* 4). For now, a
- * run stopped at a gated call asks here, on the line it stopped at: what the call would do, and Allow, Skip or Deny, each
+ * The Margin: the file's runtime column, a pane view beside the code (ARCHITECTURE.md, *Extension points* 4). A run stopped
+ * at a gated call asks here, on the line it stopped at: what the call would do, and Allow, Skip or Deny, each
  * for this call, this run or always, the choice sent back to the session (`editor.capability.decide`), which resumes it.
  *
  * In the margin rather than a notification because a program waiting on a person has to say so for as long as it waits:
- * a notification can be dismissed, and then nothing says it's stopped (the user, 2026-11-03). So there's no pane until a
- * run asks, and the question stays until it's answered or the run moves on.
+ * a notification can be dismissed, and then nothing says it's stopped (the user, 2026-11-03). So the question stays until
+ * it's answered or the run moves on.
  *
- * From every debugger's `ask` event (the run contract). Coverage's marks are its gutter column's (coverage.ts). What else the
- * Margin showed (`full-editor`'s: a run's values, cards, Rule…) comes back with those features.
+ * From every debugger's `ask` event (the run contract). A run's values, and how it ended short, are values.ts's; coverage's
+ * marks are its gutter column's (coverage.ts). What else the Margin showed (`full-editor`'s: cards, Rule…) comes back with
+ * those features.
  */
 import type { AskEvent, CapabilityChoice } from "@brianjenkins94/editor-api";
 import type { PaneAction, PaneContent, PaneItem } from "@brianjenkins94/editor-api/pane";
@@ -16,6 +17,7 @@ import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import { installCoverage } from "./coverage";
+import { endMarks, installValues, valueItems } from "./values";
 
 /** The view the Margin is, in the pane. */
 const VIEW = "margin";
@@ -29,7 +31,7 @@ function code(text: string): string {
 }
 
 /** A stop's question, as a pane item: the call and what it reaches, then its answers. */
-function questionOf({ session, ask }: Asking): PaneContent {
+function questionOf({ session, ask }: Asking): Pick<PaneContent, "items"> & { "marks": NonNullable<PaneContent["marks"]> } {
 	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/policy/<you>.json)` : undefined;
 	const choice = (label: string, [once, run, forever]: [CapabilityChoice, CapabilityChoice, CapabilityChoice], does: string): PaneAction => ({
 		"title": label,
@@ -81,11 +83,22 @@ export function activate(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(observed);
 	}
 
+	installValues(context, redraw, clear);
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand("margin.paneView", (uri: unknown): PaneContent | undefined => {
-			const asking = typeof uri === "string" ? asks.get(uri) : undefined;
+			if (typeof uri !== "string") {
+				return undefined;
+			}
 
-			return asking === undefined ? undefined : questionOf(asking);
+			const asking = asks.get(uri);
+			const question = asking === undefined ? undefined : questionOf(asking);
+			const text = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
+			// (the question first on its line: it's what the run waits on)
+			const items = [...question?.items ?? [], ...valueItems(uri, text)];
+			const marks = [...question?.marks ?? [], ...endMarks(uri)];
+
+			return items.length === 0 && marks.length === 0 ? undefined : { "items": items, "marks": marks };
 		}),
 		vscode.commands.registerCommand("margin.decide", async (session: unknown, choice: unknown) => {
 			const decide = async (): Promise<void> => {

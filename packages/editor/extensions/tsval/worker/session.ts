@@ -18,6 +18,7 @@ import { editorPlaywright, programModules, runtimeReady, whereOf } from "./runti
 import { post, state, workerLog } from "./state";
 import { askAt } from "./stops";
 import { startTests, tellCoverage, tellTests, testsOver, testTold } from "./tests";
+import { endValues, flushValues, keepTold, resumeTold, startValues, tellSet, traceValue } from "./values";
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => {
@@ -110,6 +111,7 @@ export function setValue(vm: Vm, name: string, text: string): Extract<WorkerEven
 			}
 
 			binding.value = vm.fromHost(literal.value);
+			tellSet(vm, name, binding.value);
 
 			return { "type": "valueSet", "ok": true, "value": format(binding.value), "snapshot": snapshot(vm) };
 		}
@@ -397,6 +399,7 @@ function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityA
 	state.denyNext = false;
 	state.allowNext = false;
 	state.skipNext = false;
+	flushValues();
 	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled }, ...ask === undefined ? {} : { "ask": ask } });
 }
 
@@ -424,6 +427,7 @@ function onBreakpointHook(vm: Vm): void {
 	// Set WAITING before posting, so an adapter that stores 1 + notifies before we reach `wait` isn't lost:
 	// Atomics.wait returns immediately when the value is no longer 0.
 	Atomics.store(state.control, 0, 0);
+	flushValues();
 	post({ "type": "stopped", "reason": "breakpoint", "snapshot": { ...snapshot(vm), "traveled": false }, "atomic": true });
 	Atomics.wait(state.control, 0, 0);
 }
@@ -431,6 +435,7 @@ function onBreakpointHook(vm: Vm): void {
 /** The program is over: end the session — with 1 for a program that threw, as node would, and
  *  where it threw. */
 function finish(exitCode = 0, crash?: Crash): void {
+	endValues();
 	// (the step's span closed first: once it's told the run ended the adapter ends this worker, and anything it sent
 	// after that is lost — the span's close was, every run)
 	state.stepSpan?.end();
@@ -612,6 +617,7 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 		// stepped, so it stays a pristine snapshot we can return to.
 		state.history = state.history.slice(0, state.index + 1);
 		state.history.push(base);
+		keepTold(base);
 		state.index = state.history.length - 1;
 		// A "continue" that landed on a capability line is a capability stop (the policy gated it); steps stay "step".
 		const stop = placeOf(base);
@@ -662,6 +668,8 @@ async function handle(action: Action): Promise<void> {
 			if (next.loop !== undefined) {
 				next.loop.pace = state.pace;
 			}
+
+			resumeTold(state.history[state.index]);
 
 			await advanceFrom(next, action, state.actionTrace);
 			break;
@@ -718,11 +726,12 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	dropUnpinned();
 
 	startTests();
+	startValues();
 
 	let loaded: ReturnType<typeof createVM>;
 
 	try {
-		loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
+		loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "trace": traceValue, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
 	} catch (error) {
 		// The program's own file doesn't parse: nothing of it has run, and the run ends there, as `node`'s does.
 		if (!(error instanceof ProgramSyntaxError)) {

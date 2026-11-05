@@ -9,7 +9,7 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { CoverageEvent, Effect, TestReport } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, LiveBatch, TestReport } from "@brianjenkins94/editor-api";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
@@ -81,6 +81,9 @@ export type WorkerEvent =
 	| { "type": "effects"; "effects": Effect[] }
 	| { "type": "coverage"; "coverage": CoverageEvent }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
+	/** Live values new since the last, of the entry or (`file`) another of the program's files, with its text (`source`) the
+	 *  first time: a few times a second, and before a stop or the end. */
+	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
 	/** A test file's tests (node:test, node-test.js), each with the statements it ran — just before `terminated`. */
 	| { "type": "tests"; "tests": TestReport[] }
 	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */

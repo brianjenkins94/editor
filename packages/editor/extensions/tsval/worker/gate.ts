@@ -16,6 +16,7 @@ import { capabilityStandins, standinCapability, givenAs } from "../canary";
 import { EXITED, stdin } from "./process";
 import { guestConsole, placeOf } from "./session";
 import { post, state } from "./state";
+import { tellSkipped } from "./values";
 
 /** The run's effects (the run contract's `Effect`): each gated call it made, was denied, skipped or was given, by its
  *  capability and resource — told the adapter as the run ends, for the run ledger (its envelope's `effects`). */
@@ -465,10 +466,11 @@ function madeFor(call: () => unknown): unknown {
 	return result;
 }
 
-/** A call that wasn't made (skipped: at its stop, or by the policy) — its stand-in's `result` — told on its line, as a
- *  counted among the run's effects. */
+/** A call that wasn't made (skipped: at its stop, or by the policy) — its stand-in's `result` — counted among the run's
+ *  effects and told on its line. */
 function skipped(capability: string, resource: string, result: unknown, decided?: Effect["decided"]): unknown {
 	tally(capability, resource, "skipped", undefined, decided);
+	tellSkipped(capability, resource);
 
 	return result;
 }
