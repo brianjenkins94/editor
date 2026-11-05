@@ -580,8 +580,8 @@
   },
   "Dormant features marked in History": {
     "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "why": "not coming back (user, 2026-11-04): silo check lists a dormant way in, and that's the decision's place",
+    "since": "2026-11-04",
     "what": "A way in whose files CI's runs load and whose code they never run is tinted purple where it's registered, with what deleting it frees, and a choice to keep it for 90 days or remove it.",
     "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes*",
     "ways": [
@@ -591,8 +591,7 @@
       "diagnostic collection|silo-dormant",
       "text editor decoration type||history/ledger.ts"
     ],
-    "in": "39b30c64",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "in": "39b30c64"
   },
   "ESLint": {
     "status": "active",
@@ -888,8 +887,8 @@
   },
   "Features map": {
     "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "why": "not coming back (user, 2026-11-04): the Features and Tests table has taken its place",
+    "since": "2026-11-04",
     "what": "A side bar of the program as its features, in the Insights monitor's cards: a card per area, a block per feature sized by its code, a legend in their colors; clicking one focuses on it and the rest of the workspace steps back (Explorer dots, open editors dimmed, its name in the status bar); a feature's status is set from the Command Palette.",
     "docs": "packages/silo/README.md, *The feature manifest*",
     "ways": [
@@ -902,8 +901,7 @@
       "status bar item|history.features",
       "text editor decoration type||history/features.ts"
     ],
-    "in": "39b30c64",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "in": "39b30c64"
   },
   "File and text search": {
     "status": "active",
@@ -1171,8 +1169,8 @@
   },
   "Live architecture diagram": {
     "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "why": "not coming back (user, 2026-11-04)",
+    "since": "2026-11-04",
     "what": "A live diagram of the editor's parts and the messages between them, opened at boot, checked against a declared model of what may talk to what (conformance), with the violations for debug-mcp's architecture_state.",
     "docs": "packages/editor/ARCHITECTURE.md, *Discovered, not declared*",
     "ways": [
@@ -1185,8 +1183,7 @@
       "packages/editor/workbench/architecture-view.ts",
       "packages/theme/src/styles/architecture-view.ts"
     ],
-    "in": "87a1e23f",
-    "restore": "from the full-editor tag: architecture-view.ts (registered with the component's registerLiveArchitecture, opened by OPEN_ARCHITECTURE_COMMAND), the model and its test, and main.tsx's architecture_violations forward; the store it drew stays, in architecture-store.ts"
+    "in": "87a1e23f"
   },
   "Live runs after an edit": {
     "status": "removed",
@@ -1612,8 +1609,8 @@
   },
   "Project picker": {
     "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "why": "not coming back (user, 2026-11-04): it opens bundled samples, and the sample catalog is empty",
+    "since": "2026-11-04",
     "what": "A projects panel on the left, collapsible to a rail and resizable, for opening a bundled sample project into the editor (the sample catalog is empty today).",
     "ways": [
       "button|Collapse project panel",
@@ -1625,8 +1622,7 @@
     "paths": [
       "packages/editor/app/samples.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "git checkout full-editor -- packages/editor/app/samples.ts"
+    "in": "e16b2b75"
   },
   "Published theme components": {
     "status": "active",

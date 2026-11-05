@@ -441,6 +441,17 @@ How it's kept:
    - **F5 runs the wrong thing with a panel's editor focused** (found 2026-11-04): with the Output view focused, the active editor
      is its channel, and the run fails with "Failed to read extension-output-…". *Run a file in the debugger*'s button should
      say which file it runs, and F5 shouldn't try an output's.
+   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: running a program (*Run a file in the
+     debugger*, *Run from the shell*, *Package scripts as tasks and the run picker*, *Preview's dev server as a debug session*,
+     *Terminal commands beyond the core's*); deciding what programs may do (*Rules*, *Rule editor*, *Capability calls panel*, *Mock
+     a value*, *Rules placed in the code*, *Capability prompts for previews*); *Live runs after an edit*; *Notes on code*; and for
+     developing and testing the editor in the editor, *Agents drive the debugger* and *Refactoring for agents*. Later: the
+     runtime insights (*Runtime evidence kept in git*, its hover, *What could go, in purple*), the previews' (*Preview DevTools*,
+     *Preview CPU profiles*, *Breakpoints in a page's code*, *Debug toolbar in the preview title bar*), *Dependency baseline and
+     exceptions*, *Explore orderings*, *Playground links*, *Type queries*, *Your edits since the last commit*, *Performance
+     monitor*, *Docking editors into windows*, *Error reports from the editor*. Far off, still the mission: *Event Sheet*, *Build a
+     game by painting a level*. Not decided: *Experiments that undo themselves*, *Scripts over the workspace*, *Formatting-only
+     changes marked*, *Spell check*, *What a way in reaches*, *How a commit did in CI*.
    - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its
      own average, so one that slows down says so rather than passing. The run record already keeps each file's and test's `ms`
      and the table shows a typical time; nothing compares against them. The catch: time depends on what ran beside it (all the
