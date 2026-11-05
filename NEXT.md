@@ -432,12 +432,10 @@ How it's kept:
      join is extensions/history/runs-say.ts, over this session's runs' `coverage` events: kept nowhere, and a file edited since
      it ran is unsaid until its next run. Its statements are the run's, so one whose code spans a handler (`const f = () => {…}`)
      reads as that code having run.
-   - **TypeScript's error sometimes never comes, on CI, since the capabilities plugin** (found 2026-11-05): agent-tools' *the
-     editor as data* waits 120 s for it. 2 of 3 runs since `ce77effd` (it took 6 s in the third), 0 of the 31 before. Not
-     reproduced here: 5 of 5 pass on this Mac's slow cores, and with the browser's CPU throttled 8×. The server's alive after it
-     (later suites get its answers). No cause known. It said, twice: the file open and active, no problems at all, and `_capabilities.findings`
-     asked of files nobody's looking at, each retried. So since 2026-11-05 it's asked only of what's in an editor, once settled;
-     see whether that holds. Not tried: the canary's work on the server's thread. The test prints what it saw when it happens.
+   - **TypeScript's error never coming, on CI** (2026-11-05): agent-tools' *the editor as data* waited 120 s for it on 4 of 6 runs after
+     the capabilities plugin (`ce77effd`), 0 of the 31 before. It said: the file open, no problems at all, and `_capabilities.findings`
+     asked of files nobody was looking at, each retried. Asked only of what's in an editor, once settled (`fcc080a2`), it's passed
+     9 of 9. So that's likely it, though the mechanism was never seen and it never happened here. If it comes back, start there.
    - **F5 runs the wrong thing with a panel's editor focused** (found 2026-11-04): with the Output view focused, the active editor
      is its channel, and the run fails with "Failed to read extension-output-…". *Run a file in the debugger*'s button should
      say which file it runs, and F5 shouldn't try an output's.
