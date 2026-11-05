@@ -46,7 +46,7 @@ export function unconfirmed(policy: Policy, history: RunRecord[]): { "rule": Rul
 
 export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
 	const rpc = createRpcClient(hub);
-	const problems = vscode.languages.createDiagnosticCollection("capabilities");
+	const problems = vscode.languages.createDiagnosticCollection("capabilities-confirmed");
 	const textOf = async (uri: vscodeApi.Uri): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 	const policyFiles = async (): Promise<vscodeApi.Uri[]> => {
 		const folder = vscode.Uri.file(`${ROOT}/.silo/policy`);

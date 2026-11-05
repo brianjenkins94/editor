@@ -12,6 +12,7 @@ import { build, createLogger } from "vite";
 import { commandTap, TAPPED_VSCODE } from "./build/command-tap";
 import { coveragePlugin } from "./build/coverage";
 import { eslintToolchain } from "./build/eslint-toolchain";
+import { buildCapabilities, CAPABILITIES_FILES } from "./build/capabilities";
 import { buildHistory, HISTORY_FILES } from "./build/history";
 import { editorTypesPlugin, editorVersionsPlugin, nodeModulesCdnPlugin } from "./build/package-types";
 import { editorSettingsDefaultsPlugin, editorWorkspacePlugin } from "./build/snapshot";
@@ -236,6 +237,7 @@ export async function preBuild(): Promise<void> {
 			// (its tsserver plugin, as the package the TypeScript extension loads it from)
 			bundledExtension("change-problems", { "node_modules/change-problems-ts-plugin/package.json": { "json": { "name": "change-problems-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "node_modules/change-problems-ts-plugin/index.js": { "script": "ts-plugin.js", "format": "es" } }),
 			bundledExtension("history", HISTORY_FILES),
+			bundledExtension("capabilities", CAPABILITIES_FILES),
 			bundledExtension("source-control"),
 			bundledExtension("margin"),
 			editorSettingsDefaultsPlugin(),
@@ -321,6 +323,9 @@ export async function preBuild(): Promise<void> {
 
 	// 3. The history extension's tsserver plugin and its engine (build/history.ts).
 	await buildHistory(root, { "logger": logger, "sourcemap": sourcemap, "banner": PROCESS_SHIM });
+
+	// The capabilities extension's: its plugin, engine and canary (build/capabilities.ts).
+	await buildCapabilities(root, { "logger": logger, "sourcemap": sourcemap, "banner": PROCESS_SHIM });
 
 	// 4. The service worker a static host serves the editor with (build/static-host.ts).
 	await buildServiceWorker(root, logger);

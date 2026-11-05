@@ -374,7 +374,7 @@
     "ways": [
       "code actions provider||workbench/capability-confirm.ts",
       "core module|installCapabilityConfirm",
-      "diagnostic collection|capabilities"
+      "diagnostic collection|capabilities-confirmed"
     ],
     "paths": [
       "packages/editor/workbench/capability-confirm.ts"
@@ -400,16 +400,26 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Capability findings in the code": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced from the reduction (user 2026-11-04): what code can reach, shown where it's written; the static half of what capabilities runs confirm",
+    "since": "2026-11-04",
     "what": "Calls that reach the network, files, commands, the environment or eval are underlined in the code and listed in Problems, with the actual URL or path filled in by a background run.",
     "docs": "packages/editor/ARCHITECTURE.md, *Capabilities*",
     "ways": [
       "diagnostic collection|capabilities"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/build/capabilities.ts",
+      "packages/editor/extensions/capabilities/engine.ts",
+      "packages/editor/extensions/capabilities/extension.ts",
+      "packages/editor/extensions/capabilities/findings.ts",
+      "packages/editor/extensions/capabilities/package.json",
+      "packages/editor/extensions/capabilities/ts-external.js",
+      "packages/editor/extensions/capabilities/ts-plugin.js"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/capability-findings.spec.mjs"
+    ]
   },
   "Capability prompts for previews": {
     "status": "removed",

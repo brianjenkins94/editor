@@ -32,6 +32,7 @@ import eslintExtension from "eslint:extension";
 import settingsDefaults from "editor:settings-defaults";
 import historyExtension from "history:extension";
 import { render } from "preact";
+import capabilitiesExtension from "capabilities:extension";
 import marginExtension from "margin:extension";
 import sourceControlExtension from "source-control:extension";
 import tsvalExtension from "tsval:extension";
@@ -455,7 +456,7 @@ function maybeBoot(): void {
 			// in a worker of its own), a change's problems and history (their tsserver plugins) and Source Control (on the
 			// editor's git), and the Margin (a stopped call's question). Public API only, but for what ARCHITECTURE.md lists
 			// (*Extension points* 3).
-			for (const extension of [eslintExtension, changeProblemsExtension, historyExtension, sourceControlExtension, marginExtension]) {
+			for (const extension of [eslintExtension, changeProblemsExtension, historyExtension, sourceControlExtension, marginExtension, capabilitiesExtension]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -463,7 +464,7 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "change-problems", "history", "source-control", "margin"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "change-problems", "history", "source-control", "margin", "capabilities"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

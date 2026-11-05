@@ -1,0 +1,26 @@
+{
+  "name": "capabilities",
+  "displayName": "Capabilities",
+  "description": "Calls that reach the network, files, commands, the environment or eval, shown in the code and in Problems, with what they reach: as written, or from a sandboxed background run.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "files": ["node_modules/capabilities-ts-plugin/package.json", "node_modules/capabilities-ts-plugin/index.js"],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
+  "contributes": {
+    "typescriptServerPlugins": [
+      {
+        "name": "capabilities-ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ]
+  }
+}

@@ -421,7 +421,12 @@ How it's kept:
      shrink). An allow rule no kept test run has used, after 5 runs since it was added, is a problem on the rule with a quick fix
      (workbench/capability-confirm.ts), and a test's row says what it newly uses or has stopped using against its run before. Runs
      are tests', so a rule only a person's debug run or a preview uses reads as unused. Not yet: the static half, whether the code
-     could still make the call, with *Capability findings in the code*; the baseline's join; capabilities by feature.
+     could still make the call (the findings below read open files only, so that needs a sweep of the project); the baseline's
+     join; capabilities by feature.
+   - *Capability findings in the code: back* 2026-11-04 — extensions/capabilities (`_capabilities.findings`, its tsserver plugin):
+     a call that reaches outside is marked and in Problems, what it reaches as written or from the sandboxed canary run, in open
+     files. Tests: in-editor/capability-findings.spec.mjs. The rest of that extension (the calls panel, the baseline, Exceptions,
+     rules) comes back with those features. TypeScript 7 still won't load a tsserver plugin, so this moves when the editor does.
    - **Developer: Reload Window in an instance** (found 2026-11-04): in an editor in a test's window, the file's tab comes back
      but `visibleTextEditors` stays empty for at least 9 s, so nothing beside the code draws; opening the page again is fine, so
      past-runs.spec does that. Not looked into, nor whether the real editor does the same.
