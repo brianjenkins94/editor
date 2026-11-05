@@ -101,7 +101,14 @@ test("the editor as data: the file in front and its tabs, the Problems view, the
 	assert.ok(state.tabs.some((tab) => tab.file === "shown.ts" && tab.active));
 
 	// TypeScript's error on it, once the language service has the file.
-	const problem = await session.eventually("TypeScript's error", async () => (await ask("problems.list", { "file": "shown.ts" })).problems.find((each) => each.source === "ts"), 120_000);
+	const problem = await session.eventually("TypeScript's error", async () => (await ask("problems.list", { "file": "shown.ts" })).problems.find((each) => each.source === "ts"), 120_000).catch(async (error) => {
+		// (seen only on CI, since the capabilities plugin: NEXT.md, what to read when it next happens)
+		const printed = session.printed().filter((line) => /capabilities|typescript|tsserver/iu.test(line)).slice(-40);
+
+		console.log("[TypeScript's error never came]", JSON.stringify(await ask("problems.list", { "file": "shown.ts" })), JSON.stringify(await ask("editor.state")), "\n" + printed.join("\n"));
+
+		throw error;
+	});
 
 	assert.deepEqual([problem.file, problem.line, problem.severity], ["shown.ts", 1, "error"]);
 
