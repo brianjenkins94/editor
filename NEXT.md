@@ -440,9 +440,11 @@ How it's kept:
    - **F5 runs the wrong thing with a panel's editor focused** (found 2026-11-04): with the Output view focused, the active editor
      is its channel, and the run fails with "Failed to read extension-output-…". *Run a file in the debugger*'s button should
      say which file it runs, and F5 shouldn't try an output's.
-   - **Developer: Reload Window in an instance** (found 2026-11-04): in an editor in a test's window, the file's tab comes back
-     but `visibleTextEditors` stays empty for at least 9 s, so nothing beside the code draws; opening the page again is fine, so
-     past-runs.spec does that. Not looked into, nor whether the real editor does the same.
+   - **A reload loses the open tab's file, in an instance** (found 2026-11-04): reloading the page in Brave, the restored tab said
+     "The editor could not be opened because the file was not found", with the file in the Explorer; opening it from there was
+     fine. Seen once. *Developer: Reload Window* in a test's window looks like the same thing: the tab comes back, and
+     `visibleTextEditors` stays empty for at least 9 s, so nothing beside the code draws. past-runs.spec opens the page again
+     instead. Not looked into, nor whether the real editor (no `?instance=`) does it.
    - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its
      own average, so one that slows down says so rather than passing. The run record already keeps each file's and test's `ms`
      and the table shows a typical time; nothing compares against them. The catch: time depends on what ran beside it (all the
