@@ -432,12 +432,13 @@ How it's kept:
      join is extensions/history/runs-say.ts, over this session's runs' `coverage` events: kept nowhere, and a file edited since
      it ran is unsaid until its next run. Its statements are the run's, so one whose code spans a handler (`const f = () => {…}`)
      reads as that code having run.
-   - **TypeScript's error sometimes never comes, on CI** (open, 2026-11-05): agent-tools' *the editor as data* waits 120 s for it. 0 of
-     31 runs before the capabilities plugin (`ce77effd`), 4 of 6 after; asking `_capabilities.findings` only of what's in an editor, once
-     settled (`fcc080a2`), brought that down but didn't end it: it failed again on `bf417850`. So that isn't the cause, or not all of it.
-     Not reproduced here (slow cores, 8× CPU throttling). When it fails, `code.problems` has the error (`now: 1`): the server knows
-     it, and it's VS Code's client that never gets it into Problems. Not tried: asking findings only after TypeScript has first said
-     something of the file; a run with the plugin off, to settle whether it's the plugin at all.
+   - **TypeScript's error sometimes never comes, on CI** (open, 2026-11-05): agent-tools' *the editor as data* waits 120 s for it. It's a
+     race with the editor's first seconds: by the time spent on the tests before it, fast (under 16 s) and slow (over 18 s), CI's history
+     says fast 7 of 9 failed, slow 0 of 16; and before the capabilities plugin, or with it off, fast 0 of 5, slow 0 of 6. Twenty runs each on
+     throwaway branches: findings not asked for 40 s, fast 1 of 5; no canary, fast 1 of 5. So neither the requests nor the canary is
+     all of it, and those samples are small. When it fails, `code.problems` has the error (`now: 1`): the server knows it, VS Code's
+     client never gets it into Problems. Not reproduced here (slow cores, 8× CPU throttling). A person would see it as a file with no
+     red until it's edited, if an edit brings it: the test now prints that, the status bar and what the server says, when it fails.
    - *Run a file in the debugger: back* 2026-11-05 — a play button above a code file and *Debug: Run* (`editor.debugFile`,
      extensions/tsval/run-file.ts), written from what it's for. F5 with no launch.json runs the code file in sight rather than the active
      editor, which with the Output view focused was its channel (found 2026-11-04). Tests: in-editor/run-file.spec.mjs.
