@@ -74,3 +74,33 @@ test("a server stopped elsewhere closes its windows", async ({ page }) => {
 	await second.input.pressSequentially(`kill ${run}\n`);
 	await expect(previewWindows(page)).toHaveCount(0, { "timeout": 30_000 });
 });
+
+test("past the room for it, the cascade of windows starts again rather than going off the page", async ({ page }) => {
+	const workbench = await openEditor(page, devApp("winapp3", "many"));
+	const { input } = await openTerminal(workbench);
+
+	await input.pressSequentially("cd winapp3 && vite\n");
+
+	const shown = previewWindows(page);
+	const another = async (count) => {
+		await shown.first().locator("[title='Another window onto this server']").click();
+		await expect(shown).toHaveCount(count);
+	};
+
+	await expect(shown).toHaveCount(1, { "timeout": 90_000 });
+
+	// (this editor's page, in its own test window, has the fewest places: four)
+	for (const count of [2, 3, 4, 5]) {
+		await another(count);
+	}
+
+	const [first, second, last] = [await shown.nth(0).boundingBox(), await shown.nth(1).boundingBox(), await shown.nth(4).boundingBox()];
+
+	expect(second.y).toBeGreaterThan(first.y);
+	expect(last.y).toBe(first.y);
+
+	for (const left of [4, 3, 2, 1, 0]) {
+		await shown.last().locator(".app-window-controls [title='Close'], .app-window-controls [aria-label='Close']").first().click();
+		await expect(shown).toHaveCount(left);
+	}
+});

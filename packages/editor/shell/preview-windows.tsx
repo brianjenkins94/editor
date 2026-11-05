@@ -28,6 +28,16 @@ const CASCADE = 32;
 const FIRST_AT = 96;
 const WIDTH = 720;
 const HEIGHT = 480;
+const FEWEST_PLACES = 4;
+
+/** Where the `opened`th window opens: the cascade goes round again before a window would leave the page, as what's off the
+ *  page stops being drawn (xterm's rendering pauses, for one) and can't be reached. (`CASCADE` of room kept for the title
+ *  bar.) On a page too small for a whole window, still `FEWEST_PLACES`, so none opens exactly over the last. */
+function cascadeAt(opened: number): number {
+	const room = Math.min(window.innerWidth - WIDTH, window.innerHeight - HEIGHT - CASCADE) - FIRST_AT;
+
+	return FIRST_AT + (opened % Math.max(FEWEST_PLACES, Math.floor(room / CASCADE) + 1)) * CASCADE;
+}
 
 interface Server { "url": string; "windows": Set<HTMLElement>; "opened": number; "offUpdates": () => void }
 
@@ -58,7 +68,7 @@ function install(hub: Hub): void {
 
 		const frame = document.createElement("iframe");
 		const another = document.createElement("div");
-		const at = FIRST_AT + server.opened * CASCADE;
+		const at = cascadeAt(server.opened);
 
 		frame.className = previewFrame();
 		frame.title = port === NO_SERVER ? "Preview" : `Preview :${String(port)}`;
