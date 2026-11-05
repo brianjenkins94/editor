@@ -840,12 +840,16 @@
     "what": "Where what's been decided about a feature no longer matches the code, a problem says so on the ledger and offers both ways out.",
     "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes*",
     "ways": [
-      "diagnostic collection|silo",
-      "output channel|History"
+      "diagnostic collection|silo"
     ],
     "paths": [
       "packages/editor/build/history.ts",
-      "packages/editor/extensions/history/"
+      "packages/editor/extensions/history/engine.ts",
+      "packages/editor/extensions/history/extension.ts",
+      "packages/editor/extensions/history/ledger.ts",
+      "packages/editor/extensions/history/package.json",
+      "packages/editor/extensions/history/ts-external.js",
+      "packages/editor/extensions/history/ts-plugin.js"
     ],
     "tests": [
       "packages/editor/test/history-ledger.test.mjs"
@@ -2642,16 +2646,21 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "What your edits change": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced from the reduction (user 2026-11-04): an edit says at once what it changed and whether anything ran it, what the live loop reads",
+    "since": "2026-11-04",
     "what": "When you pause typing, the History output says which features your edits added, removed or changed, and whether runs used them.",
     "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say*",
     "ways": [
+      "command|history.show",
       "output channel|History"
     ],
-    "in": "39b30c64",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/history/runs-say.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/edits-change.spec.mjs"
+    ]
   },
   "What's been decided about it": {
     "status": "active",

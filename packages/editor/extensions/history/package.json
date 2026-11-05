@@ -1,14 +1,17 @@
 {
   "name": "history",
   "displayName": "History",
-  "description": "The program as it stands, read as you edit by the TypeScript server's own TypeScript, and the feature ledger held to it: `silo check`'s drift in Problems, and what's been decided about a file or a name.",
+  "description": "What your edits change, and whether runs used it, in the History output. The program as it stands, read as you edit by the TypeScript server's own TypeScript, and the feature ledger held to it: `silo check`'s drift in Problems, and what's been decided about a file or a name.",
   "publisher": "silo",
   "version": "0.0.1",
   "engines": {
     "vscode": "*"
   },
   "browser": "extension.js",
-  "files": ["node_modules/history-ts-plugin/package.json", "node_modules/history-ts-plugin/index.js"],
+  "files": [
+    "node_modules/history-ts-plugin/package.json",
+    "node_modules/history-ts-plugin/index.js"
+  ],
   "activationEvents": [
     "onLanguage:typescript",
     "onLanguage:typescriptreact",
@@ -20,6 +23,13 @@
       {
         "name": "history-ts-plugin",
         "enableForWorkspaceTypeScriptVersions": true
+      }
+    ],
+    "commands": [
+      {
+        "command": "history.show",
+        "title": "Show What Changed",
+        "category": "History"
       }
     ]
   }

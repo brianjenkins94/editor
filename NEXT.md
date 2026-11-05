@@ -427,6 +427,14 @@ How it's kept:
      a call that reaches outside is marked and in Problems, what it reaches as written or from the sandboxed canary run, in open
      files. Tests: in-editor/capability-findings.spec.mjs. The rest of that extension (the calls panel, the baseline, Exceptions,
      rules) comes back with those features. TypeScript 7 still won't load a tsserver plugin, so this moves when the editor does.
+   - *What your edits change: back* 2026-11-04 — the History output (History: Show What Changed): what a pause added, removed or
+     changed, by feature, and what runs said of each. Tests: in-editor/edits-change.spec.mjs. Lib no longer has `exercise`, so the
+     join is extensions/history/runs-say.ts, over this session's runs' `coverage` events: kept nowhere, and a file edited since
+     it ran is unsaid until its next run. Its statements are the run's, so one whose code spans a handler (`const f = () => {…}`)
+     reads as that code having run.
+   - **F5 runs the wrong thing with a panel's editor focused** (found 2026-11-04): with the Output view focused, the active editor
+     is its channel, and the run fails with "Failed to read extension-output-…". *Run a file in the debugger*'s button should
+     say which file it runs, and F5 shouldn't try an output's.
    - **Developer: Reload Window in an instance** (found 2026-11-04): in an editor in a test's window, the file's tab comes back
      but `visibleTextEditors` stays empty for at least 9 s, so nothing beside the code draws; opening the page again is fine, so
      past-runs.spec does that. Not looked into, nor whether the real editor does the same.
