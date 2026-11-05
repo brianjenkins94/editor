@@ -73,6 +73,19 @@ export async function openTerminal(workbench) {
 	return { "input": workbench.locator(".xterm-helper-textarea").last(), "output": output };
 }
 
+/** Until `read` (a locator's top, say) is past `than`: what's drawn beside the code moves once BABLR has read the edit, in its own time. */
+export async function moved(page, read, than, timeout = 30_000) {
+	const until = Date.now() + timeout;
+
+	while (await read() <= than) {
+		if (Date.now() > until) {
+			throw new Error(`it stayed at ${String(than)}`);
+		}
+
+		await page.waitForTimeout(200);
+	}
+}
+
 /** The open file's text replaced, as a person does it, and saved. */
 export async function retype(workbench, text) {
 	await codeOf(workbench).press("ControlOrMeta+a");

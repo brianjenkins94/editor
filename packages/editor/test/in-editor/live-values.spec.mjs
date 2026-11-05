@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile } from "./editor.mjs";
+import { codeOf, moved, openEditor, openFile } from "./editor.mjs";
 
 const PROGRAM = `const total = 2 + 3;
 let sum = 0;
@@ -62,9 +62,8 @@ test("a run's values beside the code: a column per turn, a call picked, followin
 
 	await codeOf(workbench).press("ControlOrMeta+Home");
 	await codeOf(workbench).pressSequentially("\n");
-	await page.waitForTimeout(1500);
 	await expect(row("total =")).toBeVisible({ "timeout": 15_000 });
-	expect(await topOf(row("total ="))).toBeGreaterThan(before);
+	await moved(page, async () => topOf(row("total =")), before);
 
 	// Its code gone, so is its value.
 	await codeOf(workbench).pressSequentially("// ");

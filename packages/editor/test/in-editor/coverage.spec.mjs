@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, retype, runCommand } from "./editor.mjs";
+import { codeOf, moved, openEditor, openFile, retype, runCommand } from "./editor.mjs";
 
 const unit = (name, body) => `import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { add, times } from "./math.mjs";\n\ntest("${name}", () => {\n\t${body}\n});\n`;
 const files = {
@@ -48,9 +48,8 @@ test("after a run, each line says whether it ran; a line no run reached says so;
 
 	await codeOf(workbench).pressSequentially("// a note\n");
 	await expect(workbench.locator(".tab.dirty")).toHaveCount(1);
-	await page.waitForTimeout(1500);
 	await expect(marks("ran").last()).toBeVisible({ "timeout": 15_000 });
-	expect(await topOf(marks("ran").last())).toBeGreaterThan(before);
+	await moved(page, async () => topOf(marks("ran").last()), before);
 
 	// Reformatted, nothing lost: BABLR finds each statement by its code, not its place.
 	const count = await marks("ran").count();
