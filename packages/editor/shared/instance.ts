@@ -109,6 +109,21 @@ export function isolate(name: string, factory: Pick<IDBFactory, "open" | "delete
 	};
 }
 
+/** A database's `name`, from here on, as `name` asked for it, not as it's stored: zen-fs opens its object store by it. */
+export function isolateDatabaseNames(name: string, database: { "prototype": IDBDatabase }): void {
+	const stored = Object.getOwnPropertyDescriptor(database.prototype, "name")!.get!;
+
+	Object.defineProperty(database.prototype, "name", {
+		"configurable": true,
+		"get": function(this: IDBDatabase): string {
+			const own = stored.call(this) as string;
+
+			return ownName(name, own) ?? own;
+		}
+	});
+}
+
 if (instance !== undefined) {
 	isolate(instance, IDBFactory.prototype, Storage.prototype, (store) => Object.keys(store));
+	isolateDatabaseNames(instance, IDBDatabase);
 }
