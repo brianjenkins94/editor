@@ -1,7 +1,11 @@
 /**
  * Live values (RUNTIME-EVIDENCE.md, *Live values*): what a run computed, beside the code in the Margin, Bret Victor's binary
- * search. Every debugger tells them as the run contract's custom events (`values` as they grow, `ended`); this keeps each
- * file's latest run's, and how it ended short, until the file's next run tells its own.
+ * search. Every debugger tells them as the run contract's custom events (`values` as they grow, `ended`).
+ *
+ * Each file's last runs are kept (RUNTIME-EVIDENCE.md, *Runs kept, as balls*), a ball each at the Margin's top: with their
+ * values and how they ended, here and on this machine (runs.ts), identified by their code, so a reformat run again is the
+ * same run counted. A click shows that run's. The latest is shown until another's picked, and a finished one rolls its ball
+ * down the gutter through the lines it went.
  *
  * A function called more than once shows one call: its latest, or the one picked on its first line (`‹ 3/5 ›`). Columns
  * line up down a call: every line at the same loop depth has the same columns, each as wide as its widest value, so a turn
@@ -9,14 +13,18 @@
  * last line.
  *
  * Everything is placed by its range in the text that ran, so it follows its code through edits and reformats (pane-views,
- * through BABLR's spans). What else the Margin showed at `full-editor` (Mock…, Rule…, cards, past runs) comes back with
- * those features.
+ * through BABLR's spans). What else the Margin showed at `full-editor` (Mock…, Rule…, cards) comes back with those features.
  */
-import type { EndedEvent, LiveCall, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, EffectsEvent, EndedEvent, LiveCall, LivePlace, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
-import type { PaneAt, PaneCell, PaneItem, PaneMark } from "@brianjenkins94/editor-api/pane";
+import type { PaneAt, PaneCell, PaneContent, PaneItem, PaneMark, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
+import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
+import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { declarationsHolding, inputOf, spanAround, traceKey } from "@brianjenkins94/util/silo/traces";
 import * as vscode from "vscode";
+import { blobOid, keepRun, keptRuns } from "./runs";
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
 interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range }
@@ -28,19 +36,24 @@ interface Picker { "function": string; "index": number; "count": number }
 interface Cell { "text": string; "kind": string }
 
 /** A run's values in a file, and what's picked in them: a function's call (by `function:line`; none, its latest) and a
- *  held column. */
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors }
-
-/** How a run ended short, and the text it ran. */
-type Ending = RunEnd & { "anchors"?: Anchors };
+ *  held column. How it ended (`done`, and `end` if that was short), when it started, how many runs alike it stands for and
+ *  what identifies it (`key`); `now`, where it is while it goes. */
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at": number; "done"?: boolean; "end"?: RunEnd; "count": number; "key"?: string; "now"?: LivePlace }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
 
-/** The latest run's values, per file URI. */
+/** How many runs of a file are kept. */
+const KEPT = 8;
+/** How many of a run's steps its ball rolls through, at most. */
+const MAX_PATH = 400;
+/** How long a run goes before its ball follows it as it goes: a shorter one's rolls once it's finished. */
+const FOLLOW_AFTER = 1000;
+
+/** The run shown, per file URI: the latest, or one picked from those kept. */
 const sessions = new Map<string, Session>();
-/** How each file's last run ended short, per file URI. */
-const ends = new Map<string, Ending>();
+/** Each file's runs kept, oldest first. */
+const kept = new Map<string, Session[]>();
 /** When each file's latest batch of values came (inline values wait for a stop's to come in). */
 const batchedAt = new Map<string, number>();
 /** The sessions that told their end themselves. */
@@ -289,9 +302,10 @@ export function valueItems(uri: string, text: string | undefined): PaneItem[] {
 	];
 }
 
-/** The gutter's mark for how `uri`'s last run ended short: ✕ where it crashed, ■ where it was stopped. */
+/** The gutter's mark for how the run shown ended short: ✕ where it crashed, ■ where it was stopped. */
 export function endMarks(uri: string): PaneMark[] {
-	const ending = ends.get(uri);
+	const session = sessions.get(uri);
+	const ending = session?.end;
 
 	if (ending === undefined) {
 		return [];
@@ -299,11 +313,145 @@ export function endMarks(uri: string): PaneMark[] {
 
 	const title = ending.kind === "crashed" ? `The last run crashed here: ${ending.message ?? "an uncaught error"}` : ending.message === undefined ? "The last run was stopped here" : `The last run stopped here: ${ending.message}`;
 
-	return [{ "at": placeOf(ending.anchors, ending.line, ending.at), "kind": ending.kind, "title": title }];
+	return [{ "at": placeOf(session?.anchors, ending.line, ending.at), "kind": ending.kind, "title": title }];
+}
+
+/** How a run ended, as its ball's colour; none while it's running. */
+function stateOf(run: Session): PaneRun["state"] {
+	if (run.done !== true) {
+		return undefined;
+	}
+
+	if (run.end === undefined) {
+		return "ran";
+	}
+
+	return run.end.kind === "crashed" ? "crashed" : "stopped";
+}
+
+const HOW: Record<string, string> = { "ran": "ran to its end", "crashed": "crashed", "stopped": "stopped short" };
+
+/** Where a run went: a step a value, in the order it ran them, the same line twice running counted once. */
+function pathOf(run: Session): PanePath {
+	const at: PaneAt[] = [];
+	let line: number | undefined;
+
+	for (const value of run.values) {
+		if (value.line !== line && at.length < MAX_PATH) {
+			({ line } = value);
+			at.push(placeOf(run.anchors, value.line, value.at));
+		}
+	}
+
+	return { "id": run.id, "at": at };
+}
+
+/** A file's runs kept, a ball each, and where the one shown went (its ball rolls along it) or, going for a while, is. */
+export function runsShown(uri: string): Pick<PaneContent, "runs" | "path"> {
+	const shown = sessions.get(uri);
+	const runs = (kept.get(uri) ?? []).map((run): PaneRun => {
+		const state = stateOf(run);
+		const alike = run.count > 1 ? ` (${String(run.count)} runs alike)` : "";
+
+		return {
+			"id": run.id,
+			"title": `${new Date(run.at).toLocaleTimeString()} — ${state === undefined ? "running" : HOW[state] ?? ""}, ${String(run.values.length)} value${run.values.length === 1 ? "" : "s"}${alike}`,
+			...state === undefined ? {} : { "state": state },
+			"picked": run === shown,
+			"command": { "title": "Show this run", "command": "margin.pickRun", "arguments": [uri, run.id] }
+		};
+	});
+	let path: PanePath | undefined;
+
+	if (shown?.done === true) {
+		path = pathOf(shown);
+	} else if (shown?.now !== undefined && Date.now() - shown.at >= FOLLOW_AFTER) {
+		path = { "id": shown.id, "at": [placeOf(shown.anchors, shown.now.line, shown.now.at)], "live": true };
+	}
+
+	return { ...runs.length === 0 ? {} : { "runs": runs }, ...path === undefined ? {} : { "path": path } };
+}
+
+/** `file`'s `[line, character]` positions as offsets. */
+function offsetsIn(text: string): (position: [number, number]) => number {
+	const starts = [0];
+
+	for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) {
+		starts.push(at + 1);
+	}
+
+	return ([line, character]) => (starts[line] ?? text.length) + character;
+}
+
+/** A file's runs from this machine, once it's shown and none are here yet: the latest shown. */
+async function restoreRuns(uri: string): Promise<boolean> {
+	if ((kept.get(uri) ?? []).length > 0) {
+		return false;
+	}
+
+	const { path } = vscode.Uri.parse(uri);
+	const traces = await keptRuns(vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false));
+	const runs = traces.filter((trace) => trace.source !== undefined).map((trace): Session => ({
+		"id": trace.id,
+		"values": trace.values.map((value) => ({ "line": value.line, "name": value.name, "value": value.value ?? "‹value›", "kind": value.kind as LiveValue["kind"], "call": value.call, "turns": value.turns, ...value.at === undefined ? {} : { "at": value.at } })),
+		"calls": new Map(trace.calls.map((call) => [call.id, call])),
+		"dropped": 0,
+		"picked": new Map(),
+		"anchors": new Anchors(vscode, path, trace.source ?? ""),
+		"at": Date.parse(trace.at),
+		"done": true,
+		...trace.end === undefined ? {} : { "end": trace.end },
+		"count": trace.count,
+		"key": traceKey(trace)
+	}));
+
+	// (a run that came meanwhile is newer: it stays shown)
+	if (runs.length === 0 || (kept.get(uri) ?? []).length > 0) {
+		return false;
+	}
+
+	kept.set(uri, runs);
+	sessions.set(uri, runs.at(-1)!);
+
+	return true;
+}
+
+/** `run`, finished, as a trace: identified by the top-level declarations it ran (BABLR's spans of the text it ran), each
+ *  value by the span around it. With no spans (text BABLR can't parse), by its text. */
+async function traceOf(uri: string, run: Session, inputs: string[], executed: [[number, number], [number, number]][]): Promise<RunTrace> {
+	const source = run.anchors?.text ?? "";
+	const answer = await annotations(vscode.commands).spans(source).catch(() => undefined);
+	const spans = answer !== undefined && "value" in answer ? answer.value : undefined;
+	const offsetOf = offsetsIn(source);
+	const ran: [number, number][] = [
+		...executed.map(([start, end]): [number, number] => [offsetOf(start), offsetOf(end)]),
+		...run.values.flatMap((value) => (value.at === undefined ? [] : [value.at])),
+		...[...run.calls.values()].flatMap((call) => (call.at === undefined ? [] : [call.at]))
+	];
+	const declarations = spans === undefined ? undefined : declarationsHolding(spans, ran);
+
+	return {
+		"id": run.id,
+		"file": vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false),
+		"oid": await blobOid(source),
+		...declarations === undefined || declarations.length === 0 ? {} : { "declarations": declarations },
+		"trigger": "you",
+		"at": new Date(run.at).toISOString(),
+		"count": 1,
+		...run.end === undefined ? {} : { "end": { "kind": run.end.kind, "line": run.end.line, ...run.end.at === undefined ? {} : { "at": run.end.at }, ...run.end.message === undefined ? {} : { "message": run.end.message } } },
+		"inputs": [...new Set(inputs)].toSorted(),
+		"values": run.values.map((value) => {
+			const span = spans === undefined || value.at === undefined ? undefined : spanAround(spans, value.at[0], value.at[1]);
+
+			return { "line": value.line, "name": value.name, "kind": value.kind, "call": value.call, "turns": value.turns, "value": value.value, ...value.at === undefined ? {} : { "at": value.at }, ...span === undefined ? {} : { "span": span.id } };
+		}),
+		"calls": [...run.calls.values()],
+		"source": source
+	};
 }
 
 /** Keep each debug run's values and end, `redraw` a file's Margin as they change. */
-export function installValues(context: vscode.ExtensionContext, redraw: (uri: string) => void, answered: (session: string) => void): void {
+export function installValues(context: vscode.ExtensionContext, log: ObservedExtension["log"] | undefined, redraw: (uri: string) => void, answered: (session: string) => void): void {
 	const uriOf = (path: string): string => vscode.Uri.file(path).toString();
 	// The values drawn ten times a second at most, however often batches come: on a timer, not an animation frame, which a
 	// hidden tab never gives.
@@ -325,48 +473,122 @@ export function installValues(context: vscode.ExtensionContext, redraw: (uri: st
 			}, 100);
 		}
 	};
+	/** `id`'s run of `uri`, or a new one, shown: the file's latest. */
+	const runOf = (uri: string, id: string): Session => {
+		const found = kept.get(uri)?.find((each) => each.id === id);
+
+		if (found !== undefined) {
+			return found;
+		}
+
+		const run: Session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map(), "at": Date.now(), "count": 1 };
+		const runs = [...kept.get(uri) ?? [], run];
+
+		kept.set(uri, runs.slice(-KEPT));
+		sessions.set(uri, run);
+
+		return run;
+	};
+	const anchorsFrom = (run: Session, file: string, source: string | undefined): void => {
+		if (run.anchors === undefined && typeof source === "string") {
+			run.anchors = new Anchors(vscode, file, source);
+		}
+	};
 	const valuesCame = (id: string, { file, source, ...batch }: ValuesEvent): void => {
 		const uri = uriOf(file);
-		let session = sessions.get(uri);
+		const run = runOf(uri, id);
 
-		// A new run of the file replaces the last one's values, and how it ended.
-		if (session?.id !== id) {
-			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map() };
-			sessions.set(uri, session);
-			ends.delete(uri);
-		}
-
-		session.anchors ??= typeof source === "string" ? new Anchors(vscode, file, source) : undefined;
-		session.values.push(...batch.values);
+		anchorsFrom(run, file, source);
+		run.values.push(...batch.values);
+		run.now = batch.now ?? batch.values.at(-1) ?? run.now;
 
 		for (const call of batch.calls) {
-			session.calls.set(call.id, call);
+			run.calls.set(call.id, call);
 		}
 
-		session.dropped = batch.dropped;
+		run.dropped = batch.dropped;
 		batchedAt.set(uri, Date.now());
 		// Running again past a capability stop: its question's answered, by whoever answered it.
 		answered(id);
 		soon(uri);
 	};
-	// The run's end: how it ended goes on its line, and its values stay until the file's next run tells its own.
+	// The run's end: how it ended goes on its line. (A run that told no values here, a file that didn't parse say, is a run
+	// all the same.)
 	const endedCame = (id: string, { file, source, end }: EndedEvent): void => {
 		const uri = uriOf(file);
-		const ran = sessions.get(uri);
+		const run = runOf(uri, id);
 
-		if (end === undefined) {
-			ends.delete(uri);
-		} else {
-			// (a run that told no values here: a file that didn't parse, say, has only its end, and the last run's values are stale)
-			if (ran?.id !== id) {
-				sessions.delete(uri);
-			}
+		anchorsFrom(run, file, source);
+		run.done = true;
 
-			ends.set(uri, { ...end, ...ran?.id === id ? ran.anchors === undefined ? {} : { "anchors": ran.anchors } : typeof source === "string" ? { "anchors": new Anchors(vscode, file, source) } : {} });
+		if (end !== undefined) {
+			run.end = end;
 		}
 
 		soon(uri);
 	};
+	/** What each session read from outside, from its effects: its values may hold it. */
+	const inputsOf = new Map<string, string[]>();
+	/** The statements each session ran, by file: what its code is. */
+	const executedOf = new Map<string, Map<string, [[number, number], [number, number]][]>>();
+	/** A finished session's runs, kept: the same as one kept already is that one, counted again, and shown as the latest. */
+	const keepSession = async (id: string): Promise<void> => {
+		const inputs = inputsOf.get(id) ?? [];
+		const executed = executedOf.get(id);
+
+		inputsOf.delete(id);
+		executedOf.delete(id);
+
+		for (const [uri, runs] of kept) {
+			const run = runs.find((each) => each.id === id);
+
+			if (run?.done === true && run.anchors !== undefined) {
+				const trace = await traceOf(uri, run, inputs, executed?.get(vscode.Uri.parse(uri).path) ?? []);
+				const key = traceKey(trace);
+				const now = kept.get(uri) ?? [];
+				const same = now.find((each) => each !== run && each.key === key);
+
+				if (same === undefined) {
+					run.key = key;
+				} else {
+					same.count += 1;
+					same.at = run.at;
+					kept.set(uri, [...now.filter((each) => each !== run && each !== same), same]);
+
+					if (sessions.get(uri) === run) {
+						sessions.set(uri, same);
+					}
+				}
+
+				redraw(uri);
+				await keepRun(trace, KEPT);
+			}
+		}
+	};
+	const keeping = async (id: string): Promise<void> => {
+		const keep = async (): Promise<void> => keepSession(id);
+
+		await (log === undefined ? keep() : log.span("editor.extensions.margin.values.keep", {}, keep)).catch((error: unknown) => {
+			log?.warn("a run couldn't be kept", { "error": String(error) });
+		});
+	};
+	/** A code file shown: its runs from this machine. */
+	const follow = (editors: readonly vscode.TextEditor[]): void => {
+		for (const { document } of editors) {
+			if (document.uri.scheme === "file") {
+				const uri = document.uri.toString();
+
+				void restoreRuns(uri).then((restored) => {
+					if (restored) {
+						redraw(uri);
+					}
+				}, () => undefined);
+			}
+		}
+	};
+
+	follow(vscode.window.visibleTextEditors);
+
 	/** A change to what a file's run shows (`value` its URI), drawn. */
 	const changing = (change: (session: Session, key: string, ...rest: unknown[]) => void) => (value: unknown, key: unknown, ...rest: unknown[]): void => {
 		const session = typeof value === "string" ? sessions.get(value) : undefined;
@@ -378,6 +600,19 @@ export function installValues(context: vscode.ExtensionContext, redraw: (uri: st
 	};
 
 	context.subscriptions.push(
+		vscode.window.onDidChangeVisibleTextEditors(follow),
+		// A run kept to show, and how it ended.
+		vscode.commands.registerCommand("margin.pickRun", (value: unknown, id: unknown) => {
+			const uri = String(value);
+			const run = kept.get(uri)?.find((each) => each.id === id);
+
+			if (run === undefined) {
+				throw new Error("that run isn't kept any more");
+			}
+
+			sessions.set(uri, run);
+			redraw(uri);
+		}),
 		// A function's call to show.
 		vscode.commands.registerCommand("margin.pick", changing((session, key, index, count) => {
 			if (index === Number(count) - 1) {
@@ -428,6 +663,17 @@ export function installValues(context: vscode.ExtensionContext, redraw: (uri: st
 			} else if (event === "ended") {
 				told.add(session.id);
 				endedCame(session.id, body as EndedEvent);
+			} else if (event === "effects") {
+				// (what came in: a call made, or given a result, not one skipped or denied)
+				inputsOf.set(session.id, (body as EffectsEvent).effects.filter((effect) => effect.how === "made" || effect.how === "given").map((effect) => inputOf(effect.capability, effect.resource)));
+			} else if (event === "coverage") {
+				const executed = new Map<string, [[number, number], [number, number]][]>();
+
+				for (const report of [body as CoverageEvent, ...(body as CoverageEvent).files ?? []]) {
+					executed.set(report.file, report.statements.filter((statement) => statement.count > 0).map((statement) => [statement.start, statement.end]));
+				}
+
+				executedOf.set(session.id, executed);
 			}
 		}),
 		// A debugger that tells no `ended`: the program's run ends with its session.
@@ -437,6 +683,9 @@ export function installValues(context: vscode.ExtensionContext, redraw: (uri: st
 			if (!told.delete(session.id) && typeof program === "string") {
 				endedCame(session.id, { "file": program });
 			}
+
+			// (after every event it told: its values, end and effects)
+			void keeping(session.id);
 		})
 	);
 }

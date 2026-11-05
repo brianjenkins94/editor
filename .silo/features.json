@@ -1418,16 +1418,20 @@
     ]
   },
   "Past runs, as balls": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced from the reduction (user 2026-11-04): what a run computed stays to be looked at, the next piece the live loop writes to",
+    "since": "2026-11-04",
     "what": "Each run of a file is kept on this machine, and picking it at the top of the margin shows its values and how it ended.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Runs kept, as balls*",
     "ways": [
       "command|margin.pickRun"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/margin/runs.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/past-runs.spec.mjs"
+    ]
   },
   "Performance monitor": {
     "status": "removed",

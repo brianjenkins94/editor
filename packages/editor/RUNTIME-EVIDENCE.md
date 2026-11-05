@@ -418,6 +418,10 @@ values are told from its trace every quarter second, not only by a timer; and ea
 when its values there weren't kept (`LiveBatch.now`), so the ball follows it past the bounds, and their count goes up
 as it runs. A live run on a save stops at its step budget well inside the second, so it's a Run that's followed.
 
+Reintroduced 2026-11-04 with what follows, kept across reloads, but not yet: a picked run's own coverage (the gutter shows the
+latest's), runs kept per test (a test run keeps its files' runs like any other; reach is test-runs.ts's now), and the
+envelopes in `.silo/runs/`.
+
 ### Kept across reloads and deduped, on this machine
 
 2026-10-22 (lib util/silo/traces; extensions/margin/runs.ts). A finished run is kept as a trace (its values, calls, how

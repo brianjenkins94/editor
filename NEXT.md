@@ -422,6 +422,9 @@ How it's kept:
      (workbench/capability-confirm.ts), and a test's row says what it newly uses or has stopped using against its run before. Runs
      are tests', so a rule only a person's debug run or a preview uses reads as unused. Not yet: the static half, whether the code
      could still make the call, with *Capability findings in the code*; the baseline's join; capabilities by feature.
+   - **Developer: Reload Window in an instance** (found 2026-11-04): in an editor in a test's window, the file's tab comes back
+     but `visibleTextEditors` stays empty for at least 9 s, so nothing beside the code draws; opening the page again is fine, so
+     past-runs.spec does that. Not looked into, nor whether the real editor does the same.
    - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its
      own average, so one that slows down says so rather than passing. The run record already keeps each file's and test's `ms`
      and the table shows a typical time; nothing compares against them. The catch: time depends on what ran beside it (all the

@@ -17,7 +17,7 @@ import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import { installCoverage } from "./coverage";
-import { endMarks, installValues, valueItems } from "./values";
+import { endMarks, installValues, runsShown, valueItems } from "./values";
 
 /** The view the Margin is, in the pane. */
 const VIEW = "margin";
@@ -83,7 +83,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(observed);
 	}
 
-	installValues(context, redraw, clear);
+	installValues(context, observed?.log, redraw, clear);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand("margin.paneView", (uri: unknown): PaneContent | undefined => {
@@ -98,7 +98,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			const items = [...question?.items ?? [], ...valueItems(uri, text)];
 			const marks = [...question?.marks ?? [], ...endMarks(uri)];
 
-			return items.length === 0 && marks.length === 0 ? undefined : { "items": items, "marks": marks };
+			const runs = runsShown(uri);
+
+			return items.length === 0 && marks.length === 0 && runs.runs === undefined ? undefined : { "items": items, "marks": marks, ...runs };
 		}),
 		vscode.commands.registerCommand("margin.decide", async (session: unknown, choice: unknown) => {
 			const decide = async (): Promise<void> => {

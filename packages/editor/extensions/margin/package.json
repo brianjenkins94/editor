@@ -1,7 +1,7 @@
 {
   "name": "margin",
   "displayName": "Margin",
-  "description": "The file's runtime column, beside the code in the pane: a run's values on the lines that made them (a column per turn of a loop), a capability stop's question with its answers, how the last run ended, and its coverage in the gutter column, from every debugger's run contract events.",
+  "description": "The file's runtime column, beside the code in the pane: a run's values on the lines that made them (a column per turn of a loop), a capability stop's question with its answers, the last runs kept and how each ended, and its coverage in the gutter column, from every debugger's run contract events.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
