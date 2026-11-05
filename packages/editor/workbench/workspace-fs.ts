@@ -49,6 +49,8 @@ const FILE_PERMISSION_READONLY = 1 as unknown as NonNullable<IStat["permissions"
  *  SharedArrayBuffer-backed — the `buffer` itself, so other realms (the LSP workers, M3b) can attach to the SAME
  *  filesystem. Also on `globalThis.__workspaceFs`. */
 export interface WorkspaceFs {
+	/** The store, as VS Code's file service reads it (holdFiles). */
+	"provider": IFileSystemProviderWithFileReadWriteCapability;
 	"reads": number;
 	"writes": number;
 	"has": (path: string) => boolean;
@@ -247,6 +249,42 @@ function forgetPersisted(db: IDBDatabase | undefined, paths: string[]): void {
 function settled<T>(body: () => T): Promise<T> {
 	return new Promise((resolve) => {
 		resolve(body());
+	});
+}
+
+/**
+ * VS Code's reads of the workspace, held until the store's mounted (`mounting`) and then answered by it, so the workbench can
+ * show before a big workspace is in: a tab restored as it boots loads a moment longer, where it would have said its file
+ * wasn't found. Registered before boot, above the store, and gone once the store's there.
+ *
+ * Not `root` itself or its `.vscode`: boot waits for the configuration service's reads of those, and the store's mounted after boot. They fall through, to the store once it's there; and it tells the service to read them again (`announce`).
+ */
+export function holdFiles(mounting: Promise<WorkspaceFs | undefined>, root: string): void {
+	const held = async <T>({ path }: { "path": string }, call: (store: IFileSystemProviderWithFileReadWriteCapability) => Promise<T>): Promise<T> => {
+		const store = path === root || path === `${root}/.vscode` || path.startsWith(`${root}/.vscode/`) ? undefined : await mounting;
+
+		if (store === undefined) {
+			throw notFound();
+		}
+
+		return call(store.provider);
+	};
+	const hold = registerFileSystemOverlay(3, {
+		"capabilities": FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive,
+		"onDidChangeCapabilities": (() => ({ "dispose": () => undefined })) as never,
+		"onDidChangeFile": (() => ({ "dispose": () => undefined })) as never,
+		"watch": () => ({ "dispose": () => undefined }),
+		"stat": async (resource) => held(resource, async (store) => store.stat(resource)),
+		"readFile": async (resource) => held(resource, async (store) => store.readFile(resource)),
+		"readdir": async (resource) => held(resource, async (store) => store.readdir(resource)),
+		"writeFile": async (resource, content, options) => held(resource, async (store) => store.writeFile(resource, content, options)),
+		"mkdir": async (resource) => held(resource, async (store) => store.mkdir(resource)),
+		"delete": async (resource, options) => held(resource, async (store) => store.delete(resource, options)),
+		"rename": async (from, to, options) => held(from, async (store) => store.rename(from, to, options))
+	});
+
+	void mounting.finally(() => {
+		hold.dispose();
 	});
 }
 
@@ -457,6 +495,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	};
 
 	const handle: WorkspaceFs = {
+		"provider": undefined as unknown as IFileSystemProviderWithFileReadWriteCapability,
 		"reads": 0,
 		"writes": 0,
 		// (asked for every file type acquisition might fetch: counted as its own caller)
@@ -599,6 +638,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	}
 
 	registerFileSystemOverlay(2, provider);
+	handle.provider = provider;
 
 	// eslint-disable-next-line ts/naming-convention -- the global other realms find the workspace fs handle by
 	(globalThis as unknown as { "__workspaceFs": WorkspaceFs }).__workspaceFs = handle;

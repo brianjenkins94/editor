@@ -69,7 +69,7 @@ import { serveUnpushed } from "./unpushed";
 import { pinned, watchVersions } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
-import { installWorkspaceFs } from "./workspace-fs";
+import { holdFiles, installWorkspaceFs } from "./workspace-fs";
 import { installWorkspaceTools } from "./workspace-tools";
 
 // Boot milestones on the performance timeline (beside VS Code's own code/* marks), for load investigations.
@@ -250,7 +250,12 @@ function bootWithFallbackViewport(root: HTMLElement): void {
 	window.addEventListener("resize", restore);
 }
 
-async function maybeBoot(): Promise<void> {
+/** How long the workspace's store waits for boot, before it's mounted regardless. */
+const BOOT_WAITS_AT_MOST_MS = 10_000;
+/** How long the browser's given to paint the booted workbench, before mounting holds the main thread. */
+const PAINT_FIRST_MS = 100;
+
+function maybeBoot(): void {
 	if (booted || workbenchContainer === undefined || init === undefined) {
 		return;
 	}
@@ -267,15 +272,22 @@ async function maybeBoot(): Promise<void> {
 	// the workers/type-checker that attach to this same zen-fs see them, and a repo load can clear/replace it. See
 	// workspace-fs.ts. Its `has` probe lets ATA skip already-present files.
 	//
-	// Mounted before boot: VS Code restores the last session's tabs as it boots, each read once, so a tab whose file isn't
-	// there yet says "the file was not found" until it's opened again.
-	const workspaceFs: WorkspaceFs | undefined = await installWorkspaceFs(files, paneLog, { "hub": workbenchHub, "architecture": architecture }).catch((error: unknown) => {
+	// Mounted once boot's done: bringing a big workspace back holds the main thread for seconds (2,909 files: 3 s), and the
+	// workbench shows first. What it reads meanwhile waits for the store (holdFiles): VS Code restores the last session's tabs
+	// as it boots, each read once, so without that a tab whose file isn't there yet says "the file was not found" until it's
+	// opened again. (Were boot ever to wait on something held, the store comes anyway, a moment late.)
+	const { "promise": bootOver, "resolve": bootDone } = Promise.withResolvers<void>();
+	const mounting = bootOver.then(async () => installWorkspaceFs(files, paneLog, { "hub": workbenchHub, "architecture": architecture })).catch((error: unknown) => {
 		bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
 
 		return undefined;
 	});
 
-	markReady("workspace");
+	holdFiles(mounting, workspaceFolder ?? "/workspace");
+	setTimeout(bootDone, BOOT_WAITS_AT_MOST_MS);
+
+	let workspaceFs: WorkspaceFs | undefined;
+
 	bootWithFallbackViewport(document.documentElement);
 
 	// SPLIT: boot's priority-1 in-memory overlay carries ONLY the read-only base — managed configs (tsconfig etc.)
@@ -328,7 +340,10 @@ async function maybeBoot(): Promise<void> {
 			// Web Awesome in this document, on the active VS Code theme (theme/vscode): the workbench's own views draw
 			// with <wa-*> components, not CSS of their own.
 			publishColors = showVsCodeTheme(workbenchHub);
-
+			// (a moment for the browser to paint what's booted: mounting holds its thread)
+			setTimeout(bootDone, PAINT_FIRST_MS);
+			workspaceFs = await mounting;
+			markReady("workspace");
 			// Filesystem overlays, layered UNDER the seeded snapshot (they only answer paths the in-memory
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its
@@ -492,7 +507,7 @@ void (async () => {
 			performance.mark("editor/init-received");
 
 			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions, "tab": data.tab };
-			void maybeBoot();
+			maybeBoot();
 
 			return;
 		} catch (error) {
@@ -518,7 +533,7 @@ render(
 		onReady={(container) => {
 			performance.mark("editor/container");
 			workbenchContainer = container;
-			void maybeBoot();
+			maybeBoot();
 		}}
 	/>,
 	document.body

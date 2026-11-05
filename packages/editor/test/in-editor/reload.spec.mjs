@@ -1,6 +1,7 @@
 /**
  * A reload, as a person does it: the file that was open comes back open, showing its text, not "the file was not found": VS Code
- * restores its tabs as it boots, each read once, so the workspace is mounted first. Runs in the editor: test/in-editor.mjs.
+ * restores its tabs as it boots, each read once, and the workspace is mounted after boot, so their reads wait for it (holdFiles). Runs in the
+ * editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 
