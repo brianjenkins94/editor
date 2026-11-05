@@ -260,3 +260,43 @@ test("import.meta: each module's own — its URL, file and directory, the same o
 		"file:///workspace/lib/util.js"
 	]);
 });
+
+test("a required file with a syntax error throws a SyntaxError at the require, as Node's does: none of it runs, it can be caught, and it isn't left loaded", async () => {
+	const files = {
+		"/w/main.js": "for (const attempt of [1, 2]) {\n  try {\n    require('./broken.js');\n  } catch (error) {\n    log(error instanceof SyntaxError);\n    log(error.message);\n  }\n}\nlog('went on');\n",
+		"/w/broken.js": "log('ran');\ntest(1);\n});\n"
+	};
+	const said = "/w/broken.js:3:1: Declaration or statement expected.";
+
+	assert.deepStrictEqual(await run(files, "/w/main.js"), [true, said, true, said, "went on"]);
+});
+
+test("an imported file with a syntax error stops the file importing it: uncaught, it's the run's error", async () => {
+	const files = {
+		"/w/main.js": "import './broken.js';\nlog('main ran');\n",
+		"/w/broken.js": "log('broken ran');\n});\n"
+	};
+
+	await assert.rejects(run(files, "/w/main.js"), (error: unknown) => error instanceof SyntaxError && error.message === "/w/broken.js:2:1: Declaration or statement expected.");
+});
+
+test("an entry file with a syntax error doesn't load, with modules or without", () => {
+	const source = "log('ran');\n});\n";
+
+	for (const options of [{ "fileName": "/w/main.js" }, { "fileName": "/w/main.js", "modules": loaderOf({ "/w/main.js": source }) }]) {
+		assert.throws(() => createVM(source, options), (error: unknown) => error instanceof SyntaxError && error.message === "/w/main.js:2:1: Declaration or statement expected.");
+	}
+});
+
+test("a breakpoint in a file with a syntax error is no error until the file is run", () => {
+	const files = { "/w/main.js": "1;\n", "/w/broken.js": "});\n" };
+	const { vm } = createVM(files["/w/main.js"], { "fileName": "/w/main.js", "modules": loaderOf(files) });
+
+	vm.addBreakpointsInFile("/w/broken.js", 1);
+});
+
+test("TypeScript and JSX, each by its file's extension, are no syntax errors", () => {
+	createVM("const a: number = 1; enum E { A }\n", { "fileName": "/w/main.ts" });
+	createVM("const a = <div>1</div>;\n", { "fileName": "/w/main.tsx" });
+	createVM("const a = <div>1</div>;\n", { "fileName": "/w/main.jsx" });
+});

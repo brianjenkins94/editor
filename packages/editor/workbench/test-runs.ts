@@ -109,6 +109,8 @@ export interface RunRecord {
 	"stalled"?: string;
 	"tests": { "id": string; "outcome": string; "ms"?: number; "error"?: string }[];
 	"effects": Effect[];
+	/** Why a file that failed without a failed test did: the end of what it said. */
+	"output"?: string;
 }
 
 /** A run of test files (tests.run): what it was asked, what it's doing, each file's result as it comes, and its end. */
@@ -345,10 +347,14 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		}
 	};
 
+	/** A file that failed without a failed test: it didn't get to run them (a syntax error, a throw at its top level), so
+	 *  it's itself the failure, as `node --test` counts one. */
+	const diedOutsideATest = (exitCode: number, tests: { "outcome": string }[]): boolean => exitCode !== 0 && !tests.some((test) => test.outcome === "fail");
+
 	const counted = (ran: Ran[]): { "files": number; "pass": number; "fail": number; "skip": number } => {
 		const outcomes = ran.flatMap((file) => file.tests.map((test) => test.outcome));
 
-		return { "files": ran.length, "pass": outcomes.filter((outcome) => outcome === "pass").length, "fail": outcomes.filter((outcome) => outcome === "fail").length, "skip": outcomes.filter((outcome) => outcome === "skip" || outcome === "todo").length };
+		return { "files": ran.length, "pass": outcomes.filter((outcome) => outcome === "pass").length, "fail": outcomes.filter((outcome) => outcome === "fail").length + ran.filter((file) => diedOutsideATest(file.exitCode, file.tests)).length, "skip": outcomes.filter((outcome) => outcome === "skip" || outcome === "todo").length };
 	};
 
 	/** A run of test files, to its end: what it's doing (`batch.now`) and each file's result as it comes (`batch.ran`). */
@@ -400,7 +406,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				"exitCode": result.exitCode,
 				...result.stalled === undefined ? {} : { "stalled": result.stalled },
 				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.error === undefined ? {} : { "error": test.error } })),
-				"effects": result.effects
+				"effects": result.effects,
+				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
 			});
 
 			batch.ran.push({
@@ -414,8 +421,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 					return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...last.has(id) ? { "before": last.get(id) } : {} };
 				}),
-				// (a file that failed without a failed test didn't run its tests: its output says why)
-				...result.exitCode !== 0 && !result.tests.some((test) => test.outcome === "fail") ? { "output": result.output } : {}
+				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
 			});
 		}
 

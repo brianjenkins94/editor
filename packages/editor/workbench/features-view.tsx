@@ -76,8 +76,11 @@ const median = (values: number[]): number | undefined => values.toSorted((one, o
 /** A duration, as someone reads one. */
 const lasted = (ms: number | undefined): string => (ms === undefined ? "" : ms < 1000 ? `${String(Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`);
 
-/** The run in `runs` (latest last) that came out `passed`. */
-const lastWhere = (runs: RunRecord[], passed: boolean): RunRecord | undefined => runs.findLast((run) => (run.tests.length > 0 && run.tests.every((test) => test.outcome === "pass")) === passed);
+/** Whether a run came out well: a file that dies before its tests have run has no failed test, and has failed. */
+const passed = (run: RunRecord): boolean => run.exitCode === 0 && run.tests.length > 0 && run.tests.every((test) => test.outcome === "pass");
+
+/** The run in `runs` (latest last) that came out `well` or didn't. */
+const lastWhere = (runs: RunRecord[], well: boolean): RunRecord | undefined => runs.findLast((run) => passed(run) === well);
 
 /** Code a test's reach counts: not a test's own, nor what's installed. */
 const isCode = (path: string): boolean => !path.includes("node_modules/") && !isTestFile(path);
@@ -190,7 +193,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 				<tbody>
 					{shown.flatMap(([name, entry]) => {
 						const files = model.files.get(name) ?? [];
-						const failing = files.filter((file) => { const last = runsOf.get(file)?.at(-1); return last !== undefined && last.tests.some((test) => test.outcome !== "pass"); }).length;
+						const failing = files.filter((file) => { const last = runsOf.get(file)?.at(-1); return last !== undefined && (last.exitCode !== 0 || last.tests.some((test) => test.outcome !== "pass")); }).length;
 						const toRun = files.filter(runnable);
 
 						return [
@@ -211,7 +214,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 								const last = runs.at(-1);
 								const kind = model.kinds.get(file) ?? "not a test";
 								const block = blockOf(file, kind, writers, runs);
-								const typical = median(runs.filter((run) => run.tests.every((test) => test.outcome === "pass")).map((run) => run.ms));
+								const typical = median(runs.filter(passed).map((run) => run.ms));
 								const opened = open.has(file);
 								const reached = model.reach.get(file);
 
@@ -233,6 +236,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										<td>{last === undefined ? <span class="wa-caption-s">not run</span> : lasted(typical)}</td>
 										<td>{running.has(file) ? <wa-spinner /> : runnable(file) ? <wa-button size="small" appearance="plain" aria-label={`Run ${file}`} onClick={() => { onRun([file]); }}>Run</wa-button> : null}</td>
 									</tr>,
+									...opened && last?.output !== undefined ? [<tr key={`${file} output`}><td class="fv-case" colSpan={9}>{last.output}</td></tr>] : [],
 									...opened ? (last?.tests ?? []).map((test) => (
 										<tr key={test.id} title={test.error}>
 											<td class="fv-case">{test.id.split(" › ").slice(1).join(" › ")}</td>

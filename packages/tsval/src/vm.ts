@@ -7,7 +7,7 @@ import ts from "typescript";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 import type { Choice, Result } from "./event-loop.ts";
 import { arrived, choose, createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGlobals, nextTimer, takeTimer, timerLabel, waitForTurn } from "./event-loop.ts";
-import { syntaxKindName } from "./frontend.ts";
+import { syntaxErrorIn, syntaxKindName } from "./frontend.ts";
 import { STANDARD_GLOBAL_NAMES, standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, isSimpleTree, nodeHandlers, pushHostCall, pushPattern, simpleValue, syntheticHandlers } from "./handlers.ts";
 import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
@@ -1088,6 +1088,12 @@ export class Machine implements VM {
 
 	/** Seat a parsed SourceFile as the initial frame. */
 	public load(sourceFile: ts.SourceFile): void {
+		const broken = syntaxErrorIn(sourceFile);
+
+		if (broken !== undefined) {
+			throw broken;
+		}
+
 		this.sourceFile = sourceFile;
 
 		// With the program's modules (VMOptions.modules), the entry is one of them: a module of its own, as Node runs it.
@@ -1542,6 +1548,14 @@ export class Machine implements VM {
 	/** Push `filename`'s module frame on this stack: its module registered first (a cycle sees its partial exports), its
 	 *  scope its own — `module`, `exports`, `require`, `__filename`, `__dirname`, `this` its exports. */
 	public pushModule(filename: string, record?: ModuleRecord): ModuleFrame {
+		const source = this.sourceOf(filename);
+		const broken = syntaxErrorIn(source);
+
+		// (before it's registered: it never loaded, so required again it's tried again)
+		if (broken !== undefined) {
+			throw broken;
+		}
+
 		const loader = this.modules!;
 		const module: ModuleRecord = record ?? { "id": filename, "filename": filename, "exports": {}, "loaded": false, "children": [], "paths": [] };
 		const scope = new Scope(this.rootScope, true);
@@ -1559,7 +1573,7 @@ export class Machine implements VM {
 			loader.register(filename, module);
 		}
 
-		const frame: ModuleFrame = { "kind": "module", "node": null, "phase": 0, "scope": scope, "valuesBase": this.values.length, "source": this.sourceOf(filename), "module": module };
+		const frame: ModuleFrame = { "kind": "module", "node": null, "phase": 0, "scope": scope, "valuesBase": this.values.length, "source": source, "module": module };
 
 		this.frames.push(frame);
 

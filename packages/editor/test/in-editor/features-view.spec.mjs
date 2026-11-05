@@ -14,6 +14,7 @@ const LEDGER = {
 	"Adding too": entry("Adds, again.", ["again.test.mjs"]),
 	"Multiplying": entry("Multiplies.", ["times.test.mjs"]),
 	"Breaking": entry("Fails on purpose.", ["break.test.mjs"]),
+	"Not parsing": entry("A test file with a syntax error.", ["broken.test.mjs"]),
 	"Nothing yet": entry("Has no tests."),
 	"Viewing": entry("A suite and a spec.", ["suite.mjs", "view.spec.mjs"]),
 	"Writing": entry("Two tests on one file.", ["one.test.mjs", "two.test.mjs"]),
@@ -32,6 +33,7 @@ const files = {
 	"again.test.mjs": unit("import { add } from \"./math.mjs\";\n\ntest(\"adds again\", () => {\n\tassert.equal(add(2, 2), 4);\n});"),
 	"times.test.mjs": unit("import { times } from \"./math.mjs\";\n\ntest(\"times\", () => {\n\tassert.equal(times(2, 2), 4);\n});"),
 	"break.test.mjs": unit("test(\"keeps\", () => {\n\tassert.ok(true);\n});\n\ntest(\"breaks\", () => {\n\tassert.equal(1, 2);\n});"),
+	"broken.test.mjs": unit("test(\"never runs\", () => {\n\tassert.ok(true);\n});\n});"),
 	"suite.mjs": "import { startSession } from \"./architecture-harness.mjs\";\n",
 	"view.spec.mjs": "import { test } from \"@playwright/test\";\n",
 	"one.test.mjs": unit(WRITES),
@@ -69,6 +71,12 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await row("break.test.mjs").locator(".fv-toggle").click();
 	await expect(row("keeps")).toBeVisible();
 	await expect(row("breaks")).toContainText("fail");
+
+	// One that can't run its tests has failed too, with no test to say so: it says why.
+	await run("broken.test.mjs");
+	await expect(row("Not parsing")).toContainText("1 failing", { "timeout": 60_000 });
+	await row("broken.test.mjs").locator(".fv-toggle").click();
+	await expect(row("Declaration or statement expected")).toContainText("broken.test.mjs:");
 
 	// How much each reaches, and how much only it does.
 	await run("times.test.mjs");

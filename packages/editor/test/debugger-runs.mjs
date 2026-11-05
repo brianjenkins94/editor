@@ -59,6 +59,16 @@ test("a test file's tests run in the debugger: each one's outcome, a failure's s
 	assert.equal(tests["reads its own file"].outcome, "pass", "a read through the runtime's files");
 });
 
+test("a test file with a syntax error fails, as Node's does: none of it runs, and it says where", async () => {
+	await session.request("files.write", { "path": "debugger-runs-broken.test.mjs", "content": `import { test } from "node:test";\n\ntest("adds", () => {});\n});\n` }, 30_000);
+
+	const answer = await runTests(["debugger-runs-broken.test.mjs"]);
+
+	assert.deepEqual(answer.counts, { "files": 1, "pass": 0, "fail": 1, "skip": 0 }, JSON.stringify(answer).slice(0, 2000));
+	assert.equal(answer.files[0].exitCode, 1);
+	assert.match(answer.files[0].output, /SyntaxError: .*debugger-runs-broken\.test\.mjs:4:1: Declaration or statement expected/u);
+});
+
 test("a test file at a commit opened beside the work runs from there: its own modules as that commit has them", async () => {
 	await session.request("files.write", { "path": "refs-run/value.mjs", "content": "export const value = \"as committed\";\n" }, 30_000);
 	await session.request("files.write", { "path": "refs-run/value.test.mjs", "content": `import assert from "node:assert/strict";

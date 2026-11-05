@@ -7,7 +7,7 @@ import type { WorkerEvent, Snapshot, Variable, CapabilityAsk, Crash, Control } f
 import type { Runtime } from "./runtime";
 import type { Action, ForwardAction, Place, TraceContext, Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
-import { TsvalInternalError, createVM } from "@brianjenkins94/tsval";
+import { ProgramSyntaxError, TsvalInternalError, createVM } from "@brianjenkins94/tsval";
 import ts from "typescript";
 import { calledSeen } from "./busy";
 import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffects, watchedOf } from "./gate";
@@ -451,6 +451,10 @@ export function placeOf(vm: Vm): Place | undefined {
 /** Where `error` was thrown, for the margin's mark: by now the frames have unwound, so tsval's note of it, not the
  *  current node. Best-effort — the run ends whatever this finds. */
 function crashOf(vm: Vm, error: unknown, message?: string): Crash | undefined {
+	if (error instanceof ProgramSyntaxError) {
+		return syntaxCrash(error);
+	}
+
 	try {
 		const site = vm.throwSite(error);
 		const at = vm.location(site);
@@ -461,6 +465,11 @@ function crashOf(vm: Vm, error: unknown, message?: string): Crash | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** A file that doesn't parse: marked where the parser stopped, not at the import that loaded it. */
+function syntaxCrash(error: ProgramSyntaxError, entry = state.sourceFile?.fileName): Crash {
+	return { "line": error.line, "at": error.at, "message": String(error), ...error.file === entry ? {} : { "file": error.file } };
 }
 
 /** What a run that stopped on something the debugger can't run says, loudly and as itself — not as the program's own
@@ -710,7 +719,21 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	startTests();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
+	let loaded: ReturnType<typeof createVM>;
+
+	try {
+		loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
+	} catch (error) {
+		// The program's own file doesn't parse: nothing of it has run, and the run ends there, as `node`'s does.
+		if (!(error instanceof ProgramSyntaxError)) {
+			throw error;
+		}
+
+		post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
+		finish(1, syntaxCrash(error, message.fileName));
+
+		return;
+	}
 
 	state.evaluating = loaded.vm;
 

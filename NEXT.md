@@ -534,9 +534,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `_history.files`). The fix is the extension's path mapping in its watcher (the vendored build,
   components/monaco-vscode-api).
 
-- **tsval runs a file with a syntax error** (found 2026-11-04): a spec with a stray `});` ran and passed in the debugger, where Node
-  throws a SyntaxError before anything runs, so a test that wouldn't parse elsewhere can pass here. Lint caught this one. It
-  should fail as Node does: the parse's diagnostics are there to read.
+- **tsval runs some files V8 rejects** (found 2026-11-04): a file the parser rejects now fails at its load, as in Node, but what
+  V8 calls early errors and TypeScript leaves to its binder and checker aren't the parser's to report. Tried: `let a; let a;` runs
+  on, a stray `break` ends the file there, and a malformed regular expression throws only when it's reached.
 
 - **A save can be dropped, silently:** VS Code abandons a save when its code actions on save are cancelled, and
   getCodeActions cancels itself when a code action provider is registered while it waits (as extensions starting up do). Seen
