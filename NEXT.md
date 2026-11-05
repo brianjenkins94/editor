@@ -441,6 +441,9 @@ How it's kept:
    - *Run a file in the debugger: back* 2026-11-05 — a play button above a code file and *Debug: Run* (`editor.debugFile`,
      extensions/tsval/run-file.ts), written from what it's for. F5 with no launch.json runs the code file in sight rather than the active
      editor, which with the Output view focused was its channel (found 2026-11-04). Tests: in-editor/run-file.spec.mjs.
+   - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
+     more test machinery (*How long a test may take*, selection, the live loop's own work) and before item 1's bench: those wait
+     for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
    - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: running a program (*Run a file in the
      debugger*, *Run from the shell*, *Package scripts as tasks and the run picker*, *Preview's dev server as a debug session*,
      *Terminal commands beyond the core's*); deciding what programs may do (*Rules*, *Rule editor*, *Capability calls panel*, *Mock
