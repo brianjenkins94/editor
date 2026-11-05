@@ -422,6 +422,12 @@ How it's kept:
      (workbench/capability-confirm.ts), and a test's row says what it newly uses or has stopped using against its run before. Runs
      are tests', so a rule only a person's debug run or a preview uses reads as unused. Not yet: the static half, whether the code
      could still make the call, with *Capability findings in the code*; the baseline's join; capabilities by feature.
+   - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its
+     own average, so one that slows down says so rather than passing. The run record already keeps each file's and test's `ms`
+     and the table shows a typical time; nothing compares against them. The catch: time depends on what ran beside it (all the
+     specs took 46 s at 3 at once and 70 s one at a time), so a deviation has to compare like with like. In tsval, statements run
+     (`VM.statements`) doesn't vary with load, so it may be the steadier measure there. `test/performance.mjs` does this for
+     the editor's boot and such, against budgets and the last green run on main; a stall (120 s of nothing) is all a test run has.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Each test's reach is kept, its lines of each
      file (`.silo/local/reach/`, test-runs.ts), `tests.affected` reads it (traces had no writer), and the table shows each file's
      reach, what only it reaches, and *touched*, with a button to run those. Measured, 386 passing tests of 64 files in the
