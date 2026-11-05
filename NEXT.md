@@ -432,10 +432,12 @@ How it's kept:
      join is extensions/history/runs-say.ts, over this session's runs' `coverage` events: kept nowhere, and a file edited since
      it ran is unsaid until its next run. Its statements are the run's, so one whose code spans a handler (`const f = () => {…}`)
      reads as that code having run.
-   - **TypeScript's error never coming, on CI** (2026-11-05): agent-tools' *the editor as data* waited 120 s for it on 4 of 6 runs after
-     the capabilities plugin (`ce77effd`), 0 of the 31 before. It said: the file open, no problems at all, and `_capabilities.findings`
-     asked of files nobody was looking at, each retried. Asked only of what's in an editor, once settled (`fcc080a2`), it's passed
-     9 of 9. So that's likely it, though the mechanism was never seen and it never happened here. If it comes back, start there.
+   - **TypeScript's error sometimes never comes, on CI** (open, 2026-11-05): agent-tools' *the editor as data* waits 120 s for it. 0 of
+     31 runs before the capabilities plugin (`ce77effd`), 4 of 6 after; asking `_capabilities.findings` only of what's in an editor, once
+     settled (`fcc080a2`), brought that down but didn't end it: it failed again on `bf417850`. So that isn't the cause, or not all of it.
+     Not reproduced here (slow cores, 8× CPU throttling). When it fails, `code.problems` has the error (`now: 1`): the server knows
+     it, and it's VS Code's client that never gets it into Problems. Not tried: asking findings only after TypeScript has first said
+     something of the file; a run with the plugin off, to settle whether it's the plugin at all.
    - *Run a file in the debugger: back* 2026-11-05 — a play button above a code file and *Debug: Run* (`editor.debugFile`,
      extensions/tsval/run-file.ts), written from what it's for. F5 with no launch.json runs the code file in sight rather than the active
      editor, which with the Output view focused was its channel (found 2026-11-04). Tests: in-editor/run-file.spec.mjs.
