@@ -250,7 +250,7 @@ function bootWithFallbackViewport(root: HTMLElement): void {
 	window.addEventListener("resize", restore);
 }
 
-function maybeBoot(): void {
+async function maybeBoot(): Promise<void> {
 	if (booted || workbenchContainer === undefined || init === undefined) {
 		return;
 	}
@@ -262,14 +262,25 @@ function maybeBoot(): void {
 	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
 	// what booting the workbench did and how long it took. Ended once monaco is online.
 	const bootSpan = paneLog.span("editor.workbench.workbench-entry.boot", { "files": files.length, "openEditors": openEditors.length });
-	// The zen-fs workspace store, mounted after boot; its `has` probe lets ATA skip already-present files.
-	let workspaceFs: WorkspaceFs | undefined;
+	// The writable workspace: a zen-fs-backed FileSystemProvider the type-checker reads through (priority 2, above boot's
+	// defaults-only priority-1 base). This is the SOLE store for source: it gets the FULL `files` (source + type surface), so
+	// the workers/type-checker that attach to this same zen-fs see them, and a repo load can clear/replace it. See
+	// workspace-fs.ts. Its `has` probe lets ATA skip already-present files.
+	//
+	// Mounted before boot: VS Code restores the last session's tabs as it boots, each read once, so a tab whose file isn't
+	// there yet says "the file was not found" until it's opened again.
+	const workspaceFs: WorkspaceFs | undefined = await installWorkspaceFs(files, paneLog, { "hub": workbenchHub, "architecture": architecture }).catch((error: unknown) => {
+		bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
 
+		return undefined;
+	});
+
+	markReady("workspace");
 	bootWithFallbackViewport(document.documentElement);
 
 	// SPLIT: boot's priority-1 in-memory overlay carries ONLY the read-only base — managed configs (tsconfig etc.)
 	// + the baked type surface (all `readonly`). The writable workspace SOURCE lives solely in the zen-fs overlay
-	// (priority 2, installed after boot), so it can be cleared/replaced on a repo load; a priority-1 copy underneath
+	// (priority 2, installed above), so it can be cleared/replaced on a repo load; a priority-1 copy underneath
 	// would re-serve files deleted from priority 2 (that was the "demo won't clear on replace" bug). This also makes
 	// the base a genuine fall-through DEFAULT layer: a loaded repo that omits its own tsconfig reads the base one.
 	// Editors that reference source open POST-boot (in the .then below, after installWorkspaceFs seeds zen-fs) rather
@@ -318,16 +329,6 @@ function maybeBoot(): void {
 			// with <wa-*> components, not CSS of their own.
 			publishColors = showVsCodeTheme(workbenchHub);
 
-			// The writable workspace: a zen-fs-backed FileSystemProvider the type-checker reads through (priority 2,
-			// above boot's now defaults-only priority-1 base). This is the SOLE store for source — it gets the FULL
-			// `files` (source + type surface), so the workers/type-checker that attach to this same zen-fs see them,
-			// and a repo load can clear/replace it. See workspace-fs.ts.
-			workspaceFs = await installWorkspaceFs(files, paneLog, { "hub": workbenchHub, "architecture": architecture }).catch((error: unknown) => {
-				bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
-
-				return undefined;
-			});
-			markReady("workspace");
 			// Filesystem overlays, layered UNDER the seeded snapshot (they only answer paths the in-memory
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its
@@ -491,7 +492,7 @@ void (async () => {
 			performance.mark("editor/init-received");
 
 			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions, "tab": data.tab };
-			maybeBoot();
+			void maybeBoot();
 
 			return;
 		} catch (error) {
@@ -517,7 +518,7 @@ render(
 		onReady={(container) => {
 			performance.mark("editor/container");
 			workbenchContainer = container;
-			maybeBoot();
+			void maybeBoot();
 		}}
 	/>,
 	document.body

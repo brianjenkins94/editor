@@ -2730,7 +2730,8 @@
       "packages/editor/workbench/workspace.ts"
     ],
     "tests": [
-      "packages/editor/test/workspace-changes.test.mjs"
+      "packages/editor/test/workspace-changes.test.mjs",
+      "packages/editor/test/in-editor/reload.spec.mjs"
     ]
   },
   "Your account page": {
