@@ -1911,18 +1911,20 @@
     ]
   },
   "Run a file in the debugger": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced (user 2026-11-05): the first of running a program; 12 features in, F5 was the only way to run a file",
+    "since": "2026-11-05",
     "what": "Run (the editor's play button) runs the open file in the debugger, the one way every program runs, whichever debugger is set to run it.",
     "docs": "packages/editor/RUNNING.md, *The model*",
     "ways": [
-      "command|editor.debugFile",
-      "debug adapter tracker provider|*|bridge/debug-events.ts",
-      "debug configuration provider|*|bridge/debug-events.ts"
+      "command|editor.debugFile"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/tsval/run-file.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/run-file.spec.mjs"
+    ]
   },
   "Run from the shell": {
     "status": "removed",

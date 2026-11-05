@@ -11,6 +11,7 @@
 import type * as vscode from "vscode";
 import { workspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import { registerTsvalDebug } from "./debug-adapter";
+import { registerRunFile } from "./run-file";
 
 export function activate(context: vscode.ExtensionContext): void {
 	const runtime = workspaceRuntime();
@@ -20,4 +21,5 @@ export function activate(context: vscode.ExtensionContext): void {
 	}
 
 	registerTsvalDebug(context, runtime);
+	registerRunFile(context);
 }

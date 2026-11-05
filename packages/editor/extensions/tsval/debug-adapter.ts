@@ -20,6 +20,7 @@ import { logger } from "@brianjenkins94/util/logger";
 import { EMPTY_POLICY } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { askEvent, decideControl } from "./adapter/stops";
+import { fileToRun, nothingToRun, runOf } from "./run-file";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -681,13 +682,20 @@ export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: Wo
 			}
 		})),
 		vscode.debug.onDidStartDebugSession(() => { void vscode.commands.executeCommand("setContext", "tsval.skipWaits", false); }),
-		// Bare F5, no launch.json: the file open. (What Run means beyond that — an app's file, a rule's process.argv, its
-		// run in the running list — is the editor's, for any debugger: the bridge's debug-events.ts.)
+		// Bare F5, no launch.json: the file you're looking at. (What Run means beyond that, its run in the running list, is the
+		// editor's, for any debugger: the bridge's debug-events.ts.)
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
 				if (config.type === undefined) {
-					// eslint-disable-next-line no-template-curly-in-string -- ${file} is a VS Code launch-config variable, not a JS template literal
-					return { "type": "tsval", "request": "launch", "name": "Debug (tsval)", "program": "${file}" };
+					const file = fileToRun();
+
+					if (file === undefined) {
+						nothingToRun();
+
+						return undefined;
+					}
+
+					return runOf(file);
 				}
 
 				return config;

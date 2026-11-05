@@ -19,8 +19,8 @@ every entry point picked one.
 
 ## The model
 
-**Everything runs in the debugger.** There's one action, *Run*, and every way in (F5 on a file, the terminal's `node`,
-an agent's `runs_tests`) starts the same session: tsval evaluating the program's own files on almostnode
+**Everything runs in the debugger.** There's one action, *Run*, and every way in (the play button above a code file, F5, the
+terminal's `node`, an agent's `runs_tests`) starts the same session: tsval evaluating the program's own files on almostnode
 (packages/tsval/README.md, *Modules*). A breakpoint stops it if there is one; stepping goes back as well as forward.
 There's no *Run Without Debugging* that runs something else.
 

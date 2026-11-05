@@ -19,6 +19,12 @@
   "contributes": {
     "commands": [
       {
+        "command": "editor.debugFile",
+        "title": "Run",
+        "category": "Debug",
+        "icon": "$(play)"
+      },
+      {
         "command": "tsval.skipWaits",
         "title": "Skip Waits",
         "category": "Debug",
@@ -44,6 +50,13 @@
           "command": "tsval.waitRealTime",
           "when": "debugType == tsval && tsval.skipWaits",
           "group": "navigation@10"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "editor.debugFile",
+          "when": "resourceExtname =~ /\\.[cm]?[jt]sx?$/",
+          "group": "navigation@1"
         }
       ]
     },
@@ -94,7 +107,7 @@
           {
             "type": "tsval",
             "request": "launch",
-            "name": "Debug (tsval)",
+            "name": "Run",
             "program": "${file}"
           }
         ]

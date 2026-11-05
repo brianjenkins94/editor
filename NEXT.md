@@ -436,9 +436,9 @@ How it's kept:
      the capabilities plugin (`ce77effd`), 0 of the 31 before. It said: the file open, no problems at all, and `_capabilities.findings`
      asked of files nobody was looking at, each retried. Asked only of what's in an editor, once settled (`fcc080a2`), it's passed
      9 of 9. So that's likely it, though the mechanism was never seen and it never happened here. If it comes back, start there.
-   - **F5 runs the wrong thing with a panel's editor focused** (found 2026-11-04): with the Output view focused, the active editor
-     is its channel, and the run fails with "Failed to read extension-output-…". *Run a file in the debugger*'s button should
-     say which file it runs, and F5 shouldn't try an output's.
+   - *Run a file in the debugger: back* 2026-11-05 — a play button above a code file and *Debug: Run* (`editor.debugFile`,
+     extensions/tsval/run-file.ts), written from what it's for. F5 with no launch.json runs the code file in sight rather than the active
+     editor, which with the Output view focused was its channel (found 2026-11-04). Tests: in-editor/run-file.spec.mjs.
    - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: running a program (*Run a file in the
      debugger*, *Run from the shell*, *Package scripts as tasks and the run picker*, *Preview's dev server as a debug session*,
      *Terminal commands beyond the core's*); deciding what programs may do (*Rules*, *Rule editor*, *Capability calls panel*, *Mock
