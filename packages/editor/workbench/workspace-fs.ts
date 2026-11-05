@@ -399,6 +399,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	};
 
 	const flush = (): void => {
+		clearTimeout(flushTimer);
 		flushTimer = undefined;
 
 		if (db === undefined || dirty.size === 0) {
@@ -419,7 +420,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		caller = "persist";
 
 		try {
-			const objects = db.transaction(PERSIST_STORE, "readwrite").objectStore(PERSIST_STORE);
+			const transaction = db.transaction(PERSIST_STORE, "readwrite");
+			const objects = transaction.objectStore(PERSIST_STORE);
 
 			for (const path of batch) {
 				if (fs.existsSync(path) && !linked(path)) {
@@ -443,6 +445,9 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 					}
 				}
 			}
+
+			// (now, not when this task ends: it may be the page's last)
+			transaction.commit();
 		} catch (error) {
 			log.warn("workspace persistence failed", { "error": String(error) }); // best-effort: the store still has it
 		} finally {
@@ -456,6 +461,9 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		dirty.add(path);
 		flushTimer ??= setTimeout(flush, FLUSH_MS);
 	};
+
+	// The page going away doesn't wait for the timer: what was saved just before a reload would be lost.
+	window.addEventListener("pagehide", flush);
 
 	for (const path of retired) {
 		persist(path); // gone from zen-fs, so the flush deletes it
