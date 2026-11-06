@@ -48,6 +48,32 @@ export async function openFile(workbench, path) {
 	await expect(workbench.locator(".tab.active", { "hasText": parts.at(-1) })).toBeVisible({ "timeout": 30_000 });
 }
 
+/** Quick Fix where the cursor is, and the action of it called `title`. Asked again until it's offered, as a person would: what
+ *  offers it may not be up yet. By its key: the palette has no Quick Fix until something offers code actions. */
+export async function quickFix(workbench, title) {
+	const code = workbench.locator(".editor-instance .native-edit-context").first();
+	const row = workbench.locator(".action-widget .monaco-list-row", { "hasText": title });
+
+	await expect(code).toBeFocused({ "timeout": 30_000 });
+
+	for (let tries = 0; ; tries += 1) {
+		await code.press("ControlOrMeta+.");
+
+		try {
+			await expect(row).toBeVisible({ "timeout": 5000 });
+			break;
+		} catch (error) {
+			if (tries === 12) {
+				throw error;
+			}
+
+			await code.press("Escape");
+		}
+	}
+
+	await row.click({ "timeout": 30_000 });
+}
+
 /** The Problems panel, opened: its rows, each file's and each problem's. */
 export async function problems(workbench) {
 	await runCommand(workbench, "View: Focus Problems");

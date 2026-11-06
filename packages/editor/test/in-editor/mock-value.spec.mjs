@@ -5,38 +5,12 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, problems, retype } from "./editor.mjs";
+import { codeOf, openEditor, openFile, problems, quickFix, retype } from "./editor.mjs";
 
 const PROGRAM = `const rate = 2;
 const total = rate * 10;
 console.log("total " + total);
 `;
-
-/** Quick Fix where the cursor is, and one of its actions. */
-async function fix(workbench, title) {
-	const row = workbench.locator(".action-widget .monaco-list-row", { "hasText": title });
-
-	await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
-
-	// (nothing says the Margin's up yet, and it isn't until a file like this has been open a moment: ask again, as a person
-	// would. By its key: the palette has no Quick Fix until something offers code actions)
-	for (let tries = 0; ; tries += 1) {
-		await codeOf(workbench).press("ControlOrMeta+.");
-
-		try {
-			await expect(row).toBeVisible({ "timeout": 5000 });
-			break;
-		} catch (error) {
-			if (tries === 12) {
-				throw error;
-			}
-
-			await codeOf(workbench).press("Escape");
-		}
-	}
-
-	await row.click();
-}
 
 async function answer(workbench, text) {
 	const input = workbench.locator(".quick-input-widget input").first();
@@ -51,7 +25,7 @@ test("a variable set on every run: the rule sets it, const or not, shows in the 
 	const workbench = await openEditor(page, { "rate.mjs": PROGRAM });
 
 	await openFile(workbench, "rate.mjs");
-	await fix(workbench, "Set rate on every run");
+	await quickFix(workbench, "Set rate on every run");
 	await answer(workbench, "5");
 
 	const mark = workbench.locator(".notes-margin-mark[title*='rate']");
@@ -81,7 +55,7 @@ test("the program's arguments on every run, from the lightbulb on process.argv",
 	const workbench = await openEditor(page, { "args.mjs": "console.log(\"args \" + process.argv.slice(2).join(\"+\"));\n" });
 
 	await openFile(workbench, "args.mjs");
-	await fix(workbench, "Give the program its arguments");
+	await quickFix(workbench, "Give the program its arguments");
 	await answer(workbench, "--port \"8 0\"");
 
 	await expect(workbench.getByRole("treeitem", { "name": ".silo", "exact": true })).toBeVisible({ "timeout": 30_000 });
@@ -106,7 +80,7 @@ console.log("count " + count);
 	await expect(allow).toBeVisible({ "timeout": 60_000 });
 	await codeOf(workbench).press("ArrowUp");
 	await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 3" })).toBeVisible({ "timeout": 30_000 });
-	await fix(workbench, "Set count now");
+	await quickFix(workbench, "Set count now");
 	await answer(workbench, "7");
 	await expect(workbench.locator(".notes-margin-cell", { "hasText": "count =" })).toContainText("7", { "timeout": 30_000 });
 

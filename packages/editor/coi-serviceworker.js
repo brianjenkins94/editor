@@ -25,6 +25,7 @@
 import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "./shared/architecture";
+import { installSocketGate } from "./shared/socket-gate";
 import { parseVirtual } from "./shared/virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
@@ -286,6 +287,101 @@ async function sendBody(call, first, reader) {
 }
 
 // Answer `request` from the server on `port` in `tab`, as `path` on it.
+// ── a preview's outside calls ──────────────────────────────────────────────────────────────────
+// The worker holds no policy: it asks this tab's root, which asks the bridge (extensions/bridge/preview-gate.ts), which may ask a
+// person, in the preview's window. It fails closed: a tab or bridge that can't be reached is a refusal.
+const DECIDE = { "timeoutMs": 300000, "waitForResponderMs": 10000 };
+const SOCKET_GATE = "/__capability";
+const RECORD_LIMIT = 64 * 1024;
+
+async function decideCall(tab, port, capability, resource) {
+	try {
+		return await rpc.request(`capability.decide.${tab}`, { "port": port, "capability": capability, "resource": resource }, DECIDE);
+	} catch (error) {
+		swLog.error("capability.decide unreachable: refusing", { "capability": capability, "error": String(error) });
+
+		return { "allow": false };
+	}
+}
+
+// A result given in a call's place, as the page reads one: JSON for a value, its text for a string.
+function givenResponse(value, by) {
+	const text = typeof value === "string";
+
+	return new Response(text ? value : JSON.stringify(value), { "status": 200, "headers": { "content-type": text ? "text/plain; charset=utf-8" : "application/json", "x-given-by": by } });
+}
+
+// What an allowed read returned, kept so it can be given when nobody's watching. Not what it's too big or binary to keep.
+async function recordFetch(tab, port, resource, response) {
+	const type = response.headers.get("content-type") ?? "";
+	const size = Number(response.headers.get("content-length") ?? 0);
+
+	if (!response.ok || size > RECORD_LIMIT || !/json|text/u.test(type)) {
+		return;
+	}
+
+	const text = await response.text();
+
+	if (text.length <= RECORD_LIMIT) {
+		let value = text;
+
+		if (type.includes("json")) {
+			try {
+				value = JSON.parse(text);
+			} catch {
+				// (it said it was: kept as what it is)
+			}
+		}
+
+		await rpc.request(`capability.record.${tab}`, { "port": port, "capability": "net", "resource": resource, "value": value }, { "timeoutMs": 30000, "waitForResponderMs": 2000 }).catch(() => undefined);
+	}
+}
+
+// A fetch or an XHR a preview's page makes outside its own server. (What it loads, its scripts and images and packages, isn't
+// asked about: it's the page being what it is.)
+async function gatedFetch(event, request) {
+	let preview;
+
+	try {
+		const client = await globalThis.clients.get(event.clientId);
+
+		preview = client ? parseVirtual(new URL(client.url).pathname) : undefined;
+	} catch {
+		preview = undefined;
+	}
+
+	if (preview === undefined) {
+		return passThrough(request);
+	}
+
+	const answer = await decideCall(preview.tab, preview.port, "net", request.url);
+
+	if ("give" in answer) {
+		return givenResponse(answer.give, answer.by);
+	}
+
+	if (answer.allow !== true) {
+		return Response.error();
+	}
+
+	const response = await passThrough(request);
+
+	if (request.method === "GET" && response.type !== "error") {
+		void recordFetch(preview.tab, preview.port, request.url, response.clone());
+	}
+
+	return response;
+}
+
+// A preview's page, with the gate on its sockets first, before anything of its own runs.
+function withSocketGate(html, prefix) {
+	// eslint-disable-next-line webawesome/no-html-in-strings -- it goes in the page of someone's app, whatever that's written in: a worker has no document to build it with
+	const script = `<script>(${installSocketGate.toString()})(${JSON.stringify(prefix + SOCKET_GATE)});</script>`;
+	const head = /<head[^>]*>/iu.exec(html);
+
+	return head === null ? script + html : html.slice(0, head.index + head[0].length) + script + html.slice(head.index + head[0].length);
+}
+
 async function handleVirtualRequest(request, tab, port, path) {
 	const span = swLog.span("editor.coi-serviceworker.virtual", { "tab": tab, "port": port, "method": request.method, "path": path });
 	const route = `virtual.request.${tab}`;
@@ -316,7 +412,15 @@ async function handleVirtualRequest(request, tab, port, path) {
 			void call({ "cancel": true }).catch(() => undefined);
 		}
 
-		const content = response.stream === undefined ? response.body : streamedBody(call, response.body);
+		let content = response.stream === undefined ? response.body : streamedBody(call, response.body);
+		const address = parseVirtual(new URL(request.url).pathname);
+
+		// A page of the server, when it's come whole: its sockets are asked about.
+		if (request.mode === "navigate" && address !== undefined && response.stream === undefined && /html/iu.test(new Headers(response.headers || {}).get("content-type") ?? "")) {
+			content = withSocketGate(new TextDecoder().decode(Uint8Array.from(content)), address.prefix);
+			delete response.headers["content-length"];
+			delete response.headers["Content-Length"];
+		}
 
 		return new Response(nullBody ? null : content, { "status": response.status, "statusText": response.statusText, "headers": virtualHeaders(response.headers) });
 	} catch (error) {
@@ -360,6 +464,15 @@ function streamedBody(call, first) {
 	}, { "highWaterMark": 0 });
 }
 
+// A new worker takes over at once, rather than waiting for every tab to close: it holds nothing worth keeping, and a tab left on an
+// old one would go on being gated, or not, by what it says.
+globalThis.addEventListener("install", () => {
+	void globalThis.skipWaiting();
+});
+globalThis.addEventListener("activate", (event) => {
+	event.waitUntil(globalThis.clients.claim());
+});
+
 globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
@@ -367,6 +480,13 @@ globalThis.addEventListener("fetch", (event) => {
 
 	// A dev server's address: <base>/__virtual__/<tab>/<port>/…
 	const virtual = parseVirtual(pathname);
+
+	// A preview's page, asking about a socket (shared/socket-gate.ts).
+	if (virtual !== undefined && virtual.rest === SOCKET_GATE && request.method === "POST") {
+		event.respondWith(request.json().then(({ capability, resource }) => decideCall(virtual.tab, virtual.port, capability, resource)).then((answer) => new Response(JSON.stringify({ "allow": answer.allow === true }), { "headers": { "content-type": "application/json" } })));
+
+		return;
+	}
 
 	if (virtual !== undefined) {
 		event.respondWith(handleVirtualRequest(request, virtual.tab, virtual.port, (virtual.rest || "/") + requestUrl.search));
@@ -400,6 +520,13 @@ globalThis.addEventListener("fetch", (event) => {
 
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
 	if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
+		return;
+	}
+
+	// A preview's fetch to somewhere else is decided. (`destination` is empty for a fetch or an XHR.)
+	if (requestUrl.origin !== globalThis.location.origin && request.destination === "" && event.clientId) {
+		event.respondWith(gatedFetch(event, request));
+
 		return;
 	}
 

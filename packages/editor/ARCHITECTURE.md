@@ -456,7 +456,7 @@ MCP server that hands them to one outside. Our agent is outside: debug-mcp reach
 ### 5. The capability decider
 
 The bridge's decide.ts (extensions/bridge/capabilities) asks the policy; what the policy leaves undecided is refused,
-and said once (the shell's prompt that asked a person went with previews). The decider is the seam: a contributed
+and said once. (A preview's outside calls ask a person, in its window: extensions/bridge/preview-gate.ts.) The decider is the seam: a contributed
 decider (an AI, an elicitation, a team's or CI's policy) answers instead. Not built: it waits until a second decider
 needs it.
 

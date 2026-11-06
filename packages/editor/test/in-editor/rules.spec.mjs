@@ -4,7 +4,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, problems, runCommand } from "./editor.mjs";
+import { codeOf, openEditor, openFile, problems, quickFix, runCommand } from "./editor.mjs";
 
 const PROGRAM = `import { execSync } from "node:child_process";
 
@@ -22,9 +22,7 @@ test("a call says how it's decided, and its lightbulb decides it: denied it's an
 		// (a problem opened puts the cursor on its call, and Quick Fix asks about what's there: it takes a moment to get there)
 		await call.dblclick();
 		await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 3" })).toBeVisible({ "timeout": 30_000 });
-		await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
-		await codeOf(workbench).press("ControlOrMeta+.");
-		await workbench.locator(".action-widget .monaco-list-row", { "hasText": title }).click({ "timeout": 30_000 });
+		await quickFix(workbench, title);
 	};
 
 	await expect(call.filter({ "hasText": "Undecided: a run stops here and asks" })).toHaveCount(1, { "timeout": 90_000 });
@@ -80,9 +78,7 @@ fetch("https://example.com/a");
 	await expect(call("net: fetch")).toHaveCount(1, { "timeout": 90_000 });
 	await call("net: fetch").dblclick();
 	await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 7" })).toBeVisible({ "timeout": 30_000 });
-	await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
-	await codeOf(workbench).press("ControlOrMeta+.");
-	await workbench.locator(".action-widget .monaco-list-row", { "hasText": "Make a rule" }).click({ "timeout": 30_000 });
+	await quickFix(workbench, "Make a rule");
 	await pick("https://example.com/**");
 	await pick("Skip");
 	await expect(call("Skipped by your rule: capability is net and resource matches https://example.com/**")).toHaveCount(1, { "timeout": 30_000 });

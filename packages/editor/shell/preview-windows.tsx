@@ -21,6 +21,7 @@ import { AppWindow } from "lucide";
 import { render } from "preact";
 import { previewFrame } from "theme/styles/shell";
 import { Icon } from "./icon";
+import { askInWindow, type PreviewAsk } from "./preview-ask";
 import "theme/components/button";
 
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
@@ -143,6 +144,16 @@ function install(hub: Hub): void {
 			shown.style.setProperty("--app-window-z", String(front + 1));
 			useWindow(shown);
 		}
+	});
+
+	// What the app wants to reach, asked in the window you used last: none open and showing, in a page that's showing, is nobody
+	// watching (extensions/bridge/preview-gate.ts answers for them).
+	serve(hub, "preview.ask", async (args) => {
+		const ask = args as PreviewAsk;
+		const windows = servers.get(ask.port)?.windows;
+		const shown = used.findLast((element) => windows?.has(element) === true && !element.hasAttribute("collapsed"));
+
+		return shown === undefined || document.visibilityState !== "visible" ? { "unwatched": true } : { "answer": await askInWindow(shown, ask) };
 	});
 
 	hub.subscribe("preview.close", (data) => {

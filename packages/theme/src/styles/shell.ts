@@ -93,4 +93,7 @@ export const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-fo
 /** A preview window's page, filling its body, on a browser page's own background (a frame is transparent). */
 export const previewFrame = css({ "display": "block", "width": "100%", "height": "100%", "border": "none", "background": "Canvas" });
 
+/** A preview's questions, over the top of its page. */
+export const previewAsks = css({ "alignSelf": "start", "zIndex": 1 });
+
 export const overlayBody = css({ "flex": "1 1 auto", "overflow": "auto", "minHeight": 0 });

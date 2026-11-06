@@ -108,7 +108,7 @@
           "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json\n/tmp/architecture-*.png", "if-no-files-found": "ignore" }
         }
       ],
-      "timeout-minutes": 15
+      "timeout-minutes": 25
     }
   }
 }

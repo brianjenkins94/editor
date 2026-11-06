@@ -14,6 +14,7 @@ import { ARCH_COMMANDS } from "../command-tap";
 import { registerCapabilityStops } from "./capability-stops";
 import { registerDebugEvents } from "./debug-events";
 import { bridgeHub, workspace, workspaceRuntime } from "./hub";
+import { installPreviewGate } from "./preview-gate";
 import { serveRuntimeFiles } from "./runtime-fs";
 
 /** This extension's exports — the bridge->workbench half of the hub uplink (ext host is an isolated realm, so it
@@ -66,6 +67,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	// bootstrap there).
 	provideWorkspaceRuntime(workspaceRuntime());
 	serveRuntimeFiles(context, bridgeHub);
+	installPreviewGate(context, bridgeHub, bridgeLog);
 	// What every debugger's runs tell core — tsval's, and another extension's (`run.debugger`: an interpreter plugged in
 	// from editor-contrib) — the run contract's events, read the one way; and how each launch is resolved (debug-events.ts).
 	registerDebugEvents(context);

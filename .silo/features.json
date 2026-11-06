@@ -415,18 +415,27 @@
     ]
   },
   "Capability prompts for previews": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "When your app reaches the network, a WebSocket or WebRTC that the policy hasn't decided, its preview window asks you; a preview nobody is watching is answered from what the call returned last time.",
-    "docs": "packages/editor/RUNNING.md, *A call's result*",
+    "status": "active",
+    "why": "written again from what it's for: a preview can't reach out unseen, and the question's on the app (user, 2026-11-06)",
+    "since": "2026-11-06",
+    "what": "When your app reaches the network, a WebSocket or WebRTC that the policy hasn't decided, its preview window asks you, and the answer holds until the server stops, or always as a rule about the site; a preview nobody is watching is answered from what the call returned last time, or refused.",
+    "docs": "packages/editor/RUNNING.md, *Rules*",
     "ways": [
-      "core module|installSocketGate",
-      "hub request|\"capability.decide.\" + tab",
-      "hub request|tap.worker.decide"
+      "core module|installPreviewGate",
+      "hub request|`capability.decide.${tab}`",
+      "hub request|`capability.record.${tab}`",
+      "hub request|capability.decide",
+      "hub request|capability.record",
+      "hub request|preview.ask"
     ],
-    "in": "517144b7",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/bridge/preview-gate.ts",
+      "packages/editor/shared/socket-gate.ts",
+      "packages/editor/shell/preview-ask.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/preview-prompts.spec.mjs"
+    ]
   },
   "Capability prototype": {
     "status": "removed",

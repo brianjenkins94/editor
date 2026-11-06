@@ -115,6 +115,13 @@ the rule sets is set, const or not (extensions/tsval/worker/session.ts). It show
 as the value in the Margin, and as an information on the line. A place that's lost or only uncertain doesn't apply, since it might be
 the wrong line, and says so as a warning in the file: the lightbulb puts it back where the cursor is (extensions/margin/placed.ts).
 
+A preview's outside calls are decided the same way (extensions/bridge/preview-gate.ts), so it can't reach out unseen: a fetch or an
+XHR by the service worker, a WebSocket or a peer connection by what it puts first in each page (shared/socket-gate.ts), both asking
+the bridge. What the policy leaves undecided its window asks, there on the app (shell/preview-ask.tsx), and the answer holds for that
+site until the server stops, or always, as a rule about the site. A preview nobody's watching (its windows collapsed or closed, or its
+tab hidden) is given what the call returned last time, or refused, and asked when someone is. It fails closed. Not asked about: what a
+page loads (its scripts, images and packages), a socket to its own machine, and what a worker of the page does.
+
 There's no view of calls or of rules to go and look at: the previous iteration had them (Capability Calls, Rules, Exceptions)
 and they were too out of the way and easy to ignore (the user, 2026-11-06). A decision made at a stop or in the file shows on
 the call as soon as the file changes. What this gives up: findings are only worked out for what's open in an editor, so there's

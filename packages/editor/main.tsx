@@ -82,6 +82,10 @@ if (reset === "wait") {
 	const tabRpc = createRpcClient(rootHub);
 
 	serve(rootHub, `virtual.request.${tab}`, async (args) => tabRpc.request("virtual.request", args, { "timeoutMs": 30_000, "waitForResponderMs": 10_000 }));
+	// A preview's outside calls, as the service worker asks: decided by the bridge (extensions/bridge/preview-gate.ts). A person
+	// may be deliberating.
+	serve(rootHub, `capability.decide.${tab}`, async (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300_000, "waitForResponderMs": 10_000 }));
+	serve(rootHub, `capability.record.${tab}`, async (args) => tabRpc.request("capability.record", args, { "timeoutMs": 30_000, "waitForResponderMs": 10_000 }));
 	serve(rootHub, "virtual.tab", () => tab);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	// Dev-only: this tab's MCP tools, which debug-mcp registers while it's connected — under this tab's id, so it can
