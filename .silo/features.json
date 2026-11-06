@@ -1835,21 +1835,27 @@
     ]
   },
   "Rule editor": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "One editor for every rule about what a program may do (allow, deny, give a value), opened under the Rules tree from a stop, the Margin or a preview prompt.",
+    "status": "active",
+    "why": "written again from what it's for, as a picker rather than a form under a panel (user, 2026-11-06): the objective is rough feature parity with full-editor",
+    "since": "2026-11-06",
+    "what": "From a call's lightbulb or a stop: pick what a rule covers (just this, a folder, its site, its program or every call of it) and what happens (allow, skip, deny or give a value), or give a value for this call only. Anything more particular is an edit to the policy file, which its schema checks.",
     "docs": "packages/editor/RUNNING.md, *Rules*",
     "ways": [
-      "agent tool|rules_list",
-      "command|editor.rules.cancelEdit",
-      "command|editor.rules.edit"
+      "command|capabilities.makeRule",
+      "command|capabilities.pickRule",
+      "command|capabilities.pickValue",
+      "command|margin.give",
+      "command|margin.rule",
+      "core module|installRulePicker"
     ],
     "paths": [
-      "packages/editor/workbench/rule-editor.ts"
+      "packages/editor/extensions/capabilities/rule-picker.ts",
+      "packages/editor/test/rules.test.mjs"
     ],
-    "in": "e16b2b75",
-    "restore": "git checkout full-editor -- packages/editor/workbench/rule-editor.ts"
+    "tests": [
+      "packages/editor/test/in-editor/rules.spec.mjs",
+      "packages/editor/test/rules.test.mjs"
+    ]
   },
   "Rules": {
     "status": "active",

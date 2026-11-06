@@ -45,3 +45,50 @@ test("a call says how it's decided, and its lightbulb decides it: denied it's an
 	await fix("Allow exec on ls, always");
 	await expect(call).toHaveCount(0, { "timeout": 30_000 });
 });
+
+test("a rule picked from the lightbulb covers what's picked: a stop's answered by the picker too, and a value given is what the call returns", async ({ page }) => {
+	const workbench = await openEditor(page, { "calls.mjs": `import { execSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+console.log("said " + execSync("ls"));
+writeFileSync("/workspace/out/kept.txt", "kept");
+console.log("done");
+fetch("https://example.com/a");
+` });
+
+	await openFile(workbench, "calls.mjs");
+
+	const rows = await problems(workbench);
+	const call = (text) => rows.filter({ "hasText": text });
+	const picker = (text) => workbench.locator(".quick-input-list .monaco-list-row", { "hasText": text });
+	const answer = (text) => workbench.locator(".notes-margin-cell .live-values-choice", { "hasText": text });
+
+	// From the lightbulb: what it covers, then what happens.
+	await expect(call("net: fetch")).toHaveCount(1, { "timeout": 90_000 });
+	await call("net: fetch").dblclick();
+	await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 7" })).toBeVisible({ "timeout": 30_000 });
+	await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
+	await runCommand(workbench, "Quick Fix...");
+	await workbench.locator(".action-widget .monaco-list-row", { "hasText": "Make a rule" }).click();
+	await picker("https://example.com/**").click();
+	await picker("Skip").click();
+	await expect(call("Skipped by your rule: capability is net and resource matches https://example.com/**")).toHaveCount(1, { "timeout": 30_000 });
+
+	await codeOf(workbench).press("F5");
+
+	// A value given at a stop is what that call returns.
+	await answer("Give…").click({ "timeout": 60_000 });
+	await workbench.locator(".quick-input-widget input").first().fill("hello");
+	await workbench.locator(".quick-input-widget input").first().press("Enter");
+
+	// A rule picked at a stop decides it, and is kept.
+	await answer("Rule…").click({ "timeout": 60_000 });
+	await picker("/workspace/**").click();
+	await picker("Allow").click();
+
+	await expect(workbench.getByRole("treeitem", { "name": "out", "exact": true })).toBeVisible({ "timeout": 60_000 });
+	await expect(call("fs:write")).toHaveCount(0, { "timeout": 30_000 });
+
+	await workbench.locator(".panel .action-label", { "hasText": "Debug Console" }).first().click();
+	await expect(workbench.locator(".repl .output", { "hasText": "said hello" }).first()).toBeVisible({ "timeout": 30_000 });
+});

@@ -11,6 +11,7 @@ import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import type * as vscode from "vscode";
 import { installDecisions } from "./decisions";
 import { publishFindings } from "./findings";
+import { installRulePicker } from "./rule-picker";
 
 export function activate(context: vscode.ExtensionContext): void {
 	const observed = observeExtension("capabilities");
@@ -20,5 +21,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	}
 
 	installDecisions(context, observed?.log);
+	installRulePicker(context, observed?.log);
 	publishFindings(context, observed?.log);
 }

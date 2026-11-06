@@ -28,7 +28,7 @@ export type PolicyFiles = Awaited<ReturnType<typeof loadPolicyFiles>>;
 
 /** What decides a call: its answer, and the rule that gave it (none: the default). */
 export interface Decision {
-	"effective": Effective;
+	"effective": Effective | "give";
 	"rule"?: Rule;
 	"whose"?: "mine" | "shared";
 }
@@ -43,15 +43,18 @@ const catalog = catalogOf(policy);
 export function decisionOfCall(files: PolicyFiles, { capability, resource = "" }: Finding): Decision {
 	const rules = (whose: "mine" | "shared"): Rule[] => files?.[whose].rules ?? [];
 	const all = { ...policy.EMPTY_POLICY, "rules": [...rules("mine"), ...rules("shared")] };
-	const effective = policy.effectiveDisposition(all, capability, resource, policy.isDangerous(capability), { "trigger": "you" });
-	const of = (whose: "mine" | "shared"): Rule | undefined => policy.ruleFor({ ...policy.EMPTY_POLICY, "rules": rules(whose) }, { "capability": capability, "resource": resource, "trigger": "you" }, DECISIONS);
+	const subject = { "capability": capability, "resource": resource, "trigger": "you" };
+	// (a rule giving its result decides it first, as a run does: extensions/tsval/worker/gate.ts)
+	const gives = policy.givenResult(all, subject) !== undefined;
+	const effective = gives ? "give" : policy.effectiveDisposition(all, capability, resource, policy.isDangerous(capability), { "trigger": "you" });
+	const of = (whose: "mine" | "shared"): Rule | undefined => policy.ruleFor({ ...policy.EMPTY_POLICY, "rules": rules(whose) }, subject, gives ? ["give"] : DECISIONS);
 	const mine = of("mine");
 	const shared = mine === undefined ? of("shared") : undefined;
 
 	return { "effective": effective, ...mine === undefined ? {} : { "rule": mine, "whose": "mine" }, ...shared === undefined ? {} : { "rule": shared, "whose": "shared" } } as Decision;
 }
 
-const SAID: Record<Effective, string> = { "allow": "Allowed", "deny": "Denied", "skip": "Skipped", "review": "Undecided" };
+const SAID: Record<Decision["effective"], string> = { "allow": "Allowed", "deny": "Denied", "skip": "Skipped", "give": "Given", "review": "Undecided" };
 
 /** A call's decision, as its diagnostic says it. */
 export function sayDecision({ effective, rule, whose }: Decision): string {
@@ -68,6 +71,7 @@ export function severityOf({ effective }: Decision, { dangerous }: Finding): vsc
 		case "deny":
 			return vscode.DiagnosticSeverity.Error;
 		case "skip":
+		case "give":
 			return vscode.DiagnosticSeverity.Information;
 		case "review":
 			return dangerous ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Hint;
@@ -87,6 +91,7 @@ export function actionsFor(files: PolicyFiles, finding: Finding): { "title": str
 
 	return [
 		...resource === undefined ? [] : VERBS.filter(([disposition]) => disposition !== effective).map(([disposition, verb]) => action(`${verb} ${capability} on ${resource}, always`, "capabilities.decide", capability, resource, disposition)),
+		action("Make a rule for this call…", "capabilities.makeRule", capability, resource),
 		...rule === undefined || whose !== "mine" ? [] : [action(`Take out your rule: ${describeRule(rule, catalog)}`, "capabilities.takeOut", rule)],
 		...rule === undefined ? [] : [action(`Open the rule, in ${files?.[whose ?? "mine"].file ?? "the policy"}`, "capabilities.openRules", whose, rule)]
 	];

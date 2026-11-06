@@ -8,7 +8,7 @@
     "vscode": "*"
   },
   "browser": "extension.js",
-  "files": ["node_modules/capabilities-ts-plugin/package.json", "node_modules/capabilities-ts-plugin/index.js"],
+  "files": ["node_modules/capabilities-ts-plugin/package.json", "node_modules/capabilities-ts-plugin/index.js", "policy.schema.json"],
   "activationEvents": [
     "onLanguage:json",
     "onLanguage:typescript",
@@ -19,6 +19,9 @@
   "contributes": {
     "commands": [
       { "command": "capabilities.openRules", "title": "Open Rules", "category": "Capabilities" }
+    ],
+    "jsonValidation": [
+      { "fileMatch": [".silo/policy.json", ".silo/policy/*.json"], "url": "./policy.schema.json" }
     ],
     "typescriptServerPlugins": [
       {

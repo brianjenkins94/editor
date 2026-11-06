@@ -102,6 +102,11 @@ waiting on someone. Its lightbulb decides it: allow, skip or deny always, take o
 above it (*Capabilities: Open Rules*). A rule is in `.silo/policy/<you>.json` or the shared `.silo/policy.json`; mine go first
 and the first that matches decides.
 
+A rule that isn't just that call is picked (extensions/capabilities/rule-picker.ts), from the lightbulb or a stop's *Rule…*: what
+it covers (just this, a folder it's in, its site, its program, or every call of its capability), then what happens (allow, skip,
+deny, or give a value: the call isn't made and returns what's typed, starting from what it returned last). A stop's *Give…* does
+that for this call only. Anything more particular is an edit to the file, which its schema checks and completes.
+
 There's no view of calls or of rules to go and look at: the previous iteration had them (Capability Calls, Rules, Exceptions)
 and they were too out of the way and easy to ignore (the user, 2026-11-06). A decision made at a stop or in the file shows on
 the call as soon as the file changes. What this gives up: findings are only worked out for what's open in an editor, so there's

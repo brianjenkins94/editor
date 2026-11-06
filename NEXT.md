@@ -455,7 +455,7 @@ How it's kept:
    - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: deciding what programs may do (*Rules* is back, on the call rather than in a panel, and *Capability calls panel* went
      with it: RUNNING.md, *Rules*; the user, 2026-11-06: the old Capability Calls, Rules and Exceptions panels were too out
      of the way and easy to ignore, so what they did comes back and they don't. Still to come, on the same terms: *Rules placed
-     in the code*, *Rule editor* as a picker from a stop or the lightbulb, *Mock a value*, *Capability prompts for previews*;
+     in the code*, *Mock a value*, *Capability prompts for previews*; *Rule editor* is back as a picker from a stop or the lightbulb;
      *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit*; *Notes on code*; and for
      developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no
