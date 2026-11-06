@@ -329,6 +329,20 @@ export default function init(modules) {
 			if (!registered && info.session !== undefined && typeof info.session.addProtocolHandler === "function") {
 				registered = true;
 				// (a failure is answered, not thrown: the server's own error says only that one happened)
+				// What's in an editor checked again (extension.ts, why): the server's own request, with the files as it names them.
+				// (once this one's over: the server runs one at a time)
+				info.session.addProtocolHandler("_changeProblems.recheck", function(request) {
+					const { file, paths } = request.arguments;
+					const prefix = file.slice(0, file.length - paths[0].length);
+
+					setTimeout(function() {
+						info.session.executeCommand({ "seq": 0, "type": "request", "command": "geterr", "arguments": { "delay": 0, "files": paths.map(function(path) {
+							return prefix + path;
+						}) } });
+					}, 0);
+
+					return { "response": {}, "responseRequired": true };
+				});
 				info.session.addProtocolHandler("_changeProblems.files", function() {
 					try {
 						return { "response": filesChanged(info.project.projectService), "responseRequired": true };

@@ -101,31 +101,7 @@ test("the editor as data: the file in front and its tabs, the Problems view, the
 	assert.ok(state.tabs.some((tab) => tab.file === "shown.ts" && tab.active));
 
 	// TypeScript's error on it, once the language service has the file.
-	const problem = await session.eventually("TypeScript's error", async () => (await ask("problems.list", { "file": "shown.ts" })).problems.find((each) => each.source === "ts"), 120_000).catch(async (error) => {
-		// (seen only on CI, opening a file early on: NEXT.md, what this is to answer)
-		const problemsNow = async () => (await ask("problems.list", { "file": "shown.ts" })).problems.map((each) => each.source);
-		const before = await problemsNow();
-		const status = await session.workbench().locator(".statusbar-item").allInnerTexts();
-		const known = await ask("code.problems", {}).catch((failed) => String(failed));
-
-		// Does an edit bring it? (typed and undone, as a person would nudge it)
-		await session.workbench().evaluate(async () => {
-			const { api } = globalThis.__editor;
-			const editor = api.window.activeTextEditor;
-
-			await editor.edit((builder) => {
-				builder.insert(new api.Position(1, 0), " ");
-			});
-			await api.commands.executeCommand("undo");
-		});
-		await new Promise((resolve) => {
-			setTimeout(resolve, 15_000);
-		});
-
-		console.log("[TypeScript's error never came]", JSON.stringify({ "problems": before, "afterAnEdit": await problemsNow(), "status": status.filter((text) => text.trim() !== ""), "server": known }).slice(0, 2000), JSON.stringify(await ask("editor.state")).slice(0, 400));
-
-		throw error;
-	});
+	const problem = await session.eventually("TypeScript's error", async () => (await ask("problems.list", { "file": "shown.ts" })).problems.find((each) => each.source === "ts"), 120_000);
 
 	assert.deepEqual([problem.file, problem.line, problem.severity], ["shown.ts", 1, "error"]);
 
