@@ -34,6 +34,20 @@ test("the Run menu runs a script in a terminal of its own, and shows a service t
 
 	await openFile(workbench, "hello.mjs");
 
+	// The scripts, in Run Task: by the keyboard, whose focus stays in the picker's input.
+	const row = (text) => workbench.locator(".quick-input-list .monaco-list-row", { "hasText": text }).first();
+	const picker = workbench.locator(".quick-input-widget input").first();
+
+	await workbench.locator(".monaco-workbench").first().press("F1");
+	await picker.fill(">Tasks: Run Task");
+	await row("Tasks: Run Task").click();
+	await expect(row("contributed")).toBeVisible({ "timeout": 30_000 });
+	await picker.fill("run");
+	await picker.press("Enter");
+	await expect(row("site: dev")).toBeVisible({ "timeout": 30_000 });
+	await expect(row("greet")).toBeVisible();
+	await picker.press("Escape");
+
 	// The file in the editor, then the workspace's scripts.
 	await menuButton(page).click();
 	await expect(item(page, "Run the file in the editor")).toBeVisible({ "timeout": 30_000 });
@@ -43,18 +57,6 @@ test("the Run menu runs a script in a terminal of its own, and shows a service t
 	// The file: in the debugger, what it computed beside it.
 	await item(page, "Run the file in the editor").click();
 	await expect(workbench.locator(".live-values-row", { "hasText": "total =" })).toContainText("5", { "timeout": 60_000 });
-
-	// The same scripts, in Run Task.
-	const row = (text) => workbench.locator(".quick-input-list .monaco-list-row", { "hasText": text }).first();
-
-	await workbench.locator(".monaco-workbench").first().press("F1");
-	await workbench.locator(".quick-input-widget input").first().fill(">Tasks: Run Task");
-	await row("Tasks: Run Task").click();
-	// (the kinds of task, once they've been asked for: "run" alone is a row of the palette's too, until it's gone)
-	await row("contributed").click({ "timeout": 30_000 });
-	await expect(row("site: dev")).toBeVisible({ "timeout": 30_000 });
-	await expect(row("greet")).toBeVisible({ "timeout": 30_000 });
-	await workbench.locator(".quick-input-widget input").first().press("Escape");
 
 	// A script: its output, in its own terminal, ended with its exit code.
 	await choose(page, "broken");
