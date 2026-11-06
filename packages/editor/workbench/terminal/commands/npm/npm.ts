@@ -28,7 +28,7 @@ function parseSpec(spec: string): { "name": string; "version": string } {
 }
 
 /** Run a command line in the shell itself, where this one runs (`npm run`'s script, `npx`'s command). */
-async function inShell(getSession: CommandHost["session"], line: string, ctx: ResolvedCommandContext, env: Record<string, string> = {}): Promise<CommandResult> {
+export async function inShell(getSession: CommandHost["session"], line: string, ctx: ResolvedCommandContext, env: Record<string, string> = {}): Promise<CommandResult> {
 	const session = await getSession();
 	const result = await session.exec(line, { "cwd": ctx.cwd, "env": { ...ctx.exportedEnv ?? Object.fromEntries(ctx.env), ...env }, "signal": ctx.signal });
 
@@ -36,7 +36,7 @@ async function inShell(getSession: CommandHost["session"], line: string, ctx: Re
 }
 
 /** A word for a command line: as it is, or quoted. */
-const quote = (word: string): string => (/^[\w./:=@%+-]+$/u.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
+export const quote = (word: string): string => (/^[\w./:=@%+-]+$/u.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
 
 /** `npx <command> [args…]` / `npm exec`: run it if this shell has it; a package's own binary it can't. */
 export async function exec(name: string, getSession: CommandHost["session"], words: string[], ctx: ResolvedCommandContext): Promise<CommandResult> {

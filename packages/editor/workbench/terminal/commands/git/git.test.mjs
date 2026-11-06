@@ -69,7 +69,8 @@ test("branch, and juvy's routing and parsing", async () => {
 	await git("branch feature");
 	assert.equal((await git("branch")).stdout, "  feature\n* main\n");
 	assert.match((await git("push upstream")).stderr, /has origin, where it was loaded from/u);
-	assert.match((await git("merge")).stderr, /unknown git command 'merge'/u, "what isn't here is unknown");
+	assert.match((await git("merge")).stderr, /^git merge: isn't here/u, "what isn't here says so");
+	assert.match((await git("frobnicate")).stderr, /unknown git command 'frobnicate'/u, "and what never was is unknown");
 	assert.match((await git("frobnicate")).stderr, /unknown git command 'frobnicate'/u, "juvy's routing");
 	assert.match((await git("stats")).stderr, /Did you mean 'status'\?/u);
 	assert.match((await git("status --bogus")).stderr, /Unknown option '--bogus'/u, "juvy's parsing");

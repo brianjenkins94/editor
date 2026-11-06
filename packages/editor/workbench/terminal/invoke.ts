@@ -15,8 +15,15 @@ import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { defineCommand } from "just-bash/browser";
 
 /** `definition` with `implementation`, as a just-bash command. */
-export function toCommand(definition: CommandDefinition, implementation: Implementation): Command {
+export function toCommand(definition: CommandDefinition, implementation?: Implementation): Command {
 	return defineCommand(definition.name, async (args, ctx) => {
+		// (whatever it was given: it isn't here)
+		const instead = definition.subcommandsNotHere?.[args[0] ?? ""];
+
+		if (definition.notHere !== undefined || instead !== undefined) {
+			return { "stdout": "", "stderr": `${definition.name}${instead === undefined ? "" : ` ${args[0]}`}: ${definition.notHere ?? instead}\n`, "exitCode": 127 };
+		}
+
 		let [stdout, stderr] = ["", ""];
 		// The process juvy runs it on: one that collects what it writes, and doesn't exit.
 		const proc: RunProcess = {

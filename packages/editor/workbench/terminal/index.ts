@@ -121,11 +121,17 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
 		sessionPromise ??= import("just-bash/browser").then((module) => {
-			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "captured": () => captured, "terminal": terminal, "session": getSession };
+			const host: CommandHost = { "history": {
+				"lines": () => [...history],
+				"clear": () => {
+					history.length = 0;
+					histIndex = 0;
+				}
+			}, "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "captured": () => captured, "terminal": terminal, "session": getSession };
 			const theirs = new Set(module.getCommandNames());
 			// Ours, each loaded the first time it runs (just-bash's lazy command), through juvy (invoke.ts): its options parsed
 			// and `--help` made from its definition.
-			const commands = COMMANDS.map((command) => ({ "name": command.name, "load": async () => toCommand(command, (await implementations[`./commands/${command.name}/${command.name}.ts`]())(host)) }));
+			const commands = COMMANDS.map((command) => ({ "name": command.name, "load": async () => toCommand(command, command.notHere === undefined ? (await implementations[`./commands/${command.name}/${command.name}.ts`]())(host) : undefined) }));
 
 			completions = [...new Set([...BUILTINS, ...theirs, ...COMMANDS.map((command) => command.name)])];
 

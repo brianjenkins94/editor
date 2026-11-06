@@ -22,3 +22,17 @@ test("a file the shell makes shows in the Explorer", async ({ page }) => {
 	await input.pressSequentially("echo made > made.txt\n");
 	await expect(workbench.getByRole("treeitem", { "name": "made.txt", "exact": true })).toBeVisible({ "timeout": 15_000 });
 });
+
+test("code opens a file in the editor, history says what's been run, and what isn't here says what to do instead", async ({ page }) => {
+	const workbench = await openEditor(page, { ...READABLE_TERMINAL, "hello.txt": "hello from the file\n" });
+	const { input, output } = await openTerminal(workbench);
+
+	await input.pressSequentially("code hello.txt\n");
+	await expect(workbench.locator(".tab.active")).toContainText("hello.txt", { "timeout": 15_000 });
+
+	await workbench.locator(".xterm-helper-textarea").last().pressSequentially("python app.py\n");
+	await expect(output).toContainText("no Python in a browser", { "timeout": 15_000 });
+
+	await input.pressSequentially("history\n");
+	await expect(output).toContainText("2  python app.py", { "timeout": 15_000 });
+});

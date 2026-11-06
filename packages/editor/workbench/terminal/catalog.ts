@@ -5,7 +5,7 @@
  * `<name>.ts` (the implementation, loaded the first time the command runs) and its tests. Adding a command is adding a
  * folder; everything that enumerates commands derives from here — tab completion and which commands make a line run a
  * statement at a time (session.ts) — so neither is a list to keep up by hand. What isn't here is just-bash's "not
- * found". The terminal is people's; an agent's way in is a tool (app/tools/host.ts).
+ * found", or, for what someone's likely to try, a folder saying what to do instead (`notHere`). The terminal is people's; an agent's way in is a tool (app/tools/host.ts).
  *
  * Only `command.ts` is read here, eagerly — it's a few lines and imports nothing — so anything can ask what the
  * commands are without loading a command (index.ts loads the implementations, lazily).
@@ -33,6 +33,10 @@ export interface CommandDefinition {
 	/** Its output goes to the terminal as it's produced rather than through just-bash's stdout (node) — or it runs
 	 *  lines that may (npm): a line with it runs a statement at a time, so what came before shows first (session.ts). */
 	"streaming"?: boolean;
+	/** It isn't here, and this says what to do instead: its whole folder is this file, and whatever it's given, it says so. */
+	"notHere"?: string;
+	/** Subcommands that aren't here, by name, each saying what to do instead. */
+	"subcommandsNotHere"?: Record<string, string>;
 }
 
 /** One of a command's subcommands. */
@@ -60,6 +64,8 @@ export interface CommandHost {
 	"terminal": number;
 	/** The shell itself, to run a line in (`npm run` runs its script there). */
 	"session": () => Promise<BashSession>;
+	/** The lines this terminal's run: what ↑ goes back through (`history`). */
+	"history": { "lines": () => string[]; "clear": () => void };
 }
 
 /** A command's output, as just-bash takes it. */

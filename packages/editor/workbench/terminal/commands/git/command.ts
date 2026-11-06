@@ -2,8 +2,31 @@ import type { CommandDefinition } from "../../catalog";
 
 const PATHS = { "format": Array, "default": [], "positional": "rest", "doc": "Paths (files or folders); none: all." } as const;
 
+/** What this git doesn't do, as much as there's to say. */
+const NOT_HERE = "isn't here: this git has status, diff, log, add, restore, commit, branch, switch and push.";
+const NO_HISTORY_EDITS = "isn't here: nothing in this git rewrites or combines history. It has status, diff, log, add, restore, commit, branch, switch and push.";
+
 export default {
 	"name": "git",
+	"subcommandsNotHere": {
+		"merge": NO_HISTORY_EDITS,
+		"rebase": NO_HISTORY_EDITS,
+		"cherry-pick": NO_HISTORY_EDITS,
+		"revert": NO_HISTORY_EDITS,
+		"reset": "isn't here: git restore <path> undoes a file's changes, and git restore --staged <path> unstages it.",
+		"stash": "isn't here: to put work aside, commit it on a branch (git switch -c <name>).",
+		"rm": "isn't here: delete the file, and it's a change like any other.",
+		"mv": "isn't here: rename the file, and it's a change like any other.",
+		"clone": "isn't here: the top bar's GitHub button loads a repository.",
+		"show": "isn't here: git log says what's been committed.",
+		"blame": "isn't here: git log says what's been committed.",
+		"fetch": "isn't here: the top bar's Commit pulls before it pushes.",
+		"pull": "isn't here: the top bar's Commit pulls before it pushes.",
+		"remote": NOT_HERE,
+		"tag": NOT_HERE,
+		"config": NOT_HERE,
+		"init": NOT_HERE
+	},
 	"summary": "The workspace's git: status, diff, log, add, restore, commit, branch, switch, push.",
 	"subcommands": {
 		"status": { "summary": "What's changed: staged, not staged, untracked.", "options": { "short": { "format": Boolean, "default": false, "short": "s", "doc": "Two letters a file." } } },

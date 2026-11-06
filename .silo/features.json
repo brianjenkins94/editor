@@ -2234,17 +2234,24 @@
     ]
   },
   "Terminal commands beyond the core's": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*); the terminal keeps the commands the core's features run: node, npm, ps, kill, git",
-    "since": "2026-11-02",
-    "what": "The terminal's other commands: code and open (a file into the editor), less, more and history, pnpm, yarn and npx (npm in their words), the commands that say they aren't here and what to do instead (vim, python, docker, vite, …) and git's subcommands that did the same, and a terminal that runs one task's command.",
+    "status": "active",
+    "why": "written again from what it's for: the objective is rough feature parity with full-editor (user, 2026-11-05)",
+    "since": "2026-11-06",
+    "what": "The terminal's other commands: code and open (a file into the editor), less, more and history, pnpm, yarn and npx (npm in their words), and the commands that say they aren't here and what to do instead (vim, python, docker, …) and git's subcommands that do the same. A terminal running one task's command went to the tasks (Package scripts as tasks and the run picker).",
     "paths": [
       "packages/editor/workbench/terminal/commands/bun/",
+      "packages/editor/workbench/terminal/commands/code/",
       "packages/editor/workbench/terminal/commands/deno/",
       "packages/editor/workbench/terminal/commands/docker/",
+      "packages/editor/workbench/terminal/commands/history/",
+      "packages/editor/workbench/terminal/commands/less/",
       "packages/editor/workbench/terminal/commands/make/",
+      "packages/editor/workbench/terminal/commands/more/",
       "packages/editor/workbench/terminal/commands/nano/",
+      "packages/editor/workbench/terminal/commands/npx/",
+      "packages/editor/workbench/terminal/commands/open/",
       "packages/editor/workbench/terminal/commands/pip/",
+      "packages/editor/workbench/terminal/commands/pnpm/",
       "packages/editor/workbench/terminal/commands/python/",
       "packages/editor/workbench/terminal/commands/python3/",
       "packages/editor/workbench/terminal/commands/ssh/",
@@ -2252,18 +2259,15 @@
       "packages/editor/workbench/terminal/commands/tar/",
       "packages/editor/workbench/terminal/commands/vi/",
       "packages/editor/workbench/terminal/commands/vim/",
-      "packages/editor/workbench/terminal/commands/vite/",
-      "packages/editor/workbench/terminal/commands/pnpm/",
       "packages/editor/workbench/terminal/commands/yarn/",
-      "packages/editor/workbench/terminal/commands/npx/",
-      "packages/editor/workbench/terminal/commands/code/",
-      "packages/editor/workbench/terminal/commands/open/",
-      "packages/editor/workbench/terminal/commands/less/",
-      "packages/editor/workbench/terminal/commands/more/",
-      "packages/editor/workbench/terminal/commands/history/"
+      "packages/editor/workbench/terminal/npm-words.ts"
     ],
-    "in": "537c4815",
-    "restore": "from the full-editor tag: each command's folder (catalog.ts finds them), with `missing` back in catalog.ts and invoke.ts for the ones that aren't here"
+    "tests": [
+      "packages/editor/test/in-editor/terminal.spec.mjs",
+      "packages/editor/workbench/terminal/commands/code/code.test.mjs",
+      "packages/editor/workbench/terminal/commands/less/less.test.mjs",
+      "packages/editor/workbench/terminal/commands/pnpm/pnpm.test.mjs"
+    ]
   },
   "Terminal node runs in the debugger": {
     "status": "active",
@@ -2420,7 +2424,18 @@
     "what": "A bash-like terminal on the workspace's files with npm, node, git, vite and other commands, which VS Code tasks also run in.",
     "paths": [
       "components/monaco-vscode-api/terminal-backend.ts",
-      "packages/editor/workbench/terminal/"
+      "packages/editor/workbench/terminal/catalog.ts",
+      "packages/editor/workbench/terminal/commands/git/",
+      "packages/editor/workbench/terminal/commands/kill/",
+      "packages/editor/workbench/terminal/commands/node/",
+      "packages/editor/workbench/terminal/commands/npm/",
+      "packages/editor/workbench/terminal/commands/ps/",
+      "packages/editor/workbench/terminal/commands/vite/",
+      "packages/editor/workbench/terminal/fs.ts",
+      "packages/editor/workbench/terminal/index.ts",
+      "packages/editor/workbench/terminal/integration.ts",
+      "packages/editor/workbench/terminal/invoke.ts",
+      "packages/editor/workbench/terminal/session.ts"
     ],
     "tests": [
       "packages/editor/test/terminal-integration.test.mjs",
