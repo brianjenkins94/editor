@@ -14,6 +14,7 @@ import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 
 import type { Span } from "@brianjenkins94/util/logger";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
+import type { RulePlace } from "@brianjenkins94/editor-api";
 import type { CapabilityAsk, Control, LoopStart, RunEnd, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { logger } from "@brianjenkins94/util/logger";
@@ -51,6 +52,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private program = "";
 	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
 	private args: string[] = [];
+	/** What rules placed in the code set, resolved to lines as it launches (`__places`, bridge/placed-rules.ts). */
+	private places: Record<string, RulePlace[]> = {};
 	/** Where it was started and with what environment — a terminal's (`cwd`, `env`); none, the workspace and nothing. */
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
 	/** Where the event loop starts — given by a launch (its clock, its seed, the choices to make), else fresh. */
@@ -184,6 +187,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.eventLoop = loopStartOf(args["eventLoop"]);
 		this.noDebug = args["noDebug"] === true;
 		this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
+		this.places = typeof args["__places"] === "object" && args["__places"] !== null ? args["__places"] as Record<string, RulePlace[]> : {};
 		this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 		this.respond(request);
 		void this.loadSource();
@@ -445,7 +449,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */

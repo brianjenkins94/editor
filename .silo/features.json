@@ -1248,18 +1248,24 @@
     ]
   },
   "Mock a value": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Give the program different command-line arguments, or a variable a different value, either once at a stop or on every run by a rule.",
-    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Mocking a value — and one way to run*",
+    "status": "active",
+    "why": "written again from what it's for, from the lightbulb rather than a form (user, 2026-11-06): the objective is rough feature parity with full-editor",
+    "since": "2026-11-06",
+    "what": "From the lightbulb on the line: set a variable now, at a stop, or on every run by a rule placed on its line, const or not; or give the program its arguments on every run, by a rule about the program.",
+    "docs": "packages/editor/RUNNING.md, *Rules*",
     "ways": [
-      "command|editor.debug.setValue",
+      "code actions provider||margin/mock.ts",
       "command|margin.mockArgv",
-      "command|margin.mockVariable"
+      "command|margin.mockVariable",
+      "command|margin.setValue",
+      "core module|installMock"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/margin/mock.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/mock-value.spec.mjs"
+    ]
   },
   "Notes on code": {
     "status": "removed",
@@ -1878,20 +1884,24 @@
     ]
   },
   "Rules placed in the code": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "A rule tied to a line stays with its code through edits, shows as a gutter mark with its sentence on hover, and can be re-placed when its place is lost.",
-    "docs": "packages/editor/RUNNING.md, *A rule placed in the code*",
+    "status": "active",
+    "why": "written again from what it's for: a rule's place in the code, shown where it is rather than in a panel (user, 2026-11-06)",
+    "since": "2026-11-06",
+    "what": "A rule tied to a statement stays with its code through edits, shows as a gutter mark with its sentence on hover, as the value in the Margin and as an information on the line. A place that's lost or uncertain doesn't apply and says so in the file, and the lightbulb puts it back or takes it out.",
+    "docs": "packages/editor/RUNNING.md, *Rules*",
     "ways": [
-      "command|silo.rules.files",
-      "command|silo.rules.replace"
+      "code actions provider||margin/placed.ts",
+      "command|margin.placeRule",
+      "core module|installPlaced",
+      "diagnostic collection|rules"
     ],
     "paths": [
-      "packages/editor/extensions/capabilities/placed-rules.ts"
+      "packages/editor/extensions/bridge/placed-rules.ts",
+      "packages/editor/extensions/margin/placed.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "git checkout full-editor -- packages/editor/extensions/capabilities/placed-rules.ts"
+    "tests": [
+      "packages/editor/test/in-editor/mock-value.spec.mjs"
+    ]
   },
   "Run TypeScript in the interpreter": {
     "status": "active",

@@ -448,14 +448,14 @@ How it's kept:
      A terminal running one task's command isn't back: tasks run in terminals of their own (workbench/tasks.ts).
    - Seen once each in 6 runs of all the specs on CI (2026-11-06), not looked into: eslint.spec's *saving fixes what can be fixed*
      (`var value` still there) and edits-change.spec's *the History output says what a pause changed* (the panel empty, no
-     `Reading`). A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard.
+     `Reading`; again on 76afc45f, passing on a rerun, so twice in about 10). A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard.
    - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
      more test machinery (*How long a test may take*, selection, the live loop's own work) and before item 1's bench: those wait
      for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
    - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: deciding what programs may do (*Rules* is back, on the call rather than in a panel, and *Capability calls panel* went
      with it: RUNNING.md, *Rules*; the user, 2026-11-06: the old Capability Calls, Rules and Exceptions panels were too out
-     of the way and easy to ignore, so what they did comes back and they don't. Still to come, on the same terms: *Rules placed
-     in the code*, *Mock a value*, *Capability prompts for previews*; *Rule editor* is back as a picker from a stop or the lightbulb;
+     of the way and easy to ignore, so what they did comes back and they don't. Still to come, on the same terms: *Capability prompts for previews*; *Rule editor* is back as a picker from a stop or the lightbulb, and *Mock a value* and *Rules
+     placed in the code* from the lightbulb on the line;
      *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit*; *Notes on code*; and for
      developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no

@@ -8,8 +8,7 @@
  * it's answered or the run moves on.
  *
  * From every debugger's `ask` event (the run contract). A run's values, and how it ended short, are values.ts's; coverage's
- * marks are its gutter column's (coverage.ts). What else the Margin showed (`full-editor`'s: cards, Rule…) comes back with
- * those features.
+ * marks are its gutter column's (coverage.ts); giving a value a run uses is mock.ts's, and a rule's place in the code placed.ts's.
  */
 import type { AskEvent, CapabilityChoice } from "@brianjenkins94/editor-api";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
@@ -18,6 +17,8 @@ import { refreshPane } from "@brianjenkins94/editor-api/pane";
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import { installCoverage } from "./coverage";
+import { installMock } from "./mock";
+import { installPlaced, placedMarks } from "./placed";
 import { endMarks, installValues, runsShown, valueItems } from "./values";
 
 /** The view the Margin is, in the pane. */
@@ -88,9 +89,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	}
 
 	installValues(context, observed?.log, redraw, clear);
+	installMock(context, observed?.log);
+	installPlaced(context, observed?.log, async () => refreshPane(vscode.commands, VIEW));
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand("margin.paneView", (uri: unknown): PaneContent | undefined => {
+		vscode.commands.registerCommand("margin.paneView", async (uri: unknown): Promise<PaneContent | undefined> => {
 			if (typeof uri !== "string") {
 				return undefined;
 			}
@@ -100,7 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const text = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
 			// (the question first on its line: it's what the run waits on)
 			const items = [...question?.items ?? [], ...valueItems(uri, text)];
-			const marks = [...question?.marks ?? [], ...endMarks(uri)];
+			const marks = [...question?.marks ?? [], ...endMarks(uri), ...await placedMarks(uri)];
 
 			const runs = runsShown(uri);
 

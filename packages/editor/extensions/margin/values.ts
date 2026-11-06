@@ -302,6 +302,9 @@ export function valueItems(uri: string, text: string | undefined): PaneItem[] {
 	];
 }
 
+/** Whether the run shown has a value of `name` on `line` (0-based): the Margin's showing it, so it can be mocked. */
+export const valueNamed = (uri: string, line: number, name: string): boolean => sessions.get(uri)?.values.some((value) => value.line === line && value.name === name) === true;
+
 /** The gutter's mark for how the run shown ended short: ✕ where it crashed, ■ where it was stopped. */
 export function endMarks(uri: string): PaneMark[] {
 	const session = sessions.get(uri);
@@ -508,8 +511,12 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 
 		run.dropped = batch.dropped;
 		batchedAt.set(uri, Date.now());
-		// Running again past a capability stop: its question's answered, by whoever answered it.
-		answered(id);
+		// Running again past a capability stop: its question's answered, by whoever answered it. (A value set at the stop is
+		// told too, and the run's still waiting there.)
+		if (batch.values.some((value) => value.kind !== "set")) {
+			answered(id);
+		}
+
 		soon(uri);
 	};
 	// The run's end: how it ended goes on its line. (A run that told no values here, a file that didn't parse say, is a run

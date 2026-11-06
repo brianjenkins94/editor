@@ -181,6 +181,12 @@ export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: 
 /** The `ended` event, once a file the run told values of (or ended short in): its values go, and its end is marked. */
 export interface EndedEvent { "file": string; "source"?: string; "end"?: RunEnd }
 
+/** A variable a rule sets, and to what. */
+export interface PlaceSet { "name": string; "value": unknown }
+
+/** The run contract's `__places`: a line (1-based) a rule's placed on, and what it sets once the statement there has run. */
+export interface RulePlace { "line": number; "sets": PlaceSet[] }
+
 /** The `ask` event: a gated call stopped at — on `line` (at `at`) of `file`, whose text that ran is `source` — the
  *  capability, the callee as written, and the resource it would reach (`resolved`: known from the run's own values,
  *  not just the argument as written); `dangerous` when the capability is (a write, a command). Answered — by the

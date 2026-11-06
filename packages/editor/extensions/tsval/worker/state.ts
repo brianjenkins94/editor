@@ -4,7 +4,7 @@
  * assigns. (A module can't assign another's `let`, so those are one object's properties.)
  */
 import type { FsShim, RunGlobal } from "@brianjenkins94/almostnode";
-import type { TestReport } from "@brianjenkins94/editor-api";
+import type { PlaceSet, TestReport } from "@brianjenkins94/editor-api";
 import type { RuntimeConnection } from "@brianjenkins94/editor-api/runtime";
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
@@ -51,6 +51,8 @@ export interface State {
 	 *  reason "capability" rather than "breakpoint". The entry's computed at launch from the policy the adapter sent;
 	 *  another file's as it loads (noteProgramFile). */
 	"capabilityLines": Map<string, Set<number>>;
+	/** What rules placed in the code set, once the statement on the line's run: by file and 1-based line (bridge/placed-rules.ts). */
+	"placeSets": Map<string, Map<number, PlaceSet[]>>;
 	/** The program's files known so far — the entry, and each other one as it loads — parsed for their capability calls. */
 	"programFiles": Map<string, ts.SourceFile>;
 	/** The policy the run is under (the adapter's, updated after an "Allow always"); none, no capability stops. */
@@ -147,6 +149,7 @@ export const state: State = {
 	"stepSpan": undefined,
 	"sourceFile": undefined,
 	"capabilityLines": new Map<string, Set<number>>(),
+	"placeSets": new Map<string, Map<number, PlaceSet[]>>(),
 	"programFiles": new Map<string, ts.SourceFile>(),
 	"policy": undefined,
 	"userLines": [],

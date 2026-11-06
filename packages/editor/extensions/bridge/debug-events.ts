@@ -12,6 +12,7 @@
  * And what Run means, whichever debugger it starts — each launch resolved here:
  *
  * - its policy (`__policy`): what its gated calls are decided by;
+ * - its rules (placed-rules.ts): what variables they set at their places (`__places`), and its arguments if one gives them;
  * - a run in core's registry (`runs.begin`), known by one id from start to end — its end the run's, with its exit code
  *   (DAP's `exited`: extension.ts's `node.exit`).
  */
@@ -21,6 +22,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { asked, policyFor } from "./capability-stops";
 import { bridgeHub } from "./hub";
+import { byRules } from "./placed-rules";
 
 /** How each session ended, as its DAP messages say (a debugger in this extension host — another's isn't seen): its exit
  *  code (`exited`). */
@@ -47,7 +49,8 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
 				const program = typeof given["program"] === "string" ? given["program"] : "";
 				// Every debugger decides its gated calls by the editor's policy (the run contract's `__policy`).
-				const config = { ...given, "__policy": await policyFor() };
+				const policy = await policyFor();
+				const config = { ...given, "__policy": policy, ...await byRules(policy, program, given) };
 
 				if (typeof config["__runId"] === "string") {
 					return config;

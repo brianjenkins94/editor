@@ -166,12 +166,12 @@ export function tellSkipped(capability: string, resource: string): void {
 	}
 }
 
-/** A value set by hand at the stop `vm` is at, shown with the run's values. */
-export function tellSet(vm: Vm, name: string, value: unknown): void {
+/** A value set by hand at the stop `vm` is at, or by a rule placed on `line` (0-based), shown with the run's values. */
+export function tellSet(vm: Vm, name: string, value: unknown, line?: number): void {
 	const at = vm.location();
 
 	if (at !== null && vm.currentNode !== null) {
-		liveIn(vm.currentNode.getSourceFile()).add({ "line": at.line, "name": name, "value": "", "raw": value, "kind": "set", "call": lastTraced?.call ?? 0, "turns": lastTraced?.turns ?? [], "step": lastTraced?.step ?? 0, "at": rangeOf(vm.currentNode) });
+		liveIn(vm.currentNode.getSourceFile()).add({ "line": line ?? at.line, "name": name, "value": "", "raw": value, "kind": "set", "call": lastTraced?.call ?? 0, "turns": lastTraced?.turns ?? [], "step": lastTraced?.step ?? 0, "at": rangeOf(vm.currentNode) });
 		flushValues();
 	}
 }

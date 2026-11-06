@@ -25,7 +25,7 @@ test("a call says how it's decided, and its lightbulb decides it: denied it's an
 		await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 3" })).toBeVisible({ "timeout": 30_000 });
 		await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
 		await runCommand(workbench, "Quick Fix...");
-		await workbench.locator(".action-widget .monaco-list-row", { "hasText": title }).click();
+		await workbench.locator(".action-widget .monaco-list-row", { "hasText": title }).click({ "timeout": 30_000 });
 	};
 
 	await expect(call.filter({ "hasText": "Undecided: a run stops here and asks" })).toHaveCount(1, { "timeout": 90_000 });
@@ -60,7 +60,21 @@ fetch("https://example.com/a");
 
 	const rows = await problems(workbench);
 	const call = (text) => rows.filter({ "hasText": text });
-	const picker = (text) => workbench.locator(".quick-input-list .monaco-list-row", { "hasText": text });
+	// (by the keyboard: a click on a row can close a picker when it isn't a person's: NEXT.md)
+	const pick = async (text) => {
+		const input = workbench.locator(".quick-input-widget input").first();
+		const row = workbench.locator(".quick-input-list .monaco-list-row.focused", { "hasText": text });
+
+		await expect(workbench.locator(".quick-input-list .monaco-list-row", { "hasText": text })).toBeVisible({ "timeout": 30_000 });
+
+		// (down to it: typing would filter on it, and a glob's `*` matches nothing)
+		for (let down = 0; down < 6 && await row.count() === 0; down += 1) {
+			await input.press("ArrowDown");
+		}
+
+		await expect(row).toBeVisible();
+		await input.press("Enter");
+	};
 	const answer = (text) => workbench.locator(".notes-margin-cell .live-values-choice", { "hasText": text });
 
 	// From the lightbulb: what it covers, then what happens.
@@ -69,9 +83,9 @@ fetch("https://example.com/a");
 	await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 7" })).toBeVisible({ "timeout": 30_000 });
 	await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
 	await runCommand(workbench, "Quick Fix...");
-	await workbench.locator(".action-widget .monaco-list-row", { "hasText": "Make a rule" }).click();
-	await picker("https://example.com/**").click();
-	await picker("Skip").click();
+	await workbench.locator(".action-widget .monaco-list-row", { "hasText": "Make a rule" }).click({ "timeout": 30_000 });
+	await pick("https://example.com/**");
+	await pick("Skip");
 	await expect(call("Skipped by your rule: capability is net and resource matches https://example.com/**")).toHaveCount(1, { "timeout": 30_000 });
 
 	await codeOf(workbench).press("F5");
@@ -81,10 +95,11 @@ fetch("https://example.com/a");
 	await workbench.locator(".quick-input-widget input").first().fill("hello");
 	await workbench.locator(".quick-input-widget input").first().press("Enter");
 
-	// A rule picked at a stop decides it, and is kept.
+	// A rule picked at a stop decides it, and is kept. (The stop after that one: its question's on its line.)
+	await expect(workbench.locator(".notes-margin-cell", { "hasText": "fs:write" })).toBeVisible({ "timeout": 60_000 });
 	await answer("Rule…").click({ "timeout": 60_000 });
-	await picker("/workspace/**").click();
-	await picker("Allow").click();
+	await pick("/workspace/**");
+	await pick("Allow");
 
 	await expect(workbench.getByRole("treeitem", { "name": "out", "exact": true })).toBeVisible({ "timeout": 60_000 });
 	await expect(call("fs:write")).toHaveCount(0, { "timeout": 30_000 });

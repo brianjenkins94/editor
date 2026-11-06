@@ -3,6 +3,7 @@
  * per stop), the stop's snapshot and its variables, setting a value at a stop, and launching a run.
  */
 import type { ModuleLoader } from "@brianjenkins94/tsval";
+import type { PlaceSet } from "@brianjenkins94/editor-api";
 import type { WorkerEvent, Snapshot, Variable, CapabilityAsk, Crash, Control } from "../debug-protocol";
 import type { Runtime } from "./runtime";
 import type { Action, ForwardAction, Place, TraceContext, Vm } from "./state";
@@ -120,19 +121,41 @@ export function setValue(vm: Vm, name: string, text: string): Extract<WorkerEven
 	return { "type": "valueSet", "ok": false, "error": `no ${name} in scope here` };
 }
 
+/** What rules set once the statement at `place` has run. */
+const setsAt = (place: Place): PlaceSet[] | undefined => state.placeSets.get(place.file)?.get(place.line);
+
+/** A rule's sets, made: a rule mocks a variable, const or not, once it's declared. Shown on the line it's placed on. */
+function makeSets(vm: Vm, sets: PlaceSet[], line: number): void {
+	for (const { name, value } of sets) {
+		for (let scope: typeof vm.rootScope | undefined = vm.top?.scope ?? vm.rootScope; scope !== undefined; scope = scope.parent) {
+			const binding = scope.bindings.get(name);
+
+			if (binding !== undefined) {
+				if (binding.initialized) {
+					binding.value = vm.fromHost(value);
+					tellSet(vm, name, binding.value, line - 1);
+				}
+
+				break;
+			}
+		}
+	}
+}
+
 /** Whether the user has a breakpoint at `place`. */
 const userStopAt = (place: Place): boolean => (place.file === state.sourceFile?.fileName ? state.userLines : state.fileLines.get(place.file) ?? []).includes(place.line);
 
-/** Every line to arm in `file`: the user's breakpoints, and the capability calls the policy gates. */
+/** Every line to arm in `file`: the user's breakpoints, the capability calls the policy gates, and where a rule sets a value
+ *  (a breakpoint that isn't a stop: runOn). */
 function linesIn(file: string): number[] {
-	return [...file === state.sourceFile?.fileName ? state.userLines : state.fileLines.get(file) ?? [], ...state.capabilityLines.get(file) ?? []];
+	return [...file === state.sourceFile?.fileName ? state.userLines : state.fileLines.get(file) ?? [], ...state.capabilityLines.get(file) ?? [], ...state.placeSets.get(file)?.keys() ?? []];
 }
 
 /** Arm `vm`'s breakpoints: in each of the program's files, the user's and the capability calls the policy gates. */
 export function arm(vm: Vm): void {
 	vm.breakpoints.clear();
 
-	for (const file of new Set([state.sourceFile?.fileName ?? "", ...state.fileLines.keys(), ...state.capabilityLines.keys()])) {
+	for (const file of new Set([state.sourceFile?.fileName ?? "", ...state.fileLines.keys(), ...state.capabilityLines.keys(), ...state.placeSets.keys()])) {
 		try {
 			vm.addBreakpointsInFile(file, ...linesIn(file));
 		} catch {
@@ -170,9 +193,15 @@ function stopsAt(vm: Vm, place: Place): boolean {
 }
 
 /** Continue: run to the next stop — past the capability lines the policy now lets pass. */
-function runOn(base: Vm): void {
+function runOn(base: Vm, arrived = false): void {
+	let there = arrived;
+
 	for (;;) {
-		base.runToBreakpoint();
+		if (!there) {
+			base.runToBreakpoint();
+		}
+
+		there = false;
 
 		const place = placeOf(base);
 
@@ -181,6 +210,20 @@ function runOn(base: Vm): void {
 		// policy since changed.)
 		if (base.finished || place === undefined || stopsAt(base, place)) {
 			return;
+		}
+
+		// A rule's place: its statement runs, then what it sets is set. (Past that, it may be somewhere else armed.)
+		const sets = setsAt(place);
+
+		if (sets !== undefined) {
+			base.stepStatement();
+			makeSets(base, sets, place.line);
+
+			if (base.finished || base.idle) {
+				return;
+			}
+
+			there = base.atBreakpoint();
 		}
 	}
 }
@@ -517,6 +560,25 @@ function stepOut(vm: Vm): void {
  *  cross-context trace (adapter action → worker step) rather than an unrelated root. */
 /** Do `action` on `base`, as far as it goes without waiting. */
 function act(base: Vm, action: ForwardAction): void {
+	// Going on from a stop on a rule's place: its statement runs first, then what it sets is set, whichever way it was left.
+	const place = state.history.length === 0 ? undefined : placeOf(base);
+	const sets = place === undefined ? undefined : setsAt(place);
+
+	if (place !== undefined && sets !== undefined) {
+		base.stepStatement();
+		makeSets(base, sets, place.line);
+
+		if (action === "next" || action === "stepIn" || base.finished || base.idle) {
+			return;
+		}
+
+		if (action === "continue") {
+			runOn(base, base.atBreakpoint());
+
+			return;
+		}
+	}
+
 	switch (action) {
 		case "continue":
 			runOn(base);
@@ -760,6 +822,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	state.programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
 	state.capabilityLines = new Map();
+	state.placeSets = new Map(Object.entries(message.places ?? {}).map(([file, places]) => [file, new Map(places.map(({ line, sets }) => [line, sets]))]));
 	armCapabilities(loaded.sourceFile);
 	arm(loaded.vm);
 

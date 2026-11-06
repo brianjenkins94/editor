@@ -107,6 +107,14 @@ it covers (just this, a folder it's in, its site, its program, or every call of 
 deny, or give a value: the call isn't made and returns what's typed, starting from what it returned last). A stop's *Give…* does
 that for this call only. Anything more particular is an edit to the file, which its schema checks and completes.
 
+A value is mocked from the lightbulb on its line (extensions/margin/mock.ts): a variable now, at a stop, as code could (not a
+const), or on every run, by a rule placed on the line; `process.argv` on every run, by a rule about the program, unless the launch
+gives its own. A placed rule is tied to the statement, not the line number. As a run launches its places are looked for in the
+file as it is (extensions/bridge/placed-rules.ts), and each is armed as a breakpoint that isn't a stop: the statement runs, then what
+the rule sets is set, const or not (extensions/tsval/worker/session.ts). It shows as a mark in the gutter with its sentence on hover,
+as the value in the Margin, and as an information on the line. A place that's lost or only uncertain doesn't apply, since it might be
+the wrong line, and says so as a warning in the file: the lightbulb puts it back where the cursor is (extensions/margin/placed.ts).
+
 There's no view of calls or of rules to go and look at: the previous iteration had them (Capability Calls, Rules, Exceptions)
 and they were too out of the way and easy to ignore (the user, 2026-11-06). A decision made at a stop or in the file shows on
 the call as soon as the file changes. What this gives up: findings are only worked out for what's open in an editor, so there's
