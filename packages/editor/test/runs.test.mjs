@@ -68,3 +68,35 @@ test("over the hub: the list, and a run stopped by its id (runs_list, runs_stop)
 	assert.equal(await rpc.request("runs.stop", { "id": script.id }, { "timeoutMs": 5000 }), true);
 	assert.equal(stopped, true);
 });
+
+test("following a run hears what it's said so far and what it says next, until it stops following; a run with a restart starts over", () => {
+	const { runs } = registry();
+	let restarted = 0;
+	const handle = runs.start(run("vite"), () => undefined, () => {
+		restarted += 1;
+	});
+	const heard = [];
+
+	handle.say("one\n");
+
+	const off = runs.follow(handle.id, (text) => {
+		heard.push(text);
+	});
+
+	handle.say("two\n");
+	off();
+	handle.say("three\n");
+	assert.deepEqual(heard, ["one\n", "two\n"]);
+
+	runs.restart(handle.id);
+	assert.equal(restarted, 1);
+	assert.equal(runs.list()[0].id, handle.id);
+
+	// (a run that's over has nothing to follow, and nothing to start over)
+	handle.end(0);
+	runs.restart(handle.id);
+	assert.equal(restarted, 1);
+	runs.follow(handle.id, () => {
+		assert.fail("nothing to hear");
+	})();
+});

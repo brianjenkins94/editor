@@ -1567,21 +1567,22 @@
     ]
   },
   "Preview's dev server as a debug session": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "A running preview's dev server shows up in Run and Debug with a Stop button, and its output goes to the Debug Console.",
+    "status": "active",
+    "why": "written again from what it's for: the objective is rough feature parity with full-editor (user, 2026-11-05)",
+    "since": "2026-11-05",
+    "what": "A running preview's dev server shows up in Run and Debug, with Restart and Stop on the debug toolbar, and its output goes to the Debug Console.",
+    "docs": "packages/editor/RUNNING.md, *The model*",
     "ways": [
-      "debug adapter descriptor provider|production",
-      "debug configuration provider|production",
-      "debugger|production",
-      "hub subscription|`production.exit.${id}`",
-      "hub subscription|`production.exit.${this.id}`",
-      "hub subscription|`production.out.${this.id}`",
-      "hub subscription|production.launch"
+      "core module|installPreviewSessions",
+      "debug adapter descriptor provider|preview",
+      "debugger|preview"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/workbench/preview-session.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/preview-session.spec.mjs"
+    ]
   },
   "Programs, services and what's running": {
     "status": "active",

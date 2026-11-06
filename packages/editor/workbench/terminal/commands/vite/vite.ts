@@ -41,15 +41,36 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 		// (`npm run` passes the script's name in the environment it runs it with: ctx.env, not the exported one)
 		const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? ctx.exportedEnv?.["npm_lifecycle_event"];
 		let stop = (): void => { /* set once it's blocking */ };
+		let restarting = false;
 		// A service, in the running list, as it was asked for.
 		const run = runner.runs.start({ "title": event === undefined ? "vite" : `npm run ${event}`, "kind": "service", "cwd": ctx.cwd, "origin": { "terminal": terminal }, "port": port, "entry": ctx.cwd, "runtime": "preview" }, () => {
 			stop();
+		}, () => {
+			void restart();
 		});
+		// To its terminal, and to whoever's following the run (preview-session.ts).
+		const say = (text: string): void => {
+			writeLive("out", text);
+			run.say(text);
+		};
+
+		const start = async (): Promise<void> => {
+			say(`\n  VITE  dev server ready, in the browser, on ${ctx.cwd}\n\n  Local:  ${await runner.startDevServer(port, ctx.cwd)}\n\n`);
+		};
+		// Started over: the same run, on the same port, its windows closing as the old server goes and a window opening on the new.
+		const restart = async (): Promise<void> => {
+			restarting = true;
+			say(`  ${stamp()} [vite] restarting\n`);
+			await runner.stopDevServer(port);
+			await start().catch((error: unknown) => {
+				say(`vite: ${error instanceof Error ? error.message : String(error)}\n`);
+				stop();
+			});
+			restarting = false;
+		};
 
 		try {
-			const address = await runner.startDevServer(port, ctx.cwd);
-
-			writeLive("out", `\n  VITE  dev server ready, in the browser, on ${ctx.cwd}\n\n  Local:  ${address}\n\n`);
+			await start();
 		} catch (error) {
 			inUse.delete(port);
 			run.end(1, false);
@@ -60,7 +81,7 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 		const off = runner.onDevServerUpdate(port, (message) => {
 			const update = message as { "type"?: string; "path"?: string };
 
-			writeLive("out", `  ${stamp()} [vite] ${update.type === "full-reload" ? "page reload" : "hmr update"} ${update.path ?? ""}\n`);
+			say(`  ${stamp()} [vite] ${update.type === "full-reload" ? "page reload" : "hmr update"} ${update.path ?? ""}\n`);
 		});
 
 		let offClosed = (): void => { /* set once it's blocking */ };
@@ -76,15 +97,19 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 				resolve();
 			}, { "once": true });
 			stop = resolve;
-			offClosed = runner.onDevServerClosed(port, resolve);
+			offClosed = runner.onDevServerClosed(port, () => {
+				if (!restarting) {
+					resolve();
+				}
+			});
 		});
 
 		off();
 		offClosed();
 		await runner.stopDevServer(port);
 		inUse.delete(port);
+		say("\n  vite: dev server stopped\n");
 		run.end(130, true);
-		writeLive("out", "\n  vite: dev server stopped\n");
 
 		return { "stdout": "", "stderr": "", "exitCode": 130 };
 	};

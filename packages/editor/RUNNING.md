@@ -25,6 +25,8 @@ terminal's `node`, an agent's `runs_tests`) starts the same session: tsval evalu
 There's no *Run Without Debugging* that runs something else.
 The top bar's Run menu has that action and the workspace's scripts, each a task in a terminal of its own, whose `npm run` starts a
 `node` or a `vite` as any terminal's does; a script whose service is up shows its preview rather than starting a second.
+A dev server is a session in Run and Debug as well, with Restart and Stop on the debug toolbar and what it says in the Debug Console:
+not a run of it, as nothing in it steps.
 
 **What runs it is invisible.** The user never chooses a runtime, and nothing they see (a menu, an output pane, a run's
 label) names tsval, almostnode or a worker.

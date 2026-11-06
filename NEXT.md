@@ -440,11 +440,16 @@ How it's kept:
      (workbench/tasks.ts, so they're in *Run Task* too) running `npm run` in the workspace's terminal, in a terminal of its own,
      ending with the script's exit code. A script whose service is up shows its preview (`preview.show`) rather than starting a
      second. Tests: in-editor/run-menu.spec.mjs.
+   - *Preview's dev server as a debug session: back* 2026-11-05, written from what it's for (workbench/preview-session.ts). A dev
+     server coming up is a session with Restart and Stop on the debug toolbar, and what it says in the Debug Console as well as
+     its terminal; a session on its own has no row in Call Stack, so the toolbar's where Stop is. Tests: in-editor/preview-session.spec.mjs.
+   - Seen once each in 6 runs of all the specs on CI (2026-11-06), not looked into: eslint.spec's *saving fixes what can be fixed*
+     (`var value` still there) and edits-change.spec's *the History output says what a pause changed* (the panel empty, no
+     `Reading`). A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard.
    - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
      more test machinery (*How long a test may take*, selection, the live loop's own work) and before item 1's bench: those wait
      for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
-   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: running a program (*Preview's dev server as a debug session*,
-     *Terminal commands beyond the core's*); deciding what programs may do (*Rules*, *Rule editor*, *Capability calls panel*, *Mock
+   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: running a program (*Terminal commands beyond the core's*); deciding what programs may do (*Rules*, *Rule editor*, *Capability calls panel*, *Mock
      a value*, *Rules placed in the code*, *Capability prompts for previews*); *Live runs after an edit*; *Notes on code*; and for
      developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no

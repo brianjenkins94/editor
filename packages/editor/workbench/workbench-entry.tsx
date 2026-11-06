@@ -70,6 +70,7 @@ import { pinned, watchVersions } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { holdFiles, installWorkspaceFs } from "./workspace-fs";
+import { installPreviewSessions } from "./preview-session";
 import { installTasks } from "./tasks";
 import { installWorkspaceTools } from "./workspace-tools";
 
@@ -423,6 +424,7 @@ function maybeBoot(): void {
 				installWorkspaceTools(api as typeof import("vscode"), workbenchHub);
 				serveTerminalState(nodeRunner, workbenchHub);
 				installTasks(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
+				installPreviewSessions(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
 
 				// Uplink the extension bridge to the page: a workbench hub bridges the bridge (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the

@@ -22,25 +22,34 @@ export interface RunHandle {
 	"id": string;
 	/** A task that turns out to keep running (it started listening) becomes a service. */
 	"update": (change: Partial<Pick<RunInfo, "port" | "title" | "kind" | "runtime">>) => void;
+	/** What it says, for whoever's following it (`follow`). */
+	"say": (text: string) => void;
 	/** It ended: by itself (`exited`, or `failed` with a nonzero code) or because it was stopped. */
 	"end": (exitCode: number, stopped?: boolean) => void;
 }
 
 export interface RunRegistry {
 	/** Register a run that's starting; `stop` is how to stop it (`runs.stop`). */
-	"start": (run: Pick<RunInfo, "title" | "kind" | "cwd" | "origin" | "port" | "entry" | "runtime">, stop: () => void) => RunHandle;
+	"start": (run: Pick<RunInfo, "title" | "kind" | "cwd" | "origin" | "port" | "entry" | "runtime">, stop: () => void, restart?: () => void) => RunHandle;
 	/** The running ones first (newest first), then the ones that ended (newest first). */
 	"list": () => RunInfo[];
 	/** Stop a running run; false if there's none by that id. */
 	"stop": (id: string) => boolean;
+	/** Start a running run over, if it can be: the same run, by a dev server's own account of how. */
+	"restart": (id: string) => void;
 	/** The running service that `matches`, if any — a second `vite` in the same directory finds the first. */
 	"runningService": (matches: (run: RunInfo) => boolean) => RunInfo | undefined;
+	/** What a run's said so far (its latest) and says from now on. Returns the unsubscribe. */
+	"follow": (id: string, listener: (text: string) => void) => () => void;
 	/** Hear each run as it ends (evidence.ts records it). Returns the unsubscribe. */
 	"onEnd": (listener: (run: RunInfo) => void) => () => void;
 }
 
 /** How many ended runs are kept, for the list's history. */
 const KEEP_ENDED = 10;
+
+/** How much of what a running run's said is kept, its latest: what someone following it from later still reads. */
+const KEEP_SAID = 64_000;
 
 /** How a run ended: stopped, or by itself — `exited`, or `failed` with a nonzero code. */
 function endedState(exitCode: number, stopped: boolean): RunInfo["state"] {
@@ -52,7 +61,7 @@ function endedState(exitCode: number, stopped: boolean): RunInfo["state"] {
 }
 
 export function createRunRegistry(hub: Hub): RunRegistry {
-	const running = new Map<string, { "info": RunInfo; "stop": () => void }>();
+	const running = new Map<string, { "info": RunInfo; "stop": () => void; "restart"?: () => void; "said": string; "followers": Set<(text: string) => void> }>();
 	const ended: RunInfo[] = [];
 	const endListeners = new Set<(run: RunInfo) => void>();
 
@@ -60,17 +69,26 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((left, right) => right.startedAt - left.startedAt), ...ended].map((info) => ({ ...info }));
 
 	const registry: RunRegistry = {
-		"start": (run, stop) => {
+		"start": (run, stop, restart) => {
 			const id = crypto.randomUUID();
 			const info: RunInfo = { ...run, "id": id, "state": "running", "startedAt": Date.now() };
 
-			running.set(id, { "info": info, "stop": stop });
+			const entry = { "info": info, "stop": stop, "restart": restart, "said": "", "followers": new Set<(text: string) => void>() };
+
+			running.set(id, entry);
 
 			return {
 				"id": id,
 				"update": (change) => {
 					if (running.has(id)) {
 						Object.assign(info, change);
+					}
+				},
+				"say": (text) => {
+					entry.said = (entry.said + text).slice(-KEEP_SAID);
+
+					for (const follower of entry.followers) {
+						follower(text);
 					}
 				},
 				"end": (exitCode, stopped = false) => {
@@ -102,7 +120,27 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 
 			return true;
 		},
+		"restart": (id) => {
+			running.get(id)?.restart?.();
+		},
 		"runningService": (matches) => [...running.values()].map((run) => run.info).find((info) => info.kind === "service" && matches(info)),
+		"follow": (id, listener) => {
+			const run = running.get(id);
+
+			if (run === undefined) {
+				return () => undefined;
+			}
+
+			if (run.said !== "") {
+				listener(run.said);
+			}
+
+			run.followers.add(listener);
+
+			return () => {
+				run.followers.delete(listener);
+			};
+		},
 		"onEnd": (listener) => {
 			endListeners.add(listener);
 

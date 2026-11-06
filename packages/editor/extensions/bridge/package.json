@@ -59,6 +59,13 @@
           }
         }
       }
+    ],
+    "debuggers": [
+      {
+        "type": "preview",
+        "label": "Preview",
+        "hiddenWhen": "true"
+      }
     ]
   }
 }
