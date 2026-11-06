@@ -385,17 +385,10 @@
   },
   "Capability calls panel": {
     "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "why": "not coming back as a panel (user, 2026-11-06: too out of the way and easy to ignore). What it did is on the call: *Rules*, the diagnostic and its lightbulb",
+    "since": "2026-11-06",
     "what": "A panel lists the program's capability calls and lets you allow, deny or clear each one; a denied call is marked as an error in the code.",
-    "ways": [
-      "command|capabilities.allow",
-      "command|capabilities.clear",
-      "command|capabilities.deny",
-      "command|capabilities.disposition",
-      "diagnostic collection|capabilities-policy",
-      "view|capabilities.calls"
-    ],
+    "ways": [],
     "in": "e16b2b75",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
@@ -1859,23 +1852,24 @@
     "restore": "git checkout full-editor -- packages/editor/workbench/rule-editor.ts"
   },
   "Rules": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "The Rules view lists every rule as a sentence, in the order rules are checked, where you can add, open, edit and remove them.",
+    "status": "active",
+    "why": "written again from what it's for, without its panel (user, 2026-11-06: the old panels were too out of the way and easy to ignore): the objective is rough feature parity with full-editor",
+    "since": "2026-11-06",
+    "what": "A capability call says how it's decided and by which rule, and is as loud as that asks for (denied an error, undecided a warning, allowed quiet); its lightbulb allows, skips or denies it always, takes out your rule or opens it. The whole list is the policy file, opened by Open Rules, with each rule's sentence above it.",
     "docs": "packages/editor/RUNNING.md, *Rules*",
     "ways": [
-      "command|silo.rules.given",
-      "command|silo.rules.list",
-      "command|silo.rules.new",
-      "command|silo.rules.open",
-      "command|silo.rules.refresh",
-      "command|silo.rules.remove",
-      "command|silo.rules.set",
-      "view|silo.rules"
+      "code actions provider||capabilities/findings.ts",
+      "code lens provider||capabilities/decisions.ts",
+      "command|capabilities.decide",
+      "command|capabilities.openRules",
+      "command|capabilities.takeOut"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/capabilities/decisions.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/rules.spec.mjs"
+    ]
   },
   "Rules placed in the code": {
     "status": "removed",

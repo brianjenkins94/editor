@@ -92,6 +92,21 @@ the debugger's inert stand-in's result. A capability line is armed from the sour
 actual resource against the policy and goes on when it's allowed. How a call is decided, a package's included, is
 ARCHITECTURE.md, *Capabilities*.
 
+## Rules
+
+A call's decision is on the call. The capability diagnostic says how it's decided and by what (`Denied by your rule: …`,
+`Undecided: a run stops here and asks`), the same way a run decides it, and is as loud as that asks for: denied is an
+error, undecided (and dangerous) a warning, skipped an information, allowed a hint, so Problems holds what's refused or
+waiting on someone. Its lightbulb decides it: allow, skip or deny always, take out my rule, or open the rule
+(extensions/capabilities/decisions.ts). The whole list, for when it's wanted, is the policy file, with each rule's sentence
+above it (*Capabilities: Open Rules*). A rule is in `.silo/policy/<you>.json` or the shared `.silo/policy.json`; mine go first
+and the first that matches decides.
+
+There's no view of calls or of rules to go and look at: the previous iteration had them (Capability Calls, Rules, Exceptions)
+and they were too out of the way and easy to ignore (the user, 2026-11-06). A decision made at a stop or in the file shows on
+the call as soon as the file changes. What this gives up: findings are only worked out for what's open in an editor, so there's
+no list of a whole project's calls, and a rule that matches nothing open is only seen in its file.
+
 ## What can't run this way
 
 The hope is none; the plan is as few as possible, each a named case with a reason, kept on a list here and shrunk.

@@ -14,6 +14,10 @@ export interface Finding {
 	"end": number;
 	"dangerous": boolean;
 	"message": string;
+	/** What it is, as a rule says it. */
+	"capability": string;
+	/** What it reaches, as written or as the canary saw it; undefined until something's seen it. */
+	"resource"?: string;
 }
 
 /** What the canary (the plugin's dynamic half: tsval's, extensions/tsval/canary.ts, built beside the plugin) saw of a
@@ -34,6 +38,13 @@ function messageOf(capability: string, callee: string, resource: string | undefi
 	return `${capability}: ${callee}${value}${type === undefined || type === "" || type === "any" ? "" : " · " + type}`;
 }
 
+/** What a call reaches, as far as it's known: the static resource, else the canary's. */
+function resourceOf(resource: string | undefined, observation: CanaryObservation | undefined): { "resource"?: string } {
+	const known = resource ?? (observation?.observed === true ? observation.value : undefined);
+
+	return known === undefined ? {} : { "resource": known };
+}
+
 /** A file's capability findings: every call with a literal resource, typed by `checker`, and every call only the canary
  *  saw (`observations`, its run of this text) with the resource it ran with. */
 // eslint-disable-next-line ts/no-explicit-any -- the host's `ts`, SourceFile and checker, as the plugin hands them over
@@ -44,13 +55,13 @@ export function findings(ts: any, sourceFile: any, checker: any, observations: r
 
 	for (const reach of findReach(ts, sourceFile)) {
 		statics.add(reach.start);
-		found.push({ "start": reach.start, "end": reach.end, "dangerous": isDangerous(reach.capability), "message": messageOf(reach.capability, reach.callee, reach.value, observed.get(reach.start), typeAtStart(ts, checker, sourceFile, reach.start)) });
+		found.push({ "start": reach.start, "end": reach.end, "dangerous": isDangerous(reach.capability), "message": messageOf(reach.capability, reach.callee, reach.value, observed.get(reach.start), typeAtStart(ts, checker, sourceFile, reach.start)), "capability": reach.capability, ...resourceOf(reach.value, observed.get(reach.start)) });
 	}
 
 	// The calls only the canary saw: their resource wasn't a literal.
 	for (const observation of observations) {
 		if (!statics.has(observation.start)) {
-			found.push({ "start": observation.start, "end": observation.end, "dangerous": observation.dangerous, "message": observation.observed ? `${observation.capability}: ${observation.callee} → ${observation.value} (ran)` : `${observation.capability}: ${observation.callee} → (ran; no string resource)` });
+			found.push({ "start": observation.start, "end": observation.end, "dangerous": observation.dangerous, "message": observation.observed ? `${observation.capability}: ${observation.callee} → ${observation.value} (ran)` : `${observation.capability}: ${observation.callee} → (ran; no string resource)`, "capability": observation.capability, ...resourceOf(undefined, observation) });
 		}
 	}
 

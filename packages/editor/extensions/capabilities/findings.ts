@@ -9,11 +9,17 @@
  * to the server per model, a few of them each retried, before the server has been told of the file. The plugin only answers:
  * nothing is put into the TypeScript server's own diagnostics, so whatever hosts the readings later (TypeScript 7's API
  * connection) answers the same request.
+ *
+ * Each says how it's decided, and is as loud as that asks for (decisions.ts): a call a run would stop at, or that's denied, is
+ * in Problems; one that's been allowed goes quiet. Its lightbulb decides it.
  */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
+import type { Finding } from "./decisions";
+import { loadPolicyFiles } from "@brianjenkins94/editor-api/policy";
+import { actionsFor, decisionOfCall, POLICY_FILES, sayDecision, severityOf } from "./decisions";
 
-const LANGUAGES = new Set(["typescript", "typescriptreact", "javascript", "javascriptreact"]);
+export const LANGUAGES = new Set(["typescript", "typescriptreact", "javascript", "javascriptreact"]);
 /** How long edits settle before a document is asked about. */
 const SETTLE_MS = 300;
 /** How long a document's been shown before it's asked about: the TypeScript extension tells the server of it first. */
@@ -26,12 +32,56 @@ const AGAIN = 30;
 interface Answer {
 	"ready"?: boolean;
 	"pending"?: boolean;
-	"findings"?: { "start": number; "end": number; "dangerous": boolean; "message": string }[];
+	"findings"?: Finding[];
+}
+
+/** A finding, where it is. */
+interface Placed { "finding": Finding; "range": vscode.Range }
+
+/** Calls `changed` when a policy file does. */
+function watchPolicy(changed: () => Promise<void>): vscode.Disposable[] {
+	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_FILES);
+	const again = (): void => {
+		void changed();
+	};
+
+	return [watcher, watcher.onDidCreate(again), watcher.onDidChange(again), watcher.onDidDelete(again)];
 }
 
 export function publishFindings(context: vscode.ExtensionContext, log?: ObservedExtension["log"]): void {
 	const collection = vscode.languages.createDiagnosticCollection("capabilities");
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Each document's findings as last answered, to say again when the policy changes, and for its lightbulb. */
+	const placed = new Map<string, { "document": vscode.TextDocument; "found": Placed[] }>();
+
+	/** A document's findings, shown as the policy has them now. */
+	const show = async (uri: string): Promise<void> => {
+		const known = placed.get(uri);
+
+		if (known === undefined) {
+			return;
+		}
+
+		const files = await loadPolicyFiles();
+
+		// (closed meanwhile: its findings went with it)
+		if (placed.get(uri) !== known) {
+			return;
+		}
+
+		collection.set(known.document.uri, known.found.map(({ finding, range }) => {
+			const decision = decisionOfCall(files, finding);
+			const diagnostic = new vscode.Diagnostic(range, `${finding.message}. ${sayDecision(decision)}`, severityOf(decision, finding));
+
+			diagnostic.source = "capabilities";
+			diagnostic.code = 900100;
+
+			return diagnostic;
+		}));
+	};
+	const showAll = async (): Promise<void> => {
+		await Promise.all([...placed.keys()].map(show));
+	};
 	const shown = (document: vscode.TextDocument): boolean => document.uri.scheme === "file" && LANGUAGES.has(document.languageId) && vscode.window.visibleTextEditors.some((editor) => editor.document === document);
 
 	const asked = async (document: vscode.TextDocument, again: number): Promise<void> => {
@@ -50,14 +100,8 @@ export function publishFindings(context: vscode.ExtensionContext, log?: Observed
 		}
 
 		if (answer?.ready === true && answer.findings !== undefined) {
-			collection.set(document.uri, answer.findings.map((finding) => {
-				const diagnostic = new vscode.Diagnostic(new vscode.Range(document.positionAt(finding.start), document.positionAt(finding.end)), finding.message, finding.dangerous ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Hint);
-
-				diagnostic.source = "capabilities";
-				diagnostic.code = 900100;
-
-				return diagnostic;
-			}));
+			placed.set(document.uri.toString(), { "document": document, "found": answer.findings.map((finding) => ({ "finding": finding, "range": new vscode.Range(document.positionAt(finding.start), document.positionAt(finding.end)) })) });
+			await show(document.uri.toString());
 		}
 
 		// (the server or its engine not up yet, or the canary still running: asked again shortly)
@@ -84,6 +128,28 @@ export function publishFindings(context: vscode.ExtensionContext, log?: Observed
 
 	context.subscriptions.push(
 		collection,
+		vscode.languages.registerCodeActionsProvider([...LANGUAGES].map((language) => ({ "language": language, "scheme": "file" })), {
+			"provideCodeActions": async (document, range, code): Promise<vscode.CodeAction[]> => {
+				const here = placed.get(document.uri.toString())?.found.filter((each) => each.range.intersection(range) !== undefined) ?? [];
+
+				if (here.length === 0) {
+					return [];
+				}
+
+				const files = await loadPolicyFiles();
+
+				return here.flatMap(({ finding, range: at }) => actionsFor(files, finding).map(({ title, command }) => {
+					const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
+
+					action.command = command;
+					action.diagnostics = code.diagnostics.filter((each) => each.source === "capabilities" && each.range.isEqual(at));
+
+					return action;
+				}));
+			}
+		}, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
+		// (decided anywhere: here, at a stop, or by editing the file)
+		...watchPolicy(showAll),
 		vscode.window.onDidChangeVisibleTextEditors((editors) => {
 			for (const { document } of editors) {
 				if (shown(document) && !timers.has(document.uri.toString())) {
@@ -99,6 +165,7 @@ export function publishFindings(context: vscode.ExtensionContext, log?: Observed
 		vscode.workspace.onDidCloseTextDocument((document) => {
 			clearTimeout(timers.get(document.uri.toString()));
 			timers.delete(document.uri.toString());
+			placed.delete(document.uri.toString());
 			collection.delete(document.uri);
 		}),
 		{ "dispose": () => {

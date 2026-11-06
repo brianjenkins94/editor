@@ -452,8 +452,11 @@ How it's kept:
    - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
      more test machinery (*How long a test may take*, selection, the live loop's own work) and before item 1's bench: those wait
      for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
-   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: deciding what programs may do (*Rules*, *Rule editor*, *Capability calls panel*, *Mock
-     a value*, *Rules placed in the code*, *Capability prompts for previews*); *Live runs after an edit*; *Notes on code*; and for
+   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: deciding what programs may do (*Rules* is back, on the call rather than in a panel, and *Capability calls panel* went
+     with it: RUNNING.md, *Rules*; the user, 2026-11-06: the old Capability Calls, Rules and Exceptions panels were too out
+     of the way and easy to ignore, so what they did comes back and they don't. Still to come, on the same terms: *Rules placed
+     in the code*, *Rule editor* as a picker from a stop or the lightbulb, *Mock a value*, *Capability prompts for previews*;
+     *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit*; *Notes on code*; and for
      developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no
      terminal, and it has no UI to mirror: kept as an exception, the user's), *What a way in reaches* and *How a commit did in
