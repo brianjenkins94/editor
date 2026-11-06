@@ -1315,19 +1315,22 @@
     ]
   },
   "Package scripts as tasks and the run picker": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "written again from what it's for: the objective is rough feature parity with full-editor (user, 2026-11-05)",
+    "since": "2026-11-05",
     "what": "Every package.json script is a task you can run, listed in Run Task and in the shell's run picker, and each runs in its own terminal.",
     "ways": [
+      "core module|installTasks",
       "hub request|tasks.list",
       "hub request|tasks.run",
-      "hub subscription|`terminal.exit.${id}`",
-      "hub subscription|`terminal.out.${id}`",
       "task provider|run"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/workbench/tasks.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/run-menu.spec.mjs"
+    ]
   },
   "Packages and types from the CDN": {
     "status": "active",
@@ -1927,16 +1930,22 @@
     ]
   },
   "Run from the shell": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "written again from what it's for: the objective is rough feature parity with full-editor (user, 2026-11-05)",
+    "since": "2026-11-05",
     "what": "A Run menu in the top bar runs the file in the editor in the debugger, or one of the workspace's scripts and tasks, showing a running service's preview instead of starting it twice.",
     "docs": "packages/editor/RUNNING.md, *The model*",
     "ways": [
-      "button|Run"
+      "button|Run",
+      "hub request|tasks.runFile",
+      "hub subscription|preview.show"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/shell/run-menu.tsx"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/run-menu.spec.mjs"
+    ]
   },
   "Run with Inputs": {
     "status": "removed",

@@ -10,7 +10,8 @@
   "browser": "extension.js",
   "activationEvents": [
     "onStartupFinished",
-    "onDebug"
+    "onDebug",
+    "onTaskType:run"
   ],
   "contributes": {
     "commands": [
@@ -38,6 +39,25 @@
         "command": "editor.bablr.check",
         "title": "Check Which Files Parse…",
         "category": "BABLR"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "run",
+        "required": [
+          "script",
+          "folder"
+        ],
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "The package.json script."
+          },
+          "folder": {
+            "type": "string",
+            "description": "The folder its package.json is in."
+          }
+        }
       }
     ]
   }

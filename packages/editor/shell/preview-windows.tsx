@@ -130,6 +130,21 @@ function install(hub: Hub): void {
 		open(port);
 	});
 
+	// A service asked for that's up already: a window onto it, open and in front of the rest.
+	hub.subscribe("preview.show", (data) => {
+		const { port } = data as { "port": number };
+		const windows = servers.get(port)?.windows ?? new Set<HTMLElement>();
+		const shown = used.findLast((element) => windows.has(element)) ?? open(port);
+
+		if (shown !== undefined) {
+			const front = Math.max(...used.map((element) => Number(getComputedStyle(element).zIndex)));
+
+			shown.removeAttribute("collapsed");
+			shown.style.setProperty("--app-window-z", String(front + 1));
+			useWindow(shown);
+		}
+	});
+
 	hub.subscribe("preview.close", (data) => {
 		const { port } = data as { "port": number };
 		const server = servers.get(port);

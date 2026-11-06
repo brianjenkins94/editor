@@ -23,6 +23,8 @@ every entry point picked one.
 terminal's `node`, an agent's `runs_tests`) starts the same session: tsval evaluating the program's own files on almostnode
 (packages/tsval/README.md, *Modules*). A breakpoint stops it if there is one; stepping goes back as well as forward.
 There's no *Run Without Debugging* that runs something else.
+The top bar's Run menu has that action and the workspace's scripts, each a task in a terminal of its own, whose `npm run` starts a
+`node` or a `vite` as any terminal's does; a script whose service is up shows its preview rather than starting a second.
 
 **What runs it is invisible.** The user never chooses a runtime, and nothing they see (a menu, an output pane, a run's
 label) names tsval, almostnode or a worker.

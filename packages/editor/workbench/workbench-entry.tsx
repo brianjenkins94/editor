@@ -70,6 +70,7 @@ import { pinned, watchVersions } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { holdFiles, installWorkspaceFs } from "./workspace-fs";
+import { installTasks } from "./tasks";
 import { installWorkspaceTools } from "./workspace-tools";
 
 // Boot milestones on the performance timeline (beside VS Code's own code/* marks), for load investigations.
@@ -421,6 +422,7 @@ function maybeBoot(): void {
 				// debug-mcp's files_* tools).
 				installWorkspaceTools(api as typeof import("vscode"), workbenchHub);
 				serveTerminalState(nodeRunner, workbenchHub);
+				installTasks(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
 
 				// Uplink the extension bridge to the page: a workbench hub bridges the bridge (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the

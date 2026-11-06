@@ -435,11 +435,15 @@ How it's kept:
    - *Run a file in the debugger: back* 2026-11-05 — a play button above a code file and *Debug: Run* (`editor.debugFile`,
      extensions/tsval/run-file.ts), written from what it's for. F5 with no launch.json runs the code file in sight rather than the active
      editor, which with the Output view focused was its channel (found 2026-11-04). Tests: in-editor/run-file.spec.mjs.
+   - *Run from the shell* and *Package scripts as tasks and the run picker: back* 2026-11-05, written from what they're for. A Run menu
+     in the top bar (shell/run-menu.tsx) has the file in the editor and every package.json script; each script is a VS Code task
+     (workbench/tasks.ts, so they're in *Run Task* too) running `npm run` in the workspace's terminal, in a terminal of its own,
+     ending with the script's exit code. A script whose service is up shows its preview (`preview.show`) rather than starting a
+     second. Tests: in-editor/run-menu.spec.mjs.
    - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
      more test machinery (*How long a test may take*, selection, the live loop's own work) and before item 1's bench: those wait
      for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
-   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: running a program (*Run a file in the
-     debugger*, *Run from the shell*, *Package scripts as tasks and the run picker*, *Preview's dev server as a debug session*,
+   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: running a program (*Preview's dev server as a debug session*,
      *Terminal commands beyond the core's*); deciding what programs may do (*Rules*, *Rule editor*, *Capability calls panel*, *Mock
      a value*, *Rules placed in the code*, *Capability prompts for previews*); *Live runs after an edit*; *Notes on code*; and for
      developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo

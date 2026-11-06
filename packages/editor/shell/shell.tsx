@@ -32,6 +32,7 @@ import { previewWindows } from "./preview-windows";
 import { push } from "./push";
 import { repoLoad } from "./repo-load";
 import { reset } from "./reset-popover";
+import { runMenu } from "./run-menu";
 import { signIn } from "./sign-in";
 import "theme/components/page";
 import "theme/components/popover";
@@ -44,7 +45,7 @@ import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
 
 /** The top window's features, started in this order once the hub is linked; their controls placed in it. */
-const FEATURES: ShellFeature[] = [push, signIn, repoLoad, commit, reset, github, previewWindows];
+const FEATURES: ShellFeature[] = [push, signIn, repoLoad, runMenu, commit, reset, github, previewWindows];
 
 // The resizable pane's limits (px). The min keeps it usable, the max caps it at a fraction of the viewport so it can't
 // swallow the editor.
