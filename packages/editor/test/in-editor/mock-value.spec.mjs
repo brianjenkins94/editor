@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, problems, retype, runCommand } from "./editor.mjs";
+import { codeOf, openEditor, openFile, problems, retype } from "./editor.mjs";
 
 const PROGRAM = `const rate = 2;
 const total = rate * 10;
@@ -18,9 +18,10 @@ async function fix(workbench, title) {
 
 	await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
 
-	// (nothing says the Margin's up yet, and it isn't until a file like this has been open a moment: ask again, as a person would)
+	// (nothing says the Margin's up yet, and it isn't until a file like this has been open a moment: ask again, as a person
+	// would. By its key: the palette has no Quick Fix until something offers code actions)
 	for (let tries = 0; ; tries += 1) {
-		await runCommand(workbench, "Quick Fix...");
+		await codeOf(workbench).press("ControlOrMeta+.");
 
 		try {
 			await expect(row).toBeVisible({ "timeout": 5000 });

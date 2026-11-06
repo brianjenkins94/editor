@@ -19,12 +19,11 @@ test("a call says how it's decided, and its lightbulb decides it: denied it's an
 	const rows = await problems(workbench);
 	const call = rows.filter({ "hasText": "exec: execSync → ls" });
 	const fix = async (title) => {
-		// (a problem opened puts the cursor on its call, and Quick Fix asks about what's there. It takes a moment to get there,
-		// and the palette has no Quick Fix until the code has the focus)
+		// (a problem opened puts the cursor on its call, and Quick Fix asks about what's there: it takes a moment to get there)
 		await call.dblclick();
 		await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 3" })).toBeVisible({ "timeout": 30_000 });
 		await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
-		await runCommand(workbench, "Quick Fix...");
+		await codeOf(workbench).press("ControlOrMeta+.");
 		await workbench.locator(".action-widget .monaco-list-row", { "hasText": title }).click({ "timeout": 30_000 });
 	};
 
@@ -82,7 +81,7 @@ fetch("https://example.com/a");
 	await call("net: fetch").dblclick();
 	await expect(workbench.locator(".statusbar-item", { "hasText": "Ln 7" })).toBeVisible({ "timeout": 30_000 });
 	await expect(codeOf(workbench)).toBeFocused({ "timeout": 30_000 });
-	await runCommand(workbench, "Quick Fix...");
+	await codeOf(workbench).press("ControlOrMeta+.");
 	await workbench.locator(".action-widget .monaco-list-row", { "hasText": "Make a rule" }).click({ "timeout": 30_000 });
 	await pick("https://example.com/**");
 	await pick("Skip");
