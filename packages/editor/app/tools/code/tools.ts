@@ -1,5 +1,6 @@
 /** What the code says: a change's problems against HEAD (code-problems.ts), as the review panel shows each changed
- *  file's; and which files BABLR parses (bablr.ts). */
+ *  file's; which files BABLR parses (bablr.ts). And refactoring as a person does it (code-refactor.ts): Find All References,
+ *  Rename Symbol, and the Explorer's move with its imports kept right. */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
@@ -34,6 +35,51 @@ const code: ToolFamily = ({ request }) => [
 			"handler": async ({ path, exclude }, { signal }) => ok(request("bablr.check", { "path": path, "exclude": exclude }, signal))
 		})
 	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
+			"name": "code_references",
+			"config": {
+				"description": "Where a name is used, as Find All References shows it: TypeScript's answer, not a text search (a same-named thing elsewhere isn't it). Each place's file, line, column and text, its declaration included. Give the file, the line it's on and the name. Returns { name, places, total }.",
+				"inputSchema": {
+					"path": z.string().describe("The file, relative to the workspace."),
+					"line": z.number().describe("The line the name is on (1-based)."),
+					"name": z.string().describe("The name on that line: a variable, function, class, member, import…")
+				}
+			},
+			"handler": async ({ path, line, name }, { signal }) => ok(request("code.references", { "path": path, "line": line, "name": name }, signal))
+		})
+	},
+	{
+		"timeoutMs": 300000,
+		"tool": defineTool({
+			"name": "code_rename",
+			"config": {
+				"description": "Rename a name everywhere it's used, as Rename Symbol (F2) does: its declaration, every use, imports and exports, as TypeScript renames it, one edit the editor sees as typing, every file saved. Give the file, the line it's on, the name and the new name.",
+				"inputSchema": {
+					"path": z.string().describe("The file, relative to the workspace."),
+					"line": z.number().describe("The line the name is on (1-based)."),
+					"name": z.string().describe("The name on that line: a variable, function, class, member, import…"),
+					"to": z.string().describe("The new name.")
+				}
+			},
+			"handler": async ({ path, line, name, to }, { signal }) => ok(request("code.rename", { "path": path, "line": line, "name": name, "to": to }, signal))
+		})
+	},
+	{
+		"timeoutMs": 300000,
+		"tool": defineTool({
+			"name": "code_move",
+			"config": {
+				"description": "Move or rename a file or folder as the Explorer does, its imports kept right: every file importing it changed to the new path, and its own relative imports to match, as TypeScript works them out, in one edit with the move, every file it touched saved. Returns { moved, to, updated }.",
+				"inputSchema": {
+					"from": z.string().describe("The file or folder now, relative to the workspace."),
+					"to": z.string().describe("Where it goes, relative to the workspace; nothing may be there.")
+				}
+			},
+			"handler": async ({ from, to }, { signal }) => ok(request("code.move", { "from": from, "to": to }, signal))
+		})
+	}
 ];
 
 export default code;

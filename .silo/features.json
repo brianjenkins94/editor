@@ -1746,26 +1746,26 @@
     ]
   },
   "Refactoring for agents": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "An agent finds where a name is used, renames it everywhere, and moves a file with every import of it kept right, as TypeScript resolves them: one edit the editor sees as typing, every file saved, nothing asked.",
+    "status": "active",
+    "why": "written again from what it's for, each tool what a person does (CLAUDE.md, *Agent tools*): Find All References, Rename Symbol, and the Explorer's move, which now keeps imports right. code_query and code_rewrite stay out: nothing a person does is them yet",
+    "since": "2026-11-07",
+    "what": "A file moved or renamed in the Explorer keeps its imports right, as TypeScript works them out, with nothing asked; and an agent finds where a name is used, renames it everywhere, and moves a file, each as a person does it, every file it touches saved.",
     "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
     "ways": [
       "agent tool|code_move",
-      "agent tool|code_query",
       "agent tool|code_references",
       "agent tool|code_rename",
-      "agent tool|code_rewrite",
       "core module|installCodeRefactor",
       "hub request|code.move",
-      "hub request|code.query",
       "hub request|code.references",
-      "hub request|code.rename",
-      "hub request|code.rewrite"
+      "hub request|code.rename"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/workbench/code-refactor.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/file-moves.spec.mjs"
+    ]
   },
   "Release pipeline": {
     "status": "active",

@@ -9,6 +9,9 @@
  * files again first); the answer is every file whose reading is newer — it changed, or a file it resolves names into
  * did — and every file there is now. Readings are kept here between requests, so an answer costs only what changed.
  *
+ * And `_history.fileRename`: the edits a file's move makes (workbench/code-refactor.ts, Refactoring for agents), as only a
+ * plugin can ask the server for them in the browser.
+ *
  * How it's loaded: registered as extension files whose extension-file:// probe URIs
  * the extension host's patched fetch/importExt resolves; this file is served, so its import.meta.url finds the engine.
  */
@@ -190,12 +193,106 @@ export default function init(modules) {
 		return { "projects": told };
 	}
 
+	// `_history.fileRename`: the edits a file's move makes, its importers' and its own (workbench/code-refactor.ts).
+	function projectsOf(projectService) {
+		return [...projectService.configuredProjects ? projectService.configuredProjects.values() : [], ...projectService.inferredProjects || []];
+	}
+
+	/** The workspace path (`/workspace/…`) a server file name is: the browser server names a file by its URI. */
+	function workspacePathOf(fileName) {
+		const uri = /^\/file\/[^/]+(\/.*)$/u.exec(fileName);
+
+		return uri === null ? fileName : uri[1];
+	}
+
+	/** What `program`'s server names a workspace path: as its files are named (by URI in the browser, else plainly). */
+	function serverNameOf(program, path) {
+		if (program.getSourceFile(path) !== undefined) {
+			return path;
+		}
+
+		const named = program.getSourceFiles().find(function(source) {
+			return source.fileName.endsWith(path) && workspacePathOf(source.fileName) === path;
+		});
+
+		if (named !== undefined) {
+			return named.fileName;
+		}
+
+		// (a file it hasn't, or one not there yet: named as its other files are)
+		const sample = program.getRootFileNames()[0];
+
+		return sample !== undefined && sample !== workspacePathOf(sample) ? sample.slice(0, sample.length - workspacePathOf(sample).length) + path : path;
+	}
+
+	/**
+	 * What moving `from` to `to` (workspace paths, a file's or a folder's) changes in the code: TypeScript's edits for it
+	 * (`getEditsForFileRename`), every import of it in each project holding it and its own relative imports, at the old
+	 * path, as each file's spans and their new text. `outside` when no project holds `from`.
+	 */
+	function fileRename(projectService, args) {
+		const from = typeof args.from === "string" ? args.from : "";
+		const to = typeof args.to === "string" ? args.to : "";
+		const edits = new Map();
+		let held = false;
+
+		for (const project of projectsOf(projectService)) {
+			const service = project.getLanguageService();
+			const program = service.getProgram();
+
+			if (program === undefined || !program.getSourceFiles().some(function(source) {
+				const path = workspacePathOf(source.fileName);
+
+				return path === from || path.startsWith(from + "/");
+			})) {
+				continue;
+			}
+
+			held = true;
+
+			for (const change of service.getEditsForFileRename(serverNameOf(program, from), serverNameOf(program, to), {}, { "allowTextChangesInNewFiles": true })) {
+				const file = workspacePathOf(change.fileName);
+				const known = edits.get(file) || new Map();
+
+				// (the same edit from two projects, once)
+				for (const text of change.textChanges) {
+					known.set(`${String(text.span.start)}:${String(text.span.length)}`, { "start": text.span.start, "length": text.span.length, "text": text.newText });
+				}
+
+				edits.set(file, known);
+			}
+		}
+
+		return {
+			"edits": [...edits].map(function(entry) {
+				return { "file": entry[0], "changes": [...entry[1].values()] };
+			}),
+			...held ? {} : { "outside": true }
+		};
+	}
+
 	return {
 		"create": function(info) {
 			if (!registered && info.session !== undefined && typeof info.session.addProtocolHandler === "function") {
 				registered = true;
 				info.session.addProtocolHandler("_history.read", function(request) {
 					return { "response": read(info, (request && request.arguments) || {}), "responseRequired": true };
+				});
+				// Files made or deleted since: told to the projects (`filesChanged`), as a refactoring wants every file it touches held.
+				info.session.addProtocolHandler("_history.files", function() {
+					try {
+						return { "response": filesChanged(info.project.projectService), "responseRequired": true };
+					} catch (error) {
+						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
+					}
+				});
+				// (a failure is answered, not thrown: the server's own error says only that one happened)
+				info.session.addProtocolHandler("_history.fileRename", function(request) {
+					try {
+						return { "response": fileRename(info.project.projectService, (request && request.arguments) || {}), "responseRequired": true };
+					} catch (error) {
+						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
+					}
 				});
 			}
 

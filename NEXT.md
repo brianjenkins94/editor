@@ -461,7 +461,7 @@ How it's kept:
      *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit* is back (RUNTIME-EVIDENCE.md, *Live
      runs*; not yet what a save reaches, which is the live loop's); *Notes on code* is back, beside the code in the Margin (RUNTIME-EVIDENCE.md, *Durable annotations
      on spans*); and for
-     developing and testing the editor in the editor, *Agents drive the debugger* (back: RUNNING.md, *For agents*), *Refactoring for agents*, *Experiments that undo
+     developing and testing the editor in the editor, *Agents drive the debugger* (back: RUNNING.md, *For agents*), *Refactoring for agents* (back: ARCHITECTURE.md, *Workspace tools*), *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no
      terminal, and it has no UI to mirror: kept as an exception, the user's), *What a way in reaches* and *How a commit did in
      CI*. Later: the
@@ -517,8 +517,8 @@ How it's kept:
      packages/almostnode/test and packages/bablr-language-ts/test are scripts, not tests. A UI spec's coverage isn't visible to
      tsval (the editor it drives runs as a plain bundle) until everything runs in tsval, as it's meant to.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
-     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
-     alone reaches), `code_move` (nothing found that fixes imports on an Explorer rename), `git_blame`, `runs_affected`
+     as its feature is reintroduced (`code_move` has the Explorer's move now, which keeps imports right). `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
+     alone reaches), `git_blame`, `runs_affected`
      and `runs_ledger` (the tests-by-feature list would be their view), `workspace_checkpoint` and `workspace_restore`,
      `editor_trace`, `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable
      view; the monitor has rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`,

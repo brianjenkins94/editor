@@ -717,6 +717,12 @@ tools*). What the code doesn't say:
   say) rather than passing an answer off as complete.
 - A write or an edit is a `WorkspaceEdit`, so an open editor, undo and format on save see it as typing, then saved. A
   read is what's open in an editor (unsaved edits included), else what's on disk.
+- **Refactoring is a person's** (workbench/code-refactor.ts): `code_references` is Find All References, `code_rename` Rename
+  Symbol, `code_move` the Explorer's rename. A file moved in the Explorer, or by anything, keeps its imports right: its importers'
+  and its own relative ones, TypeScript's `getEditsForFileRename` through history's tsserver plugin (`_history.fileRename`, as only
+  a plugin can ask it in the browser), in the same edit as the move. Nothing's asked: VS Code would ask before an extension's
+  edits to a move, and the monaco component stores the answer OK unless someone chose otherwise (*Reset Choice for File
+  Operation Participants* asks again). Not back: `code_query` and `code_rewrite`, which nothing a person does is yet.
 - **No shell (2026-10-27).** The agents' shell tool (core's just-bash, a shell per call) was removed: an agent with one
   used it for everything (grep, sed, `git`) and went around the editor, skipping the WorkspaceEdit, the hunk review and
   the debugger, and finding just-bash's gaps instead of the editor's. The terminal is for people; `terminal_output`

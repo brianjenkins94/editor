@@ -53,6 +53,7 @@ import { installFsTrace } from "./fs-trace";
 import { installPaneViews } from "./pane-views";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installCodeProblems } from "./code-problems";
+import { installCodeRefactor } from "./code-refactor";
 import { installGitHistory } from "./git-history";
 import { installGitRefs } from "./git-refs";
 import { installGitPush } from "./git-push";
@@ -443,6 +444,8 @@ function maybeBoot(): void {
 				// A change's problems against HEAD, TypeScript's and ESLint's (code-problems.ts): the review panel's, each
 				// changed file's, and agents' code_problems.
 				installCodeProblems(api as typeof import("vscode"), workbenchHub, git, paneLog);
+				// A file moved keeps its imports right, and agents' references, rename and move (code-refactor.ts).
+				installCodeRefactor(api as typeof import("vscode"), workbenchHub, paneLog);
 				// Branches, and a branch pulled from or pushed to GitHub through the shell's sign-in (git-push.ts).
 				const remote = installGitPush(workbenchHub, paneLog);
 
