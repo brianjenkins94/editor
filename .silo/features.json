@@ -2030,9 +2030,9 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Scripts over the workspace": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "back as an agent-only tool, the user's exception to CLAUDE.md's *Agent tools* (2026-11-07): agents have no terminal, and a person's way to this is the terminal's node, which they have. The objective is rough feature parity with full-editor",
+    "since": "2026-11-07",
     "what": "JavaScript an agent runs for counting or joining data across the workspace's files, which it reads but can't change, in a locked-down realm with no network; the answer says what it read and what it was refused.",
     "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
     "ways": [
@@ -2041,10 +2041,12 @@
       "hub request|script.run"
     ],
     "paths": [
+      "packages/editor/app/tools/script/tools.ts",
       "packages/editor/workbench/script-run.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "git checkout full-editor -- packages/editor/workbench/script-run.ts"
+    "tests": [
+      "packages/editor/test/script-run.test.mjs"
+    ]
   },
   "Sign in by email code": {
     "status": "active",

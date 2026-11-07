@@ -727,6 +727,10 @@ tools*). What the code doesn't say:
   and *Workspace: Restore Checkpoint…* puts every file changed since back, as one edit undo takes back; `workspace_checkpoint` and
   `workspace_restore` are the same for agents. Not `.silo/`, the editor's own records, and not across a commit: that's git's to
   undo. A window's checkpoints go with a reload.
+- **Scripts are an agent's alone** (workbench/script-run.ts): `script_run` runs JavaScript for counting or joining across files,
+  the workspace read-only, in the capability-gated realm (no network, no `require`, nothing that writes), and says what it read and
+  what it was refused. The one tool with nothing a person does to mirror, by the user's choice (2026-11-07): agents have no terminal,
+  and a person's way to the same is the terminal's `node`.
 - **No shell (2026-10-27).** The agents' shell tool (core's just-bash, a shell per call) was removed: an agent with one
   used it for everything (grep, sed, `git`) and went around the editor, skipping the WorkspaceEdit, the hunk review and
   the debugger, and finding just-bash's gaps instead of the editor's. The terminal is for people; `terminal_output`

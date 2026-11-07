@@ -54,6 +54,7 @@ import { installPaneViews } from "./pane-views";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installCodeProblems } from "./code-problems";
 import { installCheckpoints } from "./checkpoints";
+import { installScriptRun } from "./script-run";
 import { installCodeRefactor } from "./code-refactor";
 import { installGitHistory } from "./git-history";
 import { installGitRefs } from "./git-refs";
@@ -425,6 +426,9 @@ function maybeBoot(): void {
 				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;
 				// debug-mcp's files_* tools).
 				installWorkspaceTools(api as typeof import("vscode"), workbenchHub);
+				// JavaScript an agent runs over the workspace, read-only, in a realm with no network (script-run.ts): agent-only, the
+				// user's exception to CLAUDE.md's *Agent tools*, as agents have no terminal.
+				installScriptRun(api as typeof import("vscode"), workbenchHub);
 				serveTerminalState(nodeRunner, workbenchHub);
 				installTasks(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
 				installPreviewSessions(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
