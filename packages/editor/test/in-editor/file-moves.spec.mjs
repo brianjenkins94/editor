@@ -12,6 +12,26 @@ const files = {
 	"total.mjs": "import { rate } from \"./rate.mjs\";\n\nexport const total = rate * 10;\n"
 };
 
+/** What the Explorer and the window show: its rows, any text being typed into, what's said, the tabs. */
+async function shown(workbench) {
+	const texts = async (locator, most = 12) => {
+		const found = [];
+
+		for (let index = 0; index < Math.min(await locator.count(), most); index += 1) {
+			found.push(await locator.nth(index).textContent());
+		}
+
+		return found;
+	};
+
+	return {
+		"rows": await texts(workbench.getByRole("treeitem")),
+		"typing": await texts(workbench.locator(".monaco-inputbox input")),
+		"said": await texts(workbench.locator(".notification-list-item-message, .dialog-message-text, .monaco-inputbox-message"), 6),
+		"tabs": await texts(workbench.locator(".tab"))
+	};
+}
+
 test("a file renamed in the Explorer: what imports it follows, and nothing's asked", async ({ page }) => {
 	const workbench = await openEditor(page, files);
 
@@ -37,10 +57,17 @@ test("a file renamed in the Explorer: what imports it follows, and nothing's ask
 		await list.press("Enter");
 		await expect(input).toBeVisible({ "timeout": 15_000 });
 	}
+
 	await input.fill("prices.mjs");
 	await input.press("Enter");
 
-	await expect(workbench.getByRole("treeitem", { "name": "prices.mjs", "exact": true })).toBeVisible({ "timeout": 30_000 });
+	try {
+		await expect(workbench.getByRole("treeitem", { "name": "prices.mjs", "exact": true })).toBeVisible({ "timeout": 30_000 });
+	} catch (error) {
+		// (it's failed on CI and not here: what the Explorer shows then, to say why)
+		throw new Error(`${String(error)}; the Explorer: ${JSON.stringify(await shown(workbench))}`, { "cause": error });
+	}
+
 	await workbench.locator(".tab", { "hasText": "total.mjs" }).first().click();
 	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("./prices.mjs", { "timeout": 60_000 });
 	await expect(workbench.locator(".dialog-box")).toHaveCount(0);
