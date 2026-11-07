@@ -8,6 +8,37 @@ import { devApp, openEditor, openFile, openTerminal, previewWindows, retype, run
 
 const files = devApp("sessionapp", "served");
 
+/** What the debugger shows: the toolbar's buttons, the sessions in the Debug Console's list, the status bar's debug item. To say
+ *  why Stop isn't there when it isn't (2 of 8 runs on CI, 2026-11-07; never here). */
+async function debugShown(workbench) {
+	const texts = async (locator, attribute) => {
+		const found = [];
+
+		for (let index = 0; index < Math.min(await locator.count(), 12); index += 1) {
+			found.push(attribute === undefined
+				? await locator.nth(index).textContent()
+				: await locator.nth(index).getAttribute(attribute));
+		}
+
+		return found;
+	};
+
+	return {
+		"toolbar": await texts(workbench.locator(".debug-toolbar .action-label"), "aria-label"),
+		"sessions": await texts(workbench.locator(".panel .monaco-select-box option")),
+		"status": await texts(workbench.locator(".statusbar-item[id*='debug'], .statusbar-item.debug"), "aria-label")
+	};
+}
+
+/** Stop on the toolbar, or why not. */
+async function stopShown(workbench, toolbar) {
+	try {
+		await expect(toolbar("Stop")).toBeVisible({ "timeout": 30_000 });
+	} catch (error) {
+		throw new Error(`${String(error)}; the debugger: ${JSON.stringify(await debugShown(workbench))}`, { "cause": error });
+	}
+}
+
 test("a dev server is a session in Run and Debug: what it says in the Debug Console, a Stop button, and it goes when the server does", async ({ page }) => {
 	const workbench = await openEditor(page, files);
 	const toolbar = (name) => workbench.locator(`.debug-toolbar .action-label[aria-label^='${name}']`);
@@ -20,7 +51,7 @@ test("a dev server is a session in Run and Debug: what it says in the Debug Cons
 	await input.pressSequentially("cd sessionapp && vite\n");
 	await expect(previewWindows(page).frameLocator("iframe").locator("#app")).toHaveText("served", { "timeout": 90_000 });
 
-	await expect(toolbar("Stop")).toBeVisible({ "timeout": 30_000 });
+	await stopShown(workbench, toolbar);
 	// Nothing in it to pause.
 	await expect(workbench.locator(".debug-toolbar .action-label.disabled[aria-label^='Pause']")).toHaveCount(1);
 	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
@@ -47,7 +78,7 @@ test("a dev server is a session in Run and Debug: what it says in the Debug Cons
 
 	await another.pressSequentially("cd sessionapp && vite\n");
 	await expect(previewWindows(page).frameLocator("iframe").locator("#app")).toHaveText("saved", { "timeout": 90_000 });
-	await expect(toolbar("Stop")).toBeVisible({ "timeout": 30_000 });
+	await stopShown(workbench, toolbar);
 	await previewWindows(page).locator(".app-window-controls [title='Close'], .app-window-controls [aria-label='Close']").click();
 	await expect(toolbar("Stop")).toBeHidden({ "timeout": 30_000 });
 });
