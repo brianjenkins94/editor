@@ -240,6 +240,7 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("capabilities", CAPABILITIES_FILES),
 			bundledExtension("source-control"),
 			bundledExtension("margin"),
+			bundledExtension("notes"),
 			editorSettingsDefaultsPlugin(),
 			polyfillNode(["path", "url", "buffer"])
 		],

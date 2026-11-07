@@ -1284,26 +1284,29 @@
     ]
   },
   "Notes on code": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "A note attached to a piece of code follows that code as it moves and changes; when the code is gone, the note waits in Problems to be re-placed or dismissed.",
+    "status": "active",
+    "why": "written again from what it's for, shown beside the code rather than as a thread to open (user, 2026-11-06, of what's out of the way): the objective is rough feature parity with full-editor",
+    "since": "2026-11-06",
+    "what": "A note attached to a piece of code shows beside it in the Margin and follows that code as it moves and changes; when the code is gone, the note waits in Problems to be put back or dismissed, from the lightbulb.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*",
     "ways": [
       "agent tool|notes_add",
       "code actions provider||notes/extension.ts",
       "command|notes.add",
-      "command|notes.confirm",
       "command|notes.dismiss",
-      "command|notes.placeHere",
-      "command|notes.replace",
-      "comment controller|notes",
-      "diagnostic collection|notes",
-      "hub request|notes.add",
-      "status bar item||notes/extension.ts"
+      "command|notes.paneView",
+      "command|notes.place",
+      "diagnostic collection||notes/extension.ts",
+      "hub request|notes.add"
     ],
-    "in": "e5772e5d",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/app/tools/notes/tools.ts",
+      "packages/editor/extensions/notes/extension.ts",
+      "packages/editor/extensions/notes/package.json"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/notes.spec.mjs"
+    ]
   },
   "Observe an app (opt-in debug link)": {
     "status": "active",

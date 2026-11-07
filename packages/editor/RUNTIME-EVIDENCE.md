@@ -297,6 +297,13 @@ is flagged in Problems. Core reads baselines from git; notes (extensions/notes),
 users. A note whose code moved to another file follows once that file is saved (a tombstone in the old file's notes);
 a move that arrives committed (pulled) isn't a changed file, so that note is asked about.
 
+A note shows beside its code in the Margin, not as a comment thread to open as it did before the reduction: something to go and
+open is too easy to ignore (the user, 2026-11-06, of panels). Add Note is in the palette and the editor's menu, on the code
+selected or the cursor's line, and in the lightbulb on a selection. What else happens to one is on the lightbulb of its line too:
+dismiss it, or, lost, put it back where the cursor is. One whose code changed, or perhaps moved, asks *Still about this?* with
+*Keep here*. Reintroduced without the typed strategy's signals, as runs' evidence isn't back to give them. Agents add them with
+`notes_add`; reading them where a comment was is NEXT.md item 3's *Notes for comments, and agents reading them*.
+
 ## Live values
 
 What one run did, beside the code: for each line, the values it computed, a column per time it ran — the right-hand

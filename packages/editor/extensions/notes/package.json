@@ -1,0 +1,58 @@
+{
+  "name": "notes",
+  "displayName": "Notes",
+  "description": "Notes on code, beside it in the Margin and following it through edits, moves and reformats; a note whose code went waits in Problems to be put back or dismissed.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "paneViews": [
+      {
+        "id": "notes",
+        "into": "margin"
+      }
+    ],
+    "commands": [
+      {
+        "command": "notes.add",
+        "title": "Add Note",
+        "category": "Notes"
+      },
+      {
+        "command": "notes.dismiss",
+        "title": "Dismiss Note",
+        "category": "Notes"
+      },
+      {
+        "command": "notes.place",
+        "title": "Put Note Here",
+        "category": "Notes"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "notes.add",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.[cm]?[jt]sx?$/",
+          "group": "notes"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "notes.dismiss",
+          "when": "false"
+        },
+        {
+          "command": "notes.place",
+          "when": "false"
+        }
+      ]
+    }
+  }
+}

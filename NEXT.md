@@ -450,7 +450,7 @@ How it's kept:
      (`var value` still there) and edits-change.spec's *the History output says what a pause changed* (the panel empty, no
      `Reading`; again on 76afc45f, passing on a rerun, and on cb0d53bc, a runner twice as slow as usual with `git.status` timing out
      beside it: load, it looks like, though not proved). That slow runner took `specs` past its 15 minutes, so it's 25: all the specs
-     take about 7 minutes on a usual runner and 14 on that one, and each new one adds to it. Worth two shards if that keeps growing. A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard.
+     take about 7 minutes on a usual runner and 14 on that one, and each new one adds to it. Worth two shards if that keeps growing. A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard. And playwright-in-editor.mjs's *drives the preview you have open*: its button test failed once locally in the whole workbench shard (2026-11-06), then passed 4 of 4 alone; not explained, though it clicks with nothing to say the page's script has attached yet.
    - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
      more test machinery (*How long a test may take*, selection, the live loop's own work) and before item 1's bench: those wait
      for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
@@ -459,7 +459,8 @@ How it's kept:
      of the way and easy to ignore, so what they did comes back and they don't. *Rule editor* is back as a picker from a stop or the lightbulb, *Mock a value* and *Rules placed in the code* from the lightbulb
      on the line, and *Capability prompts for previews* in the preview's window (not yet asked about: a worker's sockets);
      *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit* is back (RUNTIME-EVIDENCE.md, *Live
-     runs*; not yet what a save reaches, which is the live loop's); *Notes on code*; and for
+     runs*; not yet what a save reaches, which is the live loop's); *Notes on code* is back, beside the code in the Margin (RUNTIME-EVIDENCE.md, *Durable annotations
+     on spans*); and for
      developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no
      terminal, and it has no UI to mirror: kept as an exception, the user's), *What a way in reaches* and *How a commit did in
