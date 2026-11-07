@@ -227,8 +227,8 @@ export default function init(modules) {
 
 	/**
 	 * What moving `from` to `to` (workspace paths, a file's or a folder's) changes in the code: TypeScript's edits for it
-	 * (`getEditsForFileRename`), every import of it in each project holding it and its own relative imports, at the old
-	 * path, as each file's spans and their new text. `outside` when no project holds `from`.
+	 * (`getEditsForFileRename`), every import of it in each project holding it and its own relative imports, as each file's
+	 * spans and their new text. Asked before or after the move (VS Code's own asks after). `outside` when no project holds it.
 	 */
 	function fileRename(projectService, args) {
 		const from = typeof args.from === "string" ? args.from : "";
@@ -243,7 +243,8 @@ export default function init(modules) {
 			if (program === undefined || !program.getSourceFiles().some(function(source) {
 				const path = workspacePathOf(source.fileName);
 
-				return path === from || path.startsWith(from + "/");
+				// (before the move it's at \`from\`; after it, as a move is followed, at \`to\`)
+				return path === from || path.startsWith(from + "/") || path === to || path.startsWith(to + "/");
 			})) {
 				continue;
 			}

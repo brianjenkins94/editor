@@ -720,9 +720,11 @@ tools*). What the code doesn't say:
 - **Refactoring is a person's** (workbench/code-refactor.ts): `code_references` is Find All References, `code_rename` Rename
   Symbol, `code_move` the Explorer's rename. A file moved in the Explorer, or by anything, keeps its imports right: its importers'
   and its own relative ones, TypeScript's `getEditsForFileRename` through history's tsserver plugin (`_history.fileRename`, as only
-  a plugin can ask it in the browser), in the same edit as the move. Nothing's asked: VS Code would ask before an extension's
-  edits to a move, and the monaco component stores the answer OK unless someone chose otherwise (*Reset Choice for File
-  Operation Participants* asks again). Not back: `code_query` and `code_rewrite`, which nothing a person does is yet.
+  a plugin can ask it in the browser), applied once the move's made and TypeScript can say, as VS Code's own TypeScript support
+  does. Not before it: VS Code waits a minute at most for what a move waits on and then moves without it, and asks first
+  before such an edit, and a workspace just opened can take longer than that to have TypeScript answer (on CI, 2026-11-07). So
+  undo takes back the imports' edit and the move as two. Not back: `code_query` and `code_rewrite`, which nothing a person does is
+  yet.
 - **An experiment undoes itself** (workbench/checkpoints.ts): *Workspace: Save Checkpoint* notes every file that differs from HEAD,
   and *Workspace: Restore Checkpoint…* puts every file changed since back, as one edit undo takes back; `workspace_checkpoint` and
   `workspace_restore` are the same for agents. Not `.silo/`, the editor's own records, and not across a commit: that's git's to

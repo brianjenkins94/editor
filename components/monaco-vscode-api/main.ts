@@ -560,10 +560,6 @@ export async function boot(options: BootOptions): Promise<void> {
 		await hideViewContainers(hiddenViewContainers);
 	}
 
-	if (layout === "workbench") {
-		await applyParticipantEdits();
-	}
-
 	// file: searches (findFiles, the search view) honour their include and exclude globs (workspace-search.ts).
 	await registerWorkspaceSearch();
 
@@ -604,21 +600,6 @@ export async function boot(options: BootOptions): Promise<void> {
 		vscode.workspace.onDidSaveTextDocument((document) => {
 			onSave(document.uri.path, document.getText());
 		});
-	}
-}
-
-/**
- * Apply what an extension adds to a file operation without asking, as if "Do not ask me again" were ticked on OK: a moved file's
- * imports kept right (the editor's code-refactor.ts) is part of the move, and an agent moving a file has no one to answer.
- * Stored where that choice is, so someone who chose otherwise keeps their choice, and Reset Choice for File Operation
- * Participants asks again.
- */
-async function applyParticipantEdits(): Promise<void> {
-	const key = "file.particpants.additionalEdits";
-	const storage = await getService(IStorageService);
-
-	if (storage.getBoolean(key, StorageScope.PROFILE) === undefined) {
-		storage.store(key, false, StorageScope.PROFILE, StorageTarget.USER);
 	}
 }
 

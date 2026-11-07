@@ -1,5 +1,5 @@
 /**
- * A file moved, as a person moves it: renamed in the Explorer, its imports follow, as TypeScript works them out, with nothing
+ * A file moved, as a person moves it: renamed in the Explorer, its imports follow once TypeScript works them out, with nothing
  * asked (workbench/code-refactor.ts). Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
@@ -62,14 +62,14 @@ test("a file renamed in the Explorer: what imports it follows, and nothing's ask
 	await input.press("Enter");
 
 	try {
-		// (a rename waits on TypeScript for its imports, which on a workspace just opened may still be starting)
-		await expect(workbench.getByRole("treeitem", { "name": "prices.mjs", "exact": true })).toBeVisible({ "timeout": 90_000 });
+		await expect(workbench.getByRole("treeitem", { "name": "prices.mjs", "exact": true })).toBeVisible({ "timeout": 30_000 });
 	} catch (error) {
 		// (it's failed on CI and not here: what the Explorer shows then, to say why)
 		throw new Error(`${String(error)}; the Explorer: ${JSON.stringify(await shown(workbench))}`, { "cause": error });
 	}
 
 	await workbench.locator(".tab", { "hasText": "total.mjs" }).first().click();
-	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("./prices.mjs", { "timeout": 60_000 });
+	// (once TypeScript can say, which on a workspace just opened may be a minute or more)
+	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("./prices.mjs", { "timeout": 120_000 });
 	await expect(workbench.locator(".dialog-box")).toHaveCount(0);
 });
