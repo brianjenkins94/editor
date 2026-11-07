@@ -23,8 +23,14 @@ import { callerFs } from "../../shared/fs-caller";
 /** The workspace's store as the terminal reaches it past VS Code: its calls the terminal's, in the store's counts. */
 const zenfs = callerFs(store, "terminal");
 
-/** just-bash's `ReadFileOptions` isn't re-exported from its `/browser` entry, so mirror the shape we use. */
-interface ReadOptions { "encoding"?: string | null }
+/** just-bash's `ReadFileOptions`/`WriteFileOptions` aren't re-exported from its `/browser` entry, so mirror the shape we use. */
+interface EncodingOptions { "encoding"?: string | null }
+
+function encodingOf(options: EncodingOptions | string | undefined): string {
+	return (typeof options === "string"
+		? options
+		: options?.encoding) ?? "utf8";
+}
 
 type VscodeApi = typeof import("vscode");
 
@@ -71,14 +77,60 @@ function translate(error: unknown, path: string): Error {
 	return new Error(String(thrown));
 }
 
-function toBytes(content: FileContent): Uint8Array {
-	return typeof content === "string" ? new TextEncoder().encode(content) : content;
+/** A string as just-bash means it: UTF-8 text, unless `encoding` says otherwise. Its pipes carry bytes as a latin1
+ *  string (a char per byte), and a redirect of a command's byte output (`base64 -d > x.png`, `cat a.png > b.png`)
+ *  writes it with `"binary"`: those chars are the bytes, and UTF-8 would turn each one above 0x7f into two. */
+function toBytes(content: FileContent, encoding: string): Uint8Array {
+	if (typeof content !== "string") {
+		return content;
+	}
+
+	switch (encoding) {
+		case "binary":
+		case "latin1":
+		case "ascii":
+			return Uint8Array.from(content, (char) => char.charCodeAt(0) & 0xFF);
+		case "base64":
+			return Uint8Array.from(atob(content), (char) => char.charCodeAt(0));
+		case "hex":
+			return Uint8Array.from(content.match(/../gu) ?? [], (pair) => Number.parseInt(pair, 16));
+		default:
+			return new TextEncoder().encode(content);
+	}
+}
+
+/** Bytes as a string in `encoding`, the inverse of `toBytes`. TextDecoder's "latin1" is windows-1252, which maps
+ *  0x80–0x9f to other characters, so the byte encodings go a char per byte instead. */
+function fromBytes(bytes: Uint8Array, encoding: string): string {
+	if (encoding === "hex") {
+		return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+	}
+
+	if (encoding !== "binary" && encoding !== "latin1" && encoding !== "ascii" && encoding !== "base64") {
+		return new TextDecoder().decode(bytes);
+	}
+
+	let chars = "";
+
+	for (let at = 0; at < bytes.length; at += 8192) {
+		chars += String.fromCharCode(...(encoding === "ascii"
+			? bytes.subarray(at, at + 8192).map((byte) => byte & 0x7F)
+			: bytes.subarray(at, at + 8192)));
+	}
+
+	return encoding === "base64"
+		? btoa(chars)
+		: chars;
 }
 
 /** POSIX path resolution — `path` against `base`, collapsing `.`/`..`. Pure arithmetic (no filesystem), so it
  *  satisfies just-bash's SYNChronous `resolvePath` even though our store is async. */
 function resolvePosix(base: string, path: string): string {
-	const combined = path.startsWith("/") ? path : `${base.endsWith("/") ? base.slice(0, -1) : base}/${path}`;
+	const combined = path.startsWith("/")
+		? path
+		: `${base.endsWith("/")
+			? base.slice(0, -1)
+			: base}/${path}`;
 	const stack: string[] = [];
 
 	for (const part of combined.split("/")) {
@@ -122,17 +174,20 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			mode = 0o120777;
 		}
 
-		return { "isFile": isFile, "isDirectory": isDirectory, "isSymbolicLink": isSymbolicLink, "mode": mode, "size": stat.size, "mtime": new Date(stat.mtime) };
+		return {
+			"isFile": isFile,
+			"isDirectory": isDirectory,
+			"isSymbolicLink": isSymbolicLink,
+			"mode": mode,
+			"size": stat.size,
+			"mtime": new Date(stat.mtime)
+		};
 	};
 
 	return {
-		"readFile": async (path: string, options?: ReadOptions | string): Promise<string> => {
-			const encoding = (typeof options === "string" ? options : options?.encoding) ?? "utf8";
-
+		"readFile": async (path: string, options?: EncodingOptions | string): Promise<string> => {
 			try {
-				const bytes = await fs.readFile(uri(path));
-
-				return new TextDecoder(encoding === "utf-8" ? "utf8" : (encoding)).decode(bytes);
+				return fromBytes(await fs.readFile(uri(path)), encodingOf(options));
 			} catch (error) {
 				throw translate(error, path);
 			}
@@ -146,22 +201,22 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			}
 		},
 
-		"writeFile": async (path: string, content: FileContent): Promise<void> => {
+		"writeFile": async (path: string, content: FileContent, options?: EncodingOptions | string): Promise<void> => {
 			try {
-				await fs.writeFile(uri(path), toBytes(content));
+				await fs.writeFile(uri(path), toBytes(content, encodingOf(options)));
 			} catch (error) {
 				throw translate(error, path); // NoPermissions on a managed config → EACCES
 			}
 		},
 
-		"appendFile": async (path: string, content: FileContent): Promise<void> => {
+		"appendFile": async (path: string, content: FileContent, options?: EncodingOptions | string): Promise<void> => {
 			let existing = new Uint8Array(0);
 
 			try {
 				existing = await fs.readFile(uri(path));
 			} catch { /* absent → create */ }
 
-			const add = toBytes(content);
+			const add = toBytes(content, encodingOf(options));
 			const merged = new Uint8Array(existing.length + add.length);
 
 			merged.set(existing);
@@ -248,7 +303,9 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 				}
 
 				for (const name of entries) {
-					const full = dir === "/" ? `/${name}` : `${dir}/${name}`;
+					const full = dir === "/"
+						? `/${name}`
+						: `${dir}/${name}`;
 
 					paths.push(full);
 

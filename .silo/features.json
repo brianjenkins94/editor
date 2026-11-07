@@ -2470,6 +2470,7 @@
       "packages/editor/workbench/terminal/session.ts"
     ],
     "tests": [
+      "packages/editor/test/terminal-fs.test.mjs",
       "packages/editor/test/terminal-integration.test.mjs",
       "packages/editor/test/terminal-session.test.mjs",
       "packages/editor/workbench/terminal/commands/npm/npm.test.mjs",
