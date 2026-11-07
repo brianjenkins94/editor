@@ -62,7 +62,8 @@ test("a file renamed in the Explorer: what imports it follows, and nothing's ask
 	await input.press("Enter");
 
 	try {
-		await expect(workbench.getByRole("treeitem", { "name": "prices.mjs", "exact": true })).toBeVisible({ "timeout": 30_000 });
+		// (a rename waits on TypeScript for its imports, which on a workspace just opened may still be starting)
+		await expect(workbench.getByRole("treeitem", { "name": "prices.mjs", "exact": true })).toBeVisible({ "timeout": 90_000 });
 	} catch (error) {
 		// (it's failed on CI and not here: what the Explorer shows then, to say why)
 		throw new Error(`${String(error)}; the Explorer: ${JSON.stringify(await shown(workbench))}`, { "cause": error });

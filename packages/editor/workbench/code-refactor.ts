@@ -23,10 +23,26 @@ const ROOT = "/workspace";
 /** The places `code.references` lists at most (`total` is all of them). */
 const LISTED = 500;
 
-/** How often, and how far apart, a move's edits are asked for while TypeScript isn't answering or doesn't hold the file yet: a
- *  workspace just opened, its server still starting. */
-const TRIES = 6;
+/** How far apart a move's edits are asked for while TypeScript isn't answering or doesn't hold the file yet (a workspace just
+ *  opened, its server still starting), and for how long: VS Code cancels what a move waits on after a minute
+ *  (`files.participants.timeout`), and the move then goes ahead without saying why, so it goes ahead before that, saying so. */
 const TRY_MS = 1000;
+const WAIT_MS = 40_000;
+
+/** `work`'s answer, or undefined if it takes past `deadline`. */
+async function by<T>(deadline: number, work: PromiseLike<T>): Promise<T | undefined> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	try {
+		return await Promise.race([Promise.resolve(work).catch(() => undefined), new Promise<undefined>((resolve) => {
+			timer = setTimeout(() => {
+				resolve(undefined);
+			}, Math.max(0, deadline - Date.now()));
+		})]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 /** What history's plugin answers of a move (`_history.fileRename`). */
 interface Moved { "edits"?: { "file": string; "changes": { "start": number; "length": number; "text": string }[] }[]; "outside"?: boolean; "error"?: string }
@@ -59,18 +75,20 @@ export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, log: Obs
 	const movesOf = async (files: readonly { "oldUri": vscodeApi.Uri; "newUri": vscodeApi.Uri }[]): Promise<vscodeApi.WorkspaceEdit> => {
 		const edit = new vscode.WorkspaceEdit();
 
+		const deadline = Date.now() + WAIT_MS;
+
 		for (const { oldUri, newUri } of files) {
 			let answer: Moved | undefined;
 
-			for (let tries = 1; tries <= TRIES && (answer === undefined || answer.outside === true); tries += 1) {
+			for (let tries = 1; Date.now() < deadline && (answer === undefined || answer.outside === true); tries += 1) {
 				if (tries > 1) {
 					await new Promise((resolve) => {
 						setTimeout(resolve, TRY_MS);
 					});
 				}
 
-				await held(oldUri);
-				answer = (await Promise.resolve(vscode.commands.executeCommand<{ "body"?: Moved } | undefined>("typescript.tsserverRequest", "_history.fileRename", { "from": oldUri.path, "to": newUri.path })).catch(() => undefined))?.body;
+				await by(deadline, held(oldUri));
+				answer = (await by(deadline, vscode.commands.executeCommand<{ "body"?: Moved } | undefined>("typescript.tsserverRequest", "_history.fileRename", { "from": oldUri.path, "to": newUri.path })))?.body;
 			}
 
 			const touched: vscodeApi.Uri[] = [];
