@@ -779,20 +779,27 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Experiments that undo themselves": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "An agent notes the working tree, tries a change, sees what it breaks, and puts every file back as it was if it doesn't hold; and previews a replacement across files as a diff before making it.",
+    "status": "active",
+    "why": "written again from what it's for, a person's commands first and the agent's tools on them (CLAUDE.md, *Agent tools*): the objective is rough feature parity with full-editor",
+    "since": "2026-11-07",
+    "what": "Save a checkpoint of the working tree, try a change, see what it breaks, and restore it to put every file back as it was, from the palette or as an agent.",
     "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
     "ways": [
       "agent tool|workspace_checkpoint",
       "agent tool|workspace_restore",
+      "command|editor.workspace.checkpoint",
+      "command|editor.workspace.restoreCheckpoint",
       "core module|installCheckpoints",
       "hub request|workspace.checkpoint",
       "hub request|workspace.restore"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/app/tools/workspace/tools.ts",
+      "packages/editor/workbench/checkpoints.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/checkpoints.spec.mjs"
+    ]
   },
   "Explore event-loop schedules": {
     "status": "active",

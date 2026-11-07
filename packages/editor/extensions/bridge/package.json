@@ -39,6 +39,16 @@
         "command": "editor.bablr.check",
         "title": "Check Which Files Parse…",
         "category": "BABLR"
+      },
+      {
+        "command": "editor.workspace.checkpoint",
+        "title": "Save Checkpoint",
+        "category": "Workspace"
+      },
+      {
+        "command": "editor.workspace.restoreCheckpoint",
+        "title": "Restore Checkpoint…",
+        "category": "Workspace"
       }
     ],
     "taskDefinitions": [

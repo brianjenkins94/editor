@@ -723,6 +723,10 @@ tools*). What the code doesn't say:
   a plugin can ask it in the browser), in the same edit as the move. Nothing's asked: VS Code would ask before an extension's
   edits to a move, and the monaco component stores the answer OK unless someone chose otherwise (*Reset Choice for File
   Operation Participants* asks again). Not back: `code_query` and `code_rewrite`, which nothing a person does is yet.
+- **An experiment undoes itself** (workbench/checkpoints.ts): *Workspace: Save Checkpoint* notes every file that differs from HEAD,
+  and *Workspace: Restore Checkpoint…* puts every file changed since back, as one edit undo takes back; `workspace_checkpoint` and
+  `workspace_restore` are the same for agents. Not `.silo/`, the editor's own records, and not across a commit: that's git's to
+  undo. A window's checkpoints go with a reload.
 - **No shell (2026-10-27).** The agents' shell tool (core's just-bash, a shell per call) was removed: an agent with one
   used it for everything (grep, sed, `git`) and went around the editor, skipping the WorkspaceEdit, the hunk review and
   the debugger, and finding just-bash's gaps instead of the editor's. The terminal is for people; `terminal_output`

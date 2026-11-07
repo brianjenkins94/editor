@@ -53,6 +53,7 @@ import { installFsTrace } from "./fs-trace";
 import { installPaneViews } from "./pane-views";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installCodeProblems } from "./code-problems";
+import { installCheckpoints } from "./checkpoints";
 import { installCodeRefactor } from "./code-refactor";
 import { installGitHistory } from "./git-history";
 import { installGitRefs } from "./git-refs";
@@ -446,6 +447,8 @@ function maybeBoot(): void {
 				installCodeProblems(api as typeof import("vscode"), workbenchHub, git, paneLog);
 				// A file moved keeps its imports right, and agents' references, rename and move (code-refactor.ts).
 				installCodeRefactor(api as typeof import("vscode"), workbenchHub, paneLog);
+				// The working tree noted and put back, a person's and an agent's (checkpoints.ts).
+				installCheckpoints(api as typeof import("vscode"), workbenchHub, git, paneLog);
 				// Branches, and a branch pulled from or pushed to GitHub through the shell's sign-in (git-push.ts).
 				const remote = installGitPush(workbenchHub, paneLog);
 
