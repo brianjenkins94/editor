@@ -130,7 +130,6 @@ import "@codingame/monaco-vscode-lua-default-extension";
 import "@codingame/monaco-vscode-markdown-basics-default-extension";
 import "@codingame/monaco-vscode-markdown-language-features-default-extension";
 import "@codingame/monaco-vscode-markdown-math-default-extension";
-import "@codingame/monaco-vscode-media-preview-default-extension";
 import "@codingame/monaco-vscode-npm-default-extension";
 import "@codingame/monaco-vscode-objective-c-default-extension";
 import "@codingame/monaco-vscode-perl-default-extension";

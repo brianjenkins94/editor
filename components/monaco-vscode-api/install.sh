@@ -9,13 +9,9 @@ REPO=https://github.com/CodinGame/monaco-vscode-api.git
 # (ETARGET). A day on, all of it is — unless a package skipped that version altogether (language-pack-cs has no 38.1.1):
 # then the next older one is tried, every package still at one version. MONACO_VSCODE_API_VERSION names one instead (to
 # try a release, or go back to one).
-#
-# Within one major, MONACO_VSCODE_API_MAJOR: a new major is a change of its own to make, not one a commit picks up. 39 dropped
-# @codingame/monaco-vscode-media-preview-default-extension, which main.ts imports, and every build broke the day it was a day old.
-MAJOR=${MONACO_VSCODE_API_MAJOR:-38}
-VERSIONS=${MONACO_VSCODE_API_VERSION:-$(npm view @codingame/monaco-vscode-api time --json 2>/dev/null | MAJOR=$MAJOR node -e '
+VERSIONS=${MONACO_VSCODE_API_VERSION:-$(npm view @codingame/monaco-vscode-api time --json 2>/dev/null | node -e '
 	const times = JSON.parse(require("fs").readFileSync(0, "utf8"));
-	const settled = Object.entries(times).filter(([version, at]) => version.startsWith(`${process.env.MAJOR}.`) && /^\d+\.\d+\.\d+$/.test(version) && Date.now() - Date.parse(at) > 24 * 60 * 60 * 1000);
+	const settled = Object.entries(times).filter(([version, at]) => /^\d+\.\d+\.\d+$/.test(version) && Date.now() - Date.parse(at) > 24 * 60 * 60 * 1000);
 
 	process.stdout.write(settled.sort(([, a], [, b]) => Date.parse(b) - Date.parse(a)).slice(0, 5).map(([version]) => version).join(" "));
 ')}
