@@ -186,36 +186,39 @@
     ]
   },
   "Agents drive the debugger": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "An AI agent can start, step, pace and stop debug sessions, send them input, set values in them, answer a call's question, set breakpoints, explore orderings, and read what the margin and the Rules view show.",
-    "docs": "packages/editor/RUNNING.md, *The model*",
+    "status": "active",
+    "why": "written again from what it's for, each tool a thing a person does in the editor (CLAUDE.md, *Agent tools*): the objective is rough feature parity with full-editor. Explore Orderings waits for its feature",
+    "since": "2026-11-07",
+    "what": "An AI agent runs a file as Run does, steps it as the toolbar does, sets breakpoints in the gutter, answers a call's question as the Margin's buttons do, stops it, and reads where it is and what the Margin shows.",
+    "docs": "packages/editor/RUNNING.md, *For agents*",
     "ways": [
       "agent tool|debug_breakpoints",
-      "agent tool|debug_explore",
+      "agent tool|debug_decide",
       "agent tool|debug_list",
       "agent tool|debug_start",
       "agent tool|debug_state",
       "agent tool|debug_step",
       "agent tool|debug_stop",
+      "agent tool|margin_state",
       "command|margin.state",
       "debug adapter tracker provider|*|bridge/debug-control.ts",
-      "hub request|`debug.session.${session.id}.decide`",
+      "hub request|`${prefix}decide`",
+      "hub request|`${prefix}state`",
+      "hub request|`${prefix}step`",
+      "hub request|`${prefix}stop`",
       "hub request|debug.breakpoints",
-      "hub request|debug.explore",
       "hub request|debug.sessions",
       "hub request|debug.start",
-      "hub request|prefix + \"pace\"",
-      "hub request|prefix + \"setValue\"",
-      "hub request|prefix + \"state\"",
-      "hub request|prefix + \"stdin\"",
-      "hub request|prefix + \"step\"",
-      "hub request|prefix + \"stop\"",
-      "hub request|subject"
+      "hub request|margin.state"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/app/tools/debug/tools.ts",
+      "packages/editor/app/tools/margin/tools.ts",
+      "packages/editor/extensions/bridge/debug-control.ts"
+    ],
+    "tests": [
+      "packages/editor/test/agent-tools.mjs"
+    ]
   },
   "Annotations that stay on their code": {
     "status": "active",

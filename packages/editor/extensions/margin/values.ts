@@ -306,6 +306,30 @@ function rowItem(uri: string, row: Row, index: number, session: Session): PaneIt
 	};
 }
 
+/** What the Margin shows of `uri`'s run, for an agent (`margin.state`): each row on the line it's on now (1-based), its label
+ *  and its value or a column per turn; how the run went; and how many values the bounds left out. A row whose code is gone isn't. */
+export async function valuesState(uri: string, text: string | undefined): Promise<{ "run"?: string; "rows": { "line": number; "label": string; "value"?: string; "cells"?: string[]; "unmade"?: string }[]; "dropped": number }> {
+	const session = sessions.get(uri);
+
+	if (session === undefined) {
+		return { "rows": [], "dropped": 0 };
+	}
+
+	const rows = rowsOf(session.values, session.calls, session.picked);
+	const lines = session.anchors === undefined || text === undefined || text === session.anchors.text ? undefined : await session.anchors.lines(text, rows.map((row) => row.at ?? [0, 0]));
+	const run = stateOf(session);
+
+	return {
+		...run === undefined ? { "run": "running" } : { "run": HOW[run] ?? run },
+		"rows": rows.flatMap((row, index) => {
+			const line = lines === undefined ? row.line : row.at === undefined ? undefined : lines[index];
+
+			return line === undefined ? [] : [{ "line": line + 1, "label": row.label, ...row.inline === undefined ? { "cells": row.cells.map((cell) => cell?.text ?? "") } : { "value": row.inline.text }, ...row.unmade === undefined ? {} : { "unmade": row.unmade }}];
+		}),
+		"dropped": session.dropped
+	};
+}
+
 /** What the Margin shows of `uri`'s last run: a row per line that has values, and what the bounds left out. */
 export function valueItems(uri: string, text: string | undefined): PaneItem[] {
 	const session = sessions.get(uri);

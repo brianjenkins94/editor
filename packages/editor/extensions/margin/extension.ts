@@ -21,7 +21,7 @@ import { installCoverage } from "./coverage";
 import { installMock } from "./mock";
 import { installPin } from "./pin";
 import { installPlaced, placedMarks } from "./placed";
-import { endMarks, installValues, runsShown, valueItems } from "./values";
+import { endMarks, installValues, runsShown, valueItems, valuesState } from "./values";
 
 /** The view the Margin is, in the pane. */
 const VIEW = "margin";
@@ -111,6 +111,18 @@ export function activate(context: vscode.ExtensionContext): void {
 			const runs = runsShown(uri);
 
 			return items.length === 0 && marks.length === 0 && runs.runs === undefined ? undefined : { "items": items, "marks": marks, ...runs };
+		}),
+		// What the Margin shows of a file, as data (an agent's margin_state): its run's values, and the question it's asking.
+		vscode.commands.registerCommand("margin.state", async (file: unknown) => {
+			const uri = vscode.Uri.file(String(file)).toString();
+			const text = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
+			const asking = asks.get(uri);
+
+			return {
+				"file": vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false),
+				...await valuesState(uri, text),
+				...asking === undefined ? {} : { "question": { "session": asking.session, "line": asking.ask.line + 1, "call": asking.ask.callee, "capability": asking.ask.capability, "resource": asking.ask.resource, "answers": ["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always"] } }
+			};
 		}),
 		vscode.commands.registerCommand("margin.decide", async (session: unknown, choice: unknown) => {
 			const decide = async (): Promise<void> => {

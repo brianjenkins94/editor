@@ -461,7 +461,7 @@ How it's kept:
      *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit* is back (RUNTIME-EVIDENCE.md, *Live
      runs*; not yet what a save reaches, which is the live loop's); *Notes on code* is back, beside the code in the Margin (RUNTIME-EVIDENCE.md, *Durable annotations
      on spans*); and for
-     developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo
+     developing and testing the editor in the editor, *Agents drive the debugger* (back: RUNNING.md, *For agents*), *Refactoring for agents*, *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no
      terminal, and it has no UI to mirror: kept as an exception, the user's), *What a way in reaches* and *How a commit did in
      CI*. Later: the

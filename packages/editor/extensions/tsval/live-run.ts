@@ -126,8 +126,13 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			sessions.set(session.id, session);
 
 			if (isLive(session)) {
-				running.set(programOf(session), session);
-				liveFirst ||= !yoursStarted;
+				// (one of yours started while this one was starting: yours is what the Margin and the console show)
+				if (yours(programOf(session))) {
+					void vscode.debug.stopDebugging(session);
+				} else {
+					running.set(programOf(session), session);
+					liveFirst ||= !yoursStarted;
+				}
 			} else {
 				yoursStarted = true;
 				liveFirst = false;

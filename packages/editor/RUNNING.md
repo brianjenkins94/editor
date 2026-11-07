@@ -45,6 +45,13 @@ and env the command line gave; one from F5 uses the Debug Console. **What's runn
 each run as it starts and ends, a run that listens on a port a service, `ps` and `kill` in the terminal and `runs_list`
 and `runs_stop` for agents.
 
+**For agents**, a run is driven the way a person drives it (extensions/bridge/debug-control.ts, CLAUDE.md, *Agent tools*):
+`debug_start` is Run, to where it first stops; `debug_step` the toolbar's steps; `debug_breakpoints` the gutter's, VS Code's
+own; `debug_decide` a stop's buttons in the Margin; `debug_stop` Stop; `debug_state` and `debug_list` what the Call Stack and
+Variables views show; and `margin_state` what the Margin shows of a file, its question too. Each is done through VS Code, so it
+shows in the editor as a person's would. Live runs aren't for driving and aren't listed. Not yet: `debug_explore`, as Explore
+Orderings isn't back.
+
 ## Tests
 
 A test file is a program like any other: `node --test` in the terminal runs each file it's given (or every test file
