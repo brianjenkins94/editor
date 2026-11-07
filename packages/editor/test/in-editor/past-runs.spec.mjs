@@ -7,7 +7,8 @@ import { expect, test } from "@playwright/test";
 
 import { codeOf, openEditor, openFile, retype } from "./editor.mjs";
 
-const files = { "runs.mjs": "const total = 1 + 1;\n" };
+// (the runs counted here are the ones this starts)
+const files = { ".vscode/settings.json": "{ \"run.liveRuns\": false }\n", "runs.mjs": "const total = 1 + 1;\n" };
 
 test("each run a ball: picked, it shows its values and how it ended; alike, it's counted; kept across a reload", async ({ page }) => {
 	const workbench = await openEditor(page, files);

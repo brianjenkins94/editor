@@ -35,7 +35,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		const link = state.editorLink;
 
 		await link.ready.then(() => {
-			state.programFsFor = (cwd) => createFsShim(new RuntimeVfs(link.fs), () => cwd);
+			state.programFsFor = (cwd) => createFsShim(new RuntimeVfs(state.runLayer ?? link.fs), () => cwd);
 		}, () => undefined);
 	}
 
@@ -120,7 +120,8 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 	// A server the program starts: answering the preview for its port, the request its handler's call (not stepped on the
 	// main stack — a breakpoint in it pauses there, as in any host-invoked handler: onBreakpointHook).
 	getServerBridge({ "onServerReady": (port: number) => {
-		if (listening.has(port)) {
+		// (a live run's server isn't served or announced: no preview opens as you type)
+		if (listening.has(port) || state.live) {
 			return;
 		}
 

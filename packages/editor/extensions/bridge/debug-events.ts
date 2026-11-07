@@ -4,6 +4,7 @@
  * into what core shows and keeps.
  *
  * - `ask`: a capability stop's question, answered as capability-stops.ts says;
+ * - `recorded`: what an allowed call returned, to give back when it isn't made (editor-api/policy's recordResult);
  * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list).
  *
  * A run a terminal started (`__startedBy: "terminal"`, its `__runId` the terminal's run) prints there — its `output`
@@ -14,10 +15,12 @@
  * - its policy (`__policy`): what its gated calls are decided by;
  * - its rules (placed-rules.ts): what variables they set at their places (`__places`), and its arguments if one gives them;
  * - a run in core's registry (`runs.begin`), known by one id from start to end — its end the run's, with its exit code
- *   (DAP's `exited`: extension.ts's `node.exit`).
+ *   (DAP's `exited`: extension.ts's `node.exit`). Not a live run, which isn't in the running list: it's told what calls
+ *   returned when they last ran for real instead (`__recorded`).
  */
-import type { AskEvent, ListeningEvent, StdinRequest } from "@brianjenkins94/editor-api";
+import type { AskEvent, ListeningEvent, RecordedEvent, StdinRequest } from "@brianjenkins94/editor-api";
 import { takeEffects } from "@brianjenkins94/editor-api/effects";
+import { recordedResults, recordResult } from "@brianjenkins94/editor-api/policy";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { asked, policyFor } from "./capability-stops";
@@ -50,9 +53,10 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 				const program = typeof given["program"] === "string" ? given["program"] : "";
 				// Every debugger decides its gated calls by the editor's policy (the run contract's `__policy`).
 				const policy = await policyFor();
-				const config = { ...given, "__policy": policy, ...await byRules(policy, program, given) };
+				const live = given["__live"] === true;
+				const config = { ...given, "__policy": policy, ...await byRules(policy, program, given), ...live ? { "__recorded": await recordedResults().catch(() => ({})) } : {} };
 
-				if (typeof config["__runId"] === "string") {
+				if (typeof config["__runId"] === "string" || live) {
 					return config;
 				}
 
@@ -72,6 +76,13 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 				case "ask":
 					asked(session, body as AskEvent);
 					break;
+
+				case "recorded": {
+					const { capability, resource, value, request } = body as RecordedEvent;
+
+					void recordResult(capability, resource, value, request).catch(() => undefined);
+					break;
+				}
 
 				case "listening":
 					if (typeof runId === "string") {

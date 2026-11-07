@@ -166,6 +166,18 @@ export function tellSkipped(capability: string, resource: string): void {
 	}
 }
 
+/** A call a live run gave what it returned when it last ran for real, told on its line: the margin says that's where the value came from. */
+export function tellReplayed(capability: string, resource: string): void {
+	const vm = state.evaluating;
+	const node = vm?.currentNode;
+
+	if (vm !== undefined && node !== null && node !== undefined) {
+		const file = node.getSourceFile();
+
+		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "name": "replayed", "value": resource === "" ? capability : `${capability} ${resource}`, "kind": "given", ...whereNow(vm), "step": vm.statements, "at": rangeOf(node) });
+	}
+}
+
 /** A value set by hand at the stop `vm` is at, or by a rule placed on `line` (0-based), shown with the run's values. */
 export function tellSet(vm: Vm, name: string, value: unknown, line?: number): void {
 	const at = vm.location();

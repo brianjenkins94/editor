@@ -40,7 +40,7 @@ export type PaneItemContent =
 	| { "label"?: string; "lead"?: PaneCell[]; "value"?: PaneCell; "cells": PaneCell[] }
 	| { "label": string; "input": { "value": string; "placeholder"?: string; "submit": PaneCommand } };
 
-/** An item beside the code: `actions` its buttons — under it, or at a row's end, shown as it's hovered; `tone` how it's
+/** An item beside the code: `actions` its buttons — under it, or at a row's end, shown as it's hovered or, with a `tone`, always; `tone` how it's
  *  marked. A click on one turns the item's buttons off until it's drawn again; a command that fails says why under it. */
 export interface PaneItem { "id": string; "at": PaneAt; "content": PaneItemContent; "actions"?: PaneAction[]; "tone"?: "info" | "question" | "warning" | "error" }
 

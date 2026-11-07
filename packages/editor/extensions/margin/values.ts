@@ -17,7 +17,7 @@
  */
 import type { CoverageEvent, EffectsEvent, EndedEvent, LiveCall, LivePlace, LiveValue, RunEnd, ValuesEvent } from "@brianjenkins94/editor-api";
 import type { Range } from "@brianjenkins94/editor-api/anchors";
-import type { PaneAt, PaneCell, PaneContent, PaneItem, PaneMark, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
+import type { PaneAction, PaneAt, PaneCell, PaneContent, PaneItem, PaneMark, PanePath, PaneRun } from "@brianjenkins94/editor-api/pane";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { RunTrace } from "@brianjenkins94/util/silo/traces";
 import { Anchors } from "@brianjenkins94/editor-api/anchors";
@@ -27,7 +27,7 @@ import * as vscode from "vscode";
 import { blobOid, keepRun, keptRuns } from "./runs";
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
-interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range }
+interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "unmade"?: string }
 
 /** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
 interface Picker { "function": string; "index": number; "count": number }
@@ -38,7 +38,7 @@ interface Cell { "text": string; "kind": string }
 /** A run's values in a file, and what's picked in them: a function's call (by `function:line`; none, its latest) and a
  *  held column. How it ended (`done`, and `end` if that was short), when it started, how many runs alike it stands for and
  *  what identifies it (`key`); `now`, where it is while it goes. */
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at": number; "done"?: boolean; "end"?: RunEnd; "count": number; "key"?: string; "now"?: LivePlace }
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors; "at": number; "done"?: boolean; "end"?: RunEnd; "count": number; "key"?: string; "now"?: LivePlace; "live"?: true }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
@@ -160,8 +160,12 @@ function rowOfLine(line: number, lineValues: LiveValue[], ordered: Map<string, s
 	const binds = !named && (only.kind === "bind" || only.kind === "set");
 	const label = labelOf(only, named, binds);
 	const group = `${call}/${depth}`;
+	// A call the run didn't make there, skipped or given what it returned last: `<capability> <resource>`.
+	const unmade = lineValues.findLast((value) => value.kind === "skip" || value.kind === "given")?.value;
+	const notMade = unmade === undefined ? {} : { "unmade": unmade };
+
 	if (depth === 0) {
-		return { "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth) };
+		return { "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth), ...notMade };
 	}
 
 	const turns = ordered.get(group) ?? [];
@@ -177,7 +181,8 @@ function rowOfLine(line: number, lineValues: LiveValue[], ordered: Map<string, s
 		}),
 		"group": group,
 		"widths": [],
-		...anchorOf(inDepth)
+		...anchorOf(inDepth),
+		...notMade
 	};
 }
 
@@ -263,8 +268,25 @@ function placeOf(anchors: Anchors | undefined, line: number, at: Range | undefin
 	return anchors !== undefined && at !== undefined ? { "ran": { "source": anchors.text, "start": at[0], "end": at[1] } } : { "lines": [line, line] };
 }
 
+/** A row's *Pin…* and *Rule…*, for a call a live run didn't make: what runs after an edit do with it (pin.ts). None for a run someone
+ *  was watching, which skipped a call because they said so at its stop. */
+function unmadeActions(uri: string, row: Row, session: Session): PaneAction[] {
+	if (session.live !== true || row.unmade === undefined || row.unmade === "") {
+		return [];
+	}
+
+	const [capability, ...rest] = row.unmade.split(" ");
+	const resource = rest.join(" ");
+
+	return [
+		{ "title": "Pin…", "command": "margin.pin", "arguments": [uri, capability, resource, row.line], "tooltip": "Keep a value past runs saw here: runs after an edit are given it" },
+		{ "title": "Rule…", "command": "margin.unattended", "arguments": [uri, capability, resource], "tooltip": "What runs after an edit, which nobody's watching, do with this call" }
+	];
+}
+
 function rowItem(uri: string, row: Row, index: number, session: Session): PaneItem {
 	const { picker } = row;
+	const unmade = unmadeActions(uri, row, session);
 	const step = (by: number, text: string, title: string): PaneCell => {
 		const to = picker === undefined ? -1 : picker.index + by;
 
@@ -274,6 +296,7 @@ function rowItem(uri: string, row: Row, index: number, session: Session): PaneIt
 	return {
 		"id": `values:${String(index)}`,
 		"at": placeOf(session.anchors, row.line, row.at),
+		...unmade.length === 0 ? {} : { "actions": unmade, "tone": "question" as const },
 		"content": {
 			...row.label === "" ? {} : { "label": row.label },
 			...picker === undefined ? {} : { "lead": [step(-1, "‹", "The call before"), { "text": `${String(picker.index + 1)}/${String(picker.count)}`, "title": `Call ${String(picker.index + 1)} of ${String(picker.count)}` }, step(1, "›", "The call after")] },
@@ -476,19 +499,29 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 			}, 100);
 		}
 	};
-	/** `id`'s run of `uri`, or a new one, shown: the file's latest. */
-	const runOf = (uri: string, id: string): Session => {
-		const found = kept.get(uri)?.find((each) => each.id === id);
+	/** Each live run going, by its session and file: only a finished one replaces what the Margin shows, so an edit that stops one
+	 *  leaves the last run's. */
+	const going = new Map<string, Session>();
+	/** `run` of `uri`, kept and shown: the file's latest. */
+	const show = (uri: string, run: Session): void => {
+		kept.set(uri, [...kept.get(uri) ?? [], run].slice(-KEPT));
+		sessions.set(uri, run);
+	};
+	/** `id`'s run of `uri`, or a new one: the file's latest, unless it's live. */
+	const runOf = (uri: string, id: string, live: boolean): Session => {
+		const found = kept.get(uri)?.find((each) => each.id === id) ?? going.get(`${id} ${uri}`);
 
 		if (found !== undefined) {
 			return found;
 		}
 
-		const run: Session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map(), "at": Date.now(), "count": 1 };
-		const runs = [...kept.get(uri) ?? [], run];
+		const run: Session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map(), "at": Date.now(), "count": 1, ...live ? { "live": true } : {} };
 
-		kept.set(uri, runs.slice(-KEPT));
-		sessions.set(uri, run);
+		if (live) {
+			going.set(`${id} ${uri}`, run);
+		} else {
+			show(uri, run);
+		}
 
 		return run;
 	};
@@ -497,9 +530,9 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 			run.anchors = new Anchors(vscode, file, source);
 		}
 	};
-	const valuesCame = (id: string, { file, source, ...batch }: ValuesEvent): void => {
+	const valuesCame = (id: string, live: boolean, { file, source, ...batch }: ValuesEvent): void => {
 		const uri = uriOf(file);
-		const run = runOf(uri, id);
+		const run = runOf(uri, id, live);
 
 		anchorsFrom(run, file, source);
 		run.values.push(...batch.values);
@@ -521,12 +554,16 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 	};
 	// The run's end: how it ended goes on its line. (A run that told no values here, a file that didn't parse say, is a run
 	// all the same.)
-	const endedCame = (id: string, { file, source, end }: EndedEvent): void => {
+	const endedCame = (id: string, live: boolean, { file, source, end }: EndedEvent): void => {
 		const uri = uriOf(file);
-		const run = runOf(uri, id);
+		const run = runOf(uri, id, live);
 
 		anchorsFrom(run, file, source);
 		run.done = true;
+
+		if (going.delete(`${id} ${uri}`)) {
+			show(uri, run);
+		}
 
 		if (end !== undefined) {
 			run.end = end;
@@ -665,11 +702,13 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 			}
 		}),
 		vscode.debug.onDidReceiveDebugSessionCustomEvent(({ session, event, body }) => {
+			const live = session.configuration["__live"] === true;
+
 			if (event === "values") {
-				valuesCame(session.id, body as ValuesEvent);
+				valuesCame(session.id, live, body as ValuesEvent);
 			} else if (event === "ended") {
 				told.add(session.id);
-				endedCame(session.id, body as EndedEvent);
+				endedCame(session.id, live, body as EndedEvent);
 			} else if (event === "effects") {
 				// (what came in: a call made, or given a result, not one skipped or denied)
 				inputsOf.set(session.id, (body as EffectsEvent).effects.filter((effect) => effect.how === "made" || effect.how === "given").map((effect) => inputOf(effect.capability, effect.resource)));
@@ -683,12 +722,19 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 				executedOf.set(session.id, executed);
 			}
 		}),
-		// A debugger that tells no `ended`: the program's run ends with its session.
+		// A debugger that tells no `ended`: the program's run ends with its session. A live run that didn't finish is gone.
 		vscode.debug.onDidTerminateDebugSession((session) => {
 			const { program } = session.configuration;
+			const live = session.configuration["__live"] === true;
 
-			if (!told.delete(session.id) && typeof program === "string") {
-				endedCame(session.id, { "file": program });
+			if (!told.delete(session.id) && typeof program === "string" && !live) {
+				endedCame(session.id, false, { "file": program });
+			}
+
+			for (const key of going.keys()) {
+				if (key.startsWith(`${session.id} `)) {
+					going.delete(key);
+				}
 			}
 
 			// (after every event it told: its values, end and effects)

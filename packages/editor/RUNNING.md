@@ -4,10 +4,10 @@ How a program is started, whatever started it, and what happens when it reaches 
 2026-10-07 from a survey of every way the UI could start one. Supersedes the two-mode plan (tsval for debugging, an
 almostnode "production" mode for real runs): there is one mode, and it is the debugger.
 
-This is the core's (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Previews, rules, recorded stops in a page,
-unattended runs and most of the Margin went with the reduction: this file at the `full-editor` tag has how they ran, and
-the ledger's tombstones say what each was. The Margin is back for one thing: a run stopped at a gated call asks there, on
-its line, until it's answered or the run moves on.
+This is the core's (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Recorded stops in a page and the runs a save
+reaches went with the reduction: this file at the `full-editor` tag has how they ran, and the ledger's tombstones say what
+each was. The file you're editing also runs on its own, on a save or an interval, quietly and without effects
+(RUNTIME-EVIDENCE.md, *Live runs*).
 
 ## Why
 

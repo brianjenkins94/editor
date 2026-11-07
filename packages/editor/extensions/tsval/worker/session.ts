@@ -8,6 +8,7 @@ import type { WorkerEvent, Snapshot, Variable, CapabilityAsk, Crash, Control } f
 import type { Runtime } from "./runtime";
 import type { Action, ForwardAction, Place, TraceContext, Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
+import { layered } from "@brianjenkins94/editor-api/runtime";
 import { ProgramSyntaxError, TsvalInternalError, createVM } from "@brianjenkins94/tsval";
 import ts from "typescript";
 import { calledSeen } from "./busy";
@@ -515,6 +516,35 @@ function crashOf(vm: Vm, error: unknown, message?: string): Crash | undefined {
 	}
 }
 
+/** A live run's step budget: past it, the run stops there rather than running on. */
+const LIVE_STEPS = 5_000_000;
+
+/** How long a live run waits on what's pending (an allowed read, say) before ending there: a promise nothing will settle would
+ *  otherwise hold it, and what it showed, for good. */
+const LIVE_WAIT_MS = 3000;
+
+/** Whether what `vm` is waiting on settled in the time a live run has. */
+async function settledInTime(vm: Vm): Promise<boolean> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const settled = await Promise.race([vm.whenSettled().then(() => true), new Promise<boolean>((resolve) => {
+		timer = setTimeout(() => {
+			resolve(false);
+		}, LIVE_WAIT_MS);
+	})]);
+
+	clearTimeout(timer);
+
+	return settled;
+}
+
+/** Where `vm` stopped short, saying why. */
+function stoppedAt(vm: Vm, message: string): Crash | undefined {
+	const node = vm.currentNode;
+	const at = vm.location(node);
+
+	return at === null || node === null ? undefined : { "line": at.line, "at": rangeOf(node), "message": message, "stopped": true, ...at.file === state.sourceFile?.fileName ? {} : { "file": at.file } };
+}
+
 /** A file that doesn't parse: marked where the parser stopped, not at the import that loaded it. */
 function syntaxCrash(error: ProgramSyntaxError, entry = state.sourceFile?.fileName): Crash {
 	return { "line": error.line, "at": error.at, "message": String(error), ...error.file === entry ? {} : { "file": error.file } };
@@ -633,7 +663,16 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 					post({ "type": "serving", "ports": [...listening] });
 				}
 
-				await base.whenSettled();
+				if (state.live) {
+					if (!await settledInTime(base)) {
+						finish(0, stoppedAt(base, "still waiting, so it stopped here: Run to finish"));
+						state.done = true;
+
+						return;
+					}
+				} else {
+					await base.whenSettled();
+				}
 
 				if (state.done) {
 					return;
@@ -649,6 +688,14 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 			// The program called process.exit: it ends there, with its code.
 			if (typeof error === "object" && error !== null && EXITED in error) {
 				finish(Number((error as { [EXITED]: unknown })[EXITED]) || 0);
+				state.done = true;
+
+				return;
+			}
+
+			// A live run past its budget stops where it got to, saying so: not a crash.
+			if (state.live && error instanceof TsvalInternalError && error.message.startsWith("step budget exceeded")) {
+				finish(0, stoppedAt(base, "too long to run live: Run to finish"));
 				state.done = true;
 
 				return;
@@ -758,8 +805,13 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// on the stack the debugger steps — its breakpoints, capability stops, rules — and the same way every time, so a
 	// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again; a
 	// launch can give one (its clock, seed and schedule).
-	// A server it starts keeps it alive: out of work, it idles, serving.
-	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const, "keepAlive": () => held.size > 0 || readsStdin() };
+	// A server it starts keeps it alive: out of work, it idles, serving. A live run's timers go at once, its waits skipped, and
+	// nothing keeps it alive past its first idle. It starts with a fresh layer: what the last one wrote is gone.
+	state.live = message.live === true;
+	state.recordedResults = state.live ? message.recorded ?? {} : {};
+	state.runLayer = state.live && state.editorLink !== undefined ? layered(state.editorLink.fs) : undefined;
+
+	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": state.live ? "fast" as const : "real" as const, "keepAlive": () => !state.live && (held.size > 0 || readsStdin()) };
 	let modules: ModuleLoader;
 	let loadedRuntime: Runtime;
 
@@ -793,11 +845,18 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	let loaded: ReturnType<typeof createVM>;
 
 	try {
-		loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "trace": traceValue, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
+		loaded = createVM(message.source, { "fileName": message.fileName, ...state.live ? { "maxSteps": LIVE_STEPS } : {}, "onBreakpoint": onBreakpointHook, "coverage": true, "trace": traceValue, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
 	} catch (error) {
 		// The program's own file doesn't parse: nothing of it has run, and the run ends there, as `node`'s does.
 		if (!(error instanceof ProgramSyntaxError)) {
 			throw error;
+		}
+
+		// Saved mid-statement, a live run runs nothing and tells nothing: the margin keeps what the last run that parsed did.
+		if (state.live) {
+			post({ "type": "terminated", "exitCode": 0, "quiet": true });
+
+			return;
 		}
 
 		post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
@@ -809,7 +868,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	state.evaluating = loaded.vm;
 
 	state.loopStart = eventLoop.now;
-	state.pace = "real";
+	state.pace = state.live ? "fast" : "real";
 	workerLog().info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
 
 	({ "sourceFile": state.sourceFile } = loaded);
@@ -817,8 +876,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (RUNTIME-EVIDENCE.md,
 	// *Capability decisions, on the line*). No policy → every undecided dangerous call breaks (firewall default).
 	({ "policy": state.policy } = message);
-	state.userLines = message.lines;
-	state.fileLines = new Map(Object.entries(message.files ?? {}));
+	state.userLines = state.live ? [] : message.lines;
+	state.fileLines = state.live ? new Map() : new Map(Object.entries(message.files ?? {}));
 
 	state.programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
 	state.capabilityLines = new Map();

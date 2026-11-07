@@ -26,11 +26,11 @@ export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack"
 
 /** Where a program threw: its line and range — in `file`, when that's another of its files than the entry. */
 /** How a run ended short: an uncaught error where it was thrown. */
-export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string }
+export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string; "stopped"?: true }
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "places"?: Record<string, RulePlace[]>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "places"?: Record<string, RulePlace[]>; "live"?: boolean; "recorded"?: Record<string, unknown>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
@@ -75,7 +75,10 @@ export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean; "ask"?: CapabilityAsk }
 	/** The program is over: `exitCode` 1 when it threw, else 0. */
 	/** `crash.file`: where it threw, when that's another of the program's files than the entry. */
-	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash }
+	/** `quiet`: a live run of text that doesn't parse yet, which ran nothing and so has nothing to tell. */
+	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash; "quiet"?: true }
+	/** What an allowed call returned, for what's given back when it isn't made. */
+	| { "type": "recorded"; "capability": string; "resource": string; "value": unknown; "request"?: string }
 	/** The run's effects so far — each gated call made, denied, skipped or given — told with its coverage, for its envelope
 	 *  in the run ledger (each telling has them all). */
 	| { "type": "effects"; "effects": Effect[] }

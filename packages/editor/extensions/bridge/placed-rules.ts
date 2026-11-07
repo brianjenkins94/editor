@@ -7,6 +7,7 @@ import type { RulePlace } from "@brianjenkins94/editor-api";
 import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type { Policy, Predicate, Rule } from "@brianjenkins94/util/silo/policy";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { triggerOf } from "@brianjenkins94/editor-api/gate";
 import { given, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
@@ -67,7 +68,7 @@ async function placesFrom(policy: Policy): Promise<Record<string, RulePlace[]>> 
 /** What rules add to a launch of `program`: `__places`, and its `args` when a rule gives them and it wasn't given its own. */
 export async function byRules(policy: Policy, program: string, config: vscode.DebugConfiguration): Promise<Record<string, unknown>> {
 	const relative = program === "" ? "" : vscode.workspace.asRelativePath(program, false);
-	const argv = config["args"] === undefined ? given(policy, { "program": relative, "trigger": "you" }, "process.argv")?.values[0] : undefined;
+	const argv = config["args"] === undefined ? given(policy, { "program": relative, "trigger": triggerOf(config["__live"] === true) }, "process.argv")?.values[0] : undefined;
 
 	return { "__places": await placesFrom(policy), ...Array.isArray(argv) ? { "args": argv } : {} };
 }

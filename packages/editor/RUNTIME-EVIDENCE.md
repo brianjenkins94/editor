@@ -390,19 +390,35 @@ It waited on two things: every run is a debug run (RUNNING.md), and tsval is fas
 and worker included, takes 170–330 ms from the workbench.
 
 - **Quiet.** A tsval debug session with no debug toolbar or Debug Console, not in the running list, stopping at nothing
-  (breakpoints are yours to hit with F5). A rule still applies.
+  (breakpoints are yours to hit with F5). A rule still applies. What it prints goes nowhere: what it did is the Margin.
 - **What it does to the world: nothing it wasn't allowed.** Nobody is watching (a rule's `trigger is edit`), so it asks
   nothing: a rule's given result first; a read the policy allows made for real; else what the call returned when it
-  last ran for real, if recorded (`.silo/local/recorded.json`; its line says *replayed*); else **skipped**. *Rule…* on
-  such a line keeps what runs after an edit do with that call.
-- **How long.** It ends at its first idle (a server waiting for requests opens no preview), or at a budget of steps,
-  saying so where it stopped (*Run to finish*). Only a finished run replaces what the margin shows.
+  last ran for real, if recorded (`.silo/local/recorded.json`; its line says *replayed*); else **skipped**. A write to a
+  workspace file goes into the run's own layer, which it can read back and which is gone when it ends, so a program that
+  writes then reads still goes the way it would. A call it didn't make has *Pin…* and *Rule…* on its line, always shown:
+  a value a past run saw there, or any rule, either for runs after an edit alone (`extensions/margin/pin.ts`). A run you
+  start isn't under them, so it can still stop and ask.
+- **How long.** It ends at its first idle (a server waiting for requests opens no preview), at a budget of steps, or after
+  3 seconds of waiting on what's pending, since a promise nothing settles would otherwise hold it. Only a finished run
+  replaces what the margin shows: one stopped by an edit, or of text that doesn't parse yet, tells nothing.
 
-**Revised 2026-10-22: on a save, and on an interval** (RUNNING.md, *Unattended runs*), not as typing pauses. Ctrl+S runs
+**Revised 2026-10-22: on a save, and on an interval**, not as typing pauses. Ctrl+S runs
 the file (the last of a burst of saves, 250 ms apart; not again if that text started a run in the last second), and so
 does `run.liveRuns.interval` (5 seconds by default, 0 for saves only) while the file in front of you, edited, differs
-from what its last run ran. An edit still stops the one going. A save reformats first when the workspace fixes on save
-(ESLint's), so the tour finds rows by what they say, not their line.
+from what its last run ran. The interval runs the text as it is, saved or not. An edit still stops the one going, and so does
+starting a run of yours of that file; none starts while one of yours is going. A save reformats first when the workspace
+fixes on save (ESLint's), so a spec finds rows by what they say, not their line.
+
+To VS Code a live run is a session like any other, which costs twice. F5 only starts a run while nothing's debugging, so pressed just
+after a save it would do nothing: while only live runs are going F5 is bound to start one anyway (`run.liveGoing`, tsval's manifest). And
+the Debug Console opens on a page's first session, which a live run would use up: the first of yours is told to open it. A spec that
+counts runs or reads what they said seeds `run.liveRuns` off, since a save starts one of its own.
+
+Reintroduced 2026-11-06 (`extensions/tsval/live-run.ts`), but not yet what a save reaches: the old one also ran again each test
+and program whose trace held code the save changed, and ended one of those before a call with nothing to give it. That's the
+live loop's (NEXT.md item 3, *Which tests to run at all*), which waits for parity. Nor is a line's *replayed* or *skipped* kept
+across a reload with its buttons: a run restored from `.silo/local/traces/` shows the value and not *Pin…* or *Rule…* until the
+next one.
 
 ### Runs kept, as balls
 

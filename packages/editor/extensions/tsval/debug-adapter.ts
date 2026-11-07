@@ -45,6 +45,10 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private ask: CapabilityAsk | undefined;
 	/** Breakpoint lines by source path — VS Code sends them per file, and tsval runs one program. */
 	private readonly breakpointLines = new Map<string, number[]>();
+	/** A live run (RUNTIME-EVIDENCE.md, *Live runs*): launched quiet after an edit, stopping at nothing, with no console. */
+	private live = false;
+	/** What calls returned when they last ran for real (`__recorded`): a live run gives them back where it would skip. */
+	private recorded: Record<string, unknown> | undefined;
 
 	private seq = 1;
 	// The debug worker: the run, interpreted — the adapter's own, by messages (debug-protocol.ts' ToWorker / WorkerEvent).
@@ -169,11 +173,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		const path = (args["source"] as { "path"?: string } | undefined)?.path ?? "";
 
 		this.breakpointLines.set(path, points.map((point) => point.line));
-		this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
+		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
 
 		if (path === this.program) {
 			this.control({ "type": "setBreakpoints", "lines": this.lines });
-		} else if (!this.noDebug) {
+		} else if (!this.noDebug && !this.live) {
 			this.control({ "type": "setBreakpoints", "lines": this.breakpointLines.get(path) ?? [], "file": path });
 		}
 
@@ -188,7 +192,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.noDebug = args["noDebug"] === true;
 		this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
 		this.places = typeof args["__places"] === "object" && args["__places"] !== null ? args["__places"] as Record<string, RulePlace[]> : {};
-		this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
+		this.live = args["__live"] === true;
+		this.recorded = typeof args["__recorded"] === "object" && args["__recorded"] !== null ? args["__recorded"] as Record<string, unknown> : undefined;
+		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
 		this.respond(request);
 		void this.loadSource();
 	}
@@ -312,6 +318,19 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	private terminateRequest(request: DapRequest): void {
+		// A live run stopped by the next edit tells nothing, no coverage and no end: the margin keeps the last run's until the next
+		// one finishes.
+		if (this.live && !this.ended) {
+			this.ended = true;
+			this.endAction();
+			this.closeWorker();
+			this.respond(request);
+			this.event("terminated");
+			this.settle("terminated");
+
+			return;
+		}
+
 		// Stopped early: hard-stop — terminate() kills the worker even while it's blocked in Atomics.wait (an in-handler
 		// pause), which a postMessage could not reach.
 		this.endAction();
@@ -449,7 +468,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, ...this.live ? { "live": true, "recorded": this.recorded } : {}, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */
@@ -543,9 +562,17 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.onTerminated(message);
 				break;
 
-			// (started in a terminal, its stdout and stderr are printed there too: debug-events.ts)
+			// (started in a terminal, its stdout and stderr are printed there too: debug-events.ts. A live run has no console.)
 			case "output":
-				this.event("output", { "category": message.stream ?? "stdout", "output": message.text + "\n" });
+				if (!this.live) {
+					this.event("output", { "category": message.stream ?? "stdout", "output": message.text + "\n" });
+				}
+
+				break;
+
+			// What an allowed call returned, kept to give back when it isn't made.
+			case "recorded":
+				this.tell("recorded", { "capability": message.capability, "resource": message.resource, "value": message.value, ...message.request === undefined ? {} : { "request": message.request } });
 				break;
 
 			case "valueSet": {
@@ -606,7 +633,13 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private onTerminated(message: Extract<WorkerEvent, { "type": "terminated" }>): void {
 		this.endAction();
 
-		this.tellEnded(message.crash === undefined ? undefined : { "kind": "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
+		// A live run that ran nothing, its text not parsing yet: no values, no coverage, no end. The margin keeps the last run's.
+		if (message.quiet === true) {
+			this.ended = true;
+		}
+
+		// (a live run past its budget ends stopped where it got to, not crashed)
+		this.tellEnded(message.crash === undefined ? undefined : { "kind": message.crash.stopped === true ? "stopped" : "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
 		// (DAP's own: the run's end, with its exit code — the editor's run ends with it)
 		this.event("exited", { "exitCode": message.exitCode ?? 0 });
 		this.event("terminated");

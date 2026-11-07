@@ -189,14 +189,22 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 	const { content } = item;
 	const buttons: (WaButton | WaDropdownItem)[] = [];
 	let dispose: (() => void) | undefined;
-	// A button's command: the item's buttons off until it's drawn again, this one marked — and why, if it fails.
+	// A button's command: the item's buttons off until it's drawn again, this one marked — and why, if it fails. If it comes
+	// back with the item still drawn as it was (a picker cancelled, say), they're on again.
 	const act = (command: PaneCommand, chosen: WaButton): void => {
+		const before = buttons.map((each) => each.disabled);
+
 		for (const each of buttons) {
 			each.disabled = true;
 		}
 
 		chosen.classList.add("chosen");
-		void run(command).catch((error: unknown) => {
+		void run(command).then(() => {
+			buttons.forEach((each, index) => {
+				each.disabled = before[index];
+			});
+			chosen.classList.remove("chosen");
+		}, (error: unknown) => {
 			// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: String() is the rendering meant, and any cast to quiet this is flagged as unnecessary
 			element.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": error instanceof Error ? error.message : String(error) }));
 		});
@@ -296,9 +304,9 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 				row.append(span);
 			});
 
-			// A row's buttons at its end, shown as it's hovered.
+			// A row's buttons at its end, shown as it's hovered, or always if it has something to say (`tone`).
 			if (item.actions !== undefined && item.actions.length > 0) {
-				const tools = Object.assign(document.createElement("span"), { "className": "live-values-mock wa-cluster wa-gap-2xs" });
+				const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock wa-cluster wa-gap-2xs${item.tone === undefined ? "" : " shown"}` });
 
 				tools.append(...item.actions.map(actionOf));
 				row.append(tools);

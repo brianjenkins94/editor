@@ -20,6 +20,8 @@ serve(hub, "demo.greet", greet);
 serve(hub, "demo.idle", idle);
 ${more}`;
 const files = {
+	// (what's told here is what the runs this starts said)
+	".vscode/settings.json": "{ \"run.liveRuns\": false }\n",
 	"tsconfig.json": "{ \"compilerOptions\": { \"allowJs\": true, \"checkJs\": false, \"module\": \"esnext\", \"target\": \"esnext\" }, \"include\": [\"**/*\"] }\n",
 	"hub.mjs": "export const hub = {};\n\nexport function serve(_hub, _name, handler) {\n\treturn handler;\n}\n",
 	"app.mjs": APP(""),

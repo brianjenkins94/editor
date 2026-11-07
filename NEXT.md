@@ -458,7 +458,8 @@ How it's kept:
      with it: RUNNING.md, *Rules*; the user, 2026-11-06: the old Capability Calls, Rules and Exceptions panels were too out
      of the way and easy to ignore, so what they did comes back and they don't. *Rule editor* is back as a picker from a stop or the lightbulb, *Mock a value* and *Rules placed in the code* from the lightbulb
      on the line, and *Capability prompts for previews* in the preview's window (not yet asked about: a worker's sockets);
-     *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit*; *Notes on code*; and for
+     *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit* is back (RUNTIME-EVIDENCE.md, *Live
+     runs*; not yet what a save reaches, which is the live loop's); *Notes on code*; and for
      developing and testing the editor in the editor, *Agents drive the debugger*, *Refactoring for agents*, *Experiments that undo
      themselves* (with commands a person has too: CLAUDE.md, *Agent tools*), *Scripts over the workspace* (agents have no
      terminal, and it has no UI to mirror: kept as an exception, the user's), *What a way in reaches* and *How a commit did in

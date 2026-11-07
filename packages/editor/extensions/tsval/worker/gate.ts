@@ -7,7 +7,7 @@ import type { Effect } from "@brianjenkins94/editor-api";
 import type { HostGuard } from "@brianjenkins94/tsval";
 import type { Runtime } from "./runtime";
 import type { Place, Vm } from "./state";
-import { triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
+import { policySkips, recordingKey, requestOf, triggerOf, verdictOf } from "@brianjenkins94/editor-api/gate";
 import { UNCATCHABLE } from "@brianjenkins94/tsval";
 import { givenResult } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
@@ -16,7 +16,7 @@ import { capabilityStandins, standinCapability, givenAs } from "../canary";
 import { EXITED, stdin } from "./process";
 import { guestConsole, placeOf } from "./session";
 import { post, state } from "./state";
-import { tellSkipped } from "./values";
+import { tellReplayed, tellSkipped } from "./values";
 
 /** The run's effects (the run contract's `Effect`): each gated call it made, was denied, skipped or was given, by its
  *  capability and resource — told the adapter as the run ends, for the run ledger (its envelope's `effects`). */
@@ -328,7 +328,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			denied("EACCES: permission denied (denied at its capability stop)");
 		}
 
-		const given = state.giveNext ?? (state.policy === undefined ? undefined : givenResult(state.policy, { "trigger": triggerOf(false), "capability": tagged.capability, "resource": resource }));
+		const given = state.giveNext ?? (state.policy === undefined ? undefined : givenResult(state.policy, { "trigger": triggerOf(state.live), "capability": tagged.capability, "resource": resource }));
 
 		state.giveNext = undefined;
 
@@ -354,8 +354,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		const landing = tagged.landing === undefined ? undefined : { "capability": tagged.landing, "resource": reachedBy(args[1]) };
 
 		if (landing !== undefined) {
-			const askedHere = state.allowNext && verdictOf(state.policy, tagged.capability, resource) === "allow";
-			const landingVerdict = askedHere ? "allow" : verdictOf(state.policy, landing.capability, landing.resource);
+			const askedHere = state.allowNext && verdictOf(state.policy, tagged.capability, resource, state.live) === "allow";
+			const landingVerdict = askedHere ? "allow" : verdictOf(state.policy, landing.capability, landing.resource, state.live);
 
 			if (askedHere) {
 				state.allowNext = false;
@@ -372,11 +372,26 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			}
 		}
 
-		// Skipped by the policy (not made, the run going on — as at its stop), made, or refused — as any debugger's calls
-		// through the runtime's files are (gate.ts).
-		const verdict = verdictOf(state.policy, tagged.capability, resource);
+		// Skipped (by the policy, or because a live run can't make it: not made, the run going on — as at its stop), made, or
+		// refused — as any debugger's calls through the runtime's files are (gate.ts).
+		const verdict = verdictOf(state.policy, tagged.capability, resource, state.live);
+		const canReplay = state.live && !policySkips(state.policy, tagged.capability, resource, true);
+		// A live run's write to a workspace file goes into its own layer, gone when it ends, instead of not happening, and a
+		// read of what it wrote reads it there. Not a call a rule itself skips.
+		const target = madeArgs(tagged.capability, args, tagged.resourceArg, cwd)[tagged.resourceArg];
+		const intoLayer = verdict === "skip" && canReplay && state.runLayer !== undefined && programFs !== undefined && editorKeeps(tagged.capability, target) && (tagged.capability !== "fs:read" || state.runLayer.holds(String(target)));
 
-		if (verdict === "skip") {
+		if (verdict === "skip" && !intoLayer) {
+			// What it returned when it last ran for real, given back if it did: the same request's (a POST's isn't a GET's).
+			const key = recordingKey(tagged.capability, resource, requestOf(tagged.capability, args));
+
+			if (canReplay && Object.hasOwn(state.recordedResults, key)) {
+				tally(tagged.capability, resource, "given", undefined, "recorded");
+				tellReplayed(tagged.capability, resource);
+
+				return givenAs(tagged.capability, fn.apply(this, args), state.recordedResults[key]);
+			}
+
 			return skipped(tagged.capability, resource, fn.apply(this, args), decided);
 		}
 
@@ -392,8 +407,11 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		// lands too.
 		const made = madeArgs(tagged.capability, landing === undefined ? args : madeArgs(landing.capability, args, 1, cwd), tagged.resourceArg, cwd);
 
-		// (a workspace file's call the editor makes, and keeps among the run's effects itself)
-		if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
+		// (a workspace file's call the editor makes, and keeps among the run's effects itself; but not one into a live run's
+		// own layer, which the editor never sees)
+		if (intoLayer) {
+			tally(tagged.capability, resource, "made", undefined, "layer");
+		} else if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
 			tally(tagged.capability, resource, "made", undefined, decided);
 		}
 
@@ -401,7 +419,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			tally(landing.capability, landing.resource, "made", undefined, decided);
 		}
 
-		return madeFor(() => effect(...made));
+		// (what a layer gave back isn't what the call returns for real)
+		return madeFor(() => effect(...made), intoLayer ? undefined : { "capability": tagged.capability, "resource": resource, "request": requestOf(tagged.capability, args) });
 	};
 
 	// almostnode's own module (or the network) a stand-in module stands for: its members, the gated ones made real.
@@ -450,9 +469,29 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value, key)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value, key)])) };
 }
 
+/** The most of a read's result recorded, to give back when it isn't made. */
+const RECORD_MAX = 256 * 1024;
+
+/** What a read returned, as text: a string, or bytes decoded. Undefined for anything else. */
+function textOf(value: unknown): string | undefined {
+	if (typeof value === "string") {
+		return value;
+	}
+
+	return value instanceof Uint8Array ? new TextDecoder().decode(value) : undefined;
+}
+
 /** Make `call` — a program's capability call, allowed — for real: a write let through the runtime's refusal while it's
- *  made. */
-function madeFor(call: () => unknown): unknown {
+ *  made, and what a read returned recorded (text, not too much of it). */
+function madeFor(call: () => unknown, recording?: { "capability": string; "resource": string; "request"?: string }): unknown {
+	const record = (value: unknown): void => {
+		const text = textOf(value);
+
+		if (recording !== undefined && text !== undefined && text !== "" && text.length <= RECORD_MAX) {
+			post({ "type": "recorded", "capability": recording.capability, "resource": recording.resource, "value": text, ...recording.request === undefined ? {} : { "request": recording.request } });
+		}
+	};
+
 	state.allowingWrites += 1;
 
 	let result: unknown;
@@ -461,6 +500,16 @@ function madeFor(call: () => unknown): unknown {
 		result = call();
 	} finally {
 		state.allowingWrites -= 1;
+	}
+
+	if (recording?.capability === "net" && result instanceof Promise) {
+		void result.then((response: unknown) => (response instanceof Response && response.ok ? response.clone().text().then(record) : undefined), () => undefined);
+	} else if (recording?.capability === "fs:read") {
+		if (result instanceof Promise) {
+			void result.then(record, () => undefined);
+		} else {
+			record(result);
+		}
 	}
 
 	return result;
@@ -495,7 +544,7 @@ export function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object
 }
 
 /** Arm the capability calls in `file` the policy gates as lines a run stops at, to ask there (RUNTIME-EVIDENCE.md,
- *  *Capability decisions, on the line*); with no policy, none. */
+ *  *Capability decisions, on the line*); with no policy, none, and a live run stops at nothing. */
 export function armCapabilities(file: ts.SourceFile): void {
-	state.capabilityLines.set(file.fileName, new Set(state.policy === undefined ? [] : capabilityBreakLines(file, state.policy)));
+	state.capabilityLines.set(file.fileName, new Set(state.policy === undefined || state.live ? [] : capabilityBreakLines(file, state.policy)));
 }

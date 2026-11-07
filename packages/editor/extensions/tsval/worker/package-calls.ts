@@ -78,9 +78,9 @@ function packageVerdict(dir: string, capability: string, call: Omit<RuntimeDecis
 		return { "allow": true, "decided": "baseline" };
 	}
 
-	const alone = (): RuntimeVerdict => ({ "allow": verdictOf(state.policy, capability, call.args[0] ?? "") === "allow", "decided": "policy" });
+	const alone = (): RuntimeVerdict => ({ "allow": verdictOf(state.policy, capability, call.args[0] ?? "", state.live) === "allow", "decided": "policy" });
 
-	if (state.editorLink === undefined) {
+	if (state.live || state.editorLink === undefined) {
 		return alone();
 	}
 

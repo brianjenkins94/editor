@@ -1188,21 +1188,28 @@
     "in": "87a1e23f"
   },
   "Live runs after an edit": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "The file you're editing runs again on save and on a timer so the margin stays current, without asking you anything, and a call these unwatched runs can't make can be pinned to a value it returned before or given a rule.",
+    "status": "active",
+    "why": "written again from what it's for: the objective is rough feature parity with full-editor (user, 2026-11-05). What a save reaches, and halting those runs, waits for the live loop",
+    "since": "2026-11-06",
+    "what": "The file you're editing runs again on save and on a timer so the margin stays current, without asking you anything. A call these unwatched runs can't make says so on its line, where it can be pinned to a value a past run saw or given a rule.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Live runs*",
     "ways": [
       "command|margin.pin",
       "command|margin.unattended",
       "command|run.live.again",
-      "command|run.live.state",
+      "command|workbench.action.debug.start",
+      "core module|installPin",
+      "debug configuration provider|*|tsval/live-run.ts",
       "setting|run.liveRuns",
       "setting|run.liveRuns.interval"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/margin/pin.ts",
+      "packages/editor/extensions/tsval/live-run.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/live-runs.spec.mjs"
+    ]
   },
   "Live values in the margin": {
     "status": "active",

@@ -5,7 +5,7 @@
  */
 import type { FsShim, RunGlobal } from "@brianjenkins94/almostnode";
 import type { PlaceSet, TestReport } from "@brianjenkins94/editor-api";
-import type { RuntimeConnection } from "@brianjenkins94/editor-api/runtime";
+import type { layered, RuntimeConnection } from "@brianjenkins94/editor-api/runtime";
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
@@ -55,6 +55,13 @@ export interface State {
 	"placeSets": Map<string, Map<number, PlaceSet[]>>;
 	/** The program's files known so far — the entry, and each other one as it loads — parsed for their capability calls. */
 	"programFiles": Map<string, ts.SourceFile>;
+	/** A live run (RUNTIME-EVIDENCE.md, *Live runs*): the file run again after an edit. It stops at nothing, asks nothing, runs its
+	 *  timers at once, and ends at its first idle or its step budget. */
+	"live": boolean;
+	/** What calls returned when they last ran for real, by gate.ts' recordingKey: a live run gives them back where it would skip. */
+	"recordedResults": Record<string, unknown>;
+	/** A live run's own writable layer over the workspace's files: its writes go there and are gone when it ends. */
+	"runLayer": ReturnType<typeof layered> | undefined;
 	/** The policy the run is under (the adapter's, updated after an "Allow always"); none, no capability stops. */
 	"policy": Policy | undefined;
 	/** The user's breakpoints (1-based lines), armed beside the capability lines. */
@@ -174,6 +181,9 @@ export const state: State = {
 	"guestProcess": undefined,
 	"runtime": undefined,
 	"programFsFor": undefined,
+	"live": false,
+	"recordedResults": {},
+	"runLayer": undefined,
 	"nodeGlobals": {},
 	"runGlobal": undefined,
 	"programBuiltins": {},
