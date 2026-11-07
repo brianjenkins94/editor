@@ -26,15 +26,15 @@ test("a file renamed in the Explorer: what imports it follows, and nothing's ask
 	const list = workbench.locator(".explorer-folders-view .monaco-list").first();
 	const input = workbench.locator(".monaco-list-row .monaco-inputbox input").first();
 
-	// Rename's key: Enter on a Mac, F2 elsewhere (where Enter opens it, already open).
+	// Rename's key: F2, or Enter on a Mac (where F2 does nothing in the Explorer; elsewhere Enter opens the file, taking the focus).
 	await list.focus();
-	await list.press("Enter");
+	await list.press("F2");
 
 	try {
-		await expect(input).toBeVisible({ "timeout": 2000 });
+		await expect(input).toBeVisible({ "timeout": 3000 });
 	} catch {
 		await list.focus();
-		await list.press("F2");
+		await list.press("Enter");
 		await expect(input).toBeVisible({ "timeout": 15_000 });
 	}
 	await input.fill("prices.mjs");
