@@ -38,7 +38,10 @@ async function hoverSays(workbench, line, right, text) {
 			return hover.first();
 		} catch (error) {
 			if (tries === 12) {
-				throw error;
+				// (what it said instead: no evidence placed, or other evidence)
+				const shown = await workbench.locator(".monaco-hover:not(.hidden)").allTextContents();
+
+				throw new Error(`the hover didn't say "${text}"; it said: ${JSON.stringify(shown)}`, { "cause": error });
 			}
 
 			await code.press("Escape");
