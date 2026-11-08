@@ -10,7 +10,8 @@
  * did — and every file there is now. Readings are kept here between requests, so an answer costs only what changed.
  *
  * And `_history.fileRename`: the edits a file's move makes (workbench/code-refactor.ts, Refactoring for agents), as only a
- * plugin can ask the server for them in the browser.
+ * plugin can ask the server for them in the browser. And `_types.at`: the type TypeScript gives each of a file's ranges
+ * (extensions/insights' hover, beside the kinds runs saw).
  *
  * How it's loaded: registered as extension files whose extension-file:// probe URIs
  * the extension host's patched fetch/importExt resolves; this file is served, so its import.meta.url finds the engine.
@@ -272,6 +273,69 @@ export default function init(modules) {
 		};
 	}
 
+	/**
+	 * `_types.at`: the type TypeScript gives each of `ranges` (offsets) in `path` (a workspace path), as it says it, or null
+	 * where no node has that range — what a hover of runtime evidence shows beside the kinds runs saw (extensions/insights).
+	 * With `tested`, an optional chain's or a `??`'s tested side (`a` of `a?.b`, `a?.()`, `a ?? b`): what its `?.` or `??`
+	 * is about. From the first project holding the file.
+	 */
+	function typesAt(projectService, args) {
+		const path = typeof args.path === "string" ? args.path : "";
+		const ranges = Array.isArray(args.ranges) ? args.ranges : [];
+		const tested = args.tested === true;
+
+		for (const project of projectsOf(projectService)) {
+			const program = project.getLanguageService().getProgram();
+			const source = program === undefined ? undefined : program.getSourceFile(serverNameOf(program, path));
+
+			if (source === undefined) {
+				continue;
+			}
+
+			const checker = program.getTypeChecker();
+
+			return { "types": ranges.map(function(range) {
+				return typeAt(checker, source, range, tested);
+			}) };
+		}
+
+		return { "types": ranges.map(function() {
+			return null;
+		}) };
+	}
+
+	/** The type of the outermost node in `source` with exactly `range` (an expression, not a token inside it), or of its
+	 *  tested side (`tested`), or null. */
+	function typeAt(checker, source, range, tested) {
+		let found;
+
+		function visit(node) {
+			if (found !== undefined || node.getStart(source) > range.start || node.getEnd() < range.end) {
+				return;
+			}
+
+			if (node.getStart(source) === range.start && node.getEnd() === range.end) {
+				found = node;
+
+				return;
+			}
+
+			ts.forEachChild(node, visit);
+		}
+
+		ts.forEachChild(source, visit);
+
+		if (found !== undefined && tested) {
+			if (found.questionDotToken !== undefined && found.expression !== undefined) {
+				found = found.expression;
+			} else if (ts.isBinaryExpression(found) && found.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+				found = found.left;
+			}
+		}
+
+		return found === undefined ? null : checker.typeToString(checker.getTypeAtLocation(found), undefined, ts.TypeFormatFlags.NoTruncation);
+	}
+
 	return {
 		"create": function(info) {
 			if (!registered && info.session !== undefined && typeof info.session.addProtocolHandler === "function") {
@@ -283,6 +347,13 @@ export default function init(modules) {
 				info.session.addProtocolHandler("_history.files", function() {
 					try {
 						return { "response": filesChanged(info.project.projectService), "responseRequired": true };
+					} catch (error) {
+						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
+					}
+				});
+				info.session.addProtocolHandler("_types.at", function(request) {
+					try {
+						return { "response": typesAt(info.project.projectService, (request && request.arguments) || {}), "responseRequired": true };
 					} catch (error) {
 						return { "response": { "error": String(error && error.stack || error) }, "responseRequired": true };
 					}

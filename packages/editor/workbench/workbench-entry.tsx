@@ -31,6 +31,7 @@ import changeProblemsExtension from "change-problems:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtension from "eslint:extension";
 import historyExtension from "history:extension";
+import insightsExtension from "insights:extension";
 import marginExtension from "margin:extension";
 import notesExtension from "notes:extension";
 import { render } from "preact";
@@ -543,6 +544,7 @@ function maybeBoot(): void {
 				sourceControlExtension,
 				marginExtension,
 				notesExtension,
+				insightsExtension,
 				capabilitiesExtension
 			]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
@@ -562,6 +564,7 @@ function maybeBoot(): void {
 					"source-control",
 					"margin",
 					"notes",
+					"insights",
 					"capabilities"
 				]
 			});

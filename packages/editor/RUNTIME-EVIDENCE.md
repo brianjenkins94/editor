@@ -8,8 +8,9 @@ values and live runs, almostnode's instrumentation, editor-api's evidence and an
 capability stop is RUNNING.md, *Capability stops*.
 
 **Back so far:** evidence kept in git for a run in the debugger (2026-11-07: workbench/evidence.ts, the worker's
-site-sums.ts), the Margin's live values and live runs, notes on spans. A preview's evidence (*Third slice*) isn't back yet,
-nor what reads the evidence: the hover and what could go, in purple. Live runs aren't recorded: they're the editor's, as
+site-sums.ts) and its hover (extensions/insights, the declared type from History's tsserver plugin's `_types.at`), the
+Margin's live values and live runs, notes on spans. A preview's evidence (*Third slice*) isn't back yet, nor what could
+go, in purple. Live runs aren't recorded: they're the editor's, as
 you type.
 
 The editor learns what your program actually does by running it: which code ran and how often, where the time went,

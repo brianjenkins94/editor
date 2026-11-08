@@ -1,0 +1,11 @@
+/**
+ * Insights: what a program did when it ran, read from the evidence kept in git (RUNTIME-EVIDENCE.md), shown where the
+ * code is, with nothing to ask for. On hover, what went through the code under the cursor across runs (hover.ts).
+ */
+import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
+import * as vscode from "vscode";
+import { registerHover } from "./hover";
+
+export function activate(context: vscode.ExtensionContext): void {
+	registerHover(context, evidenceStore(vscode, context.subscriptions));
+}

@@ -2730,16 +2730,20 @@
     ]
   },
   "What went through this code, on hover": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced on the evidence kept in git: what a run saw, read where the code is. The objective is rough feature parity with full-editor",
+    "since": "2026-11-07",
     "what": "Hovering code shows which values passed through it across runs, how often they were empty, what kinds they were next to the declared type, and how often each branch ran.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Second slice: values, branches and types*",
     "ways": [
       "hover provider||insights/hover.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/insights/"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/evidence-hover.spec.mjs"
+    ]
   },
   "What your edits change": {
     "status": "active",

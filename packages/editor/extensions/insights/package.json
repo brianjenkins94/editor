@@ -1,0 +1,14 @@
+{
+  "name": "insights",
+  "displayName": "Insights",
+  "description": "What a program did when it ran, from the evidence kept in git, where the code is: on hover, what went through the code under the cursor across runs (how many values, how often nullish, their kinds beside the declared type, a few of them; each branch's arms).",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ]
+}
