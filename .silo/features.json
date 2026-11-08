@@ -1024,22 +1024,28 @@
     ]
   },
   "How a commit did in CI": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "For a commit (HEAD by default), its GitHub Actions runs on the workspace's origin, the jobs of each that didn't pass with their failed steps, and a job's log up to its first error with the tests it failed, through the editor's sign-in.",
+    "status": "active",
+    "why": "reintroduced: whether what you pushed passed, in the status bar, without going to GitHub; and agents read the same. The objective is rough feature parity with full-editor",
+    "since": "2026-11-07",
+    "what": "The status bar says how HEAD did in GitHub Actions on the workspace's origin (passed, failed naming what, or going), asked again as HEAD changes and while a run goes. Clicking it lists the runs and the failed jobs with their failed steps; a job opens its log up to its first error with the tests it failed, a run opens on GitHub. Through the editor's sign-in; agents read the same.",
     "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
     "ways": [
       "agent tool|ci_status",
+      "command|editor.ci.show",
       "core module|installCiStatus",
       "hub request|ci.status",
-      "hub request|github.actions"
+      "hub request|github.actions",
+      "status bar item|editor.ci",
+      "text document content provider|ci-log"
     ],
     "paths": [
+      "packages/editor/app/tools/ci/",
+      "packages/editor/shell/ci.ts",
       "packages/editor/workbench/ci-status.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "git checkout full-editor -- packages/editor/workbench/ci-status.ts"
+    "tests": [
+      "packages/editor/test/ci-status.test.mjs"
+    ]
   },
   "Hub links over WebRTC, and tab lobbies": {
     "status": "active",

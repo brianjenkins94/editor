@@ -49,6 +49,11 @@
         "command": "editor.workspace.restoreCheckpoint",
         "title": "Restore Checkpoint…",
         "category": "Workspace"
+      },
+      {
+        "command": "editor.ci.show",
+        "title": "How HEAD Did in CI",
+        "category": "CI"
       }
     ],
     "taskDefinitions": [

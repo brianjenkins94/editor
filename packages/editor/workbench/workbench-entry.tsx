@@ -13,28 +13,27 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 // (first, before anything takes the realm's own: an instance's storage apart, a hidden tab's timers kept)
-import "../shared/instance";
-import "../shared/hidden-timers";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { WorkspaceFs } from "./workspace-fs";
+import "../shared/instance";
+import "../shared/hidden-timers";
 // First of what runs, before anything loads Lit: Web Awesome's components here move into VS Code's new windows (theme/documents).
-import "theme/documents";
+import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 // eslint-disable-next-line perfectionist/sort-imports -- theme/documents above, first on purpose: it has to run before Lit does
 import { failureText } from "@brianjenkins94/editor-api/failures";
-import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
-import changeProblemsExtension from "change-problems:extension";
-import eslintExtension from "eslint:extension";
-import settingsDefaults from "editor:settings-defaults";
-import historyExtension from "history:extension";
-import { render } from "preact";
 import capabilitiesExtension from "capabilities:extension";
+import changeProblemsExtension from "change-problems:extension";
+import settingsDefaults from "editor:settings-defaults";
+import eslintExtension from "eslint:extension";
+import historyExtension from "history:extension";
 import marginExtension from "margin:extension";
 import notesExtension from "notes:extension";
+import { render } from "preact";
 import sourceControlExtension from "source-control:extension";
 import tsvalExtension from "tsval:extension";
 import { NETWORK_PROBES } from "../shared/architecture";
@@ -42,32 +41,35 @@ import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore } from "./architecture-store";
 import { installTypeAcquisition } from "./ata";
-import { wireWorkbenchHub } from "./bridge-link";
-import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
-import { installCodeReach } from "./code-reach";
-import { installDecisions } from "./decisions";
 import { installBablr } from "./bablr";
+import { wireWorkbenchHub } from "./bridge-link";
 import { installCapabilityConfirm } from "./capability-confirm";
-import { installFeaturesView } from "./features-view";
-import { installEditorState } from "./editor-state";
-import { installFsTrace } from "./fs-trace";
-import { installPaneViews } from "./pane-views";
-import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
-import { installCodeProblems } from "./code-problems";
 import { installCheckpoints } from "./checkpoints";
-import { installScriptRun } from "./script-run";
+import { installCiStatus } from "./ci-status";
+import { installCodeProblems } from "./code-problems";
+import { installCodeReach } from "./code-reach";
 import { installCodeRefactor } from "./code-refactor";
+import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
+import { installDecisions } from "./decisions";
+import { installEditorState } from "./editor-state";
+import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
+import { installFeaturesView } from "./features-view";
+import { installFsTrace } from "./fs-trace";
 import { installGitHistory } from "./git-history";
-import { installGitRefs } from "./git-refs";
 import { installGitPush } from "./git-push";
+import { installGitRefs } from "./git-refs";
 import { commitPart, installGitReview } from "./git-review";
 import { installGitService } from "./git-service";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
+import { installPaneViews } from "./pane-views";
+import { installPreviewSessions } from "./preview-session";
 import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS, serveOrigin } from "./project";
 import { markReady, whenDebuggerUp } from "./readiness";
-import { createBashProcess, serveTerminalState } from "./terminal";
+import { installScriptRun } from "./script-run";
 import { installTarballs } from "./tarballs";
+import { installTasks } from "./tasks";
+import { createBashProcess, serveTerminalState } from "./terminal";
 import { installTestRuns } from "./test-runs";
 import { followSystemTheme, showVsCodeTheme } from "./theme-follow";
 import { serveUnpushed } from "./unpushed";
@@ -75,9 +77,8 @@ import { pinned, watchVersions } from "./versions";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { holdFiles, installWorkspaceFs } from "./workspace-fs";
-import { installPreviewSessions } from "./preview-session";
-import { installTasks } from "./tasks";
 import { installWorkspaceTools } from "./workspace-tools";
+import "theme/documents";
 
 // Boot milestones on the performance timeline (beside VS Code's own code/* marks), for load investigations.
 performance.mark("editor/entry");
@@ -132,14 +133,23 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 // editor's runtime through the probe there — VS Code leaves its extensions no other way out — linked into this hub, and
 // answered as tsval's is (ARCHITECTURE.md, *Extension points* 2: its file calls by the bridge, its servers by the preview) — linked as
 // every runtime link is (editor-api's linkRuntime: its own id, carrying only the runtime).
-installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
+installMonacoProbes(architecture, {
+	"identifyWorker": identifyWorker,
+	"classifyUrl": classifyUrl,
+	"linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session)
+});
 
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.
 	if (!event.message.includes("ResizeObserver loop")) {
 		// With its stack, so its report is named and grouped by where it was thrown, not lumped with every other one
 		// without (packages/api's fingerprint falls back to the route).
-		paneLog.error("uncaught error", { "message": event.message, "file": event.filename, "line": event.lineno, "stack": stackOf(event.error) });
+		paneLog.error("uncaught error", {
+			"message": event.message,
+			"file": event.filename,
+			"line": event.lineno,
+			"stack": stackOf(event.error)
+		});
 	}
 });
 window.addEventListener("unhandledrejection", (event) => {
@@ -155,7 +165,12 @@ window.addEventListener("unhandledrejection", (event) => {
 
 	// Capture the STACK, not just the message — a bare message is rarely enough to place a boot-time rejection.
 	// Relays to the $sys.log.> collector (debug-mcp). (This is how the workspace-fs fake-URI `e.with` was traced.)
-	paneLog.error("unhandled rejection", { "reason": reasonText(reason), "stack": stackOf(reason instanceof ErrorEvent ? reason.error : reason) });
+	paneLog.error("unhandled rejection", {
+		"reason": reasonText(reason),
+		"stack": stackOf(reason instanceof ErrorEvent
+			? reason.error
+			: reason)
+	});
 });
 
 /** A thrown value's stack, if it has one — also an error made in another document (a docked window's), which isn't
@@ -163,17 +178,23 @@ window.addEventListener("unhandledrejection", (event) => {
 function stackOf(thrown: unknown): string | undefined {
 	const stack = (thrown as { "stack"?: unknown } | null | undefined)?.stack;
 
-	return typeof stack === "string" ? stack : undefined;
+	return typeof stack === "string"
+		? stack
+		: undefined;
 }
 
 /** What a rejection's reason says: an error's message; a failure event's (a worker's, rejected as it came), with where
  *  — never `[object ErrorEvent]`; else the value. */
 function reasonText(reason: unknown): string {
 	if (reason instanceof ErrorEvent) {
-		return `${reason.message || "a worker failed"}${reason.filename === "" ? "" : ` (${reason.filename}:${reason.lineno})`}`;
+		return `${reason.message || "a worker failed"}${reason.filename === ""
+			? ""
+			: ` (${reason.filename}:${reason.lineno})`}`;
 	}
 
-	return reason instanceof Error ? reason.message : failureText(reason);
+	return reason instanceof Error
+		? reason.message
+		: failureText(reason);
 }
 
 /** One of the editor's own extensions (`<name>:extension`: its folder, as build.ts built it, and its manifest), registered
@@ -285,7 +306,9 @@ function maybeBoot(): void {
 	// opened again. (Were boot ever to wait on something held, the store comes anyway, a moment late.)
 	const { "promise": bootOver, "resolve": bootDone } = Promise.withResolvers<void>();
 	const mounting = bootOver.then(async () => installWorkspaceFs(files, paneLog, { "hub": workbenchHub, "architecture": architecture })).catch((error: unknown) => {
-		bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
+		bootSpan.error("workspace zen-fs failed", {
+			"error": errText(error)
+		});
 
 		return undefined;
 	});
@@ -305,7 +328,9 @@ function maybeBoot(): void {
 	// Editors that reference source open POST-boot (in the .then below, after installWorkspaceFs seeds zen-fs) rather
 	// than via boot's defaultLayout, which can't read them — the file service isn't up until boot resolves.
 	// (the overridable defaults among it not read-only there: written again after they're deleted, they go to zen-fs)
-	const baseFiles = files.filter((file) => file.readonly === true).map((file) => (OVERRIDABLE_DEFAULTS.has(file.path.slice((workspaceFolder ?? "/workspace").length + 1)) ? { ...file, "readonly": false } : file));
+	const baseFiles = files.filter((file) => file.readonly === true).map((file) => (OVERRIDABLE_DEFAULTS.has(file.path.slice((workspaceFolder ?? "/workspace").length + 1))
+		? { ...file, "readonly": false }
+		: file));
 
 	boot({
 		// VS Code lays out the whole workbench — minus the menu bar and title bar: the shell around this iframe is the
@@ -364,8 +389,14 @@ function maybeBoot(): void {
 			// in boot's priority-1 seed (that layer now carries only the read-only base). They're in the zen-fs overlay
 			// seeded just above, so the editor can read them. Empty `files` = open only, don't rewrite (already seeded).
 			// openProject self-gates on the vscode API being ready (apiReady, captured below).
-			void apiReady.then(async () => (openEditors.length > 0 ? openProject(vscodeApi, workspaceFolder ?? "/workspace", paneLog, { "openEditors": openEditors }) : undefined))
-				.catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); });
+			void apiReady.then(async () => (openEditors.length > 0
+				? openProject(vscodeApi, workspaceFolder ?? "/workspace", paneLog, { "openEditors": openEditors })
+				: undefined))
+				.catch((error: unknown) => {
+					bootSpan.error("initial open failed", {
+						"error": errText(error)
+					});
+				});
 
 			// The editor's settings DEFAULTS — settings-defaults.jsonc, registered as the lowest settings layer (a
 			// contributions-only extension: no code, no host). Layers merge per key, so a workspace `.vscode/settings.json`
@@ -389,7 +420,9 @@ function maybeBoot(): void {
 			const bridgeExt = builtIn(bridgeExtension, ExtensionHostKind.LocalProcess);
 
 			bridgeExt.setAsDefaultApi().catch((error: unknown) => {
-				bootSpan.error("setAsDefaultApi failed", { "error": errText(error) });
+				bootSpan.error("setAsDefaultApi failed", {
+					"error": errText(error)
+				});
 			});
 			bridgeExt.getApi().then((api: unknown) => {
 				vscodeApi = api;
@@ -398,7 +431,11 @@ function maybeBoot(): void {
 				markBridgeReady();
 				markReady("api");
 				// A debug run can start once the debugger is up (readiness.ts).
-				whenDebuggerUp(api as typeof import("vscode"), workbenchHub).catch((error: unknown) => { bootSpan.error("the debugger didn't come up", { "error": errText(error) }); });
+				whenDebuggerUp(api as typeof import("vscode"), workbenchHub).catch((error: unknown) => {
+					bootSpan.error("the debugger didn't come up", {
+						"error": errText(error)
+					});
+				});
 				// Workspace settings persisted in the store (a loaded repo's .vscode/, or the user's own) were invisible
 				// when the configuration service read them at startup — the store mounts after boot, and restoring it
 				// fires no change events. Announce them now so they apply. (Writes after boot fire events themselves.)
@@ -457,6 +494,9 @@ function maybeBoot(): void {
 				// Branches, and a branch pulled from or pushed to GitHub through the shell's sign-in (git-push.ts).
 				const remote = installGitPush(workbenchHub, paneLog);
 
+				// How HEAD did in CI, in the status bar, and agents' ci_status (ci-status.ts).
+				installCiStatus(api as typeof import("vscode"), workbenchHub, paneLog);
+
 				// Diff, log, show and blame, for agents' git tools (git-history.ts).
 				installGitHistory(api as typeof import("vscode"), workbenchHub, remote);
 				// A commit beside the work, read-only, at .refs/<name>/ — or its code alone, comments stripped by BABLR (git-refs.ts).
@@ -476,9 +516,13 @@ function maybeBoot(): void {
 				installCapabilityConfirm(api as typeof import("vscode"), workbenchHub, paneLog);
 
 				// The editor's theme follows the system's, as the shell's does (theme-follow.ts).
-				followSystemTheme(api as typeof import("vscode"), workbenchHub, () => publishColors?.());
+				followSystemTheme(api as typeof import("vscode"), workbenchHub, () => { publishColors?.(); });
 				bootSpan.info("the bridge's vscode api, for core");
-			}).catch((error: unknown) => { bootSpan.error("the bridge's setup failed", { "error": errText(error) }); });
+			}).catch((error: unknown) => {
+				bootSpan.error("the bridge's setup failed", {
+					"error": errText(error)
+				});
+			});
 
 			// tsval, the stepping debugger — an extension of its own, in the bridge's host (LocalProcess: it spawns its debug
 			// workers top-level, as the bridge does its servers). It reaches the editor as any debugger does: the run contract,
@@ -489,7 +533,15 @@ function maybeBoot(): void {
 			// in a worker of its own), a change's problems and history (their tsserver plugins) and Source Control (on the
 			// editor's git), and the Margin (a stopped call's question). Public API only, but for what ARCHITECTURE.md lists
 			// (*Extension points* 3).
-			for (const extension of [eslintExtension, changeProblemsExtension, historyExtension, sourceControlExtension, marginExtension, notesExtension, capabilitiesExtension]) {
+			for (const extension of [
+				eslintExtension,
+				changeProblemsExtension,
+				historyExtension,
+				sourceControlExtension,
+				marginExtension,
+				notesExtension,
+				capabilitiesExtension
+			]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
 
@@ -497,14 +549,28 @@ function maybeBoot(): void {
 			// editor-contrib's interpreters and renderers (extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "change-problems", "history", "source-control", "margin", "notes", "capabilities"] });
+			bootSpan.info("extensions registered", {
+				"extensions": [
+					"bridge",
+					"tsval",
+					"eslint",
+					"change-problems",
+					"history",
+					"source-control",
+					"margin",
+					"notes",
+					"capabilities"
+				]
+			});
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
 			bootSpan.end();
 		})
 		.catch((error: unknown) => {
-			bootSpan.error("workbench boot failed", { "error": errText(error) });
+			bootSpan.error("workbench boot failed", {
+				"error": errText(error)
+			});
 			bootSpan.end();
 		});
 }
@@ -523,12 +589,20 @@ void (async () => {
 
 			performance.mark("editor/init-received");
 
-			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions, "tab": data.tab };
+			init = {
+				"files": data.files ?? [],
+				"openEditors": data.openEditors ?? [],
+				"workspaceFolder": data.workspaceFolder,
+				"moduleVersions": data.moduleVersions,
+				"tab": data.tab
+			};
 			maybeBoot();
 
 			return;
 		} catch (error) {
-			performance.mark("editor/init-retry", { "detail": String(error) });
+			performance.mark("editor/init-retry", {
+				"detail": String(error)
+			});
 			await new Promise((resolve) => {
 				setTimeout(resolve, 250);
 			});

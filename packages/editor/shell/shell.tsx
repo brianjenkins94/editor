@@ -24,6 +24,7 @@ import { asidePane, editorFrame, injectGlobals, mainWrap, overlay, overlayBar, o
 import { applyVsCodeColors } from "theme/vscode-colors";
 import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
+import { ci } from "./ci";
 import { commit } from "./commit";
 import { renderGitPanel } from "./git-panel";
 import { github } from "./github-control";
@@ -45,7 +46,17 @@ import "theme/components/relative-time";
 import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
 
 /** The top window's features, started in this order once the hub is linked; their controls placed in it. */
-const FEATURES: ShellFeature[] = [push, signIn, repoLoad, runMenu, commit, reset, github, previewWindows];
+const FEATURES: ShellFeature[] = [
+	push,
+	ci,
+	signIn,
+	repoLoad,
+	runMenu,
+	commit,
+	reset,
+	github,
+	previewWindows
+];
 
 // The resizable pane's limits (px). The min keeps it usable, the max caps it at a fraction of the viewport so it can't
 // swallow the editor.
@@ -57,7 +68,9 @@ function loadPaneWidth(key: string, fallback: number): number {
 	try {
 		const value = Number(localStorage.getItem("shell:" + key));
 
-		return Number.isFinite(value) && value > 0 ? value : fallback;
+		return Number.isFinite(value) && value > 0
+			? value
+			: fallback;
 	} catch {
 		return fallback;
 	}
@@ -160,7 +173,10 @@ function Shell() {
 			"close": overlayCloseRef.current
 		}, shellHub, (<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>));
 
-		const context: ShellContext = { "hub": shellHub, "rpc": createRpcClient(shellHub) };
+		const context: ShellContext = {
+			"hub": shellHub,
+			"rpc": createRpcClient(shellHub)
+		};
 
 		for (const feature of FEATURES) {
 			feature.start?.(context);
@@ -172,7 +188,9 @@ function Shell() {
 	// Apply the pane's width to wa-page's CSS var (collapsed → the rail's). Clamp against the live max so a narrow viewport
 	// can't leave it wider than the editor. Inline `setProperty` wins over the static `.wa-shell` defaults.
 	useEffect(() => {
-		pageRef.current?.style.setProperty("--aside-width", (rhsCollapsed ? RAIL_WIDTH : Math.min(asideWidth, paneMax())) + "px");
+		pageRef.current?.style.setProperty("--aside-width", (rhsCollapsed
+			? RAIL_WIDTH
+			: Math.min(asideWidth, paneMax())) + "px");
 	}, [asideWidth, rhsCollapsed]);
 
 	// Persist the width so it survives reloads (per browser; localStorage may be unavailable in private mode).
@@ -213,19 +231,28 @@ function Shell() {
 
 		event.preventDefault();
 
-		const nudge = event.key === "ArrowLeft" ? 16 : -16;
+		const nudge = event.key === "ArrowLeft"
+			? 16
+			: -16;
 		const max = paneMax();
 
 		setAsideWidth((value) => Math.max(PANE.asideMin, Math.min(max, value + nudge)));
 	};
 
-	const controls = (place: "start" | "end") => (shell === undefined ? [] : FEATURES.flatMap((feature, index) => {
-		const control = feature.control;
+	const controls = (place: "start" | "end") => (shell === undefined
+		? []
+		: FEATURES.flatMap((feature, index) => {
+				const { control } = feature;
 
-		return control?.place === place ? [<control.Control key={index} shell={shell} />] : [];
-	}));
+				return control?.place === place
+					? [<control.Control key={index} shell={shell} />]
+					: [];
+			}));
 
-	const shellClass = ["wa-shell", rhsCollapsed ? "rhs-collapsed" : ""].filter(Boolean).join(" ");
+	const shellClass = [
+		"wa-shell",
+		rhsCollapsed ? "rhs-collapsed" : ""
+	].filter(Boolean).join(" ");
 
 	return (
 		<wa-page ref={pageRef} class={shellClass} mobile-breakpoint="0" disable-navigation-toggle>
@@ -260,12 +287,22 @@ function Shell() {
 			    button, passed in above) is the panel's own. The children are KEYED: unkeyed, a sibling swapping in
 			    or out can make preact reuse the git panel's host <div> for another element, stamping that element's
 			    class and children onto it — the panel then renders inside it. */}
-			<div slot="aside" class={rhsCollapsed ? "wa-stack wa-gap-m wa-align-items-center " + railRegion() : "wa-stack wa-gap-0 " + sideCol() + " " + asidePane()}>
+			<div
+				slot="aside"
+				class={rhsCollapsed
+					? "wa-stack wa-gap-m wa-align-items-center " + railRegion()
+					: "wa-stack wa-gap-0 " + sideCol() + " " + asidePane()}
+			>
 				{rhsCollapsed && (
 					<RailContent
 						key="rail"
 						items={[
-							{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } }
+							{
+								"node": PanelRight,
+								"label": "Changes",
+								"title": "Expand changes panel",
+								"onClick": () => { setRhsCollapsed(false); }
+							}
 						]}
 					/>
 				)}
@@ -286,7 +323,9 @@ function Shell() {
 				)}
 			</div>
 
-			{shell !== undefined && FEATURES.flatMap((feature, index) => (feature.Overlay === undefined ? [] : [<feature.Overlay key={index} shell={shell} />]))}
+			{shell !== undefined && FEATURES.flatMap((feature, index) => (feature.Overlay === undefined
+				? []
+				: [<feature.Overlay key={index} shell={shell} />]))}
 		</wa-page>
 	);
 }
