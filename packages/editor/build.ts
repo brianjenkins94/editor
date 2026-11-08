@@ -279,7 +279,8 @@ export async function preBuild(): Promise<void> {
 		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", ...SHARED_PACKAGES] },
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
-		"plugins": [...coverage(), unenvResolve()],
+		// (and the page runtime a dev server puts in its pages, as a script: runtime evidence)
+		"plugins": [...coverage(), unenvResolve(), bundledModule("previews", "page-script.ts", "page-evidence", "iife", [])],
 		"worker": { "plugins": coverage, "rollupOptions": { "output": { "sourcemap": sourcemap } } },
 		"build": {
 			"outDir": "dist",

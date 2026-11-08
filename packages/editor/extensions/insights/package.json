@@ -31,6 +31,21 @@
           "type": "string",
           "default": "",
           "markdownDescription": "This machine's name in the runtime evidence kept in `.silo/` (each run records where it ran: this name, plus the browser, OS and cores it detects). Name each machine you work on, so timings compare like with like. Empty is `default`."
+        },
+        "silo.evidence.previews": {
+          "type": "string",
+          "enum": [
+            "full",
+            "coverage",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Statements, values and branches: everything a debugger's run records.",
+            "Statements only: the cheapest, an increment each.",
+            "Nothing: previews run their code as written."
+          ],
+          "default": "full",
+          "markdownDescription": "How much of a preview's code its dev server instruments for runtime evidence. Its wrappers run on the app's hot paths: scale it back if a preview's frame budget is tight. Applies to the next preview started."
         }
       }
     }

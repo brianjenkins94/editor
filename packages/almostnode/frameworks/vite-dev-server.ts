@@ -309,6 +309,9 @@ export class ViteDevServer extends DevServer {
 	private stops = new Map<string, number[]>();
 	/** How much of the workspace's modules to instrument for runtime evidence (instrument.ts): off until told. */
 	private instrumentLevel: InstrumentLevel | "off" = "off";
+	/** What counts the instrumented modules' reports in the page (the host's page runtime, as a classic script's code): the
+	 *  first script of every page served while instrumenting, before any module. */
+	private pageRuntime: string | undefined;
 	/** Each version of a workspace module instrumented, by its source's git blob oid: what it was — so the evidence of
 	 *  a version a hot update replaced can still be read against its own text (RUNTIME-EVIDENCE.md, the third slice). */
 	private readonly versions = new Map<string, { "file": string; "source": string }>();
@@ -346,10 +349,12 @@ export class ViteDevServer extends DevServer {
 
   /**
    * Instrument the workspace's modules for runtime evidence — everything, statements only, or not at all (instrument.ts).
-   * Modules served after this are; a page reloaded gets them.
+   * Modules served after this are; a page reloaded gets them. `runtime` is what counts what they tell it, in the page:
+   * a script's code, put first in every page served while instrumenting.
    */
-	setInstrumentation(level: InstrumentLevel | "off"): void {
+	setInstrumentation(level: InstrumentLevel | "off", runtime?: string): void {
 		this.instrumentLevel = level;
+		this.pageRuntime = runtime;
 	}
 
   /**
@@ -935,6 +940,14 @@ export default css;
 			} else {
         // Prepend if no html tag
 				content = REACT_REFRESH_PREAMBLE + content;
+			}
+
+      // The page runtime, before everything else: the app's modules tell it what they observe as they run.
+			if (this.instrumentLevel !== "off" && this.pageRuntime !== undefined) {
+				const runtime = `<script>${this.pageRuntime.replaceAll("</script", "<\\/script")}</script>`;
+				const head = /<head[^>]*>/iu.exec(content);
+
+				content = head === null ? runtime + content : content.slice(0, head.index + head[0].length) + runtime + content.slice(head.index + head[0].length);
 			}
 
       // Inject HMR client script before </head> or </body>

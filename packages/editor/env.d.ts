@@ -13,6 +13,13 @@ declare module "editor:settings-defaults" {
 	export default defaults;
 }
 /** The cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
+/** The page runtime of runtime evidence (previews/page-script.ts), bundled to a script's text. */
+declare module "previews:page-evidence" {
+	const code: string;
+
+	export default code;
+}
+
 declare module "cspell:server-node" {
 	const code: string;
 

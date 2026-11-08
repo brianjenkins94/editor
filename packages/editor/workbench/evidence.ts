@@ -14,6 +14,7 @@
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
 import type { LoadedPackage, SiteObservation, StatementCoverage } from "@brianjenkins94/editor-api";
+import type { ModuleEvidence } from "@brianjenkins94/editor-api/recorded";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type { Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
@@ -21,11 +22,15 @@ import type * as vscodeApi from "vscode";
 import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseSamples, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
+
+/** How long after a preview's server stops its pages' last reports still count (they come as their windows close). */
+const LAST_REPORT_MS = 3000;
 
 interface UserAgentData { "brands"?: { "brand": string; "version": string }[]; "platform"?: string }
 
@@ -129,6 +134,61 @@ export function exactSpans(source: string, spans: { "id": string; "start": numbe
 	});
 }
 
+/** Two pages' totals for one module version, added up: its statements (the same list, in the same order: the same
+ *  version), and its sites, matched by range — counts summed, kinds summed, samples joined (at most five). */
+export function mergeModules(first: ModuleEvidence, second: ModuleEvidence): ModuleEvidence {
+	const key = (site: SiteObservation): string => `${site.start.join(":")}-${site.end.join(":")}`;
+	const sites = new Map(first.sites.map((site) => [
+		key(site),
+		site
+	]));
+
+	for (const site of second.sites) {
+		const known = sites.get(key(site));
+
+		if (known === undefined) {
+			sites.set(key(site), site);
+			continue;
+		}
+
+		const tags = { ...known.tags };
+
+		for (const [tag, count] of Object.entries(site.tags ?? {})) {
+			tags[tag] = (tags[tag] ?? 0) + count;
+		}
+
+		sites.set(key(site), {
+			...known,
+			...known.seen === undefined
+				? {}
+				: {
+						"seen": known.seen + (site.seen ?? 0),
+						"nullish": (known.nullish ?? 0) + (site.nullish ?? 0),
+						"tags": tags,
+						"samples": [
+							...new Set([
+								...known.samples ?? [],
+								...site.samples ?? []
+							])
+						].slice(0, 5)
+					},
+			...known.arms === undefined
+				? {}
+				: {
+						"arms": known.arms.map((count, arm) => count + (site.arms?.[arm] ?? 0))
+					}
+		});
+	}
+
+	return {
+		...first,
+		"statements": first.statements.map((statement, index) => ({ ...statement, "count": statement.count + (second.statements[index]?.count ?? 0) })),
+		"sites": [
+			...sites.values()
+		]
+	};
+}
+
 /** `.silo/`'s own two files before anything's written into it: `.gitignore` (`/local/` stays on this machine) and
  *  `.gitattributes` (its JSONL merges by line). Lines already there are kept. */
 async function ensureSiloFiles(vscode: typeof vscodeApi): Promise<void> {
@@ -193,6 +253,92 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		}
 	});
 
+	// How much of a preview's code its dev server instruments (`silo.evidence.previews`), asked as each starts.
+	serve(hub, "evidence.level", () => vscode.workspace.getConfiguration("silo.evidence").get<string>("previews") ?? "full");
+
+	// Each preview run's evidence, until it ends: every page's latest totals (a page reports all it has counted since it
+	// loaded), and each module version's source, asked of its dev server as soon as the version turns up, while it's
+	// still serving (it's stopped before the run ends); and the packages its pages loaded, by name@version (esm.sh's).
+	const rpc = createRpcClient(hub);
+	const previews = new Map<string, { "pages": Map<string, ModuleEvidence[]>; "sources": Map<string, Promise<string | undefined>>; "versions": Map<string, string[]>; "packages": Set<string> }>();
+
+	hub.subscribe("evidence.preview", (data) => {
+		const { window, page, modules, "packages": loaded } = (data ?? {}) as { "window"?: unknown; "page"?: unknown; "modules"?: unknown; "packages"?: unknown };
+		const port = Number(/^preview:(\d+)/u.exec(typeof window === "string"
+			? window
+			: "")?.[1]);
+		// (its server's run, or one that's just ended: a page's last report comes as its window closes, after its server)
+		const run = Number.isNaN(port)
+			? undefined
+			: runs.runningService((candidate) => candidate.port === port) ?? runs.list().find((candidate) => candidate.port === port && candidate.endedAt !== undefined && Date.now() - candidate.endedAt < LAST_REPORT_MS);
+
+		if (run === undefined || typeof page !== "string" || !Array.isArray(modules)) {
+			return;
+		}
+
+		const preview = previews.get(run.id) ?? {
+			"pages": new Map(),
+			"sources": new Map(),
+			"versions": new Map(),
+			"packages": new Set()
+		};
+
+		previews.set(run.id, preview);
+		preview.pages.set(page, modules as ModuleEvidence[]);
+
+		for (const each of Array.isArray(loaded)
+			? loaded
+			: []) {
+			if (typeof each === "string") {
+				preview.packages.add(each);
+			}
+		}
+
+		for (const { file, version } of modules as ModuleEvidence[]) {
+			if (!preview.sources.has(version)) {
+				preview.sources.set(version, rpc.request("preview.version", { "port": port, "oid": version }, { "timeoutMs": 10_000, "waitForResponderMs": 5_000 }).then((answer) => (answer as { "source"?: string } | undefined)?.source, () => undefined));
+				preview.versions.set(file, [
+					...preview.versions.get(file) ?? [],
+					version
+				]);
+			}
+		}
+	});
+
+	/** A preview run's evidence as each file's versions: every page's totals for a version added up, each read against
+	 *  its own source. A version whose source can't be had (the dev server never said) is left out. */
+	const previewCoverage = async (preview: NonNullable<ReturnType<typeof previews.get>>): Promise<Coverage[]> => {
+		const byVersion = new Map<string, ModuleEvidence>();
+
+		for (const modules of preview.pages.values()) {
+			for (const module of modules) {
+				const key = `${module.file}\0${module.version}`;
+				const known = byVersion.get(key);
+
+				byVersion.set(key, known === undefined
+					? module
+					: mergeModules(known, module));
+			}
+		}
+
+		const covered: Coverage[] = [];
+
+		for (const module of byVersion.values()) {
+			const source = await preview.sources.get(module.version);
+
+			if (source !== undefined) {
+				covered.push({
+					"file": module.file,
+					"source": source,
+					"statements": module.statements,
+					"sites": module.sites
+				});
+			}
+		}
+
+		return covered;
+	};
+
 	const uri = (path: string): vscodeApi.Uri => vscode.Uri.file(`${ROOT}/${path}`);
 	const read = async (path: string): Promise<Uint8Array | undefined> => Promise.resolve(vscode.workspace.fs.readFile(uri(path))).catch(() => undefined);
 	const text = async (path: string): Promise<string> => new TextDecoder().decode(await read(path) ?? new Uint8Array());
@@ -207,40 +353,40 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 	/** What a run observed of `file`, keyed on spans and folded into what earlier runs in its environment observed of it;
 	 *  its values' samples into this machine's. */
-	const recordFile = async (envelope: RunEnvelope, file: string, covered: Coverage): Promise<{ "statements": number; "sites": number }> => {
-		if (covered.source === "") {
-			return { "statements": 0, "sites": 0 };
+	const recordFile = async (envelope: RunEnvelope, file: string, versions: Coverage[]): Promise<{ "statements": number; "sites": number }> => {
+		const reached: { "span": string; "count": number }[] = [];
+		const sites: (SiteObservation & { "span": string })[] = [];
+
+		// (each version a preview's hot updates brought, read against its own text: code a version didn't change has the
+		// same spans in every one, so what each saw there adds up, and the file's folded once, as one run)
+		for (const covered of versions.filter((version) => version.source !== "")) {
+			const refer = await bablr.refer(covered.source, file, offsets(covered.source, covered.statements));
+			const spans = covered.sites.length === 0 || refer.unparsable !== undefined
+				? {}
+				: await bablr.spans(covered.source);
+			const unparsable = refer.unparsable ?? spans.unparsable;
+
+			if (unparsable !== undefined) {
+				// What ran here is lost: said in the envelope, so the run's record says so (silo coverage reports it).
+				envelope.unparsed = { ...envelope.unparsed, [file]: unparsable };
+				continue;
+			}
+
+			const siteIds = exactSpans(covered.source, spans.spans ?? [], offsets(covered.source, covered.sites));
+
+			covered.statements.forEach((statement, index) => {
+				const span = refer.refs?.[index]?.span;
+
+				if (span !== undefined) {
+					reached.push({ "span": span, "count": statement.count });
+				}
+			});
+			covered.sites.forEach((site, index) => {
+				if (siteIds[index] !== undefined) {
+					sites.push({ ...site, "span": siteIds[index] });
+				}
+			});
 		}
-
-		const statementRanges = offsets(covered.source, covered.statements);
-		const refer = await bablr.refer(covered.source, file, statementRanges);
-		const spans = covered.sites.length === 0 || refer.unparsable !== undefined
-			? {}
-			: await bablr.spans(covered.source);
-		const unparsable = refer.unparsable ?? spans.unparsable;
-
-		if (unparsable !== undefined) {
-			// What ran here is lost: said in the envelope, so the run's record says so (silo coverage reports it).
-			envelope.unparsed = { ...envelope.unparsed, [file]: unparsable };
-
-			return { "statements": 0, "sites": 0 };
-		}
-
-		const siteIds = exactSpans(covered.source, spans.spans ?? [], offsets(covered.source, covered.sites));
-		const reached = covered.statements.flatMap((statement, index) => {
-			const span = refer.refs?.[index]?.span;
-
-			return span === undefined
-				? []
-				: [
-						{ "span": span, "count": statement.count }
-					];
-		});
-		const sites = covered.sites.flatMap((site, index) => (siteIds[index] === undefined
-			? []
-			: [
-					{ ...site, "span": siteIds[index] }
-				]));
 
 		if (reached.length === 0 && sites.length === 0) {
 			return { "statements": 0, "sites": 0 };
@@ -311,7 +457,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		return ran;
 	};
 
-	const record = async (run: RunInfo, covered: Coverage[], loaded: LoadedPackage[]): Promise<void> => log.span("editor.workbench.evidence.record", { "op": run.runtime ?? "tsval", "count": covered.length }, async (span) => {
+	const record = async (run: RunInfo, covered: Coverage[], loaded: LoadedPackage[], versions: Record<string, string[]> = {}, pagePackages: string[] = []): Promise<void> => log.span("editor.workbench.evidence.record", { "op": run.runtime ?? "tsval", "count": covered.length }, async (span) => {
 		const entry = repoRelative(run.entry ?? run.cwd);
 		const name = vscode.workspace.getConfiguration("silo").get<string>("machine")?.trim();
 		const envelope: RunEnvelope = {
@@ -343,7 +489,21 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 				await blobOid(each.source)
 			] as const)))
 		};
-		const ran = await packagesOf(loaded);
+
+		// (a preview ran every version of a module its hot updates brought: the last is the file's, all are listed; and its
+		// pages' packages are by name@version alone, as esm.sh served them)
+		for (const [file, oids] of Object.entries(versions)) {
+			envelope.files[repoRelative(file)] = oids.at(-1)!;
+
+			if (oids.length > 1) {
+				envelope.versions = { ...envelope.versions, [repoRelative(file)]: oids };
+			}
+		}
+
+		const ran = {
+			...await packagesOf(loaded),
+			...Object.fromEntries(pagePackages.map((each) => [each, {}]))
+		};
 
 		if (Object.keys(ran).length > 0) {
 			envelope.packages = ran;
@@ -354,8 +514,17 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		let statements = 0;
 		let sites = 0;
 
+		const byFile = new Map<string, Coverage[]>();
+
 		for (const each of covered) {
-			const kept = await recordFile(envelope, repoRelative(each.file), each);
+			byFile.set(repoRelative(each.file), [
+				...byFile.get(repoRelative(each.file)) ?? [],
+				each
+			]);
+		}
+
+		for (const [file, versions] of byFile) {
+			const kept = await recordFile(envelope, file, versions);
 
 			statements += kept.statements;
 			sites += kept.sites;
@@ -377,15 +546,33 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	let writing = Promise.resolve();
 
 	runs.onEnd((run) => {
+		// (a server's run: what its pages say as their windows close counts, so it's recorded once they've had the time)
+		if (run.port !== undefined && !reports.has(run.id)) {
+			hub.publish("evidence.flush", { "port": run.port });
+			setTimeout(() => {
+				ended(run);
+			}, LAST_REPORT_MS);
+
+			return;
+		}
+
+		ended(run);
+	});
+
+	function ended(run: RunInfo): void {
 		const covered = reports.get(run.id);
+		const preview = previews.get(run.id);
 		const loaded = packages.get(run.id) ?? [];
 
 		reports.delete(run.id);
+		previews.delete(run.id);
 		packages.delete(run.id);
 
-		// (a run that told no evidence — a terminal's task, a dev server — isn't the debugger's to record)
+		// (a run that told no evidence — a terminal's task, a dev server no page of which ran instrumented code — isn't recorded)
 		if (covered !== undefined) {
 			writing = writing.then(async () => record(run, covered, loaded)).catch(() => { /* evidence never breaks a run */ });
+		} else if (preview !== undefined) {
+			writing = writing.then(async () => record(run, await previewCoverage(preview), [], Object.fromEntries(preview.versions), [...preview.packages])).catch(() => { /* evidence never breaks a run */ });
 		}
-	});
+	}
 }

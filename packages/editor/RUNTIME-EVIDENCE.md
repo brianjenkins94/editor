@@ -10,7 +10,7 @@ capability stop is RUNNING.md, *Capability stops*.
 **Back so far:** evidence kept in git for a run in the debugger (2026-11-07: workbench/evidence.ts, the worker's
 site-sums.ts) and its hover (extensions/insights, the declared type from History's tsserver plugin's `_types.at`), the
 Margin's live values and live runs, notes on spans, and what could go, in purple (extensions/insights/fixes.ts), on the
-code only. A preview's evidence (*Third slice*) isn't back yet. Live runs aren't recorded: they're the editor's, as
+code only, and a preview's (*Third slice*, 2026-11-08: previews/, its page runtime without recorded stops). Live runs aren't recorded: they're the editor's, as
 you type.
 
 The editor learns what your program actually does by running it: which code ran and how often, where the time went,
@@ -176,8 +176,10 @@ re-imported unchanged counts on into its old one. A module's own scope would los
 
 **Reporting: often, and before the page goes.** Each page reports what it has counted since it loaded, as totals rather
 than increments, so a lost report costs nothing. It reports every 10 seconds while something changed, on each hot
-update, on `pagehide`, and when the editor asks before the preview closes (`evidence.flush`): a preview's windows close
-before its run ends.
+update, on `pagehide`, and when its server's run ends (`evidence.flush`: its windows may stay open). A report goes by
+`postMessage` to the window its preview is in, the shell's, which passes it on (previews/page-script.ts; 2026-11-08). The
+core records a server's run a few seconds after it ends, so those last reports count, and the dev server keeps a
+stopped server's versions until another starts on its port, so they can still be read.
 
 **Recording: core folds a preview run like any other.** A report carries the page's port, and core finds the run there,
 so the page never needs to know a run id (P6).

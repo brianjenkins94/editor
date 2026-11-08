@@ -368,7 +368,14 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 			return factory.createBlock([entry, factory.createTryStatement(factory.createBlock(statements, true), undefined, leave)], true);
 		};
 
-		return ts.visitNode(sourceFile, visit) as ts.SourceFile;
+		// In a lexical environment of the module's: what an optional call on a member hoists (its object and callee's
+		// temporaries) is declared at its top. Without one they're dropped, and a module, strict, throws on the first.
+		context.startLexicalEnvironment();
+
+		const visited = ts.visitNode(sourceFile, visit) as ts.SourceFile;
+		const hoisted = context.endLexicalEnvironment();
+
+		return hoisted === undefined || hoisted.length === 0 ? visited : factory.updateSourceFile(visited, factory.mergeLexicalEnvironment([...visited.statements], hoisted));
 	};
 
 	return {

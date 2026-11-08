@@ -109,6 +109,28 @@ function install(hub: Hub): void {
 		return element;
 	};
 
+	// A page's runtime evidence (previews/page-script.ts posts it here, the window its preview is in): on to the core, as
+	// its server's (evidence.ts finds the run by the port). By the port the page says, as its last report comes as its
+	// window closes, when it's no longer among the windows here.
+	addEventListener("message", (event: MessageEvent) => {
+		const { channel, port, page, modules, packages } = (event.data ?? {}) as { "channel"?: unknown; "port"?: unknown; "page"?: unknown; "modules"?: unknown; "packages"?: unknown };
+
+		if (channel === "editor-evidence" && event.origin === location.origin && typeof port === "number") {
+			hub.publish("evidence.preview", { "window": `preview:${String(port)}`, "page": page, "modules": modules, "packages": packages });
+		}
+	});
+
+	// A server's run ended: its pages report now (its windows may stay open, the page left as it was).
+	hub.subscribe("evidence.flush", (data) => {
+		const { port } = (data ?? {}) as { "port"?: unknown };
+
+		for (const frame of document.querySelectorAll<HTMLIFrameElement>(`[data-preview-port="${String(port)}"] iframe`)) {
+			for (const target of frame.contentWindow === null ? [] : framesUnder(frame.contentWindow)) {
+				target.postMessage({ "channel": "editor-evidence-flush" }, location.origin);
+			}
+		}
+	});
+
 	hub.subscribe("preview.ready", (data) => {
 		const { port, url } = data as { "port": number; "url": string };
 

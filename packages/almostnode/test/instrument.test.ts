@@ -53,8 +53,9 @@ function run(source: string, level: InstrumentLevel = "full"): { "printed": unkn
 	const execute = (code: string, evidence: unknown): unknown[] => {
 		const printed: unknown[] = [];
 
-		// The context is the module's globalThis: the runtime is found there, as in a preview page.
-		runInNewContext(code, { "__evidence": evidence, "out": (value: unknown) => { printed.push(value); } });
+		// The context is the module's globalThis: the runtime is found there, as in a preview page. Strict, as a module is:
+		// an undeclared name assigned throws.
+		runInNewContext("\"use strict\";\n" + code, { "__evidence": evidence, "out": (value: unknown) => { printed.push(value); } });
 
 		return printed;
 	};
@@ -132,6 +133,20 @@ test("an optional call on a member keeps its this, and reads its object once", (
 
 	assert.deepEqual(printed, [42, 1]);
 	assert.ok(events.includes("optional get().next?.() → function"));
+});
+
+test("an optional call on a member inside a function: its temporaries declared, as a module's strict code needs", () => {
+	const { printed, events } = run([
+		"const hooks = { onClick: (n: number) => n + 1 };",
+		"function clicked(count: number) {",
+		"\treturn hooks.onClick?.(count);",
+		"}",
+		"out(clicked(1));",
+		"out((() => hooks.onClick?.(2))());"
+	].join("\n"));
+
+	assert.deepEqual(printed, [2, 3]);
+	assert.ok(events.some((event) => event.startsWith("optional hooks.onClick?.(count)")), events.join("\n"));
 });
 
 test("an embedded statement — an if's arm, a loop's body — is counted in a block of its own", () => {

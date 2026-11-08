@@ -17,6 +17,7 @@ import { observe } from "@brianjenkins94/observability";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { answerServer } from "../shared/workspace-runtime";
+import pageScript from "previews:page-evidence";
 import { attachSharedWorkspace, connectWorkspace, createZenfsVFS } from "../shared/zenfs-vfs.js";
 
 /** The exact version a preview loads of each package: the editor's shared resolver's (workbench/versions.ts).
@@ -44,7 +45,7 @@ const workspaceReady = rpc.request("workspace.buffer", undefined, { "timeoutMs":
 
 let vfs: ReturnType<typeof createZenfsVFS> | undefined;
 
-type DevServer = RequestHandler & { "start": () => void; "stop": () => void; "setHMRTarget": (target: { "postMessage": (message: unknown) => void }) => void; "setTransformErrorReporter": (report: (info: Record<string, unknown>) => void) => void; "notifyChange": (path: string) => void };
+type DevServer = RequestHandler & { "start": () => void; "stop": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown) => void }) => void; "setTransformErrorReporter": (report: (info: Record<string, unknown>) => void) => void; "notifyChange": (path: string) => void };
 
 /** The dev servers started here, by port, and the folder each serves. */
 const servers = new Map<number, DevServer>();
@@ -53,6 +54,13 @@ const roots = new Map<number, string>();
 /** What a change under a server's folder doesn't update it for: as Vite's own watcher ignores them, so an install or a
  *  commit isn't a storm of hot updates. */
 const UNWATCHED = /\/(?:\.git|node_modules|\.silo)(?:\/|$)/u;
+
+/** A stopped dev server, by its port, until another starts there: what its pages ran is read after it stops (their last
+ *  report comes as its run ends), against the versions it served (`preview.version`). */
+const stopped = new Map<number, DevServer>();
+
+/** The ports whose dev server instruments what it serves (runtime evidence: page-evidence.ts counts in the page). */
+const instrumenting = new Set<number>();
 
 function nobody(port: number): WireResponse {
 	return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${String(port)}`) };
@@ -107,6 +115,16 @@ serve(hub, "preview.start", async (raw): Promise<{ "port": number }> => {
 		const { ViteDevServer } = await import("@brianjenkins94/almostnode");
 		const server = new ViteDevServer(await (vfs ??= createZenfsVFS()), { "port": port, "root": root, "versionsFile": VERSIONS_FILE }) as unknown as DevServer;
 
+		// How much of what it serves it instruments for runtime evidence (`silo.evidence.previews`, the core's to say).
+		const level = await rpc.request("evidence.level", {}, { "timeoutMs": 5000, "waitForResponderMs": 5000 }).catch(() => "off") as "full" | "coverage" | "off";
+
+		// (with the page runtime the instrumented modules tell what they observe: previews/page-script.ts)
+		server.setInstrumentation(level, pageScript);
+
+		if (level !== "off") {
+			instrumenting.add(port);
+		}
+
 		server.start();
 		// (a worker has no window to post a hot update to: it goes over the hub, for whatever shows the page)
 		server.setHMRTarget({
@@ -119,11 +137,20 @@ serve(hub, "preview.start", async (raw): Promise<{ "port": number }> => {
 			log.warn("a dev server's transform failed: served 500, recovers on reload", info);
 		});
 		servers.set(port, server);
+		stopped.delete(port);
 		roots.set(port, root.replace(/\/+$/u, ""));
 		architecture.spawn({ "id": `vite:${String(port)}`, "label": `Vite dev server :${String(port)}`, "container": "workers", "detail": root, "dynamic": true });
 
 		return { "port": port };
 	});
+});
+
+// A version of a module a dev server instrumented, by its source's blob oid: what it was when it ran (the evidence of a
+// version a hot update has since replaced is read against it).
+serve(hub, "preview.version", (raw) => {
+	const { port, oid } = raw as { "port": number; "oid": string };
+
+	return (servers.get(port) ?? stopped.get(port))?.versionSource(oid) ?? {};
 });
 
 serve(hub, "preview.stop", (raw) => {
@@ -134,7 +161,13 @@ serve(hub, "preview.stop", (raw) => {
 	}
 
 	servers.get(port)?.stop();
+
+	if (instrumenting.has(port) && servers.has(port)) {
+		stopped.set(port, servers.get(port)!);
+	}
+
 	roots.delete(port);
+	instrumenting.delete(port);
 
 	return servers.delete(port);
 });

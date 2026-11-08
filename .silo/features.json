@@ -779,19 +779,22 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Evidence from previews": {
-    "status": "removed",
-    "why": "split from Runtime evidence kept in git (2026-11-07), which came back for the debugger's runs first; a preview's comes next",
-    "since": "2026-11-07",
-    "what": "A preview's pages are instrumented as its dev server serves them, count what ran and went through each site across hot updates, and report it, so a preview's run is kept in git like a debugger's; you choose how much of a preview is recorded.",
+    "status": "active",
+    "why": "reintroduced after the debugger's runs' evidence: a preview's run kept in git as a debugger's is, so the hover and the purple read what an app did too. The objective is rough feature parity with full-editor",
+    "since": "2026-11-08",
+    "what": "A preview's dev server instruments the workspace's modules as it serves them and puts a small runtime first in each page, which counts what ran and went through each site across hot updates and reports it to the editor; when the server's run ends, its pages report once more and the run is kept in git like a debugger's. `silo.evidence.previews` says how much is instrumented (everything, statements only, or nothing).",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Third slice: previews, under HMR*",
     "ways": [
       "core module|installPageEvidence",
+      "hub request|evidence.level",
       "hub request|preview.version",
       "hub subscription|evidence.flush",
-      "hub subscription|evidence.preview"
+      "hub subscription|evidence.preview",
+      "setting|silo.evidence.previews"
     ],
-    "in": "517144b7",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/previews/"
+    ]
   },
   "Experiments that undo themselves": {
     "status": "active",
