@@ -1,7 +1,7 @@
 {
   "name": "insights",
   "displayName": "Insights",
-  "description": "What a program did when it ran, from the evidence kept in git, where the code is: on hover, what went through the code under the cursor across runs (how many values, how often nullish, their kinds beside the declared type, a few of them; each branch's arms).",
+  "description": "What a program did when it ran, from the evidence kept in git, where the code is: on hover, what went through the code under the cursor across runs (how many values, how often nullish, their kinds beside the declared type, a few of them; each branch's arms); and in purple, with a quick fix, where runs say a `?.` or `??` was never needed, a branch never taken or code never run.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
@@ -10,5 +10,29 @@
   "browser": "extension.js",
   "activationEvents": [
     "onStartupFinished"
-  ]
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "Runtime evidence",
+      "properties": {
+        "silo.evidence.minRuns": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "markdownDescription": "How many runs must have reached a `?.`, `??` or branch since its code last changed before the editor suggests it could go (a `?.` never nullish, a branch never taken)."
+        },
+        "silo.evidence.minSeen": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "markdownDescription": "How many values must have gone through a `?.` or `??`, or how many times a branch must have run, across those runs before the editor suggests it could go."
+        },
+        "silo.machine": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "This machine's name in the runtime evidence kept in `.silo/` (each run records where it ran: this name, plus the browser, OS and cores it detects). Name each machine you work on, so timings compare like with like. Empty is `default`."
+        }
+      }
+    }
+  }
 }

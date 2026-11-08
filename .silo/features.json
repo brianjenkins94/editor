@@ -2043,7 +2043,8 @@
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *The model*",
     "ways": [
       "core module|installEvidence",
-      "hub subscription|evidence.observed"
+      "hub subscription|evidence.observed",
+      "setting|silo.machine"
     ],
     "paths": [
       "packages/editor/extensions/tsval/site-sums.ts",
@@ -2698,22 +2699,26 @@
     ]
   },
   "What could go, in purple": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Code the runs show was never needed, such as a `?.` that never met an empty value or a branch never taken, is tinted purple with a quick fix to remove it, and the Suggestions view lists them for every file.",
+    "status": "active",
+    "why": "reintroduced on the evidence kept in git, on the code only: the Suggestions view beside Problems isn't back, as a list somewhere else is somewhere nobody looks (the user, 2026-11-06, of the old panels). The objective is rough feature parity with full-editor",
+    "since": "2026-11-07",
+    "what": "Code the runs show was never needed, such as a `?.` that never met an empty value, a `??` or `&&`/`||` whose right side never ran, a branch never taken or code never run, is marked in purple where it is, more strongly the more tries say so, with how rare it could still be and a quick fix to remove it.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Fourth slice: what could go, in purple, across inputs*",
     "ways": [
       "code actions provider||insights/fixes.ts",
-      "command|insights.applySuggestion",
       "diagnostic collection|evidence",
       "setting|silo.evidence.minRuns",
       "setting|silo.evidence.minSeen",
-      "text editor decoration type||insights/fixes.ts",
-      "view|insights.suggestions"
+      "text editor decoration type||insights/fixes.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/insights/fixes.ts",
+      "packages/editor/extensions/insights/suggestions.ts"
+    ],
+    "tests": [
+      "packages/editor/test/insights-suggestions.test.mjs",
+      "packages/editor/test/in-editor/what-could-go.spec.mjs"
+    ]
   },
   "What each test ran": {
     "status": "experiment",
@@ -2739,7 +2744,9 @@
       "hover provider||insights/hover.ts"
     ],
     "paths": [
-      "packages/editor/extensions/insights/"
+      "packages/editor/extensions/insights/extension.ts",
+      "packages/editor/extensions/insights/hover.ts",
+      "packages/editor/extensions/insights/package.json"
     ],
     "tests": [
       "packages/editor/test/in-editor/evidence-hover.spec.mjs"

@@ -9,8 +9,8 @@ capability stop is RUNNING.md, *Capability stops*.
 
 **Back so far:** evidence kept in git for a run in the debugger (2026-11-07: workbench/evidence.ts, the worker's
 site-sums.ts) and its hover (extensions/insights, the declared type from History's tsserver plugin's `_types.at`), the
-Margin's live values and live runs, notes on spans. A preview's evidence (*Third slice*) isn't back yet, nor what could
-go, in purple. Live runs aren't recorded: they're the editor's, as
+Margin's live values and live runs, notes on spans, and what could go, in purple (extensions/insights/fixes.ts), on the
+code only. A preview's evidence (*Third slice*) isn't back yet. Live runs aren't recorded: they're the editor's, as
 you type.
 
 The editor learns what your program actually does by running it: which code ran and how often, where the time went,
@@ -227,9 +227,9 @@ The point of running a program many times: what none of the runs needed is code 
 - **Purple is the evidence's color**: a wavy underline for an operator that could go, a tint for code that never ran.
   Each is a Hint diagnostic too, with a fix; nothing is applied for you. Coverage has no line background, so a line that
   never ran isn't red and purple at once.
-- **A Suggestions view, beside Problems**: VS Code's Problems view doesn't list hints, and raising them to Information
-  would put VS Code's own squiggle under the purple. It reads files from disk rather than opening them as documents, so
-  tsserver isn't handed every file with evidence.
+- **On the code, not in a view** (2026-11-07): the Suggestions view that listed every file's beside Problems isn't back. A
+  list somewhere else is somewhere nobody looks (the user, 2026-11-06, of the old panels), and VS Code's Problems view
+  doesn't list hints; raising them to Information would put VS Code's own squiggle under the purple.
 - **Never isn't proof.** Each message says how rare it could still be, by the rule of three: with none in n tries, at
   most 3/n of the time, 95% sure ("at most 1 in 4, 95% sure"), or too few tries yet under six. The purple grows
   stronger with the tries (under 30, under 300, more). The thresholds are `silo.evidence.minRuns` (3) and `minSeen` (10).
