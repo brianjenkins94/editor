@@ -44,6 +44,7 @@ import { architectureStore } from "./architecture-store";
 import { installTypeAcquisition } from "./ata";
 import { wireWorkbenchHub } from "./bridge-link";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
+import { installCodeReach } from "./code-reach";
 import { installDecisions } from "./decisions";
 import { installBablr } from "./bablr";
 import { installCapabilityConfirm } from "./capability-confirm";
@@ -466,6 +467,7 @@ function maybeBoot(): void {
 				serveUnpushed(workbenchHub);
 				// What's been decided about a file or a name: the history extension's reading of the ledger and docs (decisions.ts).
 				installDecisions(api as typeof import("vscode"), workbenchHub);
+				installCodeReach(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner);
 				// Features and their tests, a table (features-view.tsx).

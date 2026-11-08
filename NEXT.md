@@ -450,7 +450,7 @@ How it's kept:
      (`var value` still there) and edits-change.spec's *the History output says what a pause changed* (the panel empty, no
      `Reading`; again on 76afc45f, passing on a rerun, and on cb0d53bc, a runner twice as slow as usual with `git.status` timing out
      beside it: load, it looks like, though not proved). That slow runner took `specs` past its 15 minutes, so it's 25: all the specs
-     take about 7 minutes on a usual runner and 14 on that one, and each new one adds to it. Worth two shards if that keeps growing. A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard. And playwright-in-editor.mjs's *drives the preview you have open*: its button test failed once locally in the whole workbench shard (2026-11-06), then passed 4 of 4 alone; not explained, though it clicks with nothing to say the page's script has attached yet. And preview-session.spec's Stop button on the debug toolbar, not there in 2 of the 8 CI runs since the move to monaco-vscode-api 39 (2026-11-07), never locally: the spec now says what the debugger showed when it isn't. preview-prompts.spec failed once too, in a slower dispatched run.
+     take about 7 minutes on a usual runner and 14 on that one, and each new one adds to it. Worth two shards if that keeps growing. A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard. And playwright-in-editor.mjs's *drives the preview you have open*: its button test failed once locally in the whole workbench shard (2026-11-06), then passed 4 of 4 alone, and twice more in 3 whole shards (2026-11-07, with code_reach's test before it making History read the program); it clicked with nothing to say the page's script had attached, so the page's script now says "ready" on the button and the test waits for that, and says each test's error. And preview-session.spec's Stop button on the debug toolbar, not there in 2 of the 8 CI runs since the move to monaco-vscode-api 39 (2026-11-07), never locally: the spec now says what the debugger showed when it isn't. preview-prompts.spec failed once too, in a slower dispatched run.
    - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
      more test machinery (*How long a test may take*, selection, the live loop's own work) and before item 1's bench: those wait
      for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
@@ -463,8 +463,8 @@ How it's kept:
      on spans*); and for
      developing and testing the editor in the editor, *Agents drive the debugger* (back: RUNNING.md, *For agents*), *Refactoring for agents* (back: ARCHITECTURE.md, *Workspace tools*), *Experiments that undo
      themselves* (back, with Workspace: Save and Restore Checkpoint: ARCHITECTURE.md, *Workspace tools*), *Scripts over the workspace* (back,
-     agent-only by the user's exception, 2026-11-07: ARCHITECTURE.md, *Workspace tools*), *What a way in reaches* and *How a commit did in
-     CI*. Later: the
+     agent-only by the user's exception, 2026-11-07: ARCHITECTURE.md, *Workspace tools*), *What a way in reaches* (back, on the
+     lightbulb at a way in's registration: ARCHITECTURE.md, *Workspace tools*) and *How a commit did in CI*. Later: the
      runtime insights (*Runtime evidence kept in git*, its hover, *What could go, in purple*), the previews' (*Preview DevTools*,
      *Preview CPU profiles*, *Breakpoints in a page's code*, *Debug toolbar in the preview title bar*), *Dependency baseline and
      exceptions*, *Explore orderings*, *Playground links*, *Type queries*, *Your edits since the last commit*, *Performance
@@ -517,8 +517,7 @@ How it's kept:
      packages/almostnode/test and packages/bablr-language-ts/test are scripts, not tests. A UI spec's coverage isn't visible to
      tsval (the editor it drives runs as a plain bundle) until everything runs in tsval, as it's meant to.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
-     as its feature is reintroduced (`code_move` has the Explorer's move now, which keeps imports right). `code_query` and `code_rewrite` (no command), `code_reach` and `decisions_for` (Remove's lightbulb shows only what one way in
-     alone reaches), `git_blame`, `runs_affected`
+     as its feature is reintroduced (`code_move` has the Explorer's move now, which keeps imports right). `code_query` and `code_rewrite` (no command), `decisions_for` (`code_reach` has the lightbulb's *What … reaches* now), `git_blame`, `runs_affected`
      and `runs_ledger` (the tests-by-feature list would be their view),
      `editor_trace`, `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable
      view; the monitor has rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`,

@@ -20,7 +20,8 @@ after(async () => {
 	await session?.close("playwright-in-editor");
 });
 
-const pageCounts = "let count = 0;\nconst button = document.querySelector(\"button\")!;\n\nbutton.addEventListener(\"click\", () => {\n\tcount += 1;\n\tbutton.textContent = \"clicked \" + String(count);\n});\n";
+// (it says it's there on the button, so nothing clicks before it listens)
+const pageCounts = "let count = 0;\nconst button = document.querySelector(\"button\")!;\n\nbutton.textContent = \"ready\";\nbutton.addEventListener(\"click\", () => {\n\tcount += 1;\n\tbutton.textContent = \"clicked \" + String(count);\n});\n";
 
 /** Test files run as runs_tests does, to their end (a call answers within a minute: then the run, asked again). */
 async function ran(files) {
@@ -37,7 +38,7 @@ test("a test file in the debugger drives the preview you have open", async () =>
 	await session.request("files.write", { "path": "pwapp/index.html", "content": "<!doctype html><html><body><h1>App</h1><button>not yet</button><script type=\"module\" src=\"/src/main.ts\"></script></body></html>\n" }, 30_000);
 	await session.request("files.write", { "path": "pwapp/src/main.ts", "content": pageCounts }, 30_000);
 	await session.terminal("cd pwapp && vite", { "fresh": true });
-	await session.eventually("the window's page", async () => (await session.page.evaluate(() => document.querySelector("app-window[data-preview-port] iframe")?.contentDocument?.querySelector("h1")?.textContent ?? "")) === "App" || undefined, 90_000);
+	await session.eventually("the window's page", async () => (await session.page.evaluate(() => document.querySelector("app-window[data-preview-port] iframe")?.contentDocument?.querySelector("button")?.textContent ?? "")) === "ready" || undefined, 90_000);
 	await session.request("files.write", { "path": "pwapp/app.spec.mjs", "content": [
 		"import { expect, test } from \"@playwright/test\";",
 		"",
@@ -60,7 +61,7 @@ test("a test file in the debugger drives the preview you have open", async () =>
 
 	const { files: [file] } = await ran(["pwapp/app.spec.mjs"]);
 
-	assert.deepEqual(file.tests.map(({ id, outcome }) => [id, outcome]), [["pwapp/app.spec.mjs › the app › its button counts", "pass"], ["pwapp/app.spec.mjs › the app › isn't there", "fail"]]);
+	assert.deepEqual(file.tests.map(({ id, outcome }) => [id, outcome]), [["pwapp/app.spec.mjs › the app › its button counts", "pass"], ["pwapp/app.spec.mjs › the app › isn't there", "fail"]], JSON.stringify(file.tests.map(({ id, error }) => ({ "id": id, "error": error?.slice(0, 600) }))));
 	assert.match(file.tests[1].error, /toBeVisible\(\) failed/u, "what didn't hold");
 	assert.equal(file.exitCode, 1);
 	// It really happened in the page you have open.

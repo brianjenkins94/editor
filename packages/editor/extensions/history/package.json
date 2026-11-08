@@ -1,7 +1,7 @@
 {
   "name": "history",
   "displayName": "History",
-  "description": "What your edits change, and whether runs used it, in the History output. The program as it stands, read as you edit by the TypeScript server's own TypeScript, and the feature ledger held to it: `silo check`'s drift in Problems, and what's been decided about a file or a name.",
+  "description": "What your edits change, and whether runs used it, in the History output. The program as it stands, read as you edit by the TypeScript server's own TypeScript, and the feature ledger held to it: `silo check`'s drift in Problems, what's been decided about a file or a name, and what a way in reaches.",
   "publisher": "silo",
   "version": "0.0.1",
   "engines": {
@@ -29,6 +29,11 @@
       {
         "command": "history.show",
         "title": "Show What Changed",
+        "category": "History"
+      },
+      {
+        "command": "history.reach.show",
+        "title": "What a Way In Reaches…",
         "category": "History"
       }
     ]

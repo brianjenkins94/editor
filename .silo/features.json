@@ -2652,19 +2652,26 @@
     ]
   },
   "What a way in reaches": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "For a way in (a command, hub request, tool, core module, setting, view), the feature that owns it, where it's registered, what removing it would free and leave by hand, and everywhere code, tests and docs name it: silo remove's plan, written nowhere.",
+    "status": "active",
+    "why": "reintroduced: before changing, moving or removing a way in, what it reaches, asked on its registration (the lightbulb) or from the palette, and by agents through the same command",
+    "since": "2026-11-07",
+    "what": "For a way in (a command, hub request, agent tool, core module, setting, view), the lightbulb on its registration and History: What a Way In Reaches… show the feature that owns it, where it's registered, what only it reaches (what removing it frees, and its code left by hand in files it shares), and everywhere code, tests and docs name it, each place opening it. Agents ask the same.",
     "docs": "packages/editor/ARCHITECTURE.md, *Workspace tools (2026-10-10)*",
     "ways": [
       "agent tool|code_reach",
+      "code actions provider||history/reach.ts",
       "command|history.reach",
+      "command|history.reach.show",
       "core module|installCodeReach",
       "hub request|code.reach"
     ],
-    "in": "39b30c64",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/history/reach.ts",
+      "packages/editor/workbench/code-reach.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/way-in-reach.spec.mjs"
+    ]
   },
   "What could go, in purple": {
     "status": "removed",

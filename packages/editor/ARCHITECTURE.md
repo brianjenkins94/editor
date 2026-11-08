@@ -641,8 +641,8 @@ ranges in a text that ran place nothing yet.
 doesn't fit*). The rewrite settles each one: the job it serves, where it lives (lib `util/silo`, pure; the command
 line; the editor), and what supersedes what. Where it starts:
 - **The manifest is gone** (2026-11-03): its entries moved into the ledger, and what read it reads the ledger's declared
-  features (`silo check`'s drift, `silo features --score`, `removalOf`, `history.decisions`). `history.features` and
-  `history.reach`, and what they fed (the features map, `git_review`'s features per hunk, focus, `code_reach`), come back
+  features (`silo check`'s drift, `silo features --score`, `removalOf`, `history.decisions`, `history.reach`, back
+  2026-11-07). `history.features`, and what it fed (the features map, `git_review`'s features per hunk, focus), come back
   on the ledger with their features.
 - **Code no feature owns is an error** (decided 2026-11-02; packages/silo/README.md, decision 22): owned by
   declaration, in the ledger, not inferred. Attribution from runs and tests checks a declaration (*Declared against
@@ -729,6 +729,12 @@ tools*). What the code doesn't say:
   and *Workspace: Restore Checkpoint…* puts every file changed since back, as one edit undo takes back; `workspace_checkpoint` and
   `workspace_restore` are the same for agents. Not `.silo/`, the editor's own records, and not across a commit: that's git's to
   undo. A window's checkpoints go with a reload.
+- **What a way in reaches is asked on it** (extensions/history/reach.ts): on a way in's registration the lightbulb offers
+  *What … reaches*, and *History: What a Way In Reaches…* asks for the one at the cursor or one picked: a quick pick titled by
+  the ledger's feature owning it, saying what only it reaches (what removing it frees), with every place it's registered, left
+  by hand in files it shares, and named in code, tests and docs, each opening it. `code_reach` asks the same `history.reach`.
+  It's `silo remove`'s plan against History's reading of the program, nothing written; Remove itself comes back with *Dormant
+  features marked in History*.
 - **Scripts are an agent's alone** (workbench/script-run.ts): `script_run` runs JavaScript for counting or joining across files,
   the workspace read-only, in the capability-gated realm (no network, no `require`, nothing that writes), and says what it read and
   what it was refused. The one tool with nothing a person does to mirror, by the user's choice (2026-11-07): agents have no terminal,

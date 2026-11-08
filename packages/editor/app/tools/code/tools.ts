@@ -38,6 +38,19 @@ const code: ToolFamily = ({ request }) => [
 	{
 		"timeoutMs": 120000,
 		"tool": defineTool({
+			"name": "code_reach",
+			"config": {
+				"description": "What a way into the program reaches (a command, hub request, agent tool, core module, setting, view…: silo's ways in) before you change, move or remove it, as History: What a Way In Reaches… and the lightbulb on its registration show it: the ledger's features owning it, where it's registered, what only it reaches (declarations, lines, files that would go whole) and its code left by hand in files it shares, and every place in code, tests and docs naming it (a hub request's requesters, a command's callers). Give its key (`hub request|code.problems`) or its id (`code.problems`); an id more than one way in has, or none, answers with matches to choose from. Read from the program as it is now, edits included. Returns { way: { key, facet, id, sides }, features, registered, frees: { declarations, files, lines, bytes }, byHand, named, tests, docs (each [{ file, line, text }]), counts } or { matches }.",
+				"inputSchema": {
+					"target": z.string().describe("A way in's key (facet|id) or its id.")
+				}
+			},
+			"handler": async ({ target }, { signal }) => ok(request("code.reach", { "target": target }, signal))
+		})
+	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
 			"name": "code_references",
 			"config": {
 				"description": "Where a name is used, as Find All References shows it: TypeScript's answer, not a text search (a same-named thing elsewhere isn't it). Each place's file, line, column and text, its declaration included. Give the file, the line it's on and the name. Returns { name, places, total }.",
@@ -63,7 +76,12 @@ const code: ToolFamily = ({ request }) => [
 					"to": z.string().describe("The new name.")
 				}
 			},
-			"handler": async ({ path, line, name, to }, { signal }) => ok(request("code.rename", { "path": path, "line": line, "name": name, "to": to }, signal))
+			"handler": async ({ path, line, name, to }, { signal }) => ok(request("code.rename", {
+				"path": path,
+				"line": line,
+				"name": name,
+				"to": to
+			}, signal))
 		})
 	},
 	{
