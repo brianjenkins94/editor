@@ -10,9 +10,10 @@ import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
+import type ts from "typescript";
 import type { WorkerEvent } from "../debug-protocol";
+import type { SiteSums } from "../site-sums";
 import type { Runtime } from "./runtime";
-import ts from "typescript";
 
 /** This worker's log, once it's linked (always, by the time a control message comes: the link comes first). */
 export function workerLog(): RuntimeConnection["log"] {
@@ -102,6 +103,10 @@ export interface State {
 	/** The VM on the timeline being shown — what coverage reports on. A forward step advances a fork; a step back
 	 *  returns to an earlier stop. */
 	"current": Vm | undefined;
+	/** What went through each observed site on each timeline (tsval's `observe`), and the sums being added to now, the
+	 *  timeline running's: a fork starts from a copy of its stop's, as its coverage starts from a copy of its counts. */
+	"sumsOf": WeakMap<Vm, SiteSums>;
+	"recording": SiteSums;
 	/** Where the run's event loop started (its clock then), for times shown since; and what a wait costs (Skip Waits). */
 	"loopStart": number;
 	"pace": "real" | "fast";
@@ -177,6 +182,8 @@ export const state: State = {
 	"loopStart": 0,
 	"pace": "real",
 	"probing": undefined,
+	"sumsOf": new WeakMap(),
+	"recording": new Map(),
 	"programFunctions": new WeakSet<object>(),
 	"guestProcess": undefined,
 	"runtime": undefined,

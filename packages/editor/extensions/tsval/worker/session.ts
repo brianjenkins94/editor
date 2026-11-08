@@ -2,16 +2,18 @@
  * The stepping debugger's session: arming breakpoints, running to a stop, stepping forward and back (tsval's forks, one
  * per stop), the stop's snapshot and its variables, setting a value at a stop, and launching a run.
  */
-import type { ModuleLoader } from "@brianjenkins94/tsval";
 import type { PlaceSet } from "@brianjenkins94/editor-api";
-import type { WorkerEvent, Snapshot, Variable, CapabilityAsk, Crash, Control } from "../debug-protocol";
+import type { ModuleLoader } from "@brianjenkins94/tsval";
+import type { CapabilityAsk, Control, Crash, Snapshot, Variable, WorkerEvent } from "../debug-protocol";
+import type { SiteSums } from "../site-sums";
 import type { Runtime } from "./runtime";
 import type { Action, ForwardAction, Place, TraceContext, Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
 import { layered } from "@brianjenkins94/editor-api/runtime";
-import { ProgramSyntaxError, TsvalInternalError, createVM } from "@brianjenkins94/tsval";
+import { createVM, ProgramSyntaxError, TsvalInternalError } from "@brianjenkins94/tsval";
 import ts from "typescript";
-import { calledSeen } from "./busy";
+import { copySums } from "../site-sums";
+import { calledSeen, observeSite } from "./busy";
 import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffects, watchedOf } from "./gate";
 import { dropUnpinned, readPins } from "./install";
 import { packagesRan, readBaseline } from "./package-calls";
@@ -21,6 +23,12 @@ import { post, state, workerLog } from "./state";
 import { askAt } from "./stops";
 import { startTests, tellCoverage, tellTests, testsOver, testTold } from "./tests";
 import { endValues, flushValues, keepTold, resumeTold, startValues, tellSet, traceValue } from "./values";
+
+/** Start recording `vm`'s observations into `sums`: the timeline running now. */
+function record(vm: Vm, sums: SiteSums): void {
+	state.sumsOf.set(vm, sums);
+	state.recording = sums;
+}
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => {
@@ -72,7 +80,10 @@ function literalOf(text: string): { "value": unknown } | { "error": string } {
 					throw new Error("only plain properties");
 				}
 
-				return [property.name.text, read(property.initializer)];
+				return [
+					property.name.text,
+					read(property.initializer)
+				];
 			}));
 		}
 
@@ -84,9 +95,13 @@ function literalOf(text: string): { "value": unknown } | { "error": string } {
 			throw new Error("not a value");
 		}
 
-		return { "value": read(statement.expression) };
+		return {
+			"value": read(statement.expression)
+		};
 	} catch (error) {
-		return { "error": `${text} — ${error instanceof Error ? error.message : String(error)} (a literal: 'text', 4, true, null, [1, 2], { a: 1 })` };
+		return { "error": `${text} — ${error instanceof Error
+			? error.message
+			: String(error)} (a literal: 'text', 4, true, null, [1, 2], { a: 1 })` };
 	}
 }
 
@@ -115,7 +130,12 @@ export function setValue(vm: Vm, name: string, text: string): Extract<WorkerEven
 			binding.value = vm.fromHost(literal.value);
 			tellSet(vm, name, binding.value);
 
-			return { "type": "valueSet", "ok": true, "value": format(binding.value), "snapshot": snapshot(vm) };
+			return {
+				"type": "valueSet",
+				"ok": true,
+				"value": format(binding.value),
+				"snapshot": snapshot(vm)
+			};
 		}
 	}
 
@@ -144,19 +164,34 @@ function makeSets(vm: Vm, sets: PlaceSet[], line: number): void {
 }
 
 /** Whether the user has a breakpoint at `place`. */
-const userStopAt = (place: Place): boolean => (place.file === state.sourceFile?.fileName ? state.userLines : state.fileLines.get(place.file) ?? []).includes(place.line);
+function userStopAt(place: Place): boolean {
+	return (place.file === state.sourceFile?.fileName
+		? state.userLines
+		: state.fileLines.get(place.file) ?? []).includes(place.line);
+}
 
 /** Every line to arm in `file`: the user's breakpoints, the capability calls the policy gates, and where a rule sets a value
  *  (a breakpoint that isn't a stop: runOn). */
 function linesIn(file: string): number[] {
-	return [...file === state.sourceFile?.fileName ? state.userLines : state.fileLines.get(file) ?? [], ...state.capabilityLines.get(file) ?? [], ...state.placeSets.get(file)?.keys() ?? []];
+	return [
+		...file === state.sourceFile?.fileName
+			? state.userLines
+			: state.fileLines.get(file) ?? [],
+		...state.capabilityLines.get(file) ?? [],
+		...state.placeSets.get(file)?.keys() ?? []
+	];
 }
 
 /** Arm `vm`'s breakpoints: in each of the program's files, the user's and the capability calls the policy gates. */
 export function arm(vm: Vm): void {
 	vm.breakpoints.clear();
 
-	for (const file of new Set([state.sourceFile?.fileName ?? "", ...state.fileLines.keys(), ...state.capabilityLines.keys(), ...state.placeSets.keys()])) {
+	for (const file of new Set([
+		state.sourceFile?.fileName ?? "",
+		...state.fileLines.keys(),
+		...state.capabilityLines.keys(),
+		...state.placeSets.keys()
+	])) {
 		try {
 			vm.addBreakpointsInFile(file, ...linesIn(file));
 		} catch {
@@ -175,7 +210,9 @@ export function noteProgramFile(filename: string, source: () => string): void {
 	let file: ts.SourceFile;
 
 	try {
-		file = ts.createSourceFile(filename, source(), ts.ScriptTarget.Latest, true, /\.[jt]sx$/u.test(filename) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+		file = ts.createSourceFile(filename, source(), ts.ScriptTarget.Latest, true, /\.[jt]sx$/u.test(filename)
+			? ts.ScriptKind.TSX
+			: ts.ScriptKind.TS);
 	} catch {
 		return;
 	}
@@ -237,7 +274,9 @@ export function fileAt(vm: Vm, place: Place): ts.SourceFile | undefined {
 		return here;
 	}
 
-	return place.file === state.sourceFile?.fileName ? state.sourceFile : state.programFiles.get(place.file);
+	return place.file === state.sourceFile?.fileName
+		? state.sourceFile
+		: state.programFiles.get(place.file);
 }
 
 /** A console argument the way node's console prints it: strings bare, everything else JSON-ish. */
@@ -270,11 +309,28 @@ export function guestConsole(): Record<string, (...args: unknown[]) => void> {
 	const write = (stream: "stdout" | "stderr", method: string) => (...args: unknown[]): void => {
 		if (state.probing === undefined) {
 			state.evaluating?.impure("effect", "console." + method);
-			post({ "type": "output", "text": args.map(formatLogArg).join(" "), "stream": stream });
+			post({
+				"type": "output",
+				"text": args.map(formatLogArg).join(" "),
+				"stream": stream
+			});
 		}
 	};
 
-	return Object.fromEntries((["log", "info", "debug", "dir", "warn", "error", "trace"] as const).map((method) => [method, write(["warn", "error", "trace"].includes(method) ? "stderr" : "stdout", method)]));
+	return Object.fromEntries(([
+		"log",
+		"info",
+		"debug",
+		"dir",
+		"warn",
+		"error",
+		"trace"
+	] as const).map((method) => [
+		method,
+		write(["warn", "error", "trace"].includes(method)
+			? "stderr"
+			: "stdout", method)
+	]));
 }
 
 /** A readable one-line rendering of a runtime value for the Variables pane. */
@@ -288,7 +344,9 @@ function format(value: unknown): string {
 			}
 
 			try {
-				return Array.isArray(value) ? `Array(${value.length})` : "{…}";
+				return Array.isArray(value)
+					? `Array(${value.length})`
+					: "{…}";
 			} catch {
 				return "{…}";
 			}
@@ -334,7 +392,9 @@ function snapshot(vm: Vm): Snapshot {
 				seen.add(name);
 				rows.push({
 					"name": name,
-					"value": binding.initialized ? format(binding.value) : "<uninitialized>",
+					"value": binding.initialized
+						? format(binding.value)
+						: "<uninitialized>",
 					"type": typeName(binding.value),
 					"variablesReference": 0
 				});
@@ -343,9 +403,43 @@ function snapshot(vm: Vm): Snapshot {
 	}
 
 	return {
-		"frames": [{ "id": 1, "name": functionName(vm.currentNode), "line": (loc?.line ?? 0) + 1, "column": (loc?.character ?? 0) + 1, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) }, ...loc === null || loc.file === state.sourceFile?.fileName ? {} : { "file": loc.file, "code": vm.currentNode?.getSourceFile().text.split("\n")[loc.line]?.trim() } }],
-		"scopes": { "1": [{ "name": "Locals", "variablesReference": 1000, "expensive": false }, ...vm.loop === undefined ? [] : [{ "name": "Event loop", "variablesReference": 2000, "expensive": false }]] },
-		"variables": { "1000": rows, ...vm.loop === undefined ? {} : { "2000": loopRows(vm.loop) } }
+		"frames": [
+			{
+				"id": 1,
+				"name": functionName(vm.currentNode),
+				"line": (loc?.line ?? 0) + 1,
+				"column": (loc?.character ?? 0) + 1,
+				...vm.currentNode === null
+					? {}
+					: {
+							"at": rangeOf(vm.currentNode)
+						},
+				...loc === null || loc.file === state.sourceFile?.fileName
+					? {}
+					: {
+							"file": loc.file,
+							"code": vm.currentNode?.getSourceFile().text.split("\n")[loc.line]?.trim()
+						}
+			}
+		],
+		"scopes": {
+			"1": [
+				{ "name": "Locals", "variablesReference": 1000, "expensive": false },
+				...vm.loop === undefined
+					? []
+					: [
+							{ "name": "Event loop", "variablesReference": 2000, "expensive": false }
+						]
+			]
+		},
+		"variables": {
+			"1000": rows,
+			...vm.loop === undefined
+				? {}
+				: {
+						"2000": loopRows(vm.loop)
+					}
+		}
 	};
 }
 
@@ -355,7 +449,9 @@ function timerKind(timer: { "interval": boolean; "delay": number }): string {
 		return "setInterval";
 	}
 
-	return timer.delay === 0 ? "setImmediate" : "setTimeout";
+	return timer.delay === 0
+		? "setImmediate"
+		: "setTimeout";
 }
 
 /** The event loop at a stop, as the Variables view shows it: the virtual clock (since the run started, and its date),
@@ -363,15 +459,32 @@ function timerKind(timer: { "interval": boolean; "delay": number }): string {
  *  how many choices were made. */
 function loopRows(loop: NonNullable<Vm["loop"]>): Variable[] {
 	const since = (ms: number): string => `+${ms - state.loopStart}ms`;
-	const row = (name: string, value: string, type: string): Variable => ({ "name": name, "value": value, "type": type, "variablesReference": 0 });
-	const timers = [...loop.timers.values()].sort((left, right) => left.due - right.due || left.seq - right.seq);
+	const row = (name: string, value: string, type: string): Variable => ({
+		"name": name,
+		"value": value,
+		"type": type,
+		"variablesReference": 0
+	});
+	const timers = [
+		...loop.timers.values()
+	].sort((left, right) => left.due - right.due || left.seq - right.seq);
 
 	return [
 		row("time", `${since(loop.clock)} · ${new Date(loop.clock).toISOString()}`, "virtual clock"),
-		row("pace", loop.pace === "fast" ? "skipping waits" : "real time", ""),
+		row("pace", loop.pace === "fast"
+			? "skipping waits"
+			: "real time", ""),
 		...timers.slice(0, 20).map((timer) => row(`${timerKind(timer)} ${timer.delay}ms`, `due ${since(timer.due)}${timer.ref ? "" : " · unref'd"}`, "timer")),
-		...timers.length > 20 ? [row("…", `${timers.length - 20} more timers`, "")] : [],
-		...[...loop.results.values()].map((result) => row(result.label, result.deliver === undefined ? "not in yet" : "in — waiting its turn", "result")),
+		...timers.length > 20
+			? [
+					row("…", `${timers.length - 20} more timers`, "")
+				]
+			: [],
+		...[
+			...loop.results.values()
+		].map((result) => row(result.label, result.deliver === undefined
+			? "not in yet"
+			: "in — waiting its turn", "result")),
 		row("choices made", String(loop.choices.length), "")
 	];
 }
@@ -383,7 +496,9 @@ function loopRows(loop: NonNullable<Vm["loop"]>): Variable[] {
 function functionName(node: ts.Node | null): string {
 	for (let at = node ?? undefined; at !== undefined; at = at.parent) {
 		if (ts.isFunctionDeclaration(at) || ts.isFunctionExpression(at) || ts.isArrowFunction(at) || ts.isMethodDeclaration(at)) {
-			return at.name !== undefined && ts.isIdentifier(at.name) ? at.name.text : "<anonymous>";
+			return at.name !== undefined && ts.isIdentifier(at.name)
+				? at.name.text
+				: "<anonymous>";
 		}
 	}
 
@@ -395,12 +510,17 @@ function functionName(node: ts.Node | null): string {
 export function rangeOf(node: ts.Node): [number, number] {
 	const head = headOf(node);
 
-	return [head.getStart(head.getSourceFile()), head.getEnd()];
+	return [
+		head.getStart(head.getSourceFile()),
+		head.getEnd()
+	];
 }
 
 /** A function's, a class's or a method's own name, if it's one of those and has one. */
 function declaredName(node: ts.Node): ts.Node | undefined {
-	return ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node) || ts.isMethodDeclaration(node) ? node.name : undefined;
+	return ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node) || ts.isMethodDeclaration(node)
+		? node.name
+		: undefined;
 }
 
 /** What stands for `node` on the code through a reformat: a statement with a body by its head — an `if`'s or a loop's
@@ -433,7 +553,9 @@ function headOf(node: ts.Node): ts.Node {
 
 	// An unnamed function: its first parameter, or the variable it's assigned to.
 	if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-		return node.parameters[0] ?? (ts.isVariableDeclaration(node.parent) ? node.parent.name : node);
+		return node.parameters[0] ?? (ts.isVariableDeclaration(node.parent)
+			? node.parent.name
+			: node);
 	}
 
 	return node;
@@ -444,7 +566,17 @@ function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityA
 	state.allowNext = false;
 	state.skipNext = false;
 	flushValues();
-	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled }, ...ask === undefined ? {} : { "ask": ask } });
+	post({
+		"type": "stopped",
+		"reason": reason,
+		"snapshot": {
+			...snapshot(vm),
+			"traveled": traveled
+		},
+		...ask === undefined
+			? {}
+			: { "ask": ask }
+	});
 }
 
 /**
@@ -472,7 +604,15 @@ function onBreakpointHook(vm: Vm): void {
 	// Atomics.wait returns immediately when the value is no longer 0.
 	Atomics.store(state.control, 0, 0);
 	flushValues();
-	post({ "type": "stopped", "reason": "breakpoint", "snapshot": { ...snapshot(vm), "traveled": false }, "atomic": true });
+	post({
+		"type": "stopped",
+		"reason": "breakpoint",
+		"snapshot": {
+			...snapshot(vm),
+			"traveled": false
+		},
+		"atomic": true
+	});
 	Atomics.wait(state.control, 0, 0);
 }
 
@@ -487,14 +627,22 @@ function finish(exitCode = 0, crash?: Crash): void {
 	tellEffects();
 	tellCoverage();
 
-	post({ "type": "terminated", "exitCode": tellTests(exitCode), ...crash === undefined ? {} : { "crash": crash } });
+	post({
+		"type": "terminated",
+		"exitCode": tellTests(exitCode),
+		...crash === undefined
+			? {}
+			: { "crash": crash }
+	});
 }
 
 /** Where `vm` is stopped: its file, and the 1-based line in it. */
 export function placeOf(vm: Vm): Place | undefined {
 	const location = vm.location();
 
-	return location === null ? undefined : { "file": location.file, "line": location.line + 1 };
+	return location === null
+		? undefined
+		: { "file": location.file, "line": location.line + 1 };
 }
 
 /** Where `error` was thrown, for the margin's mark: by now the frames have unwound, so tsval's note of it, not the
@@ -510,7 +658,16 @@ function crashOf(vm: Vm, error: unknown, message?: string): Crash | undefined {
 		// (an Error, else whatever was thrown — a primitive)
 		const thrown = error as Error | string | number | boolean | null | undefined;
 
-		return at === null || site === null ? undefined : { "line": at.line, "at": rangeOf(site), "message": message ?? String(thrown), ...at.file === state.sourceFile?.fileName ? {} : { "file": at.file } };
+		return at === null || site === null
+			? undefined
+			: {
+					"line": at.line,
+					"at": rangeOf(site),
+					"message": message ?? String(thrown),
+					...at.file === state.sourceFile?.fileName
+						? {}
+						: { "file": at.file }
+				};
 	} catch {
 		return undefined;
 	}
@@ -526,11 +683,14 @@ const LIVE_WAIT_MS = 3000;
 /** Whether what `vm` is waiting on settled in the time a live run has. */
 async function settledInTime(vm: Vm): Promise<boolean> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const settled = await Promise.race([vm.whenSettled().then(() => true), new Promise<boolean>((resolve) => {
-		timer = setTimeout(() => {
-			resolve(false);
-		}, LIVE_WAIT_MS);
-	})]);
+	const settled = await Promise.race([
+		vm.whenSettled().then(() => true),
+		new Promise<boolean>((resolve) => {
+			timer = setTimeout(() => {
+				resolve(false);
+			}, LIVE_WAIT_MS);
+		})
+	]);
 
 	clearTimeout(timer);
 
@@ -542,12 +702,29 @@ function stoppedAt(vm: Vm, message: string): Crash | undefined {
 	const node = vm.currentNode;
 	const at = vm.location(node);
 
-	return at === null || node === null ? undefined : { "line": at.line, "at": rangeOf(node), "message": message, "stopped": true, ...at.file === state.sourceFile?.fileName ? {} : { "file": at.file } };
+	return at === null || node === null
+		? undefined
+		: {
+				"line": at.line,
+				"at": rangeOf(node),
+				"message": message,
+				"stopped": true,
+				...at.file === state.sourceFile?.fileName
+					? {}
+					: { "file": at.file }
+			};
 }
 
 /** A file that doesn't parse: marked where the parser stopped, not at the import that loaded it. */
 function syntaxCrash(error: ProgramSyntaxError, entry = state.sourceFile?.fileName): Crash {
-	return { "line": error.line, "at": error.at, "message": String(error), ...error.file === entry ? {} : { "file": error.file } };
+	return {
+		"line": error.line,
+		"at": error.at,
+		"message": String(error),
+		...error.file === entry
+			? {}
+			: { "file": error.file }
+	};
 }
 
 /** What a run that stopped on something the debugger can't run says, loudly and as itself — not as the program's own
@@ -560,7 +737,9 @@ function unrunnable(error: unknown): string | undefined {
 
 	const unimplemented = /^unimplemented: (?<what>[\s\S]*)$/u.exec(error.message)?.groups?.what;
 
-	return unimplemented === undefined ? `The debugger failed here: ${error.message}` : `Can't run this yet — the debugger doesn't support ${unimplemented}`;
+	return unimplemented === undefined
+		? `The debugger failed here: ${error.message}`
+		: `Can't run this yet — the debugger doesn't support ${unimplemented}`;
 }
 
 /** Guest call depth: the `call`/`construct` frames on the control stack (the rest are expression/statement frames). */
@@ -591,8 +770,12 @@ function stepOut(vm: Vm): void {
 /** Do `action` on `base`, as far as it goes without waiting. */
 function act(base: Vm, action: ForwardAction): void {
 	// Going on from a stop on a rule's place: its statement runs first, then what it sets is set, whichever way it was left.
-	const place = state.history.length === 0 ? undefined : placeOf(base);
-	const sets = place === undefined ? undefined : setsAt(place);
+	const place = state.history.length === 0
+		? undefined
+		: placeOf(base);
+	const sets = place === undefined
+		? undefined
+		: setsAt(place);
 
 	if (place !== undefined && sets !== undefined) {
 		base.stepStatement();
@@ -631,7 +814,9 @@ function act(base: Vm, action: ForwardAction): void {
  *  capability line's, a capability stop — else a step. */
 function stopReason(base: Vm, action: ForwardAction, stop: Place | undefined): "capability" | "breakpoint" | "step" {
 	if (action === "continue" || (action === "stepOut" && base.atBreakpoint())) {
-		return stop !== undefined && capabilityAt(stop) ? "capability" : "breakpoint";
+		return stop !== undefined && capabilityAt(stop)
+			? "capability"
+			: "breakpoint";
 	}
 
 	return "step";
@@ -640,7 +825,9 @@ function stopReason(base: Vm, action: ForwardAction, stop: Place | undefined): "
 async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): Promise<void> {
 	state.current = base;
 	state.evaluating = base; // (a program file a package requires is evaluated on the machine running)
-	const span = trace !== undefined ? workerLog().continueSpan(trace, "editor.extensions.tsval.worker.session.step", { "action": action }) : workerLog().span("editor.extensions.tsval.worker.session.step", { "action": action });
+	const span = trace !== undefined
+		? workerLog().continueSpan(trace, "editor.extensions.tsval.worker.session.step", { "action": action })
+		: workerLog().span("editor.extensions.tsval.worker.session.step", { "action": action });
 
 	state.stepSpan = span;
 
@@ -660,7 +847,10 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 
 				// Out of work but serving: the session is idle — a request (or a timer it sets) goes on from here.
 				if (held.size > 0 || readsStdin()) {
-					post({ "type": "serving", "ports": [...listening] });
+					post({
+						"type": "serving",
+						"ports": [...listening]
+					});
 				}
 
 				if (state.live) {
@@ -733,7 +923,9 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 		// A step-out cut short by a breakpoint reports it as one, like a continue would.
 		const reason = stopReason(base, action, stop);
 
-		emitStopped(base, reason, false, reason === "capability" && stop !== undefined ? askAt(base, stop) : undefined);
+		emitStopped(base, reason, false, reason === "capability" && stop !== undefined
+			? askAt(base, stop)
+			: undefined);
 	} finally {
 		span.end();
 	}
@@ -774,6 +966,8 @@ async function handle(action: Action): Promise<void> {
 			// observations going on from a copy of that stop's.
 			const next = state.history[state.index].fork();
 
+			record(next, copySums(state.sumsOf.get(state.history[state.index])));
+
 			if (next.loop !== undefined) {
 				next.loop.pace = state.pace;
 			}
@@ -808,10 +1002,20 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// A server it starts keeps it alive: out of work, it idles, serving. A live run's timers go at once, its waits skipped, and
 	// nothing keeps it alive past its first idle. It starts with a fresh layer: what the last one wrote is gone.
 	state.live = message.live === true;
-	state.recordedResults = state.live ? message.recorded ?? {} : {};
-	state.runLayer = state.live && state.editorLink !== undefined ? layered(state.editorLink.fs) : undefined;
+	state.recordedResults = state.live
+		? message.recorded ?? {}
+		: {};
+	state.runLayer = state.live && state.editorLink !== undefined
+		? layered(state.editorLink.fs)
+		: undefined;
 
-	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": state.live ? "fast" as const : "real" as const, "keepAlive": () => !state.live && (held.size > 0 || readsStdin()) };
+	const eventLoop = {
+		"now": Date.now(),
+		"seed": Math.floor(Math.random() * 2 ** 32),
+		...message.eventLoop,
+		"pace": state.live ? "fast" as const : "real" as const,
+		"keepAlive": () => !state.live && (held.size > 0 || readsStdin())
+	};
 	let modules: ModuleLoader;
 	let loadedRuntime: Runtime;
 
@@ -820,7 +1024,9 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 		modules = programModules(loadedRuntime);
 	} catch (error) {
 		// (with where: a load failing inside the runtime names no file of the program's)
-		post({ "type": "output", "text": `The program's modules can't be loaded: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}`, "stream": "stderr" });
+		post({ "type": "output", "text": `The program's modules can't be loaded: ${error instanceof Error && error.stack !== undefined
+			? error.stack
+			: String(error)}`, "stream": "stderr" });
 		finish(1);
 
 		return;
@@ -829,7 +1035,9 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// Its capabilities real (RUNNING.md, *Effects are real, decided per call*): each gated call decided as it's made — but
 	// for a run of an ordering exploring found (its schedule given), which replays that run: its calls' results the
 	// stand-ins' it had.
-	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined ? loadedRuntime : undefined, whereOf(message));
+	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined
+		? loadedRuntime
+		: undefined, whereOf(message));
 
 	state.programBuiltins = surface.modules;
 	state.programFunctions = functionsIn([surface.modules, surface.globals]);
@@ -845,7 +1053,28 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	let loaded: ReturnType<typeof createVM>;
 
 	try {
-		loaded = createVM(message.source, { "fileName": message.fileName, ...state.live ? { "maxSteps": LIVE_STEPS } : {}, "onBreakpoint": onBreakpointHook, "coverage": true, "trace": traceValue, "called": calledSeen, "watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }), "eventLoop": eventLoop, "asyncContext": asyncContext, "sharedGlobals": state.runGlobal?.own, "globals": { ...state.nodeGlobals, ...surface.globals, "__editorTest": testTold, "__editorPlaywright": editorPlaywright }, "modules": modules });
+		loaded = createVM(message.source, {
+			"fileName": message.fileName,
+			...state.live
+				? { "maxSteps": LIVE_STEPS }
+				: {},
+			"onBreakpoint": onBreakpointHook,
+			"coverage": true,
+			"observe": observeSite,
+			"trace": traceValue,
+			"called": calledSeen,
+			"watches": watchedOf(surface.globals, surface.modules, { "__editorTest": testTold, "__editorPlaywright": editorPlaywright }),
+			"eventLoop": eventLoop,
+			"asyncContext": asyncContext,
+			"sharedGlobals": state.runGlobal?.own,
+			"globals": {
+				...state.nodeGlobals,
+				...surface.globals,
+				"__editorTest": testTold,
+				"__editorPlaywright": editorPlaywright
+			},
+			"modules": modules
+		});
 	} catch (error) {
 		// The program's own file doesn't parse: nothing of it has run, and the run ends there, as `node`'s does.
 		if (!(error instanceof ProgramSyntaxError)) {
@@ -866,22 +1095,38 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	}
 
 	state.evaluating = loaded.vm;
+	record(loaded.vm, new Map());
 
 	state.loopStart = eventLoop.now;
 	state.pace = state.live ? "fast" : "real";
-	workerLog().info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
+	workerLog().info("event loop", {
+		"now": eventLoop.now,
+		"seed": eventLoop.seed,
+		...eventLoop.schedule === undefined
+			? {}
+			: { "schedule": eventLoop.schedule }
+	});
 
 	({ "sourceFile": state.sourceFile } = loaded);
 	// Capability breakpoints: pre-arm a breakpoint at every capability call the policy won't let pass, so a
 	// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (RUNTIME-EVIDENCE.md,
 	// *Capability decisions, on the line*). No policy → every undecided dangerous call breaks (firewall default).
 	({ "policy": state.policy } = message);
-	state.userLines = state.live ? [] : message.lines;
-	state.fileLines = state.live ? new Map() : new Map(Object.entries(message.files ?? {}));
+	state.userLines = state.live
+		? []
+		: message.lines;
+	state.fileLines = state.live
+		? new Map()
+		: new Map(Object.entries(message.files ?? {}));
 
-	state.programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
+	state.programFiles = new Map([
+		[loaded.sourceFile.fileName, loaded.sourceFile]
+	]);
 	state.capabilityLines = new Map();
-	state.placeSets = new Map(Object.entries(message.places ?? {}).map(([file, places]) => [file, new Map(places.map(({ line, sets }) => [line, sets]))]));
+	state.placeSets = new Map(Object.entries(message.places ?? {}).map(([file, places]) => [
+		file,
+		new Map(places.map(({ line, sets }) => [line, sets]))
+	]));
 	armCapabilities(loaded.sourceFile);
 	arm(loaded.vm);
 
@@ -894,7 +1139,9 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 /** Launch a run. */
 export function launch(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): void {
 	// Absent without cross-origin isolation: then a breakpoint inside a host-invoked handler can't pause (onBreakpointHook).
-	state.control = message.control === undefined ? undefined : new Int32Array(message.control);
+	state.control = message.control === undefined
+		? undefined
+		: new Int32Array(message.control);
 	workerLog().info("launch", { "file": message.fileName, "breakpoints": message.lines.length });
 	void launchProgram(message, trace);
 }

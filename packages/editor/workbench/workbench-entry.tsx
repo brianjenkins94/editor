@@ -52,6 +52,7 @@ import { installCodeRefactor } from "./code-refactor";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
+import { installEvidence } from "./evidence";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installFeaturesView } from "./features-view";
 import { installFsTrace } from "./fs-trace";
@@ -470,6 +471,8 @@ function maybeBoot(): void {
 				serveTerminalState(nodeRunner, workbenchHub);
 				installTasks(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
 				installPreviewSessions(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
+				// What runs observed, kept in git beside the code (evidence.ts; RUNTIME-EVIDENCE.md).
+				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr, paneLog);
 
 				// Uplink the extension bridge to the page: a workbench hub bridges the bridge (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the

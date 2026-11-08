@@ -47,6 +47,10 @@ export interface Bablr {
 	/** `text` with each comment's characters spaces but its line breaks — line for line the text as it is — or
 	 *  undefined where BABLR can't parse it. */
 	"stripped": (text: string, signal?: AbortSignal) => Promise<string | undefined>;
+	/** Every span of `source` (evidence.ts keys a site on the one that's exactly its node), or why BABLR can't parse it. */
+	"spans": (source: string) => Promise<{ "spans"?: { "id": string; "start": number; "end": number }[]; "unparsable"?: string }>;
+	/** The span each range anchors to, as a reference (evidence.ts keys a statement on it), or why BABLR can't parse it. */
+	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<{ "refs"?: (SpanRef | null)[]; "unparsable"?: string }>;
 }
 
 /** A folder's files, checked. */
@@ -92,7 +96,9 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 
 		started = {
 			"ask": async <T>(name: string, args: unknown, signal?: AbortSignal): Promise<T> => {
-				const combined = signal === undefined ? dead.signal : AbortSignal.any([signal, dead.signal]);
+				const combined = signal === undefined
+					? dead.signal
+					: AbortSignal.any([signal, dead.signal]);
 				// (no timeout: the first waits out the worker's bundle loading, and a parse takes what it takes)
 				const run = tail.then(async () => rpc.request(`bablr.${name}`, args, { "timeoutMs": Infinity, "waitForResponderMs": 60_000, "signal": combined }) as Promise<T>);
 
@@ -120,9 +126,22 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 
 	/** Every code file under `path` (relative to the workspace) parsed, but those `exclude` matches: what BABLR takes. */
 	const check = async (path: string, exclude: string | undefined, signal: AbortSignal, progress?: (done: number, of: number) => void): Promise<Checked> => log.span("editor.workbench.bablr.check", { "path": path }, async (span) => {
-		const base = vscode.Uri.file(path === "" || path === "." ? DIR : `${DIR}/${path.replace(/^\/+|\/+$/gu, "")}`);
-		const files = (await vscode.workspace.findFiles(new vscode.RelativePattern(base, CODE_FILES), exclude === undefined ? "**/node_modules/**" : `{**/node_modules/**,${exclude}}`)).toSorted((one, other) => one.path.localeCompare(other.path));
-		const checked: Checked = { "path": path, "files": files.length, "parsed": 0, "lines": 0, "parsedLines": 0, "ms": 0, "cached": 0, "unparsable": [] };
+		const base = vscode.Uri.file(path === "" || path === "."
+			? DIR
+			: `${DIR}/${path.replace(/^\/+|\/+$/gu, "")}`);
+		const files = (await vscode.workspace.findFiles(new vscode.RelativePattern(base, CODE_FILES), exclude === undefined
+			? "**/node_modules/**"
+			: `{**/node_modules/**,${exclude}}`)).toSorted((one, other) => one.path.localeCompare(other.path));
+		const checked: Checked = {
+			"path": path,
+			"files": files.length,
+			"parsed": 0,
+			"lines": 0,
+			"parsedLines": 0,
+			"ms": 0,
+			"cached": 0,
+			"unparsable": []
+		};
 		const begun = performance.now();
 
 		for (const [at, uri] of files.entries()) {
@@ -157,12 +176,22 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 				checked.parsed += 1;
 				checked.parsedLines += lines;
 			} else {
-				checked.unparsable.push({ "file": vscode.workspace.asRelativePath(uri, false), "lines": lines, "why": (answer.why ?? "").slice(0, MOST_WHY) });
+				checked.unparsable.push({
+					"file": vscode.workspace.asRelativePath(uri, false),
+					"lines": lines,
+					"why": (answer.why ?? "").slice(0, MOST_WHY)
+				});
 			}
 		}
 
 		checked.ms = Math.round(performance.now() - begun);
-		span.end({ "count": checked.files, "parsed": checked.parsed, "lines": checked.lines, "parsedLines": checked.parsedLines, "cached": checked.cached });
+		span.end({
+			"count": checked.files,
+			"parsed": checked.parsed,
+			"lines": checked.lines,
+			"parsedLines": checked.parsedLines,
+			"cached": checked.cached
+		});
 
 		return checked;
 	});
@@ -192,8 +221,14 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 				report.report({ "message": `${String(done)} of ${String(of)} files`, "increment": 100 / of });
 			});
 		});
-		const percent = checked.lines === 0 ? 100 : Math.round((checked.parsedLines / checked.lines) * 100);
-		const said = `BABLR parses ${String(checked.parsed)} of ${String(checked.files)} files${checked.path === "" ? "" : " in " + checked.path} — ${String(percent)}% of their ${String(checked.lines)} lines${checked.cancelled === true ? " (cancelled)" : ""}.`;
+		const percent = checked.lines === 0
+			? 100
+			: Math.round((checked.parsedLines / checked.lines) * 100);
+		const said = `BABLR parses ${String(checked.parsed)} of ${String(checked.files)} files${checked.path === ""
+			? ""
+			: " in " + checked.path} — ${String(percent)}% of their ${String(checked.lines)} lines${checked.cancelled === true
+			? " (cancelled)"
+			: ""}.`;
 
 		if (checked.unparsable.length === 0) {
 			void vscode.window.showInformationMessage(said);
@@ -221,14 +256,21 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			told(file, answer.unparsable);
 		}
 
-		return answer.unparsable === undefined ? { "value": take(answer) } : { "unparsable": answer.unparsable };
+		return answer.unparsable === undefined
+			? {
+					"value": take(answer)
+				}
+			: { "unparsable": answer.unparsable };
 	};
 
 	/** The other changed files, for a span that may have moved to one. */
 	const changedFiles = async (file: string): Promise<Record<string, string>> => {
 		const { files } = await status();
 		const others = files.filter((change) => change.status !== "D" && change.path !== file && CODE_FILE.test(change.path)).slice(0, MOST_OTHERS);
-		const texts = await Promise.all(others.map(async ({ path }): Promise<[string, string]> => [path, new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(`${DIR}/${path}`)))]));
+		const texts = await Promise.all(others.map(async ({ path }): Promise<[string, string]> => [
+			path,
+			new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(`${DIR}/${path}`)))
+		]));
 
 		return Object.fromEntries(texts);
 	};
@@ -236,10 +278,23 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 	vscode.commands.registerCommand("editor.annotations.spans", async (source: string) => answering(undefined, "spans", { "source": source }, ({ spans }) => spans));
 	vscode.commands.registerCommand("editor.annotations.refer", async (source: string, file: string, ranges: unknown[]) => answering(file, "refer", { "source": source, "file": file, "ranges": ranges }, ({ refs }) => refs.map((ref) => ref ?? undefined)));
 	vscode.commands.registerCommand("editor.annotations.resolve", async (source: string, file: string, refs: SpanRef[], options: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] } = {}) => log.span("editor.workbench.bablr.resolve", { "path": file, "count": refs.length }, async (span) => {
-		const asked = { "source": source, "file": file, "refs": refs, "observed": options.observed === true, "types": options.types ?? {}, "texts": options.texts ?? [] };
+		const asked = {
+			"source": source,
+			"file": file,
+			"refs": refs,
+			"observed": options.observed === true,
+			"types": options.types ?? {},
+			"texts": options.texts ?? []
+		};
 		const first = await answering(file, "resolve", asked, ({ resolutions }) => resolutions) as { "value"?: { "status": string }[] };
 		// (one that's what ran fades instead of being looked for; one made by a person is looked for further)
-		const lost = options.observed === true || first.value === undefined ? [] : refs.flatMap((ref, index) => (first.value?.[index]?.status === "attached" ? [] : [{ "ref": ref, "index": index }]));
+		const lost = options.observed === true || first.value === undefined
+			? []
+			: refs.flatMap((ref, index) => (first.value?.[index]?.status === "attached"
+					? []
+					: [
+							{ "ref": ref, "index": index }
+						]));
 
 		span.end({ "lost": lost.length });
 
@@ -247,7 +302,11 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			return first;
 		}
 
-		const blobs = [...new Set(lost.flatMap(({ ref }) => (ref.baseline === undefined ? [] : [ref.baseline.blob])))];
+		const blobs = [
+			...new Set(lost.flatMap(({ ref }) => (ref.baseline === undefined
+				? []
+				: [ref.baseline.blob])))
+		];
 		const baselines = Object.fromEntries((await Promise.all(blobs.map(async (blob) => [blob, await blobText(blob)] as const))).filter(([, text]) => text !== undefined));
 		const others = await changedFiles(file).catch(() => ({}));
 
@@ -255,7 +314,12 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			return first;
 		}
 
-		const again = await worker().ask<{ "resolutions"?: { "status": string }[] }>("resolve", { ...asked, "refs": lost.map(({ ref }) => ref), "baselines": baselines, "others": others });
+		const again = await worker().ask<{ "resolutions"?: { "status": string }[] }>("resolve", {
+			...asked,
+			"refs": lost.map(({ ref }) => ref),
+			"baselines": baselines,
+			"others": others
+		});
 
 		for (const [at, { index }] of lost.entries()) {
 			if (again.resolutions?.[at] !== undefined && first.value !== undefined) {
@@ -277,6 +341,8 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 	});
 
 	return {
+		"spans": async (source) => worker().ask("spans", { "source": source }),
+		"refer": async (source, file, ranges) => worker().ask("refer", { "source": source, "file": file, "ranges": ranges }),
 		"stripped": async (text, signal) => {
 			const { parsed, comments = [] } = await worker().ask<Parse>("parse", { "source": text }, signal);
 

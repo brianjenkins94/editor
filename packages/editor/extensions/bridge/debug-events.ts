@@ -5,7 +5,9 @@
  *
  * - `ask`: a capability stop's question, answered as capability-stops.ts says;
  * - `recorded`: what an allowed call returned, to give back when it isn't made (editor-api/policy's recordResult);
- * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list).
+ * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list);
+ * - `coverage`: what the run ran and what went through its sites, as it ends (`evidence.observed`: evidence.ts keeps it in
+ *   git; the Margin reads the event itself).
  *
  * A run a terminal started (`__startedBy: "terminal"`, its `__runId` the terminal's run) prints there — its `output`
  * events' stdout and stderr (`node.out.<run>`) — and reads what's typed there (`node.stdin.<run>`, the `stdin` request).
@@ -18,7 +20,7 @@
  *   (DAP's `exited`: extension.ts's `node.exit`). Not a live run, which isn't in the running list: it's told what calls
  *   returned when they last ran for real instead (`__recorded`).
  */
-import type { AskEvent, ListeningEvent, RecordedEvent, StdinRequest } from "@brianjenkins94/editor-api";
+import type { AskEvent, CoverageEvent, ListeningEvent, RecordedEvent, StdinRequest } from "@brianjenkins94/editor-api";
 import { takeEffects } from "@brianjenkins94/editor-api/effects";
 import { recordedResults, recordResult } from "@brianjenkins94/editor-api/policy";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
@@ -35,12 +37,16 @@ const ends = new Map<string, { "exitCode": number }>();
 function terminalRun(session: vscode.DebugSession): string | undefined {
 	const runId = session.configuration["__runId"];
 
-	return session.configuration["__startedBy"] === "terminal" && typeof runId === "string" ? runId : undefined;
+	return session.configuration["__startedBy"] === "terminal" && typeof runId === "string"
+		? runId
+		: undefined;
 }
 
 export function registerDebugEvents(context: vscode.ExtensionContext): void {
 	// What a run did through the editor, kept here as it did it (runtime-fs.ts): its workspace's files. Taken as the run ends.
-	serve(bridgeHub, "run.effects", (args) => ({ "effects": takeEffects((args as { "run": string }).run) }));
+	serve(bridgeHub, "run.effects", (args) => ({
+		"effects": takeEffects((args as { "run": string }).run)
+	}));
 
 	const rpc = createRpcClient(bridgeHub);
 	/** Each terminal's run's stdin subscription, by its session. */
@@ -50,18 +56,34 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 		// A run in the running list, known by one id from start to end.
 		vscode.debug.registerDebugConfigurationProvider("*", {
 			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
-				const program = typeof given["program"] === "string" ? given["program"] : "";
+				const program = typeof given["program"] === "string"
+					? given["program"]
+					: "";
 				// Every debugger decides its gated calls by the editor's policy (the run contract's `__policy`).
 				const policy = await policyFor();
 				const live = given["__live"] === true;
-				const config = { ...given, "__policy": policy, ...await byRules(policy, program, given), ...live ? { "__recorded": await recordedResults().catch(() => ({})) } : {} };
+				const config = {
+					...given,
+					"__policy": policy,
+					...await byRules(policy, program, given),
+					...live
+						? { "__recorded": await recordedResults().catch(() => ({})) }
+						: {}
+				};
 
 				if (typeof config["__runId"] === "string" || live) {
 					return config;
 				}
 
 				try {
-					const { id } = await rpc.request("runs.begin", { "title": program === "" ? config.name : `${config.name} — ${vscode.workspace.asRelativePath(program)}`, "cwd": program.slice(0, program.lastIndexOf("/")) || "/workspace", "entry": program, "runtime": config.type }, { "timeoutMs": 5000, "waitForResponderMs": 2000 }) as { "id": string };
+					const { id } = await rpc.request("runs.begin", {
+						"title": program === ""
+							? config.name
+							: `${config.name} — ${vscode.workspace.asRelativePath(program)}`,
+						"cwd": program.slice(0, program.lastIndexOf("/")) || "/workspace",
+						"entry": program,
+						"runtime": config.type
+					}, { "timeoutMs": 5000, "waitForResponderMs": 2000 }) as { "id": string };
 
 					return { ...config, "__runId": id };
 				} catch {
@@ -81,6 +103,36 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					const { capability, resource, value, request } = body as RecordedEvent;
 
 					void recordResult(capability, resource, value, request).catch(() => undefined);
+					break;
+				}
+
+				// A run's evidence is of the text that ran, each of its files with its own (packages/tsval/README.md, *Modules*).
+				case "coverage": {
+					if (typeof runId !== "string") {
+						break;
+					}
+
+					const coverage = body as CoverageEvent;
+					const files = (coverage.files ?? []).map((other) => ({
+						"file": other.file,
+						"source": other.source ?? "",
+						"statements": other.statements,
+						"sites": other.sites
+					}));
+
+					bridgeHub.publish("evidence.observed", {
+						"runId": runId,
+						"file": coverage.file,
+						"source": coverage.source ?? "",
+						"statements": coverage.statements,
+						"sites": coverage.sites,
+						...files.length === 0
+							? {}
+							: { "files": files },
+						...coverage.packages === undefined
+							? {}
+							: { "packages": coverage.packages }
+					});
 					break;
 				}
 
@@ -115,7 +167,12 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 							const category = message.body?.category ?? "console";
 
 							if (category === "stdout" || category === "stderr") {
-								bridgeHub.publish(`node.out.${runId}`, { "stream": category === "stderr" ? "err" : "out", "data": message.body?.output ?? "" });
+								bridgeHub.publish(`node.out.${runId}`, {
+									"stream": category === "stderr"
+										? "err"
+										: "out",
+									"data": message.body?.output ?? ""
+								});
 							}
 						}
 					}
@@ -129,7 +186,12 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 				typing.set(session.id, bridgeHub.subscribe(`node.stdin.${runId}`, (data) => {
 					const { "data": text, end } = (data ?? {}) as { "data"?: string; "end"?: boolean };
 
-					void session.customRequest("stdin", { "data": text ?? "", ...end === true ? { "end": true } : {} } satisfies StdinRequest);
+					void session.customRequest("stdin", {
+						"data": text ?? "",
+						...end === true
+							? { "end": true }
+							: {}
+					} satisfies StdinRequest);
 				}));
 			}
 		}),

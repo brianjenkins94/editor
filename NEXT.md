@@ -465,8 +465,9 @@ How it's kept:
      themselves* (back, with Workspace: Save and Restore Checkpoint: ARCHITECTURE.md, *Workspace tools*), *Scripts over the workspace* (back,
      agent-only by the user's exception, 2026-11-07: ARCHITECTURE.md, *Workspace tools*), *What a way in reaches* (back, on the
      lightbulb at a way in's registration: ARCHITECTURE.md, *Workspace tools*) and *How a commit did in CI* (back, in the status
-     bar: ARCHITECTURE.md, *Workspace tools*). Later: the
-     runtime insights (*Runtime evidence kept in git*, its hover, *What could go, in purple*), the previews' (*Preview DevTools*,
+     bar: ARCHITECTURE.md, *Workspace tools*). Now: the
+     runtime insights (*Runtime evidence kept in git*, back for the debugger's runs; then *Evidence from previews*, the hover,
+     *What could go, in purple*). Later: the previews' (*Preview DevTools*,
      *Preview CPU profiles*, *Breakpoints in a page's code*, *Debug toolbar in the preview title bar*), *Dependency baseline and
      exceptions*, *Explore orderings*, *Playground links*, *Type queries*, *Your edits since the last commit*, *Performance
      monitor*, *Docking editors into windows*, *Error reports from the editor*, *Formatting-only changes marked*,

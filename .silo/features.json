@@ -778,6 +778,21 @@
     "in": "e16b2b75",
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
+  "Evidence from previews": {
+    "status": "removed",
+    "why": "split from Runtime evidence kept in git (2026-11-07), which came back for the debugger's runs first; a preview's comes next",
+    "since": "2026-11-07",
+    "what": "A preview's pages are instrumented as its dev server serves them, count what ran and went through each site across hot updates, and report it, so a preview's run is kept in git like a debugger's; you choose how much of a preview is recorded.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Third slice: previews, under HMR*",
+    "ways": [
+      "core module|installPageEvidence",
+      "hub request|preview.version",
+      "hub subscription|evidence.flush",
+      "hub subscription|evidence.preview"
+    ],
+    "in": "517144b7",
+    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+  },
   "Experiments that undo themselves": {
     "status": "active",
     "why": "written again from what it's for, a person's commands first and the agent's tools on them (CLAUDE.md, *Agent tools*): the objective is rough feature parity with full-editor",
@@ -2021,19 +2036,22 @@
     ]
   },
   "Runtime evidence kept in git": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "What runs and previews observed (which code ran, the values that passed, whether functions stayed pure) is summed and committed beside the code with each run's envelope and the machine it ran on; you choose how much of a preview is recorded.",
+    "status": "active",
+    "why": "reintroduced for runs in the debugger first: what the hover and the purple read. The objective is rough feature parity with full-editor",
+    "since": "2026-11-07",
+    "what": "What a run in the debugger observed (which statements ran and how often, what went through each `?.`, `??`, parameter and return, which way each branch went) is folded, keyed on BABLR spans, into `.silo/evidence/<user>/<environment>/<file>.jsonl` beside the code, and the run's envelope (whose, where, on what commit and file versions, which packages) appended to `.silo/runs/<user>.jsonl`; the values themselves stay on the machine. Live runs aren't recorded.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *The model*",
     "ways": [
-      "core module|installPageEvidence",
-      "hub request|preview.version",
-      "hub subscription|evidence.flush",
-      "hub subscription|evidence.preview"
+      "core module|installEvidence",
+      "hub subscription|evidence.observed"
     ],
-    "in": "517144b7",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/tsval/site-sums.ts",
+      "packages/editor/workbench/evidence.ts"
+    ],
+    "tests": [
+      "packages/editor/test/site-sums.test.mjs"
+    ]
   },
   "Scripts over the workspace": {
     "status": "active",
