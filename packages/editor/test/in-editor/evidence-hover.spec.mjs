@@ -12,22 +12,20 @@ const files = {
 	"played.mjs": "function play(world, score) {\n\tworld.onWin?.();\n\n\treturn score > 10 ? \"won\" : \"lost\";\n}\n\nconst world = { \"onWin\": () => undefined };\n\nconsole.log(play(world, 12), play(world, 3));\n"
 };
 
-/** The hover at the cursor, on `line` (1-based) `right` characters in, asked until it says `text`: what a run keeps is
- *  written as it ends. */
-async function hoverSays(workbench, line, right, text) {
+/** The hover at `line` and `column` (1-based), asked until it says `text`: what a run keeps is written as it ends. */
+async function hoverSays(workbench, line, column, text) {
 	const code = codeOf(workbench);
 	const hover = workbench.locator(".monaco-hover:not(.hidden)", { "hasText": text });
 
-	await code.press("ControlOrMeta+a");
-	await code.press("ArrowLeft");
+	// (Go to Line, not arrow keys: on CI a burst of them was lost, and the hover asked of line 1. Its column counts a tab as
+	// its width: the columns asked land in the word either way)
+	await code.press("Control+g");
 
-	for (let at = 1; at < line; at += 1) {
-		await code.press("ArrowDown");
-	}
+	const input = workbench.locator(".quick-input-widget input").first();
 
-	for (let at = 0; at < right; at += 1) {
-		await code.press("ArrowRight");
-	}
+	await input.fill(`:${String(line)}:${String(column)}`);
+	await input.press("Enter");
+	await expect(workbench.locator(".statusbar-item", { "hasText": `Ln ${String(line)},` })).toBeVisible({ "timeout": 30_000 });
 
 	for (let tries = 0; ; tries += 1) {
 		await runCommand(workbench, "Show or Focus Hover");
@@ -56,13 +54,13 @@ test("a run, then the hover: what went through a ?. and which way a ?: went", as
 	await codeOf(workbench).press("F5");
 	await expect(workbench.locator(".notes-margin-run.ran")).toHaveCount(1, { "timeout": 60_000 });
 
-	const tested = await hoverSays(workbench, 2, 2, "never nullish");
+	const tested = await hoverSays(workbench, 2, 6, "never nullish");
 
 	await expect(tested).toContainText("2 values in 1 run");
 	await expect(tested).toContainText("function");
 	await codeOf(workbench).press("Escape");
 
-	const branch = await hoverSays(workbench, 4, 9, "50%");
+	const branch = await hoverSays(workbench, 4, 13, "50%");
 
 	await expect(branch).toContainText("in 1 run");
 });
