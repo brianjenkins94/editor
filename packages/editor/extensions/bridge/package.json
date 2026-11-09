@@ -54,6 +54,11 @@
         "command": "editor.ci.show",
         "title": "How HEAD Did in CI",
         "category": "CI"
+      },
+      {
+        "command": "tsval.stepRecordedStop",
+        "title": "Step a Recorded Stop",
+        "category": "Debug"
       }
     ],
     "taskDefinitions": [

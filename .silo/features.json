@@ -322,21 +322,26 @@
     ]
   },
   "Breakpoints in a page's code": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "A breakpoint in a web app's page code records what was in scope each time its line ran and shows it in the margin, and a recorded call can be stepped through again in the debugger.",
+    "status": "active",
+    "why": "reintroduced: what a page's code had in scope each time a line ran, beside it, though a page can't stop; and a recorded call stepped again in the debugger. The objective is rough feature parity with full-editor",
+    "since": "2026-11-09",
+    "what": "A breakpoint in a web app's page code records what was in scope each time its line ran (and the event the page was handling), and the Margin shows it, a column per time; the lightbulb on the line, or Debug: Step a Recorded Stop, runs a recorded call again in the tsval debugger, stopped at the stop, on what it read in the page.",
     "docs": "packages/editor/RUNNING.md, *Apps: recorded stops, not live ones*",
     "ways": [
+      "code actions provider||workbench/recorded-stops.ts",
       "command|tsval.stepRecordedStop",
+      "core module|installRecordedStops",
+      "hub request|preview.stops",
       "hub subscription|stops.preview"
     ],
     "paths": [
       "packages/editor/extensions/tsval/replay-run.ts",
-      "packages/editor/test/replay.test.mjs"
+      "packages/editor/workbench/recorded-stops.ts"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "tests": [
+      "packages/editor/test/in-editor/recorded-stops.spec.mjs",
+      "packages/editor/test/replay.test.mjs"
+    ]
   },
   "Build a game by painting a level": {
     "status": "removed",

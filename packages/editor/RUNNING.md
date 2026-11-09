@@ -4,9 +4,8 @@ How a program is started, whatever started it, and what happens when it reaches 
 2026-10-07 from a survey of every way the UI could start one. Supersedes the two-mode plan (tsval for debugging, an
 almostnode "production" mode for real runs): there is one mode, and it is the debugger.
 
-This is the core's (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Recorded stops in a page and the runs a save
-reaches went with the reduction: this file at the `full-editor` tag has how they ran, and the ledger's tombstones say what
-each was. The file you're editing also runs on its own, on a save or an interval, quietly and without effects
+This is the core's (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). The runs a save reaches went with the
+reduction: this file at the `full-editor` tag has how they ran, and the ledger's tombstones say what each was. The file you're editing also runs on its own, on a save or an interval, quietly and without effects
 (RUNTIME-EVIDENCE.md, *Live runs*).
 
 ## Why
@@ -51,6 +50,43 @@ own; `debug_decide` a stop's buttons in the Margin; `debug_stop` Stop; `debug_st
 Variables views show; and `margin_state` what the Margin shows of a file, its question too. Each is done through VS Code, so it
 shows in the editor as a person's would. Live runs aren't for driving and aren't listed. Not yet: `debug_explore`, as Explore
 Orderings isn't back.
+
+## Apps: recorded stops, not live ones
+
+Stopping at a line and stepping from it needs whoever runs the code to be able to stop. tsval can, for everything it
+runs, including a library's synchronous callback (by blocking its worker until the user goes on). A page can't:
+
+- **Page code can't pause page code.** Only the browser's own debugger stops a page, and a page can't drive it: the
+  preview's DevTools go through chobitsu, which can inspect a page but not stop it.
+- **The page's main thread can't wait.** A worker can block until it's told to go on; the main thread can't.
+- **The browser calls page code synchronously.** A listener, a custom element's lifecycle, an observer's callback, a
+  getter the browser reads: each is called from the browser's own stack. Run every script in the page on tsval and a
+  breakpoint in a click handler still can't stop. Every framework is built on event handlers, so none escapes it.
+
+The other way to stop live is the app moved into a worker with its DOM proxied from the main thread (Partytown's way):
+real pauses, but every synchronous DOM read a round trip, and what must be decided in the event (`preventDefault()`, a
+controlled input's value, focus) decided too late. That's slower than the real page and different from it exactly where
+people debug, and each framework touches the DOM its own way: more proxy, more gaps. Rejected.
+
+**A breakpoint in a page is a recorded stop.** Each time its line runs, what's in scope (locals, arguments, `this`, the
+stack, which event or render) is recorded and shown in the margin, a column per time it ran. The recording is the dev
+server's instrumentation mapped back through the framework's source maps: framework-neutral, at the page's own speed,
+in the real page.
+
+**Stepping a recorded handler.** The page also records what the function was called with, what it closes over and what
+each call it makes returns, and tsval runs the same function from there, fed those results, while the live page has
+gone on: *Step a Recorded Stop*, in the palette and in the lightbulb on the stop's line. Replay at a function's grain
+rather than the page's. Not yet: a method, and stepping into another of the program's functions (it's handed its result).
+
+**How it's wired** (workbench/recorded-stops.ts): the editor's breakpoints go to every dev server (`preview.stops`), which
+instruments a file with a stop whatever the evidence level and hot-updates it; the page runtime (previews/page-evidence.ts)
+records each hit, the latest 20 of each stop, and reports soon after through the shell (`stops.preview`); the dev
+server's session in Run and Debug (workbench/preview-session.ts) tells the Margin them as its values, each report in place
+of the last, against the text of the version that ran. A dev server's session is a no-debug one, so the breakpoints are
+read from VS Code, not given to it.
+
+A page isn't replayed. A virtual loop for its clock, timers, frames and channels, its inputs recorded, would buy
+stepping back through UI code, but stepping back needs stopping first. Not planned.
 
 ## Tests
 
@@ -142,11 +178,12 @@ met (*Can't run this yet — the debugger doesn't support …*), marked on that 
 program's own error and never naming a runtime. A second, native world would be a second set of behaviours to keep
 honest, and it would hide each gap instead of making it a bug to fix.
 
-1. **Too slow to interpret**: a program whose own code computes heavily, a simulation or a game's update loop (*What it
+1. **A browser page's own code**: observed, its breakpoints recorded stops (*Apps: recorded stops, not live ones*).
+2. **Too slow to interpret**: a program whose own code computes heavily, a simulation or a game's update loop (*What it
    costs*). The answer is making tsval faster, not keeping a second world.
-2. **Packages** are native already (packages/tsval/README.md, *Modules*), inside the run, not a separate mode. Their own
+3. **Packages** are native already (packages/tsval/README.md, *Modules*), inside the run, not a separate mode. Their own
    async work is on the host's loop, outside the deterministic one.
-3. **What tsval doesn't support yet**, a syntax or a builtin: each a bug to fix, not a mode.
+4. **What tsval doesn't support yet**, a syntax or a builtin: each a bug to fix, not a mode.
 
 ## What it costs
 

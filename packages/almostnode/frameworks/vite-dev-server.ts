@@ -943,7 +943,8 @@ export default css;
 			}
 
       // The page runtime, before everything else: the app's modules tell it what they observe as they run.
-			if (this.instrumentLevel !== "off" && this.pageRuntime !== undefined) {
+			// (with a recorded stop too, which the runtime records: evidence off, a stop set later records from the next load)
+			if ((this.instrumentLevel !== "off" || this.stops.size > 0) && this.pageRuntime !== undefined) {
 				const runtime = `<script>${this.pageRuntime.replaceAll("</script", "<\\/script")}</script>`;
 				const head = /<head[^>]*>/iu.exec(content);
 

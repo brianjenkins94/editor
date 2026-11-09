@@ -9,13 +9,18 @@
  * lost one costs nothing. A page reports every 10 seconds while its counts change, on each hot update (before the
  * module is re-imported), and on `pagehide`.
  *
- * A breakpoint in a page's code (recorded stops) isn't back: the instrumenter calls its operations only for a stop, so
- * here they do nothing.
+ * Recorded stops (RUNNING.md: a breakpoint in a page) are told here too (`p`): each time a stop's line runs, what was in
+ * scope — each value previewed then, as the margin shows a live value — with `this`, the event the page was handling
+ * and the functions it was in; the latest of each stop's hits kept, and reported soon after (not every 10 seconds: a
+ * stop is looked at as it happens).
  */
 import type { SiteObservation } from "@brianjenkins94/editor-api";
-import type { ModuleEvidence } from "@brianjenkins94/editor-api/recorded";
+import type { Encoded } from "@brianjenkins94/editor-api/recorded";
+import type { ModuleEvidence, RecordedStop, Replay, StopHit } from "@brianjenkins94/editor-api/recorded";
 import type { ObserveSite } from "@brianjenkins94/tsval";
+import { encode } from "@brianjenkins94/editor-api/recorded";
 import { esmPackage } from "@brianjenkins94/editor-api/recorded";
+import { preview } from "@brianjenkins94/editor-api/values";
 import { typeTag } from "@brianjenkins94/tsval/values";
 
 /** What a site of a module records: a statement (coverage), or one of tsval's observe sites (instrument.ts). */
@@ -24,8 +29,7 @@ type SiteKind = "statement" | ObserveSite;
 /** A site of the module's table: its kind and its node's range (0-based line and character). */
 type Entry = [SiteKind, number, number, number, number];
 
-/** The runtime operations an instrumented module calls (instrument.ts); a recorded stop's (`p`, `e`, `k`, `x`) only
- *  for a stop, which isn't back. */
+/** The runtime operations an instrumented module calls (instrument.ts). */
 interface Ops {
 	"s": (site: number) => void;
 	"v": (site: number, value: unknown) => unknown;
@@ -33,11 +37,41 @@ interface Ops {
 	"b": (site: number, value: unknown) => unknown;
 	"a": (site: number, value: unknown) => unknown;
 	"o": (site: number, value: unknown) => unknown;
-	"p": () => void;
-	"e": () => undefined;
-	"k": (at: unknown, value: unknown) => unknown;
-	"x": () => void;
+	"p": (at: [number, number, number, number], scope: () => Record<string, unknown>, self: () => unknown, where: string) => void;
+	"e": (fn: [number, number, number, number], free: () => Record<string, unknown>, self: () => unknown, args: ArrayLike<unknown>) => Recording;
+	"k": (at: [number, number], value: unknown) => unknown;
+	"x": (recording: Recording) => void;
 }
+
+/** A replayable function's call being recorded, and the stop's hit it reached (if it did). */
+interface Recording { "replay": Replay; "hit"?: StopHit }
+
+/** How many of a stop's hits keep their recorded call (the latest): each is a snapshot of what the call read. */
+const MAX_REPLAYS = 5;
+
+/** A value as a stop shows it, previewed in the page (a value read later would be what it became): a DOM node or an
+ *  event by what it is (`<button#add.primary>`, `MouseEvent click` — their properties live on prototypes, which a plain
+ *  preview doesn't read), anything else as the margin previews a live value. */
+function stopPreview(value: unknown): string {
+	if (typeof Node !== "undefined" && value instanceof Element) {
+		return `<${value.tagName.toLowerCase()}${value.id === "" ? "" : "#" + value.id}${[...value.classList].map((name) => "." + name).join("")}>`;
+	}
+
+	if (typeof Node !== "undefined" && value instanceof Node) {
+		return value.nodeName.toLowerCase();
+	}
+
+	if (typeof Event !== "undefined" && value instanceof Event) {
+		return `${value.constructor.name} ${value.type}`;
+	}
+
+	return preview(value);
+}
+
+/** How many of a stop's hits are kept (the latest), and how soon after a hit the page reports. */
+const MAX_HITS = 20;
+const STOP_REPORT_MS = 150;
+
 
 /** How often a page with changes reports. */
 const REPORT_MS = 10_000;
@@ -87,7 +121,108 @@ function pagePackages(): string[] {
 	return loadedPackages(performance.getEntriesByType("resource").map((entry) => entry.name));
 }
 
-export function installPageEvidence(report: (modules: ModuleEvidence[], packages: string[]) => void): { "flush": () => void } {
+export function installPageEvidence(report: (modules: ModuleEvidence[], packages: string[]) => void, reportStops: (stops: RecordedStop[]) => void = () => undefined): { "flush": () => void } {
+	const stops = new Map<string, RecordedStop & { "count": number }>();
+	let stopTimer: ReturnType<typeof setTimeout> | undefined;
+	const stopsNow = (): void => {
+		stopTimer = undefined;
+		reportStops([...stops.values()].map(({ "count": _count, ...stop }) => stop));
+	};
+
+	/** The replayable calls being made, innermost last. */
+	const calls: Recording[] = [];
+	/** A stop of `file`'s `version` hit: what's in scope, previewed now (a value read later would be what it became). */
+	const stopHit = (file: string, version: string, at: [number, number, number, number], scope: () => Record<string, unknown>, self: () => unknown, where: string): void => {
+		const key = `${file}\0${version}\0${at.join(",")}`;
+		const stop = stops.get(key) ?? { "file": file, "version": version, "at": at, "where": where, "hits": [], "count": 0 };
+		const values: [string, string][] = [];
+
+		try {
+			for (const [name, value] of Object.entries(scope())) {
+				values.push([name, stopPreview(value)]);
+			}
+		} catch { /* a name not readable now: what was read stands */ }
+
+		try {
+			const me = self();
+
+			if (me !== undefined && me !== globalThis) {
+				values.push(["this", stopPreview(me)]);
+			}
+		} catch { /* before super(): no this yet */ }
+
+		const event = (globalThis as { "event"?: { "type"?: unknown } }).event?.type;
+
+		const hit: StopHit = { "n": stop.count + 1, ...typeof event === "string" ? { "event": event } : {}, "values": values };
+
+		stop.count += 1;
+		stop.hits = [...stop.hits, hit].slice(-MAX_HITS);
+		// The recorded call it's in, if its function is replayable: given the hit as it leaves. Only the latest few keep one.
+		stop.hits.slice(0, -MAX_REPLAYS).forEach((older) => {
+			delete older.replay;
+		});
+
+		const recording = calls.at(-1);
+
+		if (recording !== undefined) {
+			recording.hit = hit;
+		}
+
+		stops.set(key, stop);
+		stopTimer ??= setTimeout(stopsNow, STOP_REPORT_MS);
+	};
+
+	const safely = <T>(read: () => T, otherwise: T): T => {
+		try {
+			return read();
+		} catch {
+			return otherwise;
+		}
+	};
+
+	const enter = (fn: [number, number, number, number], free: () => Record<string, unknown>, self: () => unknown, args: ArrayLike<unknown>): Recording => {
+		const recording: Recording = { "replay": { "fn": fn, "free": Object.fromEntries(Object.entries(safely(free, {})).map(([name, value]) => [name, encode(value)])), "self": encode(safely(self, undefined)), "args": Array.from(args, (arg) => encode(arg)), "calls": [] } };
+
+		calls.push(recording);
+
+		return recording;
+	};
+
+	const made = (at: [number, number], value: unknown): unknown => {
+		const recording = calls.at(-1);
+
+		if (recording !== undefined) {
+			const slot: [number, number, Encoded] = [at[0], at[1], encode(value)];
+
+			recording.replay.calls.push(slot);
+
+			// A promise: what it settles to, when it does (a replay's await gets that).
+			if (value !== null && typeof value === "object" && typeof (value as { "then"?: unknown }).then === "function") {
+				void (value as Promise<unknown>).then((settled) => {
+					slot[2] = { "$": "p", "v": encode(settled) };
+				}, (reason: unknown) => {
+					slot[2] = { "$": "pr", "v": encode(reason) };
+				});
+			}
+		}
+
+		return value;
+	};
+
+	const leave = (recording: Recording): void => {
+		const at = calls.lastIndexOf(recording);
+
+		if (at !== -1) {
+			calls.splice(at);
+		}
+
+		// Reached its stop: the hit keeps it, to be stepped (and is reported again, with it).
+		if (recording.hit !== undefined) {
+			recording.hit.replay = recording.replay;
+			stopTimer ??= setTimeout(stopsNow, STOP_REPORT_MS);
+		}
+	};
+
 	const versions = new Map<string, { "file": string; "version": string; "table": Entry[]; "counts": Uint32Array; "seen": Uint32Array; "nullish": Uint32Array; "arms": Uint32Array; "kinds": (Kinds | undefined)[]; "ops": Ops }>();
 	let changed = false;
 
@@ -189,10 +324,10 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 
 				return observed;
 			},
-			"p": () => undefined,
-			"e": () => undefined,
-			"k": (_at, made) => made,
-			"x": () => undefined
+			"p": (at, scope, self, where) => { stopHit(file, version, at, scope, self, where); },
+			"e": enter,
+			"k": made,
+			"x": leave
 		};
 
 		versions.set(key, {

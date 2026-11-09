@@ -55,8 +55,10 @@ async function sayWhatHappened() {
 	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => !/^\{"context|^%c|^console\.group|^\s*$|^[←→]|observability\.|node_modules|ata\.|\.cdn/u.test(line)).slice(-120).map((line) => line.slice(0, 220)).join("\n  ")}`);
 }
 
-/** How many specs run at once: each has an editor of its own in a window of its own. */
-const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 3);
+/** How many specs run at once: each has an editor of its own in a window of its own, all in one renderer process (they're
+ *  the page's same-origin frames). Two, not three (2026-11-09): at three its peak was 8.7 GB of all 29 specs and it
+ *  crashed near 9 three times in four runs; at two, 7.5 GB, for 168 s against 154. */
+const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 2);
 /** COVERAGE=1 reads each test's counts around it (architecture-harness.mjs), so a spec is run in its test, one at a time, each
  *  with the page to itself. */
 const COUNTING = process.env.COVERAGE === "1";

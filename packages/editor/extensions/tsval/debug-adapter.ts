@@ -10,6 +10,7 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/editor-api";
+import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 
 import type { Span } from "@brianjenkins94/util/logger";
@@ -49,6 +50,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private live = false;
 	/** What calls returned when they last ran for real (`__recorded`): a live run gives them back where it would skip. */
 	private recorded: Record<string, unknown> | undefined;
+	/** A recorded call to replay (RUNNING.md: stepping a recorded handler): the text that ran, and what the call read. */
+	private replay: (Replay & { "source": string }) | undefined;
 
 	private seq = 1;
 	// The debug worker: the run, interpreted — the adapter's own, by messages (debug-protocol.ts' ToWorker / WorkerEvent).
@@ -194,6 +197,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.places = typeof args["__places"] === "object" && args["__places"] !== null ? args["__places"] as Record<string, RulePlace[]> : {};
 		this.live = args["__live"] === true;
 		this.recorded = typeof args["__recorded"] === "object" && args["__recorded"] !== null ? args["__recorded"] as Record<string, unknown> : undefined;
+		this.replay = typeof args["replay"] === "object" && args["replay"] !== null ? args["replay"] as Replay & { "source": string } : undefined;
 		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
 		this.respond(request);
 		void this.loadSource();
@@ -433,7 +437,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	private async loadSource(): Promise<void> {
 		try {
-			this.source = (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
+			// A replay runs the text that ran in the page (its recorded version), whatever the file holds now.
+			this.source = this.replay?.source ?? (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
 			this.sourceReady = true;
 			this.maybeStart();
 		} catch (error) {
@@ -468,7 +473,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, ...this.live ? { "live": true, "recorded": this.recorded } : {}, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, ...this.live ? { "live": true, "recorded": this.recorded } : {}, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } } }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */

@@ -3,17 +3,19 @@
  * to the Debug Console as well as its terminal. It's a window onto the service, not a way of running it: the server's the terminal's
  * (workbench/runs.ts), stopping the session stops it, and however it ends, the session does. It claims nothing a debugging session
  * would: no status bar, and Run and Debug isn't brought forward. Nothing here steps: it has no threads, and the toolbar has Restart
- * and Stop.
+ * and Stop. What its pages' recorded stops (a breakpoint in their code) record, it tells the Margin (recorded-stops.ts).
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
 import type { NodeRunner } from "./node-runner";
+import type { RecordedStops } from "./recorded-stops";
+import { installRecordedStops, recordedStops } from "./recorded-stops";
 
 interface Request { "seq": number; "command": string }
 
 /** The Debug Adapter Protocol, as far as a service has it. */
-function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, service: string): vscodeApi.DebugAdapter {
+function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, hub: Hub, log: Logger, service: string): vscodeApi.DebugAdapter {
 	const sent = new vscode.EventEmitter<vscodeApi.DebugProtocolMessage>();
 	const stops: (() => void)[] = [];
 	let seq = 0;
@@ -27,9 +29,12 @@ function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, service: string
 	const say = (text: string): void => {
 		event("output", { "category": "stdout", "output": text });
 	};
+	const run = runner.runs.list().find((each) => each.id === service);
+	// (its port's pages' recorded stops: told as its values)
+	const recorded: RecordedStops | undefined = run?.port === undefined ? undefined : recordedStops(hub, log, run.port, event);
 	const follow = (): void => {
-		stops.push(runner.runs.follow(service, say), runner.runs.onEnd((run) => {
-			if (run.id === service) {
+		stops.push(runner.runs.follow(service, say), runner.runs.onEnd((ended) => {
+			if (ended.id === service) {
 				event("terminated");
 			}
 		}));
@@ -65,6 +70,8 @@ function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, service: string
 			}
 		},
 		"dispose": () => {
+			recorded?.dispose();
+
 			for (const stop of stops) {
 				stop();
 			}
@@ -73,8 +80,9 @@ function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, service: string
 }
 
 export function installPreviewSessions(vscode: typeof vscodeApi, runner: NodeRunner, hub: Hub, log: Logger): void {
+	installRecordedStops(vscode, hub, log);
 	vscode.debug.registerDebugAdapterDescriptorFactory("preview", {
-		"createDebugAdapterDescriptor": (session) => new vscode.DebugAdapterInlineImplementation(adapterOf(vscode, runner, session.configuration["service"] as string))
+		"createDebugAdapterDescriptor": (session) => new vscode.DebugAdapterInlineImplementation(adapterOf(vscode, runner, hub, log, session.configuration["service"] as string))
 	});
 
 	// (a restart is ready again, in the session it has)

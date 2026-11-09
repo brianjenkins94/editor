@@ -110,8 +110,8 @@ export function flushValues(): void {
 
 /** What tsval's trace told (VMOptions.trace). */
 export function traceValue(event: TraceEvent): void {
-	// (a probe's fork didn't run)
-	if (state.sourceFile === undefined || state.probing !== undefined) {
+	// (a probe's fork didn't run; a replay's own wiring isn't the program's: replay-run.ts)
+	if (state.sourceFile === undefined || state.probing !== undefined || event.name.startsWith("__self.__replay")) {
 		return;
 	}
 

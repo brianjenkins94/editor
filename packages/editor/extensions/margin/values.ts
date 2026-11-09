@@ -554,9 +554,17 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 			run.anchors = new Anchors(vscode, file, source);
 		}
 	};
-	const valuesCame = (id: string, live: boolean, { file, source, ...batch }: ValuesEvent): void => {
+	const valuesCame = (id: string, live: boolean, { file, source, replace, ...batch }: ValuesEvent): void => {
 		const uri = uriOf(file);
 		const run = runOf(uri, id, live);
+
+		// A report of every value so far (a preview's recorded stops), in place of the last: of the version that ran last,
+		// which a hot update may have changed.
+		if (replace === true) {
+			run.values = [];
+			run.calls.clear();
+			run.anchors = undefined;
+		}
 
 		anchorsFrom(run, file, source);
 		run.values.push(...batch.values);
@@ -570,7 +578,7 @@ export function installValues(context: vscode.ExtensionContext, log: ObservedExt
 		batchedAt.set(uri, Date.now());
 		// Running again past a capability stop: its question's answered, by whoever answered it. (A value set at the stop is
 		// told too, and the run's still waiting there.)
-		if (batch.values.some((value) => value.kind !== "set")) {
+		if (replace !== true && batch.values.some((value) => value.kind !== "set")) {
 			answered(id);
 		}
 

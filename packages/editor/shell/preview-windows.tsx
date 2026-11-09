@@ -222,6 +222,16 @@ function install(hub: Hub): void {
 		}
 	});
 
+	// A page's recorded stops (a breakpoint in its code: RUNNING.md), each report every hit so far: on to the editor's Margin,
+	// by the preview's session (workbench/preview-session.ts).
+	addEventListener("message", (event: MessageEvent) => {
+		const { channel, port, stops } = (event.data ?? {}) as { "channel"?: unknown; "port"?: unknown; "stops"?: unknown };
+
+		if (channel === "editor-stops" && event.origin === location.origin && typeof port === "number" && Array.isArray(stops)) {
+			hub.publish("stops.preview", { "port": port, "stops": stops });
+		}
+	});
+
 	// A server's run ended: its pages report now (its windows may stay open, the page left as it was).
 	hub.subscribe("evidence.flush", (data) => {
 		const { port } = (data ?? {}) as { "port"?: unknown };

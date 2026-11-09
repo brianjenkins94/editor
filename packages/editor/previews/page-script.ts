@@ -3,12 +3,15 @@
  * there before the app's modules run: runtime evidence's page runtime (page-evidence.ts), reporting to the editor showing
  * the preview. A report goes to the window the preview's top frame is in (the shell's preview window: its frames are
  * the dev server's, everything above them isn't), which passes it on as `evidence.preview` (shell/preview-windows.tsx); and
- * now, when the editor asks (`evidence.flush`, as its server's run ends).
+ * now, when the editor asks (`evidence.flush`, as its server's run ends). And its recorded stops (a breakpoint in a page's
+ * code: RUNNING.md), soon after each is hit, passed on as `stops.preview`.
  */
 import { installPageEvidence } from "./page-evidence";
 
 /** What a report is to the window hosting the preview. */
 const CHANNEL = "editor-evidence";
+/** And what a report of its recorded stops is. */
+const STOPS_CHANNEL = "editor-stops";
 
 /** The window the preview's top frame is in: above every frame of this dev server's (its pages are under
  *  `/__virtual__/<tab>/<port>/`), the first that isn't. */
@@ -43,6 +46,12 @@ if (to !== undefined) {
 			"page": page,
 			"modules": modules,
 			"packages": packages
+		}, location.origin);
+	}, (stops) => {
+		to.postMessage({
+			"channel": STOPS_CHANNEL,
+			"port": port,
+			"stops": stops
 		}, location.origin);
 	});
 

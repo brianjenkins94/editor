@@ -9,9 +9,11 @@ import type { SiteSums } from "../site-sums";
 import type { Runtime } from "./runtime";
 import type { Action, ForwardAction, Place, TraceContext, Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
+import { revive } from "@brianjenkins94/editor-api/recorded";
 import { layered } from "@brianjenkins94/editor-api/runtime";
 import { createVM, ProgramSyntaxError, TsvalInternalError } from "@brianjenkins94/tsval";
 import ts from "typescript";
+import { replayGuard, replayProgram } from "../replay-run";
 import { copySums } from "../site-sums";
 import { calledSeen, observeSite } from "./busy";
 import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffects, watchedOf } from "./gate";
@@ -1136,14 +1138,80 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	await session(loaded.vm, trace);
 }
 
-/** Launch a run. */
+/** A recorded call replayed for the debugger (RUNNING.md: stepping a recorded handler): the function run on what it read in
+ *  the page, its free names its globals, revived, and each call to something it couldn't record (a page's function, a DOM
+ *  method, the network) handed the result it had there, by where it was made and how many times; a call with a function
+ *  of the program's among its arguments (`items.map(fn)`) made for real, so the debugger steps into it. Its breakpoints
+ *  are the file's, the stop among them. */
+async function launchReplay(message: Extract<Control, { "type": "launch" }>, replay: NonNullable<Extract<Control, { "type": "launch" }>["replay"]>, trace: TraceContext | undefined): Promise<void> {
+	const { standIn, hostGuard } = replayGuard(replay);
+	const self = revive(replay.self, standIn);
+	const eventLoop = { "now": Date.now(), "seed": 1, "pace": "fast" as const };
+
+	state.live = false;
+	state.recordedResults = {};
+	state.runLayer = undefined;
+	startValues();
+
+	let loaded: ReturnType<typeof createVM>;
+
+	try {
+		loaded = createVM(replayProgram(message.source, replay.fn), {
+			"fileName": message.fileName,
+			"onBreakpoint": onBreakpointHook,
+			"coverage": true,
+			"observe": observeSite,
+			"trace": traceValue,
+			"eventLoop": eventLoop,
+			"asyncContext": asyncContext,
+			"sharedGlobals": state.runGlobal?.own,
+			"hostGuard": hostGuard,
+			"globals": {
+				...state.nodeGlobals,
+				"__self": typeof self === "object" && self !== null ? self : {},
+				"__args": replay.args.map((arg) => revive(arg, standIn)),
+				"console": guestConsole()
+			}
+		});
+	} catch (error) {
+		// (what it ran in the page, as text, doesn't parse here: said, and the replay ends)
+		post({ "type": "output", "text": `The recorded call can't be replayed: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}`, "stream": "stderr" });
+		finish(1);
+
+		return;
+	}
+
+	// What it read from outside itself, as the scope around it: bindings the debugger shows (and the call assigns to).
+	for (const [name, value] of Object.entries(replay.free)) {
+		loaded.vm.rootScope.bindings.set(name, { "value": revive(value, standIn), "kind": "let", "initialized": true });
+	}
+
+	state.evaluating = loaded.vm;
+	record(loaded.vm, new Map());
+	state.loopStart = eventLoop.now;
+	state.pace = "fast";
+	({ "sourceFile": state.sourceFile } = loaded);
+	state.policy = undefined;
+	state.userLines = message.lines;
+	state.fileLines = new Map();
+	state.programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
+	state.capabilityLines = new Map();
+	state.placeSets = new Map();
+	arm(loaded.vm);
+	state.history = [];
+	state.index = -1;
+	state.done = false;
+	await session(loaded.vm, trace);
+}
+
+/** Launch a run: its program's, or a recorded call's replay. */
 export function launch(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): void {
 	// Absent without cross-origin isolation: then a breakpoint inside a host-invoked handler can't pause (onBreakpointHook).
 	state.control = message.control === undefined
 		? undefined
 		: new Int32Array(message.control);
-	workerLog().info("launch", { "file": message.fileName, "breakpoints": message.lines.length });
-	void launchProgram(message, trace);
+	workerLog().info("launch", { "file": message.fileName, "breakpoints": message.lines.length, "replay": message.replay !== undefined });
+	void (message.replay === undefined ? launchProgram(message, trace) : launchReplay(message, message.replay, trace));
 }
 
 export function setBreakpoints(message: Extract<Control, { "type": "setBreakpoints" }>): void {

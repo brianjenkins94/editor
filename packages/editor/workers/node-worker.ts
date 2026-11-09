@@ -45,7 +45,7 @@ const workspaceReady = rpc.request("workspace.buffer", undefined, { "timeoutMs":
 
 let vfs: ReturnType<typeof createZenfsVFS> | undefined;
 
-type DevServer = RequestHandler & { "start": () => void; "stop": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown) => void }) => void; "setTransformErrorReporter": (report: (info: Record<string, unknown>) => void) => void; "notifyChange": (path: string) => void };
+type DevServer = RequestHandler & { "start": () => void; "stop": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown) => void }) => void; "setTransformErrorReporter": (report: (info: Record<string, unknown>) => void) => void; "notifyChange": (path: string) => void; "setStops": (stops: Record<string, number[]>) => string[] };
 
 /** The dev servers started here, by port, and the folder each serves. */
 const servers = new Map<number, DevServer>();
@@ -61,6 +61,20 @@ const stopped = new Map<number, DevServer>();
 
 /** The ports whose dev server instruments what it serves (runtime evidence: page-evidence.ts counts in the page). */
 const instrumenting = new Set<number>();
+
+/** The recorded stops (RUNNING.md: a breakpoint in a page), by file: every dev server's, a new one's from its start. */
+let stops: Record<string, number[]> = {};
+
+/** `server` (on `port`) given the recorded stops: the files whose stops changed are hot-updated, re-instrumented. */
+function applyStops(port: number, server: DevServer): void {
+	const root = roots.get(port);
+
+	for (const file of server.setStops(stops)) {
+		if (root !== undefined && file.startsWith(`${root}/`)) {
+			server.notifyChange(file.slice(root.length));
+		}
+	}
+}
 
 function nobody(port: number): WireResponse {
 	return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${String(port)}`) };
@@ -139,6 +153,7 @@ serve(hub, "preview.start", async (raw): Promise<{ "port": number }> => {
 		servers.set(port, server);
 		stopped.delete(port);
 		roots.set(port, root.replace(/\/+$/u, ""));
+		applyStops(port, server);
 		architecture.spawn({ "id": `vite:${String(port)}`, "label": `Vite dev server :${String(port)}`, "container": "workers", "detail": root, "dynamic": true });
 
 		return { "port": port };
@@ -151,6 +166,19 @@ serve(hub, "preview.version", (raw) => {
 	const { port, oid } = raw as { "port": number; "oid": string };
 
 	return (servers.get(port) ?? stopped.get(port))?.versionSource(oid) ?? {};
+});
+
+// The recorded stops, from the editor's breakpoints (extensions/bridge/recorded-stops.ts): every dev server's from now on.
+serve(hub, "preview.stops", (raw) => {
+	const { "stops": given } = (raw ?? {}) as { "stops"?: unknown };
+
+	stops = typeof given === "object" && given !== null ? given as Record<string, number[]> : {};
+
+	for (const [port, server] of servers) {
+		applyStops(port, server);
+	}
+
+	return true;
 });
 
 serve(hub, "preview.stop", (raw) => {
