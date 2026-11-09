@@ -151,6 +151,13 @@ with the app's frames moved through each module's inline source map to the lines
 and the insights extension lists the app's busiest functions, each opening at its line (extensions/insights/profiles.ts).
 Agents profile the same way (`previews_profile`).
 
+The active debug session's toolbar is in the title bar of the preview window it drives too: VS Code draws its own inside
+the workbench's frame, so the bridge tells the shell what the session is (`debug.state`: its type, whether it's paused,
+and the port it gives as `__port`) and the shell draws continue or pause, the steps and restart in the window of that
+port you used last, each sent back as the built-in command (`debug.command`, extensions/bridge/debug-toolbar.ts). A dev
+server's own session has Restart there; a recorded call of its page being stepped (RUNNING.md, *Apps: recorded stops,
+not live ones*) has the steps. No stop: closing the window does that.
+
 ### Previews (out until reintroduced)
 
 The rewrite took the rest of previews out (*The rewrite, in place*): their taps and evidence, and the service worker's

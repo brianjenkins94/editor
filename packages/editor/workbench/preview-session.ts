@@ -102,6 +102,8 @@ export function installPreviewSessions(vscode: typeof vscodeApi, runner: NodeRun
 				"request": "launch",
 				"name": `Preview :${String(port)}`,
 				"service": service.id,
+				// (the preview window its toolbar is drawn in too: extensions/bridge/debug-toolbar.ts)
+				"__port": port,
 				"internalConsoleOptions": "neverOpen"
 			}, { "noDebug": true, "suppressDebugStatusbar": true, "suppressDebugView": true }));
 		}

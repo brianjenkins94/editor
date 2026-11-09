@@ -14,6 +14,7 @@ import { ARCH_COMMANDS } from "../command-tap";
 import { registerCapabilityStops } from "./capability-stops";
 import { serveDebugControl } from "./debug-control";
 import { registerDebugEvents } from "./debug-events";
+import { registerDebugToolbar } from "./debug-toolbar";
 import { bridgeHub, workspace, workspaceRuntime } from "./hub";
 import { installPreviewGate } from "./preview-gate";
 import { serveRuntimeFiles } from "./runtime-fs";
@@ -76,6 +77,8 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	registerCapabilityStops(context);
 	// Every debugger's sessions, driven by an agent as a person does: Run, steps, breakpoints, answers (debug-control.ts).
 	serveDebugControl(context, bridgeHub, bridgeLog);
+	// The active session's toolbar, in the title bar of the preview window it drives too (debug-toolbar.ts).
+	registerDebugToolbar(context, bridgeHub);
 
 	// Each extension host's command totals (extensions/command-tap.ts): the extensions, and the commands between them, on
 	// the architecture view — discovered, not declared (ARCHITECTURE.md, *Discovered, not declared*). A host sends its totals; what's new

@@ -91,7 +91,7 @@ export function installRecordedStops(vscode: typeof vscodeApi, hub: Hub, log: Lo
 				return false;
 			}
 
-			return vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `${labelOf(chosen)} (recorded)`, "program": chosen.stop.file, "replay": { ...chosen.hit.replay, "source": answer.source } });
+			return vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `${labelOf(chosen)} (recorded)`, "program": chosen.stop.file, "replay": { ...chosen.hit.replay, "source": answer.source }, "__port": chosen.port });
 		});
 	});
 

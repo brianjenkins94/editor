@@ -10,7 +10,9 @@
  *
  * Each window has Chrome's DevTools for its page, docked under it (preview-devtools.ts), from its title bar; the same
  * DevTools protocol is a hub request (`preview.cdp`), which agents use too. And a CPU profile of its page, asked for from
- * its title bar (or `preview.profile`) and taken when it keeps running slow (preview-profile.ts).
+ * its title bar (or `preview.profile`) and taken when it keeps running slow (preview-profile.ts). And the debug toolbar of
+ * the session that drives a window's page (its dev server's own, or a recorded call of it being stepped), in the title bar
+ * of the window of its port you used last (extensions/bridge/debug-toolbar.ts tells which, `debug.state`).
  *
  * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): each
  * test's page has a window of its own while it runs, so tests can run at once: the one it opens by going somewhere, or else
@@ -22,10 +24,11 @@ import type { ShellFeature } from "./feature";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { appWindow } from "@brianjenkins94/app-window";
 import { serve } from "@brianjenkins94/hub";
-import { AppWindow, Bug, Gauge } from "lucide";
+import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Gauge, Pause, Play, Redo2, RotateCcw } from "lucide";
 import { render } from "preact";
 import { useState } from "preact/hooks";
 import { previewBody, previewFrame } from "theme/styles/shell";
+import { createStore, useStore } from "./feature";
 import { Icon } from "./icon";
 import { askInWindow, type PreviewAsk } from "./preview-ask";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
@@ -56,15 +59,49 @@ interface Server { "url": string; "windows": Set<HTMLElement>; "opened": number;
 /** A window with no server (a test's page, before it goes anywhere): its own, as a server's port is. */
 const NO_SERVER = 0;
 
-/** A window's title bar's own controls: another window onto its server, a CPU profile of its page, and DevTools docked
- *  under its page or not. */
-function WindowActions({ another, profile, devtools }: { "another": () => void; "profile": () => Promise<unknown>; "devtools": () => boolean }) {
+/** The active debug session, as the bridge tells it (`debug.state`), and the window whose title bar has its toolbar. */
+interface DebugState { "active": boolean; "type": string; "paused": boolean; "port"?: number }
+
+const debugging = createStore<{ "state": DebugState; "window"?: string }>({ "state": { "active": false, "type": "", "paused": false } });
+
+/** The active session's toolbar, in the title bar of the window it drives: continue or pause and the steps for one that
+ *  steps (any but a dev server's own), and restart. No stop: closing the window does that, as it always has. */
+function DebugButtons({ window, command }: { "window": string; "command": (name: string) => void }) {
+	const { state, "window": target } = useStore(debugging);
+
+	if (target !== window) {
+		return null;
+	}
+
+	const button = (icon: Parameters<typeof Icon>[0]["node"], name: string, title: string, enabled = true) => (
+		<wa-button appearance="plain" size="small" title={title} aria-label={title} disabled={!enabled} onClick={() => { command(name); }}><Icon node={icon} /></wa-button>
+	);
+
+	return (
+		<>
+			{state.type !== "preview" && (
+				<>
+					{state.paused ? button(Play, "continue", "Continue") : button(Pause, "pause", "Pause")}
+					{button(Redo2, "stepOver", "Step Over", state.paused)}
+					{button(ArrowDownToLine, "stepInto", "Step Into", state.paused)}
+					{button(ArrowUpToLine, "stepOut", "Step Out", state.paused)}
+				</>
+			)}
+			{button(RotateCcw, "restart", "Restart")}
+		</>
+	);
+}
+
+/** A window's title bar's own controls: the debug toolbar of the session driving its page, another window onto its
+ *  server, a CPU profile of its page, and DevTools docked under its page or not. */
+function WindowActions({ window, command, another, profile, devtools }: { "window": string; "command": (name: string) => void; "another": () => void; "profile": () => Promise<unknown>; "devtools": () => boolean }) {
 	const [docked, setDocked] = useState(false);
 	const [profiling, setProfiling] = useState(false);
 	const title = `Profile its page for ${String(PROFILE_MS / 1000)} seconds`;
 
 	return (
 		<>
+			<DebugButtons window={window} command={command} />
 			<wa-button appearance="plain" size="small" title="Another window onto this server" aria-label="Another window onto this server" onClick={another}><Icon node={AppWindow} /></wa-button>
 			<wa-button
 				appearance="plain"
@@ -110,9 +147,21 @@ function install(hub: Hub): void {
 		? used.findLast((each) => port === undefined || servers.get(port)?.windows.has(each) === true)
 		: used.find((each) => each.dataset["previewWindow"] === key));
 
+	/** The window the active session's toolbar goes in: its port's you used last. */
+	const retarget = (): void => {
+		const { state } = debugging.get();
+		const windows = state.port === undefined ? undefined : servers.get(state.port)?.windows;
+		const target = state.active ? used.findLast((element) => windows?.has(element) === true) : undefined;
+
+		if (target?.dataset["previewWindow"] !== debugging.get().window) {
+			debugging.set({ "window": target?.dataset["previewWindow"] });
+		}
+	};
+
 	const useWindow = (element: HTMLElement): void => {
 		used.splice(used.indexOf(element) >>> 0, 1);
 		used.push(element);
+		retarget();
 	};
 
 	const open = (port: number): HTMLElement | undefined => {
@@ -148,6 +197,7 @@ function install(hub: Hub): void {
 				element.remove();
 				used.splice(used.indexOf(element) >>> 0, 1);
 				server.windows.delete(element);
+				retarget();
 
 				if (server.windows.size === 0 && port !== NO_SERVER) {
 					hub.publish("preview.close", { "port": port });
@@ -159,6 +209,8 @@ function install(hub: Hub): void {
 		// (its key: `5173~2` is the port's second window, as DevTools and `preview.cdp` know it)
 		element.dataset["previewWindow"] = `${String(port)}~${String(server.opened + 1)}`;
 		render(<WindowActions
+			window={element.dataset["previewWindow"]}
+			command={(name) => { hub.publish("debug.command", { "command": name }); }}
 			another={() => { open(port); }}
 			profile={async () => {
 				const found = profiled(element);
@@ -193,6 +245,13 @@ function install(hub: Hub): void {
 
 		return element;
 	};
+
+	// The active debug session, for its toolbar (extensions/bridge/debug-toolbar.ts): asked now, as the bridge may be first.
+	hub.subscribe("debug.state", (data) => {
+		debugging.set({ "state": data as DebugState });
+		retarget();
+	});
+	hub.publish("debug.state.ask", {});
 
 	// The DevTools protocol onto a window's page.
 	installPreviewCdp(hub, (asked) => {
@@ -304,6 +363,7 @@ function install(hub: Hub): void {
 			}
 
 			servers.delete(port);
+			retarget();
 		}
 	});
 
@@ -355,6 +415,7 @@ function install(hub: Hub): void {
 				element.remove();
 				used.splice(used.indexOf(element) >>> 0, 1);
 				servers.get(NO_SERVER)?.windows.delete(element);
+				retarget();
 			}
 
 			return undefined;

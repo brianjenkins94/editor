@@ -544,16 +544,23 @@
     ]
   },
   "Debug toolbar in the preview title bar": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "The pause, step, restart and stop buttons also appear in the preview window's title bar and control the same session.",
+    "status": "active",
+    "why": "reintroduced: the session driving a preview's page stepped from that page's window, where you're looking; the objective is rough feature parity with full-editor",
+    "since": "2026-11-09",
+    "what": "The active debug session's continue or pause, steps and restart also appear in the title bar of the preview window it drives (the window of its port you used last), and control the same session: a dev server's own session has Restart there, a recorded call of its page being stepped has the steps too.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Preview windows*",
     "ways": [
       "debug adapter tracker provider|*|bridge/debug-toolbar.ts",
-      "hub subscription|debug.command"
+      "hub subscription|debug.command",
+      "hub subscription|debug.state",
+      "hub subscription|debug.state.ask"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/bridge/debug-toolbar.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/recorded-stops.spec.mjs"
+    ]
   },
   "Dependency baseline and exceptions": {
     "status": "removed",
