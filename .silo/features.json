@@ -1567,24 +1567,30 @@
     ]
   },
   "Preview CPU profiles": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Profile a preview's page on demand, and automatically when it keeps running slow, saving each profile as a .cpuprofile mapped back to the lines you wrote.",
+    "status": "active",
+    "why": "reintroduced: where a previewed app's time goes, on the lines you wrote, asked for from its window or taken when it keeps running slow; and agents ask the same. The objective is rough feature parity with full-editor",
+    "since": "2026-11-09",
+    "what": "A Profile button in each preview window's title bar samples its page for 5 seconds (the JS Self-Profiling API), and a page that keeps running slow is profiled without being asked. Each is kept as a .cpuprofile under .silo/local/profiles/ with the app's frames mapped to the lines written, and the app's busiest functions are listed, each opening at its line: at once when asked for, a notification away when it ran slow. Agents profile the same way.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Preview windows*",
     "ways": [
       "agent tool|previews_profile",
+      "command|insights.profiles.saved",
       "core module|installAutoProfiler",
       "core module|installPreviewProfiler",
       "core module|installProfileFiles",
       "hub request|PREVIEW_PROFILE",
-      "hub subscription|PREVIEW_PROFILED"
+      "hub subscription|preview.profiled"
     ],
     "paths": [
+      "packages/editor/app/tools/profiles/",
       "packages/editor/extensions/insights/profiles.ts",
+      "packages/editor/shell/preview-profile.ts",
+      "packages/editor/workbench/profile-files.ts",
       "packages/editor/workbench/sourcemap.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "git checkout full-editor -- packages/editor/extensions/insights/profiles.ts packages/editor/workbench/sourcemap.ts"
+    "tests": [
+      "packages/editor/test/in-editor/preview-profile.spec.mjs"
+    ]
   },
   "Preview DevTools": {
     "status": "active",

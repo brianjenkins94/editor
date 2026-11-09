@@ -9,7 +9,8 @@
  * the server (`preview.close`), which is how a preview is dismissed; a server stopped elsewhere closes its windows.
  *
  * Each window has Chrome's DevTools for its page, docked under it (preview-devtools.ts), from its title bar; the same
- * DevTools protocol is a hub request (`preview.cdp`), which agents use too.
+ * DevTools protocol is a hub request (`preview.cdp`), which agents use too. And a CPU profile of its page, asked for from
+ * its title bar (or `preview.profile`) and taken when it keeps running slow (preview-profile.ts).
  *
  * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): each
  * test's page has a window of its own while it runs, so tests can run at once: the one it opens by going somewhere, or else
@@ -21,13 +22,14 @@ import type { ShellFeature } from "./feature";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { appWindow } from "@brianjenkins94/app-window";
 import { serve } from "@brianjenkins94/hub";
-import { AppWindow, Bug } from "lucide";
+import { AppWindow, Bug, Gauge } from "lucide";
 import { render } from "preact";
 import { useState } from "preact/hooks";
 import { previewBody, previewFrame } from "theme/styles/shell";
 import { Icon } from "./icon";
 import { askInWindow, type PreviewAsk } from "./preview-ask";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
+import { createPreviewProfiler, installAutoProfiler, installPreviewProfiler, PROFILE_MS } from "./preview-profile";
 import "theme/components/button";
 
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
@@ -54,13 +56,30 @@ interface Server { "url": string; "windows": Set<HTMLElement>; "opened": number;
 /** A window with no server (a test's page, before it goes anywhere): its own, as a server's port is. */
 const NO_SERVER = 0;
 
-/** A window's title bar's own controls: another window onto its server, and DevTools docked under its page or not. */
-function WindowActions({ another, devtools }: { "another": () => void; "devtools": () => boolean }) {
+/** A window's title bar's own controls: another window onto its server, a CPU profile of its page, and DevTools docked
+ *  under its page or not. */
+function WindowActions({ another, profile, devtools }: { "another": () => void; "profile": () => Promise<unknown>; "devtools": () => boolean }) {
 	const [docked, setDocked] = useState(false);
+	const [profiling, setProfiling] = useState(false);
+	const title = `Profile its page for ${String(PROFILE_MS / 1000)} seconds`;
 
 	return (
 		<>
 			<wa-button appearance="plain" size="small" title="Another window onto this server" aria-label="Another window onto this server" onClick={another}><Icon node={AppWindow} /></wa-button>
+			<wa-button
+				appearance="plain"
+				size="small"
+				title={profiling ? "Profiling its page…" : title}
+				aria-label={profiling ? "Profiling its page" : "Profile its page"}
+				loading={profiling}
+				onClick={() => {
+					setProfiling(true);
+					// (what it found goes where every profile does: workbench/profile-files.ts; a failure is the profiler's span's)
+					void profile().catch(() => undefined).finally(() => { setProfiling(false); });
+				}}
+			>
+				<Icon node={Gauge} />
+			</wa-button>
 			<wa-button appearance={docked ? "filled" : "plain"} size="small" title={docked ? "Close DevTools" : "DevTools"} aria-label={docked ? "Close DevTools" : "DevTools"} onClick={() => { setDocked(devtools()); }}><Icon node={Bug} /></wa-button>
 		</>
 	);
@@ -77,6 +96,19 @@ function install(hub: Hub): void {
 	const used: HTMLElement[] = [];
 	/** What closes each window's DevTools, while it's docked. */
 	const undock = new WeakMap<HTMLElement, () => void>();
+	const profile = createPreviewProfiler(hub);
+
+	/** A window, as profiling it has it. */
+	const profiled = (element: HTMLElement): { "key": string; "port": number; "page": Window } | undefined => {
+		const page = element.querySelector("iframe")?.contentWindow;
+
+		return page === null || page === undefined ? undefined : { "key": element.dataset["previewWindow"]!, "port": Number(element.dataset["previewPort"]), "page": page };
+	};
+
+	/** A window by its key, else the port's you used last, else the one you used last. */
+	const windowAt = ({ key, port }: { "key"?: string; "port"?: number }): HTMLElement | undefined => (key === undefined
+		? used.findLast((each) => port === undefined || servers.get(port)?.windows.has(each) === true)
+		: used.find((each) => each.dataset["previewWindow"] === key));
 
 	const useWindow = (element: HTMLElement): void => {
 		used.splice(used.indexOf(element) >>> 0, 1);
@@ -128,6 +160,11 @@ function install(hub: Hub): void {
 		element.dataset["previewWindow"] = `${String(port)}~${String(server.opened + 1)}`;
 		render(<WindowActions
 			another={() => { open(port); }}
+			profile={async () => {
+				const found = profiled(element);
+
+				return found === undefined ? undefined : profile(found, "asked");
+			}}
 			devtools={() => {
 				if (devtools === undefined) {
 					devtools = openDevtoolsPanel(hub, element.dataset["previewWindow"]!, frame);
@@ -157,15 +194,22 @@ function install(hub: Hub): void {
 		return element;
 	};
 
-	// The DevTools protocol onto a window's page: by its key, else the port's you used last, else the one you used last.
-	installPreviewCdp(hub, ({ key, port }) => {
-		const element = key === undefined
-			? used.findLast((each) => port === undefined || servers.get(port)?.windows.has(each) === true)
-			: used.find((each) => each.dataset["previewWindow"] === key);
+	// The DevTools protocol onto a window's page.
+	installPreviewCdp(hub, (asked) => {
+		const element = windowAt(asked);
 		const frame = element?.querySelector("iframe");
 
 		return element === undefined || frame === null || frame === undefined ? undefined : { "key": element.dataset["previewWindow"]!, "frame": frame };
 	});
+
+	// A profile of a window's page, asked for, and of a server's that keeps running slow (not a test's page: in-editor
+	// Playwright's, an editor of its own as often as not).
+	installPreviewProfiler(hub, profile, (asked) => {
+		const element = windowAt(asked);
+
+		return element === undefined ? undefined : profiled(element);
+	});
+	installAutoProfiler(profile, () => used.filter((element) => element.dataset["previewPort"] !== String(NO_SERVER)).flatMap((element) => profiled(element) ?? []));
 
 	// A page's runtime evidence (previews/page-script.ts posts it here, the window its preview is in): on to the core, as
 	// its server's (evidence.ts finds the run by the port). By the port the page says, as its last report comes as its

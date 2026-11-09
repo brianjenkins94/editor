@@ -207,10 +207,12 @@ const rpc = createRpcClient(swHub);
 // (a tab's root links only after this worker starts: a request may get here first)
 const RESPONDER_WAIT_MS = 10_000;
 
-// Add the isolation and iframe-embedding headers a dev server's response needs.
+// Add the isolation and iframe-embedding headers a dev server's response needs, and the JS Self-Profiling policy, so the
+// editor can profile a preview's page (shell/preview-profile.ts): a Profiler can be made only in a document served with it.
 function virtualHeaders(source) {
 	const headers = new Headers(source || {});
 
+	headers.set("Document-Policy", "js-profiling");
 	headers.set("Cross-Origin-Embedder-Policy", COEP);
 	headers.set("Cross-Origin-Opener-Policy", "same-origin");
 	headers.set("Cross-Origin-Resource-Policy", "cross-origin");

@@ -143,6 +143,14 @@ a JavaScript implementation of it added to the page on first use (`preview.cdp`,
 `preview.cdp.event.<window>`). The page is same-origin with the shell, so it's in reach without a debugger attached; what
 chobitsu can't do is pause, which is the tsval debugger's. Agents send the same protocol (`previews_cdp`).
 
+Its Profile button samples its page for 5 seconds with the JS Self-Profiling API (shell/preview-profile.ts), which the
+service worker allows by serving every preview document with `Document-Policy: js-profiling`; a server's page that keeps
+running slow (much of its time in long animation frames, two windows of 2 s in a row) is profiled without being asked, at
+most every 2 minutes. Each profile is published (`preview.profiled`), kept as a `.cpuprofile` under `.silo/local/profiles/`
+with the app's frames moved through each module's inline source map to the lines written (workbench/profile-files.ts),
+and the insights extension lists the app's busiest functions, each opening at its line (extensions/insights/profiles.ts).
+Agents profile the same way (`previews_profile`).
+
 ### Previews (out until reintroduced)
 
 The rewrite took the rest of previews out (*The rewrite, in place*): their taps and evidence, and the service worker's

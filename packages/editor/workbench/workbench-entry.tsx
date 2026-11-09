@@ -66,6 +66,7 @@ import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installPaneViews } from "./pane-views";
 import { installPreviewSessions } from "./preview-session";
+import { installProfileFiles } from "./profile-files";
 import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS, serveOrigin } from "./project";
 import { markReady, whenDebuggerUp } from "./readiness";
 import { installScriptRun } from "./script-run";
@@ -474,6 +475,8 @@ function maybeBoot(): void {
 				installPreviewSessions(api as typeof import("vscode"), nodeRunner, workbenchHub, paneLog);
 				// What runs observed, kept in git beside the code (evidence.ts; RUNTIME-EVIDENCE.md).
 				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr, paneLog);
+				// A preview's profiles, kept source-mapped, for the insights extension to say where its time went.
+				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, paneLog);
 
 				// Uplink the extension bridge to the page: a workbench hub bridges the bridge (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
