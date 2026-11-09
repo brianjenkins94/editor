@@ -137,6 +137,12 @@ editor: an iframe on the server's address, as many per server as you open. Each 
 window of it and every frame its app nests, where the dev server's client in the page applies them. Closing a server's last
 window stops the server; a server stopped elsewhere closes its windows.
 
+Each window's DevTools button docks Chrome's DevTools under its page (shell/preview-devtools.ts): chii's frontend, from
+jsDelivr in a sandboxed frame of an opaque origin, speaks the DevTools protocol to the shell, which answers through chobitsu,
+a JavaScript implementation of it added to the page on first use (`preview.cdp`, each page's events on
+`preview.cdp.event.<window>`). The page is same-origin with the shell, so it's in reach without a debugger attached; what
+chobitsu can't do is pause, which is the tsval debugger's. Agents send the same protocol (`previews_cdp`).
+
 ### Previews (out until reintroduced)
 
 The rewrite took the rest of previews out (*The rewrite, in place*): their taps and evidence, and the service worker's

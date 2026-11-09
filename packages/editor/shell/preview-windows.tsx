@@ -8,6 +8,9 @@
  * the dev server's client in the page applies them. Closing a window closes just it, but closing a server's last one stops
  * the server (`preview.close`), which is how a preview is dismissed; a server stopped elsewhere closes its windows.
  *
+ * Each window has Chrome's DevTools for its page, docked under it (preview-devtools.ts), from its title bar; the same
+ * DevTools protocol is a hub request (`preview.cdp`), which agents use too.
+ *
  * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): each
  * test's page has a window of its own while it runs, so tests can run at once: the one it opens by going somewhere, or else
  * the one you've used last that no other page has. A preview's frame is same-origin with the shell, so its DOM is right here.
@@ -15,13 +18,16 @@
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ShellFeature } from "./feature";
+import type { DevtoolsPanel } from "./preview-devtools";
 import { appWindow } from "@brianjenkins94/app-window";
 import { serve } from "@brianjenkins94/hub";
-import { AppWindow } from "lucide";
+import { AppWindow, Bug } from "lucide";
 import { render } from "preact";
-import { previewFrame } from "theme/styles/shell";
+import { useState } from "preact/hooks";
+import { previewBody, previewFrame } from "theme/styles/shell";
 import { Icon } from "./icon";
 import { askInWindow, type PreviewAsk } from "./preview-ask";
+import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import "theme/components/button";
 
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
@@ -30,6 +36,9 @@ const FIRST_AT = 96;
 const WIDTH = 720;
 const HEIGHT = 480;
 const FEWEST_PLACES = 4;
+/** How much taller a window gets while DevTools is docked in it, as far as the page below it allows, so the app keeps
+ *  its room. */
+const DEVTOOLS_HEIGHT = 340;
 
 /** Where the `opened`th window opens: the cascade goes round again before a window would leave the page, as what's off the
  *  page stops being drawn (xterm's rendering pauses, for one) and can't be reached. (`CASCADE` of room kept for the title
@@ -45,6 +54,18 @@ interface Server { "url": string; "windows": Set<HTMLElement>; "opened": number;
 /** A window with no server (a test's page, before it goes anywhere): its own, as a server's port is. */
 const NO_SERVER = 0;
 
+/** A window's title bar's own controls: another window onto its server, and DevTools docked under its page or not. */
+function WindowActions({ another, devtools }: { "another": () => void; "devtools": () => boolean }) {
+	const [docked, setDocked] = useState(false);
+
+	return (
+		<>
+			<wa-button appearance="plain" size="small" title="Another window onto this server" aria-label="Another window onto this server" onClick={another}><Icon node={AppWindow} /></wa-button>
+			<wa-button appearance={docked ? "filled" : "plain"} size="small" title={docked ? "Close DevTools" : "DevTools"} aria-label={docked ? "Close DevTools" : "DevTools"} onClick={() => { setDocked(devtools()); }}><Icon node={Bug} /></wa-button>
+		</>
+	);
+}
+
 /** A window's frame and every frame its app nests: each has a client of its own, which acts only on what it loaded. */
 function framesUnder(root: Window): Window[] {
 	return [root, ...Array.from({ "length": root.frames.length }, (_, index) => framesUnder(root.frames[index]!)).flat()];
@@ -54,6 +75,8 @@ function install(hub: Hub): void {
 	const servers = new Map<number, Server>();
 	/** The windows, the one last used last. */
 	const used: HTMLElement[] = [];
+	/** What closes each window's DevTools, while it's docked. */
+	const undock = new WeakMap<HTMLElement, () => void>();
 
 	const useWindow = (element: HTMLElement): void => {
 		used.splice(used.indexOf(element) >>> 0, 1);
@@ -68,23 +91,28 @@ function install(hub: Hub): void {
 		}
 
 		const frame = document.createElement("iframe");
-		const another = document.createElement("div");
+		const body = document.createElement("div");
+		const actions = document.createElement("div");
 		const at = cascadeAt(server.opened);
+		let devtools: DevtoolsPanel | undefined;
 
 		frame.className = previewFrame();
 		frame.title = port === NO_SERVER ? "Preview" : `Preview :${String(port)}`;
 		frame.allow = "cross-origin-isolated";
 		frame.src = server.url;
-		render(<wa-button appearance="plain" size="small" title="Another window onto this server" aria-label="Another window onto this server" onClick={() => { open(port); }}><Icon node={AppWindow} /></wa-button>, another);
+		// (the page, and DevTools under it while it's docked)
+		body.className = `wa-stack wa-gap-0 ${previewBody()}`;
+		body.append(frame);
 
 		const element = appWindow({
 			"label": port === NO_SERVER ? "Preview" : `Preview :${String(port)}`,
 			"closable": true,
 			"width": WIDTH,
 			"bodyHeight": HEIGHT,
-			"headerActions": [another],
-			"children": [frame],
+			"headerActions": [actions],
+			"children": [body],
 			"onClose": () => {
+				undock.get(element)?.();
 				element.remove();
 				used.splice(used.indexOf(element) >>> 0, 1);
 				server.windows.delete(element);
@@ -96,6 +124,26 @@ function install(hub: Hub): void {
 		});
 
 		element.dataset["previewPort"] = String(port);
+		// (its key: `5173~2` is the port's second window, as DevTools and `preview.cdp` know it)
+		element.dataset["previewWindow"] = `${String(port)}~${String(server.opened + 1)}`;
+		render(<WindowActions
+			another={() => { open(port); }}
+			devtools={() => {
+				if (devtools === undefined) {
+					devtools = openDevtoolsPanel(hub, element.dataset["previewWindow"]!, frame);
+					undock.set(element, devtools.dispose);
+					body.append(devtools.element);
+					element.setAttribute("body-height", String(Math.max(HEIGHT, Math.min(HEIGHT + DEVTOOLS_HEIGHT, window.innerHeight - element.getBoundingClientRect().top - FIRST_AT))));
+				} else {
+					devtools.dispose();
+					undock.delete(element);
+					devtools = undefined;
+					element.setAttribute("body-height", String(HEIGHT));
+				}
+
+				return devtools !== undefined;
+			}}
+		/>, actions);
 		element.initialLeft = at;
 		element.initialTop = at;
 		server.opened += 1;
@@ -108,6 +156,16 @@ function install(hub: Hub): void {
 
 		return element;
 	};
+
+	// The DevTools protocol onto a window's page: by its key, else the port's you used last, else the one you used last.
+	installPreviewCdp(hub, ({ key, port }) => {
+		const element = key === undefined
+			? used.findLast((each) => port === undefined || servers.get(port)?.windows.has(each) === true)
+			: used.find((each) => each.dataset["previewWindow"] === key);
+		const frame = element?.querySelector("iframe");
+
+		return element === undefined || frame === null || frame === undefined ? undefined : { "key": element.dataset["previewWindow"]!, "frame": frame };
+	});
 
 	// A page's runtime evidence (previews/page-script.ts posts it here, the window its preview is in): on to the core, as
 	// its server's (evidence.ts finds the run by the port). By the port the page says, as its last report comes as its
@@ -186,6 +244,7 @@ function install(hub: Hub): void {
 			server.offUpdates();
 
 			for (const element of server.windows) {
+				undock.get(element)?.();
 				element.remove();
 				used.splice(used.indexOf(element) >>> 0, 1);
 			}
@@ -238,6 +297,7 @@ function install(hub: Hub): void {
 
 			// (nor is one closed while its counts are to be read, COVERAGE=1's: the harness closes it, having read them)
 			if (element !== undefined && openedForPage.delete(element) && given[0] !== true && !("__evidence" in globalThis)) {
+				undock.get(element)?.();
 				element.remove();
 				used.splice(used.indexOf(element) >>> 0, 1);
 				servers.get(NO_SERVER)?.windows.delete(element);

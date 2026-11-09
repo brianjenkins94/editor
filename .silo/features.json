@@ -1587,18 +1587,24 @@
     "restore": "git checkout full-editor -- packages/editor/extensions/insights/profiles.ts packages/editor/workbench/sourcemap.ts"
   },
   "Preview DevTools": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Chrome's DevTools docked under a preview window (console, elements, network), and the same DevTools protocol for agents.",
+    "status": "active",
+    "why": "reintroduced: a previewed app's console, elements and network where its window is, without leaving the editor; and agents ask its page the same. The objective is rough feature parity with full-editor",
+    "since": "2026-11-09",
+    "what": "A DevTools button in each preview window's title bar docks Chrome's DevTools (console, elements, network, application) under its page, talking to it over the hub through chobitsu, added to the page on first use; agents send the same DevTools protocol.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Preview windows*",
     "ways": [
       "agent tool|previews_cdp",
       "core module|installPreviewCdp",
       "hub request|PREVIEW_CDP",
       "hub subscription|PREVIEW_CDP_EVENT + key"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/app/tools/previews/",
+      "packages/editor/shell/preview-devtools.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/preview-devtools.spec.mjs"
+    ]
   },
   "Preview windows": {
     "status": "active",

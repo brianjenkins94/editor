@@ -91,7 +91,13 @@ export const overlay = css({
 export const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-font-family-code)" });
 
 /** A preview window's page, filling its body, on a browser page's own background (a frame is transparent). */
-export const previewFrame = css({ "display": "block", "width": "100%", "height": "100%", "border": "none", "background": "Canvas" });
+export const previewFrame = css({ "display": "block", "flex": "1 1 0", "minHeight": 0, "width": "100%", "height": "100%", "border": "none", "background": "Canvas" });
+
+/** A preview window's body: its page, and DevTools under it while it's docked, edge to edge, so the page has all of it. */
+export const previewBody = css({ "--app-window-padding": "0" });
+
+/** Chrome's DevTools, docked under a preview window's page (shell/preview-devtools.ts). */
+export const previewDevtools = css({ "flex": "0 0 45%", "minHeight": 0, "borderBlockStart": "var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border)", "& > iframe": { "display": "block", "border": 0, "width": "100%", "height": "100%" } });
 
 /** A preview's questions, over the top of its page. */
 export const previewAsks = css({ "alignSelf": "start", "zIndex": 1 });
