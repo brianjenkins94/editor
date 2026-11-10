@@ -144,12 +144,9 @@ a JavaScript implementation of it added to the page on first use (`preview.cdp`,
 chobitsu can't do is pause, which is the tsval debugger's. Agents send the same protocol (`previews_cdp`).
 
 Its Profile button samples its page for 5 seconds with the JS Self-Profiling API (shell/preview-profile.ts), which the
-service worker allows by serving every preview document with `Document-Policy: js-profiling`; a server's page that keeps
-running slow (much of its time in long animation frames, two windows of 2 s in a row) is profiled without being asked, at
-most every 2 minutes. Each profile is published (`preview.profiled`), kept as a `.cpuprofile` under `.silo/local/profiles/`
-with the app's frames moved through each module's inline source map to the lines written (workbench/profile-files.ts),
-and the insights extension lists the app's busiest functions, each opening at its line (extensions/insights/profiles.ts).
-Agents profile the same way (`previews_profile`).
+service worker allows by serving every preview document with `Document-Policy: js-profiling`. Each profile is published
+(`preview.profiled`), and each of the app's functions' time is kept with its server's run, shown on the function's line
+(RUNTIME-EVIDENCE.md, *Time*). Agents profile the same way (`previews_profile`).
 
 The active debug session's toolbar is in the title bar of the preview window it drives too: VS Code draws its own inside
 the workbench's frame, so the bridge tells the shell what the session is (`debug.state`: its type, whether it's paused,

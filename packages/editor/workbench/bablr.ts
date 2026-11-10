@@ -48,7 +48,7 @@ export interface Bablr {
 	 *  undefined where BABLR can't parse it. */
 	"stripped": (text: string, signal?: AbortSignal) => Promise<string | undefined>;
 	/** Every span of `source` (evidence.ts keys a site on the one that's exactly its node), or why BABLR can't parse it. */
-	"spans": (source: string) => Promise<{ "spans"?: { "id": string; "start": number; "end": number }[]; "unparsable"?: string }>;
+	"spans": (source: string) => Promise<{ "spans"?: { "id": string; "type"?: string; "start": number; "end": number }[]; "unparsable"?: string }>;
 	/** The span each range anchors to, as a reference (evidence.ts keys a statement on it), or why BABLR can't parse it. */
 	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<{ "refs"?: (SpanRef | null)[]; "unparsable"?: string }>;
 }

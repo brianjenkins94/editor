@@ -10,7 +10,7 @@
  *
  * Each window has Chrome's DevTools for its page, docked under it (preview-devtools.ts), from its title bar; the same
  * DevTools protocol is a hub request (`preview.cdp`), which agents use too. And a CPU profile of its page, asked for from
- * its title bar (or `preview.profile`) and taken when it keeps running slow (preview-profile.ts). And the debug toolbar of
+ * its title bar (or `preview.profile`), kept with its server's run (preview-profile.ts). And the debug toolbar of
  * the session that drives a window's page (its dev server's own, or a recorded call of it being stepped), in the title bar
  * of the window of its port you used last (extensions/bridge/debug-toolbar.ts tells which, `debug.state`).
  *
@@ -32,7 +32,7 @@ import { createStore, useStore } from "./feature";
 import { Icon } from "./icon";
 import { askInWindow, type PreviewAsk } from "./preview-ask";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
-import { createPreviewProfiler, installAutoProfiler, installPreviewProfiler, PROFILE_MS } from "./preview-profile";
+import { createPreviewProfiler, installPreviewProfiler, PROFILE_MS } from "./preview-profile";
 import "theme/components/button";
 
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
@@ -215,7 +215,7 @@ function install(hub: Hub): void {
 			profile={async () => {
 				const found = profiled(element);
 
-				return found === undefined ? undefined : profile(found, "asked");
+				return found === undefined ? undefined : profile(found);
 			}}
 			devtools={() => {
 				if (devtools === undefined) {
@@ -261,14 +261,12 @@ function install(hub: Hub): void {
 		return element === undefined || frame === null || frame === undefined ? undefined : { "key": element.dataset["previewWindow"]!, "frame": frame };
 	});
 
-	// A profile of a window's page, asked for, and of a server's that keeps running slow (not a test's page: in-editor
-	// Playwright's, an editor of its own as often as not).
+	// A profile of a window's page, asked for.
 	installPreviewProfiler(hub, profile, (asked) => {
 		const element = windowAt(asked);
 
 		return element === undefined ? undefined : profiled(element);
 	});
-	installAutoProfiler(profile, () => used.filter((element) => element.dataset["previewPort"] !== String(NO_SERVER)).flatMap((element) => profiled(element) ?? []));
 
 	// A page's runtime evidence (previews/page-script.ts posts it here, the window its preview is in): on to the core, as
 	// its server's (evidence.ts finds the run by the port). By the port the page says, as its last report comes as its

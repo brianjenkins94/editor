@@ -224,7 +224,7 @@ serve(hub, "bablr.spans", async (args, { signal }) => {
 
 	const answer = await parsed(source, signal);
 
-	return "why" in answer ? { "unparsable": answer.why } : { "spans": anchorsOf(source, answer.cst).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end })) };
+	return "why" in answer ? { "unparsable": answer.why } : { "spans": anchorsOf(source, answer.cst).filter((span) => span.type !== null).map(({ id, type, start, end }) => ({ "id": id, "type": type, "start": start, "end": end })) };
 });
 
 serve(hub, "bablr.refer", async (args, { signal }) => {

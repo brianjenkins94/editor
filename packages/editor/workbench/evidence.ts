@@ -9,6 +9,10 @@
  * span that's exactly its node — a site without one isn't recorded. The values themselves stay on this machine
  * (`.silo/local/samples/`). A file BABLR's grammar doesn't take yet gets no evidence; its run is still recorded, saying so.
  *
+ * And where a preview's time went, each time it's profiled (profile-times.ts gives each function's time): folded into the
+ * file's evidence as it's taken, on the function's span (silo's foldTimes), marked with the run it was taken in, so it's on
+ * the code at once rather than when the run ends. Each profile is one in the fading.
+ *
  * A live run isn't a run here: it's the editor's, as you type, and would write on every pause.
  *
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
@@ -23,7 +27,7 @@ import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseSamples, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldTimes, foldValues, parseEvidence, parseSamples, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import { blobOid, headCommit } from "./git-engine";
 
@@ -31,6 +35,16 @@ const ROOT = "/workspace";
 
 /** How long after a preview's server stops its pages' last reports still count (they come as their windows close). */
 const LAST_REPORT_MS = 3000;
+
+/** One function's time in a profile of a file: its span (BABLR's, the function's node), its own ms, with what it called,
+ *  and its callers and callees by name, each by its ms. */
+export interface FunctionTime { "span": string; "selfMs": number; "totalMs": number; "callers": Record<string, number>; "callees": Record<string, number> }
+
+/** A profile of one file: the source it was read against, how long it sampled, and each function's time. */
+export interface FileTimes { "source": string; "profiledMs": number; "functions": FunctionTime[] }
+
+/** What evidence takes from elsewhere in the workbench: a profile's times, of a file (a workspace path), taken in a run. */
+export interface EvidenceIntake { "times": (runId: string, file: string, times: FileTimes) => void }
 
 interface UserAgentData { "brands"?: { "brand": string; "version": string }[]; "platform"?: string }
 
@@ -217,7 +231,7 @@ function repoRelative(path: string): string {
 		: path;
 }
 
-export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr, log: Observed["log"]): void {
+export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr, log: Observed["log"]): EvidenceIntake {
 	// Each run's report, until the run ends (the session's coverage comes just before its end): its entry's, and each other
 	// of the program's files that ran (packages/tsval/README.md, *Modules*); and the packages whose code it ran.
 	const reports = new Map<string, Coverage[]>();
@@ -457,9 +471,34 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		return ran;
 	};
 
+	/** A profile's times of `file`, folded into its evidence on each function's span. */
+	const recordTimes = async (taken: RunEnvelope, file: string, times: FileTimes): Promise<number> => {
+		const reports = times.functions.map((each) => ({ "span": each.span, "selfMs": each.selfMs, "totalMs": each.totalMs, "profiledMs": times.profiledMs, "callers": each.callers, "callees": each.callees }));
+
+		if (reports.length > 0) {
+			const path = evidencePath(taken.user, taken.environment, file);
+
+			await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(foldTimes(parseEvidence(await text(path)), reports, { "id": taken.id, "at": taken.endedAt }))));
+		}
+
+		return reports.length;
+	};
+
+	/** The environment a run here ran in: its runtime, this browser, and this machine's name (`silo.machine`). */
+	const environmentOf = (runtime: string): RunEnvelope["environment"] => {
+		const name = vscode.workspace.getConfiguration("silo").get<string>("machine")?.trim();
+
+		return {
+			"runtime": runtime,
+			...browserClass(),
+			"name": name === undefined || name === ""
+				? "default"
+				: name
+		};
+	};
+
 	const record = async (run: RunInfo, covered: Coverage[], loaded: LoadedPackage[], versions: Record<string, string[]> = {}, pagePackages: string[] = []): Promise<void> => log.span("editor.workbench.evidence.record", { "op": run.runtime ?? "tsval", "count": covered.length }, async (span) => {
 		const entry = repoRelative(run.entry ?? run.cwd);
-		const name = vscode.workspace.getConfiguration("silo").get<string>("machine")?.trim();
 		const envelope: RunEnvelope = {
 			"type": "run",
 			"id": run.id,
@@ -473,13 +512,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 				? { "stopped": true as const }
 				: {},
 			"user": await currentUser(),
-			"environment": {
-				"runtime": run.runtime ?? "tsval",
-				...browserClass(),
-				"name": name === undefined || name === ""
-					? "default"
-					: name
-			},
+			"environment": environmentOf(run.runtime ?? "tsval"),
 			...await headCommit().then((commit) => (commit === undefined
 				? {}
 				: { "commit": commit })),
@@ -575,4 +608,17 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			writing = writing.then(async () => record(run, await previewCoverage(preview), [], Object.fromEntries(preview.versions), [...preview.packages])).catch(() => { /* evidence never breaks a run */ });
 		}
 	}
+
+	return {
+		// (in turn with the runs' own writes: the same files)
+		"times": (runId, file, times) => {
+			writing = writing.then(async () => log.span("editor.workbench.evidence.time", { "path": repoRelative(file), "count": times.functions.length }, async (span) => {
+				const run = runs.list().find((each) => each.id === runId);
+				const taken = { "id": runId, "endedAt": new Date().toISOString(), "user": await currentUser(), "environment": environmentOf(run?.runtime ?? "browser") } as RunEnvelope;
+
+				await ensureSiloFiles(vscode);
+				span.end({ "functions": await recordTimes(taken, repoRelative(file), times) });
+			})).catch(() => { /* evidence never breaks a run */ });
+		}
+	};
 }

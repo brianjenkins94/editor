@@ -239,6 +239,26 @@ The point of running a program many times: what none of the runs needed is code 
   file once per set (extensions/margin/inputs.ts). What none of the inputs reached is what turns purple. Inputs beyond
   arguments (stdin, files, a function's own arguments) and generated ones want a design of their own.
 
+## Time
+
+Where a preview's time went is evidence like the rest, kept with the run (the user, 2026-11-09: a list of hotspots in a
+pop-up, and a notification when a page ran slow, were the surfaces nobody uses). The Profile button in a preview window's
+title bar samples its page for 5 seconds (shell/preview-profile.ts). Each of the app's frames is moved through its module's
+source map to the line it's written on and placed in the innermost function BABLR's parse of the text has around it (a
+frame names a function by where its parameters start), and each function's own time, its time with what it called, and its
+direct callers and callees by name are folded into the file's evidence on that function's span (workbench/profile-times.ts;
+silo's `time` observation, `foldTimes`), marked with the run it was taken in. BABLR rather than TypeScript: it's already
+what keys the evidence, and a cold TypeScript server (none of the app's files open yet) could take a minute to answer.
+Folded as each profile is taken, not as the run ends, so it's on the code at once: each profile is one in the fading. Its own
+time is the faded weight, beside how long the profiles sampled, so its share is the one over the other; a function a later
+profile didn't sample only fades.
+
+On the code (extensions/insights/times.ts): each function says at the end of its line its share of the time profiled and
+its own time a profile (`38% · 1.7 s`), its head is tinted warmer at 10%, 25% and 50%, and the hover adds its time with what
+it called, who called it and what it called. Times depend on the machine: the evidence is per environment (`silo.machine`),
+and what's shown is every environment's folded together. Not yet: comparing a function's time with the last profile before
+a change (*+40% since a2e5e6d8*), and recording a span of your choosing rather than 5 seconds.
+
 ## Durable annotations on spans
 
 One way for anything attached to code — evidence, notes, a dismissed suggestion, a call site's decision, an event-sheet

@@ -1,7 +1,7 @@
 {
   "name": "insights",
   "displayName": "Insights",
-  "description": "What a program did when it ran, from the evidence kept in git, where the code is: on hover, what went through the code under the cursor across runs (how many values, how often nullish, their kinds beside the declared type, a few of them; each branch's arms); and in purple, with a quick fix, where runs say a `?.` or `??` was never needed, a branch never taken or code never run; and where a preview's time went, as each profile of it is kept (one you asked for opens on its hotspots, one taken because it kept running slow is a notification).",
+  "description": "What a program did when it ran, from the evidence kept in git, where the code is: on hover, what went through the code under the cursor across runs (how many values, how often nullish, their kinds beside the declared type, a few of them; each branch's arms); and in purple, with a quick fix, where runs say a `?.` or `??` was never needed, a branch never taken or code never run; and where a preview's time went, on each function its profiles sampled: its share and its own time at the end of its line, its head tinted the warmer the more it took, and its callers and callees on hover.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {

@@ -20,6 +20,10 @@ export interface SpanEvidence {
 	"reached"?: { "ever": number; "runs": number; "lastAt": string };
 	"value"?: { "seen": number; "nullish": number; "tags": Record<string, number>; "ever": number; "runs": number; "lastAt": string };
 	"branch"?: { "arms": number[]; "ever": number; "runs": number; "lastAt": string };
+	/** Where a function's time went in the runs that profiled it (a preview's CPU profile): its own (`selfMs`), with what
+	 *  it called (`totalMs`), how long those profiles sampled (`profiledMs`), each faded, so its share is `selfMs /
+	 *  profiledMs`; and who called it and what it called, by name, each by its ms. */
+	"time"?: { "selfMs": number; "totalMs": number; "profiledMs": number; "callers": Record<string, number>; "callees": Record<string, number>; "runs": number; "lastAt": string };
 	/** A few of the values themselves, as this machine saw them. */
 	"samples"?: (string | number | boolean)[];
 }
@@ -69,6 +73,23 @@ function foldBranch(known: SpanEvidence, observation: Extract<Observation, { "ki
 	return { ...known, "branch": { "arms": arms, "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
 }
 
+/** `a`'s and `b`'s ms by name, summed. */
+function addMs(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+	const sum = { ...a };
+
+	for (const [name, ms] of Object.entries(b)) {
+		sum[name] = (sum[name] ?? 0) + ms;
+	}
+
+	return sum;
+}
+
+function foldTime(known: SpanEvidence, observation: Extract<Observation, { "kind": "time" }>): SpanEvidence {
+	const before = known.time;
+
+	return { ...known, "time": { "selfMs": (before?.selfMs ?? 0) + observation.w, "totalMs": (before?.totalMs ?? 0) + observation.totalMs, "profiledMs": (before?.profiledMs ?? 0) + observation.profiledMs, "callers": addMs(before?.callers ?? {}, observation.callers), "callees": addMs(before?.callees ?? {}, observation.callees), "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
+}
+
 /** `observation` added to what's known of its span. */
 function fold(known: SpanEvidence, observation: Observation): SpanEvidence {
 	switch (observation.kind) {
@@ -80,6 +101,9 @@ function fold(known: SpanEvidence, observation: Observation): SpanEvidence {
 
 		case "branch":
 			return foldBranch(known, observation);
+
+		case "time":
+			return foldTime(known, observation);
 
 		default:
 			return known;

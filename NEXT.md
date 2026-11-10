@@ -468,7 +468,8 @@ How it's kept:
      bar: ARCHITECTURE.md, *Workspace tools*). Now: the
      runtime insights (*Runtime evidence kept in git*, its hover, *What could go, in purple* and *Evidence from previews*:
      back, RUNTIME-EVIDENCE.md), and the previews' (*Preview DevTools*, *Preview CPU profiles* and *Debug toolbar in the preview
-     title bar*, back: ARCHITECTURE.md, *Preview windows*; *Breakpoints in a page's code*, back: RUNNING.md, *Apps: recorded
+     title bar*, back: ARCHITECTURE.md, *Preview windows*; the profiles reworked, the user 2026-11-09: their times on the
+     code, kept with the run, RUNTIME-EVIDENCE.md, *Time*; *Breakpoints in a page's code*, back: RUNNING.md, *Apps: recorded
      stops, not live ones*). Next, in this order: *Dependency baseline and
      exceptions* (proposed 2026-11-09, not yet agreed: the baseline back as it was, its maker, the package worker, the
      TypeScript plugin's `surface` and `silo.baseline`; and what goes beyond it on the code, not in a view: a version that
