@@ -16,6 +16,7 @@ import { serveDebugControl } from "./debug-control";
 import { registerDebugEvents } from "./debug-events";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { bridgeHub, workspace, workspaceRuntime } from "./hub";
+import { registerAnnotations } from "./annotations";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { installPreviewGate } from "./preview-gate";
 import { serveRuntimeFiles } from "./runtime-fs";
@@ -72,6 +73,8 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	serveRuntimeFiles(context, bridgeHub);
 	// The metrics plane's samples, for VS Code's side (the insights extension's status bar reads them by command).
 	registerMetricsBridge(context);
+	// What a change is, cosmetic or meaningful, for extensions (the cosmetic extension's badge): the workbench's BABLR.
+	registerAnnotations(context);
 	installPreviewGate(context, bridgeHub, bridgeLog);
 	// What every debugger's runs tell core — tsval's, and another extension's (`run.debugger`: an interpreter plugged in
 	// from editor-contrib) — the run contract's events, read the one way; and how each launch is resolved (debug-events.ts).

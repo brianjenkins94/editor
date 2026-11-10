@@ -1,0 +1,15 @@
+{
+  "name": "cosmetic",
+  "displayName": "Cosmetic changes",
+  "description": "Marks a changed file whose change is formatting or comments only — whitespace, line breaks, semicolons, comments — by BABLR's verdict of HEAD against the working tree: a ≈ badge and a dimmed name, in Source Control and the Explorer alike. Its changes come from the editor's git (editor.git.*), its verdicts from the editor's BABLR (editor.annotations.classify); `cosmetic.list` says each changed file's.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {}
+}

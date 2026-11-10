@@ -20,6 +20,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
+import type { ChangeVerdict } from "@brianjenkins94/editor-api/git";
 import type { SpanRef } from "@brianjenkins94/util/silo/annotations";
 import type * as vscodeApi from "vscode";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
@@ -335,6 +336,53 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 
 		return first;
 	}));
+
+	// What a change from one text to another is (the worker's verdict, from its kept parses): cosmetic, formatting or
+	// comments only, or meaningful, with the nodes that changed and their lines. The same two texts answer the same, kept
+	// for the next ask (the cosmetic extension reads every changed file again after each change).
+	const verdicts = new Map<string, ChangeVerdict | "unparsable">();
+	const classify = async (before: string, after: string): Promise<ChangeVerdict | "unparsable"> => {
+		// (identical: the only answer that needs no parse)
+		if (before === after) {
+			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [] };
+		}
+
+		const [one, other] = await Promise.all([before, after].map(async (text) => crypto.subtle.digest("SHA-1", new TextEncoder().encode(text))));
+		const key = [one, other].map((digest) => [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")).join(":");
+		const known = verdicts.get(key);
+
+		if (known !== undefined) {
+			return known;
+		}
+
+		const answer = await worker().ask<ChangeVerdict | { "verdict": "unparsable" }>("verdict", { "contents": [before, after] });
+		const verdict = answer.verdict === "unparsable" ? "unparsable" : answer as ChangeVerdict;
+
+		if (verdicts.size > 200) {
+			verdicts.clear();
+		}
+
+		verdicts.set(key, verdict);
+
+		return verdict;
+	};
+
+	// …asked by extensions through the bridge's `editor.annotations.classify` (editor-api's annotations().classify).
+	serve(hub, "annotations.classify", async (args) => {
+		const { before, after } = (args ?? {}) as { "before"?: unknown; "after"?: unknown };
+
+		if (typeof before !== "string" || typeof after !== "string") {
+			throw new TypeError("annotations.classify: the two texts");
+		}
+
+		return log.span("editor.workbench.bablr.classify", { "bytes": before.length + after.length }, async (span) => {
+			const verdict = await classify(before, after);
+
+			span.end({ "op": verdict === "unparsable" ? verdict : verdict.verdict });
+
+			return verdict === "unparsable" ? { "unparsable": "BABLR can't parse one of the two texts" } : { "value": verdict };
+		});
+	});
 
 	serve(hub, "bablr.check", async (args, { signal }) => {
 		const { path, exclude } = (args ?? {}) as { "path"?: unknown; "exclude"?: unknown };

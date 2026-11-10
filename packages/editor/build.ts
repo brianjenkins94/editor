@@ -264,6 +264,7 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("notes"),
 			bundledExtension("insights"),
 			bundledExtension("type-queries"),
+			bundledExtension("cosmetic"),
 			editorSettingsDefaultsPlugin(),
 			polyfillNode(["path", "url", "buffer"])
 		],

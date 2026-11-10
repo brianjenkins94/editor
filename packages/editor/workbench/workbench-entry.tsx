@@ -35,6 +35,7 @@ import insightsExtension from "insights:extension";
 import marginExtension from "margin:extension";
 import notesExtension from "notes:extension";
 import typeQueriesExtension from "type-queries:extension";
+import cosmeticExtension from "cosmetic:extension";
 import { render } from "preact";
 import sourceControlExtension from "source-control:extension";
 import tsvalExtension from "tsval:extension";
@@ -555,7 +556,8 @@ function maybeBoot(): void {
 				notesExtension,
 				insightsExtension,
 				capabilitiesExtension,
-				typeQueriesExtension
+				typeQueriesExtension,
+				cosmeticExtension
 			]) {
 				builtIn(extension, ExtensionHostKind.LocalWebWorker);
 			}
@@ -576,7 +578,8 @@ function maybeBoot(): void {
 					"notes",
 					"insights",
 					"capabilities",
-					"type-queries"
+					"type-queries",
+					"cosmetic"
 				]
 			});
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration

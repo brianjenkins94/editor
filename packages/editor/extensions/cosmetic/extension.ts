@@ -1,0 +1,136 @@
+/**
+ * Cosmetic changes (ARCHITECTURE.md's worked example, the classifier as an extension of its own): a changed file whose
+ * change is formatting or comments only — by BABLR's verdict of HEAD against the working tree — marked with a file
+ * decoration (a ≈ badge, its name dimmed), which VS Code draws wherever the file is listed: Source Control, the Explorer,
+ * tabs. Knows nothing of how git is kept: the changes come through the editor's git commands, the verdicts through the
+ * editor's BABLR (`editor.annotations.classify`, sharing its cached parses) — ARCHITECTURE.md, *Extension points* 5.
+ *
+ * `cosmetic.list`: each changed code file's verdict, as last read.
+ */
+import type { ChangeVerdict, GitFileChange } from "@brianjenkins94/editor-api/git";
+import { annotations } from "@brianjenkins94/editor-api/annotations";
+import { observeExtension } from "@brianjenkins94/editor-api/runtime";
+import * as vscode from "vscode";
+
+/** The files BABLR reads: code. */
+const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
+
+/** How long after a change the files are read again. */
+const SETTLE_MS = 2000;
+
+/** How long after the editor starts before the first read: a git status and BABLR's parses are work the boot (and
+ *  TypeScript's first answers) shouldn't share a thread with, and a change made sooner is read as it's saved. */
+const FIRST_READ_MS = 30_000;
+
+export function activate(context: vscode.ExtensionContext): void {
+	const observed = observeExtension("cosmetic");
+
+	if (observed !== undefined) {
+		context.subscriptions.push(observed);
+	}
+
+	const changed = new vscode.EventEmitter<vscode.Uri[]>();
+	/** Each changed code file's verdict, by URI. */
+	let verdicts = new Map<string, ChangeVerdict["verdict"]>();
+	const root = (): vscode.Uri | undefined => vscode.workspace.workspaceFolders?.[0]?.uri;
+
+	/** Every modified code file's verdict, read again — the files whose mark changed told. */
+	const readNow = async (): Promise<void> => {
+		const folder = root();
+		const status = await Promise.resolve(vscode.commands.executeCommand<{ "files": GitFileChange[] } | undefined>("editor.git.status")).catch(() => undefined);
+
+		if (folder === undefined || status === undefined) {
+			return;
+		}
+
+		const next = new Map<string, ChangeVerdict["verdict"]>();
+
+		// One at a time: BABLR's worker queues them anyway, and a verdict over texts it has parsed is quick.
+		for (const file of status.files.filter((each) => each.status === "M" && CODE.test(each.path))) {
+			const texts = await Promise.resolve(vscode.commands.executeCommand<{ "head": string; "working": string }>("editor.git.file", file.path)).catch(() => undefined);
+			const answer = texts === undefined
+				? undefined
+				: await annotations(vscode.commands).classify(texts.head, texts.working);
+
+			next.set(vscode.Uri.joinPath(folder, file.path).toString(), answer !== undefined && "value" in answer
+				? answer.value.verdict
+				: "none");
+		}
+
+		const touched = [
+			...new Set([
+				...verdicts.keys(),
+				...next.keys()
+			])
+		].filter((uri) => verdicts.get(uri) !== next.get(uri));
+
+		verdicts = next;
+		changed.fire(touched.map((uri) => vscode.Uri.parse(uri)));
+	};
+
+	const read = async (): Promise<void> => {
+		const log = observed?.log;
+
+		return log === undefined
+			? readNow()
+			: log.span("editor.extensions.cosmetic.read", {}, readNow);
+	};
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const later = (): void => {
+		clearTimeout(timer);
+		timer = setTimeout(() => {
+			void read();
+		}, SETTLE_MS);
+	};
+
+	/** Whether to follow file changes yet: not while the workspace is still being written at boot. */
+	let following = false;
+	const follow = (): void => {
+		following = true;
+		later();
+	};
+
+	const changedFile = (): void => {
+		if (following) {
+			later();
+		}
+	};
+
+	// (what can change a verdict: a code file, or git's HEAD and refs, a commit or a checkout — not every file a run or a
+	// tool writes, each of which would read every changed file again)
+	const watcher = vscode.workspace.createFileSystemWatcher("{**/*.{ts,tsx,js,jsx,mjs,cjs},.git/HEAD,.git/refs/**}");
+
+	context.subscriptions.push(
+		changed,
+		watcher,
+		vscode.window.registerFileDecorationProvider({
+			"onDidChangeFileDecorations": changed.event,
+			"provideFileDecoration": (uri) => (verdicts.get(uri.toString()) === "cosmetic"
+				? {
+						"badge": "≈",
+						"tooltip": "Cosmetic — formatting or comments only",
+						"color": new vscode.ThemeColor("disabledForeground")
+					}
+				: undefined)
+		}),
+		// (a save, a code file the repository changes, or a commit or checkout: git's HEAD and refs)
+		vscode.workspace.onDidSaveTextDocument(follow),
+		watcher.onDidChange(changedFile),
+		watcher.onDidCreate(changedFile),
+		watcher.onDidDelete(changedFile),
+		vscode.commands.registerCommand("cosmetic.list", () => Object.fromEntries([...verdicts].map(([uri, verdict]) => [
+			vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false),
+			verdict
+		])))
+	);
+
+	const first = setTimeout(follow, FIRST_READ_MS);
+
+	context.subscriptions.push({
+		"dispose": () => {
+			clearTimeout(first);
+			clearTimeout(timer);
+		}
+	});
+}

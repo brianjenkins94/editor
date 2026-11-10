@@ -983,9 +983,9 @@
     ]
   },
   "Formatting-only changes marked": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced as it was (the user, 2026-11-09: rough feature parity with full-editor)",
+    "since": "2026-11-10",
     "what": "Each change is judged formatting-only or meaningful; a file whose changes are only whitespace, semicolons or comments gets a badge and a dimmed name in Source Control and the Explorer.",
     "ways": [
       "command|cosmetic.list",
@@ -995,10 +995,13 @@
       "hub request|bablr.verdict"
     ],
     "paths": [
-      "packages/bablr-language-ts/lib/cosmetic.ts"
+      "packages/editor/extensions/cosmetic/extension.ts",
+      "packages/editor/extensions/cosmetic/package.json",
+      "packages/editor/extensions/bridge/annotations.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "tests": [
+      "packages/editor/test/cosmetic.test.mjs"
+    ]
   },
   "Git in the browser": {
     "status": "active",

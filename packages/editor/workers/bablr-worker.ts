@@ -18,7 +18,7 @@
 import "./bablr-fast-freeze"; // first: neutralizes record freezing before the BABLR bundle captures Object.freeze
 // (A comment, so sorting leaves the freeze first.)
 import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
-import { atomsOf, cstSpansAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
+import { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { OBSERVED, PIPELINE, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
@@ -182,6 +182,43 @@ async function parsed(source: string, signal: AbortSignal): Promise<Parsed> {
 	return answer;
 }
 
+/** `parsed`'s parse as BABLR's identity core takes one: it throws where the text doesn't parse. */
+const parseFor = (signal: AbortSignal) => async (source: string): Promise<Cst> => {
+	const answer = await parsed(source, signal);
+
+	if ("why" in answer) {
+		throw new Error(answer.why);
+	}
+
+	return answer.cst;
+};
+
+// Two texts of a file (HEAD's and the working tree's) ⇒ whether the change is cosmetic (formatting or comments only) or
+// meaningful, the nodes that changed and their lines: the cosmetic extension's badge (workbench/bablr.ts `classify`).
+// From the parses kept above, so each version is parsed once however many it's compared with.
+serve(hub, "bablr.verdict", async (args, { signal }) => {
+	const { contents } = args as { "contents": string[] };
+
+	return log.span("editor.workers.bablr-worker.verdict", { "count": contents.length, "bytes": contents.reduce((total, text) => total + text.length, 0) }, async (span) => {
+		try {
+			const result = await deriveIdentityAsync(contents, { "signal": signal, "parse": parseFor(signal) }) as { "verdict": string; "changedNodeIds": string[]; "changedLines"?: number[] };
+
+			span.end({ "op": result.verdict });
+
+			return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines ?? [] };
+		} catch (error) {
+			if (signal.aborted) {
+				throw error;
+			}
+
+			// (a text BABLR can't parse: the caller says so rather than guess)
+			span.end({ "op": "unparsable" });
+
+			return { "verdict": "unparsable", "changedNodeIds": [], "changedLines": [] };
+		}
+	});
+});
+
 // A file's texts since the last commit, [HEAD, …each burst after it] ⇒ the code each change touched, for "your edits"
 // (edit-history.ts): from the parses kept above, so a burst's text is parsed once. Nothing where one doesn't parse.
 serve(hub, "bablr.editGroups", async (args, { signal }) => {
@@ -189,18 +226,7 @@ serve(hub, "bablr.editGroups", async (args, { signal }) => {
 
 	return log.span("editor.workers.bablr-worker.editGroups", { "count": chain.length }, async (span) => {
 		try {
-			const grouped = await editGroups(chain, {
-				"signal": signal,
-				"parse": async (source: string) => {
-					const answer = await parsed(source, signal);
-
-					if ("why" in answer) {
-						throw new Error(answer.why);
-					}
-
-					return answer.cst;
-				}
-			}) as { "groups": unknown[]; "bursts": number };
+			const grouped = await editGroups(chain, { "signal": signal, "parse": parseFor(signal) }) as { "groups": unknown[]; "bursts": number };
 
 			span.end({ "groups": grouped.groups.length, "bursts": grouped.bursts });
 

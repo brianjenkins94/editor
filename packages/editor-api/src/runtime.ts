@@ -349,19 +349,40 @@ export function observeExtension(name: string): ObservedExtension | undefined {
 		return undefined;
 	}
 
-	const id = `ext:${name}`;
-	const { port, dispose } = runtime.connect(id);
-	const hub = createHub({ "id": id });
-	const unlink = hub.link(portTransport(port), { "uplink": true });
-	const metrics = reportMetrics(hub);
+	// (opened on first use: an extension runs in every editor, the in-editor specs' dozens in one page, and one that never
+	// logs or keeps a gauge needn't hold a hub, a port and a relay in each)
+	let opened: ObservedExtension | undefined;
+	const open = (): ObservedExtension => {
+		if (opened === undefined) {
+			const id = `ext:${name}`;
+			const { port, dispose } = runtime.connect(id);
+			const hub = createHub({ "id": id });
+			const unlink = hub.link(portTransport(port), { "uplink": true });
+			const metrics = reportMetrics(hub);
+
+			opened = {
+				"log": relayLoggerToHub(hub, hub.id),
+				"metrics": metrics,
+				"dispose": () => {
+					metrics.dispose();
+					unlink();
+					dispose();
+				}
+			};
+		}
+
+		return opened;
+	};
 
 	return {
-		"log": relayLoggerToHub(hub, hub.id),
-		"metrics": metrics,
+		get "log"() {
+			return open().log;
+		},
+		get "metrics"() {
+			return open().metrics;
+		},
 		"dispose": () => {
-			metrics.dispose();
-			unlink();
-			dispose();
+			opened?.dispose();
 		}
 	};
 }

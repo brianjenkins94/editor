@@ -479,8 +479,8 @@ How it's kept:
      (2) a preview's window shown as an editor tab, full-editor's hosted-editor.ts with what it found (an inactive pane is
      taken out of the page, so the preview is laid over its pane, hidden but loaded); and (3) docking proper, a window
      snapped to the shell's edges or tabbed with another, in `app-window` itself if it's wanted, decided by use. In that
-     order; (1) and (2) skipped until agreed), *Formatting-only changes marked* (*Error reports from the editor* is back as it was:
-     packages/api/README.md, *Errors and timelines*),
+     order; (1) and (2) skipped until agreed) (*Error reports from the editor* is back as it was: packages/api/README.md,
+     *Errors and timelines*; and *Formatting-only changes marked*, a ≈ badge on a file changed only in its formatting),
      *Spell check* (its infos drowned Problems when it was in: that wants an answer as it comes back). Far off, still the mission: *Event Sheet*, *Build a
      game by painting a level*.
    - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its
@@ -609,6 +609,14 @@ packages/editor (`--all`, `--runs N`, `--json`).
   2026-11-04, on CI's first saves. ESLint's fix doesn't wait for its worker to load, and saves again when it sees that cancel
   (`extensions/eslint/extension.ts`). Another provider that's slow to answer could still lose a save. The agents' `files_edit` /
   `files_write` still try again (workspace-tools.ts `applyAndSave`).
+- **The in-editor specs' renderer is near its limit** (found 2026-11-10): all 35 specs, two at once, peak at 7.5–8.8 GB in
+  the one renderer they share, and it crashes near 9 (a "Target crashed", and every spec after it fails). One at a time,
+  6.2–6.6 GB, for 253 s against 170. Either way it climbs about 60 MB a spec and never comes down, but not in JavaScript:
+  once every spec is done, `measureUserAgentSpecificMemory` finds 833 MB live, the outer editor alone, no spec's frame or
+  worker kept, detached or not, while the renderer holds 6.2 GB. So it's what the renderer keeps of what it freed, and the
+  way out is a fresh renderer every so many specs (a new browser context: a reload keeps the process), not a leak to find.
+  `observeExtension` opens an extension's link only on first use now, which saved some (each extension, in every editor).
+  Local gates run the specs one at a time (`IN_EDITOR_AT_ONCE=1`) meanwhile; CI's two at once hasn't crashed.
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems.
