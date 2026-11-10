@@ -2253,15 +2253,14 @@
     ]
   },
   "Spell check": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "The real cspell engine spell-checks code and prose.",
+    "status": "active",
+    "why": "reintroduced (the user, 2026-11-09: rough feature parity with full-editor), its unknown words as hints, on the code, not infos in Problems, which a file's worth drowned when it was in",
+    "since": "2026-11-10",
+    "what": "The real cspell engine spell-checks code and prose; an unknown word is dotted under, with its message on hover, and not listed in Problems.",
+    "ways": [],
     "paths": [
       "packages/editor/extensions/cspell"
-    ],
-    "in": "e16b2b75",
-    "restore": "git checkout full-editor -- packages/editor/extensions/cspell"
+    ]
   },
   "Starter code renderer": {
     "status": "active",

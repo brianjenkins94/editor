@@ -473,7 +473,8 @@ How it's kept:
      stops, not live ones*). *Dependency baseline and exceptions* is back too, on the code (ARCHITECTURE.md, *Dependency
      baseline*). *Explore orderings* is back, on the code (RUNNING.md, *Explore orderings*), and *Playground links*, each opening in an editor of its own (ARCHITECTURE.md, *Instances*), and *Type queries*, and *Your edits since the last commit* (its command for placed rules left out: nothing uses it), and *Performance monitor*, in the status bar (ARCHITECTURE.md, *The metrics plane*). *Error reports from the editor* is back as it was (packages/api/README.md, *Errors and timelines*),
      and *Formatting-only changes marked*, a ≈ badge on a file changed only in its formatting; *Docking editors into windows*
-     is parked. Next: *Spell check* (its infos drowned Problems when it was in: that wants an answer as it comes back). Far off, still the mission: *Event Sheet*, *Build a
+     is parked; and *Spell check* is back, its unknown words hints on the code, not infos in Problems (which a file's worth
+     drowned when it was in). That is the list. Far off, still the mission: *Event Sheet*, *Build a
      game by painting a level*.
    - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its
      own average, so one that slows down says so rather than passing. The run record already keeps each file's and test's `ms`

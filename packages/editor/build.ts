@@ -1,6 +1,7 @@
 import type { Plugin, RollupOutput } from "vite";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { builtinModules, createRequire } from "node:module";
 import * as path from "node:path";
 import * as url from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -15,6 +16,7 @@ import { coveragePlugin } from "./build/coverage";
 import { eslintToolchain } from "./build/eslint-toolchain";
 import { buildCapabilities, CAPABILITIES_FILES } from "./build/capabilities";
 import { buildHistory, HISTORY_FILES } from "./build/history";
+import { DICTIONARIES, servedName } from "./extensions/cspell/dictionaries";
 import { editorTypesPlugin, editorVersionsPlugin, nodeModulesCdnPlugin } from "./build/package-types";
 import { editorSettingsDefaultsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { buildServiceWorker, staticHostPlugin } from "./build/static-host";
@@ -104,6 +106,29 @@ async function bundleCode(folder: string, file: string, id: string, format: "cjs
 
 /** `<folder>/<file>` bundled (bundleCode) as a virtual module `<name>:<id>`, named for the folder's last segment, whose
  *  default export is the code, a string. */
+/** Node's built-ins, by both their names: what a server run by almostnode imports from it, not from the bundle. */
+const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
+
+/** A language server's `<file>` → ESM string (`<name>:<id>`) with ALL NODE BUILTINS EXTERNAL, run by almostnode
+ *  in a worker host. */
+function bundledNodeServer(name: string, file = "server-node.ts", id = "server-node"): Plugin {
+	return bundledModule("extensions/" + name, file, id, "es", nodeBuiltins);
+}
+
+/** Emit cspell's dictionaries (extensions/cspell/dictionaries.ts) at fixed, unhashed URLs server-host fetches at runtime. */
+function cspellDict(): Plugin {
+	return {
+		"name": "cspell-dict",
+		"generateBundle": function() {
+			for (const dictionary of DICTIONARIES) {
+				const packageDir = path.dirname(createRequire(import.meta.url).resolve(dictionary.package + "/cspell-ext.json"));
+
+				this.emitFile({ "type": "asset", "fileName": "lsp/dicts/" + servedName(dictionary), "source": fs.readFileSync(path.join(packageDir, dictionary.file), { "encoding": null }) });
+			}
+		}
+	};
+}
+
 function bundledModule(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), plugins: Plugin[] = [], banner?: string): Plugin {
 	const virtual = `${folder.split("/").at(-1)}:${id}`;
 	const resolved = "\0" + virtual;
@@ -265,6 +290,9 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("insights"),
 			bundledExtension("type-queries"),
 			bundledExtension("cosmetic"),
+			// (its worker: cspell under almostnode — a classic script is done at once, so the client's first messages are
+			// held until the module's server listens)
+			bundledExtension("cspell", { "server.js": { "worker": "server-host.js", "hold": true } }),
 			editorSettingsDefaultsPlugin(),
 			polyfillNode(["path", "url", "buffer"])
 		],
@@ -303,7 +331,7 @@ export async function preBuild(): Promise<void> {
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
 		// (and the page runtime a dev server puts in its pages, as a script: runtime evidence)
-		"plugins": [...coverage(), unenvResolve(), bundledModule("previews", "page-script.ts", "page-evidence", "iife", [])],
+		"plugins": [...coverage(), unenvResolve(), bundledModule("previews", "page-script.ts", "page-evidence", "iife", []), bundledNodeServer("cspell"), cspellDict()],
 		"worker": { "plugins": coverage, "rollupOptions": { "output": { "sourcemap": sourcemap } } },
 		"build": {
 			"outDir": "dist",
@@ -318,6 +346,8 @@ export async function preBuild(): Promise<void> {
 				"preserveEntrySignatures": "strict",
 				"input": {
 					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
+					// cspell's language server, under almostnode (the cspell extension starts it)
+					"lsp/server-host": resolvePath("./extensions/cspell/server-host.ts"),
 					// ESLint's worker: real ESLint and the preset under almostnode (the eslint extension starts it), from the
 					// toolchain beside it
 					"lsp/eslint-worker": resolvePath("./extensions/eslint/worker.ts"),
