@@ -88,13 +88,7 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	// Get (or lazily create) the Automerge doc for a path: load the persisted binary, else seed from HEAD text.
-	const docFor = async (path: string): Promise<AutomergeDoc> => {
-		const existing = docs.get(path);
-
-		if (existing !== undefined) {
-			return existing;
-		}
-
+	const load = async (path: string): Promise<AutomergeDoc> => {
 		const AM = await automerge();
 		const saved = await readHistory(path);
 		const head = await engine.headContent(path);
@@ -114,8 +108,29 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		return doc;
 	};
 
+	// (loaded once: two asking at once, before it's in `docs`, would each start one, and the later would replace the
+	// earlier, its bursts with it)
+	const loading = new Map<string, Promise<AutomergeDoc>>();
+	const docFor = async (path: string): Promise<AutomergeDoc> => {
+		const existing = docs.get(path);
+
+		if (existing !== undefined) {
+			return existing;
+		}
+
+		const pending = loading.get(path) ?? load(path);
+
+		loading.set(path, pending);
+
+		try {
+			return await pending;
+		} finally {
+			loading.delete(path);
+		}
+	};
+
 	// Flush the current editor text as ONE burst (no-op when the text is unchanged from the doc's latest snapshot).
-	const flush = async (path: string, text: string): Promise<void> => {
+	const flushNow = async (path: string, text: string): Promise<void> => {
 		const AM = await automerge();
 		const doc = await docFor(path);
 
@@ -137,6 +152,17 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 				"error": failureText(error)
 			});
 		}
+	};
+
+	// A file's bursts are kept one after another: one flushed while the last still waits (on Automerge loading, the first
+	// time) would start from the same doc, and the later would replace the earlier.
+	const flushing = new Map<string, Promise<void>>();
+	const flush = async (path: string, text: string): Promise<void> => {
+		const next = (flushing.get(path) ?? Promise.resolve()).then(async () => flushNow(path, text));
+
+		flushing.set(path, next.catch(() => undefined));
+
+		return next;
 	};
 
 	const schedule = (path: string, text: string): void => {
