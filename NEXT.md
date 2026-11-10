@@ -608,6 +608,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   in batches of 12, each in a session of its own (test/in-editor.mjs): the peak is the outer editor and two specs' editors,
   7.4–7.9 GB with cspell, where unbatched it climbed to 8.8 and crashed, for about 190 s against 170. What's left to
   shrink is the editor itself: each of the three runs its own TypeScript servers, ESLint, BABLR and so on.
+- **A new terminal didn't come in preview-profile.spec on CI** (1b36c848, 2026-11-10; passed on rerun): Terminal: Create New
+  Terminal, and no `.xterm-rows` within 30 s. Other specs open one the same way (editor.mjs `openTerminal`).
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems.
