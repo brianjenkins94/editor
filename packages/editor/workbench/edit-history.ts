@@ -165,6 +165,8 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		return next;
 	};
 
+	/** Each file's burst still being typed: the text it's at, flushed once the typing pauses. */
+	const typing = new Map<string, string>();
 	const schedule = (path: string, text: string): void => {
 		const pending = timers.get(path);
 
@@ -172,8 +174,10 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 			clearTimeout(pending);
 		}
 
+		typing.set(path, text);
 		timers.set(path, setTimeout(() => {
 			timers.delete(path);
+			typing.delete(path);
 			void flush(path, text).catch((error: unknown) => {
 				log.error("edit-history flush failed", {
 					"path": path,
@@ -202,6 +206,7 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		if (path !== undefined && pending !== undefined) {
 			clearTimeout(pending);
 			timers.delete(path);
+			typing.delete(path);
 			void flush(path, event.document.getText()).catch((error: unknown) => {
 				log.error("edit-history will-save flush failed", {
 					"path": path,
@@ -221,6 +226,7 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 			if (pending !== undefined) {
 				clearTimeout(pending);
 				timers.delete(path);
+				typing.delete(path);
 			}
 
 			void flush(path, document.getText()).catch((error: unknown) => {
@@ -265,6 +271,19 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		}
 
 		return log.span("editor.workbench.edit-history.chunks", { "path": path }, async (span) => {
+			// (the file's edits so far: a burst still being typed flushed now, and those already flushing finished)
+			const pending = timers.get(path);
+			const text = typing.get(path);
+
+			if (pending !== undefined && text !== undefined) {
+				clearTimeout(pending);
+				timers.delete(path);
+				typing.delete(path);
+				void flush(path, text).catch(() => undefined);
+			}
+
+			await flushing.get(path);
+
 			const { chain, lastTime } = await sinceCommit(path);
 
 			if (chain.length <= 1) {
