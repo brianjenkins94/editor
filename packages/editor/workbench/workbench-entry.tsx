@@ -67,7 +67,7 @@ import { createNodeRunner } from "./node-runner";
 import { installPaneViews } from "./pane-views";
 import { installPreviewSessions } from "./preview-session";
 import { installProfileTimes } from "./profile-times";
-import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS, serveOrigin } from "./project";
+import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS, serveFiles, serveOrigin } from "./project";
 import { markReady, whenDebuggerUp } from "./readiness";
 import { installScriptRun } from "./script-run";
 import { installTarballs } from "./tarballs";
@@ -511,6 +511,8 @@ function maybeBoot(): void {
 				// The repository the workspace is a clone of, for the shell's binding (project.ts); and what only it holds,
 				// for Reset (unpushed.ts).
 				serveOrigin(workbenchHub);
+				// The workspace's files, for the shell's Share (project.ts).
+				serveFiles(api as typeof import("vscode"), workbenchHub, workspaceFolder ?? "/workspace", paneLog);
 				serveUnpushed(workbenchHub);
 				// What's been decided about a file or a name: the history extension's reading of the ledger and docs (decisions.ts).
 				installDecisions(api as typeof import("vscode"), workbenchHub);

@@ -119,6 +119,13 @@ name by looking up. An instance's reset takes only its own and leaves the one se
 its tab; resetting the real editor takes its instances with it. Workers aren't covered: the only database one opens is
 BABLR's parses, kept by the text's hash, safe to share.
 
+A TypeScript Playground link opens in an instance of its own (shell/playground.tsx): swap the link's host for the editor's,
+and the shell moves to `?instance=playground-<its hash>`, where the link's files (shared/playground-link.ts: v2, classic
+with its compiler options, or `#src=`) become that workspace once the app listens, and the hash leaves the address, so a
+reload keeps what's changed since. Following a link never replaces the workspace you're in; the same link opens the same
+instance. The top bar's Share goes the other way: the workspace's files (`workbench.files`, the editor's scaffolding left
+out) and the editor in front, as a Playground v2 link on the site's root, copied as it opens.
+
 ### The dev server
 
 `vite` in the terminal (or a project's `"dev": "vite"`) starts almostnode's in-browser Vite dev server in the dev-server

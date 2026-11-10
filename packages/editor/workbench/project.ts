@@ -8,6 +8,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
+import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { serve } from "@brianjenkins94/hub";
@@ -190,6 +191,46 @@ export function followProjectSwitches(hub: Hub, open: (project: Project) => Prom
 			}
 		}, 150);
 	});
+}
+
+/** The workspace as the shell's Share sends it (shell/playground.tsx): every project file as bytes, the editor's scaffolding
+ *  left out, and the editor in front with its selection, as a playground link records it. */
+export function serveFiles(vscode: typeof vscodeApi, hub: Hub, root: string, log: Logger): void {
+	serve(hub, "workbench.files", async (): Promise<SharedWorkspace> => log.span("editor.workbench.project.files", { "path": root }, async (span) => {
+		const files: SharedWorkspace["files"] = [];
+		const walk = async (dir: string): Promise<void> => {
+			for (const [name, type] of await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir))) {
+				const full = `${dir}/${name}`;
+
+				if (dir === root && SCAFFOLDING.has(name)) {
+					continue;
+				}
+
+				if (type === vscode.FileType.Directory) {
+					await walk(full);
+				} else if (type === vscode.FileType.File) {
+					files.push({ "path": full, "bytes": await vscode.workspace.fs.readFile(vscode.Uri.file(full)) });
+				}
+			}
+		};
+
+		await walk(root);
+		span.end({ "count": files.length, "bytes": files.reduce((total, { bytes }) => total + bytes.length, 0) });
+
+		const editor = vscode.window.activeTextEditor;
+
+		if (editor === undefined || editor.document.uri.scheme !== "file") {
+			return { "files": files };
+		}
+
+		const { active, anchor } = editor.selection;
+
+		return {
+			"files": files,
+			"activeFile": editor.document.uri.path,
+			"selection": { "positionLineNumber": active.line + 1, "positionColumn": active.character + 1, "selectionStartLineNumber": anchor.line + 1, "selectionStartColumn": anchor.character + 1 }
+		};
+	}));
 }
 
 /** The GitHub repository the workspace is a clone of — its origin, and the branch it's on — or null, as `git.origin`: the

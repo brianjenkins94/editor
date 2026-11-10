@@ -1550,20 +1550,23 @@
     "restore": "from the full-editor tag: its ways in are in its extension or service there"
   },
   "Playground links": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Open a TypeScript Playground link here as a real workspace (swap its host for the editor's), and share your workspace as a link the Playground opens too.",
+    "status": "active",
+    "why": "reintroduced (the user, 2026-11-09: rough feature parity with full-editor); a link opens in an editor of its own rather than replacing the workspace, so following one loses nothing",
+    "since": "2026-11-09",
+    "what": "Open a TypeScript Playground link here as a real workspace (swap its host for the editor's): an editor of its own, named by the link, so the workspace you're in is kept. And share your workspace as a Playground v2 link, which opens here or in the Playground.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Instances*",
     "ways": [
       "button|Share",
-      "hub request|workbench.files",
-      "hub request|workspace.files"
+      "hub request|workbench.files"
     ],
     "paths": [
-      "packages/editor/shared/playground-link.ts"
+      "packages/editor/shared/playground-link.ts",
+      "packages/editor/shell/playground.tsx"
     ],
-    "in": "e5772e5d",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "tests": [
+      "packages/editor/test/playground-link.test.mjs",
+      "packages/editor/test/in-editor/playground-links.spec.mjs"
+    ]
   },
   "Playwright tests in the debugger": {
     "status": "active",

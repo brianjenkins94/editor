@@ -32,6 +32,7 @@ import { Icon } from "./icon";
 import { previewWindows } from "./preview-windows";
 import { push } from "./push";
 import { repoLoad } from "./repo-load";
+import { playground } from "./playground";
 import { reset } from "./reset-popover";
 import { runMenu } from "./run-menu";
 import { signIn } from "./sign-in";
@@ -51,6 +52,7 @@ const FEATURES: ShellFeature[] = [
 	ci,
 	signIn,
 	repoLoad,
+	playground,
 	runMenu,
 	commit,
 	reset,

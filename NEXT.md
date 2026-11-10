@@ -471,7 +471,7 @@ How it's kept:
      title bar*, back: ARCHITECTURE.md, *Preview windows*; the profiles reworked, the user 2026-11-09: their times on the
      code, kept with the run, RUNTIME-EVIDENCE.md, *Time*; *Breakpoints in a page's code*, back: RUNNING.md, *Apps: recorded
      stops, not live ones*). *Dependency baseline and exceptions* is back too, on the code (ARCHITECTURE.md, *Dependency
-     baseline*). *Explore orderings* is back, on the code (RUNNING.md, *Explore orderings*). Next, in this order: *Playground links*, *Type queries*, *Your edits since the last commit*, *Performance
+     baseline*). *Explore orderings* is back, on the code (RUNNING.md, *Explore orderings*), and *Playground links*, each opening in an editor of its own (ARCHITECTURE.md, *Instances*). Next, in this order: *Type queries*, *Your edits since the last commit*, *Performance
      monitor*, *Docking editors into windows*, *Error reports from the editor*, *Formatting-only changes marked*,
      *Spell check* (its infos drowned Problems when it was in: that wants an answer as it comes back). Far off, still the mission: *Event Sheet*, *Build a
      game by painting a level*.
@@ -601,6 +601,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   2026-11-04, on CI's first saves. ESLint's fix doesn't wait for its worker to load, and saves again when it sees that cancel
   (`extensions/eslint/extension.ts`). Another provider that's slow to answer could still lose a save. The agents' `files_edit` /
   `files_write` still try again (workspace-tools.ts `applyAndSave`).
+- **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
+  replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
+  the project service") stays in Problems.
 
 ## Decisions
 
