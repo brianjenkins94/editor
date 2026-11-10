@@ -470,7 +470,11 @@ How it's kept:
      back, RUNTIME-EVIDENCE.md), and the previews' (*Preview DevTools*, *Preview CPU profiles* and *Debug toolbar in the preview
      title bar*, back: ARCHITECTURE.md, *Preview windows*; *Breakpoints in a page's code*, back: RUNNING.md, *Apps: recorded
      stops, not live ones*). Next, in this order: *Dependency baseline and
-     exceptions*, *Explore orderings*, *Playground links*, *Type queries*, *Your edits since the last commit*, *Performance
+     exceptions* (proposed 2026-11-09, not yet agreed: the baseline back as it was, its maker, the package worker, the
+     TypeScript plugin's `surface` and `silo.baseline`; and what goes beyond it on the code, not in a view: a version that
+     grew a capability warned on its line in package.json, or in .silo/versions.json for one nothing lists, and use from the
+     code that reaches more on its import, each with the lightbulb's allow or refuse as a policy rule; the answers given at
+     a call in runs, once or refused, said in that call's decision diagnostic), *Explore orderings*, *Playground links*, *Type queries*, *Your edits since the last commit*, *Performance
      monitor*, *Docking editors into windows*, *Error reports from the editor*, *Formatting-only changes marked*,
      *Spell check* (its infos drowned Problems when it was in: that wants an answer as it comes back). Far off, still the mission: *Event Sheet*, *Build a
      game by painting a level*.
