@@ -4,12 +4,16 @@
  * background run of the file (tsval's canary.ts), and findings.ts shows them as this extension's diagnostics.
  *
  * A call's decision is on the call (decisions.ts): the diagnostic says how it's decided and by what, and its lightbulb
- * changes that. There's no view of them to go and look at (the user, 2026-11-06). The dependency baseline comes back with
- * its feature.
+ * changes that. There's no view of them to go and look at (the user, 2026-11-06). And the dependency baseline: what each
+ * dependency's own code can do, kept as the project's dependencies and code change (baseline.ts), with what goes beyond it
+ * said where it is (growth.ts).
  */
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import type * as vscode from "vscode";
+import { keepBaseline } from "./baseline";
 import { installDecisions } from "./decisions";
+import { readExceptions } from "./exceptions";
+import { warnGrowth } from "./growth";
 import { publishFindings } from "./findings";
 import { installRulePicker } from "./rule-picker";
 
@@ -22,5 +26,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	installDecisions(context, observed?.log);
 	installRulePicker(context, observed?.log);
-	publishFindings(context, observed?.log);
+	publishFindings(context, readExceptions(context), observed?.log);
+	keepBaseline(context, observed?.log);
+	warnGrowth(context, observed?.log);
 }

@@ -563,17 +563,28 @@
     ]
   },
   "Dependency baseline and exceptions": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "What each dependency's own code can do is recorded when it's added, and the Exceptions view shows anything that goes beyond that and how each run's calls were answered.",
+    "status": "active",
+    "why": "reintroduced on the code, not in a view (the user, 2026-11-06 and 2026-11-09): what each dependency's own code can do, kept as it's added, and what goes beyond it said where it is; the objective is rough feature parity with full-editor",
+    "since": "2026-11-09",
+    "what": "What each dependency's own code can do is recorded as the project opens and its dependencies and code change (.silo/baseline.json, or its local copy), with what the code's use of each reaches. A version that grew a capability is warned on its line in package.json, and the code's use that reaches more on its import, each with the lightbulb's allow always or refuse as a rule in your policy about that package. And what people answered at a call in their runs, allowed once or refused, is said on that call, beside how the policy decides it: a run's capability calls are kept in its envelope.",
+    "docs": "packages/editor/ARCHITECTURE.md, *Dependency baseline*",
     "ways": [
+      "code actions provider||capabilities/growth.ts",
+      "command|capabilities.decideGrowth",
+      "diagnostic collection|baseline",
+      "hub subscription|evidence.effects",
       "setting|silo.baseline",
-      "view|silo.exceptions",
       "worker||capabilities/packages-worker.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/capabilities/baseline.ts",
+      "packages/editor/extensions/capabilities/exceptions.ts",
+      "packages/editor/extensions/capabilities/growth.ts",
+      "packages/editor/extensions/capabilities/packages-worker.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/dependency-baseline.spec.mjs"
+    ]
   },
   "Docking editors into windows": {
     "status": "removed",

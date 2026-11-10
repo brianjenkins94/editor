@@ -7,7 +7,9 @@
  * - `recorded`: what an allowed call returned, to give back when it isn't made (editor-api/policy's recordResult);
  * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list);
  * - `coverage`: what the run ran and what went through its sites, as it ends (`evidence.observed`: evidence.ts keeps it in
- *   git; the Margin reads the event itself).
+ *   git; the Margin reads the event itself);
+ * - `effects`: its capability calls, each with how it was decided, an answer at the call among them (`evidence.effects`:
+ *   evidence.ts puts them in the run's envelope, where they're its exceptions on record).
  *
  * A run a terminal started (`__startedBy: "terminal"`, its `__runId` the terminal's run) prints there — its `output`
  * events' stdout and stderr (`node.out.<run>`) — and reads what's typed there (`node.stdin.<run>`, the `stdin` request).
@@ -135,6 +137,13 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					});
 					break;
 				}
+
+				case "effects":
+					if (typeof runId === "string") {
+						bridgeHub.publish("evidence.effects", { "runId": runId, "effects": (body as { "effects"?: unknown }).effects });
+					}
+
+					break;
 
 				case "listening":
 					if (typeof runId === "string") {

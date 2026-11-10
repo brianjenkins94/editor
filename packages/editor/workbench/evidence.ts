@@ -6,7 +6,9 @@
  * browser it ran in, the repository it ran on, and what the runtime saw — a debug session's report as it ends
  * (`evidence.observed`, the bridge's, from tsval's `coverage`): each statement's count under the span BABLR picks for it,
  * and what went through each observed site (values at `?.`, `??`, parameters and returns; each branch's arms) under the
- * span that's exactly its node — a site without one isn't recorded. The values themselves stay on this machine
+ * span that's exactly its node — a site without one isn't recorded. Its capability calls, each with how it was decided
+ * (`evidence.effects`), go in its envelope: an answer given at a call is an exception to the policy, on record there. The
+ * values themselves stay on this machine
  * (`.silo/local/samples/`). A file BABLR's grammar doesn't take yet gets no evidence; its run is still recorded, saying so.
  *
  * And where a preview's time went, each time it's profiled (profile-times.ts gives each function's time): folded into the
@@ -17,7 +19,7 @@
  *
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
-import type { LoadedPackage, SiteObservation, StatementCoverage } from "@brianjenkins94/editor-api";
+import type { Effect, LoadedPackage, SiteObservation, StatementCoverage } from "@brianjenkins94/editor-api";
 import type { ModuleEvidence } from "@brianjenkins94/editor-api/recorded";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
@@ -264,6 +266,17 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 		if (typeof runId === "string" && Array.isArray(loaded)) {
 			packages.set(runId, loaded as LoadedPackage[]);
+		}
+	});
+
+	// Each run's capability calls as it last told them (each telling all of them so far), until it ends.
+	const effectsOf = new Map<string, Effect[]>();
+
+	hub.subscribe("evidence.effects", (data) => {
+		const { runId, effects } = (data ?? {}) as { "runId"?: unknown; "effects"?: unknown };
+
+		if (typeof runId === "string" && Array.isArray(effects)) {
+			effectsOf.set(runId, effects as Effect[]);
 		}
 	});
 
@@ -533,6 +546,14 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			}
 		}
 
+		const effects = effectsOf.get(run.id) ?? [];
+
+		effectsOf.delete(run.id);
+
+		if (effects.length > 0) {
+			envelope.effects = effects;
+		}
+
 		const ran = {
 			...await packagesOf(loaded),
 			...Object.fromEntries(pagePackages.map((each) => [each, {}]))
@@ -606,6 +627,8 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			writing = writing.then(async () => record(run, covered, loaded)).catch(() => { /* evidence never breaks a run */ });
 		} else if (preview !== undefined) {
 			writing = writing.then(async () => record(run, await previewCoverage(preview), [], Object.fromEntries(preview.versions), [...preview.packages])).catch(() => { /* evidence never breaks a run */ });
+		} else {
+			effectsOf.delete(run.id);
 		}
 	}
 

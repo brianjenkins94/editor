@@ -1,10 +1,12 @@
 /**
  * What the capability findings read of a file, built on `@brianjenkins94/util/silo` (the canonical static analysis). It takes
  * the `ts`, SourceFile and checker of whatever holds the file: the TypeScript server today, through the capabilities plugin,
- * so it parses nothing itself.
+ * so it parses nothing itself. And a file's import surface, for the dependency baseline's `consumer` (baseline.ts).
  */
+import type { SurfaceEntry } from "@brianjenkins94/util/silo/detect";
+import { surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
-import { findReach } from "@brianjenkins94/util/silo/reach";
+import { findReach, surfaceOf } from "@brianjenkins94/util/silo/reach";
 import { typeAtStart } from "@brianjenkins94/util/silo/typed";
 
 /** One capability finding, as the extension shows it: its span, whether it's dangerous (a warning, else a hint), and
@@ -66,4 +68,10 @@ export function findings(ts: any, sourceFile: any, checker: any, observations: r
 	}
 
 	return found;
+}
+
+/** One file's import surface: each specifier, and the members its code uses of it (`dynamic`: some it can't name). */
+// eslint-disable-next-line ts/no-explicit-any -- whatever host's `ts` and tree (the server's, through the plugin)
+export function surface(ts: any, sourceFile: any): Record<string, SurfaceEntry> {
+	return surfaceEntries(surfaceOf(ts, sourceFile));
 }

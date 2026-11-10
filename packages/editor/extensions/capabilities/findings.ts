@@ -11,12 +11,14 @@
  * connection) answers the same request.
  *
  * Each says how it's decided, and is as loud as that asks for (decisions.ts): a call a run would stop at, or that's denied, is
- * in Problems; one that's been allowed goes quiet. Its lightbulb decides it.
+ * in Problems; one that's been allowed goes quiet. Its lightbulb decides it. And what people answered at it in their runs,
+ * allowed once or refused (exceptions.ts).
  */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import type { Finding } from "./decisions";
 import { loadPolicyFiles } from "@brianjenkins94/editor-api/policy";
+import type { Exceptions } from "./exceptions";
 import { actionsFor, decisionOfCall, POLICY_FILES, sayDecision, severityOf } from "./decisions";
 
 export const LANGUAGES = new Set(["typescript", "typescriptreact", "javascript", "javascriptreact"]);
@@ -48,7 +50,7 @@ function watchPolicy(changed: () => Promise<void>): vscode.Disposable[] {
 	return [watcher, watcher.onDidCreate(again), watcher.onDidChange(again), watcher.onDidDelete(again)];
 }
 
-export function publishFindings(context: vscode.ExtensionContext, log?: ObservedExtension["log"]): void {
+export function publishFindings(context: vscode.ExtensionContext, exceptions: Exceptions, log?: ObservedExtension["log"]): void {
 	const collection = vscode.languages.createDiagnosticCollection("capabilities");
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
 	/** Each document's findings as last answered, to say again when the policy changes, and for its lightbulb. */
@@ -71,7 +73,7 @@ export function publishFindings(context: vscode.ExtensionContext, log?: Observed
 
 		collection.set(known.document.uri, known.found.map(({ finding, range }) => {
 			const decision = decisionOfCall(files, finding);
-			const diagnostic = new vscode.Diagnostic(range, `${finding.message}. ${sayDecision(decision)}`, severityOf(decision, finding));
+			const diagnostic = new vscode.Diagnostic(range, `${finding.message}. ${sayDecision(decision)}${exceptions.said(finding.capability, finding.resource)}`, severityOf(decision, finding));
 
 			diagnostic.source = "capabilities";
 			diagnostic.code = 900100;
@@ -150,6 +152,9 @@ export function publishFindings(context: vscode.ExtensionContext, log?: Observed
 		}, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
 		// (decided anywhere: here, at a stop, or by editing the file)
 		...watchPolicy(showAll),
+		exceptions.onDidChange(() => {
+			void showAll();
+		}),
 		vscode.window.onDidChangeVisibleTextEditors((editors) => {
 			for (const { document } of editors) {
 				if (shown(document) && !timers.has(document.uri.toString())) {

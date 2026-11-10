@@ -8,6 +8,9 @@
  * the background, bounded by a tsval step budget, for the resources the static half can't see; while it runs, the answer
  * says `pending`, and the extension asks again. The canary needs `typescript`, so it's built with ts EXTERNAL and handed
  * tsserver's own via `globalThis.__capabilitiesTs`.
+ *
+ * `_capabilities.surface`: every source file's import surface (engine.surface) across the programs the server holds, for
+ * the dependency baseline's `consumer` (baseline.ts): the workspace's own code's use of its dependencies.
  */
 
 export default function init(modules) {
@@ -105,6 +108,50 @@ export default function init(modules) {
 
 	let registered = false;
 
+	/**
+	 * A server file name as a path relative to `root`, or undefined for one that isn't the workspace's own source. In the
+	 * browser the server names a file by its URI — `/<scheme>/<authority>/<path>` (`/file/ts-nul-authority/workspace/…`;
+	 * Source Control's HEAD copies are `/git-head/…`) — and only the `file` scheme is the workspace; a desktop server's
+	 * names are plain paths. (As the history plugin reads them.)
+	 */
+	function relativeTo(root, fileName) {
+		const uri = /^\/([a-z][a-z0-9+.-]*)\/([^/]+)(\/.*)$/u.exec(fileName);
+		let path = fileName;
+
+		if (uri !== null) {
+			path = uri[1] === "file" ? uri[3] : undefined;
+		}
+
+		return path !== undefined && path.startsWith(root + "/") && !path.includes("/node_modules/") ? path.slice(root.length + 1) : undefined;
+	}
+
+	/** Every source file in `root` the server's programs hold — each once (the first project that has it) — with its
+	 *  import surface (engine.surface): the workspace's own code's use of its dependencies. Not ready until the engine is. */
+	function surfaces(projectService, root) {
+		if (engine === undefined) {
+			return { "ready": false, "error": engineError };
+		}
+
+		const files = {};
+		const projects = [...(projectService.configuredProjects ? projectService.configuredProjects.values() : []), ...(projectService.inferredProjects || [])];
+
+		for (const project of projects) {
+			const program = project.getLanguageService().getProgram();
+
+			for (const source of program === undefined ? [] : program.getSourceFiles()) {
+				const path = relativeTo(root, source.fileName);
+
+				if (path !== undefined && !source.isDeclarationFile && files[path] === undefined) {
+					try {
+						files[path] = engine.surface(ts, source);
+					} catch (error) { /* a file it can't read: no surface of it */ }
+				}
+			}
+		}
+
+		return { "ready": projects.length > 0, "files": files };
+	}
+
 	function registerRequests(info) {
 		if (registered || info.session === undefined || typeof info.session.addProtocolHandler !== "function") {
 			return;
@@ -112,6 +159,12 @@ export default function init(modules) {
 
 		registered = true;
 
+		// `_capabilities.surface`: every source file's import surface, for the baseline's `consumer` (baseline.ts).
+		info.session.addProtocolHandler("_capabilities.surface", function(request) {
+			const args = (request && request.arguments) || {};
+
+			return { "response": surfaces(info.project.projectService, String(args.root || "/workspace").replace(/\/+$/u, "")), "responseRequired": true };
+		});
 		// `_capabilities.findings`: a file's capability findings, for the extension to show (findings.ts).
 		info.session.addProtocolHandler("_capabilities.findings", function(request) {
 			const at = fileOf(info, request);

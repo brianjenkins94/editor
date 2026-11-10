@@ -792,7 +792,8 @@ tools*). What the code doesn't say:
 
 What's in the core of the capability IDE is **Enforce**: at run time, a debug run's real effects (files, the network,
 commands) are decided per call. The static half (Detect, Resolve and Surface: the capabilities extension, its tsserver
-plugin and its panels) went with the reduction; its tombstone is in the ledger.
+plugin and its panels) went with the reduction, and is coming back on the code rather than in panels: the findings and
+decisions on each call, rules from its lightbulb, and the dependency baseline (below).
 
 The core is pure, with no vscode, node or oxc: util/silo's policy (dispositions, rules, resource matching) and tsval's
 capability-calls.ts (`classifyCall`, `shouldBreak`). The `.silo/` layout, and why its two axes are kept in separate
@@ -818,6 +819,24 @@ code imports of it, while the baseline's version is the one running), made; else
 redline, then the policy; what it leaves undecided isn't made, and is said once, with how to allow it: a rule in my
 policy). The model is silo's README, *The model*; the order is the debug worker's (worker/package-calls.ts). A rule about a package's calls is
 about that package's only, and so is an answer for the run.
+
+### Dependency baseline
+
+The baseline a package's call is decided against is kept by the capabilities extension (extensions/capabilities/
+baseline.ts), as the project opens and as `.silo/versions.json` and its code change: what each dependency's own code can
+do, read off its published tarball in a worker of the extension's (packages-worker.ts, lib's `packageCaps`), and the join,
+what the members the code imports of it reach (lib's `sliceCaps`, rolldown's browser build), from each file's import
+surface as the capabilities tsserver plugin reads it (`_capabilities.surface`). Kept at `.silo/baseline.json` when the
+repository commits one, else its local copy; `silo.baseline` off, none is kept and the policy decides every package's call.
+
+What goes beyond it is said where it is, not in a view (the user, 2026-11-06): a version that grew a capability is warned on
+its line in each package.json that depends on it (or in `.silo/versions.json`, for a package nothing lists), and the code's
+use that reaches more on each import of it, each until the policy decides that package's calls of it; the lightbulb's
+"Allow … always" or "Refuse" writes that rule in my policy (growth.ts). A nested private workspace governs itself, and is
+left out. And the exceptions: what was answered at a call in runs, allowed once or refused, is said in that call's
+decision (exceptions.ts), read from the runs' envelopes, which keep each run's capability calls with how each was decided
+(`evidence.effects`, workbench/evidence.ts). Not yet: a workspace file's write the editor makes for a run is kept among the
+run's file effects without its answer, so an answer at one isn't said.
 
 **A call nobody's decided stops the run** on that line and asks (capability-stops.ts, `editor.capability.decide`):
 allow, skip or deny, for this call, this run or always. A run nobody's watching (`runs_tests`) doesn't wait on a person:
