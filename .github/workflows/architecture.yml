@@ -108,7 +108,9 @@
           "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json\n/tmp/architecture-*.png", "if-no-files-found": "ignore" }
         }
       ],
-      "timeout-minutes": 25
+      # (the specs shard is the longest: 21–22 min of specs after 3 of setup on 2026-11-10, more as features come back with
+      # theirs; this is a hang's limit, not a budget)
+      "timeout-minutes": 35
     }
   }
 }
