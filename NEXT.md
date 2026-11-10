@@ -601,14 +601,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
   2026-11-04, on CI's first saves. ESLint's fix doesn't wait for its worker to load, and saves again when it sees that cancel
   (`extensions/eslint/extension.ts`). Another provider that's slow to answer could still lose a save. The agents' `files_edit` /
   `files_write` still try again (workspace-tools.ts `applyAndSave`).
-- **The in-editor specs' renderer is near its limit** (found 2026-11-10): all 35 specs, two at once, peak at 7.5–8.8 GB in
-  the one renderer they share, and it crashes near 9 (a "Target crashed", and every spec after it fails). One at a time,
-  6.2–6.6 GB, for 253 s against 170. Either way it climbs about 60 MB a spec and never comes down, but not in JavaScript:
-  once every spec is done, `measureUserAgentSpecificMemory` finds 833 MB live, the outer editor alone, no spec's frame or
-  worker kept, detached or not, while the renderer holds 6.2 GB. So it's what the renderer keeps of what it freed, and the
-  way out is a fresh renderer every so many specs (a new browser context: a reload keeps the process), not a leak to find.
-  `observeExtension` opens an extension's link only on first use now, which saved some (each extension, in every editor).
-  Local gates run the specs one at a time (`IN_EDITOR_AT_ONCE=1`) meanwhile; CI's two at once hasn't crashed.
+- **The in-editor specs' renderer** (found 2026-11-10): every spec's editor is a frame of one page, so they share its
+  renderer, which kept about 60 MB a spec that never came back (not JavaScript: at the end of a run that held 6.2 GB,
+  `measureUserAgentSpecificMemory` found 0.8 GB live, the outer editor alone), and near 9 GB it crashed. Now the specs run
+  in batches of 12, each in a session of its own (test/in-editor.mjs): the peak is the outer editor and two specs' editors,
+  7.4–7.9 GB with cspell, where unbatched it climbed to 8.8 and crashed, for about 190 s against 170. What's left to
+  shrink is the editor itself: each of the three runs its own TypeScript servers, ESLint, BABLR and so on.
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems.
