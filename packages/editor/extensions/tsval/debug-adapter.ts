@@ -677,7 +677,7 @@ function loopStartOf(value: unknown): LoopStart | undefined {
  *  preview through it, its log and spans are the editor's) — for debug session `session`, when it runs one — then sent
  *  control messages; its events go to `onEvent`, a failure to load or an uncaught error to `onError` (with whether it had
  *  loaded), said as the debug worker's (watchWorker). */
-function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onEvent: (event: WorkerEvent) => void, onError: (message: string, loaded: boolean) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
+export function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onEvent: (event: WorkerEvent) => void, onError: (message: string, loaded: boolean) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
 	// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module cache for an
 	// unchanged URL even after a rebuild); harmless in production.
 	const url = new URL("./lsp/debug-worker.js", location.href);

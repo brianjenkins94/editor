@@ -32,6 +32,8 @@ export interface Crash { "line": number; "at": [number, number]; "message": stri
 /** Adapter → worker. */
 export type Control =
 	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "places"?: Record<string, RulePlace[]>; "live"?: boolean; "recorded"?: Record<string, unknown>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay }
+	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
+	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
@@ -49,6 +51,16 @@ export type Control =
 
 /** Where tsval's event loop starts (its clock, its random seed) and the choices to make. */
 export interface LoopStart { "now": number; "seed": number; "schedule"?: number[] }
+
+/** A line the program printed, exploring: the text, and where the call that printed it is (its file, its 1-based line). */
+export interface Printed { "text": string; "file": string; "line": number }
+
+/** One way a run of the program can end, from exploring its orderings: what it printed and where, where it threw if it did,
+ *  a schedule that gets there (to debug it), the events chosen along it, and how many runs ended this way. */
+export interface Ordering { "output": Printed[]; "crash"?: { "message": string; "file"?: string; "line"?: number }; "schedule": number[]; "path": string[]; "runs": number }
+
+/** What exploring a program's orderings found: how many runs, whether every ordering was run, and the distinct outcomes. */
+export interface Explored { "runs": number; "complete": boolean; "outcomes": Ordering[]; "eventLoop": LoopStart }
 
 /** A rule placed in the code (RUNNING.md, *A rule placed in the code*), found in the text that runs: the 1-based line
  *  its statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
@@ -97,4 +109,6 @@ export type WorkerEvent =
 	/** Out of work, serving: the session is idle until a request (or a timer) comes. */
 	| { "type": "serving"; "ports": number[] }
 	/** The program is computing, every few seconds while it runs code (the run contract's `busy`). */
-	| { "type": "busy" };
+	| { "type": "busy" }
+	/** What exploring the program's orderings found (asked by `explore`). */
+	| { "type": "explored"; "explored": Explored };

@@ -20,6 +20,7 @@
  */
 import type { ToWorker } from "./debug-protocol";
 import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
+import { exploreOrderings } from "./worker/explore";
 import { typed } from "./worker/process";
 import { launch, setBreakpoints, setPace, setValue } from "./worker/session";
 import { post, state } from "./worker/state";
@@ -40,6 +41,12 @@ globalThis.addEventListener("message", (event: MessageEvent<ToWorker>): void => 
 			launch(message, trace);
 			break;
 		}
+
+		case "explore":
+			void exploreOrderings(message).then((explored) => {
+				post({ "type": "explored", "explored": explored });
+			});
+			break;
 
 		case "setBreakpoints":
 			setBreakpoints(message);

@@ -282,7 +282,7 @@ export function fileAt(vm: Vm, place: Place): ts.SourceFile | undefined {
 }
 
 /** A console argument the way node's console prints it: strings bare, everything else JSON-ish. */
-function formatLogArg(value: unknown): string {
+export function formatLogArg(value: unknown): string {
 	if (typeof value === "string") {
 		return value;
 	}

@@ -857,16 +857,26 @@
     ]
   },
   "Explore orderings": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Runs a program under every ordering of its events and shows the different outcomes, so bugs that depend on order turn up.",
+    "status": "active",
+    "why": "reintroduced on the code, not in a list (the user, 2026-11-06: no out-of-the-way views): what depends on the order of events said on the line it's about; the objective is rough feature parity with full-editor",
+    "since": "2026-11-09",
+    "what": "Runs a program under every ordering of its events (which call's answer comes first, a timer before or after) and says on each line that prints or throws differently from one ordering to another how it goes in each, with the lightbulb's Debug ordering to run any of them exactly that way. Agents explore with debug_explore, which runs the same command, and debug one with debug_start's eventLoop.",
+    "docs": "packages/editor/RUNNING.md, *Explore orderings*",
     "ways": [
-      "command|tsval.explore",
-      "command|tsval.exploreOrderings"
+      "agent tool|debug_explore",
+      "code actions provider||tsval/explore.ts",
+      "command|tsval.debugOrdering",
+      "command|tsval.exploreOrderings",
+      "diagnostic collection|orderings",
+      "hub request|debug.explore"
     ],
-    "in": "fcc92752",
-    "restore": "from the full-editor tag: debug-adapter.ts's exploreProgram and its two commands, debug-worker.ts's exploreOrderings (tsval's explore, still in packages/tsval)"
+    "paths": [
+      "packages/editor/extensions/tsval/explore.ts",
+      "packages/editor/extensions/tsval/worker/explore.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/explore-orderings.spec.mjs"
+    ]
   },
   "Extensions by URL": {
     "status": "active",

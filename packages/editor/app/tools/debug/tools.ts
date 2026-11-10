@@ -8,6 +8,8 @@ import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
 const SESSION = z.string().optional().describe("The session id (from debug_list or debug_start). Omit when exactly one is going.");
+/** An ordering of the program's events to run again: debug_explore's `eventLoop`, with one outcome's `schedule`. */
+const EVENT_LOOP = z.object({ "now": z.number(), "seed": z.number(), "schedule": z.array(z.number()).optional() });
 const PROGRAM = z.string().optional().describe("The file, absolute or relative to the workspace (src/index.ts, say). Default: the file open in the editor.");
 
 /** The session to act on: `session`, else this tab's only one. */
@@ -34,10 +36,22 @@ const debug: ToolFamily = (host) => [
 				"description": "Run a file as Run does, in the editor's debugger (a VS Code debug session, shown in its UI), and return where it first stops, idles or ends: { session, state, reason, line, code, locals, output }. A call the policy hasn't decided stops it with reason capability, its question in the Margin: answer with debug_decide.",
 				"inputSchema": {
 					"program": PROGRAM,
-					"breakpoints": z.array(z.number()).optional().describe("1-based lines to break on in that file, replacing its breakpoints.")
+					"breakpoints": z.array(z.number()).optional().describe("1-based lines to break on in that file, replacing its breakpoints."),
+					"eventLoop": EVENT_LOOP.optional().describe("Run one ordering of its events, as the lightbulb's Debug ordering does: debug_explore's eventLoop with an outcome's schedule.")
 				}
 			},
-			"handler": async ({ program, breakpoints }, { signal }) => ok(host.request("debug.start", { "program": program, "breakpoints": breakpoints }, signal, 60000))
+			"handler": async ({ program, breakpoints, eventLoop }, { signal }) => ok(host.request("debug.start", { "program": program, "breakpoints": breakpoints, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop } }, signal, 60000))
+		})
+	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
+			"name": "debug_explore",
+			"config": {
+				"description": "Explore Orderings, as its button above a file does: run the file once per ordering of its events (which fetch or other call answers first, a timer before or after) and return the distinct ways it ends: { runs, complete, outcomes: [{ output: [{ text, file, line }], crash, schedule, path, runs }], eventLoop }. The lines that go differently are said on the code, as for a person. To debug one outcome: debug_start with eventLoop { ...eventLoop, schedule: outcome.schedule }. A gated call isn't made for real here, so a run of one asks at it unless the policy allows it.",
+				"inputSchema": { "program": PROGRAM }
+			},
+			"handler": async ({ program }, { signal }) => ok(host.request("debug.explore", { "program": program }, signal, 120000))
 		})
 	},
 	{

@@ -48,6 +48,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "tsval.exploreOrderings",
+        "title": "Explore Orderings",
+        "category": "Debug",
+        "icon": "$(type-hierarchy)"
+      },
+      {
         "command": "tsval.skipWaits",
         "title": "Skip Waits",
         "category": "Debug",
@@ -80,6 +86,13 @@
           "command": "editor.debugFile",
           "when": "resourceExtname =~ /\\.[cm]?[jt]sx?$/",
           "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "tsval.exploreOrderings",
+          "when": "resourceExtname =~ /\\.[cm]?[jt]sx?$/",
+          "group": "1_run@1"
         }
       ]
     },

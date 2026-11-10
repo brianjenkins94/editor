@@ -5,6 +5,7 @@
  *
  *   `debug.sessions`                         every session going, where each is
  *   `debug.start` { program?, breakpoints? } Run: the file, answered with where it first stops, idles or ends
+ *   `debug.explore` { program? }             Explore Orderings: the file under every ordering of its events, its outcomes
  *   `debug.breakpoints` { program?, lines }  a file's breakpoints replaced, VS Code's own
  *   `debug.session.<id>.step` { action }     a step, answered with the next stop, or the end
  *   `debug.session.<id>.state`               where it is now
@@ -311,7 +312,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 	};
 
 	/** Run `program` (the file in front by default), as Run does, and answer with where it first stops, idles or ends. */
-	const start = async (program: string | undefined, breakpoints: number[] | undefined, signal: AbortSignal): Promise<DebugOutcome> => {
+	const start = async (program: string | undefined, breakpoints: number[] | undefined, eventLoop: unknown, signal: AbortSignal): Promise<DebugOutcome> => {
 		const path = resolveProgram(program);
 
 		if (!/\.[cm]?[jt]sx?$/u.test(path)) {
@@ -333,7 +334,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 		});
 
 		// (what Run starts: tsval/run-file.ts' runOf)
-		if (!await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "Run", "program": path, "__launchId": launch })) {
+		if (!await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "Run", "program": path, "__launchId": launch, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop } })) {
 			launches.delete(launch);
 
 			throw new Error("VS Code didn't start the run");
@@ -381,9 +382,23 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 			return { "program": path, "lines": lines };
 		}) },
 		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
-			const { program, breakpoints } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[] };
+			const { program, breakpoints, eventLoop } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "eventLoop"?: unknown };
 
-			return span("start", { "caller": "agent", "path": program ?? "" }, async () => start(program, breakpoints, signal));
+			return span("start", { "caller": "agent", "path": program ?? "" }, async () => start(program, breakpoints, eventLoop, signal));
+		}) },
+		// Explore Orderings, its command (tsval's): what it says on the code shown as a person's would be, its outcomes the answer.
+		{ "dispose": serve(hub, "debug.explore", async (args) => {
+			const path = resolveProgram((args as { "program"?: string } | undefined)?.program);
+
+			return span("explore", { "caller": "agent", "path": path }, async () => {
+				const explored = await vscode.commands.executeCommand<{ "error"?: string } | undefined>("tsval.exploreOrderings", vscode.Uri.file(path));
+
+				if (explored === undefined || explored.error !== undefined) {
+					throw new Error(explored?.error ?? "Explore Orderings didn't run");
+				}
+
+				return explored;
+			});
 		}) },
 		{ "dispose": serve(hub, "margin.state", async (args) => vscode.commands.executeCommand("margin.state", resolveProgram((args as { "file"?: string } | undefined)?.file))) }
 	);

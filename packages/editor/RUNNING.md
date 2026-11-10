@@ -48,8 +48,26 @@ and `runs_stop` for agents.
 `debug_start` is Run, to where it first stops; `debug_step` the toolbar's steps; `debug_breakpoints` the gutter's, VS Code's
 own; `debug_decide` a stop's buttons in the Margin; `debug_stop` Stop; `debug_state` and `debug_list` what the Call Stack and
 Variables views show; and `margin_state` what the Margin shows of a file, its question too. Each is done through VS Code, so it
-shows in the editor as a person's would. Live runs aren't for driving and aren't listed. Not yet: `debug_explore`, as Explore
-Orderings isn't back.
+shows in the editor as a person's would. Live runs aren't for driving and aren't listed. `debug_explore` is Explore Orderings,
+below, and `debug_start`'s `eventLoop` its lightbulb's Debug ordering.
+
+## Explore orderings
+
+A race is a program that can end more than one way, depending on which of its events comes first. tsval's event loop
+chooses, at each point where more than one could come next (a call's answer in, or a timer due), and records what it chose,
+so a run can be made again by its choices (`eventLoop.schedule`, packages/tsval/src/explore.ts). Explore Orderings, in the
+menu above a code file (More Actions), runs the file once per way those choices can go, up to 100 runs (worker/explore.ts):
+
+- **Every call is its stand-in**, answered at once, as a run of a given schedule's is: how long a real call takes isn't the
+  program's to choose, and only what's in can be chosen.
+- **What depends on the order is said on the line it's about** (explore.ts; no list, as nothing else is): each line that
+  prints or throws differently in one ordering than another has a diagnostic saying what it does in each, a throw as a
+  warning, and its lightbulb's *Debug ordering N* runs that one in the debugger, exactly that way, to step. A difference no
+  line can be found for is said on the file's first line. One way to end is *No race*, said and gone.
+- **An edit to the file takes them away**, as what they say may no longer be so.
+
+A debugged ordering's calls are stand-ins too, so it goes the way it went when explored; a call the policy hasn't allowed
+still asks at its line.
 
 ## Apps: recorded stops, not live ones
 
