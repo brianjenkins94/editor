@@ -479,7 +479,8 @@ How it's kept:
      (2) a preview's window shown as an editor tab, full-editor's hosted-editor.ts with what it found (an inactive pane is
      taken out of the page, so the preview is laid over its pane, hidden but loaded); and (3) docking proper, a window
      snapped to the shell's edges or tabbed with another, in `app-window` itself if it's wanted, decided by use. In that
-     order; (1) and (2) skipped until agreed), *Error reports from the editor*, *Formatting-only changes marked*,
+     order; (1) and (2) skipped until agreed), *Formatting-only changes marked* (*Error reports from the editor* is back as it was:
+     packages/api/README.md, *Errors and timelines*),
      *Spell check* (its infos drowned Problems when it was in: that wants an answer as it comes back). Far off, still the mission: *Event Sheet*, *Build a
      game by painting a level*.
    - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its

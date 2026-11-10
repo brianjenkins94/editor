@@ -32,6 +32,7 @@ import { Icon } from "./icon";
 import { previewWindows } from "./preview-windows";
 import { push } from "./push";
 import { repoLoad } from "./repo-load";
+import { errorReports } from "./error-notice";
 import { playground } from "./playground";
 import { reset } from "./reset-popover";
 import { runMenu } from "./run-menu";
@@ -57,7 +58,8 @@ const FEATURES: ShellFeature[] = [
 	commit,
 	reset,
 	github,
-	previewWindows
+	previewWindows,
+	errorReports
 ];
 
 // The resizable pane's limits (px). The min keeps it usable, the max caps it at a fraction of the viewport so it can't

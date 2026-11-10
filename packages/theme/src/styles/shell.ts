@@ -28,6 +28,9 @@ export const popoverBody = css({ "width": "300px", "maxWidth": "80vw" });
 export const ghError = css({ "color": "var(--wa-color-danger-on-quiet)" });
 
 // An uncaught error's id (shell/reporting.ts), to quote: over everything, bottom right, until dismissed or a minute on.
+// An uncaught error's id (shell/reporting.ts), to quote: over everything, bottom right, until dismissed or a minute on.
+export const errorNotice = css({ "position": "fixed", "insetInlineEnd": "var(--wa-space-m)", "insetBlockEnd": "var(--wa-space-m)", "zIndex": 2147483000, "maxWidth": "360px", "fontSize": "var(--wa-font-size-xs)" });
+
 export const ghOk = css({ "color": "var(--wa-color-success-on-quiet)" });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects

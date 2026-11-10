@@ -1,4 +1,5 @@
 import type { Plugin, RollupOutput } from "vite";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as path from "node:path";
 import * as url from "node:url";
@@ -181,11 +182,31 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 	};
 }
 
+/** `editor:release`: the commit being built (`git rev-parse --short HEAD`), or "dev" without git: the editor's error
+ *  reports say which release they came from (shell/reporting.ts; packages/api/README.md O6). */
+function releasePlugin(): Plugin {
+	const id = "editor:release";
+	let release = "dev";
+
+	try {
+		release = execFileSync("git", ["rev-parse", "--short", "HEAD"], { "encoding": "utf8" }).trim();
+	} catch {
+		/* not a checkout */
+	}
+
+	return {
+		"name": "editor-release",
+		"resolveId": (source) => (source === id ? `\0${id}` : undefined),
+		"load": (moduleId) => (moduleId === `\0${id}` ? `export default ${JSON.stringify(release)};` : undefined)
+	};
+}
+
 /** The host site's plugins — shared by the host BUILD (hostBuild) and the DEV server (dev.ts): cross-origin
  *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
  *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
 export function hostPlugins(): Plugin[] {
 	return [
+		releasePlugin(),
 		...coverage(),
 		// The SHELL (main.tsx → shell.tsx) is built here, and it lazily imports the browser GitHub client
 		// (github.ts → fido → util/env, util/store), which pulls in node builtins: `env.ts` reads `process`/`path`/`url`

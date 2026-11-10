@@ -757,9 +757,9 @@
     ]
   },
   "Error reports from the editor": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
+    "status": "active",
+    "why": "reintroduced as it was (the user, 2026-11-09: rough feature parity with full-editor)",
+    "since": "2026-11-10",
     "what": "Every realm's uncaught errors, and a signed-in session's timeline (repo loaded, commands run, panes shown, runs), sent to the API from the shell; an error reported shows its id, to quote.",
     "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
     "ways": [
@@ -769,8 +769,9 @@
       "packages/editor/shell/error-notice.tsx",
       "packages/editor/shell/reporting.ts"
     ],
-    "in": "3f3d8152",
-    "restore": "from the full-editor tag: the shell's errorReports feature (error-notice.tsx), session.ts's postEvents and reportError, and the session.event publishes in main.tsx, repo-load.tsx, runs.ts and workbench-entry.tsx"
+    "tests": [
+      "packages/editor/test/runs.test.mjs"
+    ]
   },
   "Errors with quotable ids": {
     "status": "active",

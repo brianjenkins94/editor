@@ -76,6 +76,8 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 			const entry = { "info": info, "stop": stop, "restart": restart, "said": "", "followers": new Set<(text: string) => void>() };
 
 			running.set(id, entry);
+			// The session timeline (packages/api/README.md O6): a run's kind, not what it ran.
+			hub.publish("session.event", { "name": "run.started", "detail": info.kind });
 
 			return {
 				"id": id,
@@ -97,6 +99,7 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 					}
 
 					Object.assign(info, { "state": endedState(exitCode, stopped), "endedAt": Date.now(), "exitCode": exitCode });
+					hub.publish("session.event", { "name": "run.ended", "detail": info.state });
 					ended.unshift(info);
 					ended.length = Math.min(ended.length, KEEP_ENDED);
 
