@@ -213,6 +213,12 @@ open — computed from the records its collector already receives, so no subsyst
 debug-mcp keeps five minutes of each tab's plane: `metrics_query` summarizes any series over a window (latest, min,
 max, mean, and the readings when asked). The performance suite reads the workbench's memory from it.
 
+People see it in the status bar (extensions/insights/monitor.ts): the tab's memory, the workspace's fill, the share of
+time in long frames, and while any span is failing, how many. It reads the plane once a second through the bridge's
+`editor.metrics.read` (metrics-bridge.ts, which keeps a few minutes of every source), and each number's hover has its
+last readings as a sparkline and what it's made of (memory by realm, failing spans by name), rather than a view of
+charts to open.
+
 ## Diagram — realms & channels
 
 ```mermaid

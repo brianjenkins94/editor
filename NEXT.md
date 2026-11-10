@@ -471,8 +471,7 @@ How it's kept:
      title bar*, back: ARCHITECTURE.md, *Preview windows*; the profiles reworked, the user 2026-11-09: their times on the
      code, kept with the run, RUNTIME-EVIDENCE.md, *Time*; *Breakpoints in a page's code*, back: RUNNING.md, *Apps: recorded
      stops, not live ones*). *Dependency baseline and exceptions* is back too, on the code (ARCHITECTURE.md, *Dependency
-     baseline*). *Explore orderings* is back, on the code (RUNNING.md, *Explore orderings*), and *Playground links*, each opening in an editor of its own (ARCHITECTURE.md, *Instances*), and *Type queries*, and *Your edits since the last commit* (its command for placed rules left out: nothing uses it). Next, in this order: *Performance
-     monitor*, *Docking editors into windows*, *Error reports from the editor*, *Formatting-only changes marked*,
+     baseline*). *Explore orderings* is back, on the code (RUNNING.md, *Explore orderings*), and *Playground links*, each opening in an editor of its own (ARCHITECTURE.md, *Instances*), and *Type queries*, and *Your edits since the last commit* (its command for placed rules left out: nothing uses it), and *Performance monitor*, in the status bar (ARCHITECTURE.md, *The metrics plane*). Next, in this order: *Docking editors into windows*, *Error reports from the editor*, *Formatting-only changes marked*,
      *Spell check* (its infos drowned Problems when it was in: that wants an answer as it comes back). Far off, still the mission: *Event Sheet*, *Build a
      game by painting a level*.
    - **How long a test may take** (the user, 2026-11-04): a limit each test shouldn't exceed, in time or as a percentage off its

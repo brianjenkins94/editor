@@ -1533,21 +1533,25 @@
     ]
   },
   "Performance monitor": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "The status bar and a Monitor view of small live charts show the editor's memory, workspace fill, long frames and errors as they happen.",
+    "status": "active",
+    "why": "reintroduced in the status bar, its charts in each number's hover rather than a view of their own (the user, 2026-11-06: no out-of-the-way panels); the objective is rough feature parity with full-editor",
+    "since": "2026-11-10",
+    "what": "The status bar shows the editor's memory, how full its workspace is, the share of time in long frames, and spans that are failing, as they happen; each one's hover has what it did over the last readings as a sparkline, and what it's made of.",
     "docs": "packages/editor/ARCHITECTURE.md, *The metrics plane*",
     "ways": [
       "command|editor.metrics.read",
       "status bar item|insights.longFrames",
       "status bar item|insights.memory",
       "status bar item|insights.spanErrors",
-      "status bar item|insights.workspace",
-      "view|insights.monitor"
+      "status bar item|insights.workspace"
     ],
-    "in": "6d1ad3ce",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/insights/monitor.ts",
+      "packages/editor/extensions/bridge/metrics-bridge.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/performance-monitor.spec.mjs"
+    ]
   },
   "Playground links": {
     "status": "active",
