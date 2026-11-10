@@ -2633,15 +2633,20 @@
     ]
   },
   "Type queries": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "A `// ^?` comment under an expression shows that expression's type at the end of the comment, as in the TypeScript Playground.",
+    "status": "active",
+    "why": "reintroduced as it was (the user, 2026-11-09: rough feature parity with full-editor)",
+    "since": "2026-11-09",
+    "what": "A `// ^?` comment under an expression shows that expression's type at the end of the comment, as in the TypeScript Playground: what hovering the character the caret points at would say, again when another file changes it.",
     "ways": [
       "inlay hints provider||type-queries/extension.ts"
     ],
-    "in": "e16b2b75",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/extensions/type-queries/extension.ts",
+      "packages/editor/extensions/type-queries/package.json"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/type-queries.spec.mjs"
+    ]
   },
   "Unparsable files flagged": {
     "status": "active",
