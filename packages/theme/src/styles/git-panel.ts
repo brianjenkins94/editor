@@ -68,6 +68,27 @@ export const gitPanelStyles = stylesheet({
 	".gp-file:hover .gp-discard, .gp-discard.armed": {
 		"visibility": "visible"
 	},
+	// Your edits: under a file's row, the code each edit since the last commit touched (git-panel.tsx `Chunks`). Hovering one
+	// spotlights its lines in the open diff (setDiffHighlight), in the same colour.
+	".gp-chunks": {
+		"padding": "var(--wa-space-3xs) var(--wa-space-s) var(--wa-space-xs) var(--wa-space-xl)",
+		"background": "var(--wa-color-surface-lowered)"
+	},
+	".gp-chunk, .gp-chunk-info": {
+		"padding": "var(--wa-space-3xs) var(--wa-space-2xs)"
+	},
+	".gp-chunk": {
+		"cursor": "pointer",
+		"fontVariantNumeric": "tabular-nums"
+	},
+	".gp-chunk:hover": {
+		"background": "var(--wa-color-warning-fill-quiet)"
+	},
+	".gp-chunk-label": {
+		"flex": "1 1 0",
+		"minWidth": "0",
+		"fontFamily": "var(--wa-font-family-code)"
+	},
 	".sxs-wrap": {
 		"minHeight": "100%"
 	},

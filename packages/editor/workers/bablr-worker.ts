@@ -18,7 +18,7 @@
 import "./bablr-fast-freeze"; // first: neutralizes record freezing before the BABLR bundle captures Object.freeze
 // (A comment, so sorting leaves the freeze first.)
 import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
-import { atomsOf, cstSpansAsync, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
+import { atomsOf, cstSpansAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { OBSERVED, PIPELINE, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
@@ -181,6 +181,41 @@ async function parsed(source: string, signal: AbortSignal): Promise<Parsed> {
 
 	return answer;
 }
+
+// A file's texts since the last commit, [HEAD, …each burst after it] ⇒ the code each change touched, for "your edits"
+// (edit-history.ts): from the parses kept above, so a burst's text is parsed once. Nothing where one doesn't parse.
+serve(hub, "bablr.editGroups", async (args, { signal }) => {
+	const { chain } = args as { "chain": string[] };
+
+	return log.span("editor.workers.bablr-worker.editGroups", { "count": chain.length }, async (span) => {
+		try {
+			const grouped = await editGroups(chain, {
+				"signal": signal,
+				"parse": async (source: string) => {
+					const answer = await parsed(source, signal);
+
+					if ("why" in answer) {
+						throw new Error(answer.why);
+					}
+
+					return answer.cst;
+				}
+			}) as { "groups": unknown[]; "bursts": number };
+
+			span.end({ "groups": grouped.groups.length, "bursts": grouped.bursts });
+
+			return grouped;
+		} catch (error) {
+			if (signal.aborted) {
+				throw error;
+			}
+
+			span.end({ "unparsable": true });
+
+			return { "groups": [], "bursts": 0 };
+		}
+	});
+});
 
 const anchorsOf = (source: string, cst: Cst): Anchor[] => spanAnchors(source, "Program", cst) as Anchor[];
 

@@ -2909,19 +2909,22 @@
     ]
   },
   "Your edits since the last commit": {
-    "status": "removed",
-    "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
-    "since": "2026-11-02",
-    "what": "Every edit burst since the last commit is recorded per file and shown as small chunks grouped by the code they touched, surviving reloads.",
+    "status": "active",
+    "why": "reintroduced as it was (the user, 2026-11-09: rough feature parity with full-editor), but for its command for placed rules, which nothing uses now",
+    "since": "2026-11-10",
+    "what": "Every burst of edits since the last commit is recorded per file and shown, under the file's row in the changes panel (Your edits), as small chunks grouped by the code they touched, surviving reloads; hovering one spotlights its lines in the open diff.",
     "ways": [
       "button|Your edits",
-      "command|editor.history.texts",
       "core module|installEditHistory",
       "hub request|bablr.editGroups",
       "hub request|history.chunks"
     ],
-    "in": "e5772e5d",
-    "restore": "from the full-editor tag: its ways in are in its extension or service there"
+    "paths": [
+      "packages/editor/workbench/edit-history.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/your-edits.spec.mjs"
+    ]
   },
   "capability engine": {
     "status": "removed",

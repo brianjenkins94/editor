@@ -51,7 +51,13 @@ export interface Bablr {
 	"spans": (source: string) => Promise<{ "spans"?: { "id": string; "type"?: string; "start": number; "end": number }[]; "unparsable"?: string }>;
 	/** The span each range anchors to, as a reference (evidence.ts keys a statement on it), or why BABLR can't parse it. */
 	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<{ "refs"?: (SpanRef | null)[]; "unparsable"?: string }>;
+	/** A file's texts since the last commit, [HEAD, …each burst after it], as the code each change touched (edit-history.ts):
+	 *  none where BABLR can't parse one. */
+	"editGroups": (chain: string[]) => Promise<{ "groups": EditGroup[]; "bursts": number }>;
 }
+
+/** What a file's edits since the last commit touched: a node's label and kind, its working lines, and how many bursts. */
+export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
 /** A folder's files, checked. */
 interface Checked {
@@ -343,6 +349,7 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 	return {
 		"spans": async (source) => worker().ask("spans", { "source": source }),
 		"refer": async (source, file, ranges) => worker().ask("refer", { "source": source, "file": file, "ranges": ranges }),
+		"editGroups": async (chain) => worker().ask("editGroups", { "chain": chain }),
 		"stripped": async (text, signal) => {
 			const { parsed, comments = [] } = await worker().ask<Parse>("parse", { "source": text }, signal);
 

@@ -68,6 +68,7 @@ import { createNodeRunner } from "./node-runner";
 import { installPaneViews } from "./pane-views";
 import { installPreviewSessions } from "./preview-session";
 import { installProfileTimes } from "./profile-times";
+import { installEditHistory } from "./edit-history";
 import { announceWorkspaceSettings, followProjectSwitches, openProject, OVERRIDABLE_DEFAULTS, serveFiles, serveOrigin } from "./project";
 import { markReady, whenDebuggerUp } from "./readiness";
 import { installScriptRun } from "./script-run";
@@ -463,6 +464,8 @@ function maybeBoot(): void {
 				installPaneViews(api as typeof import("vscode"));
 				// Which files BABLR parses, and a warning on each it can't (bablr.ts).
 				const bablr = installBablr(api as typeof import("vscode"), workbenchHub, paneLog);
+				// Your edits since the last commit, burst by burst, kept per file and grouped by the code they touched (edit-history.ts).
+				installEditHistory(api as typeof import("vscode"), workbenchHub, bablr, paneLog);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// The workspace as an agent works in it — its files read, written, edited, found and searched (workspace-tools.ts;
