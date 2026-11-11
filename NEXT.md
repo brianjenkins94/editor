@@ -46,7 +46,13 @@ How it's kept:
      configs name to be read ahead, whole, from their tarballs: node-modules-provider.ts's prefetchFor); and capabilities
      reading `customElements.get(…)` as a net call, as `*.get` matches any receiver: the user ruled it out, so an HTTP verb
      whose method TypeScript's own lib declares isn't a request now (lib c4effef, findReach's `program`).
-   - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. Profiled 2026-10-30 (the
+   - **Load cost:** measured again 2026-11-11 (a first load of this repository in Brave): the workspace buffer at 32 of
+     128 MB. The one long block was the write-back's first flush, 15 s on the main thread: a folder and the files in
+     it both in its batch, each file was walked again under every folder above it (read ~6 times, 145,560 stats for
+     3,768 paths, 75 MB read for 21 MB of files). Now a path under a folder in the batch that's still there is left to
+     that folder's walk, and the walk takes one lstat an entry: 1.6 s, 16,763 stats, each file read once; a reload
+     restores all 3,038 (workspace-fs.ts's flush). The restore at boot is the next: 27,919 stats for 3,759 paths
+     (1.9 s of the workbench's 5.5 s boot). What follows is the history. Profiled 2026-10-30 (the
      harness's Chromium, a DevTools CPU profile of the load; logpoints on zen-fs's lookups and the file provider for
      who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every
      file it checked, a read bumping zen-fs's ctime (b7430d91); and the load writing each file through VS Code's file

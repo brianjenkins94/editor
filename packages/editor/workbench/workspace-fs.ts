@@ -387,11 +387,13 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	// linked again, and the flush kept again: ~1,800 files restored, deleted and re-put every boot, half its main thread.
 	const linked = (path: string): boolean => fs.lstatSync(path).isSymbolicLink();
 	const filesUnder = (path: string): string[] => {
-		if (linked(path)) {
+		const stats = fs.lstatSync(path);
+
+		if (stats.isSymbolicLink()) {
 			return [];
 		}
 
-		if (!fs.statSync(path).isDirectory()) {
+		if (!stats.isDirectory()) {
 			return [path];
 		}
 
@@ -408,7 +410,32 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			return;
 		}
 
-		const batch = [...dirty];
+		// A path under a folder in the batch that's still there is that folder's: its walk puts it. Walked again for each
+		// folder above it, a clone's files were each read ~6 times, 145,560 stats for 3,768 paths (13 s of a 15 s
+		// flush, on the main thread). (Under one that's gone, it's still its own: a seeded path's tombstone.)
+		const present = new Map<string, boolean>();
+		const walked = (folder: string): boolean => {
+			let is = present.get(folder);
+
+			if (is === undefined) {
+				is = fs.existsSync(folder) && !linked(folder);
+				present.set(folder, is);
+			}
+
+			return is;
+		};
+
+		const batch = [...dirty].filter((path) => {
+			for (let at = path.lastIndexOf("/"); at > 0; at = path.lastIndexOf("/", at - 1)) {
+				const folder = path.slice(0, at);
+
+				if (dirty.has(folder) && walked(folder)) {
+					return false;
+				}
+			}
+
+			return true;
+		});
 		const started = performance.now();
 		// (the write-back crosses into IndexedDB: its batch's paths, the files it put and their bytes — the transaction
 		// itself commits after, off this thread's clock)
