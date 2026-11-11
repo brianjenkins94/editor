@@ -199,9 +199,12 @@ function seedFiles(files: WorkbenchFile[], readonlyPaths: Set<string>): Set<stri
 	return seeded;
 }
 
-/** Bring the persisted writes back over the seed (`localMounted`: silo's local/ has a store of its own). Returns how
- *  many were restored and tombstoned, the retired paths (to drop from persistence) and the ones moved into local/. */
-function restorePersisted(persisted: [string, Uint8Array | null][], localMounted: boolean): { "restored": number; "tombstoned": number; "retired": string[]; "moved": string[] } {
+/** Bring the persisted writes back over the seed (`localMounted`: silo's local/ has a store of its own), each file made
+ *  by `create`. Returns how many were restored and tombstoned, the retired paths (to drop from persistence) and the ones
+ *  moved into local/. */
+function restorePersisted(persisted: [string, Uint8Array | null][], localMounted: boolean, create: (path: string, contents: Uint8Array) => void): { "restored": number; "tombstoned": number; "retired": string[]; "moved": string[] } {
+	// (each folder made once: asking whether it exists is a lookup from the root, for each of a repository's files)
+	const made = new Set<string>();
 	let restored = 0;
 	let tombstoned = 0;
 	const retired: string[] = [];
@@ -224,8 +227,14 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 				tombstoned += 1;
 			} catch { /* a file stands where its folder was: already gone */ }
 		} else {
-			ensureParent(path);
-			fs.writeFileSync(path, contents);
+			const dir = path.slice(0, path.lastIndexOf("/"));
+
+			if (!made.has(dir)) {
+				made.add(dir);
+				ensureParent(path);
+			}
+
+			create(path, contents);
 			restored += 1;
 		}
 	}
@@ -370,8 +379,31 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	if (db !== undefined) {
 		const persisted = await persistLoadAll(db);
 
+		// A file restored is new to the store (only the seed's few are there already), so it's made in the store
+		// itself: a create and a write, a lookup from the root each. Through zen-fs's own writeFileSync, a new file was
+		// ~9 of them (it resolves the path, finds it missing, resolves the folder, stats both again): 27,919 stats for
+		// a reload's 3,759 paths, 1.9 s of the workbench's boot. (In Node, 2,000 files: 2.0 s → 0.65 s.)
+		const mountedAt = buffer !== undefined ? "/workspace" : "";
+		const create = (path: string, contents: Uint8Array): void => {
+			const inStore = path.slice(mountedAt.length);
+
+			try {
+				if (store === undefined) {
+					throw new Error("no store");
+				}
+
+				store.createFileSync(inStore, { "mode": 0o644, "uid": 0, "gid": 0 });
+			} catch {
+				fs.writeFileSync(path, contents); // the seed's (it's there already): as any write
+
+				return;
+			}
+
+			store.writeSync(inStore, contents, 0);
+		};
+
 		caller = "restore";
-		({ restored, tombstoned, retired, moved } = restorePersisted(persisted, localStore !== undefined));
+		({ restored, tombstoned, retired, moved } = restorePersisted(persisted, localStore !== undefined, create));
 		caller = undefined;
 	}
 
