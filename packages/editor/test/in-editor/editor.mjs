@@ -17,15 +17,31 @@ export async function openEditor(page, files, { extension } = {}) {
 	return workbench;
 }
 
-/** A command, from the palette, as a person runs one. */
+/** A command, from the palette, as a person runs one. The palette closes when its window loses focus, as it does to another
+ *  spec's editor in the same page (test/in-editor.mjs runs two at once), and an Enter then runs nothing: so it's opened
+ *  again until Enter goes to it. */
 export async function runCommand(workbench, title) {
-	await workbench.locator(".monaco-workbench").first().press("F1");
-
 	const input = workbench.locator(".quick-input-widget input[type='text'], .quick-input-widget input:not([type])").first();
 
-	await input.fill(`>${title}`);
-	await expect(workbench.locator(".quick-input-list .monaco-list-row.focused", { "hasText": title }).first()).toBeVisible({ "timeout": 15_000 });
-	await input.press("Enter");
+	for (let tries = 1; tries <= 3; tries += 1) {
+		await workbench.locator(".monaco-workbench").first().press("F1");
+		await input.fill(`>${title}`);
+		await expect(workbench.locator(".quick-input-list .monaco-list-row.focused", { "hasText": title }).first()).toBeVisible({ "timeout": 15_000 });
+
+		const focused = await expect(input).toBeFocused({ "timeout": 1000 }).then(() => true, (error) => {
+			if (tries === 3) {
+				throw error;
+			}
+
+			return false;
+		});
+
+		if (focused) {
+			await input.press("Enter");
+
+			return;
+		}
+	}
 }
 
 /** A file from the Explorer, by its path: each folder opened on the way, as a person goes. */
@@ -88,11 +104,24 @@ export const codeOf = (workbench) => workbench.locator(".editor-instance .native
 /** What a workspace is seeded with for a test to read its terminal: drawn as DOM rows, as this setting has it, not on a canvas. */
 export const READABLE_TERMINAL = { ".vscode/settings.json": "{ \"terminal.integrated.gpuAcceleration\": \"off\" }\n" };
 
-/** A new terminal, at its prompt: where its keys go, and what it shows (READABLE_TERMINAL). */
+/** A new terminal, at its prompt: where its keys go, and what it shows (READABLE_TERMINAL). Asked for again if none has come
+ *  in 15 s: twice on CI (1b36c848, 4e9ae421) none came in preview-profile.spec, beside preview-devtools.spec opening one of
+ *  its own at the same time, in the same page, which can take the focus from the palette between `runCommand`'s look and
+ *  its Enter. (Not by its keys, Ctrl+Shift+`: with a file open, in preview-session.spec, that brought none.) */
 export async function openTerminal(workbench) {
+	const rows = workbench.locator(".xterm-rows");
+	const before = await rows.count();
+
 	await runCommand(workbench, "Terminal: Create New Terminal");
 
-	const output = workbench.locator(".xterm-rows").last();
+	// More, not one more: a panel shown with none in it may come with one of its own.
+	const came = await expect(rows.nth(before)).toBeAttached({ "timeout": 15_000 }).then(() => true, () => false);
+
+	if (!came) {
+		await runCommand(workbench, "Terminal: Create New Terminal");
+	}
+
+	const output = rows.last();
 
 	await expect(output).toContainText("/workspace $", { "timeout": 30_000 });
 
