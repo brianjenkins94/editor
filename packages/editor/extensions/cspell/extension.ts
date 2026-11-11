@@ -8,9 +8,10 @@ import { failureText, watchWorker } from "@brianjenkins94/editor-api/failures";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
-// The documents it checks. The react language ids matter: a .tsx file's languageId is `typescriptreact`, and a client
-// only forwards documents its selector names.
-const DOCUMENTS = ["typescript", "typescriptreact", "javascript", "javascriptreact", "plaintext", "markdown", "json"].map((language) => ({ "language": language }));
+// The documents it checks: the workspace's files, by language — not a diff's other side (`git-head:`, a commit's), which is
+// the same words again. The react language ids matter: a .tsx file's languageId is `typescriptreact`, and a client only
+// forwards documents its selector names.
+const DOCUMENTS = ["typescript", "typescriptreact", "javascript", "javascriptreact", "plaintext", "markdown", "json"].map((language) => ({ "language": language, "scheme": "file" }));
 
 let client: LanguageClient | undefined;
 

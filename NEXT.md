@@ -33,6 +33,18 @@ How it's kept:
      2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's
      types, and never told after (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing
      that. eslint.config.js's `@brianjenkins94/util/eslint` has no declaration file (ts 7016, a suggestion here).
+   - **Used on itself, 2026-11-10** (`env/brianjenkins94/editor` in an instance, in Brave): the clone in 3.4 s, a file open
+     under 10 s, 2,888 files stored in 15.5 s, the main thread idle again within a minute (1.3 GB). What it found, and what
+     came of it: the dependency baseline's 169 uses "grown" from files TypeScript read late (fixed: 971bc9b2, lib f73c086);
+     `unenv/node/*` unresolved, 40 errors, as type acquisition took a package's subpaths only from named exports, and
+     fetched unenv before the workspace's versions were pinned (the CDN's latest, 1.10.0, kept in the store) — it now
+     waits for the pins, refetches a package stored at another version, and acquires each subpath imported, through a
+     wildcard export too; History's 21 dead ends, commands it hadn't read the registering code of yet (now taken as
+     registered until it's read: CI's `silo check` reads everything); spell check twice over, on a diff's `git-head:` side
+     too (files only now). Still open: the repository's eslint.config.js can't load in the editor (Web Awesome's
+     `dist/components`, a folder its plugin lists, isn't there for a package served from the CDN a file at a time); and
+     capabilities reads `customElements.get(…)` as a net call, as `*.get` matches any receiver by design (lib's
+     NET_MATCHERS): whether the receiver's type should rule it out is the user's call.
    - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. Profiled 2026-10-30 (the
      harness's Chromium, a DevTools CPU profile of the load; logpoints on zen-fs's lookups and the file provider for
      who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every

@@ -27,12 +27,15 @@
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscode from "vscode";
 import { REFS_DIR } from "@brianjenkins94/editor-api/git";
+import { waitFor } from "./readiness";
 import { installedLocally } from "./versions";
 
 /** Files whose imports are worth acquiring types for. */
 const RELEVANT = /\.(?:tsx?|jsx?|mts|cts)$/u;
 /** Debounce edits — a re-scan only fetches genuinely new modules, so a short wait coalesces typing. */
 const DEBOUNCE_MS = 800;
+/** How long acquisition waits for the workspace's versions to be pinned before it fetches anyway. */
+const PINS_MS = 30_000;
 /** Cap on NETWORK fetches per run (already-present files are free), so a pathological type graph can't runaway. */
 const MAX_NETWORK = 400;
 /** A declaration file. */
@@ -60,6 +63,56 @@ export function importedPackages(source: string): string[] {
 	}
 
 	return [...roots];
+}
+
+/** The package subpaths `source` imports (`unenv/node/fs` → `unenv`, `node/fs`): their types aren't the package's main
+ *  entry's, and a wildcard export (`"./*"`) names none up front, so each is acquired as it's imported. */
+export function importedSubpaths(source: string): [string, string][] {
+	const found = new Map<string, [string, string]>();
+
+	for (const match of source.matchAll(new RegExp(SPECIFIER, "gu"))) {
+		const pkg = packageRootOf(match[1]);
+
+		if (pkg !== undefined && match[1].length > pkg.length + 1) {
+			found.set(match[1], [pkg, match[1].slice(pkg.length + 1)]);
+		}
+	}
+
+	return [...found.values()];
+}
+
+/** The types file a package's `exports` gives `./<subpath>`: its key, or a wildcard key's (`"./*"` →
+ *  `./dist/runtime/*.d.mts`) with the rest put in for the `*`. Undefined when none does. */
+export function exportedTypes(exportsField: unknown, subpath: string): string | undefined {
+	if (exportsField === null || typeof exportsField !== "object") {
+		return undefined;
+	}
+
+	const wanted = "./" + subpath;
+
+	for (const [key, node] of Object.entries(exportsField as Record<string, unknown>)) {
+		const star = key.indexOf("*");
+		const [before, after] = star === -1 ? [key, ""] : [key.slice(0, star), key.slice(star + 1)];
+		const matches = star === -1 ? wanted === key : wanted.startsWith(before) && wanted.endsWith(after) && wanted.length >= key.length - 1;
+		const types = matches ? pickTypes(node) : undefined;
+
+		if (types !== undefined) {
+			return types.replace("*", wanted.slice(before.length, wanted.length - after.length));
+		}
+	}
+
+	return undefined;
+}
+
+/** A package.json's `version`, or undefined when it has none (or isn't JSON). */
+function versionOf(packageJson: string | undefined): string | undefined {
+	try {
+		const { version } = JSON.parse(packageJson ?? "") as { "version"?: unknown };
+
+		return typeof version === "string" ? version : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** JSON with comments and trailing commas (a tsconfig) → its value; undefined when it doesn't parse. */
@@ -412,7 +465,55 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		return true;
 	};
 
+	/** A package subpath's types (`unenv/node/fs`): through its package's `exports`, a wildcard's too, else beside it (its
+	 *  `.d.ts`, or its folder's `index.d.ts`) — then what that file references, as acquireFile crawls. */
+	const acquireSubpath = async (pkg: string, sub: string, budget: { "n": number }): Promise<void> => {
+		if (installedLocally.has(pkg) || fetchedPath.has(`${pkg}#${sub}`)) {
+			return;
+		}
+
+		fetchedPath.add(`${pkg}#${sub}`);
+
+		// (its package first: the package.json read here is the pinned version's)
+		await acquirePackage(pkg, budget);
+
+		const pkgJsonRel = pkg + "/package.json";
+		const pkgJson = has(abs(pkgJsonRel)) ? await readLocal(pkgJsonRel) : await cdnText(pkgJsonRel, false, budget);
+		let exportsField: unknown;
+
+		try {
+			exportsField = pkgJson === undefined ? undefined : (JSON.parse(pkgJson) as Record<string, unknown>)["exports"];
+		} catch { /* malformed package.json */ }
+
+		const exported = exportedTypes(exportsField, sub)?.replace(/^\.\//u, "");
+		// (its listing: what the file references relatively is found in it, and a guess that isn't there isn't fetched)
+		const files = await packageFiles(pkg, budget);
+
+		for (const candidate of exported === undefined ? [sub + ".d.ts", sub + "/index.d.ts"] : [exported]) {
+			if (DECL.test(candidate) && (files.size === 0 || files.has(candidate)) && await acquireFile(pkg, candidate, files, budget)) {
+				return;
+			}
+		}
+	};
+
+	/** Each package's acquiring this session, so what needs it done (a subpath of it) can wait for it. */
+	const acquiring = new Map<string, Promise<void>>();
+
 	async function acquirePackage(pkg: string, budget: { "n": number }): Promise<void> {
+		const pending = acquiring.get(pkg);
+
+		if (pending !== undefined) {
+			return pending;
+		}
+
+		const done = acquirePackageNow(pkg, budget);
+
+		acquiring.set(pkg, done);
+
+		return done;
+	}
+
+	async function acquirePackageNow(pkg: string, budget: { "n": number }): Promise<void> {
 		if (seenPackage.has(pkg) || installedLocally.has(pkg)) {
 			return;
 		}
@@ -421,10 +522,20 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		const pkgJsonRel = pkg + "/package.json";
 		// Present → acquired in a prior session (the store persists): read package.json LOCALLY, no network, and
-		// its whole subtree is already stored (so acquireFile below short-circuits and no ?meta fetch is needed).
-		const stored = has(abs(pkgJsonRel));
+		// its whole subtree is already stored (so acquireFile below short-circuits and no ?meta fetch is needed). But one
+		// stored at another version than the one pinned now (fetched before the pins were known: the CDN's latest) is
+		// cleared and fetched again, rather than its files mixed with the pinned version's.
+		let stored = has(abs(pkgJsonRel));
+		let local = stored ? await readLocal(pkgJsonRel) : undefined;
+
+		if (stored && versions[pkg] !== undefined && versionOf(local) !== versions[pkg]) {
+			await api.workspace.fs.delete(api.Uri.file(abs(pkg)), { "recursive": true }).then(() => undefined, () => undefined);
+			stored = false;
+			local = undefined;
+		}
+
 		const present = stored && !healing;
-		const pkgJson = stored ? await readLocal(pkgJsonRel) : await cdnText(pkgJsonRel, false, budget);
+		const pkgJson = stored ? local : await cdnText(pkgJsonRel, false, budget);
 
 		if (pkgJson === undefined) {
 			// Not published under this name → try the DefinitelyTyped counterpart (react → @types/react).
@@ -497,7 +608,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 	/** Acquire `packages` (and `configs`, tsconfigs to extend); the last run in flight reloads the TS projects if anything
 	 *  landed. */
-	const acquire = (what: Record<string, unknown>, packages: string[], configs: [string, string][] = []): void => {
+	const acquire = (what: Record<string, unknown>, packages: string[], configs: [string, string][] = [], subpaths: [string, string][] = []): void => {
 		const span = log.span("editor.workbench.ata.acquire", { ...what, "imports": packages.length });
 		const budget = { "n": MAX_NETWORK };
 		const writtenBefore = written;
@@ -508,7 +619,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		inFlight += 1;
 
-		void Promise.all([...packages.map((pkg) => acquirePackage(pkg, budget)), ...configs.map(([pkg, sub]) => acquireConfig(pkg, sub, budget))])
+		// (once the workspace's versions are pinned — versions.ts's first sync — or a while on: fetched before, a package
+		// comes at the CDN's latest, and stays that version in the store)
+		void waitFor(["versions"], PINS_MS)
+			.then(async () => Promise.all([...packages.map((pkg) => acquirePackage(pkg, budget)), ...configs.map(([pkg, sub]) => acquireConfig(pkg, sub, budget)), ...subpaths.map(([pkg, sub]) => acquireSubpath(pkg, sub, budget))]))
 			.then(async () => {
 				if (healing && !has(abs(HEALED))) {
 					await write(HEALED, "");
@@ -541,9 +655,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 
 		const packages = importedPackages(document.getText());
+		const subpaths = importedSubpaths(document.getText());
 
 		if (packages.length > 0) {
-			acquire({ "file": document.uri.path }, packages);
+			acquire({ "file": document.uri.path }, packages, [], subpaths);
 		}
 	};
 

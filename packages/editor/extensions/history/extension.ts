@@ -194,6 +194,21 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 
 		const features = featuresOf([...latest.ways].map(([file, ways]) => ({ "file": file, "ways": ways })));
+		const { files } = await ledger.workspace();
+		const unread = [...files].filter((path) => /\.[cm]?[jt]sx?$/u.test(path) && !path.includes("node_modules/") && !readings.has(path));
+
+		// A command or view a manifest declares and its code doesn't register — while that extension's code isn't all read,
+		// which is what TypeScript's server holds (the projects it's loaded), whether it does can't be said yet: taken as
+		// registered until it's read, not called a dead end (nor gone, which leaving it out would make it).
+		// (silo check on the command line reads every file, and says it there.)
+		for (const feature of features.values()) {
+			const declaredOnly = (feature.facet === "command" || feature.facet === "view") && feature.sides.includes("declared") && !feature.sides.includes("registered");
+			const folders = feature.files.filter((file) => file.endsWith("package.json")).map((file) => file.slice(0, -"package.json".length));
+
+			if (declaredOnly && folders.some((folder) => unread.some((path) => path.startsWith(folder)))) {
+				feature.sides.push("registered");
+			}
+		}
 
 		reach.read(features, latest.graph);
 		await ledger.check(features);
