@@ -842,6 +842,12 @@ what the members the code imports of it reach (lib's `sliceCaps`, rolldown's bro
 surface as the capabilities tsserver plugin reads it (`_capabilities.surface`). Kept at `.silo/baseline.json` when the
 repository commits one, else its local copy; `silo.baseline` off, none is kept and the policy decides every package's call.
 
+The server holds only the projects it has loaded, so a reading covers what's open, and grows as more loads. Each file's
+surface as last read is kept beside the baseline (`.silo/local/baseline-files.json`), with the files there when it was
+made that haven't been read yet: a reading of fewer files takes nothing away, a file read for the first time is the
+baseline's, and only a file read before, or made since, can grow the code's use (lib's syncConsumer, its `seen`). Without
+that, the editor's own repository had 169 uses "grown" a minute after its baseline was made.
+
 What goes beyond it is said where it is, not in a view (the user, 2026-11-06): a version that grew a capability is warned on
 its line in each package.json that depends on it (or in `.silo/versions.json`, for a package nothing lists), and the code's
 use that reaches more on each import of it, each until the policy decides that package's calls of it; the lightbulb's

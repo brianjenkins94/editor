@@ -37,7 +37,7 @@ import { keptAt, localOf } from "@brianjenkins94/editor-api/git";
 import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 import { add, consumerOf, surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { JOIN, joinedBefore, joinsWanted, syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
-import { baselinePath, versionsPath } from "@brianjenkins94/util/silo/layout";
+import { baselinePath, LOCAL_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
 /** How many packages are read at once. */
@@ -134,20 +134,36 @@ function packageWorker(context: vscode.ExtensionContext): { "read": (url: string
 	};
 }
 
-/**
- * The project's own use of its dependencies (lib's consumerOf): each source file's import surface, from this
- * extension's TypeScript server plugin, merged per workspace — its nearest package.json's folder, relative to `root`
- * ("." the root's); a nested private workspace governs itself and is left out, as are dot-folders, as silo audit walks
- * them — with each package's version as `.silo/versions.json` resolved it. Undefined while the server can't answer.
- */
-async function consumerFor(root: vscode.Uri, versions: VersionsFile): Promise<Record<string, WsConsumer> | undefined> {
-	const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "ready"?: boolean; "files"?: Record<string, Record<string, SurfaceEntry>> } } | undefined>("typescript.tsserverRequest", "_capabilities.surface", { "root": root.path })).catch(() => undefined);
+/** Each code file's import surface (workspace-relative path → specifier → its use), as read from TypeScript's server. */
+type Surfaces = Record<string, Record<string, SurfaceEntry>>;
+
+/** Where the code's use has been read from, kept beside the baseline (`.silo/local/baseline-files.json`): each code
+ *  file's surface as last read, so a reading of fewer files (TypeScript's server holds only the projects it has loaded)
+ *  takes nothing away; and the files there when the baseline was made that haven't been read yet, whose first reading
+ *  is the baseline's, not growth. */
+interface ReadFrom { "files": Surfaces; "pending": string[] }
+
+/** The code files a baseline counts: not in node_modules or a dot-folder, relative to `root`. */
+async function codeFiles(root: vscode.Uri): Promise<string[]> {
+	return (await vscode.workspace.findFiles("**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}", "{**/node_modules/**,**/.*/**}")).map((uri) => uri.path.slice(root.path.length + 1));
+}
+
+/** Each code file's import surface, from this extension's TypeScript server plugin, off the trees the server holds:
+ *  undefined while it can't answer. */
+async function surfacesNow(root: vscode.Uri): Promise<Surfaces | undefined> {
+	const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "ready"?: boolean; "files"?: Surfaces } } | undefined>("typescript.tsserverRequest", "_capabilities.surface", { "root": root.path })).catch(() => undefined);
 	const answer = response?.body;
 
 	if (answer?.ready !== true || answer.files === undefined) {
 		return undefined;
 	}
 
+	return Object.fromEntries(Object.entries(answer.files).filter(([path]) => CODE.test(path) && !path.split("/").some((part) => part.startsWith(".")))) as Surfaces;
+}
+
+/** Each workspace (its package.json's folder, relative to `root`, "." the root's) and whether it's a nested private one,
+ *  which governs itself and is left out. */
+async function workspacesOf(root: vscode.Uri): Promise<{ "dir": string; "private": boolean }[]> {
 	const workspaces: { "dir": string; "private": boolean }[] = [];
 
 	for (const uri of await vscode.workspace.findFiles("**/package.json", "{**/node_modules/**,**/.*/**}")) {
@@ -157,14 +173,22 @@ async function consumerFor(root: vscode.Uri, versions: VersionsFile): Promise<Re
 		workspaces.push({ "dir": dir, "private": dir !== "." && manifest?.private === true });
 	}
 
-	// (the deepest folder that has the file — the root's when none does)
+	return workspaces;
+}
+
+/**
+ * The project's own use of its dependencies (lib's consumerOf) from these files' surfaces, merged per workspace — the
+ * deepest folder with a package.json that has the file ("." the root's); a nested private workspace is left out, as
+ * silo audit walks them — with each package's version as `.silo/versions.json` resolved it.
+ */
+function consumerFrom(surfaces: Surfaces, workspaces: { "dir": string; "private": boolean }[], versions: VersionsFile): Record<string, WsConsumer> {
 	const owner = (path: string): { "dir": string; "private": boolean } => workspaces.filter(({ dir }) => dir !== "." && path.startsWith(dir + "/")).toSorted((one, other) => other.dir.length - one.dir.length)[0] ?? { "dir": ".", "private": false };
 	const buckets = new Map<string, Surface>();
 
-	for (const [path, surface] of Object.entries(answer.files)) {
+	for (const [path, surface] of Object.entries(surfaces)) {
 		const workspace = owner(path);
 
-		if (CODE.test(path) && !path.split("/").some((part) => part.startsWith(".")) && !workspace.private) {
+		if (!workspace.private) {
 			const bucket = buckets.get(workspace.dir) ?? new Map();
 
 			buckets.set(workspace.dir, bucket);
@@ -180,6 +204,35 @@ async function consumerFor(root: vscode.Uri, versions: VersionsFile): Promise<Re
 	}
 
 	return consumerOf(Object.fromEntries([...buckets].map(([dir, surface]) => [dir, surfaceEntries(surface)])), (_workspace, pkg) => versions.packages[pkg]?.version);
+}
+
+/**
+ * The code's use now, and what of it can have grown: every file read so far, each as last read (`read`); the same less
+ * the files read for the first time now that were there when the baseline was made (`seen`, lib's syncConsumer's), whose
+ * use is the baseline's; and what to keep for next time. `fresh`: no record of where it was read from (a baseline made
+ * before this was kept, or none), so this reading is where the baseline starts. Undefined while the server can't answer.
+ */
+async function consumerFor(root: vscode.Uri, versions: VersionsFile, existing: BaselineFile | undefined, kept: ReadFrom | undefined): Promise<{ "read": Record<string, WsConsumer>; "seen": Record<string, WsConsumer>; "fresh": boolean; "keep": ReadFrom } | undefined> {
+	const now = await surfacesNow(root);
+
+	if (now === undefined) {
+		return undefined;
+	}
+
+	const there = new Set(await codeFiles(root));
+	const fresh = existing === undefined || kept === undefined;
+	const pending = new Set(fresh ? there : kept.pending);
+	// (each file there, as read now or as last read; one that's gone, gone)
+	const files = Object.fromEntries(Object.entries({ ...fresh ? {} : kept.files, ...now }).filter(([path]) => there.has(path)));
+	const firstRead = new Set(Object.keys(now).filter((path) => pending.has(path)));
+	const workspaces = await workspacesOf(root);
+
+	return {
+		"read": consumerFrom(files, workspaces, versions),
+		"seen": consumerFrom(Object.fromEntries(Object.entries(files).filter(([path]) => !firstRead.has(path))), workspaces, versions),
+		"fresh": fresh,
+		"keep": { "files": files, "pending": [...pending].filter((path) => there.has(path) && !(path in now)).sort() }
+	};
 }
 
 /** `uri` as JSON, or undefined when there's none (or it isn't JSON). */
@@ -248,12 +301,13 @@ async function readPackages(context: vscode.ExtensionContext, resolved: Versions
 /** The consumer to write: the code's use as `read` now, with what its reach gained marked grown (lib's syncConsumer) —
  *  nothing grows in a baseline being made, nor from a consumer not read yet (the server wasn't up when the baseline was
  *  made) — and the `join` mark, there once the code's use is read; until then, both as they were. */
-function consumerNow(existing: BaselineFile | undefined, read: Record<string, WsConsumer> | undefined, added: ReadonlySet<string>): { "consumer": Record<string, WsConsumer>; "join"?: number } {
-	if (read === undefined) {
+function consumerNow(existing: BaselineFile | undefined, use: Awaited<ReturnType<typeof consumerFor>>, added: ReadonlySet<string>): { "consumer": Record<string, WsConsumer>; "join"?: number } {
+	if (use === undefined) {
 		return { "consumer": existing?.consumer ?? {}, ...existing?.join === undefined ? {} : { "join": existing.join } };
 	}
 
-	return { "consumer": syncConsumer(joinedBefore(existing), read, added).consumer, "join": JOIN };
+	// (where it starts, nothing grown: no record of where it was read from)
+	return { "consumer": syncConsumer(use.fresh ? undefined : joinedBefore(existing), use.read, added, use.seen).consumer, "join": JOIN };
 }
 
 /**
@@ -280,11 +334,18 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, 
 		return true;
 	}
 	// (the code's use now — its package entries' caps, the joins, filled below — or undefined while the server can't say)
-	const read = await consumerFor(root, versions);
+	const readFrom = vscode.Uri.joinPath(root, LOCAL_DIR, "baseline-files.json");
+	const use = await consumerFor(root, versions, existing, await readJson(readFrom) as ReadFrom | undefined);
+	const read = use?.read;
 	const slices = slicesOf(read, existing, resolved);
 	const { installed, unread } = await readPackages(context, resolved, known, slices, read);
 	const { packages, changed } = syncPackages(known, installed);
-	const { consumer, join } = consumerNow(existing, read, new Set(changed.added));
+	const { consumer, join } = consumerNow(existing, use, new Set(changed.added));
+
+	if (use !== undefined) {
+		await vscode.workspace.fs.writeFile(readFrom, new TextEncoder().encode(JSON.stringify(use.keep) + "\n"));
+	}
+
 	const consumerChanged = JSON.stringify(consumer) !== JSON.stringify(existing?.consumer ?? {});
 
 	const packagesChanged = changed.added.length + changed.updated.length + changed.grew.length > 0;
