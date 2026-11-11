@@ -47,15 +47,17 @@ function resourceOf(resource: string | undefined, observation: CanaryObservation
 	return known === undefined ? {} : { "resource": known };
 }
 
-/** A file's capability findings: every call with a literal resource, typed by `checker`, and every call only the canary
- *  saw (`observations`, its run of this text) with the resource it ran with. */
-// eslint-disable-next-line ts/no-explicit-any -- the host's `ts`, SourceFile and checker, as the plugin hands them over
-export function findings(ts: any, sourceFile: any, checker: any, observations: readonly CanaryObservation[]): Finding[] {
+/** A file's capability findings: every call with a literal resource, typed by its `program`'s checker, and every call only
+ *  the canary saw (`observations`, its run of this text) with the resource it ran with. A verb the platform declares
+ *  (`customElements.get`) isn't a request: the program says whose method it is (lib's findReach). */
+// eslint-disable-next-line ts/no-explicit-any -- the host's `ts`, SourceFile and program, as the plugin hands them over
+export function findings(ts: any, sourceFile: any, program: any, observations: readonly CanaryObservation[]): Finding[] {
+	const checker = program.getTypeChecker();
 	const found: Finding[] = [];
 	const observed = new Map(observations.map((observation) => [observation.start, observation]));
 	const statics = new Set<number>();
 
-	for (const reach of findReach(ts, sourceFile)) {
+	for (const reach of findReach(ts, sourceFile, undefined, program)) {
 		statics.add(reach.start);
 		found.push({ "start": reach.start, "end": reach.end, "dangerous": isDangerous(reach.capability), "message": messageOf(reach.capability, reach.callee, reach.value, observed.get(reach.start), typeAtStart(ts, checker, sourceFile, reach.start)), "capability": reach.capability, ...resourceOf(reach.value, observed.get(reach.start)) });
 	}

@@ -179,7 +179,7 @@ export default function init(modules) {
 			const cached = canaryCache.get(at.path);
 			const observations = cached !== undefined && cached.text === at.sourceFile.text ? cached.observations : [];
 
-			return { "response": { "ready": true, "findings": engine.findings(ts, at.sourceFile, at.program.getTypeChecker(), observations), "pending": canaryInFlight.has(at.path) }, "responseRequired": true };
+			return { "response": { "ready": true, "findings": engine.findings(ts, at.sourceFile, at.program, observations), "pending": canaryInFlight.has(at.path) }, "responseRequired": true };
 		});
 	}
 

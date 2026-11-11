@@ -43,9 +43,9 @@ How it's kept:
      registered until it's read: CI's `silo check` reads everything); spell check twice over, on a diff's `git-head:` side
      too (files only now); the repository's eslint.config.js not loading, as Web Awesome's `dist/components`, a folder it
      lists, wasn't there for a package served from the CDN a file at a time (now ESLint's worker waits for the packages its
-     configs name to be read ahead, whole, from their tarballs: node-modules-provider.ts's prefetchFor). Still open:
-     capabilities reads `customElements.get(…)` as a net call, as `*.get` matches any receiver by design (lib's
-     NET_MATCHERS): whether the receiver's type should rule it out is the user's call.
+     configs name to be read ahead, whole, from their tarballs: node-modules-provider.ts's prefetchFor); and capabilities
+     reading `customElements.get(…)` as a net call, as `*.get` matches any receiver: the user ruled it out, so an HTTP verb
+     whose method TypeScript's own lib declares isn't a request now (lib c4effef, findReach's `program`).
    - **Load cost:** the workspace buffer is at 49 of 64 MB once this repo's types are in. Profiled 2026-10-30 (the
      harness's Chromium, a DevTools CPU profile of the load; logpoints on zen-fs's lookups and the file provider for
      who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every
