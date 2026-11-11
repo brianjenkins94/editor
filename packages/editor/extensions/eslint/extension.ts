@@ -52,6 +52,22 @@ const PROJECT_MARKS = new Set(["package.json", ".eslintignore", "eslint.config.j
 /** Which config linted a file (none: the preset), and why it isn't the file's own when that failed to load. */
 interface Using { "config"?: string; "error"?: string }
 
+/** The packages the workspace's configs name (and the files of its own they import), read ahead by the editor, whole
+ *  (`editor.nodeModules.prefetch`, the CDN's node_modules): what the worker loads them from is then all there. A failure
+ *  costs nothing but the wait: the CDN goes on answering a file at a time. */
+async function prefetchConfigs(): Promise<void> {
+	await log.span("editor.extensions.eslint.prefetch", {}, async (span) => {
+		const configs = await vscode.workspace.findFiles(CONFIG_GLOB, "**/node_modules/**");
+		const packages = await vscode.commands.executeCommand<string[]>("editor.nodeModules.prefetch", configs.map((config) => config.path)).then((names) => names ?? [], (error: unknown) => {
+			span.error("the configs' packages weren't read ahead", { "error": error instanceof Error ? error.message : String(error) });
+
+			return [];
+		});
+
+		span.end({ "configs": configs.length, "packages": packages.length });
+	});
+}
+
 /** The worker: lint a text, or fix it, as `file` from the working directory `cwd` — until it's disposed. */
 interface Worker { "loaded": () => boolean; "lint": (file: string, text: string, cwd: string) => Promise<Message[]>; "fix": (file: string, text: string, cwd: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
 
@@ -99,13 +115,21 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 	worker.addEventListener("message", (event: MessageEvent) => {
 		const data = event.data as Record<string, unknown>;
 
-		// (it listens: its link into the workspace — then it loads ESLint, and answers once it has)
+		// (it listens: its link into the workspace — then it loads ESLint, and answers once it has. The packages its configs
+		// name are read ahead first, whole: a config reads them as Node reads a disk, a folder listed too, and the CDN has a
+		// file only once something has fetched it, a folder's listing never)
 		if (data["ready"] === true) {
-			const link = runtime.connect("eslint");
+			void prefetchConfigs().then(() => {
+				if (failure !== undefined) {
+					return; // (started afresh meanwhile)
+				}
 
-			disposables.push(link.dispose);
-			worker.postMessage({ "runtime": link.port }, [link.port]);
-			listening();
+				const link = runtime.connect("eslint");
+
+				disposables.push(link.dispose);
+				worker.postMessage({ "runtime": link.port }, [link.port]);
+				listening();
+			});
 
 			return;
 		}

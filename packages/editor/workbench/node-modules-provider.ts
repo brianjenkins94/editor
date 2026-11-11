@@ -21,9 +21,12 @@ import {
 	FileSystemProviderCapabilities,
 	FileType
 } from "@brianjenkins94/monaco-vscode-api/main";
+import { logger } from "@brianjenkins94/util/logger";
 import { timeCall } from "../shared/fs-boundaries";
 import { vscodeCaller } from "../shared/fs-caller";
 import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
+import { normalized, packagesNamedBy, relativeImports, splitPackage } from "./node-modules-prefetch";
+import { tarball } from "./tarballs";
 
 /** unpkg `?meta`: the old listing (`type: "directory"`, its immediate `files`), or the current one — `{ prefix, files }`
  *  with every file beneath the prefix flat, by full path (`type` is then a MIME type, and directories aren't listed). */
@@ -64,15 +67,19 @@ function isTsSourceProbe(rel: string): boolean {
 	return (/\.(?:tsx?|mts|cts)$/u).test(rel) && !(/\.d\.(?:ts|mts|cts)$/u).test(rel);
 }
 
-/** Split a node_modules-relative path into package + subpath, honouring scopes (@scope/name). */
-function splitPackage(rel: string): { "pkg": string; "sub": string } {
-	const parts = rel.split("/");
-	const count = parts[0]?.startsWith("@") ? 2 : 1;
+/** How deep `prefetchFor` follows a config's relative imports: a config and the few files of its own it imports. */
+const PREFETCH_DEPTH = 3;
 
-	return { "pkg": parts.slice(0, count).join("/"), "sub": parts.slice(count).join("/") };
-}
+/** What a relative import may name, a file as written or with Node's extensions. */
+const IMPORT_TRIES = ["", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", "/index.js"];
 
-export function createNodeModulesProvider(workspaceFolder: string, versions: Record<string, string>): IFileSystemProviderWithFileReadWriteCapability {
+// Each prefetch is a span: it crosses the network, and what asked for it waits on it.
+const log = logger({ "source": "workbench" });
+
+/** The provider, and `prefetchFor`: what `files` name, read ahead. */
+export type NodeModulesProvider = IFileSystemProviderWithFileReadWriteCapability & { "prefetchFor": (files: string[], read: (path: string) => Promise<string | undefined>) => Promise<string[]> };
+
+export function createNodeModulesProvider(workspaceFolder: string, versions: Record<string, string>): NodeModulesProvider {
 	const prefix = workspaceFolder.replace(/\/$/u, "") + "/node_modules";
 	// The deploy base ("/editor/" on GitHub Pages, "/" locally): this provider runs in the workbench iframe at
 	// <base>/__vscode__/host.html, and the service worker is scoped to <base>, so requests must sit under <base>
@@ -162,6 +169,101 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	const fileResults = new Map<string, Uint8Array | undefined>();
 	const metaInflight = new Set<string>();
 	const fileInflight = new Set<string>();
+	// Packages read whole, ahead of what asks (prefetch): their files in fileResults, and each folder's children here, so
+	// what reads them as Node reads a disk (ESLint's worker loading a config) has them at its first read, a folder's
+	// listing too, which the CDN only gives by a fetch of its own. A path in one that isn't in it is nowhere: no fetch.
+	const whole = new Set<string>();
+	const folders = new Map<string, Map<string, FileType>>();
+	const prefetching = new Map<string, Promise<void>>();
+	/** Whether `rel` is in a package read whole, and isn't there. */
+	const absent = (rel: string): boolean => whole.has(splitPackage(rel).pkg) && !fileResults.has(rel) && !folders.has(rel);
+
+	/** `name`, read whole: its tarball, at the version pinned, each file and folder kept. */
+	const prefetch = (name: string): Promise<void> => {
+		const version = versions[name];
+
+		if (version === undefined) {
+			return Promise.resolve();
+		}
+
+		if (!prefetching.has(name)) {
+			prefetching.set(name, (async () => {
+				const [{ unpack }, bytes] = await Promise.all([import("@brianjenkins94/almostnode/packages"), tarball(name, version)]);
+
+				for (const [path, data] of unpack(bytes)) {
+					const rel = `${name}/${path}`;
+					let child = rel;
+					let type = FileType.File;
+
+					fileResults.set(rel, data);
+
+					while (child.length > name.length) {
+						const at = child.slice(0, child.lastIndexOf("/"));
+						const entries = folders.get(at) ?? new Map<string, FileType>();
+
+						entries.set(child.slice(at.length + 1), type);
+						folders.set(at, entries);
+						child = at;
+						type = FileType.Directory;
+					}
+				}
+
+				whole.add(name);
+			})().catch((error: unknown) => {
+				prefetching.delete(name); // (asked again next time: the CDN goes on answering it a file at a time meanwhile)
+
+				throw error;
+			}));
+		}
+
+		return prefetching.get(name)!;
+	};
+
+	/** What `files` name (and the files they import by a relative path, a few deep), read whole: the packages, once in. */
+	const prefetchFor = (files: string[], read: (path: string) => Promise<string | undefined>): Promise<string[]> => log.span("editor.workbench.node-modules-provider.prefetch", { "count": files.length }, async (span) => {
+		const seen = new Set<string>();
+		const named = new Set<string>();
+		let level = files.map((file) => normalized(file));
+
+		for (let depth = 0; depth < PREFETCH_DEPTH && level.length > 0; depth += 1) {
+			const next: string[] = [];
+
+			for (const file of level.filter((each) => !seen.has(each) && !each.includes("/node_modules/"))) {
+				seen.add(file);
+
+				const text = await read(file);
+
+				if (text === undefined) {
+					continue;
+				}
+
+				for (const name of packagesNamedBy(text, versions)) {
+					named.add(name);
+				}
+
+				const folder = file.slice(0, file.lastIndexOf("/"));
+
+				for (const specifier of relativeImports(text)) {
+					const target = normalized(`${folder}/${specifier}`);
+					const tries = await Promise.all(IMPORT_TRIES.map(async (suffix) => (await read(target + suffix) === undefined ? undefined : target + suffix)));
+					const found = tries.find((each) => each !== undefined);
+
+					if (found !== undefined) {
+						next.push(found);
+					}
+				}
+			}
+
+			level = next;
+		}
+
+		const results = await Promise.allSettled([...named].map(async (name) => prefetch(name)));
+		const failed = [...named].filter((_, index) => results[index].status === "rejected");
+
+		span.end({ "files": seen.size, "packages": named.size, "failed": failed.length });
+
+		return [...named].filter((name) => !failed.includes(name));
+	});
 
 	const ensureMeta = (rel: string, resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["stat"]>[0]): void => {
 		if (metaInflight.has(rel)) {
@@ -226,6 +328,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return Promise.reject(notFound());
 			}
 
+			if (folders.has(rel)) {
+				return Promise.resolve({ "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 });
+			}
+
+			if (absent(rel)) {
+				return Promise.reject(notFound());
+			}
+
 			// Existence via the ACTUAL FILE (404-aware), NOT `?meta`. unpkg's `?meta` lies: it returns
 			// `200 {files:[]}` for ANY path — existent or not — so a `?meta`-based stat reported every probe as a
 			// real 0-byte file, and readFile then 404'd, so tsserver resolved the import to a dead file ("is not a
@@ -252,7 +362,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return Promise.reject(notFound());
 			}
 
-			if (isTsSourceProbe(rel)) {
+			if (isTsSourceProbe(rel) || absent(rel)) {
 				return Promise.reject(notFound());
 			}
 
@@ -280,6 +390,16 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 			if (rel === "") {
 				return Promise.resolve([]);
+			}
+
+			const listed = folders.get(rel);
+
+			if (listed !== undefined) {
+				return Promise.resolve([...listed]);
+			}
+
+			if (absent(rel)) {
+				return Promise.reject(notFound());
 			}
 
 			if (!metaResults.has(rel)) {
@@ -313,5 +433,5 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		(provider as unknown as Record<string, unknown>)[method] = (resource: { "path": string }): unknown => timeCall("node_modules", method, vscodeCaller(), resource.path, () => original(resource));
 	}
 
-	return provider;
+	return Object.assign(provider, { "prefetchFor": prefetchFor });
 }

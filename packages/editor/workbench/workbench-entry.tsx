@@ -390,7 +390,16 @@ function maybeBoot(): void {
 			// Pinned by the build's own versions until the workspace's are resolved (versions.ts's `pinned`, which each sync
 			// keeps up), so a loaded repo's packages load at its versions, not the editor's.
 			Object.assign(pinned, moduleVersions);
-			registerFileSystemOverlay(0, createNodeModulesProvider(workspaceFolder ?? "/workspace", pinned));
+			const nodeModules = createNodeModulesProvider(workspaceFolder ?? "/workspace", pinned);
+
+			registerFileSystemOverlay(0, nodeModules);
+			// What's about to read packages as Node reads a disk (ESLint's worker, before it loads its configs) asks for those
+			// its files name, read ahead whole, and waits (node-modules-provider.ts's prefetchFor).
+			void apiReady.then(() => {
+				const api = vscodeApi as typeof import("vscode");
+
+				api.commands.registerCommand("editor.nodeModules.prefetch", async (files: unknown) => nodeModules.prefetchFor(Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : [], async (path) => Promise.resolve(api.workspace.fs.readFile(api.Uri.file(path))).then((bytes) => new TextDecoder().decode(bytes), () => undefined)));
+			});
 
 			// Open the initial editors now — deferred from boot's defaultLayout because the source files no longer live
 			// in boot's priority-1 seed (that layer now carries only the read-only base). They're in the zen-fs overlay

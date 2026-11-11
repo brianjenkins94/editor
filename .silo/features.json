@@ -1427,6 +1427,7 @@
     "since": "2026-11-02",
     "what": "Any import type-checks and go-to-definition reaches real package source without installing anything, at dependency versions pinned for everyone.",
     "ways": [
+      "command|editor.nodeModules.prefetch",
       "core module|installPackage",
       "core module|installTarballs",
       "core module|installTypeAcquisition",
@@ -1437,12 +1438,14 @@
       "packages/editor/extensions/tsval/worker/install.ts",
       "packages/editor/workbench/ata.ts",
       "packages/editor/workbench/install.ts",
+      "packages/editor/workbench/node-modules-prefetch.ts",
       "packages/editor/workbench/node-modules-provider.ts",
       "packages/editor/workbench/tarballs.ts",
       "packages/editor/workbench/versions.ts"
     ],
     "tests": [
       "packages/editor/test/ata.test.mjs",
+      "packages/editor/test/node-modules-prefetch.test.mjs",
       "packages/editor/test/tarballs.test.mjs"
     ]
   },
