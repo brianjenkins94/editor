@@ -31,7 +31,7 @@
     "@pkgjs/parseargs": "latest",
     "@rolldown/browser": "latest",
     "@typescript-eslint/parser": "latest",
-    "@zenfs/core": "2.8.3",
+    "@zenfs/core": "2.9.0",
     "@zenfs/dom": "latest",
     "@zenfs/streams": "1.0.2",
     "account": "file:../account",
