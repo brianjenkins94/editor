@@ -97,7 +97,8 @@ async function bundleCode(folder: string, file: string, id: string, format: "cjs
 			"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
 			// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
 			// into siblings we don't capture (we grab only the entry chunk as a string).
-			"rollupOptions": { "external": externals, "output": { "codeSplitting": false, ...banner === undefined ? {} : { "banner": banner } } }
+			// keepNames: as the workbench's (its build, below), for a worker that bundles zen-fs
+			"rollupOptions": { "external": externals, "output": { "codeSplitting": false, "keepNames": true, ...banner === undefined ? {} : { "banner": banner } } }
 		}
 	}) as RollupOutput[];
 
@@ -313,7 +314,9 @@ export async function preBuild(): Promise<void> {
 			"rollupOptions": {
 				"input": { "workbench": "workbench/workbench-entry.tsx" },
 				"external": ["@brianjenkins94/monaco-vscode-api/main"],
-				"output": { "chunkFileNames": "[name].js", "paths": { "@brianjenkins94/monaco-vscode-api/main": "./main.js" } }
+				// keepNames: CI's minify renames classes, and memium (zen-fs's structs) knows a struct by its class's name —
+				// zen-fs's `class DirListing extends $from.packed("DirListing", …)` minified to `class e` is no struct to it
+				"output": { "chunkFileNames": "[name].js", "keepNames": true, "paths": { "@brianjenkins94/monaco-vscode-api/main": "./main.js" } }
 			}
 		}
 	});
