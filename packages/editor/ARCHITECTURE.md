@@ -412,7 +412,7 @@ each host instead of exporting it. What handing a port across hosts meets:
 
 #### The runtime's files, through core (decided 2026-10-10)
 
-A contributed debugger doesn't get the workspace's buffer. It's our storage format (patched zen-fs's SingleBuffer: a
+A contributed debugger doesn't get the workspace's buffer. It's our storage format (zen-fs's SingleBuffer: a
 second zen-fs mounting it can break the filesystem's structure, `.git` and `.silo` with it), and the bytes are below
 everything the editor keeps around a file: an open editor's unsaved text, change events, the policy, the run's
 effects. It gets **synchronous files through core** instead, each call answered by the bridge (runtime-fs.ts):

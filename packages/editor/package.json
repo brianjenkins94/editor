@@ -13,8 +13,7 @@
     "test": "node --import tsx --test --test-concurrency=4 test/*.test.mjs workbench/terminal/commands/*/*.test.mjs",
     "test:architecture": "npm run test:architecture:realms && npm run test:architecture:performance",
     "test:architecture:realms": "node --test --test-global-setup=test/architecture-harness.mjs test/worker-realms.mjs test/debugger-runs.mjs",
-    "test:architecture:performance": "node --import tsx --test --test-global-setup=test/architecture-harness.mjs test/performance.mjs",
-    "postinstall": "node patches/apply.mjs"
+    "test:architecture:performance": "node --import tsx --test --test-global-setup=test/architecture-harness.mjs test/performance.mjs"
   },
   "dependencies": {
     "@automerge/automerge": "latest",

@@ -359,14 +359,13 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "The editor's build (build.ts, build/vite.ts: the workbench, its extensions and workers; each feature's own part in build/, by its name), its dev server (dev.ts), the dependency patches applied after install, and the ambient types the build provides.",
+    "what": "The editor's build (build.ts, build/vite.ts: the workbench, its extensions and workers; each feature's own part in build/, by its name), its dev server (dev.ts), and the ambient types the build provides.",
     "paths": [
       "components/monaco-vscode-api/vite.config.ts",
       "packages/editor/build.ts",
       "packages/editor/build/vite.ts",
       "packages/editor/dev.ts",
       "packages/editor/env.d.ts",
-      "packages/editor/patches/",
       "packages/editor/wa-jsx.d.ts"
     ],
     "tests": [
