@@ -560,6 +560,14 @@ How it's kept:
      view; the monitor has rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`,
      `runs_tests` have the terminal (`git`, `node --test`, `node`), which agents gave up on 2026-10-27;
      `page_eval` and `page_query`, the browser's devtools.
+4. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 3:
+   what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is
+   made at commit time, per person, by the tests run in the editor, and names the declarations each ran, so it lapses
+   when that code changes; a test rests after 20 green runs, with a weekly full run; CI reruns a vouched test after 7
+   days. Built so far is only what it stands on: tests run in the editor (`runs_tests`, the in-editor specs), the ledger
+   declares each feature's tests, and runs record their reach. Not built: vouches, `touched` and `resting`, and CI
+   reading them. Open: decisions 15, 17–19 and 20. Done when a push's CI runs fewer tests because the rest are vouched
+   for or resting.
 
 ## Watching
 
