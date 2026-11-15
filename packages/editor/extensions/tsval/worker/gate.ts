@@ -14,7 +14,7 @@ import ts from "typescript";
 import { capabilityBreakLines } from "../capability-calls";
 import { capabilityStandins, standinCapability, givenAs } from "../canary";
 import { EXITED, stdin } from "./process";
-import { guestConsole, placeOf } from "./session";
+import { guestConsole, guestStream, placeOf } from "./session";
 import { post, state } from "./state";
 import { tellReplayed, tellSkipped } from "./values";
 
@@ -201,9 +201,16 @@ export function capabilitySurface(fileName: string, args: string[], real?: Runti
 	// environment (a terminal's — RUNNING.md, *Output goes where it was started*), and its stdin — nothing it can do.
 	// (Its version is the one almostnode's process reports, packages/almostnode/shims/process.ts, so a run reads the same
 	// version whichever runtime it's in.)
-	// And how it ends: `exit(code)` there and then, or `exitCode` once it's done, as node's.
+	// And how it ends: `exit(code)` there and then, or `exitCode` once it's done, as node's. What it writes to stdout and
+	// stderr is its output, as its console's is; and a built-in by its name (getBuiltinModule, Node 22.3+) is what its
+	// import would give it: its stand-ins first (`fs`), else the runtime's.
 	const process = {
 		"argv": ["node", fileName, ...args],
+		"stdout": guestStream("stdout"),
+		"stderr": guestStream("stderr"),
+		"getBuiltinModule": (id: string): unknown => (Object.hasOwn(standins.modules, id)
+			? standins.modules[id]
+			: (state.runtime?.getProcess() as unknown as { "getBuiltinModule"?: (id: string) => unknown } | undefined)?.getBuiltinModule?.(id)),
 		"env": { ...where.env },
 		"platform": "browser",
 		"version": "v20.0.0",

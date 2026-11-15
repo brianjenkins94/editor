@@ -164,6 +164,12 @@ export function execFile(
 	return child;
 }
 
+// (ours, not unenv's "not implemented": a caller that can do without a process — silo's git, read by isomorphic-git
+// instead — knows it from ENOSYS, as from execSync's)
+export function execFileSync(_file: string, _args?: string[] | ExecOptions, _options?: ExecOptions): string | Buffer {
+	throw enosys("execFileSync");
+}
+
 export function fork(_modulePath: string, _args?: string[] | SpawnOptions, _options?: SpawnOptions): ChildProcess {
 	const child = new ChildProcess();
 	const err = enosys("fork");

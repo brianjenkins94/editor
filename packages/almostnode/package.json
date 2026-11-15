@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@noble/hashes": "latest",
     "@pkgjs/parseargs": "latest",
     "assert": "latest",
     "events": "latest",

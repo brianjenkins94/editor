@@ -79,9 +79,30 @@ export async function filesOf(repo: string, options: { "untracked"?: boolean } =
 		return tracked;
 	}
 
-	// (statusMatrix leaves out what .gitignore ignores; untracked is in neither HEAD nor the index)
-	const known = new Set(tracked);
-	const untracked = (await git.statusMatrix({ "fs": nodeFs, "dir": repo })).filter(([file, head, , stage]) => head === 0 && stage === 0 && !known.has(file)).map(([file]) => file);
+	// The working tree against the index: what isn't in it and isn't ignored (an ignored folder isn't walked into). Not
+	// statusMatrix, which writes the index's refreshed stats back to .git: this only reads, as `git ls-files` does.
+	const untracked: string[] = [];
+
+	await git.walk({
+		"fs": nodeFs,
+		"dir": repo,
+		"trees": [git.WORKDIR(), git.STAGE()],
+		"map": async (file, [workdir, stage]) => {
+			if (file === ".") {
+				return true;
+			}
+
+			if (workdir === null || await git.isIgnored({ "fs": nodeFs, "dir": repo, "filepath": file })) {
+				return null;
+			}
+
+			if (stage === null && await workdir.type() === "blob") {
+				untracked.push(file);
+			}
+
+			return true;
+		}
+	});
 
 	return sorted([
 		...tracked,

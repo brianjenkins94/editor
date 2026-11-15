@@ -229,6 +229,19 @@ test("util.types: Node's answers — a boxed primitive is an object, typed array
 	assert.deepEqual(said, [false, true, true, false, true, true, true, true, true, true]);
 });
 
+test("crypto's hashes are Node's digests: createHash, createHmac and pbkdf2Sync, as Node computes them", async () => {
+	const node = await import("node:crypto");
+	const runtime = new Runtime(new VirtualFS());
+	const code = (crypto: string): string => `const crypto = ${crypto}; module.exports = [...["sha1", "sha256", "sha384", "sha512", "md5"].map((each) => crypto.createHash(each).update("abc").update(new Uint8Array([1, 2, 255])).digest("hex")), crypto.createHmac("sha256", "key").update("data").digest("base64"), crypto.pbkdf2Sync("password", "salt", 2, 20, "sha1").toString("hex"), (() => { try { crypto.createHash("nope"); return "made"; } catch (error) { return error.message; } })()];`;
+	const said = runtime.execute(code(`require("crypto")`), "/hash.js").exports;
+
+	const nodes = { "exports": undefined as unknown };
+
+	// eslint-disable-next-line no-new-func, ts/no-implied-eval -- the same code, in Node, for what Node's crypto says
+	new Function("module", "node", code("node"))(nodes, node);
+	assert.deepEqual(said, nodes.exports);
+});
+
 test("path is Node's posix path: a backslash is a name's, and resolve starts from the program's directory", () => {
 	const runtime = new Runtime(new VirtualFS(), { "cwd": "/workspace" });
 	const said = runtime.execute(`const path = require("path"); module.exports = [path.join("a\\\\b", "c"), path.normalize("a\\\\b/../c"), path.posix.isAbsolute("C:\\\\x"), path.basename("/a/b/", ".b"), path.format({ "dir": "/x", "name": "n", "ext": "e" }), path.resolve("x"), require("path/posix") === path.posix];`, "/workspace/path.js").exports;

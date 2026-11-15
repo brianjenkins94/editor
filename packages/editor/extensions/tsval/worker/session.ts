@@ -335,6 +335,31 @@ export function guestConsole(): Record<string, (...args: unknown[]) => void> {
 	]));
 }
 
+/** The program's process.stdout or .stderr: what it writes is its output, as console's is. The protocol carries lines,
+ *  so a write's own last newline ends its line rather than adding an empty one. */
+export function guestStream(stream: "stdout" | "stderr"): { "isTTY": boolean; "write": (chunk: unknown, ...rest: unknown[]) => boolean } {
+	return {
+		"isTTY": false,
+		"write": (chunk, ...rest) => {
+			const text = typeof chunk === "string" ? chunk : chunk instanceof Uint8Array ? new TextDecoder().decode(chunk) : String(chunk);
+
+			if (state.probing === undefined && text !== "") {
+				state.evaluating?.impure("effect", `process.${stream}.write`);
+				post({ "type": "output", "text": text.replace(/\n$/u, ""), "stream": stream });
+			}
+
+			// (its callback, last, once it's written: node's)
+			const done = rest.at(-1);
+
+			if (typeof done === "function") {
+				queueMicrotask(() => done());
+			}
+
+			return true;
+		}
+	};
+}
+
 /** A readable one-line rendering of a runtime value for the Variables pane. */
 function format(value: unknown): string {
 	switch (typeof value) {
@@ -1034,12 +1059,45 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 		return;
 	}
 
+	// The packages' process is the run's too, as in node, where there's one: its arguments, environment and directory (a
+	// package's argument parser reads them; util's isEntry asks argv[1] whether this program is the one started)…
+	const where = whereOf(message);
+	const packageProcess = loadedRuntime.getProcess();
+
+	packageProcess.argv = ["node", message.fileName, ...message.args ?? []];
+
+	if (where.env !== undefined) {
+		packageProcess.env = { ...where.env };
+	}
+
+	if (where.cwd !== undefined && packageProcess.cwd() !== where.cwd) {
+		packageProcess.chdir(where.cwd);
+	}
+
+	// (almostnode's path resolves against the realm's process — its own, where it's the realm, as in its node worker; this
+	// worker's is the bundle's stand-in, at "/", so `path.resolve(".")` is the run's directory only if it asks the run's)
+	const realmProcess = (globalThis as { "process"?: { "cwd"?: () => string } }).process;
+
+	if (realmProcess !== undefined && realmProcess !== packageProcess) {
+		realmProcess.cwd = () => packageProcess.cwd();
+	}
+
 	// Its capabilities real (RUNNING.md, *Effects are real, decided per call*): each gated call decided as it's made — but
 	// for a run of an ordering exploring found (its schedule given), which replays that run: its calls' results the
 	// stand-ins' it had.
 	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined
 		? loadedRuntime
-		: undefined, whereOf(message));
+		: undefined, where);
+	// …and what a package writes (a CLI runner's help, its errors) is the run's output, and its process.exit or exitCode
+	// ends the run as the program's would: one process, as node has.
+	const runProcess = surface.globals["process"] as { "stdout": { "write": unknown }; "stderr": { "write": unknown }; "exit": (code?: number) => never; "exitCode": number | undefined };
+
+	Object.assign(packageProcess.stdout, { "write": runProcess.stdout.write });
+	Object.assign(packageProcess.stderr, { "write": runProcess.stderr.write });
+	packageProcess.exit = runProcess.exit;
+	Object.defineProperty(packageProcess, "exitCode", { "configurable": true, "get": () => runProcess.exitCode, "set": (code: number | undefined) => {
+		runProcess.exitCode = code;
+	} });
 
 	state.programBuiltins = surface.modules;
 	state.programFunctions = functionsIn([surface.modules, surface.globals]);

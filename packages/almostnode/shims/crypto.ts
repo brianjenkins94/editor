@@ -4,6 +4,10 @@
  * Provides cryptographic utilities using Web Crypto API
  */
 
+import type { CHash } from "@noble/hashes/utils.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { md5, sha1 } from "@noble/hashes/legacy.js";
+import { sha256, sha384, sha512 } from "@noble/hashes/sha2.js";
 import EventEmitter from "events/events.js";
 import { Buffer } from "../utils/buffer";
 
@@ -69,6 +73,7 @@ class Hash {
 
 	constructor(algorithm: string) {
 		this.algorithm = normalizeHashAlgorithm(algorithm);
+		hashOf(this.algorithm);
 	}
 
 	update(data: string | Buffer | Uint8Array, encoding?: string): this {
@@ -700,55 +705,28 @@ function encodeResult(data: Uint8Array, encoding?: string): string | Buffer {
 }
 
 // Synchronous hash fallback using a simple but consistent algorithm
+/** Node's digests, computed here — WebCrypto's are async only, and have no MD5 — by the names normalizeHashAlgorithm
+ *  gives. (They were a deterministic stand-in mixing the bytes, so a SHA-1 wasn't one: isomorphic-git, hashing a
+ *  pack, took every pack for corrupted.) */
+const HASHES: Record<string, CHash> = { "SHA-1": sha1, "SHA-256": sha256, "SHA-384": sha384, "SHA-512": sha512, "MD5": md5 };
+
+/** `algorithm`'s hash, or Node's error for one it hasn't. */
+function hashOf(algorithm: string): CHash {
+	const hash = HASHES[algorithm];
+
+	if (hash === undefined) {
+		throw new Error("Digest method not supported");
+	}
+
+	return hash;
+}
+
 function syncHash(data: Uint8Array, algorithm: string): Uint8Array {
-  // Use a deterministic hash that produces consistent output
-  // This is NOT cryptographically secure but provides consistent behavior
-	let size: number;
-
-	if (algorithm.includes("512")) {
-		size = 64; // SHA-512 = 64 bytes
-	} else if (algorithm.includes("384")) {
-		size = 48; // SHA-384 = 48 bytes
-	} else if (algorithm.includes("1") || algorithm === "SHA-1") {
-		size = 20; // SHA-1 = 20 bytes
-	} else {
-		size = 32; // SHA-256 = 32 bytes (default)
-	}
-
-	const result = new Uint8Array(size);
-
-  // Simple but deterministic mixing function
-	let h1 = 0xDEADBEEF;
-	let h2 = 0x41C6CE57;
-
-	for (let i = 0; i < data.length; i++) {
-		h1 = Math.imul(h1 ^ data[i], 2654435761);
-		h2 = Math.imul(h2 ^ data[i], 1597334677);
-	}
-
-	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-
-  // Fill result buffer
-	for (let i = 0; i < size; i++) {
-		const mix = i < size / 2 ? h1 : h2;
-
-		result[i] = (mix >>> ((i % 4) * 8)) & 0xFF;
-		h1 = Math.imul(h1, 1103515245) + 12345;
-		h2 = Math.imul(h2, 1103515245) + 12345;
-	}
-
-	return result;
+	return hashOf(algorithm)(data);
 }
 
 function syncHmac(data: Uint8Array, key: Uint8Array, algorithm: string): Uint8Array {
-  // Combine key and data for HMAC-like behavior
-	const combined = new Uint8Array(key.length + data.length);
-
-	combined.set(key, 0);
-	combined.set(data, key.length);
-
-	return syncHash(combined, algorithm);
+	return hmac(hashOf(algorithm), key, data);
 }
 
 // Async implementations using WebCrypto

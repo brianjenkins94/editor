@@ -25,9 +25,20 @@ How it's kept:
    - type acquisition reads every package's manifest and tsconfig.
 
    features-map.ts went from 32 TypeScript errors to 2, and a linked file has one name. Still open:
-   - **Doesn't run in the browser:** `silo check`. rolldown no longer stops it (the CLI loads it only for a baseline's
-     slices), but its analysis is TypeScript 7, native only on npm until its wasm build is published
-     (typescript-go#4733). CI on a pushed branch checks it instead. (`process.exit` and the theme budget test run now.)
+   - **Doesn't run in the browser yet:** `silo check`. Nothing it needs is spawned now: its analysis runs on TypeScript
+     7's WebAssembly build where no native compiler can start (lib's `apiOf`; `@typescript/typescript-wasip1-wasm`,
+     on npm since 2026-10-30; unpkg serves its 53 MB tsc.wasm, jsDelivr won't), and its git on isomorphic-git (silo's
+     git.ts). Under Node with neither spawned, `check --json --prices` is byte-identical to native's (25 s against
+     3.5 s). In the editor's terminal (2026-11-15) `node packages/silo/src/cli.ts check` starts and lists the
+     repository's 2,309 files; fixed on the way there: util's env took the debugger for a browser (isEntry, and juvy
+     reading `--json`'s environment variable from globalThis), a run's packages had almostnode's own process (its argv,
+     stdout, exit), `path.resolve` started from `/`, `execFileSync` wasn't ENOSYS, and almostnode's synchronous hashes
+     weren't SHA-1 (isomorphic-git took every pack for corrupted). What stops it: the workspace installs one version
+     of a package (versions.ts: "each name once"), so silo's TypeScript 7 is the root's TypeScript 6 there — it needs
+     a folder's own versions (nested node_modules, as npm), or npm aliases (`typescript-7`, as lib has). Then tsc.wasm
+     through the node_modules overlay, untried. CI on a pushed branch checks it meanwhile. (A `@latest` tarball isn't
+     fetched again while its version is the same, util's 0.1.0, as npm without `npm install <url>`: delete it to
+     refresh.)
    - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —
      go-to-definition reaches theme's card.d.ts and from it Web Awesome's in the root node_modules, and the file has no
      2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's
