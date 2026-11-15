@@ -2978,7 +2978,8 @@
     ],
     "paths": [
       ".github/workflows/silo.yml",
-      "packages/silo/src/cli.ts"
+      "packages/silo/src/cli.ts",
+      "packages/silo/src/git.ts"
     ],
     "tests": [
       "packages/silo/test/cli.test.ts"

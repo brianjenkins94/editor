@@ -19,10 +19,11 @@
  *                                                        commit messages, which are never read
  *
  * The code is read by TypeScript — the one silo bundles (7.1), whatever the project has: its ways in, its declaration
- * graph, its import surface.
+ * graph, its import surface. Its native compiler, or where nothing can be spawned (the editor's debugger, where this
+ * runs as `node packages/silo/src/cli.ts`) the same compiler's WebAssembly build; and git the same way (./git).
  *
  * The logic is @brianjenkins94/util/silo (features, history, git-snapshots): pure, so the editor runs the same code in
- * the browser over its own workspace. This file is only the desktop's way to ask: git, the disk, and stdout.
+ * the browser over its own workspace. This file is only the command line's way to ask: git, the disk, and stdout.
  */
 import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
 import type { Price } from "@brianjenkins94/util/silo/cost";
@@ -52,16 +53,12 @@ import { ledgerPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, isOwnedCode, ledgerText, ownersOf, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
+import { filesOf, headOf, repoOf } from "./git.ts";
 
 /** rolldown, for the baseline's slices (the two commands that make one): loaded when one's asked for, not as the CLI
  *  starts — its native binding doesn't load where there's no native code (the editor's debugger), and nothing else needs it. */
 async function rolldownForSlices(): Promise<Rolldown> {
 	return (await import("rolldown")).rolldown as unknown as Rolldown;
-}
-
-/** The repository a path is in. */
-function repoOf(directory: string): string {
-	return execFileSync("git", ["rev-parse", "--show-toplevel"], { "cwd": path.resolve(directory), "encoding": "utf8" }).trim();
 }
 
 /** The TypeScript silo bundles (7.1): what reads the code, whatever the project has. */
@@ -103,7 +100,7 @@ async function analyzerOf(repo: string): Promise<Analyzer> {
 /** The program now: its files as they are on disk (but for what git ignores) — its features, and its declaration graph. */
 export async function currentProgram(repo: string): Promise<{ "features": ReturnType<typeof featuresOf>; "graph": DeclarationGraph }> {
 	// (and the files not yet committed, but for those git ignores: as the ledger's drift reads them)
-	const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && includeByDefault(file) && fs.existsSync(path.join(repo, file)));
+	const files = (await filesOf(repo, { "untracked": true })).filter((file) => includeByDefault(file) && fs.existsSync(path.join(repo, file)));
 	const analyzer = await analyzerOf(repo);
 
 	try {
@@ -150,7 +147,7 @@ function ledgerOf(repo: string): Ledger {
 export async function ledgerDrift(repo: string, today = new Date().toISOString().slice(0, 10), program?: Awaited<ReturnType<typeof currentProgram>>): Promise<Drift[]> {
 	const ledger = ledgerOf(repo);
 	// (and the files not yet committed, but for those git ignores: a new file is held to an owner before it's committed)
-	const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && fs.existsSync(path.join(repo, file)));
+	const files = (await filesOf(repo, { "untracked": true })).filter((file) => fs.existsSync(path.join(repo, file)));
 	const read = (file: string): { "file": string; "text": string } => ({ "file": file, "text": fs.readFileSync(path.join(repo, file)) });
 	const ways = [...(program ?? await currentProgram(repo)).features.values()].map((feature) => ({ "key": feature.key, "facet": feature.facet, "id": feature.id, "sides": feature.sides }));
 
@@ -340,7 +337,7 @@ export const app = subcommands({
 			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — as it is now; once it's there, synced with what's installed (a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more with the members that brought it in; either asks at the call unless the policy allows it).",
 			"config": juvy({ "repo": repoArgument }),
 			"handler": async (config) => {
-				const paths = siloPaths(repoOf(config.get("repo")));
+				const paths = siloPaths(await repoOf(config.get("repo")));
 
 				await ensureSiloDir(paths);
 
@@ -427,7 +424,7 @@ export const app = subcommands({
 				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." }
 			}),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				const repo = await repoOf(config.get("repo"));
 				const file = path.join(repo, ledgerPath());
 				const entry = config.get("entry") as string;
 				const why = config.get("why") as string;
@@ -460,7 +457,7 @@ export const app = subcommands({
 			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, a code file in an owned folder (.silo/owned.json) no feature owns or two do, and dead ends (a command or view declared and never registered, a setting never read) — and the declared features': a way in or a code file no feature owns, one owned that's gone or owned twice, a path that isn't there — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "prices": { "format": Boolean, "default": false, "doc": "Every entry's price, too: what deleting its feature would free." } }),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				const repo = await repoOf(config.get("repo"));
 				const paths = siloPaths(repo);
 				const program = await currentProgram(repo);
 				const drifted = await ledgerDrift(repo, undefined, program);
@@ -528,7 +525,7 @@ export const app = subcommands({
 				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." }
 			}),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				const repo = await repoOf(config.get("repo"));
 				const name = config.get("entry") as string;
 				const ledger = ledgerOf(repo);
 				const entry = ledger[name];
@@ -545,8 +542,8 @@ export const app = subcommands({
 
 				const program = await currentProgram(repo);
 				const textOf = (file: string): string | undefined => (fs.existsSync(path.join(repo, file)) ? fs.readFileSync(path.join(repo, file)) : undefined);
-				const head = execFileSync("git", ["rev-parse", "--short", "HEAD"], { "cwd": repo, "encoding": "utf8" }).trim();
-				const tracked = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n").filter((file) => file !== "" && fs.existsSync(path.join(repo, file)));
+				const head = await headOf(repo);
+				const tracked = (await filesOf(repo)).filter((file) => fs.existsSync(path.join(repo, file)));
 				const removal = removalOf({ "name": name, "why": config.get("why") as string, ...key === undefined ? {} : { "key": key }, "paths": paths, "ledger": ledger, "features": program.features, "graph": program.graph, "tracked": tracked, "textOf": textOf, "head": head, "today": new Date().toISOString().slice(0, 10) });
 
 				// (nothing it can take out on its own — its code shares files, its way in has no manifest entry: no tombstone for
@@ -579,7 +576,7 @@ export const app = subcommands({
 				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." }
 			}),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				const repo = await repoOf(config.get("repo"));
 				const name = config.get("entry") as string;
 				const ledger = ledgerOf(repo);
 				const entry = ledger[name];
@@ -621,7 +618,7 @@ export const app = subcommands({
 				"json": jsonFlag
 			}),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				const repo = await repoOf(config.get("repo"));
 				const since = config.get("since");
 				const until = config.get("until");
 				const steps = await coverageOf(repo, { "ref": config.get("ref"), ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
@@ -647,10 +644,10 @@ export const app = subcommands({
 				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." },
 				"json": jsonFlag
 			}),
-			"handler": (config) => {
-				const repo = repoOf(config.get("repo"));
+			"handler": async (config) => {
+				const repo = await repoOf(config.get("repo"));
 				const folder = path.resolve(config.get("reach"));
-				const tracked = execFileSync("git", ["ls-files"], { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 }).split("\n");
+				const tracked = await filesOf(repo);
 				const tests = fs.readdirSync(folder).filter((file) => file.endsWith(".json")).flatMap((file) => {
 					const suite = file.replace(/\.json$/u, "");
 					const candidates = tracked.filter((each) => new RegExp(`(^|/)test/(.*/)?${suite.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\.[cm]?[jt]s$`, "u").test(each));
@@ -671,7 +668,7 @@ export const app = subcommands({
 			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject; by CI's tests), each grouping scored against the ledger's declared features: how many of its features each finds whole, splits or merges, and its precision and recall; and who owns the code: how many of the manifest's features reach each declaration, from their ways in and what registers them.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the ledger's declared features (silo README, *The feature manifest*)." } }),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				const repo = await repoOf(config.get("repo"));
 
 				if (config.get("score")) {
 					const scored = await derivationScores(repo);
@@ -697,7 +694,7 @@ export const app = subcommands({
 				"json": jsonFlag
 			}),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				const repo = await repoOf(config.get("repo"));
 				const since = config.get("since"), until = config.get("until");
 				const steps = await historyOf(repo, { "ref": config.get("ref"), ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
 				const span = since === "" ? steps : steps.slice(1); // the baseline only gives the first commit something to compare with

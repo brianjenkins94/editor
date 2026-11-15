@@ -5,6 +5,7 @@ import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 
 import { coverageOf, currentFeatures, historyOf, installArgs } from "../src/cli.ts";
+import { filesOf, headOf, repoOf } from "../src/git.ts";
 
 const CLI = path.join(import.meta.dirname, "../src/cli.ts");
 
@@ -45,6 +46,28 @@ const repo = await repository({
 	"2026-10-03": { "notes/extension.ts": extension("add(1);") },
 	"2026-10-04": { "notes/extension.ts": extension("add(1); /* only a comment */") },
 	"2026-10-05": { "notes/package.json": null, "notes/extension.ts": null }
+});
+
+test("git: read without spawning it (isomorphic-git, as in the editor's debugger) gives what git gives", async () => {
+	const fresh = await repository({ "2026-10-01": { ".gitignore": "ignored.txt\nbuild/\n", "a/tracked.ts": "1", "b.md": "2" } });
+
+	fs.writeFileSync(path.join(fresh, "untracked.ts"), "3");
+	fs.writeFileSync(path.join(fresh, "ignored.txt"), "4");
+	await fs.mkdir(path.join(fresh, "build"));
+	fs.writeFileSync(path.join(fresh, "build", "out.js"), "5");
+
+	const read = async (): Promise<unknown> => ({ "repo": await repoOf(path.join(fresh, "a")), "tracked": await filesOf(fresh), "all": await filesOf(fresh, { "untracked": true }), "head": await headOf(fresh) });
+	const spawned = await read();
+
+	process.env["SILO_GIT"] = "isomorphic";
+
+	try {
+		assert.deepEqual(await read(), spawned);
+	} finally {
+		delete process.env["SILO_GIT"];
+	}
+
+	assert.deepEqual((spawned as { "all": string[] }).all, [".gitignore", "a/tracked.ts", "b.md", "untracked.ts"]);
 });
 
 test("features: the working tree's ways in", async () => {
