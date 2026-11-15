@@ -61,9 +61,11 @@ async function rolldownForSlices(): Promise<Rolldown> {
 	return (await import("rolldown")).rolldown as unknown as Rolldown;
 }
 
-/** The TypeScript silo bundles (7.1): what reads the code, whatever the project has. */
+/** The TypeScript silo bundles (7.1): what reads the code, whatever the project has. Its own name, `typescript-7` (an
+ *  npm alias): a workspace whose root has another TypeScript keeps its own, and silo's is still found beside it (the
+ *  editor installs one version of a name). */
 async function bundledTypeScript(): Promise<TypeScriptModules> {
-	const found = await typescriptModules(import.meta.dirname);
+	const found = await typescriptModules(import.meta.dirname, "typescript-7");
 
 	if (found === undefined) {
 		throw new Error("silo's own TypeScript (7.1) isn't installed beside it: reinstall silo");

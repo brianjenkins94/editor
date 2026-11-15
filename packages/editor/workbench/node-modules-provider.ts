@@ -27,6 +27,7 @@ import { vscodeCaller } from "../shared/fs-caller";
 import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
 import { normalized, packagesNamedBy, relativeImports, splitPackage } from "./node-modules-prefetch";
 import { tarball } from "./tarballs";
+import { aliases } from "./versions";
 
 /** unpkg `?meta`: the old listing (`type: "directory"`, its immediate `files`), or the current one — `{ prefix, files }`
  *  with every file beneath the prefix flat, by full path (`type` is then a MIME type, and directories aren't listed). */
@@ -125,8 +126,11 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		// hands it back same-origin (the fold-in that retired `__proxy__`; see coi-serviceworker.js). The
 		// pinned version rides along as `?v=` so the served source matches the type-checker snapshot's version;
 		// `?meta` asks for the directory listing. `served()` above guarantees the version is defined here.
-		const version = versions[splitPackage(rel).pkg];
-		const search = query === "?meta" ? `?meta&v=${version}` : `?v=${version}`;
+		const { pkg } = splitPackage(rel);
+		const version = versions[pkg];
+		// (an npm alias is fetched as the package it is: `p`, which the fallback asks the CDN for instead of the folder's name)
+		const real = aliases[pkg] === undefined ? "" : `&p=${encodeURIComponent(aliases[pkg])}`;
+		const search = (query === "?meta" ? `?meta&v=${version}` : `?v=${version}`) + real;
 		const url = new URL(`${deployBase}${prefix.replace(/^\//u, "")}/${rel}${search}`, location.href).href;
 
 		if (!cache.has(url)) {
@@ -188,7 +192,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 		if (!prefetching.has(name)) {
 			prefetching.set(name, (async () => {
-				const [{ unpack }, bytes] = await Promise.all([import("@brianjenkins94/almostnode/packages"), tarball(name, version)]);
+				const [{ unpack }, bytes] = await Promise.all([import("@brianjenkins94/almostnode/packages"), tarball(aliases[name] ?? name, version)]);
 
 				for (const [path, data] of unpack(bytes)) {
 					const rel = `${name}/${path}`;

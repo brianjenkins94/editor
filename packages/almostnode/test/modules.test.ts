@@ -64,6 +64,19 @@ test("resolve: a package whose built entry isn't there loads from its `source` c
 	assert.deepEqual(built.resolve("sibling"), { "kind": "package", "filename": "/workspace/node_modules/sibling/dist/index.js" });
 });
 
+test("resolve: an npm alias's folder (`typescript-7`, whose package is `typescript`) matches its exports by subpath, as Node does", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/typescript-7/package.json": JSON.stringify({ "name": "typescript", "exports": { ".": "./main.js", "./sync": "./sync.js" } }),
+		"/workspace/node_modules/typescript-7/main.js": "module.exports = 'main';",
+		"/workspace/node_modules/typescript-7/sync.js": "module.exports = 'sync';"
+	});
+
+	assert.deepEqual(runtime.resolve("typescript-7"), { "kind": "package", "filename": "/workspace/node_modules/typescript-7/main.js" });
+	assert.deepEqual(runtime.resolve("typescript-7/sync"), { "kind": "package", "filename": "/workspace/node_modules/typescript-7/sync.js" });
+	// (and a file: URL is the file it names, as Node's import takes `pathToFileURL(resolved).href`)
+	assert.deepEqual(runtime.resolve("file:///workspace/node_modules/typescript-7/sync.js"), { "kind": "package", "filename": "/workspace/node_modules/typescript-7/sync.js" });
+});
+
 test("a linked package's imports up out of it resolve from where it really is, as Node's do", () => {
 	// (a monorepo's sibling, linked into node_modules: its neighbour is beside its real folder)
 	class Linked extends VirtualFS {
@@ -248,6 +261,16 @@ test("nativeFileImports: false — import() of a file: URL is loaded from the ru
 	const config = await (runtime.execute("module.exports = import('file:///workspace/eslint.config.js?mtime=1');", "/workspace/main.js").exports as Promise<{ "default": unknown }>);
 
 	assert.deepEqual(config.default, { "rules": {} });
+});
+
+test("import() of a file: URL outside the workspace — a package installed in the runtime's own memory — loads from the runtime's files, native imports or not", async () => {
+	const runtime = runtimeWith({
+		"/node_modules/typescript-7/package.json": JSON.stringify({ "name": "typescript", "exports": { "./sync": "./sync.js" } }),
+		"/node_modules/typescript-7/sync.js": "module.exports = { 'API': 'api' };"
+	});
+	const sync = await (runtime.execute("module.exports = import('file:///node_modules/typescript-7/sync.js');", "/workspace/main.js").exports as Promise<{ "API": unknown }>);
+
+	assert.equal(sync.API, "api");
 });
 
 test("a module is loaded once however many are: none is let go and loaded again as a second copy", () => {

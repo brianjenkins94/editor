@@ -304,9 +304,10 @@ export function nodeModulesCdnPlugin(): Plugin {
 
 				const rel = pathname.slice(index + NODE_MODULES.length);
 				const at = rel.startsWith("@") ? rel.indexOf("/", rel.indexOf("/") + 1) : rel.indexOf("/");
-				const pkg = at === -1 ? rel : rel.slice(0, at);
 				const sub = at === -1 ? "" : rel.slice(at + 1);
 				const params = new URLSearchParams(rawQuery ?? "");
+				// (`p`: the package an npm alias is, as the service worker takes it)
+				const pkg = params.get("p") ?? (at === -1 ? rel : rel.slice(0, at));
 				const version = params.get("v");
 				const spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
 				const upstream = "https://unpkg.com/" + spec + (params.has("meta") ? "?meta" : "");

@@ -16,11 +16,13 @@
  *
  * A dependency the registry doesn't have is in it too: a `file:`/`link:` one by the folder it links (`link`), a tarball
  * URL by that URL (`tarball`), each at the version its package.json says. Those the editor installs itself, on every
- * sync (install.ts): `npm install` is this sync.
+ * sync (install.ts): `npm install` is this sync. An npm alias (`"typescript-7": "npm:typescript@…"`) is the package it
+ * names, under its own name, with that package's tarball (`alias`): what fetches it by name fetches the package it is.
  */
 import type * as vscodeApi from "vscode";
 import { failureText } from "@brianjenkins94/editor-api/failures";
 import { keptAt, REFS_DIR } from "@brianjenkins94/editor-api/git";
+import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
 import { markReady } from "./readiness";
@@ -36,7 +38,15 @@ export const MIN_AGE_DAYS = 7;
  *  TypeScript 7's `@typescript/typescript-<os>-<arch>`): npm installs only the one for the machine, and none runs in the
  *  browser, so nothing reads it (the baseline skips it). `link`: a `file:`/`link:` dependency's folder, relative to
  *  the workspace root — workspace code, not a package to fetch. */
-export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true; "link"?: string }
+export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true; "link"?: string; "alias"?: string }
+
+/** An npm alias's range (`npm:typescript@7.1.0`): the package it installs under another name, and that package's range.
+ *  Its entry says which (`alias`), with that package's tarball: what fetches it by name fetches the package it is. */
+export function aliasOf(range: string): { "name": string; "range": string } | undefined {
+	const match = /^npm:((?:@[^/@]+\/)?[^/@]+)(?:@(.*))?$/u.exec(range);
+
+	return match === null ? undefined : { "name": match[1]!, "range": match[2] ?? "latest" };
+}
 
 /** A dependency npm's registry can't serve, so the CDN can't either: a linked folder, or a tarball from elsewhere. The
  *  editor installs these itself (install.ts). */
@@ -50,7 +60,11 @@ export const pinned: Record<string, string> = {};
  *  one's folder is the workspace's code. Kept up by each sync. */
 export const installedLocally = new Set<string>();
 
-/** `pinned` and `installedLocally`, from `packages` now. */
+/** Each pinned name that's an npm alias, and the package it is (Resolved's `alias`): the CDN has it by that name. Kept
+ *  up by each sync. */
+export const aliases: Record<string, string> = {};
+
+/** `pinned`, `installedLocally` and `aliases`, from `packages` now. */
 function repin(packages: Record<string, Resolved>): void {
 	for (const name of Object.keys(pinned)) {
 		delete pinned[name];
@@ -58,11 +72,19 @@ function repin(packages: Record<string, Resolved>): void {
 
 	installedLocally.clear();
 
+	for (const name of Object.keys(aliases)) {
+		delete aliases[name];
+	}
+
 	for (const [name, each] of Object.entries(packages)) {
 		if (installsLocally(each)) {
 			installedLocally.add(name);
 		} else {
 			pinned[name] = each.version;
+
+			if (each.alias !== undefined) {
+				aliases[name] = each.alias;
+			}
 		}
 	}
 }
@@ -166,7 +188,8 @@ async function manifestOf(name: string, version: string): Promise<{ "dependencie
 	return { "dependencies": { ...peers, ...manifest.optionalDependencies, ...manifest.dependencies }, "platform": isPlatform(manifest) };
 }
 
-/** A dependency range the registry can resolve (not a file:, link:, git or URL dependency, nor an npm: alias). */
+/** A dependency range the registry can resolve as it is (not a file:, link:, git or URL dependency, nor an npm: alias,
+ *  which is resolved as the package it names: aliasOf). */
 export const resolvable = (range: string): boolean => !/^(?:file|link|workspace|git|git\+[a-z]+|https?|npm):|\//u.test(range);
 
 /**
@@ -184,7 +207,7 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 
 	for (let at = 0; at < unread.length; at += PARALLEL) {
 		await Promise.all(unread.slice(at, at + PARALLEL).map(async ([name, each]) => {
-			const manifest = await manifestOf(name, each.version).catch(() => undefined);
+			const manifest = await manifestOf(each.alias ?? name, each.version).catch(() => undefined);
 
 			if (manifest !== undefined) {
 				resolved[name] = { ...each, "dependencies": Object.keys(manifest.dependencies).toSorted(), ...manifest.platform ? { "platform": true as const } : {} };
@@ -194,16 +217,19 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 	}
 
 	while (queue.length > 0) {
-		const batch = queue.splice(0, PARALLEL).filter(([name, range], index, all) => !(name in resolved) && resolvable(range) && all.findIndex(([other]) => other === name) === index);
+		const batch = queue.splice(0, PARALLEL).filter(([name, range], index, all) => !(name in resolved) && (resolvable(range) || aliasOf(range) !== undefined) && all.findIndex(([other]) => other === name) === index);
 
 		await Promise.all(batch.map(async ([name, range]) => {
 			try {
-				const chosen = choose(await published(name), range, cutoff);
+				// (an alias, `npm:typescript@7.1.0`, is the package it names, by its range: the name is only where it's put)
+				const alias = aliasOf(range);
+				const source = alias?.name ?? name;
+				const chosen = choose(await published(source), alias?.range ?? range, cutoff);
 
 				if (chosen !== undefined && !(name in resolved)) {
-					const manifest = await manifestOf(name, chosen.version);
+					const manifest = await manifestOf(source, chosen.version);
 
-					resolved[name] ??= { "version": chosen.version, "range": range, ...chosen.young ? { "young": true as const } : {}, "dependencies": Object.keys(manifest.dependencies).toSorted(), ...manifest.platform ? { "platform": true as const } : {} };
+					resolved[name] ??= { "version": chosen.version, "range": range, ...chosen.young ? { "young": true as const } : {}, ...alias === undefined ? {} : { "alias": source, "tarball": tarballUrl(source, chosen.version) }, "dependencies": Object.keys(manifest.dependencies).toSorted(), ...manifest.platform ? { "platform": true as const } : {} };
 					queue.push(...Object.entries<string>(manifest.dependencies));
 				}
 			} catch {

@@ -110,7 +110,9 @@ function packageAnswers(pinned) {
 }
 
 async function fetchCdn(pathname, requestUrl) {
-	const { pkg, sub } = splitPackage(pathname.slice(NODE_MODULES.length));
+	// (`p`: the package an npm alias is, which the CDN has by that name — the folder is the alias's)
+	const { pkg: folder, sub } = splitPackage(pathname.slice(NODE_MODULES.length));
+	const pkg = requestUrl.searchParams.get("p") ?? folder;
 	const meta = requestUrl.searchParams.has("meta");
 	let version = requestUrl.searchParams.get("v");
 	let spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);

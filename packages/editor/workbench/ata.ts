@@ -28,7 +28,7 @@ import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscode from "vscode";
 import { REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { waitFor } from "./readiness";
-import { installedLocally } from "./versions";
+import { aliases, installedLocally } from "./versions";
 
 /** Files whose imports are worth acquiring types for. */
 const RELEVANT = /\.(?:tsx?|jsx?|mts|cts)$/u;
@@ -360,13 +360,19 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		budget.n -= 1;
 
-		const version = versions[packageRootOf(rel) ?? rel];
+		const pkg = packageRootOf(rel) ?? rel;
+		const version = versions[pkg];
 		let search: string;
 
 		if (meta) {
 			search = "?meta" + (version === undefined ? "" : "&v=" + version);
 		} else {
 			search = version === undefined ? "" : "?v=" + version;
+		}
+
+		// (an npm alias, fetched as the package it is: node-modules-provider's `p`)
+		if (aliases[pkg] !== undefined) {
+			search += (search === "" ? "?" : "&") + "p=" + encodeURIComponent(aliases[pkg]);
 		}
 
 		try {

@@ -414,8 +414,9 @@ let importing = 0;
 function createDynamicImport(moduleRequire: RequireFunction, base?: string, nativeFileImports = true): (specifier: string) => Promise<unknown> {
 	return async (specifier: string): Promise<unknown> => {
 		// (or, with nativeFileImports false, loaded as any import is, from this runtime's files — the URL's path, its
-		// query and hash dropped, as Node's loader reads a file URL)
-		if (!nativeFileImports && typeof specifier === "string" && specifier.startsWith("file://")) {
+		// query and hash dropped, as Node's loader reads a file URL; and so is one outside the workspace, which is all the
+		// service worker serves: a package installed in this runtime's own memory, under /node_modules, a debug run's)
+		if (typeof specifier === "string" && specifier.startsWith("file://") && (!nativeFileImports || !decodeURIComponent(new URL(specifier).pathname).startsWith("/workspace/"))) {
 			specifier = decodeURIComponent(new URL(specifier).pathname);
 		}
 
@@ -713,6 +714,11 @@ function createRequire(
 			id = id.slice(5);
 		}
 
+		// A file: URL is the file it names, as Node's import takes it (`import(pathToFileURL(file).href)`)
+		if (id.startsWith("file://")) {
+			id = decodeURIComponent(new URL(id).pathname);
+		}
+
     // Built-in modules
 		if (builtinModules[id] || id === "fs" || id === "process" || id === "url" || id === "querystring" || id === "util") {
 			return id;
@@ -891,6 +897,9 @@ function createRequire(
 
       // Check package.json first — it controls entry points (browser, main, exports)
 			const pkg = getParsedPackageJson(pkgPath);
+			// (its exports are matched by the subpath under the folder found, as Node's are — not by the manifest's name,
+			// which resolve.exports reads off the id: an npm alias, `typescript-7`, is a folder whose package is `typescript`)
+			const entry = "." + moduleId.slice(pkgName.length);
 
 			if (pkg) {
         // Use resolve.exports to handle the exports field
@@ -900,7 +909,7 @@ function createRequire(
           // fallback will retry with the import condition.
 					for (const conditions of [{ "require": true }, { "import": true }] as const) {
 						try {
-							const resolved = resolveExports(pkg, moduleId, conditions);
+							const resolved = resolveExports(pkg, entry, conditions);
 
 							if (resolved && resolved.length > 0) {
 								const exportPath = resolved[0];
@@ -931,7 +940,7 @@ function createRequire(
 					// A linked package whose build isn't there (a sibling in a monorepo, its dist ignored by git) loads from
 					// what its `source` condition names, when it names one: nothing else reads that condition.
 					try {
-						const source = resolveExports(pkg, moduleId, { "conditions": ["source"] })?.[0];
+						const source = resolveExports(pkg, entry, { "conditions": ["source"] })?.[0];
 						const resolvedSource = source === undefined ? null : tryResolveFile(pathShim.join(pkgRoot, source));
 
 						if (resolvedSource) {

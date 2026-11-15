@@ -1445,7 +1445,8 @@
     "tests": [
       "packages/editor/test/ata.test.mjs",
       "packages/editor/test/node-modules-prefetch.test.mjs",
-      "packages/editor/test/tarballs.test.mjs"
+      "packages/editor/test/tarballs.test.mjs",
+      "packages/editor/test/versions.test.mjs"
     ]
   },
   "Page tools": {
