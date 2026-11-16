@@ -89,7 +89,7 @@ async function within<T>(work: Promise<T>, ms: number, message: string): Promise
 interface Asked { "message": string; "key": string; "scope": string; "request": Record<string, unknown> }
 
 /** A test file's result, as a run answers it. */
-interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[] }
+interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[]; "output"?: string }
 
 /** Statements as the lines they cover, as few ranges as they make (first and last line, from 0). */
 function rangesOf(statements: [[number, number], [number, number]][]): [number, number][] {
@@ -500,6 +500,13 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			}
 
 			batch.now = { "doing": `running ${file} (${String(index + 1)} of ${String(chosen.length)})`, "since": performance.now() };
+
+			// (a file that isn't there fails, as node --test's does, rather than running nothing and passing: kept nowhere)
+			if (!await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${ROOT}/${file}`))).then(() => true, () => false)) {
+				batch.ran.push({ "file": file, "exitCode": 1, "ms": 0, "tests": [], "output": `Could not find '${ROOT}/${file}'` });
+
+				continue;
+			}
 
 			const result = await runFile(file, signal, approvals);
 
