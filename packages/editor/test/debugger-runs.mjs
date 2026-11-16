@@ -212,8 +212,16 @@ test("react", () => { assert.equal(typeof React.createElement, "function"); });
 
 test("a run's stages are spans: under its run's, the runtime loaded, its entry parsed, its first step — and on its end, what it asked of the editor", async () => {
 	const ended = (stage) => (line) => line.startsWith("[debug-worker]") && line.includes("← editor.extensions.tsval.worker." + stage);
-	// (the runs before this one ended theirs: the page prints every record it collects, a span's end as `← name (ms)` and its attributes)
-	const run = await session.eventually("a run's span ended", async () => session.printed().findLast(ended("session.run")), 30_000);
+	// (a run of its own: the page prints every record it collects, a span's end as `← name (ms)` and its attributes — but
+	// keeps only its latest 5,000 lines, which a cold page's CDN fetches on CI can push an earlier test's run out of)
+	await session.request("files.write", { "path": "debugger-spans.test.mjs", "content": "import { test } from \"node:test\";\n\ntest(\"runs\", () => {});\n" }, 30_000);
+	await runTests(["debugger-spans.test.mjs"]);
+
+	const run = await session.eventually("a run's span ended", async () => session.printed().findLast(ended("session.run")), 30_000).catch((error) => {
+		const worker = session.printed().filter((line) => line.startsWith("[debug-worker]"));
+
+		throw new Error(`${error.message}: of the ${String(session.printed().length)} lines the page printed, kept, ${String(worker.length)} are the debug worker's, the last: ${worker.slice(-8).join("\n")}`, { "cause": error });
+	});
 	const printed = session.printed().filter((line) => line.startsWith("[debug-worker]"));
 
 	for (const stage of ["session.load", "session.parse", "session.step"]) {
