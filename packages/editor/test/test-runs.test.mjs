@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { changedLines, selectionOf, slowerOf } from "../workbench/test-runs.ts";
+import { changedLines, kindOf, selectionOf, slowerOf } from "../workbench/test-runs.ts";
 
 const ID = "a.test.mjs › adds";
 
@@ -97,4 +97,11 @@ test("a change nothing here checks says so: lines no test ran, code no test runs
 
 	assert.deepEqual([...tests.keys()], ["times.test.mjs › times"]);
 	assert.deepEqual(why.map((each) => each.why), ["lines not run", "not run", "config", "not code", "test"]);
+});
+
+test("a test file's kind is what its imports say, not what its text mentions: a test folder's helper isn't a test", () => {
+	assert.equal(kindOf("import { test } from \"node:test\";\n"), "unit");
+	assert.equal(kindOf("import { expect, test } from \"@playwright/test\";\n"), "UI spec");
+	assert.equal(kindOf("import { test } from \"node:test\";\nimport { startSession } from \"./architecture-harness.mjs\";\n"), "browser suite");
+	assert.equal(kindOf("export const fixture = \"import { test } from 'node:test'\";\n"), "not a test");
 });

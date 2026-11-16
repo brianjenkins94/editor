@@ -7,8 +7,10 @@
  *   its last outcome, and `stale`: the file has changed since that run. And for each changed file, why it selected what it
  *   did (`why`, `selectionOf`): a test, lines a test ran, lines no test ran, code no test here runs, what every test runs
  *   under (config), or not code — so a change nothing here checks says so, rather than selecting nothing. And the test
- *   files with no reach kept (`untraced`, the first UNTRACED_LISTED, and how many more): what they reach isn't known until
- *   they run, so an answer without them isn't the whole of it.
+ *   files with no reach kept that a run here would trace, a unit test or a spec (`untraced`, the first UNTRACED_LISTED, and
+ *   how many more): what they reach isn't known until they run, so an answer without them isn't the whole of it; and how
+ *   many browser suites there are (`outside`), run from outside the editor, whose reach isn't known here. A test folder's
+ *   helpers and fixtures aren't tests (kindOf).
  * - `tests.run` { files?, affected? }: test files run one at a time, as `node --test` runs each (in the debugger), and
  *   each test's result: its outcome, what it threw, what a failed assertion compared, its time and statements, how it
  *   came out last before this run, and — passed, but by more than `run.tests.slowerBy` over its typical — `slower`. `affected` runs the files of the affected tests that are stale. A capability stop (a gated
@@ -65,8 +67,8 @@ const STALL_MS = 120_000;
  *  run goes on without (named files: how each test came out before) or says so (none named). */
 const AFFECTED_MS = 60_000;
 
-/** How many untraced test files an answer names: a repository's can be hundreds (the editor's, 941), which is more than
- *  an agent's tool answer holds; the rest are counted (`untracedLeftOut`). */
+/** How many untraced test files an answer names: a repository's can be hundreds (the editor's, 185 unit tests and specs),
+ *  more than an agent's tool answer holds; the rest are counted (`untracedLeftOut`). */
 const UNTRACED_LISTED = 50;
 
 /** A run's output kept, at most (its end): enough to see why a file failed to load. */
@@ -179,6 +181,25 @@ function scopeOf(capability: string, resource: string): string {
 	return `${capability}:${resource === "" ? "*" : resource}`;
 }
 
+/** What kind of test a file is: where it runs. */
+export type Kind = "unit" | "UI spec" | "browser suite" | "not a test";
+
+/** What a file's imports say it is: its text may mention another kind (a test's own data can). */
+export function kindOf(text: string): Kind {
+	const importing = text.split("\n").filter((line) => line.startsWith("import "));
+	const imports = (what: string): boolean => importing.some((line) => line.includes(what));
+
+	if (imports("architecture-harness")) {
+		return "browser suite";
+	}
+
+	if (imports("@playwright/test")) {
+		return "UI spec";
+	}
+
+	return imports("node:test") || imports("vitest") ? "unit" : "not a test";
+}
+
 /** A test a change reaches. */
 interface Affected {
 	"id": string;
@@ -274,7 +295,27 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return reach;
 	};
 
-	const affected = async (paths?: string[]): Promise<{ "tests": Affected[]; "changed": string[]; "why": { "path": string; "why": Why; "tests": number }[]; "untraced": string[]; "untracedLeftOut"?: number }> => {
+	/** Each test-named file's kind (kindOf), read once, and again once it's changed. */
+	const kindsKnown = new Map<string, Kind>();
+	const kindOfFile = async (path: string): Promise<Kind> => {
+		let kind = kindsKnown.get(path);
+
+		if (kind === undefined) {
+			kind = kindOf(await read(path) ?? "");
+			kindsKnown.set(path, kind);
+		}
+
+		return kind;
+	};
+	const codeWatcher = vscode.workspace.createFileSystemWatcher("**/*.{js,mjs,cjs,ts,mts,cts}");
+
+	for (const event of [codeWatcher.onDidChange, codeWatcher.onDidCreate, codeWatcher.onDidDelete]) {
+		event((uri) => {
+			kindsKnown.delete(vscode.workspace.asRelativePath(uri, false));
+		});
+	}
+
+	const affected = async (paths?: string[]): Promise<{ "tests": Affected[]; "changed": string[]; "why": { "path": string; "why": Why; "tests": number }[]; "untraced": string[]; "untracedLeftOut"?: number; "outside": number }> => {
 		const changed = paths ?? (await git.status({ "whole": true })).files.filter((change) => change.status !== "D").map((change) => change.path);
 		// (each changed code file's lines against the last commit; one git hasn't, or named and not changed, is all of it)
 		const changes = await Promise.all(changed.map(async (path): Promise<Change> => {
@@ -300,15 +341,19 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		const traced = new Set(Object.keys(reach).map((id) => id.split(" › ")[0]));
 		const testFiles = (await vscode.workspace.findFiles("**/*.{js,mjs,cjs,ts,mts,cts}", "**/{node_modules,.*}/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isTestFile(path));
-
-		const untraced = testFiles.filter((path) => !traced.has(path)).sort((left, right) => left.localeCompare(right));
+		// (of those with no reach, what running here would trace — a unit test, a spec — and the browser suites, run from
+		// outside, whose reach isn't known here; a test folder's helpers and fixtures aren't tests)
+		const kinds = await Promise.all(testFiles.filter((path) => !traced.has(path)).map(async (path): Promise<[string, Kind]> => [path, await kindOfFile(path)]));
+		const untraced = kinds.filter(([, kind]) => kind === "unit" || kind === "UI spec").map(([path]) => path).sort((left, right) => left.localeCompare(right));
+		const outside = kinds.filter(([, kind]) => kind === "browser suite").length;
 
 		return {
 			"tests": tests.sort((left, right) => Number(right.stale) - Number(left.stale) || left.id.localeCompare(right.id)),
 			"changed": changed,
 			"why": selected.why,
 			"untraced": untraced.slice(0, UNTRACED_LISTED),
-			...untraced.length > UNTRACED_LISTED ? { "untracedLeftOut": untraced.length - UNTRACED_LISTED } : {}
+			...untraced.length > UNTRACED_LISTED ? { "untracedLeftOut": untraced.length - UNTRACED_LISTED } : {},
+			"outside": outside
 		};
 	};
 

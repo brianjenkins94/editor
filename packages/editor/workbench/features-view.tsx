@@ -15,7 +15,7 @@ import type { Logger } from "@brianjenkins94/util/logger";
 import type { LedgerEntry } from "@brianjenkins94/util/silo/ledger";
 import type { JSX } from "preact";
 import type * as vscodeApi from "vscode";
-import type { RunRecord, Slower, Why } from "./test-runs";
+import type { Kind, RunRecord, Slower, Why } from "./test-runs";
 import { registerCustomView, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
@@ -23,7 +23,7 @@ import { parseLedger } from "@brianjenkins94/util/silo/ledger";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { featuresViewStyles } from "theme/styles/features-view";
-import { slowerOf } from "./test-runs";
+import { kindOf, slowerOf } from "./test-runs";
 import { isTestFile } from "./terminal/commands/node/node";
 import "theme/components/badge";
 import "theme/components/button";
@@ -33,8 +33,6 @@ import "theme/components/spinner";
 
 const ROOT = "/workspace";
 
-/** What kind of test a file is: where it runs. */
-type Kind = "unit" | "UI spec" | "browser suite" | "not a test";
 
 /** What a run answers (test-runs.ts): a question, what it's still doing, or each file's tests. */
 interface Answer { "run"?: string; "running"?: string; "ask"?: { "message": string; "key": string } }
@@ -62,22 +60,6 @@ const KIND_TITLE: Record<Kind, string> = {
 	"browser suite": "Started from outside the editor, by a real browser: CI's, or node --test here.",
 	"not a test": "A helper or fixture the ledger names among its tests."
 };
-
-/** What a file's imports say it is: its text may mention another kind (a test's own data can). */
-function kindOf(text: string): Kind {
-	const importing = text.split("\n").filter((line) => line.startsWith("import "));
-	const imports = (what: string): boolean => importing.some((line) => line.includes(what));
-
-	if (imports("architecture-harness")) {
-		return "browser suite";
-	}
-
-	if (imports("@playwright/test")) {
-		return "UI spec";
-	}
-
-	return imports("node:test") || imports("vitest") ? "unit" : "not a test";
-}
 
 const median = (values: number[]): number | undefined => values.toSorted((one, other) => one - other)[Math.floor(values.length / 2)];
 

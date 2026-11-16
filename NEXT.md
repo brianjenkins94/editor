@@ -526,7 +526,9 @@ How it's kept:
      not its file (those changed since the last commit, either side of the change: `selectionOf`), and says for each changed
      file why it selected what it did: a test, lines run, lines not run, not run, config or not code. The table names what's
      changed that no test here checks, and what every test runs under, above its rows; runs_affected's `why`. A save that
-     fixes a file (the `!` ESLint drops) changes more lines than the edit, and selects by them, rightly. Measured, 386 passing tests of 64 files in the
+     fixes a file (the `!` ESLint drops) changes more lines than the edit, and selects by them, rightly. What has no reach
+     yet (`untraced`) is the unit tests and specs a run here would trace, 180 here; the 12 browser suites are counted
+     apart (`outside`), and the 749 helpers and fixtures in test folders aren't tests. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test
