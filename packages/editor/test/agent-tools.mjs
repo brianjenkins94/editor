@@ -3,7 +3,8 @@
  * (app/tools/; page-tools.test.mjs holds the tools to them) answered by the workbench — the workspace's files read,
  * written, edited, replaced across files, found, searched and deleted (workspace-tools.ts); git's diff, log, show and
  * blame (git-history.ts); what a terminal printed (`terminal.state`); and the editor as data: the file in front, its
- * tabs, the Problems view and the notifications showing (editor-state.ts); which files BABLR parses, as `code_parses` asks
+ * tabs, the Problems view (ESLint's problems among them, each lint a span of ext:eslint's) and the notifications showing
+ * (editor-state.ts); which files BABLR parses, as `code_parses` asks
  * (`bablr.check`, workbench/bablr.ts), and asked again from what's kept. And the workspace searched as a person and an
  * extension search it — findFiles' globs, Quick Open, Find in Files (the component's workspace-search.ts).
  *
@@ -112,6 +113,20 @@ test("the editor as data: the file in front and its tabs, the Problems view, the
 	await session.eventually("the notification", async () => ((await ask("notifications.list")).some((each) => each.message === "a notification for the agent") ? true : undefined), 30_000);
 
 	await assert.rejects(ask("editor.trace", {}), /takes \{ component/u);
+});
+
+test("ESLint's problems as the agents' request has them, each by its rule and place, and each lint a span of ext:eslint's", async () => {
+	await ask("files.write", { "path": "lint/probe.ts", "content": "export function run(): void {\n\tdebugger;\n}\n" });
+	await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.window.showTextDocument(api.Uri.file("/workspace/lint/probe.ts"));
+	});
+
+	const found = await session.eventually("no-debugger on probe.ts", async () => (await ask("problems.list", { "file": "lint/probe.ts" })).problems.find((problem) => problem.source === "eslint" && problem.code === "no-debugger"), 120_000);
+
+	assert.deepEqual([found.line, found.column], [2, 2]);
+	assert.ok(session.printed().some((line) => line.startsWith("[ext:eslint]") && line.includes("editor.extensions.eslint.lint")), "each lint a span of ext:eslint's");
 });
 
 test("which files BABLR parses, as code_parses asks: each it can't and why, its lines, and asked again from what's kept", async () => {

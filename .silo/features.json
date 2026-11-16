@@ -644,7 +644,7 @@
       "packages/editor/extensions/eslint/"
     ],
     "tests": [
-      "packages/editor/test/eslint.mjs",
+      "packages/editor/test/agent-tools.mjs",
       "packages/editor/test/in-editor/eslint.spec.mjs",
       "packages/editor/test/performance.mjs"
     ]

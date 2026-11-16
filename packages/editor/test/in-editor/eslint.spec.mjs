@@ -1,7 +1,7 @@
 /**
  * ESLint in the editor (extensions/eslint), as a person has it: real ESLint on the file that's open, its problems in Problems,
- * fixes on save, a folder's own config, a config that won't load said on itself, and silence when it's turned off. Runs in
- * the editor: test/in-editor.mjs.
+ * fixes on save, a folder's own config, a config that won't load said on itself, and silence when it's turned off. What an
+ * agent reads of it, and its spans, have no UI: test/agent-tools.mjs. Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 

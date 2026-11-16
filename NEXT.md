@@ -549,7 +549,8 @@ How it's kept:
      answers a client (a module compiled, 503 once stopped, a port nobody served) is the test's own requests — Playwright's
      `request` (`page.request`, the fixture), made by the shell as a client of the origin, not the program's `fetch`, which
      the debugger's capability gate decides (tried, it threw "Cannot read properties of undefined (reading '0')"; the user
-     chose `request`, 2026-11-16). packages/playwright/src/request.ts, held to Playwright's own by request.test.mjs. 7 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
+     chose `request`, 2026-11-16). packages/playwright/src/request.ts, held to Playwright's own by request.test.mjs. eslint.mjs's
+     request and span, with no UI, are agent-tools.mjs's (test/eslint.mjs gone, as bablr.mjs). 6 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
      and the next full run. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
