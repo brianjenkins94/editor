@@ -5,12 +5,14 @@ import ts from "typescript";
 import { instrument } from "../../almostnode/frameworks/instrument.ts";
 
 /**
- * COVERAGE=1 (off by default; build.ts): the editor's own modules instrumented for statement coverage with almostnode's
- * instrument.ts, counted in each realm by a small runtime of their own (RUNTIME), for the harness to read per test:
- * what each test ran, for comparing with what the ledger declares (packages/silo/README.md, *Declared against observed*).
+ * COVERAGE=1 (`npm run dev`'s, else off; build.ts): the editor's own modules instrumented for statement coverage with
+ * almostnode's instrument.ts, counted in each realm by a small runtime of their own (RUNTIME): what each test ran — a UI
+ * spec's, run in the editor, read from its window's realms as the test ends (shell/preview-windows.tsx); an architecture
+ * test's, read by the harness from outside, for comparing with what the ledger declares (packages/silo/README.md,
+ * *Declared against observed*).
  *
- * A stopgap (the ledger's *What each test ran*, an experiment): recording reach from outside the editor until tests run in
- * it, in the browser, where what a test ran is its trace.
+ * The outside half is a stopgap (the ledger's *What each test ran*, an experiment): reach recorded from outside the editor
+ * until those tests run in it, in the browser, where what a test ran is its trace.
  *
  * Files are named as the ledger names them, from the repository's root, whether a package was reached by its folder or
  * through node_modules.

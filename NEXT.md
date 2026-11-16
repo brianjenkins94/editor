@@ -532,8 +532,10 @@ How it's kept:
      it drives too (2026-11-16; the user: everything that can run in the browser runs in the browser), with the dev server
      counting (COVERAGE=1): its window's realms, frames and workers, answer what they ran on a BroadcastChannel, each realm
      there since the page first went somewhere being the test's (the outer editor's and the service worker were there
-     before). features-view.spec reaches 257 files, 24,794 lines, where it reached its own two before. Not yet: the dev
-     server counting by default (it's slower), and the browser suites (`outside`) run in the editor. Measured, 386 passing tests of 64 files in the
+     before). features-view.spec reaches 257 files, 24,794 lines, where it reached its own two before. `npm run dev`
+     counts by default since (COVERAGE=0 doesn't): 9% slower to boot, 3% more memory, up to a third more script (the
+     extension host 14.9 → 20.1 MB); the harness's own servers and CI's don't, and the performance suite refuses a counting
+     one rather than hold it to the plain build's budgets. Not yet: the browser suites (`outside`) run in the editor. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test

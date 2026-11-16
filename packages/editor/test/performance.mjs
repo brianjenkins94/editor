@@ -44,6 +44,14 @@ before(async () => {
 	debugMcp = createDebugMcp({ "port": DEBUG_MCP_PORT });
 	await debugMcp.whenListening;
 	session = await startSession({ "boot": false, "debugMcp": "external", "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } });
+
+	// The budgets are the plain build's: a dev server already answering that counts (`npm run dev` does: build/coverage.ts)
+	// loads more script and boots slower, so it's said, not measured against them — unless counting is what's asked.
+	await session.page.waitForLoadState("load");
+
+	if (process.env.COVERAGE !== "1" && await session.page.evaluate(() => "__evidence" in globalThis)) {
+		throw new Error("the dev server this uses counts coverage (npm run dev does, COVERAGE=1): the budgets are the plain build's — stop it and this starts its own, or run it with COVERAGE=0 npm run dev");
+	}
 });
 
 after(async () => {
