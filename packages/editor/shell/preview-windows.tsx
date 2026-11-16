@@ -17,6 +17,8 @@
  * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): each
  * test's page has a window of its own while it runs, so tests can run at once: the one it opens by going somewhere, or else
  * the one you've used last that no other page has. A preview's frame is same-origin with the shell, so its DOM is right here.
+ * With the dev server counting (COVERAGE=1), what the editor in a test's window ran — every realm of it — goes back with
+ * the page as it's let go, the test's reach.
  */
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
@@ -24,6 +26,7 @@ import type { ShellFeature } from "./feature";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { appWindow } from "@brianjenkins94/app-window";
 import { serve } from "@brianjenkins94/hub";
+import { logger } from "@brianjenkins94/util/logger";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Gauge, Pause, Play, Redo2, RotateCcw } from "lucide";
 import { render } from "preact";
 import { useState } from "preact/hooks";
@@ -34,6 +37,52 @@ import { askInWindow, type PreviewAsk } from "./preview-ask";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { createPreviewProfiler, installPreviewProfiler, PROFILE_MS } from "./preview-profile";
 import "theme/components/button";
+
+const log = logger({ "source": "shell" });
+
+/** Where the coverage build's realms answer (build/coverage.ts, COVERAGE=1): every instrumented realm on the origin,
+ *  frames and workers alike. */
+const COVERAGE_CHANNEL = "editor.coverage";
+
+/** How long a question there waits for answers: a realm busy for longer (a worker blocked) isn't heard. */
+const ASK_MS = 1000;
+
+/** Each instrumented realm's answer to `ask` on COVERAGE_CHANNEL, within ASK_MS: its id, and what it ran when asked. */
+async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": string; "ran"?: Record<string, [number, number][]> }[]> {
+	const channel = new BroadcastChannel(COVERAGE_CHANNEL);
+	const nonce = crypto.randomUUID();
+	const answers: { "realm": string; "ran"?: Record<string, [number, number][]> }[] = [];
+
+	channel.addEventListener("message", ({ data }: MessageEvent<{ "answer"?: string; "realm": string; "ran"?: Record<string, [number, number][]> }>) => {
+		if (data.answer === nonce) {
+			answers.push(data);
+		}
+	});
+	channel.postMessage({ ...ask, "nonce": nonce });
+	await new Promise((resolve) => {
+		setTimeout(resolve, ASK_MS);
+	});
+	channel.close();
+
+	return answers;
+}
+
+/** Lines `[first, last]` as few ranges as they make. */
+function rangesOf(lines: [number, number][]): [number, number][] {
+	const ranges: [number, number][] = [];
+
+	for (const [from, to] of lines.toSorted(([one], [other]) => one - other)) {
+		const last = ranges.at(-1);
+
+		if (last !== undefined && from <= last[1] + 1) {
+			last[1] = Math.max(last[1], to);
+		} else {
+			ranges.push([from, to]);
+		}
+	}
+
+	return ranges;
+}
 
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
 const CASCADE = 32;
@@ -369,6 +418,34 @@ function install(hub: Hub): void {
 	const claimed = new Map<string, HTMLElement>();
 	const openedForPage = new Set<HTMLElement>();
 
+	// With the dev server counting (COVERAGE=1, build/coverage.ts): what a page's window ran is the test's. The realms there
+	// were as the page first went somewhere — the editor around it, the service worker — aren't its; every realm since is
+	// (its frames and workers), and started counting from nothing. Asked before it goes somewhere again (which replaces
+	// them) and as it's let go.
+	const counting = "__evidence" in globalThis;
+	const realmsBefore = new Map<string, Set<string>>();
+	const ranSoFar = new Map<string, Map<string, [number, number][]>>();
+	const collect = async (page: string): Promise<void> => log.span("editor.shell.preview-windows.reach", {}, async (span) => {
+		const before = realmsBefore.get(page);
+
+		if (before === undefined) {
+			return;
+		}
+
+		const realms = (await askRealms({ "ask": "realms" })).map(({ realm }) => realm).filter((realm) => !before.has(realm));
+		const answers = realms.length === 0 ? [] : await askRealms({ "ask": "ran", "realms": realms });
+		const ran = ranSoFar.get(page) ?? new Map<string, [number, number][]>();
+
+		for (const answer of answers) {
+			for (const [file, lines] of Object.entries(answer.ran ?? {})) {
+				ran.set(file, rangesOf([...ran.get(file) ?? [], ...lines]));
+			}
+		}
+
+		ranSoFar.set(page, ran);
+		span.end({ "count": realms.length, "answered": answers.length, "files": ran.size });
+	});
+
 	/** `page`'s window: the one it has; else going somewhere opens it one of its own, and anything else takes the one you've
 	 *  used last that no other page has. */
 	const windowOf = (page: string, opening: boolean): HTMLElement | undefined => {
@@ -403,12 +480,18 @@ function install(hub: Hub): void {
 		const { call, "args": given = [], "page": asking = "" } = args as PlaywrightCall;
 
 		if (call === "release") {
+			await collect(asking);
+
+			const reach = ranSoFar.get(asking);
 			const element = claimed.get(asking);
+
+			realmsBefore.delete(asking);
+			ranSoFar.delete(asking);
 
 			claimed.delete(asking);
 
-			// (nor is one closed while its counts are to be read, COVERAGE=1's: the harness closes it, having read them)
-			if (element !== undefined && openedForPage.delete(element) && given[0] !== true && !("__evidence" in globalThis)) {
+			// (nor is one closed while its counts are to be read from outside, COVERAGE=1's harness's: it closes it, having read them)
+			if (element !== undefined && openedForPage.delete(element) && given[0] !== true && !("__countedFromOutside" in globalThis)) {
 				undock.get(element)?.();
 				element.remove();
 				used.splice(used.indexOf(element) >>> 0, 1);
@@ -416,7 +499,15 @@ function install(hub: Hub): void {
 				retarget();
 			}
 
-			return undefined;
+			return reach === undefined ? undefined : { "reach": Object.fromEntries(reach) };
+		}
+
+		if (counting && call === "goto") {
+			if (realmsBefore.has(asking)) {
+				await collect(asking);
+			} else {
+				realmsBefore.set(asking, new Set((await askRealms({ "ask": "realms" })).map(({ realm }) => realm)));
+			}
 		}
 
 		const page = windowOf(asking, call === "goto")?.querySelector("iframe")?.contentWindow;

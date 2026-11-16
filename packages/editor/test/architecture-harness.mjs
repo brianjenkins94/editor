@@ -258,9 +258,14 @@ export async function startSession(options = {}) {
 		await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { "rate": Number(process.env.ARCH_CPU_THROTTLE) });
 	}
 
-	// COVERAGE=1: the session's realms, where each test's coverage is read (build/coverage.ts instruments them).
+	// COVERAGE=1: the session's realms, where each test's coverage is read (build/coverage.ts instruments them) — a test's
+	// preview windows kept open as it ends for theirs to be read (shell/preview-windows.tsx: the editor itself, counting,
+	// takes a window's reach as the test lets it go, and closes it).
 	if (process.env.COVERAGE === "1") {
 		(globalThis.__coverageSessions ??= new Set()).add({ "page": page, "context": context });
+		await page.addInitScript(() => {
+			globalThis.__countedFromOutside = true;
+		});
 	}
 	// What went wrong in the page, kept to say why when the editor doesn't boot (and printed as it happens in CI).
 	const pageErrors = [];

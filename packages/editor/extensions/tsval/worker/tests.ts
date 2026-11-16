@@ -1,6 +1,7 @@
 /**
  * A test file's tests as node-test.js tells them (`__editorTest`): each one's outcome, what it threw, a failed
- * assertion's sides, its time, and the statements it ran.
+ * assertion's sides, its time, and the statements it ran — its program's, and those of the editor its page drove, when
+ * that's counted (state's `windowReach`).
  */
 import type { CoverageEvent, TestReport } from "@brianjenkins94/editor-api";
 import type ts from "typescript";
@@ -64,9 +65,12 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 				: {
 						"statements": statements
 					},
-			"files": started === undefined
-				? []
-				: ranSince(started)
+			"files": [
+				...started === undefined
+					? []
+					: ranSince(started),
+				...state.windowReach.splice(0)
+			]
 		});
 	} else if (kind === "done") {
 		state.testsFailed = Number(titles ?? 0);

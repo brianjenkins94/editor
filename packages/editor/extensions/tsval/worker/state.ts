@@ -205,6 +205,10 @@ export interface State {
 	"pins": Record<string, string>;
 	/** The tests a test file's run ran, as each ended (node-test.js tells each start and end). */
 	"testsRan": TestReport[];
+	/** What the window a test's page drove ran, told as the page let it go (the shell's, `playwright.run`'s `release`, with
+	 *  the dev server instrumented): the code of the editor in it, in every realm of it. The test ending next takes it as
+	 *  its own (its page is let go by an `after` of its, just before it ends). */
+	"windowReach": TestReport["files"];
 	/** How many tests failed, as node-test.js tells at the end: a run with one fails, as `node --test` does. */
 	"testsFailed": number;
 	/** Whether node-test.js has told that the file's tests are all done: past it, only what Node counts as keeping a process
@@ -256,6 +260,7 @@ export const state: State = {
 	"baseline": undefined,
 	"pins": {},
 	"testsRan": [],
+	"windowReach": [],
 	"testsFailed": 0,
 	"testsDone": false
 };

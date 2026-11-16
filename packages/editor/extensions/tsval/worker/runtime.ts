@@ -190,12 +190,17 @@ export const editorPlaywright = {
 
 		return page;
 	},
-	/** A test's page, done with: its window let go, and closed if the page opened it, unless it's `kept` to look at. */
+	/** A test's page, done with: its window let go, and closed if the page opened it, unless it's `kept` to look at. What
+	 *  the editor in it ran, when the dev server counts it, is the test's (state's `windowReach`). */
 	"release": async (page: Page, kept: boolean) => {
 		const id = pageIds.get(page);
 
 		if (id !== undefined) {
-			await playwrightCall(id, "release", kept);
+			const { reach } = (await playwrightCall(id, "release", kept) ?? {}) as { "reach"?: Record<string, [number, number][]> };
+
+			for (const [file, lines] of Object.entries(reach ?? {})) {
+				state.windowReach.push({ "file": file, "statements": lines.map(([from, to]): [[number, number], [number, number]] => [[from, 0], [to, 0]]) });
+			}
 		}
 	},
 	"expect": playwrightExpect

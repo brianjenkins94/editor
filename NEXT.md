@@ -528,7 +528,12 @@ How it's kept:
      changed that no test here checks, and what every test runs under, above its rows; runs_affected's `why`. A save that
      fixes a file (the `!` ESLint drops) changes more lines than the edit, and selects by them, rightly. What has no reach
      yet (`untraced`) is the unit tests and specs a run here would trace, 180 here; the 12 browser suites are counted
-     apart (`outside`), and the 749 helpers and fixtures in test folders aren't tests. Measured, 386 passing tests of 64 files in the
+     apart (`outside`), and the 749 helpers and fixtures in test folders aren't tests. And a UI spec's reach is the editor
+     it drives too (2026-11-16; the user: everything that can run in the browser runs in the browser), with the dev server
+     counting (COVERAGE=1): its window's realms, frames and workers, answer what they ran on a BroadcastChannel, each realm
+     there since the page first went somewhere being the test's (the outer editor's and the service worker were there
+     before). features-view.spec reaches 257 files, 24,794 lines, where it reached its own two before. Not yet: the dev
+     server counting by default (it's slower), and the browser suites (`outside`) run in the editor. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test
