@@ -684,6 +684,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   its keys, Ctrl+Shift+`: with a file open that brought none). If it comes back, it wasn't the focus.
 - **preview-session.spec saw no debug session** (local, 2026-11-10, once in three with the CPU four times slower and the preview
   specs two at a time): the dev server served its page, and the toolbar, the session list and the status bar had nothing.
+  Again on CI 2026-11-16 (cde152ee's specs, 1 of 40: no Stop, `{"toolbar":[],"sessions":[],"status":[]}`), passing in five
+  full runs here that day.
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems.
