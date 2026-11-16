@@ -11,6 +11,10 @@ import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { virtualUrl } from "../shared/virtual-path";
 import { createRunRegistry } from "./runs";
 
+/** How long a run waits for the debugger to listen (a run typed as the editor starts): past it, the debugger couldn't
+ *  take it. The extension host's start can be slow on a first load, so a minute. */
+const LAUNCH_WAIT_MS = 60_000;
+
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
 export interface NodeRunHooks {
@@ -126,7 +130,21 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			hooks.signal.addEventListener("abort", onAbort, { "once": true });
 		}
 
-		hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args }, ...hooks.noDebug === true ? { "noDebug": true } : {} });
+		// Once the debugger listens: the bridge subscribes as the editor's start-up finishes, and a launch published before
+		// that went to no one — the run waited for ever, saying nothing. Nobody there in time, it couldn't start: said so.
+		void hub.whenInterested("debug.launch", LAUNCH_WAIT_MS).then((listening) => {
+			if (settled) {
+				return;
+			}
+
+			if (!listening) {
+				finish(false, 0);
+
+				return;
+			}
+
+			hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args }, ...hooks.noDebug === true ? { "noDebug": true } : {} });
+		});
 	});
 
 	const runs = createRunRegistry(hub);

@@ -51,10 +51,6 @@ How it's kept:
      them (RuntimeFs `entries`; almostnode's fs asks a VFS's `direntsSync` before statting): 10 stats, and the check
      19 s, of which 3 s is the 1,124 listings and the rest mostly TypeScript. (A `@latest` tarball isn't fetched again
      while its version is the same, util's 0.1.0, as npm without `npm install <url>`: delete it to refresh.)
-   - **A run typed during a boot can hang, saying nothing** (2026-11-16): `node packages/silo/src/cli.ts check`
-     typed ~10 s into a fresh editor's load was listed by `runs_list` as running for over a minute with no debug
-     session — the debug worker logged no launch, nothing said why; Ctrl+C, then the same again, ran at once. Likely
-     the terminal's run asked tsval before its extension was ready, and the ask was lost rather than waited for.
    - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —
      go-to-definition reaches theme's card.d.ts and from it Web Awesome's in the root node_modules, and the file has no
      2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's
