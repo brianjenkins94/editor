@@ -654,6 +654,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 }
 
+/** How long a finished worker's link into the editor stays open after it's ended: for what it sent there last to arrive. */
+const LINK_GRACE_MS = 1000;
+
 /** What a rejection says: an Error's message, anything else stringified as it is. */
 function messageOf(error: unknown): string {
 	if (error instanceof Error) {
@@ -706,7 +709,11 @@ export function startWorker(runtime: WorkspaceRuntime, session: string | undefin
 		},
 		"close": () => {
 			worker.terminate();
-			link.dispose();
+			// (its link a moment after: what it sent there just before its end — its run's span closing — is still on its way,
+			// on a channel of its own that `terminated` can arrive ahead of; closed now, it was lost, on CI's slower runners)
+			setTimeout(() => {
+				link.dispose();
+			}, LINK_GRACE_MS);
 		}
 	};
 }
