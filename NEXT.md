@@ -420,8 +420,8 @@ How it's kept:
        **A terminal too** (in-editor/terminal.spec.mjs): keys go to its helper textarea, punctuation arriving once key codes
        were a real keyboard's (with the old ones `.`, `-` and `&&` were lost), and a test reads it as DOM rows, by seeding
        `terminal.integrated.gpuAcceleration` off (READABLE_TERMINAL), as it draws on a canvas otherwise, so it reads a renderer
-       a default setup doesn't draw with. `ControlOrMeta+a` selects in Monaco now; why it didn't before wasn't found. test/bablr.mjs stays for the
-       parses kept and the agents' request, which have no UI to read. And the suites' own needs: they ask over the hub
+       a default setup doesn't draw with. `ControlOrMeta+a` selects in Monaco now; why it didn't before wasn't found. The parses kept and the agents'
+       request, which have no UI to read, are agent-tools.mjs's now (test/bablr.mjs gone). And the suites' own needs: they ask over the hub
        (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
        page's console and errors (the tap) follow.
        *Second suite moved:* in-editor/eslint.spec.mjs, each case a seeded instance and what's on screen: the preset, a
@@ -541,7 +541,8 @@ How it's kept:
      clicks what's under the pointer, as a mouse does (a checkbox's drawn box toggles its input), and the review panel's
      Discard shows on the open or focused row, not the hovered one alone. instances.mjs is instances.spec.mjs: a change
      kept, and a reset taking it back, where IndexedDB's database names were read (an instance's seed is where it starts
-     each time, not what it keeps). 9 left (`outside`), what has no UI in them the open question. Measured, 386 passing tests of 64 files in the
+     each time, not what it keeps). bablr.mjs is bablr.spec.mjs and, for its request, agent-tools.mjs. 8 left
+     (`outside`), what has no UI in them the open question. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test

@@ -1,6 +1,7 @@
 /**
- * Which files BABLR parses (workbench/bablr.ts), as a person finds out: the command, what it says, and the warning in
- * Problems, gone once the file's fixed. Runs in the editor: test/in-editor.mjs.
+ * Which files BABLR parses (workbench/bablr.ts), as a person finds out: the command, what it says (of the files and their
+ * lines), and the warning in Problems, gone once the file's fixed. What an agent asks of it, and its answers kept, have no
+ * UI: test/agent-tools.mjs. Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 
@@ -19,7 +20,7 @@ test("a folder checked says what BABLR parses, with a file it can't a warning in
 	// (the first waits out BABLR's worker loading)
 	const toast = workbench.locator(".notification-toast");
 
-	await expect(toast.getByText(/BABLR parses 1 of 2 files in parses/u)).toBeVisible({ "timeout": 300_000 });
+	await expect(toast.getByText("BABLR parses 1 of 2 files in parses — 50% of their 4 lines.")).toBeVisible({ "timeout": 300_000 });
 	await toast.getByRole("button", { "name": "Show Problems" }).click();
 	await expect(workbench.locator(".markers-panel").getByText(/BABLR can't parse this file/u)).toBeVisible({ "timeout": 30_000 });
 	await expect(workbench.locator(".markers-panel").getByText("broken.ts")).toBeVisible();

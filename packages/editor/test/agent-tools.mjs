@@ -3,7 +3,8 @@
  * (app/tools/; page-tools.test.mjs holds the tools to them) answered by the workbench — the workspace's files read,
  * written, edited, replaced across files, found, searched and deleted (workspace-tools.ts); git's diff, log, show and
  * blame (git-history.ts); what a terminal printed (`terminal.state`); and the editor as data: the file in front, its
- * tabs, the Problems view and the notifications showing (editor-state.ts). And the workspace searched as a person and an
+ * tabs, the Problems view and the notifications showing (editor-state.ts); which files BABLR parses, as `code_parses` asks
+ * (`bablr.check`, workbench/bablr.ts), and asked again from what's kept. And the workspace searched as a person and an
  * extension search it — findFiles' globs, Quick Open, Find in Files (the component's workspace-search.ts).
  *
  *   node --test --test-global-setup=test/architecture-harness.mjs test/agent-tools.mjs
@@ -111,6 +112,19 @@ test("the editor as data: the file in front and its tabs, the Problems view, the
 	await session.eventually("the notification", async () => ((await ask("notifications.list")).some((each) => each.message === "a notification for the agent") ? true : undefined), 30_000);
 
 	await assert.rejects(ask("editor.trace", {}), /takes \{ component/u);
+});
+
+test("which files BABLR parses, as code_parses asks: each it can't and why, its lines, and asked again from what's kept", async () => {
+	await ask("files.write", { "path": "parses/fine.ts", "content": "export const fine = 1;\n" });
+	await ask("files.write", { "path": "parses/broken.ts", "content": "export const = ;\n" });
+
+	// (the first waits out BABLR's worker loading)
+	const checked = await session.request("bablr.check", { "path": "parses" }, 300_000);
+
+	assert.deepEqual([checked.files, checked.parsed, checked.lines, checked.parsedLines], [2, 1, 4, 2]);
+	assert.deepEqual(checked.unparsable.map(({ file }) => file), ["parses/broken.ts"]);
+	assert.equal((await session.request("bablr.check", { "path": "parses" }, 120_000)).cached, 2, "both answered from what's kept");
+	await assert.rejects(ask("bablr.check", {}), /takes \{ path/u);
 });
 
 test("Trace File Calls: each call at a boundary, for a while — its operation, caller, path and time — as the trace's records", async () => {

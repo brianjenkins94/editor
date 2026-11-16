@@ -21,7 +21,9 @@ async function openRef(page, workbench, ref, how = "As it is") {
 		await input.fill(text);
 
 		if (!await expect(input).toBeFocused({ "timeout": 1000 }).then(() => true, () => false)) {
-			stopped.push(`${what}: not focused`);
+			const focused = await workbench.locator(":focus").first().getAttribute("class").catch(() => "nothing");
+
+			stopped.push(`${what}: not focused (${String(await input.count())} inputs; the focus on ${JSON.stringify(focused)}, ${await page.locator(":focus").first().getAttribute("class").catch(() => "nothing")} outside)`);
 
 			return false;
 		}

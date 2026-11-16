@@ -2683,7 +2683,7 @@
       "packages/editor/workers/bablr-worker.ts"
     ],
     "tests": [
-      "packages/editor/test/bablr.mjs",
+      "packages/editor/test/agent-tools.mjs",
       "packages/editor/test/in-editor/bablr.spec.mjs"
     ]
   },
