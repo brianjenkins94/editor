@@ -539,8 +539,9 @@ How it's kept:
      the specs of the features it tested: git-views.mjs is four (review-panel, change-problems, commit-beside,
      source-control.spec.mjs), what it asked of hub requests read off the screen instead; on the way, in-editor Playwright
      clicks what's under the pointer, as a mouse does (a checkbox's drawn box toggles its input), and the review panel's
-     Discard shows on the open or focused row, not the hovered one alone. 10 left (`outside`), what has no UI in them
-     the open question. Measured, 386 passing tests of 64 files in the
+     Discard shows on the open or focused row, not the hovered one alone. instances.mjs is instances.spec.mjs: a change
+     kept, and a reset taking it back, where IndexedDB's database names were read (an instance's seed is where it starts
+     each time, not what it keeps). 9 left (`outside`), what has no UI in them the open question. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test

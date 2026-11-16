@@ -734,7 +734,7 @@
     ],
     "tests": [
       "packages/editor/test/instance.test.mjs",
-      "packages/editor/test/instances.mjs"
+      "packages/editor/test/in-editor/instances.spec.mjs"
     ]
   },
   "Email, inbox and the Mail page": {
