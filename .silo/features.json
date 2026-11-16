@@ -1596,7 +1596,7 @@
     "tests": [
       "packages/editor/test/in-editor.mjs",
       "packages/editor/test/in-editor/editor.mjs",
-      "packages/editor/test/playwright-in-editor.mjs",
+      "packages/editor/test/in-editor/playwright-in-editor.spec.mjs",
       "packages/playwright/test/engine.test.mjs",
       "packages/playwright/test/request.test.mjs"
     ]

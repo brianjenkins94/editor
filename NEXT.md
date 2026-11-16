@@ -555,7 +555,12 @@ How it's kept:
      editor's Playwright's now), the starter workspace, TypeScript formatted on save by ESLint and JSON not, an extension by
      its address saying hello, a CDN package file as a client gets it (`request`). It keeps the three with no UI: the theme
      following the system's (a frame's `prefers-color-scheme` is the browser's, not its element's `color-scheme`: tried in
-     Chromium), the architecture plane's reports, and signing in with the API routed. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
+     Chromium), the architecture plane's reports, and signing in with the API routed.
+     playwright-in-editor.mjs is playwright-in-editor.spec.mjs: an app served from an editor's terminal, its spec run from
+     Features and tests there — a test passing and one failing, each said, the passing one's click in the window that's
+     open — then, the server stopped, a spec that needs a window failing rather than hanging. Its "a whole editor in a window
+     of its own" is what every spec here is. The workbench, beside a preview window, is narrow: the table's Run column was
+     past its edge until the panel and side bar were hidden. 5 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
      and the next full run. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
