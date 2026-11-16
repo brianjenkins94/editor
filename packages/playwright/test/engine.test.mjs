@@ -368,6 +368,7 @@ test("a click on a checkbox drawn over its input, in a shadow root's label: what
 				customElements.define("x-check", class extends HTMLElement {
 					constructor() {
 						super();
+						// eslint-disable-next-line webawesome/no-css-in-strings -- a fixture's geometry: the box drawn over the input it toggles
 						this.attachShadow({ "mode": "open" }).innerHTML = "<label style='position:relative;display:inline-block;width:40px;height:40px'><input type=checkbox style='position:absolute;inset:0;margin:0;width:40px;height:40px'><svg width=40 height=40 style='position:absolute;inset:0'><rect width=40 height=40 /></svg></label>";
 					}
 				});
