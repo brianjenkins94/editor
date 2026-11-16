@@ -8,9 +8,11 @@
  * hooks and subtests included — kept as a trace of the test on each file it ran (RUNNING.md, *Tests*).
  *
  * What's here: `test` (`it`), `describe` (`suite`), their `.skip` and `.todo` (and `.only`, run as any other), the
- * `skip` and `todo` options, `before`, `after`, `beforeEach`, `afterEach`, and a test's context: `name`, `diagnostic`,
- * `skip`, `todo`, `test`, `after`, `passed` and `assert` (node:assert). Callback tests (`(t, done)`) too. Not here: `mock`,
- * snapshots, `only` filtering, timeouts and concurrency — a test that never settles ends with the run.
+ * `skip`, `todo` and `timeout` options, `before`, `after`, `beforeEach`, `afterEach`, and a test's context: `name`,
+ * `diagnostic`, `skip`, `todo`, `test`, `after`, `passed` and `assert` (node:assert). Callback tests (`(t, done)`) too. Not
+ * here: `mock`, snapshots, `only` filtering and concurrency — a test that never settles, with no `timeout`, ends with the
+ * run. A `timeout` is the run's clock's, as the program's own time is: in the debugger, where the code runs many times
+ * slower than in Node, a limit written for Node holds for what the test waits on, not for how long its code takes.
  */
 "use strict";
 
@@ -158,6 +160,26 @@ function assertionOf(error) {
 	return JSON.stringify({ "actual": shown(error.actual), "expected": shown(error.expected), ...typeof error.operator === "string" ? { "operator": error.operator } : {} });
 }
 
+/** `work`, or node's failure once `timeout` ms pass without it settling (a test's `timeout` option); `work` as it is
+ *  with none. */
+async function within(work, timeout) {
+	if (typeof timeout !== "number" || !Number.isFinite(timeout)) {
+		return work;
+	}
+
+	let timer;
+
+	try {
+		return await Promise.race([work, new Promise((_resolve, reject) => {
+			timer = setTimeout(() => {
+				reject(Object.assign(new Error(`test timed out after ${timeout}ms`), { "code": "ERR_TEST_FAILURE", "failureType": "testTimeoutFailure" }));
+			}, timeout);
+		})]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 async function runTest(node, titles, suite, depth) {
 	const skip = node.options.skip;
 	const todo = node.options.todo;
@@ -200,20 +222,23 @@ async function runTest(node, titles, suite, depth) {
 	tell("start", JSON.stringify(titles));
 
 	try {
-		for (const each of suites) {
-			for (const fn of each.hooks.beforeEach) {
-				await call(fn, context);
+		// (its hooks, itself and its subtests, within its `timeout`, as node times them)
+		await within((async () => {
+			for (const each of suites) {
+				for (const fn of each.hooks.beforeEach) {
+					await call(fn, context);
+				}
 			}
-		}
 
-		await call(node.fn, context);
-		await Promise.all(subtests);
+			await call(node.fn, context);
+			await Promise.all(subtests);
 
-		for (const each of suites.toReversed()) {
-			for (const fn of each.hooks.afterEach) {
-				await call(fn, context);
+			for (const each of suites.toReversed()) {
+				for (const fn of each.hooks.afterEach) {
+					await call(fn, context);
+				}
 			}
-		}
+		})(), node.options.timeout);
 	} catch (thrown) {
 		error = thrown;
 	}

@@ -30,6 +30,12 @@
           "default": 5,
           "minimum": 0,
           "description": "How often, in seconds, the file you're editing runs again while it differs from its last run (0: only when you save)."
+        },
+        "run.tests.slowerBy": {
+          "type": "number",
+          "default": 25,
+          "minimum": 0,
+          "description": "How much slower than it typically runs, as a percentage, a passing test can be before it's said to be slower: in the Features and tests table, and in a run's results. Measured by the statements it ran, where they're counted (what ran beside it doesn't change them), else by its time against its earlier passing runs. A test's own limit, in time, is node:test's `timeout` option."
         }
       }
     },

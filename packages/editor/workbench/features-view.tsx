@@ -3,7 +3,8 @@
  * Features and tests (packages/silo/README.md, *Tests by feature, in your face*), a table in the panel: each feature of the
  * ledger, with its test files under it, each opening to its tests. A file's row says what kind of test it is, whether it can't
  * run beside the others and why, the effects its last run had, how much code it reaches and how much of that only it does, when
- * it last passed and failed, how long it typically takes, whether code it ran has changed since, and a button that runs it. Tests
+ * it last passed and failed, how long it typically takes (and which of its tests last ran slower than they typically do, by more
+ * than `run.tests.slowerBy`), whether code it ran has changed since, and a button that runs it. Tests
  * are meant to run at once, so only one that can't says anything in that column.
  *
  * What it says comes from the ledger and the runs kept here (test-runs.ts, `tests.history`); a file not run here says so.
@@ -13,7 +14,7 @@ import type { Logger } from "@brianjenkins94/util/logger";
 import type { LedgerEntry } from "@brianjenkins94/util/silo/ledger";
 import type { JSX } from "preact";
 import type * as vscodeApi from "vscode";
-import type { RunRecord } from "./test-runs";
+import type { RunRecord, Slower } from "./test-runs";
 import { registerCustomView, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
@@ -21,6 +22,7 @@ import { parseLedger } from "@brianjenkins94/util/silo/ledger";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { featuresViewStyles } from "theme/styles/features-view";
+import { slowerOf } from "./test-runs";
 import { isTestFile } from "./terminal/commands/node/node";
 import "theme/components/badge";
 import "theme/components/button";
@@ -46,6 +48,8 @@ interface Model {
 	"reach": Map<string, { "lines": number; "only": number }>;
 	/** The test files whose code has changed since they last ran. */
 	"touched": Set<string>;
+	/** How much slower than typical a passing test may run before it's said to be (setting `run.tests.slowerBy`). */
+	"slowerBy": number;
 }
 
 const KIND_TITLE: Record<Kind, string> = {
@@ -154,6 +158,13 @@ function Effects({ run, before }: { "run": RunRecord | undefined; "before": RunR
 	);
 }
 
+/** How a test ran slower than it typically does, as a badge, saying by what. */
+function SlowerBadge({ slower }: { "slower": Slower }): JSX.Element {
+	const typical = slower.measure === "statements" ? `${String(slower.typical)} statements` : lasted(slower.typical);
+
+	return <wa-badge variant="warning" appearance="outlined" title={`Its last run took ${String(slower.by)}% more ${slower.measure === "statements" ? "statements" : "time"} than its typical ${typical}.`}>{`${String(slower.by)}% slower`}</wa-badge>;
+}
+
 function When({ run }: { "run": RunRecord | undefined }): JSX.Element | null {
 	return run === undefined ? null : <wa-relative-time date={run.at} title={run.at} />;
 }
@@ -215,6 +226,12 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 								const kind = model.kinds.get(file) ?? "not a test";
 								const block = blockOf(file, kind, writers, runs);
 								const typical = median(runs.filter(passed).map((run) => run.ms));
+								// (each test of its last run against its runs before)
+								const slower = new Map((last?.tests ?? []).flatMap((test) => {
+									const found = test.outcome === "pass" ? slowerOf(runs.slice(0, -1), test.id, test, model.slowerBy) : undefined;
+
+									return found === undefined ? [] : [[test.id, found] as const];
+								}));
 								const opened = open.has(file);
 								const reached = model.reach.get(file);
 
@@ -233,7 +250,16 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										</td>
 										<td><When run={lastWhere(runs, true)} /></td>
 										<td><When run={lastWhere(runs, false)} /></td>
-										<td>{last === undefined ? <span class="wa-caption-s">not run</span> : lasted(typical)}</td>
+										<td>
+											{last === undefined
+												? <span class="wa-caption-s">not run</span>
+												: (
+														<span class="wa-cluster wa-gap-3xs">
+															{lasted(typical)}
+															{slower.size === 0 ? null : <wa-badge variant="warning" appearance="outlined" title={[...slower.keys()].map((id) => id.split(" › ").slice(1).join(" › ")).join("\n")}>{`${String(slower.size)} slower`}</wa-badge>}
+														</span>
+													)}
+										</td>
 										<td>{running.has(file) ? <wa-spinner /> : runnable(file) ? <wa-button size="small" appearance="plain" aria-label={`Run ${file}`} onClick={() => { onRun([file]); }}>Run</wa-button> : null}</td>
 									</tr>,
 									...opened && last?.output !== undefined ? [<tr key={`${file} output`}><td class="fv-case" colSpan={9}>{last.output}</td></tr>] : [],
@@ -241,7 +267,12 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										<tr key={test.id} title={test.error}>
 											<td class="fv-case">{test.id.split(" › ").slice(1).join(" › ")}</td>
 											<td colSpan={6}>{test.outcome === "pass" ? null : <wa-badge variant="danger">{test.outcome}</wa-badge>}</td>
-											<td>{lasted(test.ms)}</td>
+											<td>
+												<span class="wa-cluster wa-gap-3xs">
+													{lasted(test.ms)}
+													{slower.has(test.id) ? <SlowerBadge slower={slower.get(test.id) as Slower} /> : null}
+												</span>
+											</td>
 											<td />
 										</tr>
 									)) : []
@@ -260,7 +291,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	const ledgerUri = vscode.Uri.file(`${ROOT}/${ledgerPath()}`);
 	const approved: string[] = [];
 	const running = new Set<string>();
-	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set() };
+	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "slowerBy": 25 };
 	const redraws = new Set<() => void>();
 	const redraw = (): void => {
 		for (const each of redraws) {
@@ -292,7 +323,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
 		const { "tests": affected } = await rpc.request("tests.affected", {}, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[] };
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)) };
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25) };
 		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length });
 		redraw();
 	});
@@ -373,6 +404,13 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	// (a run anyone started: an agent's, or one of the table's own)
 	hub.subscribe("tests.kept", () => {
 		void read();
+	});
+
+	// (how much slower a test may run, changed)
+	vscode.workspace.onDidChangeConfiguration((event) => {
+		if (event.affectsConfiguration("run.tests.slowerBy")) {
+			void read();
+		}
 	});
 
 	const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(ROOT), ledgerPath()));

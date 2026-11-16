@@ -13,8 +13,10 @@ import { post, state } from "./state";
 /** Each running test's coverage counts as it started, by its titles (JSON): what ran since is that test's. */
 export const testStarts = new Map<string, Map<ts.SourceFile, number[]>>();
 
-/** When each test started, by the host's clock (the program's runs on the deterministic loop's): its time. */
+/** When each test started, by the host's clock (the program's runs on the deterministic loop's): its time. And the
+ *  statement clock's reading then: its work. */
 const testClock = new Map<string, number>();
+const testStatements = new Map<string, number>();
 
 /** node-test.js's `__editorTest`: a test started (`titles`), ended (and how: `outcome`, what it threw, and what a failed
  *  assertion compared, as JSON), or the file's tests are done (`titles` then the count that failed). Called from the
@@ -28,12 +30,19 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 			[...entry.counts]
 		])));
 		testClock.set(titles, performance.now());
+
+		if (state.current !== undefined) {
+			testStatements.set(titles, state.current.statements);
+		}
 	} else if (kind === "end" && titles !== undefined) {
 		const started = testStarts.get(titles);
 		const clocked = testClock.get(titles);
+		const counted = testStatements.get(titles);
+		const statements = counted === undefined || state.current === undefined ? undefined : state.current.statements - counted;
 
 		testStarts.delete(titles);
 		testClock.delete(titles);
+		testStatements.delete(titles);
 		state.testsRan.push({
 			"titles": JSON.parse(titles) as string[],
 			"outcome": outcome as TestReport["outcome"],
@@ -49,6 +58,11 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 				? {}
 				: {
 						"ms": Math.round(performance.now() - clocked)
+					},
+			...statements === undefined || statements < 0
+				? {}
+				: {
+						"statements": statements
 					},
 			"files": started === undefined
 				? []

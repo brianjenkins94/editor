@@ -931,7 +931,8 @@
       "hub request|run.effects",
       "hub subscription|tests.kept",
       "hub request|tests.reach",
-      "button|Run touched"
+      "button|Run touched",
+      "setting|run.tests.slowerBy"
     ],
     "paths": [
       "packages/editor/workbench/features-view.tsx",
@@ -2440,7 +2441,8 @@
       "packages/editor/workbench/test-runs.ts"
     ],
     "tests": [
-      "packages/editor/test/debugger-runs.mjs"
+      "packages/editor/test/debugger-runs.mjs",
+      "packages/editor/test/test-runs.test.mjs"
     ]
   },
   "Tests run in the debugger": {
@@ -2454,7 +2456,8 @@
       "packages/editor/extensions/tsval/worker/tests.ts"
     ],
     "tests": [
-      "packages/editor/test/debugger-runs.mjs"
+      "packages/editor/test/debugger-runs.mjs",
+      "packages/editor/test/node-test.test.mjs"
     ]
   },
   "The API Worker": {

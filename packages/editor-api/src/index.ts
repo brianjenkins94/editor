@@ -142,6 +142,9 @@ export interface TestReport {
 	"assertion"?: { "actual": string; "expected": string; "operator"?: string };
 	/** How long it took, by the debugger's clock (not the program's, which the deterministic loop keeps). */
 	"ms"?: number;
+	/** How many statements it ran (the machine's statement clock, as it went on): its work, which what ran beside it
+	 *  doesn't change, as it does its time. */
+	"statements"?: number;
 	"files": { "file": string; "statements": [[number, number], [number, number]][] }[];
 }
 

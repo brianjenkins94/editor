@@ -7,8 +7,8 @@
  *   its lines). And the test files with no reach kept (`untraced`): what they reach isn't known until they run, so an answer
  *   without them isn't the whole of it.
  * - `tests.run` { files?, affected? }: test files run one at a time, as `node --test` runs each (in the debugger), and
- *   each test's result: its outcome, what it threw, what a failed assertion compared, its time, and how it came out
- *   last before this run. `affected` runs the files of the affected tests that are stale. A capability stop (a gated
+ *   each test's result: its outcome, what it threw, what a failed assertion compared, its time and statements, how it
+ *   came out last before this run, and — passed, but by more than `run.tests.slowerBy` over its typical — `slower`. `affected` runs the files of the affected tests that are stale. A capability stop (a gated
  *   call the policy leaves undecided) isn't left waiting on a person who isn't watching: one `approved` names (its
  *   key, `runs_tests:<scope>`) is allowed, this once; the first that isn't ends the run there, and the run answers with
  *   its question (`ask`) — which runs_tests puts to the person through debug-mcp (BERNARD, JUDICIAL, then them), and
@@ -107,10 +107,43 @@ export interface RunRecord {
 	"ms": number;
 	"exitCode": number;
 	"stalled"?: string;
-	"tests": { "id": string; "outcome": string; "ms"?: number; "error"?: string }[];
+	"tests": { "id": string; "outcome": string; "ms"?: number; "statements"?: number; "error"?: string }[];
 	"effects": Effect[];
 	/** Why a file that failed without a failed test did: the end of what it said. */
 	"output"?: string;
+}
+
+/** How a test ran slower than it typically does: by how much (a percentage), measured how, and its typical. */
+export interface Slower { "by": number; "measure": "statements" | "time"; "typical": number }
+
+/** How many earlier passing runs a time is compared with: a time varies with what ran beside it, so one isn't enough. (A
+ *  count of statements doesn't: one is.) */
+const TIMED_RUNS = 3;
+
+/** The middle of `values`. */
+const median = (values: number[]): number => values.toSorted((one, other) => one - other)[Math.floor(values.length / 2)] ?? 0;
+
+/**
+ * How much slower test `id` ran in `latest` than it typically does — the median of the `earlier` runs it passed in — when
+ * by more than `percent` (setting `run.tests.slowerBy`). By its statements, where they're counted (its work: what ran
+ * beside it doesn't change it); else by its time, once it has TIMED_RUNS earlier passes to go by. Undefined when it
+ * isn't, or there's nothing to go by.
+ */
+export function slowerOf(earlier: RunRecord[], id: string, latest: { "ms"?: number; "statements"?: number }, percent: number): Slower | undefined {
+	const passes = earlier.flatMap((run) => run.tests.filter((test) => test.id === id && test.outcome === "pass"));
+	const counted = passes.flatMap((test) => (test.statements === undefined ? [] : [test.statements]));
+	const timed = passes.flatMap((test) => (test.ms === undefined ? [] : [test.ms]));
+	const compared = latest.statements !== undefined && counted.length > 0
+		? { "measure": "statements" as const, "now": latest.statements, "typical": median(counted) }
+		: latest.ms !== undefined && timed.length >= TIMED_RUNS ? { "measure": "time" as const, "now": latest.ms, "typical": median(timed) } : undefined;
+
+	if (compared === undefined || compared.typical <= 0) {
+		return undefined;
+	}
+
+	const by = Math.round((compared.now / compared.typical - 1) * 100);
+
+	return by > percent ? { "by": by, "measure": compared.measure, "typical": compared.typical } : undefined;
 }
 
 /** A run of test files (tests.run): what it was asked, what it's doing, each file's result as it comes, and its end. */
@@ -398,6 +431,10 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				return { "ask": result.asked };
 			}
 
+			// (each test against its own earlier runs, before this one's kept among them)
+			const earlier = (await readHistory()).filter((run) => run.file === file);
+			const percent = vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25);
+
 			await keepReach(file, result.tests);
 			await keep({
 				"file": file,
@@ -405,7 +442,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				"ms": result.ms,
 				"exitCode": result.exitCode,
 				...result.stalled === undefined ? {} : { "stalled": result.stalled },
-				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.error === undefined ? {} : { "error": test.error } })),
+				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...test.error === undefined ? {} : { "error": test.error } })),
 				"effects": result.effects,
 				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
 			});
@@ -418,8 +455,10 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				...result.stalled === undefined ? {} : { "stalled": result.stalled },
 				"tests": result.tests.map((test) => {
 					const id = [file, ...test.titles].join(" › ");
+					// (a test that passed but did more than it used to, or took longer: said, as a failure is)
+					const slower = test.outcome === "pass" ? slowerOf(earlier, id, test, percent) : undefined;
 
-					return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...last.has(id) ? { "before": last.get(id) } : {} };
+					return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...slower === undefined ? {} : { "slower": slower }, ...last.has(id) ? { "before": last.get(id) } : {} };
 				}),
 				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
 			});
