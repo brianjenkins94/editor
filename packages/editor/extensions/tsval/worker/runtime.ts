@@ -3,7 +3,7 @@
  * the capability stand-ins, and the editor's own modules a program imports as its code (node:test).
  */
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
-import type { Outcome } from "@brianjenkins94/playwright";
+import type { Fetched, Outcome } from "@brianjenkins94/playwright";
 import type { ModuleLoader } from "@brianjenkins94/tsval";
 import type { Control } from "../debug-protocol";
 import { REFS_DIR } from "@brianjenkins94/editor-api/git";
@@ -183,7 +183,14 @@ export const editorPlaywright = {
 				await playwrightCall(id, "goto", url);
 			},
 			"url": async () => playwrightCall(id, "url") as Promise<string>,
-			"title": async () => playwrightCall(id, "title") as Promise<string>
+			"title": async () => playwrightCall(id, "title") as Promise<string>,
+			// (the test's own request, made by the shell — not the program's fetch, which its capability gate decides —
+			// and told among the run's effects as a goto is)
+			"fetch": async (url, init) => {
+				tally("page:request", url, "made");
+
+				return playwrightCall(id, "fetch", url, init) as Promise<Fetched>;
+			}
 		});
 
 		pageIds.set(page, id);

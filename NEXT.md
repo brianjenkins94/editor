@@ -545,11 +545,11 @@ How it's kept:
      (`outside`), what has no UI in them the open question. Not yet explained: a second "Open a Commit Read-Only" in one
      editor, with another spec's beside it, took no ref in about half the runs here — its box showing, its input not visible
      and the focus on nothing or the empty editor group, five tries over 15 s — so commit-beside opens it once an editor.
-     dev-server.mjs stays, smaller: its page's isolation is the spec's now (the page says `crossOriginIsolated`); what's left is
-     what the service worker answers a client (a module compiled, 503 once stopped, a port nobody served), and a spec's own
-     `fetch` is its program's, which the debugger's capability gate decides — tried, it threw ("Cannot read properties of
-     undefined (reading '0')"). Whether a test's requests go through the gate, or a Playwright `request` of its own, is the
-     decision those three wait on. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
+     dev-server.mjs is dev-server.spec.mjs: its page says it's isolated (`crossOriginIsolated`), and what the service worker
+     answers a client (a module compiled, 503 once stopped, a port nobody served) is the test's own requests — Playwright's
+     `request` (`page.request`, the fixture), made by the shell as a client of the origin, not the program's `fetch`, which
+     the debugger's capability gate decides (tried, it threw "Cannot read properties of undefined (reading '0')"; the user
+     chose `request`, 2026-11-16). packages/playwright/src/request.ts, held to Playwright's own by request.test.mjs. 7 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
      and the next full run. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over

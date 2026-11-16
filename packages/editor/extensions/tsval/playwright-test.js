@@ -5,11 +5,11 @@
  * debug worker (`__editorPlaywright`): they run in the worker, not stepped, and each op runs on the preview's page in
  * the shell (`playwright.run`).
  *
- * What's here: `test` (its `page` and `browserName` fixtures, and its info), `.skip` (declared, or called in a test),
- * `.fixme`, `.only`, `.describe` (`.skip`, `.only`, `.serial`, `.parallel`, `.configure`), `beforeEach`, `afterEach`,
- * `beforeAll`, `afterAll`, `step`, `info`; `expect`. Not here: `test.extend` (fixtures of your own), `test.use`'s
- * options (accepted, unused), other browsers, contexts, `request`, and timeouts — a test that never settles ends with
- * the run.
+ * What's here: `test` (its `page`, `request` — the page's, a test's own HTTP requests, made by the shell — and
+ * `browserName` fixtures, and its info), `.skip` (declared, or called in a test), `.fixme`, `.only`, `.describe` (`.skip`,
+ * `.only`, `.serial`, `.parallel`, `.configure`), `beforeEach`, `afterEach`, `beforeAll`, `afterAll`, `step`, `info`;
+ * `expect`. Not here: `test.extend` (fixtures of your own), `test.use`'s options (accepted, unused), other browsers,
+ * contexts, and timeouts — a test that never settles ends with the run.
  */
 "use strict";
 
@@ -33,7 +33,9 @@ function fixturesOf(context) {
 			throw outside();
 		}
 
-		known = { "page": host.page(), "browserName": "chromium" };
+		const page = host.page();
+
+		known = { "page": page, "request": page.request, "browserName": "chromium" };
 		fixtures.set(context, known);
 		// (its window, done with as the test ends; a failed test's left open, to look at)
 		context.after?.(async () => host.release(known.page, context.passed === false));
@@ -99,7 +101,7 @@ test.use = () => undefined;
 test.info = () => infoOf(current ?? {});
 test.step = async (title, body) => body();
 test.extend = () => {
-	throw new Error("test.extend isn't here: the editor's @playwright/test has its page and browserName fixtures only");
+	throw new Error("test.extend isn't here: the editor's @playwright/test has its page, request and browserName fixtures only");
 };
 
 function describe(title, body) {

@@ -502,6 +502,15 @@ function install(hub: Hub): void {
 			return reach === undefined ? undefined : { "reach": Object.fromEntries(reach) };
 		}
 
+		// A test's own request: made here, as a client of its origin — no window needed (a stopped server's address is asked
+		// too), and not the program's fetch, which the debugger's capability gate decides.
+		if (call === "fetch") {
+			const { fetched, requestInit } = await import("@brianjenkins94/playwright");
+			const [url, init] = given as [string, Parameters<typeof requestInit>[0]];
+
+			return fetched(await fetch(url, requestInit(init)));
+		}
+
 		if (counting && call === "goto") {
 			if (realmsBefore.has(asking)) {
 				await collect(asking);

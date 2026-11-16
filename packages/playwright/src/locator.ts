@@ -5,13 +5,16 @@
  * until its element can take it, or its timeout passes, as Playwright's auto-waiting does.
  */
 import type { Action, Op, Outcome, Step, TextMatch } from "./engine.ts";
+import type { Fetched, FetchInit } from "./request.ts";
+import { APIRequestContext } from "./request.ts";
 
-/** Where a page's ops run, and how it's navigated. */
+/** Where a page's ops run, how it's navigated, and where its test's own requests are made (request.ts). */
 export interface Driver {
 	"run": (op: Op) => Promise<Outcome>;
 	"goto"?: (url: string) => Promise<void>;
 	"url"?: () => Promise<string>;
 	"title"?: () => Promise<string>;
+	"fetch"?: (url: string, init: FetchInit) => Promise<Fetched>;
 }
 
 /** A timeout passing, as Playwright's TimeoutError. */
@@ -142,10 +145,19 @@ export class Page extends Finder {
 	/** How long an action or a wait takes before it fails (Playwright's `setDefaultTimeout`). */
 	public timeout = 5000;
 	protected readonly driver: Driver;
+	/** Its test's own HTTP requests, relative to where the page is (Playwright's `page.request`). */
+	public readonly request: APIRequestContext;
 
 	public constructor(driver: Driver) {
 		super();
 		this.driver = driver;
+		this.request = new APIRequestContext(async (url, init) => {
+			if (driver.fetch === undefined) {
+				throw new Error("page.request: this page can't make requests");
+			}
+
+			return driver.fetch(url, init);
+		}, async () => this.url());
 	}
 
 	protected further(steps: Step[], more: string): Locator {

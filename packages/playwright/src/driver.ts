@@ -1,9 +1,10 @@
 /**
  * A driver for a page whose window is in reach — the same realm, or same-origin, as a preview's frame is to the shell:
- * each op runs on its document at once (engine.ts `run`).
+ * each op runs on its document at once (engine.ts `run`), and a request is its window's fetch (request.ts).
  */
 import type { Driver } from "./locator.ts";
 import { run } from "./engine.ts";
+import { fetched, requestInit } from "./request.ts";
 
 /** How long a navigation has to load: under what asks for it over the hub (editor-api's `playwright`), so it's this says why. */
 const GOTO_TIMEOUT_MS = 50_000;
@@ -46,6 +47,8 @@ export function windowDriver(window: Window | (() => Window)): Driver {
 			}
 		},
 		"url": async () => current().location.href,
-		"title": async () => current().document.title
+		"title": async () => current().document.title,
+		// (from its window: its origin's, its service worker answering)
+		"fetch": async (url, init) => fetched(await current().fetch(url, requestInit(init)))
 	};
 }
