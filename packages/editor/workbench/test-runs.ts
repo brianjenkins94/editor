@@ -2,10 +2,13 @@
  * Tests for agents: which tests a change reaches, and their results as data (RUNNING.md, *Tests*). Their readers:
  * agents' `runs_affected` and `runs_tests`.
  *
- * - `tests.affected` { paths? }: the tests whose last run here ran code in the changed files (`tests.reach`), or that are in
- *   one — each with its last outcome, and `stale`: the file has changed since that run (a whole file is all it goes by, not
- *   its lines). And the test files with no reach kept (`untraced`): what they reach isn't known until they run, so an answer
- *   without them isn't the whole of it.
+ * - `tests.affected` { paths? }: the tests whose last run here ran the lines changed since the last commit (`tests.reach`;
+ *   a file git doesn't have yet, or one named that hasn't changed, all of it), or that are in a changed test file — each with
+ *   its last outcome, and `stale`: the file has changed since that run. And for each changed file, why it selected what it
+ *   did (`why`, `selectionOf`): a test, lines a test ran, lines no test ran, code no test here runs, what every test runs
+ *   under (config), or not code — so a change nothing here checks says so, rather than selecting nothing. And the test
+ *   files with no reach kept (`untraced`, the first UNTRACED_LISTED, and how many more): what they reach isn't known until
+ *   they run, so an answer without them isn't the whole of it.
  * - `tests.run` { files?, affected? }: test files run one at a time, as `node --test` runs each (in the debugger), and
  *   each test's result: its outcome, what it threw, what a failed assertion compared, its time and statements, how it
  *   came out last before this run, and — passed, but by more than `run.tests.slowerBy` over its typical — `slower`. `affected` runs the files of the affected tests that are stale. A capability stop (a gated
@@ -31,6 +34,7 @@ import type * as vscodeApi from "vscode";
 import type { GitReader } from "./git-service";
 import type { NodeRunner } from "./node-runner";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { alignedRows, hunksOf } from "../shared/git-hunks";
 import { waitFor } from "./readiness";
 import { isTestFile } from "./terminal/commands/node/node";
 
@@ -60,6 +64,10 @@ const STALL_MS = 120_000;
 /** How long working out the affected tests may take — their traces and a search of the workspace — before a
  *  run goes on without (named files: how each test came out before) or says so (none named). */
 const AFFECTED_MS = 60_000;
+
+/** How many untraced test files an answer names: a repository's can be hundreds (the editor's, 941), which is more than
+ *  an agent's tool answer holds; the rest are counted (`untracedLeftOut`). */
+const UNTRACED_LISTED = 50;
 
 /** A run's output kept, at most (its end): enough to see why a file failed to load. */
 const OUTPUT = 4000;
@@ -181,6 +189,67 @@ interface Affected {
 	"reaches": string[];
 }
 
+/** What every test runs under: its packages, its compiler's settings, what its program may do. */
+const CONFIG = /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|\.npmrc|tsconfig[^/]*\.json)$|^\.silo\/policy\.json$/u;
+
+/** A changed file, and its changed lines (from 0, first and last, on either side of the change); none, all of it. */
+export interface Change { "path": string; "lines"?: [number, number][] }
+
+/** Why a changed file selected what it did: it's a test (itself); tests ran its changed lines (those); tests ran it but not
+ *  those lines, or none here runs it at all (nothing checks the change); every test runs under it (config: what it
+ *  reaches isn't lines); or it isn't code. */
+export type Why = "test" | "lines run" | "lines not run" | "not run" | "config" | "not code";
+
+/** The lines `head` → `working` changed, on both sides (a test's reach may be of either text): what a hunk removes and
+ *  adds, or, where it only adds or only removes, the lines either side of it. From 0, as a test's reach is. */
+export function changedLines(head: string, working: string): [number, number][] {
+	const lines: [number, number][] = [];
+
+	for (const hunk of hunksOf("", head, working, alignedRows(head, working))) {
+		for (const side of [hunk.head, hunk.working]) {
+			lines.push(side.lines === 0 ? [Math.max(0, side.start - 1), side.start] : [side.start - 1, side.start + side.lines - 2]);
+		}
+	}
+
+	return lines;
+}
+
+/** Which tests `changes` select, by what each test last ran (`reach`: its id's each code file's lines), and why each change
+ *  selected what it did. A test is selected by a change to its own file, or to lines it ran. */
+export function selectionOf(changes: Change[], reach: Record<string, Record<string, [number, number][]>>, isTest: (path: string) => boolean): { "tests": Map<string, string[]>; "why": { "path": string; "why": Why; "tests": number }[] } {
+	const tests = new Map<string, string[]>();
+	const why = changes.map(({ path, lines }) => {
+		if (isTest(path)) {
+			const own = Object.keys(reach).filter((id) => id.split(" › ")[0] === path);
+
+			for (const id of own) {
+				tests.set(id, [...tests.get(id) ?? [], path]);
+			}
+
+			return { "path": path, "why": "test" as Why, "tests": own.length };
+		}
+
+		if (CONFIG.test(path)) {
+			return { "path": path, "why": "config" as Why, "tests": 0 };
+		}
+
+		if (!CODE.test(path)) {
+			return { "path": path, "why": "not code" as Why, "tests": 0 };
+		}
+
+		const ranIt = Object.entries(reach).filter(([, files]) => Object.hasOwn(files, path));
+		const ranLines = ranIt.filter(([, files]) => lines === undefined || files[path].some(([from, to]) => lines.some(([first, last]) => first <= to && from <= last)));
+
+		for (const [id] of ranLines) {
+			tests.set(id, [...tests.get(id) ?? [], path]);
+		}
+
+		return { "path": path, "why": (ranIt.length === 0 ? "not run" : ranLines.length === 0 ? "lines not run" : "lines run") as Why, "tests": ranLines.length };
+	});
+
+	return { "tests": tests, "why": why };
+}
+
 export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitReader, runner: NodeRunner): void {
 	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
@@ -205,33 +274,41 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return reach;
 	};
 
-	const affected = async (paths?: string[]): Promise<{ "tests": Affected[]; "changed": string[]; "untraced": string[] }> => {
+	const affected = async (paths?: string[]): Promise<{ "tests": Affected[]; "changed": string[]; "why": { "path": string; "why": Why; "tests": number }[]; "untraced": string[]; "untracedLeftOut"?: number }> => {
 		const changed = paths ?? (await git.status({ "whole": true })).files.filter((change) => change.status !== "D").map((change) => change.path);
-		const code = new Set(changed.filter((each) => CODE.test(each)));
-		const reach = await readReach();
-		const lastRuns = new Map((await readHistory()).map((run) => [run.file, run]));
-		const changedAt = new Map(await Promise.all([...code].map(async (path): Promise<[string, number]> => [path, await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${ROOT}/${path}`))).then((stat) => stat.mtime, () => 0)])));
-		const tests: Affected[] = [];
-
-		for (const [id, files] of Object.entries(reach)) {
-			const file = id.split(" › ")[0];
-			const reaches = [...code].filter((path) => path === file || Object.hasOwn(files, path));
-
-			if (reaches.length > 0) {
-				const run = lastRuns.get(file);
-				const at = run?.at ?? "";
-
-				tests.push({ "id": id, "file": file, "outcome": run?.tests.find((test) => test.id === id)?.outcome ?? "", "at": at, "stale": reaches.some((path) => (changedAt.get(path) ?? 0) > Date.parse(at === "" ? "0" : at)), "reaches": reaches });
+		// (each changed code file's lines against the last commit; one git hasn't, or named and not changed, is all of it)
+		const changes = await Promise.all(changed.map(async (path): Promise<Change> => {
+			if (!CODE.test(path) || isTestFile(path)) {
+				return { "path": path };
 			}
-		}
+
+			const texts = await git.file(path).catch(() => undefined);
+
+			return texts === undefined || texts.head === "" || texts.head === texts.working ? { "path": path } : { "path": path, "lines": changedLines(texts.head, texts.working) };
+		}));
+		const reach = await readReach();
+		const selected = selectionOf(changes, reach, isTestFile);
+		const lastRuns = new Map((await readHistory()).map((run) => [run.file, run]));
+		const changedAt = new Map(await Promise.all([...new Set([...selected.tests.values()].flat())].map(async (path): Promise<[string, number]> => [path, await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${ROOT}/${path}`))).then((stat) => stat.mtime, () => 0)])));
+		const tests = [...selected.tests].map(([id, reaches]): Affected => {
+			const file = id.split(" › ")[0];
+			const run = lastRuns.get(file);
+			const at = run?.at ?? "";
+
+			return { "id": id, "file": file, "outcome": run?.tests.find((test) => test.id === id)?.outcome ?? "", "at": at, "stale": reaches.some((path) => (changedAt.get(path) ?? 0) > Date.parse(at === "" ? "0" : at)), "reaches": reaches };
+		});
 
 		const traced = new Set(Object.keys(reach).map((id) => id.split(" › ")[0]));
 		const testFiles = (await vscode.workspace.findFiles("**/*.{js,mjs,cjs,ts,mts,cts}", "**/{node_modules,.*}/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isTestFile(path));
 
+		const untraced = testFiles.filter((path) => !traced.has(path)).sort((left, right) => left.localeCompare(right));
+
 		return {
 			"tests": tests.sort((left, right) => Number(right.stale) - Number(left.stale) || left.id.localeCompare(right.id)),
 			"changed": changed,
-			"untraced": testFiles.filter((path) => !traced.has(path)).sort((left, right) => left.localeCompare(right))
+			"why": selected.why,
+			"untraced": untraced.slice(0, UNTRACED_LISTED),
+			...untraced.length > UNTRACED_LISTED ? { "untracedLeftOut": untraced.length - UNTRACED_LISTED } : {}
 		};
 	};
 

@@ -522,7 +522,11 @@ How it's kept:
      game by painting a level*.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Each test's reach is kept, its lines of each
      file (`.silo/local/reach/`, test-runs.ts), `tests.affected` reads it (traces had no writer), and the table shows each file's
-     reach, what only it reaches, and *touched*, with a button to run those. Measured, 386 passing tests of 64 files in the
+     reach, what only it reaches, and *touched*, with a button to run those. Since 2026-11-16 a change selects by its lines,
+     not its file (those changed since the last commit, either side of the change: `selectionOf`), and says for each changed
+     file why it selected what it did: a test, lines run, lines not run, not run, config or not code. The table names what's
+     changed that no test here checks, and what every test runs under, above its rows; runs_affected's `why`. A save that
+     fixes a file (the `!` ESLint drops) changes more lines than the edit, and selects by them, rightly. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test

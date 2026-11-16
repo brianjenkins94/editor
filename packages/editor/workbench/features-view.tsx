@@ -4,7 +4,8 @@
  * ledger, with its test files under it, each opening to its tests. A file's row says what kind of test it is, whether it can't
  * run beside the others and why, the effects its last run had, how much code it reaches and how much of that only it does, when
  * it last passed and failed, how long it typically takes (and which of its tests last ran slower than they typically do, by more
- * than `run.tests.slowerBy`), whether code it ran has changed since, and a button that runs it. Tests
+ * than `run.tests.slowerBy`), whether code it ran has changed since (the lines it ran: test-runs.ts `selectionOf`), and a
+ * button that runs it; and above it, what's changed since the last commit that no test here checks. Tests
  * are meant to run at once, so only one that can't says anything in that column.
  *
  * What it says comes from the ledger and the runs kept here (test-runs.ts, `tests.history`); a file not run here says so.
@@ -14,7 +15,7 @@ import type { Logger } from "@brianjenkins94/util/logger";
 import type { LedgerEntry } from "@brianjenkins94/util/silo/ledger";
 import type { JSX } from "preact";
 import type * as vscodeApi from "vscode";
-import type { RunRecord, Slower } from "./test-runs";
+import type { RunRecord, Slower, Why } from "./test-runs";
 import { registerCustomView, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
@@ -48,6 +49,9 @@ interface Model {
 	"reach": Map<string, { "lines": number; "only": number }>;
 	/** The test files whose code has changed since they last ran. */
 	"touched": Set<string>;
+	/** The changes since the last commit that no test here checks (code no test runs, lines no test ran), and those every
+	 *  test runs under (config): what selecting by reach can't say. */
+	"unchecked": Record<"not run" | "lines not run" | "config", string[]>;
 	/** How much slower than typical a passing test may run before it's said to be (setting `run.tests.slowerBy`). */
 	"slowerBy": number;
 }
@@ -169,6 +173,20 @@ function When({ run }: { "run": RunRecord | undefined }): JSX.Element | null {
 	return run === undefined ? null : <wa-relative-time date={run.at} title={run.at} />;
 }
 
+/** How many changed files to name before saying how many more. */
+const NAMED = 3;
+
+/** Changes selecting by reach can't vouch for, named (the first few; all of them in its title). */
+function Unchecked({ label, title, paths }: { "label": string; "title": string; "paths": string[] }): JSX.Element | null {
+	if (paths.length === 0) {
+		return null;
+	}
+
+	const named = paths.slice(0, NAMED).join(", ") + (paths.length > NAMED ? `, and ${String(paths.length - NAMED)} more` : "");
+
+	return <div class="wa-caption-s" title={`${title}\n\n${paths.join("\n")}`}>{`${label}: ${named}`}</div>;
+}
+
 function Table({ model, running, onRun, onOpen }: { "model": Model; "running": Set<string>; "onRun": (files: string[]) => void; "onOpen": (file: string) => void }): JSX.Element {
 	const [all, setAll] = useState(false);
 	const [open, setOpen] = useState<Set<string>>(new Set());
@@ -197,6 +215,9 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 				<span class="wa-caption-s">{`${String(shown.length)} of ${String(model.features.length)} features`}</span>
 				{model.touched.size === 0 ? null : <wa-button size="small" variant="brand" aria-label="Run touched" onClick={() => { onRun([...model.touched]); }}>{`Run the ${String(model.touched.size)} touched`}</wa-button>}
 			</div>
+			<Unchecked label="No test here runs" title="Code changed since the last commit that no test's last run here ran: nothing here checks it." paths={model.unchecked["not run"]} />
+			<Unchecked label="No test here ran the lines changed in" title="Tests here run these files, but none ran the lines changed since the last commit." paths={model.unchecked["lines not run"]} />
+			<Unchecked label="Changed, under every test" title="What every test runs under (its packages, its compiler's settings, what its program may do): any test may come out differently." paths={model.unchecked.config} />
 			<table class="fv-table">
 				<thead>
 					<tr><th>Test</th><th>Type</th><th>Can't run in parallel</th><th>Effects</th><th>Reach</th><th>Last passed</th><th>Last failed</th><th>Typical</th><th /></tr>
@@ -291,7 +312,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	const ledgerUri = vscode.Uri.file(`${ROOT}/${ledgerPath()}`);
 	const approved: string[] = [];
 	const running = new Set<string>();
-	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "slowerBy": 25 };
+	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "unchecked": { "not run": [], "lines not run": [], "config": [] }, "slowerBy": 25 };
 	const redraws = new Set<() => void>();
 	const redraw = (): void => {
 		for (const each of redraws) {
@@ -321,9 +342,10 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 
 		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
-		const { "tests": affected } = await rpc.request("tests.affected", {}, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[] };
+		const { "tests": affected, why } = await rpc.request("tests.affected", {}, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
+		const changesThat = (reason: Why): string[] => why.filter((each) => each.why === reason).map((each) => each.path);
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25) };
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25) };
 		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length });
 		redraw();
 	});

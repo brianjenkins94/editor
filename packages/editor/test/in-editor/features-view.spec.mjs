@@ -85,6 +85,14 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await expect(row("again.test.mjs")).toContainText("nothing only here", { "timeout": 60_000 });
 	await expect(row("add.test.mjs")).toContainText("nothing only here");
 
+	// What's changed that no test here checks says so, and what every test runs under: this workspace has no commit yet,
+	// so all of it has changed. math.mjs, run by those tests, isn't among it.
+	const unchecked = workbench.locator(".fv > .wa-caption-s", { "hasText": "No test here runs:" });
+
+	await expect(unchecked).toHaveAttribute("title", /\nsuite\.mjs\n/u, { "timeout": 30_000 });
+	await expect(unchecked).not.toHaveAttribute("title", /math\.mjs/u);
+	await expect(workbench.locator(".fv > .wa-caption-s", { "hasText": "Changed, under every test:" })).toContainText(".silo/policy.json");
+
 	// A save touches what reached that file, not what didn't, and they run from there.
 	await openFile(workbench, "math.mjs");
 	await codeOf(workbench).pressSequentially("// ");
