@@ -481,3 +481,22 @@ test("into frames, as Playwright goes: what's in one, and in one in it, and not 
 	await expect(ours.frameLocator("#one").frameLocator("#deeper").getByRole("button")).toHaveText("Deep");
 	await assert.rejects(expect(ours.frameLocator("#nothing").getByRole("button")).toBeVisible({ "timeout": 200 }), /toBeVisible\(\) failed/u);
 });
+
+test("toHaveCSS: a property's computed value, a custom property's too, as the browser computes it", async () => {
+	await page.setContent("<div id=styled></div>");
+	await page.addScriptTag({ "content": ENGINE });
+	await page.evaluate(() => {
+		const styled = document.querySelector("#styled");
+
+		styled.style.setProperty("display", "flex");
+		styled.style.setProperty("--tone", "#1e1e1e");
+	});
+
+	const computed = await page.evaluate(() => getComputedStyle(document.querySelector("#styled")).getPropertyValue("display"));
+
+	assert.equal(computed, "flex");
+	await expect(ours.locator("#styled")).toHaveCSS("display", "flex");
+	await expect(ours.locator("#styled")).toHaveCSS("--tone", /^#1e1e1e$/u);
+	await assert.rejects(expect(ours.locator("#styled")).toHaveCSS("display", "block", { "timeout": 200 }), /toHaveCSS\("display", "block"\) failed — received "flex"/u);
+	await fresh();
+});

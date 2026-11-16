@@ -351,6 +351,11 @@ export class Locator extends Finder {
 		return await this.waited("getAttribute", [name], options) as string | null;
 	}
 
+	/** Not Playwright's: a property's computed value, what `toHaveCSS` reads. */
+	public async computedStyle(name: string, options: ActionOptions = {}): Promise<string> {
+		return await this.waited("css", [name], options) as string;
+	}
+
 	public async boundingBox(options: ActionOptions = {}): Promise<{ "x": number; "y": number; "width": number; "height": number } | null> {
 		return await this.waited("boundingBox", [], options) as { "x": number; "y": number; "width": number; "height": number } | null;
 	}

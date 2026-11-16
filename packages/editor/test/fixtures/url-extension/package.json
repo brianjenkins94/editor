@@ -1,7 +1,7 @@
 {
 	"name": "url-extension",
 	"displayName": "An extension loaded by URL",
-	"description": "workbench.mjs loads it with ?extension=, as editor-contrib's extensions are loaded while developed.",
+	"description": "in-editor/workbench.spec.mjs loads it with ?extension=, as editor-contrib's extensions are loaded while developed.",
 	"publisher": "test",
 	"version": "0.0.1",
 	"engines": { "vscode": "*" },

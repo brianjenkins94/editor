@@ -35,7 +35,7 @@ export interface Op {
 
 export type Action =
 	| "count" | "allTextContents" | "allInnerTexts"
-	| "textContent" | "innerText" | "innerHTML" | "inputValue" | "getAttribute" | "boundingBox"
+	| "textContent" | "innerText" | "innerHTML" | "inputValue" | "getAttribute" | "boundingBox" | "css"
 	| "isVisible" | "isHidden" | "isEnabled" | "isDisabled" | "isChecked" | "isEditable" | "isFocused"
 	| "click" | "dblclick" | "hover" | "focus" | "blur" | "fill" | "clear" | "press" | "pressSequentially"
 	| "check" | "uncheck" | "selectOption" | "dispatchEvent" | "scrollIntoViewIfNeeded" | "waitFor";
@@ -1048,6 +1048,8 @@ export function run(document: Document, op: Op): Outcome {
 		case "innerText": return { "done": true, "value": (element as HTMLElement).innerText };
 		case "innerHTML": return { "done": true, "value": element.innerHTML };
 		case "getAttribute": return { "done": true, "value": element.getAttribute(String(args[0])) };
+		// (a property's computed value, as toHaveCSS reads it: a custom property's too)
+		case "css": return { "done": true, "value": windowOf(element).getComputedStyle(element).getPropertyValue(String(args[0])).trim() };
 		case "boundingBox": {
 			if (!isVisible(element)) {
 				return { "done": true, "value": null };

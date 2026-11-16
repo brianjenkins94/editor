@@ -550,7 +550,12 @@ How it's kept:
      `request` (`page.request`, the fixture), made by the shell as a client of the origin, not the program's `fetch`, which
      the debugger's capability gate decides (tried, it threw "Cannot read properties of undefined (reading '0')"; the user
      chose `request`, 2026-11-16). packages/playwright/src/request.ts, held to Playwright's own by request.test.mjs. eslint.mjs's
-     request and span, with no UI, are agent-tools.mjs's (test/eslint.mjs gone, as bablr.mjs). 6 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
+     request and span, with no UI, are agent-tools.mjs's (test/eslint.mjs gone, as bablr.mjs). 6 left.
+     workbench.mjs is mostly workbench.spec.mjs: a colour theme picked and the shell in its colours (`toHaveCSS`, the
+     editor's Playwright's now), the starter workspace, TypeScript formatted on save by ESLint and JSON not, an extension by
+     its address saying hello, a CDN package file as a client gets it (`request`). It keeps the three with no UI: the theme
+     following the system's (a frame's `prefers-color-scheme` is the browser's, not its element's `color-scheme`: tried in
+     Chromium), the architecture plane's reports, and signing in with the API routed. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
      and the next full run. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over

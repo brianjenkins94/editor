@@ -163,6 +163,10 @@ class LocatorAssertions {
 		await this.poll("toHaveAttribute", async () => this.locator.getAttribute(name, this.quick), (value) => (expected === undefined ? value !== null : value !== null && (typeof expected === "string" ? value === expected : expected.test(value))), expected === undefined ? JSON.stringify(name) : `${JSON.stringify(name)}, ${shown(expected)}`, options);
 	}
 
+	public async toHaveCSS(name: string, expected: Text, options?: Options): Promise<void> {
+		await this.poll("toHaveCSS", async () => this.locator.computedStyle(name, this.quick), (value) => (typeof expected === "string" ? value === expected : expected.test(value)), `${JSON.stringify(name)}, ${shown(expected)}`, options);
+	}
+
 	public async toHaveClass(expected: Text, options?: Options): Promise<void> {
 		await this.poll("toHaveClass", async () => this.locator.getAttribute("class", this.quick), (value) => (typeof expected === "string" ? normalized(value ?? "") === normalized(expected) : expected.test(value ?? "")), shown(expected), options);
 	}

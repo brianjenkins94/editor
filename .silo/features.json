@@ -893,7 +893,7 @@
     ],
     "tests": [
       "packages/editor/test/fixtures/url-extension/",
-      "packages/editor/test/workbench.mjs"
+      "packages/editor/test/in-editor/workbench.spec.mjs"
     ]
   },
   "Feature ledger drift in Problems": {
@@ -2095,8 +2095,8 @@
       "packages/editor/index.html"
     ],
     "tests": [
-      "packages/editor/test/static-host.test.mjs",
-      "packages/editor/test/workbench.mjs"
+      "packages/editor/test/in-editor/workbench.spec.mjs",
+      "packages/editor/test/static-host.test.mjs"
     ]
   },
   "Runtime evidence kept in git": {
@@ -2545,8 +2545,8 @@
       "packages/editor/demo/"
     ],
     "tests": [
-      "packages/editor/test/starter.test.mjs",
-      "packages/editor/test/workbench.mjs"
+      "packages/editor/test/in-editor/workbench.spec.mjs",
+      "packages/editor/test/starter.test.mjs"
     ]
   },
   "The workspace terminal": {
@@ -2605,6 +2605,7 @@
       "packages/editor/workbench/theme-follow.ts"
     ],
     "tests": [
+      "packages/editor/test/in-editor/workbench.spec.mjs",
       "packages/editor/test/workbench.mjs"
     ]
   },

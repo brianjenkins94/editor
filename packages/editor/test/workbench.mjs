@@ -1,10 +1,9 @@
 /**
- * The editor's own surfaces, in a real editor: the theme following the system's (workbench/theme-follow.ts, the shell's
- * colours from VS Code's), the starter workspace it opens on (build/snapshot.ts), the service worker it runs with on a
- * static host (coi-serviceworker.js), every context reporting on the architecture plane (shared/architecture.ts,
- * the command tap, the stores' reports), an extension loaded by URL (workbench/extensions.ts, `?extension=`), and
- * signing in started from the GitHub button (shell/sign-in.tsx, session.ts) — the API stood in for, so no account is
- * touched. The extension's load is the page's second, the service worker's first to control.
+ * What of the editor's own surfaces a person doesn't see, and so in-editor/workbench.spec.mjs can't do: the theme following
+ * the system's (the system's preference emulated, which a page can't for one window of its own: a frame follows the
+ * browser's), every context reporting on the architecture plane (shared/architecture.ts, the command tap, the stores'
+ * reports), and signing in started from the GitHub button (shell/sign-in.tsx, session.ts), the API stood in for — routed
+ * before the page loads — so no account is touched. What a person has of them is that spec's.
  *
  *   node --test --test-global-setup=test/architecture-harness.mjs test/workbench.mjs
  */
@@ -55,22 +54,6 @@ test("the theme follows the system's: VS Code's theme switches, and the shell dr
 	await inColours("light", "Default Light+", "#ffffff");
 });
 
-test("a fresh editor opens on the starter workspace, with the editor's settings as its defaults", async () => {
-	const { files } = await session.request("files.glob", { "pattern": "**/*.{ts,tsx,json,html}" }, 30_000);
-
-	for (const file of ["package.json", "tsconfig.json", "index.html", "src/App.tsx", "src/main.tsx", "apps/second/src/App.tsx"]) {
-		assert.ok(files.includes(file), `${file} in ${JSON.stringify(files)}`);
-	}
-
-	const settings = await session.workbench().evaluate(() => {
-		const { api } = globalThis.__editor;
-
-		return { "plain": api.workspace.getConfiguration("editor").get("formatOnSave"), "typescript": api.workspace.getConfiguration("editor", { "languageId": "typescript" }).get("formatOnSave") };
-	});
-
-	assert.deepEqual(settings, { "plain": false, "typescript": true });
-});
-
 test("every context reports on the architecture plane: the realms, the extensions by their commands, the stores", async () => {
 	// (each reports when it's up and has something to say: all of them are waited for, not the first)
 	let missing = [];
@@ -89,31 +72,6 @@ test("every context reports on the architecture plane: the realms, the extension
 	}, 60_000).catch((error) => {
 		throw new Error(`${error.message}: no ${missing.join(", no ")}`);
 	});
-});
-
-test("an extension loaded by URL (`?extension=`) runs in the editor", async () => {
-	const { page } = session;
-	const url = new URL(page.url());
-
-	url.searchParams.append("extension", new URL("/test/fixtures/url-extension/", url).href);
-	await page.goto(url.href);
-
-	const said = await session.eventually("its command", async () => session.workbench().evaluate(async () => globalThis.__editor?.api.commands.executeCommand("urlExtension.hello")).catch(() => undefined), 120_000);
-
-	assert.equal(said, "hello from a URL");
-});
-
-test("the service worker serves a package's file from the CDN, same-origin, stamped for isolation", async () => {
-	const { page } = session;
-	// (controlled from the load after it registered: a dev server isolates the first itself, so it isn't reloaded for it)
-	const answer = await page.evaluate(async () => {
-		const response = await fetch("/workspace/node_modules/react/package.json?v=18.3.1");
-
-		return { "controlled": navigator.serviceWorker.controller !== null, "status": response.status, "name": (await response.json()).name, "coop": response.headers.get("cross-origin-opener-policy") };
-	});
-
-	assert.deepEqual(answer, { "controlled": true, "status": 200, "name": "react", "coop": "same-origin" });
-	await session.eventually("the worker's CDN span", async () => (session.printed().some((line) => line.startsWith("[sw]") && line.includes("react@18.3.1/package.json")) ? true : undefined), 30_000);
 });
 
 test("signing in starts from the GitHub button: pushed to the API, then off to its sign-in page as the editor", async () => {
