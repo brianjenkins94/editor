@@ -49,12 +49,25 @@ const repo = await repository({
 });
 
 test("git: read without spawning it (isomorphic-git, as in the editor's debugger) gives what git gives", async () => {
-	const fresh = await repository({ "2026-10-01": { ".gitignore": "ignored.txt\nbuild/\n", "a/tracked.ts": "1", "b.md": "2" } });
+	const fresh = await repository({ "2026-10-01": { ".gitignore": "ignored.txt\nbuild/\n*.tmp\n", "a/tracked.ts": "1", "b.md": "2", "c/.gitignore": "*.log\n!keep.log\ncache/\n!special.tmp\n" } });
+	const write = async (file: string, text: string): Promise<void> => {
+		await fs.mkdir(path.dirname(path.join(fresh, file)), { "recursive": true });
+		fs.writeFileSync(path.join(fresh, file), text);
+	};
 
-	fs.writeFileSync(path.join(fresh, "untracked.ts"), "3");
-	fs.writeFileSync(path.join(fresh, "ignored.txt"), "4");
-	await fs.mkdir(path.join(fresh, "build"));
-	fs.writeFileSync(path.join(fresh, "build", "out.js"), "5");
+	await write("untracked.ts", "3");
+	await write("ignored.txt", "4");
+	await write("build/out.js", "5");
+	// (a folder's own rules: relative to it, a negation over its parent's, a folder-only pattern; and the repository's excludes)
+	await write("c/d/drop.log", "6");
+	await write("c/keep.log", "7");
+	await write("c/cache/x.js", "8");
+	await write("c/d/cache.js", "9");
+	await write("c/special.tmp", "10");
+	await write("other.tmp", "11");
+	await write("e/new/deep.ts", "12");
+	await write("excluded.md", "13");
+	await write(".git/info/exclude", "excluded.md\n");
 
 	const read = async (): Promise<unknown> => ({ "repo": await repoOf(path.join(fresh, "a")), "tracked": await filesOf(fresh), "all": await filesOf(fresh, { "untracked": true }), "head": await headOf(fresh) });
 	const spawned = await read();
@@ -67,7 +80,7 @@ test("git: read without spawning it (isomorphic-git, as in the editor's debugger
 		delete process.env["SILO_GIT"];
 	}
 
-	assert.deepEqual((spawned as { "all": string[] }).all, [".gitignore", "a/tracked.ts", "b.md", "untracked.ts"]);
+	assert.deepEqual((spawned as { "all": string[] }).all, [".gitignore", "a/tracked.ts", "b.md", "c/.gitignore", "c/d/cache.js", "c/keep.log", "c/special.tmp", "e/new/deep.ts", "untracked.ts"]);
 });
 
 test("features: the working tree's ways in", async () => {

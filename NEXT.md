@@ -26,18 +26,23 @@ How it's kept:
 
    features-map.ts went from 32 TypeScript errors to 2, and a linked file has one name. Still open:
    - **`silo check` runs in the editor** (2026-11-15): `node packages/silo/src/cli.ts check` in its terminal says the
-     ledger and the code agree, in 74 s (3.5 s natively), and the run before it caught two stray files as owned by no
+     ledger and the code agree, in 28 s (3.3 s natively), and a run before it caught two stray files as owned by no
      feature. Nothing it needs is spawned: its analysis is TypeScript 7's WebAssembly build where no native compiler
      can start (lib's `apiOf`; `@typescript/typescript-wasip1-wasm`, on npm since 2026-10-30; unpkg serves its 53 MB
      tsc.wasm, jsDelivr won't), and its git is isomorphic-git (silo's git.ts); under Node with neither spawned,
-     `check --json --prices` is byte-identical to native's (25 s). silo's TypeScript is an npm alias, `typescript-7`, as
+     `check --json --prices` is byte-identical to native's (15 s). silo's TypeScript is an npm alias, `typescript-7`, as
      lib's is: the workspace installs one version of a name (versions.ts), and the root's is TypeScript 6 — an alias
      resolves as the package it names, with that package's tarball (`alias`). Fixed on the way: util's env took the
      debugger for a browser (isEntry, and juvy reading `--json`'s environment variable from globalThis); a run's
      packages had almostnode's own process (its argv, stdout, exit); `path.resolve` started from `/`; `execFileSync`
      wasn't ENOSYS; almostnode's synchronous hashes weren't SHA-1 (isomorphic-git took every pack for corrupted); an
      alias's folder matched its exports by the manifest's name; and a package's `import()` of a `file:` URL outside the
-     workspace went to the browser's loader. Its 74 s is the wasm compiler and the debugger's fs, unmeasured apart. (A
+     workspace went to the browser's loader. It took 74 s at first: measured apart (2026-11-15), two listings of the
+     untracked files were ~30 s each — isomorphic-git's isIgnored reads the excludes and every parent's .gitignore for
+     each file (~167,000 fs calls, 52,000 of them failing), each a runtime-fs round trip at 0.5–1 ms — so git.ts walks
+     the tree itself, a read of each folder and of each .gitignore there is (0.05 s under Node). Of the 28 s left,
+     TypeScript's analysis is ~11–16 s and makes no runtime-fs calls; the wasm loads in no measurable time; a run starts
+     in 0.3 s and silo's modules load in ~2.5 s. A run's stages have no spans yet: they were timed by exiting early. (A
      `@latest` tarball isn't fetched again while its version is the same, util's 0.1.0, as npm without `npm install
      <url>`: delete it to refresh.)
    - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —

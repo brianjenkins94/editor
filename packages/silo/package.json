@@ -23,6 +23,7 @@
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@typescript/typescript-wasip1-wasm": "7.1.0-dev.20261107.1",
     "cmd-ts": "latest",
+    "ignore": "latest",
     "isomorphic-git": "latest",
     "rolldown": "latest",
     "typescript-7": "npm:typescript@7.1.0-dev.20261107.1"

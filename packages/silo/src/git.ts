@@ -3,10 +3,13 @@
  * child_process says ENOSYS) — the repository's own .git through isomorphic-git, over `node:fs` (there, the workspace).
  * Reads only: what silo writes to git (a feature's restore) still asks the `git` on the PATH.
  */
+import type { Ignore } from "ignore";
+
 import { execFileSync } from "node:child_process";
 // eslint-disable-next-line ts/no-restricted-imports -- isomorphic-git takes Node's own fs (its promises and callbacks), which the util wrapper isn't
 import * as nodeFs from "node:fs";
 import * as path from "node:path";
+import ignore from "ignore";
 
 /** Whether `error` is a spawn where none can be (not git's own failure, which is still thrown). */
 const unspawnable = (error: unknown): boolean => (error as { "code"?: string } | undefined)?.code === "ENOSYS";
@@ -72,42 +75,67 @@ export async function filesOf(repo: string, options: { "untracked"?: boolean } =
 		return sorted(listed.split("\n").filter((file) => file !== ""));
 	}
 
-	const git = await isomorphicGit();
-	const tracked = await git.listFiles({ "fs": nodeFs, "dir": repo });
+	const tracked = await (await isomorphicGit()).listFiles({ "fs": nodeFs, "dir": repo });
 
 	if (options.untracked !== true) {
 		return tracked;
 	}
 
-	// The working tree against the index: what isn't in it and isn't ignored (an ignored folder isn't walked into). Not
-	// statusMatrix, which writes the index's refreshed stats back to .git: this only reads, as `git ls-files` does.
-	const untracked: string[] = [];
-
-	await git.walk({
-		"fs": nodeFs,
-		"dir": repo,
-		"trees": [git.WORKDIR(), git.STAGE()],
-		"map": async (file, [workdir, stage]) => {
-			if (file === ".") {
-				return true;
-			}
-
-			if (workdir === null || await git.isIgnored({ "fs": nodeFs, "dir": repo, "filepath": file })) {
-				return null;
-			}
-
-			if (stage === null && await workdir.type() === "blob") {
-				untracked.push(file);
-			}
-
-			return true;
-		}
-	});
-
 	return sorted([
 		...tracked,
-		...untracked
+		...untrackedOf(repo, new Set(tracked))
 	]);
+}
+
+/** A folder's ignore rules (its .gitignore, or the repository's own excludes), with the folder they're relative to. */
+interface Rules { "base": string; "rules": Ignore }
+
+/** Whether `file` (a folder: ending in `/`) is ignored by `stack`, from the top down: the deeper folder's word last. */
+function ignoredBy(stack: Rules[], file: string): boolean {
+	let ignored = false;
+
+	for (const { base, rules } of stack) {
+		const tested = rules.test(base === "" ? file : file.slice(base.length + 1));
+
+		ignored = ignored ? !tested.unignored : tested.ignored;
+	}
+
+	return ignored;
+}
+
+/**
+ * What git doesn't track and doesn't ignore either (`git ls-files --others --exclude-standard`, but for the user's own
+ * excludes file): the working tree walked once — a read of each folder, and of each .gitignore there is — not into an
+ * ignored folder, nor .git. Not isomorphic-git's walk and isIgnored, which read the excludes and every parent's
+ * .gitignore again for each file (52,000 failed reads of this repository's): each a round trip in the editor's debugger.
+ * Only reads, as `git ls-files` does (statusMatrix writes the index's refreshed stats back).
+ */
+function untrackedOf(repo: string, tracked: Set<string>): string[] {
+	const read = (file: string): string | undefined => (nodeFs.existsSync(path.join(repo, file)) ? nodeFs.readFileSync(path.join(repo, file), "utf8") : undefined);
+	const untracked: string[] = [];
+	const visit = (folder: string, above: Rules[]): void => {
+		const entries = nodeFs.readdirSync(path.join(repo, folder), { "withFileTypes": true });
+		// (the top's is among the rules it starts with)
+		const own = folder !== "" && entries.some((entry) => entry.name === ".gitignore" && !entry.isDirectory());
+		const stack = own ? [...above, { "base": folder, "rules": ignore().add(nodeFs.readFileSync(path.join(repo, folder, ".gitignore"), "utf8")) }] : above;
+
+		for (const entry of entries.filter((each) => each.name !== ".git")) {
+			const file = folder === "" ? entry.name : folder + "/" + entry.name;
+
+			if (entry.isDirectory()) {
+				if (!ignoredBy(stack, file + "/")) {
+					visit(file, stack);
+				}
+			} else if (!tracked.has(file) && !ignoredBy(stack, file)) {
+				untracked.push(file);
+			}
+		}
+	};
+
+	// (the top's rules: .git/info/exclude, then its .gitignore — both relative to the top)
+	visit("", [{ "base": "", "rules": ignore().add(read(".git/info/exclude") ?? "").add(read(".gitignore") ?? "") }]);
+
+	return untracked;
 }
 
 /** HEAD's commit, abbreviated (`git rev-parse --short HEAD`). */
