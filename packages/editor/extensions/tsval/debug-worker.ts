@@ -23,12 +23,12 @@ import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
 import { exploreOrderings } from "./worker/explore";
 import { typed } from "./worker/process";
 import { launch, setBreakpoints, setPace, setValue } from "./worker/session";
-import { post, state } from "./worker/state";
+import { countLinkCalls, post, state } from "./worker/state";
 import { decide } from "./worker/stops";
 
 globalThis.addEventListener("message", (event: MessageEvent<ToWorker>): void => {
 	if (event.data.kind === "runtime") {
-		state.editorLink = connectRuntime(event.data.port, { "name": "debug-worker" });
+		state.editorLink = countLinkCalls(connectRuntime(event.data.port, { "name": "debug-worker" }));
 
 		return;
 	}

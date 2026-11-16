@@ -42,9 +42,14 @@ How it's kept:
      each file (~167,000 fs calls, 52,000 of them failing), each a runtime-fs round trip at 0.5–1 ms — so git.ts walks
      the tree itself, a read of each folder and of each .gitignore there is (0.05 s under Node). Of the 28 s left,
      TypeScript's analysis is ~11–16 s and makes no runtime-fs calls; the wasm loads in no measurable time; a run starts
-     in 0.3 s and silo's modules load in ~2.5 s. A run's stages have no spans yet: they were timed by exiting early. (A
-     `@latest` tarball isn't fetched again while its version is the same, util's 0.1.0, as npm without `npm install
-     <url>`: delete it to refresh.)
+     in 0.3 s and silo's modules load in ~2.5 s. Those were timed by exiting early; a run's stages are spans now
+     (2026-11-16): `…tsval.worker.session.run` from its launch to its end, with what it asked of the editor on its end
+     (`stat: 5762, statMs: 8836`, each call the run waited on: readFile, stat, readdir, tarball, decide), and under it
+     the runtime's `load`, the entry's `parse`, each package's `install.fetch` (bytes, files) and the first `step`. The
+     next cost they show: of a 29 s check, 12 s is the run waiting on 5,762 stats and 1,124 readdirs — the listing's
+     `withFileTypes`, a stat an entry, as the runtime's readdir gives names only; a readdir with each entry's type
+     would make it one call a folder. (A `@latest` tarball isn't fetched again while its version is the same, util's
+     0.1.0, as npm without `npm install <url>`: delete it to refresh.)
    - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —
      go-to-definition reaches theme's card.d.ts and from it Web Awesome's in the root node_modules, and the file has no
      2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's

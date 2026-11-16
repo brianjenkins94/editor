@@ -210,6 +210,21 @@ test("react", () => { assert.equal(typeof React.createElement, "function"); });
 	assert.deepEqual(answer.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(answer).slice(0, 1500));
 });
 
+test("a run's stages are spans: under its run's, the runtime loaded, its entry parsed, its first step — and on its end, what it asked of the editor", async () => {
+	const ended = (stage) => (line) => line.startsWith("[debug-worker]") && line.includes("← editor.extensions.tsval.worker." + stage);
+	// (the runs before this one ended theirs: the page prints every record it collects, a span's end as `← name (ms)` and its attributes)
+	const run = await session.eventually("a run's span ended", async () => session.printed().findLast(ended("session.run")), 30_000);
+	const printed = session.printed().filter((line) => line.startsWith("[debug-worker]"));
+
+	for (const stage of ["session.load", "session.parse", "session.step"]) {
+		assert.ok(printed.some(ended(stage)), `${stage} ended: ${printed.slice(-12).join("\n")}`);
+	}
+
+	// (each file the run read through the editor, counted and timed, with its exit)
+	assert.match(run, /"exitCode":\d/u, run);
+	assert.match(run, /"readFile":\d+,"readFileMs":\d+/u, run);
+});
+
 test("a breakpoint stops the run; a step goes on a line, a step back returns to it", async () => {
 	await session.request("files.write", { "path": "debugger-steps.mjs", "content": "let x = 1;\nx = 2;\nx = 3;\nconsole.log(x);\n" }, 30_000);
 

@@ -5,7 +5,7 @@
 import { unpack } from "@brianjenkins94/almostnode/packages";
 import { packageDisposition } from "@brianjenkins94/util/silo/policy";
 import { tally } from "./gate";
-import { post, state } from "./state";
+import { post, state, workerLog } from "./state";
 
 /** A file the editor keeps for the project, as text: `.silo/<name>` when the repository has it, else its local copy
  *  (editor-api's git.ts `keptAt`) — through the editor's runtime, as the debugger's own read. */
@@ -56,25 +56,32 @@ export function installPackage(name: string): boolean {
 	}
 
 	const vfs = state.runtime.getVFS();
+	const link = state.editorLink;
 
-	// (installing is busy too: the worker blocks on each tarball, with nothing else to say — a run's dozen installs, a
-	// minute and more with nothing told, read as stuck)
-	post({ "type": "busy" });
+	// (under the run that required it: its span, as almostnode's install hook hands nothing down)
+	return (state.runSpan ?? workerLog()).span("editor.extensions.tsval.worker.install.fetch", { "name": name, "version": version }, (span) => {
+		// (installing is busy too: the worker blocks on each tarball, with nothing else to say — a run's dozen installs, a
+		// minute and more with nothing told, read as stuck)
+		post({ "type": "busy" });
 
-	const archive = state.editorLink.tarball(name, version);
+		const archive = link.tarball(name, version);
+		let files = 0;
 
-	post({ "type": "busy" });
+		post({ "type": "busy" });
 
-	for (const [path, bytes] of unpack(archive)) {
-		const file = `${dir}/${path}`;
+		for (const [path, bytes] of unpack(archive)) {
+			const file = `${dir}/${path}`;
 
-		vfs.mkdirSync(file.slice(0, file.lastIndexOf("/")), { "recursive": true });
-		vfs.writeFileSync(file, bytes);
-	}
+			vfs.mkdirSync(file.slice(0, file.lastIndexOf("/")), { "recursive": true });
+			vfs.writeFileSync(file, bytes);
+			files += 1;
+		}
 
-	installed.set(name, version);
+		installed.set(name, version);
+		span.end({ "bytes": archive.byteLength, "count": files });
 
-	return true;
+		return true;
+	});
 }
 
 /** What's installed whose pin has changed since, removed — installed again, at its new version, as it's required. */

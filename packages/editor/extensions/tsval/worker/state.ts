@@ -7,6 +7,7 @@ import type { FsShim, RunGlobal } from "@brianjenkins94/almostnode";
 import type { PlaceSet, TestReport } from "@brianjenkins94/editor-api";
 import type { layered, RuntimeConnection } from "@brianjenkins94/editor-api/runtime";
 import type { LoadedVM } from "@brianjenkins94/tsval";
+import type { Span } from "@brianjenkins94/util/logger";
 import type { WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
@@ -18,6 +19,58 @@ import type { Runtime } from "./runtime";
 /** This worker's log, once it's linked (always, by the time a control message comes: the link comes first). */
 export function workerLog(): RuntimeConnection["log"] {
 	return state.editorLink.log;
+}
+
+/** The calls a run made of the editor through its link, by what each asked (`readFile`, `stat`, `tarball`, `decide`, …). */
+const linkCalls = new Map<string, { "calls": number; "ms": number; "failed": number }>();
+
+/**
+ * `link`, each call it makes of the editor counted: a run's file calls, a package's tarball, a package's call decided
+ * there — each a blocking round trip, thousands a run, so counted rather than spanned (CLAUDE.md, *Spans*: hot paths),
+ * and told on the run's span as it ends (linkCallsSince). The editor counts the same calls as it answers them (the
+ * metrics plane's `runtime-fs`); these are the run's, and the time the run waited.
+ */
+export function countLinkCalls(link: RuntimeConnection): RuntimeConnection {
+	const counted = <T extends (...args: never[]) => unknown>(what: string, call: T): T => ((...args: Parameters<T>) => {
+		const started = performance.now();
+		const tally = linkCalls.get(what) ?? { "calls": 0, "ms": 0, "failed": 0 };
+
+		linkCalls.set(what, tally);
+		tally.calls += 1;
+
+		try {
+			return call(...args);
+		} catch (error) {
+			tally.failed += 1;
+
+			throw error;
+		} finally {
+			tally.ms += performance.now() - started;
+		}
+	}) as T;
+
+	for (const [name, call] of Object.entries(link.fs)) {
+		(link.fs as unknown as Record<string, unknown>)[name] = counted(name, call);
+	}
+
+	link.tarball = counted("tarball", link.tarball);
+	link.decide = counted("decide", link.decide);
+
+	return link;
+}
+
+/** The calls counted since the last asking, as a span's attributes — `stat: 8750, statMs: 4700, statFailed: 12` — and
+ *  the count started again. */
+export function linkCallsSince(): Record<string, number> {
+	const told = Object.fromEntries([...linkCalls].flatMap(([what, { calls, ms, failed }]) => [
+		[what, calls],
+		[what + "Ms", Math.round(ms)],
+		...failed > 0 ? [[what + "Failed", failed]] : []
+	]));
+
+	linkCalls.clear();
+
+	return told;
 }
 
 export type Vm = LoadedVM["vm"];
@@ -47,6 +100,9 @@ export interface State {
 	"editorLink": RuntimeConnection | undefined;
 	/** The step under way's span (advanceFrom's): a run's end closes it before it says so (finish). */
 	"stepSpan": { "end": () => void } | undefined;
+	/** The run's span, from its launch to its end (session.ts's openRun and finish): its stages under it — the runtime
+	 *  loading, the entry parsed, each package installed, its first step. */
+	"runSpan": Span | undefined;
 	"sourceFile": ts.SourceFile | undefined;
 	/** 1-based lines pre-armed as capability breakpoints (policy said stop), by program file — so a stop there reports
 	 *  reason "capability" rather than "breakpoint". The entry's computed at launch from the policy the adapter sent;
@@ -159,6 +215,7 @@ export interface State {
 export const state: State = {
 	"editorLink": undefined,
 	"stepSpan": undefined,
+	"runSpan": undefined,
 	"sourceFile": undefined,
 	"capabilityLines": new Map<string, Set<number>>(),
 	"placeSets": new Map<string, Map<number, PlaceSet[]>>(),

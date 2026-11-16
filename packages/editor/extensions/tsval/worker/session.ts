@@ -4,6 +4,7 @@
  */
 import type { PlaceSet } from "@brianjenkins94/editor-api";
 import type { ModuleLoader } from "@brianjenkins94/tsval";
+import type { Span } from "@brianjenkins94/util/logger";
 import type { CapabilityAsk, Control, Crash, Snapshot, Variable, WorkerEvent } from "../debug-protocol";
 import type { SiteSums } from "../site-sums";
 import type { Runtime } from "./runtime";
@@ -21,7 +22,7 @@ import { dropUnpinned, readPins } from "./install";
 import { packagesRan, readBaseline } from "./package-calls";
 import { EXITED, held, listening, readsStdin } from "./process";
 import { editorPlaywright, programModules, runtimeReady, whereOf } from "./runtime";
-import { post, state, workerLog } from "./state";
+import { linkCallsSince, post, state, workerLog } from "./state";
 import { askAt } from "./stops";
 import { startTests, tellCoverage, tellTests, testsOver, testTold } from "./tests";
 import { endValues, flushValues, keepTold, resumeTold, startValues, tellSet, traceValue } from "./values";
@@ -654,13 +655,36 @@ function finish(exitCode = 0, crash?: Crash): void {
 	tellEffects();
 	tellCoverage();
 
+	const told = tellTests(exitCode);
+
+	endRun({ "exitCode": told, ...crash === undefined ? {} : { "crashed": true } });
 	post({
 		"type": "terminated",
-		"exitCode": tellTests(exitCode),
+		"exitCode": told,
 		...crash === undefined
 			? {}
 			: { "crash": crash }
 	});
+}
+
+/** A run's span (state.runSpan), from its launch to its end: the stages under it, and on its end how it went and what it
+ *  asked of the editor (linkCallsSince). Continues the adapter's launch, when it sent its trace. */
+function openRun(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): Span {
+	const name = "editor.extensions.tsval.worker.session.run";
+	const attrs = { "path": message.fileName, "args": message.args?.length ?? 0, "live": message.live === true, "replay": message.replay !== undefined };
+
+	// (what was counted before it is the last run's, or the worker's own start)
+	linkCallsSince();
+	state.runSpan = trace === undefined ? workerLog().span(name, attrs) : workerLog().continueSpan(trace, name, attrs);
+
+	return state.runSpan;
+}
+
+/** The run's span ended, with `attrs` and what the run asked of the editor: before the run says it's over, as once
+ *  it has the adapter ends this worker, and what it sends after is lost (finish). */
+function endRun(attrs: Record<string, unknown>): void {
+	state.runSpan?.end({ ...attrs, "programFiles": state.programFiles.size, ...linkCallsSince() });
+	state.runSpan = undefined;
 }
 
 /** Where `vm` is stopped: its file, and the 1-based line in it. */
@@ -849,12 +873,12 @@ function stopReason(base: Vm, action: ForwardAction, stop: Place | undefined): "
 	return "step";
 }
 
-async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): Promise<void> {
+async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext, parent: ReturnType<typeof workerLog> = workerLog()): Promise<void> {
 	state.current = base;
 	state.evaluating = base; // (a program file a package requires is evaluated on the machine running)
 	const span = trace !== undefined
 		? workerLog().continueSpan(trace, "editor.extensions.tsval.worker.session.step", { "action": action })
-		: workerLog().span("editor.extensions.tsval.worker.session.step", { "action": action });
+		: parent.span("editor.extensions.tsval.worker.session.step", { "action": action });
 
 	state.stepSpan = span;
 
@@ -1009,8 +1033,8 @@ async function handle(action: Action): Promise<void> {
 	}
 }
 
-async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
-	await advanceFrom(initial, "continue", launchTrace); // run to the first breakpoint (or completion)
+async function session(initial: Vm, run: Span): Promise<void> {
+	await advanceFrom(initial, "continue", undefined, run); // run to the first breakpoint (or completion), under the run's span
 
 	while (!state.done) {
 		const action = await nextAction();
@@ -1028,6 +1052,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// launch can give one (its clock, seed and schedule).
 	// A server it starts keeps it alive: out of work, it idles, serving. A live run's timers go at once, its waits skipped, and
 	// nothing keeps it alive past its first idle. It starts with a fresh layer: what the last one wrote is gone.
+	const run = openRun(message, trace);
+
 	state.live = message.live === true;
 	state.recordedResults = state.live
 		? message.recorded ?? {}
@@ -1047,7 +1073,8 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	let loadedRuntime: Runtime;
 
 	try {
-		loadedRuntime = await runtimeReady(message.workspace);
+		// (the first run in a worker loads almostnode and attaches the workspace; a later one finds it ready)
+		loadedRuntime = await run.span("editor.extensions.tsval.worker.session.load", { "first": state.runtime === undefined }, async () => runtimeReady(message.workspace));
 		modules = programModules(loadedRuntime);
 	} catch (error) {
 		// (with where: a load failing inside the runtime names no file of the program's)
@@ -1113,7 +1140,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	let loaded: ReturnType<typeof createVM>;
 
 	try {
-		loaded = createVM(message.source, {
+		loaded = run.span("editor.extensions.tsval.worker.session.parse", { "path": message.fileName, "bytes": message.source.length }, () => createVM(message.source, {
 			"fileName": message.fileName,
 			...state.live
 				? { "maxSteps": LIVE_STEPS }
@@ -1134,7 +1161,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 				"__editorPlaywright": editorPlaywright
 			},
 			"modules": modules
-		});
+		}));
 	} catch (error) {
 		// The program's own file doesn't parse: nothing of it has run, and the run ends there, as `node`'s does.
 		if (!(error instanceof ProgramSyntaxError)) {
@@ -1143,6 +1170,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 		// Saved mid-statement, a live run runs nothing and tells nothing: the margin keeps what the last run that parsed did.
 		if (state.live) {
+			endRun({ "exitCode": 0, "unparsed": true });
 			post({ "type": "terminated", "exitCode": 0, "quiet": true });
 
 			return;
@@ -1193,7 +1221,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	state.history = [];
 	state.index = -1;
 	state.done = false;
-	await session(loaded.vm, trace);
+	await session(loaded.vm, run);
 }
 
 /** A recorded call replayed for the debugger (RUNNING.md: stepping a recorded handler): the function run on what it read in
@@ -1205,6 +1233,7 @@ async function launchReplay(message: Extract<Control, { "type": "launch" }>, rep
 	const { standIn, hostGuard } = replayGuard(replay);
 	const self = revive(replay.self, standIn);
 	const eventLoop = { "now": Date.now(), "seed": 1, "pace": "fast" as const };
+	const run = openRun(message, trace);
 
 	state.live = false;
 	state.recordedResults = {};
@@ -1259,7 +1288,7 @@ async function launchReplay(message: Extract<Control, { "type": "launch" }>, rep
 	state.history = [];
 	state.index = -1;
 	state.done = false;
-	await session(loaded.vm, trace);
+	await session(loaded.vm, run);
 }
 
 /** Launch a run: its program's, or a recorded call's replay. */
