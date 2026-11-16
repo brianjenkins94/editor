@@ -10,28 +10,23 @@ import { changesPanel, codeOf, commitAll, gitLog, openEditor, openFile, READABLE
 /** How many times "Open a Commit Read-Only" is asked, each a second longer after the last. */
 const TRIES = 5;
 
-/** "Git: Open a Commit Read-Only…" on `ref`, as it is or (`how`) the code alone. Its boxes close as their window loses the
- *  focus, as the palette's do (runCommand: another spec's editor in the same page), so it's asked again until both
- *  answers go to it — a while after each time, as the other spec typing keeps the focus for a while. */
+/** "Git: Open a Commit Read-Only…" on `ref`, as it is or (`how`) the code alone. With another spec's editor in the same
+ *  page (test/in-editor.mjs runs two at once), a box can lose the focus or close before its answer, so it's asked again,
+ *  a while longer after each time, until both answers go to it. */
 async function openRef(page, workbench, ref, how = "As it is") {
 	const input = workbench.locator(".quick-input-widget input[type='text'], .quick-input-widget input:not([type])").first();
 	// (where each try stopped, said if none takes)
 	const stopped = [];
+	// (Enter with the box's own focus — `press` gives it back to the input — and the next box looked for: seen here, a
+	// window given the focus back hands it to what had it last, the editor group, a moment after the box has it)
 	const answered = async (text, next, what) => {
 		await input.fill(text);
-
-		if (!await expect(input).toBeFocused({ "timeout": 1000 }).then(() => true, () => false)) {
-			const focused = await workbench.locator(":focus").first().getAttribute("class").catch(() => "nothing");
-
-			stopped.push(`${what}: not focused (${String(await input.count())} inputs; the focus on ${JSON.stringify(focused)}, ${await page.locator(":focus").first().getAttribute("class").catch(() => "nothing")} outside)`);
-
-			return false;
-		}
-
 		await input.press("Enter");
 
 		if (next !== undefined && !await expect(next).toBeVisible({ "timeout": 15_000 }).then(() => true, () => false)) {
-			stopped.push(`${what}: no "${how}" after it (showing: ${JSON.stringify(await workbench.locator(".quick-input-widget").first().innerText().catch(() => "nothing"))})`);
+			const focused = await workbench.locator(":focus").first().getAttribute("class").catch(() => "nothing");
+
+			stopped.push(`${what}: no "${how}" after it (the focus on ${JSON.stringify(focused)}; showing: ${JSON.stringify(await workbench.locator(".quick-input-widget").first().innerText().catch(() => "nothing"))})`);
 
 			return false;
 		}
@@ -64,11 +59,6 @@ test("a commit opened beside the work: its files as committed, read-only, and no
 	const workbench = await openEditor(page, { ...READABLE_TERMINAL, "refs-probe/a.txt": "committed\n" });
 
 	await commitAll(page, "refs: a file to read at its commit");
-
-	// A name that isn't one says so.
-	await openRef(page, workbench, "no-such-ref");
-	await expect(workbench.locator(".notification-toast", { "hasText": "isn't a commit" })).toBeVisible({ "timeout": 60_000 });
-
 	await openRef(page, workbench, "main");
 
 	// The working file changed after: the commit's is as it was.
@@ -108,4 +98,12 @@ test("a commit's code alone: each file's comments blanked line for line, and no 
 	// (.refs, main~stripped, refs-alone, then its files: the fourth level is the commit's)
 	await expect(workbench.locator("[role='treeitem'][aria-level='4'][aria-label='a.ts']")).toHaveCount(1);
 	await expect(workbench.locator("[role='treeitem'][aria-level='4'][aria-label='README.md']")).toHaveCount(0);
+});
+
+test("a name that isn't a commit says so", async ({ page }) => {
+	const workbench = await openEditor(page, { "refs-none/a.txt": "a\n" });
+
+	await commitAll(page, "refs: something to name");
+	await openRef(page, workbench, "no-such-ref");
+	await expect(workbench.locator(".notification-toast", { "hasText": "isn't a commit" })).toBeVisible({ "timeout": 60_000 });
 });

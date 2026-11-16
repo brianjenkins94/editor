@@ -16,6 +16,7 @@ test("a change listed, committed from its input box", async ({ page }) => {
 	await expect(listed.first()).toBeVisible({ "timeout": 60_000 });
 	await workbench.locator(".scm-editor .monaco-editor").first().click();
 	await workbench.locator(".scm-editor .native-edit-context").first().pressSequentially("from Source Control");
+	await expect(workbench.locator(".scm-editor .view-lines").first()).toHaveText("from Source Control");
 	await workbench.locator(".scm-editor .native-edit-context").first().press("ControlOrMeta+Enter");
 
 	await expect(listed).toHaveCount(0, { "timeout": 60_000 });
