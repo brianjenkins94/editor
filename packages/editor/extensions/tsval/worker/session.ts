@@ -670,12 +670,13 @@ function finish(exitCode = 0, crash?: Crash): void {
 /** A run's span (state.runSpan), from its launch to its end: the stages under it, and on its end how it went and what it
  *  asked of the editor (linkCallsSince). Continues the adapter's launch, when it sent its trace. */
 function openRun(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): Span {
-	const name = "editor.extensions.tsval.worker.session.run";
 	const attrs = { "path": message.fileName, "args": message.args?.length ?? 0, "live": message.live === true, "replay": message.replay !== undefined };
 
 	// (what was counted before it is the last run's, or the worker's own start)
 	linkCallsSince();
-	state.runSpan = trace === undefined ? workerLog().span(name, attrs) : workerLog().continueSpan(trace, name, attrs);
+	state.runSpan = trace === undefined
+		? workerLog().span("editor.extensions.tsval.worker.session.run", attrs)
+		: workerLog().continueSpan(trace, "editor.extensions.tsval.worker.session.run", attrs);
 
 	return state.runSpan;
 }
