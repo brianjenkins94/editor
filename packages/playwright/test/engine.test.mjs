@@ -359,6 +359,30 @@ test("a click on a button whose icon is slotted into it, the icon what's under t
 	await fresh();
 });
 
+test("a click on a checkbox drawn over its input, in a shadow root's label: what's under the pointer clicked, so it's checked, on either side", async () => {
+	const checked = async (click) => {
+		await page.setContent("<x-check></x-check>");
+		await page.addScriptTag({ "content": ENGINE });
+		await page.evaluate(() => {
+			if (customElements.get("x-check") === undefined) {
+				customElements.define("x-check", class extends HTMLElement {
+					constructor() {
+						super();
+						this.attachShadow({ "mode": "open" }).innerHTML = "<label style='position:relative;display:inline-block;width:40px;height:40px'><input type=checkbox style='position:absolute;inset:0;margin:0;width:40px;height:40px'><svg width=40 height=40 style='position:absolute;inset:0'><rect width=40 height=40 /></svg></label>";
+					}
+				});
+			}
+		});
+		await click();
+
+		return page.evaluate(() => document.querySelector("x-check").shadowRoot.querySelector("input").checked);
+	};
+
+	assert.equal(await checked(async () => page.locator("x-check").click({ "timeout": 2000 })), true);
+	assert.equal(await checked(async () => ours.locator("x-check").click({ "timeout": 2000 })), true);
+	await fresh();
+});
+
 test("a frame driven as a page keeps its focus when another takes it, and is told focus moving within it", async () => {
 	await page.setContent("<iframe id=a srcdoc='<input id=one><input id=two>'></iframe><iframe id=b srcdoc='<input id=other>'></iframe>");
 	await page.addScriptTag({ "content": ENGINE });

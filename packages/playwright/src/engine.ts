@@ -714,31 +714,9 @@ function notActionable(element: Element, needsEnabled: boolean): string | undefi
 		element.scrollIntoView({ "block": "center", "inline": "center" });
 	}
 
-	const hitAtMiddle = (): Element | null => {
-		const box = element.getBoundingClientRect();
-		const x = box.left + box.width / 2;
-		const y = box.top + box.height / 2;
-		let hit = element.ownerDocument.elementFromPoint(x, y);
-
-		// (the browser answers with the host: on into its shadow root, for what's really there)
-		for (let inside = hit?.shadowRoot?.elementFromPoint(x, y); inside !== null && inside !== undefined && inside !== hit; inside = hit?.shadowRoot?.elementFromPoint(x, y)) {
-			hit = inside;
-		}
-
-		return hit;
-	};
-	const inElement = (found: Element): boolean => {
-		// (through the slot it's assigned to, as the browser draws it and Playwright goes: an icon slotted into a shadow root's button is in that button)
-		for (let at: Element | null = found; at !== null; at = at.assignedSlot ?? composedParent(at)) {
-			if (at === element) {
-				return true;
-			}
-		}
-
-		return false;
-	};
+	const hitAtMiddle = (): Element | null => hitAt(element);
 	// (nor is it covered by its own host: a slot's content, or a button in a shadow root, hits what holds it)
-	const covered = (hit: Element | null): hit is Element => hit !== null && !inElement(hit) && !isHostOf(hit, element);
+	const covered = (hit: Element | null): hit is Element => hit !== null && !isIn(hit, element) && !isHostOf(hit, element);
 
 	if (covered(hitAtMiddle())) {
 		// (scrolled out of a scrolling box, in view of the window: scrolled to, as Playwright does when a click is blocked)
@@ -754,18 +732,53 @@ function notActionable(element: Element, needsEnabled: boolean): string | undefi
 	return undefined;
 }
 
+/** What's at `element`'s middle, as a pointer there hits it: into shadow roots, for what's really there. */
+function hitAt(element: Element): Element | null {
+	const box = element.getBoundingClientRect();
+	const x = box.left + box.width / 2;
+	const y = box.top + box.height / 2;
+	let hit = element.ownerDocument.elementFromPoint(x, y);
+
+	// (the browser answers with the host: on into its shadow root, for what's really there)
+	for (let inside = hit?.shadowRoot?.elementFromPoint(x, y); inside !== null && inside !== undefined && inside !== hit; inside = hit?.shadowRoot?.elementFromPoint(x, y)) {
+		hit = inside;
+	}
+
+	return hit;
+}
+
+/** Whether `found` is `element` or in it — through the slot it's assigned to, as the browser draws it and Playwright goes:
+ *  an icon slotted into a shadow root's button is in that button. */
+function isIn(found: Element, element: Element): boolean {
+	for (let at: Element | null = found; at !== null; at = at.assignedSlot ?? composedParent(at)) {
+		if (at === element) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/** What takes the focus as a pointer goes down on what's in it. */
+const FOCUSABLE = "[tabindex], a[href], button, input, select, textarea, [contenteditable='true']";
+
+/** A pointer's events at `element`'s middle, on what's there as a mouse's are: what's under the pointer, when it's in
+ *  `element` (a checkbox's drawn box in its label, which the browser's own activation then passes to the input), else
+ *  `element`. */
 function pointer(element: Element, types: string[], detail = 1): void {
 	const view = windowOf(element);
 	const box = element.getBoundingClientRect();
 	const init = { "bubbles": true, "cancelable": true, "composed": true, "clientX": box.left + box.width / 2, "clientY": box.top + box.height / 2, "button": 0, "detail": detail, "view": view };
+	const hit = hitAt(element);
+	const target = hit !== null && isIn(hit, element) ? hit : element;
 
 	for (const type of types) {
 		const event = type.startsWith("pointer") ? new view.PointerEvent(type, { ...init, "pointerType": "mouse", "isPrimary": true }) : new view.MouseEvent(type, init);
 
-		element.dispatchEvent(event);
+		target.dispatchEvent(event);
 
 		if (type === "mousedown" && (element as HTMLElement).focus !== undefined) {
-			(element.closest("[tabindex], a[href], button, input, select, textarea, [contenteditable='true']") as HTMLElement | null)?.focus();
+			((target.closest(FOCUSABLE) ?? element.closest(FOCUSABLE)) as HTMLElement | null)?.focus();
 		}
 	}
 }

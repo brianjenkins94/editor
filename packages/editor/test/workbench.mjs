@@ -15,16 +15,21 @@ import { startSession, URL_UNDER_TEST } from "./architecture-harness.mjs";
 
 let session;
 
+/** The development API (shell/session.ts `API`, off the production site). */
+const API = "https://editor-api-dev.brianjenkins94.workers.dev";
+
+/** How the API's requests are answered: as they would be, unless a test stands in for it. */
+let answerApi = async (route) => route.continue();
+
 before(async () => {
-	session = await startSession();
+	// (routed from the start: a route added later waits on every worker the page has had, and one rolldown's slicer ends
+	// with its threads parked never says it's gone — Playwright's route then waits for ever)
+	session = await startSession({ "prepare": async (context) => context.route(`${API}/**`, async (route) => answerApi(route)) });
 });
 
 after(async () => {
 	await session?.close("workbench");
 });
-
-/** The development API (shell/session.ts `API`, off the production site). */
-const API = "https://editor-api-dev.brianjenkins94.workers.dev";
 
 test("the theme follows the system's: VS Code's theme switches, and the shell draws in its colours", async () => {
 	const { page } = session;
@@ -115,7 +120,7 @@ test("signing in starts from the GitHub button: pushed to the API, then off to i
 	const { page } = session;
 	const pushed = [];
 
-	await page.context().route(`${API}/**`, async (route) => {
+	answerApi = async (route) => {
 		const { pathname } = new URL(route.request().url());
 
 		if (pathname === "/auth/par") {
@@ -126,10 +131,10 @@ test("signing in starts from the GitHub button: pushed to the API, then off to i
 		} else {
 			await route.fulfill({ "status": 200, "contentType": "application/json", "body": "{}" });
 		}
-	});
+	};
 
-	await page.locator("wa-button[aria-label='GitHub']").click();
-	await page.locator("[aria-label='GitHub connection'] wa-button", { "hasText": "Sign in" }).click();
+	await page.locator("wa-button[aria-label='GitHub']").click({ "timeout": 30_000 });
+	await page.locator("[aria-label='GitHub connection'] wa-button", { "hasText": "Sign in" }).click({ "timeout": 30_000 });
 	await page.waitForURL(`${API}/auth/start**`, { "timeout": 30_000 });
 
 	const started = new URL(page.url());

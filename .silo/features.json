@@ -18,7 +18,7 @@
     ],
     "tests": [
       "packages/editor/test/code-problems.test.mjs",
-      "packages/editor/test/git-views.mjs",
+      "packages/editor/test/in-editor/change-problems.spec.mjs",
       "packages/editor/test/page-tools.test.mjs"
     ]
   },
@@ -38,7 +38,7 @@
       "packages/editor/workbench/git-refs.ts"
     ],
     "tests": [
-      "packages/editor/test/git-views.mjs"
+      "packages/editor/test/in-editor/commit-beside.spec.mjs"
     ]
   },
   "Admin: architecture": {
@@ -1951,7 +1951,7 @@
       "packages/editor/shell/git-panel.tsx"
     ],
     "tests": [
-      "packages/editor/test/git-views.mjs"
+      "packages/editor/test/in-editor/review-panel.spec.mjs"
     ]
   },
   "Rule editor": {
@@ -2254,7 +2254,7 @@
       "packages/editor/extensions/source-control/"
     ],
     "tests": [
-      "packages/editor/test/git-views.mjs"
+      "packages/editor/test/in-editor/source-control.spec.mjs"
     ]
   },
   "Spell check": {

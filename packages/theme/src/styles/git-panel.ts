@@ -65,7 +65,8 @@ export const gitPanelStyles = stylesheet({
 	".gp-discard": {
 		"visibility": "hidden"
 	},
-	".gp-file:hover .gp-discard, .gp-discard.armed": {
+	// (and on the row that's open, or has the focus: not the pointer's alone, so a keyboard or a touch reaches it too)
+	".gp-file:hover .gp-discard, .gp-file:focus-within .gp-discard, .gp-file[aria-current='true'] .gp-discard, .gp-discard.armed": {
 		"visibility": "visible"
 	},
 	// Your edits: under a file's row, the code each edit since the last commit touched (git-panel.tsx `Chunks`). Hovering one

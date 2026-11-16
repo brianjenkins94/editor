@@ -49,7 +49,8 @@ export async function openFile(workbench, path) {
 	const parts = path.split("/");
 
 	for (const [at, name] of parts.entries()) {
-		const row = workbench.getByRole("treeitem", { "name": name, "exact": true });
+		// (at its depth: a name can be at more than one — a commit opened beside the work has the workspace's)
+		const row = workbench.locator(`[role='treeitem'][aria-level='${String(at + 1)}'][aria-label='${name}']`);
 
 		await expect(row).toBeVisible({ "timeout": 30_000 });
 
@@ -158,3 +159,33 @@ export const devApp = (folder, said) => ({
 
 /** What a dev server's window is: as many as are open. */
 export const previewWindows = (page) => page.locator("app-window[data-preview-port]");
+
+/** The changes panel (shell/git-panel.tsx), shown: what's changed since the last commit, a row a file. */
+export async function changesPanel(page) {
+	if (!await page.locator(".gp").isVisible()) {
+		await page.locator("wa-button[aria-label='Toggle changes panel']").click();
+	}
+
+	// (a checkbox clicked where a person does, its box; whether it's checked, its input's)
+	return { "row": (name) => page.locator(".gp-file", { "hasText": name }), "all": page.locator("wa-checkbox[aria-label='Select all changes']"), "allChecked": page.locator("wa-checkbox[aria-label='Select all changes'] input") };
+}
+
+/** Every change committed from the changes panel, with `message`: the panel empty once it's made. */
+export async function commitAll(page, message) {
+	const { allChecked } = await changesPanel(page);
+
+	await expect(page.locator(".gp-file").first()).toBeVisible({ "timeout": 60_000 });
+	await expect(allChecked).toBeChecked();
+	await page.locator(".gp-commit wa-textarea textarea").fill(message);
+	await page.locator(".gp-commit wa-button").click();
+	await expect(page.locator(".gp-file")).toHaveCount(0, { "timeout": 60_000 });
+}
+
+/** The workspace's commits, newest first, one a line, as `git log --oneline` in a new terminal shows them (READABLE_TERMINAL). */
+export async function gitLog(workbench) {
+	const { input, output } = await openTerminal(workbench);
+
+	await input.pressSequentially("git log --oneline\n");
+
+	return output;
+}
