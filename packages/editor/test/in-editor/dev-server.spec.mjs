@@ -1,14 +1,14 @@
 /**
  * The in-browser dev server (workers/node-worker.ts, the terminal's `vite`), as a person has it: a project served from the
- * terminal, its page running, a save reaching it, another refused, and stopping it. test/dev-server.mjs keeps what has no UI to
- * read. Runs in the editor: test/in-editor.mjs.
+ * terminal, its page running isolated as the editor's own is, a save reaching it, another refused, and stopping it.
+ * test/dev-server.mjs keeps what a client hears from it, which has no UI to read. Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 
 import { devApp, openEditor, openFile, openTerminal, previewWindows, retype } from "./editor.mjs";
 
 test("vite serves a project: its page runs, a save reaches it, another is refused, and it stops", async ({ page }) => {
-	const workbench = await openEditor(page, devApp("devapp", "from TypeScript"));
+	const workbench = await openEditor(page, { ...devApp("devapp", "from TypeScript"), "devapp/index.html": "<!doctype html><html><body><div id=\"app\"></div><div id=\"isolated\"></div><script type=\"module\" src=\"/src/isolated.ts\"></script><script type=\"module\" src=\"/src/main.ts\"></script></body></html>\n", "devapp/src/isolated.ts": "document.querySelector(\"#isolated\")!.textContent = crossOriginIsolated ? \"isolated\" : \"not isolated\";\n" });
 
 	await openFile(workbench, "devapp/src/main.ts");
 
@@ -20,6 +20,8 @@ test("vite serves a project: its page runs, a save reaches it, another is refuse
 	const app = page.frameLocator("app-window[data-preview-port] iframe").locator("#app");
 
 	await expect(app).toHaveText("from TypeScript", { "timeout": 60_000 });
+	// (SharedArrayBuffer and the rest: an app's page isolated as the editor's own is)
+	await expect(page.frameLocator("app-window[data-preview-port] iframe").locator("#isolated")).toHaveText("isolated");
 
 	// A save: the terminal says so, and the page has it.
 	await retype(workbench, "document.querySelector(\"#app\")!.textContent = \"saved since\";");
