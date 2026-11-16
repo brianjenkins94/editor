@@ -26,7 +26,7 @@ How it's kept:
 
    features-map.ts went from 32 TypeScript errors to 2, and a linked file has one name. Still open:
    - **`silo check` runs in the editor** (2026-11-15): `node packages/silo/src/cli.ts check` in its terminal says the
-     ledger and the code agree, in 28 s (3.3 s natively), and a run before it caught two stray files as owned by no
+     ledger and the code agree, in 19 s (3.3 s natively), and a run before it caught two stray files as owned by no
      feature. Nothing it needs is spawned: its analysis is TypeScript 7's WebAssembly build where no native compiler
      can start (lib's `apiOf`; `@typescript/typescript-wasip1-wasm`, on npm since 2026-10-30; unpkg serves its 53 MB
      tsc.wasm, jsDelivr won't), and its git is isomorphic-git (silo's git.ts); under Node with neither spawned,
@@ -45,11 +45,16 @@ How it's kept:
      in 0.3 s and silo's modules load in ~2.5 s. Those were timed by exiting early; a run's stages are spans now
      (2026-11-16): `…tsval.worker.session.run` from its launch to its end, with what it asked of the editor on its end
      (`stat: 5762, statMs: 8836`, each call the run waited on: readFile, stat, readdir, tarball, decide), and under it
-     the runtime's `load`, the entry's `parse`, each package's `install.fetch` (bytes, files) and the first `step`. The
-     next cost they show: of a 29 s check, 12 s is the run waiting on 5,762 stats and 1,124 readdirs — the listing's
-     `withFileTypes`, a stat an entry, as the runtime's readdir gives names only; a readdir with each entry's type
-     would make it one call a folder. (A `@latest` tarball isn't fetched again while its version is the same, util's
-     0.1.0, as npm without `npm install <url>`: delete it to refresh.)
+     the runtime's `load`, the entry's `parse`, each package's `install.fetch` (bytes, files) and the first `step`. They
+     showed 12 s of a 29 s check waiting on 5,762 stats and 1,124 readdirs — the listing's `withFileTypes`, a stat an
+     entry, as the runtime's readdir gave names only. Its folders' entries now come with their kinds, as VS Code lists
+     them (RuntimeFs `entries`; almostnode's fs asks a VFS's `direntsSync` before statting): 10 stats, and the check
+     19 s, of which 3 s is the 1,124 listings and the rest mostly TypeScript. (A `@latest` tarball isn't fetched again
+     while its version is the same, util's 0.1.0, as npm without `npm install <url>`: delete it to refresh.)
+   - **A run typed during a boot can hang, saying nothing** (2026-11-16): `node packages/silo/src/cli.ts check`
+     typed ~10 s into a fresh editor's load was listed by `runs_list` as running for over a minute with no debug
+     session — the debug worker logged no launch, nothing said why; Ctrl+C, then the same again, ran at once. Likely
+     the terminal's run asked tsval before its extension was ready, and the ask was lost rather than waited for.
    - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —
      go-to-definition reaches theme's card.d.ts and from it Web Awesome's in the root node_modules, and the file has no
      2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's

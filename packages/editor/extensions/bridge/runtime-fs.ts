@@ -73,8 +73,12 @@ async function perform(op: string, path: string, payload: Uint8Array, to?: strin
 				return { "meta": stat === undefined ? {} : { "stat": { "type": (stat.type & vscode.FileType.Directory) === 0 ? "file" : "directory", "size": stat.size, "mtime": stat.mtime } } };
 			}
 
-			case "readdir":
-				return { "meta": { "entries": (await vscode.workspace.fs.readDirectory(uri)).map(([name]) => name) } };
+			case "readdir": {
+				// (each entry's kind with its name, as VS Code lists them: a typed listing is one call a folder, not a stat an entry)
+				const listed = await vscode.workspace.fs.readDirectory(uri);
+
+				return { "meta": { "entries": listed.map(([name]) => name), "types": listed.map(([, type]) => ((type & vscode.FileType.Directory) === 0 ? "file" : "directory")) } };
+			}
 			case "writeFile":
 				await vscode.workspace.fs.writeFile(uri, payload);
 

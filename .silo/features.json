@@ -699,6 +699,7 @@
       "packages/editor-api/test/exchanges.test.mjs",
       "packages/editor-api/test/layer.test.mjs",
       "packages/editor-api/test/mailbox.test.mjs",
+      "packages/editor-api/test/runtime-vfs.test.mjs",
       "packages/editor-api/test/values.test.mjs"
     ]
   },

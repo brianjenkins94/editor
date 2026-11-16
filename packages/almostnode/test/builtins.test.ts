@@ -349,3 +349,51 @@ test("what almostnode can't do says so as it's used: a UDP socket, v8's serializ
 	// (tools make one as they load, and never use it here: eslint-plugin-jsonc, through synckit)
 	runtime.execute("new (require(\"worker_threads\").Worker)(\"./w.js\");", "/worker.js");
 });
+
+test("fs's withFileTypes takes the kinds from a VFS that lists them (one call a folder), else stats each entry — the same Dirents either way, in all three forms", async () => {
+	const { createFsShim } = await import("../shims/fs.ts");
+	const make = (vfs: InstanceType<typeof VirtualFS>): void => {
+		vfs.mkdirSync("/w/sub", { "recursive": true });
+		vfs.writeFileSync("/w/a.txt", "a");
+	};
+	const kinds = (dirents: { "name": string; "isDirectory": () => boolean; "isFile": () => boolean }[]): string[] => dirents.map((each) => `${each.name} ${each.isDirectory() ? "dir" : each.isFile() ? "file" : "?"}`).sort();
+	const forms = async (fs: ReturnType<typeof createFsShim>): Promise<string[][]> => [
+		kinds(fs.readdirSync("/w", { "withFileTypes": true })),
+		kinds(await fs.promises.readdir("/w", { "withFileTypes": true }) as never),
+		kinds(await new Promise((resolve, reject) => {
+			fs.readdir("/w", { "withFileTypes": true }, (error, found) => (error === null ? resolve(found as never) : reject(error)));
+		}))
+	];
+
+	// (a VFS that stats each entry, as almostnode's own does)
+	const plain = new VirtualFS();
+	let stats = 0;
+	const statSync = plain.statSync.bind(plain);
+
+	make(plain);
+	plain.statSync = (path: string) => {
+		stats += 1;
+
+		return statSync(path);
+	};
+
+	const expected = ["a.txt file", "sub dir"];
+
+	assert.deepEqual(await forms(createFsShim(plain)), [expected, expected, expected]);
+	assert.equal(stats, 6, "a stat an entry, in each form");
+
+	// (one whose listing has the kinds: the editor's runtime-vfs.ts)
+	const typed = new VirtualFS() as InstanceType<typeof VirtualFS> & { "direntsSync": (path: string) => { "name": string; "type": "file" | "directory" }[] };
+
+	make(typed);
+	typed.direntsSync = (path) => typed.readdirSync(path).map((name) => ({ "name": name, "type": name === "sub" ? "directory" as const : "file" as const }));
+	stats = 0;
+	typed.statSync = () => {
+		stats += 1;
+
+		throw new Error("not asked");
+	};
+
+	assert.deepEqual(await forms(createFsShim(typed)), [expected, expected, expected]);
+	assert.equal(stats, 0, "no stat: the listing has the kinds");
+});

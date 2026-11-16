@@ -7,7 +7,7 @@
  * there. The debugger's module loading isn't through this: its reads aren't the program's.
  */
 import type { Stats } from "@brianjenkins94/almostnode";
-import type { RuntimeFs, RuntimeStat } from "./runtime.ts";
+import type { RuntimeEntry, RuntimeFs, RuntimeStat } from "./runtime.ts";
 import { VirtualFS } from "@brianjenkins94/almostnode";
 
 /** `path`, absolute and normalized — if it's in the workspace. */
@@ -136,6 +136,14 @@ export class RuntimeVfs extends VirtualFS {
 		const workspace = inWorkspace(path);
 
 		return workspace === undefined ? super.readdirSync(path) : this.files.readdir(workspace);
+	}
+
+	/** A workspace folder's entries with their kinds, in one call (almostnode's fs asks it for `withFileTypes`, rather than a
+	 *  stat an entry); undefined outside the workspace, or where the files don't list kinds (a run's layer): it stats them. */
+	public direntsSync(path: string): RuntimeEntry[] | undefined {
+		const workspace = inWorkspace(path);
+
+		return workspace === undefined ? undefined : this.files.entries?.(workspace);
 	}
 
 	public override unlinkSync(path: string): void {

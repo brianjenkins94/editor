@@ -248,6 +248,28 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 		"X_OK": 1
 	};
 
+	/**
+	 * `path`'s entries with their kinds (`withFileTypes`): the VFS's own typed listing where it has one (`direntsSync`: one
+	 * call a folder — a VFS whose calls are round trips, the editor's runtime-vfs.ts), else each entry statted.
+	 */
+	const direntsOf = (path: string): Dirent[] => {
+		const typed = (vfs as { "direntsSync"?: (folder: string) => { "name": string; "type": "file" | "directory" }[] | undefined }).direntsSync?.(path);
+
+		if (typed !== undefined) {
+			return typed.map(({ name, type }) => new Dirent(name, type === "directory", type === "file"));
+		}
+
+		return vfs.readdirSync(path).map((name) => {
+			try {
+				const stat = vfs.statSync(path.endsWith("/") ? path + name : path + "/" + name);
+
+				return new Dirent(name, stat.isDirectory(), stat.isFile());
+			} catch {
+				return new Dirent(name, false, true); // (a file, when it can't be statted)
+			}
+		});
+	};
+
 	/** A new folder named `prefix` and six random characters, as Node's mkdtemp makes one. */
 	const mkdtemp = (prefix: string): string => {
 		const resolvedPath = resolvePath(`${prefix}${Math.random().toString(36).slice(2, 8)}`);
@@ -367,31 +389,9 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 			return new Promise((resolve, reject) => {
 				try {
 					const path = resolvePath(pathLike);
-					const entries = vfs.readdirSync(path);
 					const opts = typeof options === "string" ? {} : options;
 
-					if (opts?.withFileTypes) {
-						const dirents = entries.map((name) => {
-							const entryPath = path.endsWith("/") ? path + name : path + "/" + name;
-							let isDir = false;
-							let isFile = false;
-
-							try {
-								const stat = vfs.statSync(entryPath);
-
-								isDir = stat.isDirectory();
-								isFile = stat.isFile();
-							} catch {
-								isFile = true;
-							}
-
-							return new Dirent(name, isDir, isFile);
-						});
-
-						resolve(dirents);
-					} else {
-						resolve(entries);
-					}
+					resolve(opts?.withFileTypes ? direntsOf(path) : vfs.readdirSync(path));
 				} catch (err) {
 					reject(err);
 				}
@@ -534,28 +534,12 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 			const path = resolvePath(pathLike);
 
 			trackCall("readdirSync", path);
-			const entries = vfs.readdirSync(path);
 
       // Handle withFileTypes option - returns Dirent objects instead of strings
 			const opts = typeof options === "string" ? { "encoding": options } : options;
 
 			if (opts?.withFileTypes) {
-				const dirents: Dirent[] = entries.map((name) => {
-					const entryPath = path.endsWith("/") ? path + name : path + "/" + name;
-					let isDir = false;
-					let isFile = false;
-
-					try {
-						const stat = vfs.statSync(entryPath);
-
-						isDir = stat.isDirectory();
-						isFile = stat.isFile();
-					} catch {
-						isFile = true; // Default to file if stat fails
-					}
-
-					return new Dirent(name, isDir, isFile);
-				});
+				const dirents = direntsOf(path);
 
         // Debug: Log readdirSync results for _generated
 				if (path.includes("_generated")) {
@@ -564,6 +548,8 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 
 				return dirents;
 			}
+
+			const entries = vfs.readdirSync(path);
 
       // Debug: Log readdirSync results for _generated
 			if (path.includes("_generated")) {
@@ -860,30 +846,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 			const path = resolvePath(pathLike);
 
 			try {
-				const entries = vfs.readdirSync(path);
-
-				if (opts?.withFileTypes) {
-					const dirents: Dirent[] = entries.map((name) => {
-						const entryPath = path.endsWith("/") ? path + name : path + "/" + name;
-						let isDir = false;
-						let isFile = false;
-
-						try {
-							const stat = vfs.statSync(entryPath);
-
-							isDir = stat.isDirectory();
-							isFile = stat.isFile();
-						} catch {
-							isFile = true;
-						}
-
-						return new Dirent(name, isDir, isFile);
-					});
-
-					cb?.(null, dirents);
-				} else {
-					cb?.(null, entries);
-				}
+				cb?.(null, opts?.withFileTypes ? direntsOf(path) : vfs.readdirSync(path));
 			} catch (err) {
 				cb?.(err as Error);
 			}

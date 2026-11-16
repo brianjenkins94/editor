@@ -395,6 +395,9 @@ export function provideWorkspaceRuntime(runtime: WorkspaceRuntime): void {
 /** A file or folder, as `fs.stat` tells it. */
 export interface RuntimeStat { "type": "file" | "directory"; "size": number; "mtime": number }
 
+/** A folder's entry, with its kind (RuntimeFs's `entries`). */
+export interface RuntimeEntry { "name": string; "type": "file" | "directory" }
+
 /** The workspace's files, synchronously, each call answered by the editor. A call is the program's — decided by the
  *  session's policy, and kept among the run's effects — unless `load` says it's the debugger's own (reads only). Failures
  *  are node's: an `Error` with its `code` (`ENOENT`, `EACCES`, …). Paths are absolute, under `/workspace`. */
@@ -404,6 +407,9 @@ export interface RuntimeFs {
 	/** Undefined when there's nothing there. */
 	"stat": (path: string, options?: { "load"?: boolean }) => RuntimeStat | undefined;
 	"readdir": (path: string, options?: { "load"?: boolean }) => string[];
+	/** A folder's entries with their kinds, as `readdir` lists them: one call a folder, where a kind asked of each entry
+	 *  (node's `withFileTypes`) would be a stat an entry. Absent where it isn't kept apart (a run's layer): then those. */
+	"entries"?: (path: string, options?: { "load"?: boolean }) => RuntimeEntry[];
 	/** With its parents. */
 	"mkdir": (path: string) => void;
 	/** With what's in it. */
@@ -646,6 +652,11 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 			"writeFile": (path, data) => { call({ "op": "writeFile", "path": path }, typeof data === "string" ? new TextEncoder().encode(data) : data); },
 			"stat": (path, options) => (call({ "op": "stat", "path": path, "load": options?.load === true }).meta as { "stat"?: RuntimeStat }).stat,
 			"readdir": (path, options) => (call({ "op": "readdir", "path": path, "load": options?.load === true }).meta as { "entries": string[] }).entries,
+			"entries": (path, options) => {
+				const { entries, types = [] } = call({ "op": "readdir", "path": path, "load": options?.load === true }).meta as { "entries": string[]; "types"?: RuntimeEntry["type"][] };
+
+				return entries.map((name, index) => ({ "name": name, "type": types[index] ?? "file" }));
+			},
 			"mkdir": (path) => { call({ "op": "mkdir", "path": path }); },
 			"rm": (path) => { call({ "op": "rm", "path": path }); },
 			"rename": (path, to) => { call({ "op": "rename", "path": path, "to": to }); }
