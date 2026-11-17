@@ -614,7 +614,17 @@ How it's kept:
        once. A keyword pass over the specs (2026-11-17): 77 tests in 43 specs, 73 booting an editor of their own; settings
        written by 10, the ledger by 5, the policy or baseline by 3; port 5173 by 10 (a dev server's address names its
        tab, `__virtual__/<tab>/5173`, so lanes may not collide there: to be observed); git state by 15, whose teardown
-       puts refs back, not only files.
+       puts refs back, not only files. Observed (2026-11-17, workbench/effects.ts: each editor says what it was left with as a
+       test lets its window go, kept with the test's run as `leaves`, printed by test/in-editor.mjs): 74 tests of 43 specs.
+       Program files made, changed or removed, ~45; editors left open, up to 3; runs still going in 7 specs — a dev server
+       on :5173 (preview-devtools, preview-profile, preview-prompts, recorded-stops, run-menu), debugger's stdin run,
+       live-runs' Run — which in one editor would meet the next (a second dev server on :5173 is refused: dev-server.spec
+       checks it); the editor's own records (.silo/evidence, traces, edit history, reach, runs) in most, which a spec that
+       reads them would see another's of (past-runs, features-view, coverage, way-in-reach). Nothing past what teardown can
+       put back — files restored, runs stopped, editors closed — so none needs an instance of its own for what it leaves:
+       only the boot's own specs, for what they test. The boot's writes read as the test's for now — git's repository made
+       (no branch → main, 40), .vscode/settings.json (29, where 10 seed it), versions.json, .gitignore — so the baseline
+       is to be taken once the editor has come up, before the column shows them.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: the restarts every 12 specs go, and lanes are measured past two as memory allows. A spec that fails beside

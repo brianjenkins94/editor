@@ -30,7 +30,7 @@
  * - `tests.history`: the runs kept here (`.silo/local/runs.jsonl`, this machine's): each file's run, when, how long, each
  *   test's outcome and time, and what it did to the world (its effects). What the table of features and tests reads.
  */
-import type { Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
+import type { Effect, Leaves, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import type { GitReader } from "./git-service";
@@ -91,7 +91,7 @@ async function within<T>(work: Promise<T>, ms: number, message: string): Promise
 interface Asked { "message": string; "key": string; "scope": string; "request": Record<string, unknown> }
 
 /** A test file's result, as a run answers it. */
-interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[]; "output"?: string }
+interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string; "leaves"?: Leaves[] }[]; "output"?: string }
 
 /** Statements as the lines they cover, as few ranges as they make (first and last line, from 0). */
 function rangesOf(statements: [[number, number], [number, number]][]): [number, number][] {
@@ -117,7 +117,8 @@ export interface RunRecord {
 	"ms": number;
 	"exitCode": number;
 	"stalled"?: string;
-	"tests": { "id": string; "outcome": string; "ms"?: number; "statements"?: number; "error"?: string }[];
+	/** Each test's, and what the editors its pages drove were left with (`leaves`): which tests can't share one. */
+	"tests": { "id": string; "outcome": string; "ms"?: number; "statements"?: number; "error"?: string; "leaves"?: Leaves[] }[];
 	"effects": Effect[];
 	/** Why a file that failed without a failed test did: the end of what it said. */
 	"output"?: string;
@@ -573,7 +574,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				"ms": result.ms,
 				"exitCode": result.exitCode,
 				...result.stalled === undefined ? {} : { "stalled": result.stalled },
-				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...test.error === undefined ? {} : { "error": test.error } })),
+				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...test.error === undefined ? {} : { "error": test.error }, ...test.leaves === undefined ? {} : { "leaves": test.leaves } })),
 				"effects": result.effects,
 				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
 			});
@@ -589,7 +590,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 					// (a test that passed but did more than it used to, or took longer: said, as a failure is)
 					const slower = test.outcome === "pass" ? slowerOf(earlier, id, test, percent) : undefined;
 
-					return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...slower === undefined ? {} : { "slower": slower }, ...last.has(id) ? { "before": last.get(id) } : {} };
+					return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...slower === undefined ? {} : { "slower": slower }, ...last.has(id) ? { "before": last.get(id) } : {}, ...test.leaves === undefined ? {} : { "leaves": test.leaves } };
 				}),
 				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
 			});

@@ -56,6 +56,7 @@ import { installCodeRefactor } from "./code-refactor";
 import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installDecisions } from "./decisions";
 import { installEditorState } from "./editor-state";
+import { installEffects } from "./effects";
 import { installEvidence } from "./evidence";
 import { loadContributedExtensions, registerExtensionFolder } from "./extensions";
 import { installFeaturesView } from "./features-view";
@@ -534,6 +535,8 @@ function maybeBoot(): void {
 				installCodeReach(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner);
+				// What this editor was left with, for a test that drove it to say as it lets it go (effects.ts).
+				installEffects(api as typeof import("vscode"), nodeRunner.runs, paneLog);
 				// Features and their tests, a table (features-view.tsx).
 				installFeaturesView(api as typeof import("vscode"), workbenchHub, paneLog);
 				// An allow rule no test run uses, said on the rule (capability-confirm.ts).

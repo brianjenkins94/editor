@@ -210,6 +210,8 @@ export interface State {
 	 *  the dev server instrumented): the code of the editor in it, in every realm of it. The test ending next takes it as
 	 *  its own (its page is let go by an `after` of its, just before it ends). */
 	"windowReach": TestReport["files"];
+	/** What the editors a test's pages drove were left with, as each was let go (workbench/effects.ts). */
+	"windowLeaves": NonNullable<TestReport["leaves"]>;
 	/** How many tests failed, as node-test.js tells at the end: a run with one fails, as `node --test` does. */
 	"testsFailed": number;
 	/** Whether node-test.js has told that the file's tests are all done: past it, only what Node counts as keeping a process
@@ -262,6 +264,7 @@ export const state: State = {
 	"pins": {},
 	"testsRan": [],
 	"windowReach": [],
+	"windowLeaves": [],
 	"testsFailed": 0,
 	"testsDone": false
 };

@@ -146,6 +146,19 @@ export interface TestReport {
 	 *  doesn't change, as it does its time. */
 	"statements"?: number;
 	"files": { "file": string; "statements": [[number, number], [number, number]][] }[];
+	/** What the editors its pages drove were left with as it let them go: what a test after it in the same editor would meet
+	 *  (packages/editor's workbench/effects.ts). */
+	"leaves"?: Leaves[];
+}
+
+/** What an editor has done to itself since it came up: its workspace's files (made, changed, removed; packages and git's
+ *  own left out), git's branch and HEAD where they moved (then, now), runs still going (and the ports they serve) and the
+ *  editors left open. */
+export interface Leaves {
+	"files": { "path": string; "how": "made" | "changed" | "removed" }[];
+	"git"?: { "branch": [string | undefined, string | undefined]; "head": [string | undefined, string | undefined] };
+	"running": { "title": string; "port"?: number }[];
+	"editors": number;
 }
 
 /** The `tests` event, sent as a test file's run ends (before `coverage`): its tests in the order they ran — `file` the

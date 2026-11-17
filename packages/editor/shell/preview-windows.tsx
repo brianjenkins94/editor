@@ -20,6 +20,7 @@
  * With the dev server counting (COVERAGE=1), what the editor in a test's window ran — every realm of it — goes back with
  * the page as it's let go, the test's reach.
  */
+import type { Leaves } from "@brianjenkins94/editor-api";
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ShellFeature } from "./feature";
@@ -46,6 +47,9 @@ const COVERAGE_CHANNEL = "editor.coverage";
 
 /** How long a question there waits for answers: a realm busy for longer (a worker blocked) isn't heard. */
 const ASK_MS = 1000;
+/** The channel an editor says on what it was left with (workbench/effects.ts), and how long one is waited for. */
+const EFFECTS_CHANNEL = "editor.effects";
+const LEAVES_MS = 2000;
 
 /** Each instrumented realm's answer to `ask` on COVERAGE_CHANNEL, within ASK_MS: its id, and what it ran when asked. */
 async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": string; "ran"?: Record<string, [number, number][]> }[]> {
@@ -65,6 +69,39 @@ async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": strin
 	channel.close();
 
 	return answers;
+}
+
+/** What the editor in `element`'s window was left with (workbench/effects.ts), asked by the instance in its address: an
+ *  editor that answers once, or none (a page that isn't an editor, or one gone). */
+async function leavesOf(element: HTMLElement | undefined): Promise<Leaves | undefined> {
+	let named: string | null | undefined;
+
+	try {
+		named = new URLSearchParams(element?.querySelector("iframe")?.contentWindow?.location.search ?? "").get("instance");
+	} catch {
+		return undefined; // (another origin's page)
+	}
+
+	if (named === null || named === undefined) {
+		return undefined;
+	}
+
+	const channel = new BroadcastChannel(EFFECTS_CHANNEL);
+	const nonce = crypto.randomUUID();
+
+	try {
+		return await new Promise<Leaves | undefined>((resolve) => {
+			channel.addEventListener("message", ({ data }: MessageEvent<{ "answer"?: string; "leaves"?: Leaves }>) => {
+				if (data.answer === nonce) {
+					resolve(data.leaves);
+				}
+			});
+			channel.postMessage({ "ask": "leaves", "instance": named, "nonce": nonce });
+			setTimeout(() => { resolve(undefined); }, LEAVES_MS);
+		});
+	} finally {
+		channel.close();
+	}
 }
 
 /** Lines `[first, last]` as few ranges as they make. */
@@ -484,6 +521,8 @@ function install(hub: Hub): void {
 
 			const reach = ranSoFar.get(asking);
 			const element = claimed.get(asking);
+			// (what its editor was left with, while it's still there to say: a test after it in the same editor would meet it)
+			const leaves = await leavesOf(element);
 
 			realmsBefore.delete(asking);
 			ranSoFar.delete(asking);
@@ -499,7 +538,7 @@ function install(hub: Hub): void {
 				retarget();
 			}
 
-			return reach === undefined ? undefined : { "reach": Object.fromEntries(reach) };
+			return { ...reach === undefined ? {} : { "reach": Object.fromEntries(reach) }, ...leaves === undefined ? {} : { "leaves": leaves } };
 		}
 
 		// A test's own request: made here, as a client of its origin — no window needed (a stopped server's address is asked
