@@ -1900,6 +1900,54 @@ export class Runtime {
 		return createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache, requester)(specifier);
 	}
 
+	/** Whether `specifier` (from `fromDir`) is a package's ES module whose evaluation awaits — at its own top level, or in
+	 *  one it statically imports, in turn — which only an import can wait for, not a require. A program file isn't asked
+	 *  about: its host evaluates those (`evaluateProgram`). Each module looked at is prepared as loading it would be, and
+	 *  kept so (its code isn't transformed twice). */
+	awaits(specifier: string, fromDir: string = this.process.cwd()): boolean {
+		const seen = new Set<string>();
+		const check = (id: string, dir: string): boolean => {
+			let resolved: Resolved;
+
+			try {
+				resolved = this.resolve(id, dir);
+			} catch {
+				return false;
+			}
+
+			if (resolved.kind !== "package" || seen.has(resolved.filename)) {
+				return false;
+			}
+
+			seen.add(resolved.filename);
+
+			let code: string;
+
+			try {
+				const raw = this.vfs.readFileSync(resolved.filename, "utf8");
+				const key = `${resolved.filename}|${simpleHash(raw)}`;
+
+				code = this.processedCodeCache.get(key) ?? prepared(raw.startsWith("#!") ? raw.slice(raw.indexOf("\n") + 1) : raw, resolved.filename);
+				this.processedCodeCache.set(key, code);
+			} catch {
+				return false;
+			}
+
+			return code.startsWith(ASYNC_MODULE) || staticImportsOf(code).some((each) => check(each, pathShim.dirname(resolved.filename)));
+		};
+
+		return check(specifier, fromDir);
+	}
+
+	/** `specifier` imported from `fromDir`, as `import()` does: a module whose top level awaits evaluated to its end, and
+	 *  its namespace — what a host evaluating the program's static imports itself asks for first, as Node evaluates an
+	 *  importer's dependencies before it, so the program's own require of it then has it whole. */
+	async import(specifier: string, fromDir: string = this.process.cwd(), requester: Requester = "program"): Promise<unknown> {
+		const require = createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache, requester);
+
+		return createDynamicImport(require, this.options.base, this.options.nativeFileImports)(specifier);
+	}
+
 	/** Where `specifier` resolves from `fromDir`, and what it is: a built-in (its name), a package's file, or a program
 	 *  file — Node's resolution, as `require` does it. Throws as `require` would when nothing's there. */
 	resolve(specifier: string, fromDir: string = this.process.cwd()): Resolved {

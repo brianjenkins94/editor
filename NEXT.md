@@ -153,7 +153,12 @@ How it's kept:
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
      `file:` URL source as the copy's destination.
    - **A caller from the stack** (fs-boundaries, 1 of 4): `vscode`, not `ExplorerService` — tsval's stacks.
-   - **static-host**: `require()` of util's vite/build.js, an ES module with top-level await.
+   - **Real Vite in a run** (static-host, through util's vite/build): rolldown's native binding ("Cannot find native
+     binding") and lightningcss's (unenv's `process.report.getReport`). Its top-level await is past: a package the
+     program imports — statically, or by `import()` of a literal — that awaits at its top (almostnode's `awaits`) is
+     imported before the program's first line, as Node evaluates it, so its require has it whole. What would take it the
+     rest: rolldown as `@rolldown/browser` and lightningcss as `lightningcss-wasm` in a run — real Vite in the browser,
+     a decision (the dev server here is almostnode's own, not Vite).
    - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
 
    These tests go with the rewrite (item 3): what's worth fixing here is the runtime they find wrong, since the rebuilt

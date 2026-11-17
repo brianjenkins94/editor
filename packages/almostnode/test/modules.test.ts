@@ -137,6 +137,29 @@ test("a linked package resolves to its real files, as Node's does: the program's
 	assert.deepEqual(runtime.resolve("greet"), { "kind": "package", "filename": "/workspace/node_modules/greet/index.js" }, "a package installed there is a package's");
 });
 
+test("awaits and import: a package that awaits at its top level — or imports one that does — is imported first, and then a require has it whole", async () => {
+	const runtime = runtimeWith({
+		...PACKAGE,
+		"/workspace/node_modules/slow/package.json": JSON.stringify({ "name": "slow", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/slow/index.js": "export const value = await Promise.resolve(42);",
+		"/workspace/node_modules/uses-slow/package.json": JSON.stringify({ "name": "uses-slow", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/uses-slow/index.js": "import { value } from 'slow';\nexport const doubled = value * 2;"
+	});
+
+	assert.deepEqual([runtime.awaits("slow"), runtime.awaits("uses-slow"), runtime.awaits("greet"), runtime.awaits("node:path")], [true, true, false, false]);
+	assert.throws(() => runtime.require("uses-slow"), /an ES module with top-level await/u, "a require can't wait for it");
+
+	const runtime2 = runtimeWith({
+		"/workspace/node_modules/slow/package.json": JSON.stringify({ "name": "slow", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/slow/index.js": "export const value = await Promise.resolve(42);",
+		"/workspace/node_modules/uses-slow/package.json": JSON.stringify({ "name": "uses-slow", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/uses-slow/index.js": "import { value } from 'slow';\nexport const doubled = value * 2;"
+	});
+
+	assert.equal((await runtime2.import("uses-slow") as { "doubled": number }).doubled, 84);
+	assert.equal((runtime2.require("uses-slow") as { "doubled": number }).doubled, 84, "then a require has it, evaluated");
+});
+
 test("registerHooks: a resolve hook redirects a specifier for what's resolved after — require and the runtime's resolve — others pass on, and deregistered it's gone", () => {
 	const runtime = runtimeWith({ ...PACKAGE, "/workspace/stand-in.js": "module.exports = { 'standIn': true };" });
 	const said = runtime.execute(`
