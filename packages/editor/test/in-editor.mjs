@@ -29,18 +29,34 @@ async function sessionWithSpecs() {
 	return session;
 }
 
+/** How long a spec may run: the slowest that passes takes under 30 s (2026-11-17), and a stall waited out 20 asks of 2 minutes
+ *  each — or, the page crashed, for ever (2026-11-17: 2 h 40 min on playwright-in-editor.spec). */
+const SPEC_MS = Number(process.env.IN_EDITOR_SPEC_MS ?? 300_000);
+
 /** A spec, run to its end in `session`'s editor's debugger. */
 async function ran(session, spec) {
 	const started = Date.now();
 	let answer = await session.request("tests.run", { "files": [`in-editor/${spec}`] }, 120_000);
 
-	for (let asked = 1; answer.running !== undefined && asked < 20; asked += 1) {
+	// (asked again while it runs, until SPEC_MS: a stall fails here, saying where it was, rather than holding every spec after it)
+	while (answer.running !== undefined && Date.now() - started < SPEC_MS) {
 		answer = await session.request("tests.run", { "run": answer.run }, 120_000);
 	}
 
 	console.log(`${spec}: ${String(Date.now() - started)} ms`);
 
+	if (answer.running !== undefined) {
+		return { "tests": [], "error": `still running after ${String(SPEC_MS / 1000)} s: ${answer.running}` };
+	}
+
 	return answer.files[0];
+}
+
+/** `work`, or undefined once `ms` pass: what's asked of a page that may have crashed (a frame's evaluate waits for ever). */
+async function within(work, ms) {
+	let timer;
+
+	return Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, ms); })]).finally(() => { clearTimeout(timer); });
 }
 
 /** What's on screen in each frame still open, and what the page printed: why a spec failed on a runner nobody can watch. */
@@ -99,7 +115,7 @@ function runs() {
 							const file = await ran(session, spec).catch((error) => ({ "tests": [], "error": String(error) }));
 
 							if (failed(file)) {
-								await sayWhatHappened(session).catch(() => undefined);
+								await within(sayWhatHappened(session).catch(() => undefined), 15_000);
 							}
 
 							settled.get(spec).finish(file);
@@ -111,7 +127,7 @@ function runs() {
 						settled.get(spec).finish({ "tests": [], "error": `its session didn't start: ${String(error)}` });
 					}
 				} finally {
-					await session?.close("in-editor").catch(() => undefined);
+					await within(session?.close("in-editor").catch(() => undefined), 30_000);
 				}
 			}
 

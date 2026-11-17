@@ -274,8 +274,10 @@ How it's kept:
      line diff under test-runs; the metrics under workspace-changes), which it says and a person decides. One decided:
      page-tools.test runs *Page tools* (130 lines, beside the hub's 406), so it's among its tests now (the user,
      2026-11-17). Its specs' reach is still read from outside.
-   - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
-     an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
+   - **Notes for comments, and agents reading them**: the migration, and an orphan warning from `files_edit`. Then the
+     pass's third condition, to show notes lose nothing. Agents read them now (2026-11-17), as the Margin shows them:
+     `files_read` with the notes beside the lines it read, `decisions_for` with a file's among its whys (the notes
+     extension's `notes.on`: each found in the text as it is, its line, who wrote it, or that it lost its place).
    - **The standard**, from the pass's gaps.
    - **Reduce to the core** — started 2026-11-02 on the branch `reduction`, in the editor. Done: the composition roots
      cut to the core (the workbench's extensions and services, build.ts, the app realm, the shell's top bar, the agent
@@ -591,6 +593,32 @@ How it's kept:
      one at a time, 40 s at 3, 41 s at 5, the ESLint spec the floor; test/in-editor.mjs runs 3. At 7 the page crashed, cause not
      found. `page.goto` is among a run's effects (`page:goto`), for the column to flag. To come: what a test touches (the gate's
      effects) as the source of that flag; each grant re-confirmed by the code and by runs, so capabilities can shrink.
+   - **Specs share an editor, by design** (the user, 2026-11-17: set up and tear down, idempotent, not in each other's way —
+     how tests are written from the beginning, not a speed-up after). A spec is written to run in an editor another spec used
+     before it and beside another: it makes what it needs, puts back what it changed, and assumes nothing it didn't make.
+     Today each test boots a VS Code of its own (editor.mjs `openEditor`, a fresh `?instance=`: coverage.spec 9.4 s, 1.0 s of
+     it the test), and the harness starts the browser again every 12 specs to stay under the renderer's ~9 GB, which three
+     specs still crashed into on 2026-11-17 (`Target crashed`). The design:
+     - **A lane's editor**: one editor a lane, booted once, its window kept between specs (preview-windows.tsx's `release`
+       hands it back to the lane rather than removing it); two lanes, as now, each its own instance, so lanes never meet.
+     - **Setup and teardown are fixtures, not the spec's own code** (specs do what a person does): an `editor` fixture seeds
+       the spec's files on a checkpoint taken as the lane's editor booted, and as the spec ends restores it (Workspace: Save
+       and Restore Checkpoint, a person's way to do the same), closes its editors, quick input and panels, and puts its
+       settings back. What a spec writes to the workspace's own files — .vscode/settings.json (10 specs), .silo/features.json
+       (5), .silo/policy.json (3) — is gone before the next.
+     - **First, what each test affects** (the user, 2026-11-17: an inventory, so we know which can never share an
+       instance). Declared: what it seeds and asks for — workspace files, settings, a port, git refs, the editor's own
+       identity (a reload, an instance, `?extension=`), runs and terminals left going. Observed: what's different in its
+       editor after it than before — files, settings, open editors, runs still going, ports listening, refs, browser
+       storage — kept with its run as its effects are, and shown in Features and Tests' column of what can't run at
+       once. A keyword pass over the specs (2026-11-17): 77 tests in 43 specs, 73 booting an editor of their own; settings
+       written by 10, the ledger by 5, the policy or baseline by 3; port 5173 by 10 (a dev server's address names its
+       tab, `__virtual__/<tab>/5173`, so lanes may not collide there: to be observed); git state by 15, whose teardown
+       puts refs back, not only files.
+     - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
+       (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
+     - **Then**: the restarts every 12 specs go, and lanes are measured past two as memory allows. A spec that fails beside
+       a copy of itself is a bug in the spec (unit test files already pass so, 2026-11-04: *Tests at once*).
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,
