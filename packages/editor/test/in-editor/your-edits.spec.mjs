@@ -15,7 +15,8 @@ async function yourEdits(page, file) {
 		await page.locator("wa-button[aria-label='Toggle changes panel']").click();
 	}
 
-	await page.locator(".gp-file", { "hasText": file }).locator("wa-button[aria-label='Your edits']").click();
+	// (the file's row comes with git's status, and its Your edits with its edits read: on CI, later than a click's 5 s)
+	await page.locator(".gp-file", { "hasText": file }).locator("wa-button[aria-label='Your edits']").click({ "timeout": 60_000 });
 
 	return page.locator(".gp-chunks");
 }
