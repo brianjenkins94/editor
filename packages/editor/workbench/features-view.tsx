@@ -324,7 +324,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 
 		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
-		const { "tests": affected, why } = await rpc.request("tests.affected", {}, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
+		const { "tests": affected, why } = await rpc.request("tests.affected", { "glance": true }, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
 		const changesThat = (reason: Why): string[] => why.filter((each) => each.why === reason).map((each) => each.path);
 
 		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25) };

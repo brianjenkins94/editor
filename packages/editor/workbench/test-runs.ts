@@ -315,8 +315,10 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		});
 	}
 
-	const affected = async (paths?: string[]): Promise<{ "tests": Affected[]; "changed": string[]; "why": { "path": string; "why": Why; "tests": number }[]; "untraced": string[]; "untracedLeftOut"?: number; "outside": number }> => {
-		const changed = paths ?? (await git.status({ "whole": true })).files.filter((change) => change.status !== "D").map((change) => change.path);
+	/** The tests a change reaches. What's changed, unless `paths` says: a walk of the whole tree (git's `whole`), as what's
+	 *  run of it acts on it — or, `glance`, of what the change watcher has told so far, for a view drawn again as it does. */
+	const affected = async (paths?: string[], glance = false): Promise<{ "tests": Affected[]; "changed": string[]; "why": { "path": string; "why": Why; "tests": number }[]; "untraced": string[]; "untracedLeftOut"?: number; "outside": number }> => {
+		const changed = paths ?? (await git.status({ "whole": !glance })).files.filter((change) => change.status !== "D").map((change) => change.path);
 		// (each changed code file's lines against the last commit; one git hasn't, or named and not changed, is all of it)
 		const changes = await Promise.all(changed.map(async (path): Promise<Change> => {
 			if (!CODE.test(path) || isTestFile(path)) {
@@ -358,9 +360,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	};
 
 	serve(hub, "tests.affected", async (args) => {
-		const { paths } = (args ?? {}) as { "paths"?: unknown };
+		const { paths, glance } = (args ?? {}) as { "paths"?: unknown; "glance"?: unknown };
 
-		return affected(Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "")) : undefined);
+		return affected(Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "")) : undefined, glance === true);
 	});
 
 	/** The runs kept, oldest first; each write waits for the one before, as files run at once end at once. */

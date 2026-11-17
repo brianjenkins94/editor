@@ -158,8 +158,12 @@ How it's kept:
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: a stop's probe
      for a path computed on its line was kept by the line, so where a copy lands got its source's (fixed, 2026-11-17:
      kept by the capability and argument it's after, worker/gate.ts `probeResource`).
-   - **Each file costs 5–8 s** however little it runs (ata's four tests take 8 ms of a 1.2 s file, cosmetic's three 4 ms
-     of 6 s): most of a run of all 41 is that, not their tests. Not yet looked into — the run's spans would say where.
+   - **Each file cost 5–8 s** however little it ran (cosmetic's three tests, 4 ms of 6 s; alone, 0.4 s). The spans said
+     where: each file's result, kept, drew Features and Tests again, and its affected tests asked git for a walk of the
+     whole tree (3.5 s on the workbench's thread), the next file's launch waiting behind it. The view asks for what the
+     change watcher has told now (`tests.affected`'s `glance`; whatever acts on it — runs_affected, a run of the stale
+     tests — still walks the whole tree): 1.4–2.9 s a file. What's left is the editor at work on each file the run opens
+     — ESLint, BABLR, the Margin's values kept (5 s, beside the run), the run's evidence recorded (1–3 s).
    (All 41 in one call hung at the tenth file on 2026-11-16, the workbench blank; on 2026-11-17 they ran through. A
    question one stopped on, answered, started the run over from its first file: it goes on from the file that asked
    now, under the same id, the files before it kept — test-runs.ts `tests.run`, as Features and Tests' Run does.)
