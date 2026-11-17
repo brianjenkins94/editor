@@ -464,7 +464,7 @@ export class WebSocketServer extends EventEmitter {
 			this._bind(port);
 			queueMicrotask(() => { this.emit("listening"); });
 		} else if (options.server !== undefined) {
-			const server = options.server as { "listening"?: boolean; "address": () => { "port": number } | string | null; "once": (event: string, listener: () => void) => void };
+			const server = options.server as { "listening"?: boolean; "address": () => { "port": number } | string | null; "once": (event: string, listener: () => void) => void; "on": (event: string, listener: (error: Error) => void) => void };
 			const bind = (): void => {
 				const address = server.address();
 
@@ -476,8 +476,17 @@ export class WebSocketServer extends EventEmitter {
 			if (server.listening === true) {
 				bind();
 			} else {
-				server.once("listening", bind);
+				// (and told, as `ws` re-emits its http server's `listening` and `error`: what waits on this server's
+				// `listening` — a port of 0's, by its address — hears it, bound by then)
+				server.once("listening", () => {
+					bind();
+					this.emit("listening");
+				});
 			}
+
+			server.on("error", (error) => {
+				this.emit("error", error);
+			});
 		}
 	}
 

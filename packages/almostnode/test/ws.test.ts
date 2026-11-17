@@ -152,3 +152,19 @@ test("a server on a port (any free one, for 0) is what the global WebSocket reac
 	await new Promise((resolve) => { third.on("listening", resolve); });
 	third.close();
 });
+
+test("a server on an http server says it's listening when that does, bound to its port by then, and passes its errors on, as ws does", async () => {
+	const { EventEmitter } = await import("node:events");
+	const http = Object.assign(new EventEmitter(), { "listening": false, "address": () => (http.listening ? { "port": 4567 } : null) });
+	const server = new WebSocketServer({ "server": http });
+	const heard: unknown[] = [];
+
+	server.on("listening", () => { heard.push(["listening", server.address()?.port]); });
+	server.on("error", (error: Error) => { heard.push(["error", error.message]); });
+	http.listening = true;
+	http.emit("listening");
+	http.emit("error", new Error("taken"));
+
+	assert.deepEqual(heard, [["listening", 4567], ["error", "taken"]]);
+	server.close();
+});

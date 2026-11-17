@@ -139,10 +139,11 @@ How it's kept:
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
-   the editor's 41 unit test files: 33 pass whole — git-fast-forward, git-status and silo-kept since a package's own
+   the editor's 41 unit test files: 34 pass whole — git-fast-forward, git-status and silo-kept since a package's own
    version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
    the root's 7 and 2; versions.json's format 3), history-ledger since almostnode's `node:module` has `registerHooks`
-   (resolve hooks, a runtime's own). The rest, by cause:
+   (resolve hooks, a runtime's own), page-tools since almostnode's `ws` says a server on an http server is listening
+   when that is (debug-mcp's `whenListening` waited for ever). The rest, by cause:
    - **A linked package's TypeScript run as JavaScript** (cosmetic, past `registerHooks` now): "Unexpected token ']' (in
      /workspace/node_modules/@brianjenkins94/editor-api/src/annotations.ts)" — resolved by its node_modules path, so a
      package's, which almostnode evaluates as it is; editor-api's other modules, imported elsewhere, load. Not yet traced.
@@ -151,7 +152,6 @@ How it's kept:
      `file:` URL source as the copy's destination.
    - **Timers in a hidden tab** (hidden-timers, 2 of 4): the worker's timers never fire under the debugger's clock.
    - **A caller from the stack** (fs-boundaries, 1 of 4): `vscode`, not `ExplorerService` — tsval's stacks.
-   - **page-tools stalls**: "nothing for 120 s: the session had no frame" (it passed 2026-11-02).
    - **static-host**: `require()` of util's vite/build.js, an ES module with top-level await.
    - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
 
