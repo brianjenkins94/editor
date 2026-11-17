@@ -9,8 +9,10 @@
  *
  * What's here: `test` (`it`), `describe` (`suite`), their `.skip` and `.todo` (and `.only`, run as any other), the
  * `skip`, `todo` and `timeout` options, `before`, `after`, `beforeEach`, `afterEach`, and a test's context: `name`,
- * `diagnostic`, `skip`, `todo`, `test`, `after`, `passed` and `assert` (node:assert). Callback tests (`(t, done)`) too. Not
- * here: `mock`, snapshots, `only` filtering and concurrency — a test that never settles, with no `timeout`, ends with the
+ * `diagnostic`, `skip`, `todo`, `test`, `after`, `passed`, `assert` (node:assert) and `mock`. Callback tests (`(t, done)`)
+ * too. `mock`: `fn`, `method` (not `getter` or `setter`), `reset`, `restoreAll`, and `timers` (`enable` — setTimeout, setInterval, setImmediate, Date
+ * — `tick`, `runAll`, `setTime`, `reset`), as node's are; the runner's own timers are the real ones, so a test's mocked
+ * clock doesn't stop it. Not here: snapshots, `only` filtering and concurrency — a test that never settles, with no `timeout`, ends with the
  * run. A `timeout` is the run's clock's, as the program's own time is: in the debugger, where the code runs many times
  * slower than in Node, a limit written for Node holds for what the test waits on, not for how long its code takes.
  */
@@ -18,8 +20,193 @@
 
 const assert = require("node:assert");
 
+/** The run's own timers and clock, as they are when this loads: what the runner itself waits with, mocked or not. */
+const real = { "setTimeout": globalThis.setTimeout, "clearTimeout": globalThis.clearTimeout, "setInterval": globalThis.setInterval, "clearInterval": globalThis.clearInterval, "setImmediate": globalThis.setImmediate, "clearImmediate": globalThis.clearImmediate, "Date": globalThis.Date };
+
 /** The debug worker's (absent elsewhere): told each test's start and end, and the run's end. */
 const tell = typeof globalThis.__editorTest === "function" ? globalThis.__editorTest : () => undefined;
+
+/** What `mock.fn` and `mock.method` made, to restore and reset all at once. */
+const made = [];
+
+/** node:test's `mock.fn`: a function that keeps each call (`.mock.calls`), and runs `implementation` (else `original`). */
+function fn(original = function () {}, implementation = original, options = {}) {
+	const calls = [];
+	let current = implementation;
+	const once = [];
+	let restore = () => undefined;
+	function mocked(...args) {
+		const run = once.length > 0 ? once.shift() : current;
+		const call = { "arguments": args, "this": this, "result": undefined, "error": undefined, "stack": new Error("mock call") };
+
+		calls.push(call);
+
+		try {
+			call.result = new.target === undefined ? run.apply(this, args) : Reflect.construct(run, args, new.target);
+		} catch (error) {
+			call.error = error;
+
+			throw error;
+		} finally {
+			if (options.times !== undefined && calls.length >= options.times) {
+				current = original;
+			}
+		}
+
+		return call.result;
+	}
+
+	mocked.mock = {
+		"calls": calls,
+		"callCount": () => calls.length,
+		"mockImplementation": (next) => { current = next; },
+		"mockImplementationOnce": (next) => { once.push(next); },
+		"resetCalls": () => { calls.length = 0; },
+		"restore": () => { restore(); },
+		"_restoring": (how) => { restore = how; }
+	};
+	made.push(mocked);
+
+	return mocked;
+}
+
+/** node:test's `mock.method`: `object[name]` a mock of itself (or of `implementation`), until it's restored. */
+function method(object, name, implementation, options = {}) {
+	const original = object[name];
+
+	if (typeof original !== "function") {
+		throw new TypeError(`The argument 'methodName' must be a method. Received ${String(name)}`);
+	}
+
+	const mocked = fn(original, implementation ?? original, options);
+	const own = Object.getOwnPropertyDescriptor(object, name);
+
+	object[name] = mocked;
+	mocked.mock._restoring(() => {
+		if (own === undefined) {
+			delete object[name];
+		} else {
+			Object.defineProperty(object, name, own);
+		}
+	});
+
+	return mocked;
+}
+
+/** node:test's mock timers: the APIs it's enabled for replaced by ones on a clock of its own, which only `tick`,
+ *  `runAll` and `setTime` move; each timer due by then run, in the order it's due — one set as another runs, due within
+ *  the same tick, too. */
+const timers = (() => {
+	let enabled;
+	let now = 0;
+	let next = 1;
+	/** What's set: by id, each with when it's due, what it runs, and its interval if it repeats. */
+	const queue = new Map();
+	const set = (callback, delay, args, every) => {
+		const id = next;
+
+		next += 1;
+		const wait = Math.max(0, Number(delay) || 0);
+
+		queue.set(id, { "id": id, "at": now + wait, "callback": callback, "args": args, "every": every === undefined ? undefined : Math.max(1, wait) });
+
+		return id;
+	};
+	const clear = (id) => { queue.delete(typeof id === "object" && id !== null ? id.id : id); };
+	/** A timer's handle, as node's mocked ones are: its id, and ref and unref doing nothing. */
+	const handle = (id) => ({ "id": id, "ref": () => handle(id), "unref": () => handle(id), "hasRef": () => true, "refresh": () => handle(id), [Symbol.toPrimitive]: () => id });
+	const due = () => [...queue.values()].filter((each) => each.at <= now).toSorted((one, other) => one.at - other.at || one.id - other.id)[0];
+	const run = () => {
+		for (let timer = due(); timer !== undefined; timer = due()) {
+			if (timer.every === undefined) {
+				queue.delete(timer.id);
+			} else {
+				timer.at += timer.every;
+			}
+
+			timer.callback(...timer.args);
+		}
+	};
+	const fakes = {
+		"setTimeout": (callback, delay, ...args) => handle(set(callback, delay, args)),
+		"clearTimeout": clear,
+		"setInterval": (callback, delay, ...args) => handle(set(callback, delay, args, delay)),
+		"clearInterval": clear,
+		"setImmediate": (callback, ...args) => handle(set(callback, 0, args)),
+		"clearImmediate": clear
+	};
+	/** Date on the mocked clock: `new Date()` and `Date.now()` are its time; given a value, the real Date's. */
+	function MockDate(...args) {
+		if (!(this instanceof MockDate)) {
+			return new real.Date(now).toString();
+		}
+
+		return Reflect.construct(real.Date, args.length === 0 ? [now] : args, new.target ?? MockDate);
+	}
+
+	Object.setPrototypeOf(MockDate, real.Date);
+	MockDate.prototype = real.Date.prototype;
+	MockDate.now = () => now;
+
+	const names = { "setTimeout": ["setTimeout", "clearTimeout"], "setInterval": ["setInterval", "clearInterval"], "setImmediate": ["setImmediate", "clearImmediate"], "Date": ["Date"] };
+
+	return {
+		"enable": ({ "apis": apis = ["setInterval", "setTimeout", "setImmediate", "Date"], "now": at = 0 } = {}) => {
+			if (enabled !== undefined) {
+				throw Object.assign(new Error("MockTimers is already enabled!"), { "code": "ERR_INVALID_STATE" });
+			}
+
+			now = typeof at === "object" ? at.getTime() : Number(at);
+			enabled = apis.flatMap((api) => names[api] ?? []);
+
+			for (const name of enabled) {
+				globalThis[name] = name === "Date" ? MockDate : fakes[name];
+			}
+		},
+		"tick": (ms = 1) => {
+			now += ms;
+			run();
+		},
+		"runAll": () => {
+			const last = Math.max(now, ...[...queue.values()].filter((each) => each.every === undefined).map((each) => each.at));
+
+			now = last;
+			run();
+		},
+		"setTime": (ms) => { now = ms; },
+		"reset": () => {
+			for (const name of enabled ?? []) {
+				globalThis[name] = real[name];
+			}
+
+			enabled = undefined;
+			queue.clear();
+			now = 0;
+		},
+		[Symbol.dispose]: () => { timers.reset(); }
+	};
+})();
+
+/** node:test's `mock`: functions and methods mocked, and timers. */
+const mock = {
+	"fn": fn,
+	"method": method,
+	"timers": timers,
+	"reset": () => {
+		for (const each of made) {
+			each.mock.resetCalls();
+			each.mock.restore();
+		}
+
+		made.length = 0;
+		timers.reset();
+	},
+	"restoreAll": () => {
+		for (const each of made) {
+			each.mock.restore();
+		}
+	}
+};
 
 const hooks = () => ({ "before": [], "after": [], "beforeEach": [], "afterEach": [] });
 /** The tests declared at the top of the file, and its suites: a tree. */
@@ -49,7 +236,7 @@ function parse(name, options, fn) {
 function schedule() {
 	if (!scheduled) {
 		scheduled = true;
-		setTimeout(runAll, 0);
+		real.setTimeout(runAll, 0);
 	}
 }
 
@@ -171,12 +358,12 @@ async function within(work, timeout) {
 
 	try {
 		return await Promise.race([work, new Promise((_resolve, reject) => {
-			timer = setTimeout(() => {
+			timer = real.setTimeout(() => {
 				reject(Object.assign(new Error(`test timed out after ${timeout}ms`), { "code": "ERR_TEST_FAILURE", "failureType": "testTimeoutFailure" }));
 			}, timeout);
 		})]);
 	} finally {
-		clearTimeout(timer);
+		real.clearTimeout(timer);
 	}
 }
 
@@ -207,6 +394,7 @@ async function runTest(node, titles, suite, depth) {
 		"todo": (message) => { todoed = message ?? true; },
 		"after": (fn) => { afters.push(fn); },
 		get "passed"() { return error === undefined; },
+		"mock": mock,
 		"test": (...args) => {
 			const { name, options, fn } = parse(...args);
 			const child = { "kind": "test", "name": String(name), "options": options, "fn": fn, "children": [], "hooks": hooks(), "parent": node };
@@ -318,6 +506,7 @@ async function runAll() {
 
 module.exports = test;
 Object.assign(test, {
+	"mock": mock,
 	"test": test,
 	"it": test,
 	"describe": describe,

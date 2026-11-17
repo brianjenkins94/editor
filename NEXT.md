@@ -139,17 +139,14 @@ How it's kept:
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
-   the editor's 41 unit test files: 34 pass whole — git-fast-forward, git-status and silo-kept since a package's own
+   the editor's 41 unit test files: 35 pass whole — git-fast-forward, git-status and silo-kept since a package's own
    version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
    the root's 7 and 2; versions.json's format 3), history-ledger since almostnode's `node:module` has `registerHooks`
    (resolve hooks, a runtime's own), page-tools since almostnode's `ws` says a server on an http server is listening
-   when that is (debug-mcp's `whenListening` waited for ever). The rest, by cause:
-   - **`node:test`'s `mock`** (cosmetic, `mock.timers`): the editor's node-test.js has none. cosmetic got here past
-     `registerHooks` and a linked package's TypeScript, which ran as a package's JavaScript ("Unexpected token ']'" in
-     editor-api's annotations.ts) until almostnode resolved a package to its real files, as Node does: a linked one's
-     are the workspace's, the program's, stepped by tsval — page-tools ran 5,283 statements where it ran 646, 13.6 s
-     where 3.9, and each test reaching a linked package is told slower once (`run.tests.slowerBy`), what it's measured by
-     now counting the workspace's own code it runs.
+   when that is (debug-mcp's `whenListening` waited for ever), cosmetic since almostnode resolves a linked package to its
+   real files (the program's, stepped by tsval, its TypeScript and all: page-tools ran 5,283 statements where it ran 646,
+   and each test reaching a linked package is told slower once) and node-test.js has node:test's `mock` (fn, method,
+   timers — held to node's own by node-test.test). The rest, by cause:
    - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
      `file:` URL source as the copy's destination.
