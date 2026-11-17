@@ -86,22 +86,24 @@ test("a program's capability calls stop in the margin, on their lines, and are m
 
 test("a breakpoint stops the run; a step goes on a line, and a step back returns to it", async ({ page }) => {
 	const workbench = await openEditor(page, { "steps.mjs": "let x = 1;\nx = 2;\nx = 3;\nconsole.log(\"x is \" + x);\n" });
-	const toolbar = (name) => workbench.locator(`.debug-toolbar .action-label[aria-label^='${name}']`);
 
 	await openFile(workbench, "steps.mjs");
 	await codeOf(workbench).press("ArrowDown");
 	await codeOf(workbench).press("F9");
 	await codeOf(workbench).press("F5");
-	// (where it's stopped, as Call Stack says: the file and its line)
+
+	// (where it's stopped, as Call Stack says: the file and its line. A step by its key, F10; Step Back has none, nor a
+	// place in the palette — the debug toolbar's, which on CI came later than a click's 5 s)
 	const at = workbench.locator(".debug-call-stack .monaco-list-row").first();
 
 	await expect(at).toContainText("steps.mjs2:1", { "timeout": 60_000 });
-	await toolbar("Step Over").click();
+	await codeOf(workbench).press("F10");
 	await expect(at).toContainText("steps.mjs3:1", { "timeout": 30_000 });
-	await toolbar("Step Back").click();
+	await workbench.locator(".debug-toolbar .action-label[aria-label^='Step Back']").click({ "timeout": 30_000 });
 	await expect(at).toContainText("steps.mjs2:1", { "timeout": 30_000 });
-	// Continued, it runs to its end: from line 2 again, x ends as it would have.
-	await toolbar("Continue").click();
+
+	// Continued (F5), it runs to its end: from line 2 again, x ends as it would have.
+	await codeOf(workbench).press("F5");
 	await expect(workbench.locator(".repl .output", { "hasText": "x is 3" }).first()).toBeVisible({ "timeout": 30_000 });
 });
 
