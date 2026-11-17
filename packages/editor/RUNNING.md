@@ -117,8 +117,9 @@ tsval, in the editor.
 test's awaits are on the run's deterministic event loop — a host-side runner calling guest tests would take them off
 it. It isn't told as one of the program's files (no coverage, values or evidence of its own). It tells the debug
 worker each test's start and end; the statements that ran in between, hooks and subtests included, are that test's.
-What's there: `test`/`it`, `describe`/`suite`, `.skip`, `.todo`, the four hooks, a test's context (`diagnostic`,
-`skip`, `todo`, `test`, `after`, `assert`) and callback tests. Not yet: `mock`, snapshots, `only` filtering, timeouts.
+What's there: `test`/`it`, `describe`/`suite`, `.skip`, `.todo`, the four hooks, the `timeout` option, a test's
+context (`diagnostic`, `skip`, `todo`, `test`, `after`, `assert`, `mock` — node's `fn`, `method` and `timers`) and
+callback tests. Not yet: snapshots, `only` filtering, concurrency.
 
 **For agents** (2026-10-29; workbench/test-runs.ts): `runs_tests` runs test files as `node --test` does and answers
 each test as data. A failed assertion's sides come as node-test.js shows them; the time is the debug worker's clock,
@@ -138,10 +139,20 @@ and the table of features and tests shows the same: a file whose code has change
 Playwright test is told and traced as any other. Its `page` drives the preview you have open (the preview window used
 last): packages/playwright's `Page`, `Locator` and `expect`, run in the debug worker (not stepped), each of a locator's ops
 run on the preview's page by the shell (`playwright.run`, shell/preview-windows.tsx). An action waits for its element there
-as Playwright's do, and an `expect` until it holds. What's there: `test` with `page` and `browserName`, `.skip` (declared, or
+as Playwright's do, and an `expect` until it holds. What's there: `test` with `page`, `request` (a test's own HTTP requests,
+made by the shell as a client of the origin, not through the program's `fetch`) and `browserName`, `.skip` (declared, or
 called in a test), `.fixme`, `.describe` and its modifiers, the four hooks, `step`, `info`. Not yet: `test.extend`,
-`test.use`'s options, other browsers, contexts, `request`, timeouts, and `playwright` itself (a browser launched). With no
+`test.use`'s options, other browsers, contexts, timeouts, and `playwright` itself (a browser launched). With no
 window open, a test fails rather than hangs, though what it says doesn't yet say why.
+
+**The editor's own unit tests run here** (2026-11-17: 39 of its 41 files, all in one call). The two that don't check the
+editor against a program a browser can't host — git-push.test against git's own `http-backend` as GitHub, node-test.test
+against Node's `node:test` — and stay outside, run by `npm test`: our own code standing in would hold the editor to
+itself. A test failing here asks first whether it tests its subject directly (the user, 2026-11-16, after a day of shims
+added to make tests pass): the runtime changes only for a gap a person's own program would hit — an error's stack, a
+copy's destination asked about, a timer native code sets — not for a test's scaffolding, a stand-in module, a fake
+Worker, a module loaded that the test doesn't use. Where it's the test, its logic moves out of its wiring to be tested
+directly (history's ledger-checks.ts, cosmetic's verdicts.ts).
 
 ## Capability stops
 

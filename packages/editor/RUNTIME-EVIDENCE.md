@@ -330,7 +330,7 @@ open is too easy to ignore (the user, 2026-11-06, of panels). Add Note is in the
 selected or the cursor's line, and in the lightbulb on a selection. What else happens to one is on the lightbulb of its line too:
 dismiss it, or, lost, put it back where the cursor is. One whose code changed, or perhaps moved, asks *Still about this?* with
 *Keep here*. Reintroduced without the typed strategy's signals, as runs' evidence isn't back to give them. Agents add them with
-`notes_add`; reading them where a comment was is NEXT.md item 3's *Notes for comments, and agents reading them*.
+`notes_add`; reading them where a comment was is NEXT.md item 2's *Notes for comments, and agents reading them*.
 
 ## Live values
 
@@ -451,7 +451,7 @@ counts runs or reads what they said seeds `run.liveRuns` off, since a save start
 
 Reintroduced 2026-11-06 (`extensions/tsval/live-run.ts`), but not yet what a save reaches: the old one also ran again each test
 and program whose trace held code the save changed, and ended one of those before a call with nothing to give it. That's the
-live loop's (NEXT.md item 3, *Which tests to run at all*), which waits for parity. Nor is a line's *replayed* or *skipped* kept
+live loop's (NEXT.md item 2, *Which tests to run at all*), which waits for parity. Nor is a line's *replayed* or *skipped* kept
 across a reload with its buttons: a run restored from `.silo/local/traces/` shows the value and not *Pin…* or *Rule…* until the
 next one.
 

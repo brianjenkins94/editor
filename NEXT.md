@@ -14,7 +14,7 @@ How it's kept:
 ## Queue
 
 1. **The refactor bench: refactor this repo in the editor, reading from and committing to GitHub.** Its first job is
-   item 3's rebuild, and what that takes is the product, for any repository (ARCHITECTURE.md, *The bench does it*):
+   item 2's rebuild, and what that takes is the product, for any repository (ARCHITECTURE.md, *The bench does it*):
    a step it can't support is a gap here. It loads: the clone
    of `brianjenkins94/editor` (2,212 files) arrives in about 2 s, and an editor is open in under 10 s. Its
    dependencies are in node_modules as npm puts them (ARCHITECTURE.md, *Packages*):
@@ -137,46 +137,7 @@ How it's kept:
      worked through the editor's tools alone (ARCHITECTURE.md, *Workspace tools*, has them all). A program runs under
      `debug_start`.
    - (d) CI on the pushed branch checks the work.
-2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
-   within a minute, done or not, and is waited on again by its run id). Measured 2026-11-17 in Brave on main, all 41 in
-   one call (4½ minutes), the editor's 41 unit test files: 39 pass whole — fs-boundaries since an error's stack in tsval is the program's
-   (tsval's src/stacks.ts: its frames, `at async` back through awaits, `Error.prepareStackTrace`'s call sites), git-fast-forward, git-status and silo-kept since a package's own
-   version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
-   the root's 7 and 2; versions.json's format 3), history-ledger and cosmetic since each tests its feature's own logic
-   (the ledger's checks, extensions/history/ledger-checks.ts; which changes are cosmetic, extensions/cosmetic/verdicts.ts)
-   rather than its wiring through a stand-in `vscode` (which had taken `node:module`'s `registerHooks` in almostnode,
-   taken back, and node:test's `mock.timers`), page-tools since almostnode's `ws` says a server on an http server is
-   listening when that is (debug-mcp's `whenListening` waited for ever), hidden-timers since a timer native code sets —
-   code `new Function` made, which runs as the host's, not stepped — is set on the machine that called into it (tsval's
-   `hostCalling`): it was set nowhere, static-host since build/static-host.ts loads Vite only when it builds (the test
-   checks the plugin beside it, which needs none; real Vite in a run, rolldown's 11 MB of WebAssembly, was tried for it
-   and taken back). And almostnode resolves a linked package to its real files, as Node does: it's the program's then,
-   stepped by tsval, its TypeScript and all (page-tools ran 5,283 statements where it ran 646, and each test reaching a
-   linked package is told slower once).
-   The rest, by cause:
-   - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
-     baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: a stop's probe
-     for a path computed on its line was kept by the line, so where a copy lands got its source's (fixed, 2026-11-17:
-     kept by the capability and argument it's after, worker/gate.ts `probeResource`).
-   - **Each file cost 5–8 s** however little it ran (cosmetic's three tests, 4 ms of 6 s; alone, 0.4 s). The spans said
-     where: each file's result, kept, drew Features and Tests again, and its affected tests asked git for a walk of the
-     whole tree (3.5 s on the workbench's thread), the next file's launch waiting behind it. The view asks for what the
-     change watcher has told now (`tests.affected`'s `glance`; whatever acts on it — runs_affected, a run of the stale
-     tests — still walks the whole tree): 1.4–2.9 s a file. What's left is the editor at work on each file the run opens
-     — ESLint, BABLR, the Margin's values kept (5 s, beside the run), the run's evidence recorded (1–3 s).
-   (All 41 in one call hung at the tenth file on 2026-11-16, the workbench blank; on 2026-11-17 they ran through. A
-   question one stopped on, answered, started the run over from its first file: it goes on from the file that asked
-   now, under the same id, the files before it kept — test-runs.ts `tests.run`, as Features and Tests' Run does.)
-
-   A test failing here asks first whether it tests its subject directly (the user, 2026-11-16, after a day of shims
-   added to make tests pass): the runtime changes only for a gap a person's own program would hit, not for a test's
-   scaffolding — a stand-in module, a fake Worker, a module loaded that the test doesn't use. Added for scaffolding, and
-   looked at again (2026-11-17), all three kept: node:test's `mock` (2660b618), though nothing of ours uses it since
-   cosmetic.test checks its logic directly — it's Node's API, which people's tests use, held to Node's by node-test.test;
-   tsval's `hostCalling` (56762658), a real bug (timers set by code `new Function` made went nowhere), held by tsval's own
-   event-loop.test whatever becomes of hidden-timers.test's fake Worker; and our Playwright's `page.request` (d5de713d),
-   Playwright's API, used by four checks in dev-server.spec and workbench.spec of what a client hears (headers, a 503).
-3. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
+2. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
    from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
    Waits on items 1 and 2 being good enough to work in. In order:
    - **Before the reduction: what the rehearsal found** (2026-11-02, on `cosmetic`: measured, declared, removed with its
@@ -644,7 +605,7 @@ How it's kept:
      view; the monitor has rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`,
      `runs_tests` have the terminal (`git`, `node --test`, `node`), which agents gave up on 2026-10-27;
      `page_eval` and `page_query`, the browser's devtools.
-4. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 3:
+3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
    what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is
    made at commit time, per person, by the tests run in the editor, and names the declarations each ran, so it lapses
    when that code changes; a test rests after 20 green runs, with a weekly full run; CI reruns a vouched test after 7
@@ -780,7 +741,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   shows beside Claude's chat, drawn from debug-mcp's `agent` spans (the editor's tools at its transport, the rest from
   Claude Code's hooks: packages/debug-mcp/agent-hook.mjs). Parked until the spans have run a while.
 - **Logpoints in the editor's own code** (`debug_logpoint`, its values as data; deferred 2026-10-30, not dropped: we
-  may want it once Playwright tests run in the editor, item 2). A logpoint
+  may want it once Playwright tests run in the editor). A logpoint
   needs a hook where it's set, and the editor runs as bundled code with no DevTools Protocol attached: it would take
   the coverage build's instrumentation (a hook at every statement, `COVERAGE=1`) carrying an expression to evaluate,
   in a dev build only. Meanwhile `editor_trace`, the logs and spans, and `page_eval` cover most of it.

@@ -604,7 +604,7 @@ packages/editor's lines (outside tests) are comments. Each one is:
   spans* in RUNTIME-EVIDENCE.md; `pickAnchor` for the span);
 - a note citing a doc, when it points at one (`FILE.md, *Section*`).
 
-Sorted on a sample (2026-11-03, 128 comments in 9 files of `full-editor`; NEXT.md item 3 has the files): 53% dropped,
+Sorted on a sample (2026-11-03, 128 comments in 9 files of `full-editor`; NEXT.md item 2 has the files): 53% dropped,
 39% notes, 6% notes citing a doc, 2% kept. The dropped are JSDoc restating a declaration; a file's header is always a
 note (its "what" is the feature's ledger entry), and 6 of 9 headers cite a doc. A cite of a queue entry by its number
 drifts; a doc's section title doesn't.
@@ -641,7 +641,7 @@ uplink, the workspace runtime, the run contract's events, capability decisions a
 and holds the ledger to it; the shell is a core and feature modules (shell/feature.ts). insights, margin, the features
 map and the rest went with their features, and come back one feature to an extension.
 
-Checked again 2026-11-03 against the ledger, on what's left (NEXT.md item 3, *The boundaries*). One feature to an
+Checked again 2026-11-03 against the ledger, on what's left (NEXT.md item 2, *The boundaries*). One feature to an
 extension holds for what plugs into the editor (change-problems, eslint, history, source-control); these stay as they are,
 each for a reason the code still gives:
 - **tsval holds seven features** (stepping, test runs, terminal runs, stops, the gate, a run's packages, agents' tests)
