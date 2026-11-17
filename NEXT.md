@@ -148,10 +148,9 @@ How it's kept:
    and each test reaching a linked package is told slower once) and node-test.js has node:test's `mock` (fn, method,
    timers — held to node's own by node-test.test), hidden-timers since a timer native code sets — code `new Function`
    made, which runs as the host's, not stepped — is set on the machine that called into it (tsval's `hostCalling`): it
-   was set nowhere, static-host since a package a run imports that awaits at its top is imported before its first line
-   and real Vite loads in a run (rolldown the browser build's, `@rolldown/browser`, bundled beside the debug worker with
-   its WebAssembly, 11 MB, a second copy of the capabilities slicer's — its parseAst and utils given its browser binding
-   by build.ts, the package's own importing its Node one). The rest, by cause:
+   was set nowhere, static-host since build/static-host.ts loads Vite only when it builds (the test checks the plugin
+   beside it, which needs none; real Vite in a run, rolldown's 11 MB of WebAssembly, was tried for it and taken back).
+   The rest, by cause:
    - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
      `file:` URL source as the copy's destination.

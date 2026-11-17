@@ -5,10 +5,12 @@
  */
 import type { Logger, Plugin } from "vite";
 import * as url from "node:url";
-import { buildPackage } from "@brianjenkins94/util/vite/build";
 
 /** The COI service worker (→ docs/coi-serviceworker.js), a single-file ES module. */
 export async function buildServiceWorker(root: string, logger: Logger): Promise<void> {
+	// (Vite loaded here, when it builds: the module's other exports, the plugin static-host.test checks, don't need it)
+	const { buildPackage } = await import("@brianjenkins94/util/vite/build");
+
 	await buildPackage(root, {
 		"customLogger": logger,
 		"base": "./",

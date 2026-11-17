@@ -1436,7 +1436,6 @@
     "paths": [
       "packages/editor/build/package-types.ts",
       "packages/editor/extensions/tsval/worker/install.ts",
-      "packages/editor/extensions/tsval/worker/rolldown.ts",
       "packages/editor/workbench/ata.ts",
       "packages/editor/workbench/install.ts",
       "packages/editor/workbench/node-modules-prefetch.ts",

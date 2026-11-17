@@ -13,7 +13,6 @@ import nodeTestSource from "../node-test.js?raw";
 import playwrightTestSource from "../playwright-test.js?raw";
 import { tally } from "./gate";
 import { installPackage } from "./install";
-import { isRolldown, rolldownFor } from "./rolldown";
 import { packageBuiltin, packageFetch, packageOf, packagesRan } from "./package-calls";
 import { listening } from "./process";
 import { noteProgramFile } from "./session";
@@ -100,13 +99,6 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		"install": (name) => installPackage(name),
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own — its calls counted as its.
 		"builtinFor": (id, requester, from) => {
-			// (rolldown, the browser build's, for whoever asks — Vite: the native package's binding can't load here)
-			const rolldown = isRolldown(id) ? rolldownFor(id) : undefined;
-
-			if (rolldown !== undefined) {
-				return rolldown;
-			}
-
 			if (requester === "package") {
 				return packageBuiltin(id, from);
 			}

@@ -212,23 +212,6 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 
 /** `editor:release`: the commit being built (`git rev-parse --short HEAD`), or "dev" without git: the editor's error
  *  reports say which release they came from (shell/reporting.ts; packages/api/README.md O6). */
-/** `@rolldown/browser`'s parseAst and utils, as its browser build: they import its Node binding (`rolldown-binding.wasi.cjs`,
- *  for a WASI host), which has no browser condition; the browser binding beside it (`rolldown-binding.wasi-browser.js`)
- *  has the same exports, its WebAssembly and threads loaded as a browser does. */
-function rolldownBrowserBinding(): Plugin {
-	return {
-		"name": "rolldown-browser-binding",
-		"enforce": "pre",
-		"resolveId": (source, importer) => {
-			if (importer === undefined || !/[\\/]@rolldown[\\/]browser[\\/]dist[\\/]/u.test(importer) || !source.endsWith("rolldown-binding.wasi.cjs")) {
-				return undefined;
-			}
-
-			return path.join(path.dirname(importer), source).replace(/rolldown-binding\.wasi\.cjs$/u, "rolldown-binding.wasi-browser.js");
-		}
-	};
-}
-
 function releasePlugin(): Plugin {
 	const id = "editor:release";
 	let release = "dev";
@@ -353,8 +336,7 @@ export async function preBuild(): Promise<void> {
 		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
 		// unenv's own)
 		// (and the page runtime a dev server puts in its pages, as a script: runtime evidence)
-		// (and rolldown's browser build all of it: a run's Vite has it for rolldown — extensions/tsval/worker/rolldown.ts)
-		"plugins": [...coverage(), unenvResolve(), rolldownBrowserBinding(), bundledModule("previews", "page-script.ts", "page-evidence", "iife", []), bundledNodeServer("cspell"), cspellDict()],
+		"plugins": [...coverage(), unenvResolve(), bundledModule("previews", "page-script.ts", "page-evidence", "iife", []), bundledNodeServer("cspell"), cspellDict()],
 		"worker": { "plugins": coverage, "rollupOptions": { "output": { "sourcemap": sourcemap } } },
 		"build": {
 			"outDir": "dist",

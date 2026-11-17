@@ -21,7 +21,6 @@ import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffe
 import { dropUnpinned, readPins } from "./install";
 import { packagesRan, readBaseline } from "./package-calls";
 import { EXITED, held, listening, readsStdin } from "./process";
-import { isRolldown, loadRolldown } from "./rolldown";
 import { editorPlaywright, programModules, runtimeReady, whereOf } from "./runtime";
 import { linkCallsSince, post, state, workerLog } from "./state";
 import { askAt } from "./stops";
@@ -1220,107 +1219,10 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	armCapabilities(loaded.sourceFile);
 	arm(loaded.vm);
 
-	// (what Node evaluates before the program's first line, and waits for: a package it imports that awaits at its top)
-	try {
-		await importAwaited(loadedRuntime, message.fileName, loaded.sourceFile, run);
-	} catch (error) {
-		post({ "type": "output", "text": `${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}\n`, "stream": "stderr" });
-		finish(1);
-
-		return;
-	}
-
 	state.history = [];
 	state.index = -1;
 	state.done = false;
 	await session(loaded.vm, run);
-}
-
-/** What a file imports or re-exports from at its top (not types), as tsval links them; and what it imports by `import()`
- *  of a literal, anywhere in it — a test's `await import("../build/x.ts")` — which awaits what that does in turn. */
-function staticImports(source: ts.SourceFile): string[] {
-	const found = source.statements.flatMap((statement) => {
-		const from = ts.isImportDeclaration(statement) && statement.importClause?.isTypeOnly !== true
-			? statement.moduleSpecifier
-			: ts.isExportDeclaration(statement) && !statement.isTypeOnly ? statement.moduleSpecifier : undefined;
-
-		return from !== undefined && ts.isStringLiteral(from) ? [from.text] : [];
-	});
-	const visit = (node: ts.Node): void => {
-		if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] !== undefined && ts.isStringLiteralLike(node.arguments[0])) {
-			found.push(node.arguments[0].text);
-		}
-
-		ts.forEachChild(node, visit);
-	};
-
-	visit(source);
-
-	return [...new Set(found)];
-}
-
-/**
- * The packages the program imports — from its entry, through its own files' imports in turn, `import()`s of a literal too — that await at
- * their top level (or import one that does: almostnode's `awaits`), imported before it runs. Node evaluates an
- * importer's dependencies, waiting on them, before the importer's first line; the program's imports of packages are
- * requires here (tsval's), which can't wait (ERR_REQUIRE_ASYNC_MODULE) — once imported, a require has them whole. And
- * rolldown, when what it reaches imports it (Vite does): the browser build loaded first (rolldown.ts).
- */
-async function importAwaited(runtime: Runtime, entry: string, source: ts.SourceFile, parent: Span): Promise<void> {
-	const awaited: [string, string][] = [];
-	let rolldown = false;
-	const read = new Set([entry]);
-	const files: [string, ts.SourceFile][] = [[entry, source]];
-
-	// (each file's own imports in turn: an array's iterator reaches what's pushed while it goes)
-	for (const [file, parsed] of files) {
-		const dir = file.slice(0, file.lastIndexOf("/")) || "/";
-
-		for (const specifier of staticImports(parsed)) {
-			let resolved: ReturnType<Runtime["resolve"]>;
-
-			try {
-				resolved = runtime.resolve(specifier, dir);
-			} catch {
-				continue; // (not there: the import says so as it runs)
-			}
-
-			if (resolved.kind === "program" && !read.has(resolved.filename)) {
-				read.add(resolved.filename);
-
-				try {
-					files.push([resolved.filename, ts.createSourceFile(resolved.filename, runtime.getVFS().readFileSync(resolved.filename, "utf8") as string, ts.ScriptTarget.Latest, true)]);
-				} catch {
-					// (unreadable: its load says why)
-				}
-			} else if (resolved.kind === "package" || isRolldown(specifier)) {
-				const reached = isRolldown(specifier) ? { "awaits": false, "imports": new Set([specifier]) } : runtime.reach(specifier, dir);
-
-				rolldown ||= [...reached.imports].some(isRolldown) || isRolldown(specifier);
-
-				if (reached.awaits) {
-					awaited.push([specifier, dir]);
-				}
-			}
-		}
-	}
-
-	// (rolldown first: what a package awaiting at its top requires of it is the browser build's, loaded)
-	if (rolldown) {
-		await parent.span("editor.extensions.tsval.worker.session.rolldown", {}, async (span) => {
-			const failed = await loadRolldown();
-
-			span.end({ "failed": failed.join("; ") });
-		});
-	}
-
-	if (awaited.length > 0) {
-		await parent.span("editor.extensions.tsval.worker.session.awaits", { "count": awaited.length }, async () => {
-			for (const [specifier, dir] of awaited) {
-				await runtime.import(specifier, dir);
-			}
-		});
-	}
 }
 
 /** A recorded call replayed for the debugger (RUNNING.md: stepping a recorded handler): the function run on what it read in
