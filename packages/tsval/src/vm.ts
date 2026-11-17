@@ -12,6 +12,8 @@ import { STANDARD_GLOBAL_NAMES, standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, isSimpleTree, nodeHandlers, pushHostCall, pushPattern, simpleValue, syntheticHandlers } from "./handlers.ts";
 import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
 import { Scope } from "./scope.ts";
+import type { Site } from "./stacks.ts";
+import { giveStack, hasProgramStack } from "./stacks.ts";
 import { ownedBy } from "./values.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
@@ -498,6 +500,9 @@ export class Machine implements VM {
 	/** Stepped async: this machine's suspended fibers, and the host-called callbacks waiting their turn, by id — its own
 	 *  (a fork copies them, so each timeline resumes its own). */
 	private pending = new Map<number, Pending>();
+	/** Stepped async: an awaited promise's awaiter — the frames of the async function cut off waiting on it — as V8
+	 *  follows an await back to its caller for a stack's `at async …` (sitesHere). */
+	private awaitedBy = new WeakMap<object, Frame[]>();
 	/** Stepped async: what settled, in the order it did — shared with forks (a host promise calls back once, into it). */
 	private scheduler: AsyncScheduler = { "settled": [], "ids": 0, "wakers": [] };
 	/** How many nested contexts (a host-called guest function's sub-run, a fiber's) the machine is inside: stepped
@@ -1052,6 +1057,13 @@ export class Machine implements VM {
 			const target = this.hostGuard?.beforeCall === undefined ? callee : this.hostGuard.beforeCall(callee, thisArg, isConstruct, { "node": site, "args": args, "isConstruct": isConstruct });
 			const result = isConstruct ? Reflect.construct(target as unknown as new (...ctorArgs: unknown[]) => unknown, args) : target.apply(thisArg, args);
 
+			// An error the program makes has its stack, not the interpreter's (stacks.ts); as does what it captures one on.
+			if (this.makesError(callee, isConstruct, result)) {
+				this.giveProgramStack(result, undefined, false, site);
+			} else if (this.capturesStack(callee)) {
+				this.giveProgramStack(args[0], args[1], true, site);
+			}
+
 			// (what a host constructor or a fresh-value maker hands back is made now)
 			if (this.escapes !== undefined && (isConstruct || this.hostWriters().fresh.has(callee))) {
 				this.made(result);
@@ -1068,6 +1080,13 @@ export class Machine implements VM {
 			}
 
 			return value;
+		} catch (error) {
+			// (a built-in's error the program may catch: its stack the program's, from the call)
+			if (!isUncatchable(error)) {
+				this.giveProgramStack(error, undefined, false, site);
+			}
+
+			throw error;
 		} finally {
 			hostCalling(callingBefore);
 			this.callSite = previousSite;
@@ -1374,6 +1393,8 @@ export class Machine implements VM {
 			}
 
 			this.signal = { "type": "throw", "value": this.toGuestError(error) };
+			// (a host built-in's error, or tsval's own for the program, caught here: the program's stack, from here)
+			this.giveProgramStack(this.signal.value);
 			this.noteThrow(this.signal.value, frame.node);
 		}
 
@@ -1918,6 +1939,7 @@ export class Machine implements VM {
 		forked.idle = this.idle;
 		forked.depth = 0;
 		forked.contexts = [];
+		forked.awaitedBy = this.awaitedBy;
 		// Its own pending fibers (their frames and closures, cloned), and the shared record of what settled.
 		forked.pending = new Map([...this.pending].map(([id, each]) => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base, "context": each.context } : { "kind": "callback", "fn": clone(each.fn) as GuestFunction, "context": each.context }]));
 		forked.scheduler = this.scheduler;
@@ -2104,7 +2126,14 @@ export class Machine implements VM {
 		const awaited = this.pauseValue;
 		const { scheduler } = this;
 
-		this.pending.set(id, { "kind": "fiber", "frames": this.frames.slice(bottom), "values": this.values.slice(base), "base": base, "context": this.asyncContext?.capture() });
+		const frames = this.frames.slice(bottom);
+
+		this.pending.set(id, { "kind": "fiber", "frames": frames, "values": this.values.slice(base), "base": base, "context": this.asyncContext?.capture() });
+
+		// (what waits on what it awaited: a stack made there goes on here, `at async …`)
+		if ((typeof awaited === "object" && awaited !== null) || typeof awaited === "function") {
+			this.awaitedBy.set(awaited, frames);
+		}
 		this.frames.length = bottom;
 		this.values.length = base;
 		this.paused = false;
@@ -2499,6 +2528,123 @@ export class Machine implements VM {
 		}
 
 		this.completion = undefined;
+	}
+
+	/** The program's `Error` (its realm's): whose `prepareStackTrace` and `stackTraceLimit` it sets. */
+	private get programError(): ErrorConstructor {
+		return (this.guestErrors["Error"] ?? Error) as ErrorConstructor;
+	}
+
+	/** Whether a host call made an error: a construction that did, or an error constructor called (`Error("…")`). (No
+	 *  trap of a Proxy it's given or makes is asked: test262 counts them.) */
+	private makesError(callee: unknown, isConstruct: boolean, result: unknown): boolean {
+		return isError(result) && (isConstruct || NATIVE_ERRORS.has(callee) || Object.values(this.guestErrors).includes(callee as never));
+	}
+
+	/** Whether `callee` is `Error.captureStackTrace`, the program's or the host's. */
+	private capturesStack(callee: unknown): boolean {
+		return callee === this.programError.captureStackTrace || callee === Error.captureStackTrace;
+	}
+
+	/**
+	 * Give `error` the program's stack from here (stacks.ts): the frames above and including `below`'s, when it's given
+	 * (`Error.captureStackTrace`'s second argument), left out. Once, unless `again` (a capture replaces it). `at`: the
+	 * node it's made at, when it's known closer than the top frame's (a host call's own).
+	 */
+	public giveProgramStack(error: unknown, below?: unknown, again = false, at?: ts.Node): void {
+		if ((typeof error !== "object" || error === null) && typeof error !== "function") {
+			return;
+		}
+
+		if (!again && (hasProgramStack(error) || !isError(error))) {
+			return;
+		}
+
+		const { programError } = this;
+		const limit = programError.stackTraceLimit;
+
+		giveStack(error, this.sitesHere(typeof limit === "number" ? Math.max(0, limit) : 0, below, at), programError);
+	}
+
+	/**
+	 * The program's stack from here, innermost first, as V8 keeps one: each function's call at where it is in it (a
+	 * module's top level, a constructor's `new`), through the calls a host made into the program (their stacks saved as
+	 * they began), and then — stepped async — each async function waiting on the one before, at its `await`, as V8
+	 * follows them (`at async …`). At most `limit`; with `below`, the frames down to and including its call left out;
+	 * `here`, where the innermost is, when it's known closer than its frame (a host call's site).
+	 */
+	public sitesHere(limit: number, below?: unknown, here?: ts.Node): Site[] {
+		const sites: Site[] = [];
+		let skipping = below !== undefined;
+		const add = (site: Site): void => {
+			if (skipping) {
+				skipping = site.fn !== below;
+
+				return;
+			}
+
+			if (sites.length < limit) {
+				sites.push(site);
+			}
+		};
+		const receiverless = (thisArg: unknown): boolean => thisArg === undefined || thisArg === null || thisArg === globalThis;
+		// One stack's sites, its top first; `isAsync`: an async function's, waiting.
+		const walk = (stack: readonly Frame[], isAsync: boolean, from?: ts.Node): void => {
+			let at = from;
+
+			for (let index = stack.length - 1; index >= 0; index -= 1) {
+				const frame = stack[index]!;
+
+				if (frame.kind === undefined) {
+					at ??= frame.node;
+				} else if (frame.kind === "call") {
+					add({ "node": at, "fn": frame.meta.self, "name": frame.meta.name, "thisArg": frame.thisArg, "isToplevel": receiverless(frame.thisArg), "isConstructor": frame.newTarget !== undefined, "isAsync": isAsync });
+					at = undefined;
+				} else if (frame.kind === "construct") {
+					add({ "node": at, "fn": frame.ctor, "name": (frame.ctor as { "name"?: string }).name, "thisArg": frame.instance, "isToplevel": false, "isConstructor": true, "isAsync": isAsync });
+					at = undefined;
+				} else if (frame.kind === "module") {
+					add({ "node": at, "name": undefined, "isToplevel": true, "isAsync": isAsync });
+					at = undefined;
+				}
+			}
+
+			// (the entry's own top level, its frames the program's file's)
+			if (at !== undefined) {
+				add({ "node": at, "name": undefined, "isToplevel": true, "isAsync": isAsync });
+			}
+		};
+		// (a nested run — a callback a host calls — has a stack of its own; the ones around it were saved as it began,
+		// innermost last)
+		let outermost: readonly Frame[] = this.frames;
+
+		walk(this.frames, false, here);
+
+		for (let depth = this.depth - 1; depth >= 0; depth -= 1) {
+			const saved = this.contexts[depth];
+
+			if (saved !== undefined) {
+				walk(saved.frames, false);
+				outermost = saved.frames;
+			}
+		}
+
+		// What waits on the async function at the bottom, and on that one, and so on.
+		const followed = new Set<readonly Frame[]>();
+
+		for (let bottom = outermost[0]; bottom?.kind === "async";) {
+			const waiting = this.awaitedBy.get(bottom.promise);
+
+			if (waiting === undefined || followed.has(waiting)) {
+				break;
+			}
+
+			followed.add(waiting);
+			walk(waiting, true);
+			bottom = waiting[0];
+		}
+
+		return sites;
 	}
 
 	/**
@@ -3012,6 +3158,20 @@ interface ExecContext {
 	"sentValue": unknown;
 	"subFrames": Frame[];
 	"subValues": unknown[];
+}
+
+/** The host's error constructors, each called as a function (`Error("…")`) makes one. */
+const NATIVE_ERRORS = new Set<unknown>(["Error", "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "SuppressedError"].map((name) => (globalThis as Record<string, unknown>)[name]).filter((each) => typeof each === "function"));
+
+/** Whether `value` is an error (its [[ErrorData]]), asking no Proxy trap: `Error.isError`, where there is one. */
+function isError(value: unknown): value is Error {
+	const { isError: has } = Error as { "isError"?: (value: unknown) => boolean };
+
+	if (has !== undefined) {
+		return has(value);
+	}
+
+	return typeof value === "object" && value !== null && Object.prototype.toString.call(value) === "[object Error]";
 }
 
 /** A suspendable execution context — the backing store for a generator or async function. */

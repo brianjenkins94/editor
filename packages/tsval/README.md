@@ -61,6 +61,12 @@ is written in, and the surface Node's own type-stripping accepts. Anything outsi
   host's — no `process`, `require`, `fetch`, timers or `console`, and no `eval`. A host adds what it
   wants through `globals`, supplies a whole realm through `globalObject`, or asks for the host's
   real `globalThis` with `realGlobals: true` (what the differential oracle does, for parity with Node).
+- **An error's stack is the program's** (`src/stacks.ts`): an error it makes — `new Error`, a class extending one, a
+  built-in's it catches, `Error.captureStackTrace` — has its own frames, not the interpreter's, in V8's format and
+  told when first read; with stepped async, an `await` goes back to what waits on it (`at async …`).
+  `Error.prepareStackTrace` gets V8's call sites (`getTypeName`, `getFunctionName`, `isAsync`, …), and
+  `stackTraceLimit` is kept to. Not there: built-ins' own frames (`at JSON.parse (<anonymous>)`), and where a frame
+  evaluates a simple expression whole, its column is the expression's start rather than the part that threw.
 
 The differential oracle runs Node in strict mode with an undefined receiver to match.
 

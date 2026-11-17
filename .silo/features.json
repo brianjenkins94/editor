@@ -2031,12 +2031,14 @@
       "packages/tsval/src/handlers",
       "packages/tsval/src/handlers.ts",
       "packages/tsval/src/index.ts",
-      "packages/tsval/src/interpret.ts"
+      "packages/tsval/src/interpret.ts",
+      "packages/tsval/src/stacks.ts"
     ],
     "tests": [
       "packages/tsval/test/vm/globals.test.ts",
       "packages/tsval/test/vm/handler-modules.test.ts",
       "packages/tsval/test/vm/regressions.test.ts",
+      "packages/tsval/test/vm/stacks.test.ts",
       "packages/tsval/test/vm/toplevel-await.test.ts"
     ]
   },

@@ -139,7 +139,8 @@ How it's kept:
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
-   the editor's 41 unit test files: 37 pass whole — git-fast-forward, git-status and silo-kept since a package's own
+   the editor's 41 unit test files: 38 pass whole — fs-boundaries since an error's stack in tsval is the program's
+   (tsval's src/stacks.ts: its frames, `at async` back through awaits, `Error.prepareStackTrace`'s call sites), git-fast-forward, git-status and silo-kept since a package's own
    version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
    the root's 7 and 2; versions.json's format 3), history-ledger and cosmetic since each tests its feature's own logic
    (the ledger's checks, extensions/history/ledger-checks.ts; which changes are cosmetic, extensions/cosmetic/verdicts.ts)
@@ -157,7 +158,6 @@ How it's kept:
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: a stop's probe
      for a path computed on its line was kept by the line, so where a copy lands got its source's (fixed, 2026-11-17:
      kept by the capability and argument it's after, worker/gate.ts `probeResource`).
-   - **A caller from the stack** (fs-boundaries, 1 of 4): `vscode`, not `ExplorerService` — tsval's stacks.
    - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
 
    A test failing here asks first whether it tests its subject directly (the user, 2026-11-16, after a day of shims
