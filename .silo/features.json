@@ -1470,6 +1470,7 @@
     ],
     "tests": [
       "packages/debug-mcp/test/page-tools.test.ts",
+      "packages/editor/test/page-tools.test.mjs",
       "packages/observability/test/page-tools.test.ts"
     ]
   },

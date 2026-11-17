@@ -271,9 +271,9 @@ How it's kept:
      the stopgap until then). Read 2026-11-17 from a run of the editor's 41 unit test files in the editor: 149 tests, 101
      with enough lines few others ran to tell, a median of 100% in their own features' code, 26 under half — mostly a
      dependency (the hub's under runs, node-runner and tarballs; tsval's under replay and site-sums; *Review by hunk*'s
-     line diff under test-runs; the metrics under workspace-changes), which it says and a person decides. One to decide:
-     page-tools.test runs *Page tools* (130 lines, beside the hub's 406) but isn't among its tests — four other features
-     declare it. Its specs' reach is still read from outside.
+     line diff under test-runs; the metrics under workspace-changes), which it says and a person decides. One decided:
+     page-tools.test runs *Page tools* (130 lines, beside the hub's 406), so it's among its tests now (the user,
+     2026-11-17). Its specs' reach is still read from outside.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.
