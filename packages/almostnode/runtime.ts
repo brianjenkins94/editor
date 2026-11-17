@@ -1902,21 +1902,30 @@ export class Runtime {
 
 	/** Whether `specifier` (from `fromDir`) is a package's ES module whose evaluation awaits — at its own top level, or in
 	 *  one it statically imports, in turn — which only an import can wait for, not a require. A program file isn't asked
-	 *  about: its host evaluates those (`evaluateProgram`). Each module looked at is prepared as loading it would be, and
-	 *  kept so (its code isn't transformed twice). */
+	 *  about: its host evaluates those (`evaluateProgram`). */
 	awaits(specifier: string, fromDir: string = this.process.cwd()): boolean {
+		return this.reach(specifier, fromDir).awaits;
+	}
+
+	/** What a package's module reaches by its static imports, in turn, through packages (not a program file's, which its
+	 *  host evaluates): every specifier imported on the way, and whether any of those modules awaits at its top level —
+	 *  what a host has to have ready before a require of it (a module of its own for one, `builtinFor`; an import for the
+	 *  other). Each module looked at is prepared as loading it would be, and kept so (its code isn't transformed twice). */
+	reach(specifier: string, fromDir: string = this.process.cwd()): { "awaits": boolean; "imports": Set<string> } {
 		const seen = new Set<string>();
-		const check = (id: string, dir: string): boolean => {
+		const imports = new Set<string>();
+		let awaits = false;
+		const visit = (id: string, dir: string): void => {
 			let resolved: Resolved;
 
 			try {
 				resolved = this.resolve(id, dir);
 			} catch {
-				return false;
+				return;
 			}
 
 			if (resolved.kind !== "package" || seen.has(resolved.filename)) {
-				return false;
+				return;
 			}
 
 			seen.add(resolved.filename);
@@ -1930,13 +1939,20 @@ export class Runtime {
 				code = this.processedCodeCache.get(key) ?? prepared(raw.startsWith("#!") ? raw.slice(raw.indexOf("\n") + 1) : raw, resolved.filename);
 				this.processedCodeCache.set(key, code);
 			} catch {
-				return false;
+				return;
 			}
 
-			return code.startsWith(ASYNC_MODULE) || staticImportsOf(code).some((each) => check(each, pathShim.dirname(resolved.filename)));
+			awaits ||= code.startsWith(ASYNC_MODULE);
+
+			for (const each of staticImportsOf(code)) {
+				imports.add(each);
+				visit(each, pathShim.dirname(resolved.filename));
+			}
 		};
 
-		return check(specifier, fromDir);
+		visit(specifier, fromDir);
+
+		return { "awaits": awaits, "imports": imports };
 	}
 
 	/** `specifier` imported from `fromDir`, as `import()` does: a module whose top level awaits evaluated to its end, and

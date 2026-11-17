@@ -139,7 +139,7 @@ How it's kept:
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
-   the editor's 41 unit test files: 36 pass whole — git-fast-forward, git-status and silo-kept since a package's own
+   the editor's 41 unit test files: 37 pass whole — git-fast-forward, git-status and silo-kept since a package's own
    version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
    the root's 7 and 2; versions.json's format 3), history-ledger since almostnode's `node:module` has `registerHooks`
    (resolve hooks, a runtime's own), page-tools since almostnode's `ws` says a server on an http server is listening
@@ -148,17 +148,14 @@ How it's kept:
    and each test reaching a linked package is told slower once) and node-test.js has node:test's `mock` (fn, method,
    timers — held to node's own by node-test.test), hidden-timers since a timer native code sets — code `new Function`
    made, which runs as the host's, not stepped — is set on the machine that called into it (tsval's `hostCalling`): it
-   was set nowhere. The rest, by cause:
+   was set nowhere, static-host since a package a run imports that awaits at its top is imported before its first line
+   and real Vite loads in a run (rolldown the browser build's, `@rolldown/browser`, bundled beside the debug worker with
+   its WebAssembly, 11 MB, a second copy of the capabilities slicer's — its parseAst and utils given its browser binding
+   by build.ts, the package's own importing its Node one). The rest, by cause:
    - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
      `file:` URL source as the copy's destination.
    - **A caller from the stack** (fs-boundaries, 1 of 4): `vscode`, not `ExplorerService` — tsval's stacks.
-   - **Real Vite in a run** (static-host, through util's vite/build): rolldown's native binding ("Cannot find native
-     binding") and lightningcss's (unenv's `process.report.getReport`). Its top-level await is past: a package the
-     program imports — statically, or by `import()` of a literal — that awaits at its top (almostnode's `awaits`) is
-     imported before the program's first line, as Node evaluates it, so its require has it whole. What would take it the
-     rest: rolldown as `@rolldown/browser` and lightningcss as `lightningcss-wasm` in a run — real Vite in the browser,
-     a decision (the dev server here is almostnode's own, not Vite).
    - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
 
    These tests go with the rewrite (item 3): what's worth fixing here is the runtime they find wrong, since the rebuilt

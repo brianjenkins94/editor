@@ -21,6 +21,7 @@ import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffe
 import { dropUnpinned, readPins } from "./install";
 import { packagesRan, readBaseline } from "./package-calls";
 import { EXITED, held, listening, readsStdin } from "./process";
+import { isRolldown, loadRolldown } from "./rolldown";
 import { editorPlaywright, programModules, runtimeReady, whereOf } from "./runtime";
 import { linkCallsSince, post, state, workerLog } from "./state";
 import { askAt } from "./stops";
@@ -1262,10 +1263,12 @@ function staticImports(source: ts.SourceFile): string[] {
  * The packages the program imports — from its entry, through its own files' imports in turn, `import()`s of a literal too — that await at
  * their top level (or import one that does: almostnode's `awaits`), imported before it runs. Node evaluates an
  * importer's dependencies, waiting on them, before the importer's first line; the program's imports of packages are
- * requires here (tsval's), which can't wait (ERR_REQUIRE_ASYNC_MODULE) — once imported, a require has them whole.
+ * requires here (tsval's), which can't wait (ERR_REQUIRE_ASYNC_MODULE) — once imported, a require has them whole. And
+ * rolldown, when what it reaches imports it (Vite does): the browser build loaded first (rolldown.ts).
  */
 async function importAwaited(runtime: Runtime, entry: string, source: ts.SourceFile, parent: Span): Promise<void> {
 	const awaited: [string, string][] = [];
+	let rolldown = false;
 	const read = new Set([entry]);
 	const files: [string, ts.SourceFile][] = [[entry, source]];
 
@@ -1290,10 +1293,25 @@ async function importAwaited(runtime: Runtime, entry: string, source: ts.SourceF
 				} catch {
 					// (unreadable: its load says why)
 				}
-			} else if (resolved.kind === "package" && runtime.awaits(specifier, dir)) {
-				awaited.push([specifier, dir]);
+			} else if (resolved.kind === "package" || isRolldown(specifier)) {
+				const reached = isRolldown(specifier) ? { "awaits": false, "imports": new Set([specifier]) } : runtime.reach(specifier, dir);
+
+				rolldown ||= [...reached.imports].some(isRolldown) || isRolldown(specifier);
+
+				if (reached.awaits) {
+					awaited.push([specifier, dir]);
+				}
 			}
 		}
+	}
+
+	// (rolldown first: what a package awaiting at its top requires of it is the browser build's, loaded)
+	if (rolldown) {
+		await parent.span("editor.extensions.tsval.worker.session.rolldown", {}, async (span) => {
+			const failed = await loadRolldown();
+
+			span.end({ "failed": failed.join("; ") });
+		});
 	}
 
 	if (awaited.length > 0) {

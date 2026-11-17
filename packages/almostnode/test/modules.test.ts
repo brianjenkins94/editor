@@ -147,6 +147,7 @@ test("awaits and import: a package that awaits at its top level — or imports o
 	});
 
 	assert.deepEqual([runtime.awaits("slow"), runtime.awaits("uses-slow"), runtime.awaits("greet"), runtime.awaits("node:path")], [true, true, false, false]);
+	assert.deepEqual([...runtime.reach("uses-slow").imports], ["slow"], "and what it reaches on the way");
 	assert.throws(() => runtime.require("uses-slow"), /an ES module with top-level await/u, "a require can't wait for it");
 
 	const runtime2 = runtimeWith({
