@@ -162,11 +162,11 @@ How it's kept:
    A test failing here asks first whether it tests its subject directly (the user, 2026-11-16, after a day of shims
    added to make tests pass): the runtime changes only for a gap a person's own program would hit, not for a test's
    scaffolding — a stand-in module, a fake Worker, a module loaded that the test doesn't use. Added for scaffolding, and
-   to look at again as their tests are rewritten (item 3): node:test's `mock` (2660b618, ~200 lines, for cosmetic's
-   debounce — people's tests may use it, so not removed); tsval's `hostCalling` (56762658: a real bug, timers set by code
-   `new Function` made going nowhere, found only through hidden-timers.test's fake Worker, which a real one in the
-   browser would replace); and our Playwright's `page.request` (d5de713d, ~190 lines, for four checks in dev-server.spec
-   and workbench.spec of what a client hears — headers, a 503 — rather than what a person sees).
+   looked at again (2026-11-17), all three kept: node:test's `mock` (2660b618), though nothing of ours uses it since
+   cosmetic.test checks its logic directly — it's Node's API, which people's tests use, held to Node's by node-test.test;
+   tsval's `hostCalling` (56762658), a real bug (timers set by code `new Function` made went nowhere), held by tsval's own
+   event-loop.test whatever becomes of hidden-timers.test's fake Worker; and our Playwright's `page.request` (d5de713d),
+   Playwright's API, used by four checks in dev-server.spec and workbench.spec of what a client hears (headers, a 503).
 3. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
    from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
    Waits on items 1 and 2 being good enough to work in. In order:
