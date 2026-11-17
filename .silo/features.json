@@ -259,7 +259,7 @@
       "packages/editor/extensions/tsval/worker/stops.ts"
     ],
     "tests": [
-      "packages/editor/test/debugger-runs.mjs"
+      "packages/editor/test/in-editor/debugger.spec.mjs"
     ]
   },
   "Architecture reports and metrics": {
@@ -2324,7 +2324,7 @@
       "packages/editor/extensions/tsval/worker/state.ts"
     ],
     "tests": [
-      "packages/editor/test/debugger-runs.mjs"
+      "packages/editor/test/in-editor/debugger.spec.mjs"
     ]
   },
   "Surface styles and Stitches": {
@@ -2441,7 +2441,7 @@
       "packages/editor/workbench/test-runs.ts"
     ],
     "tests": [
-      "packages/editor/test/debugger-runs.mjs",
+      "packages/editor/test/agent-tools.mjs",
       "packages/editor/test/test-runs.test.mjs"
     ]
   },
@@ -2456,7 +2456,7 @@
       "packages/editor/extensions/tsval/worker/tests.ts"
     ],
     "tests": [
-      "packages/editor/test/debugger-runs.mjs",
+      "packages/editor/test/in-editor/debugger.spec.mjs",
       "packages/editor/test/node-test.test.mjs"
     ]
   },
@@ -2503,7 +2503,7 @@
       "packages/editor/workbench/bridge-link.ts"
     ],
     "tests": [
-      "packages/editor/test/debugger-runs.mjs"
+      "packages/editor/test/agent-tools.mjs"
     ]
   },
   "The editor's test harnesses": {

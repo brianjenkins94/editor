@@ -560,7 +560,15 @@ How it's kept:
      Features and tests there — a test passing and one failing, each said, the passing one's click in the window that's
      open — then, the server stopped, a spec that needs a window failing rather than hanging. Its "a whole editor in a window
      of its own" is what every spec here is. The workbench, beside a preview window, is narrow: the table's Run column was
-     past its edge until the panel and side bar were hidden. 5 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
+     past its edge until the panel and side bar were hidden. 5 left.
+     debugger-runs.mjs is debugger.spec.mjs: a test file run from Features and tests (each outcome, a failure's sides on its
+     row, a timer, a read), a program's capability calls answered Allow, Skip and Deny in the margin and the Debug Console and
+     Explorer saying what came of each, a breakpoint (F9, F5), Step Over and Step Back by the toolbar as Call Stack says, and
+     stdin typed at a terminal's run. Its syntax-error case was features-view.spec's already. What only agents have — a
+     package loaded in a run, a test at a commit by its path, runs_tests' approval, a run's spans, the bridge's links — is
+     agent-tools.mjs's (a package needs the starter's node_modules, which a seeded instance has none of). Answering in the
+     margin needs the editor's room: the Debug Console, opened as a run starts, leaves a short window's editor a few lines,
+     so the panel's hidden while answering. 4 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
      and the next full run. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over

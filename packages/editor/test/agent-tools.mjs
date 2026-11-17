@@ -6,7 +6,10 @@
  * tabs, the Problems view (ESLint's problems among them, each lint a span of ext:eslint's) and the notifications showing
  * (editor-state.ts); which files BABLR parses, as `code_parses` asks
  * (`bablr.check`, workbench/bablr.ts), and asked again from what's kept. And the workspace searched as a person and an
- * extension search it — findFiles' globs, Quick Open, Find in Files (the component's workspace-search.ts).
+ * extension search it — findFiles' globs, Quick Open, Find in Files (the component's workspace-search.ts). And test files
+ * run as runs_tests runs them (`tests.run`): a package loaded, a test at a commit opened beside the work by its path, a
+ * write the policy doesn't decide asked about and approved, a run's stages as spans, and the bridge's links — what a
+ * person has of the debugger being in-editor/debugger.spec.mjs's.
  *
  *   node --test --test-global-setup=test/architecture-harness.mjs test/agent-tools.mjs
  */
@@ -26,6 +29,18 @@ after(async () => {
 });
 
 const ask = async (subject, data) => session.request(subject, data, 30_000);
+
+/** Test files run as runs_tests runs them, to their end (a call answers within a minute: then the run, asked again), or to
+ *  what it asks; `approved`, what runs_tests was told it may. */
+async function runTests(files, approved) {
+	let answer = await session.request("tests.run", { "files": files, ...approved === undefined ? {} : { "approved": approved } }, 120_000);
+
+	for (let asked = 1; answer.running !== undefined && answer.ask === undefined && asked < 10; asked++) {
+		answer = await session.request("tests.run", { "run": answer.run }, 120_000);
+	}
+
+	return answer;
+}
 
 test("files: written, read numbered, edited, replaced across files or not at all, found, searched and deleted", async () => {
 	assert.deepEqual(await ask("files.write", { "path": "tools/one.txt", "content": "alpha\nbeta\nalpha\n" }), { "path": "tools/one.txt", "created": true, "lines": 4 });
@@ -404,4 +419,96 @@ test("a script over the workspace, an agent's: a count across files and what it 
 	assert.match((await run("for (;;) {}", 1000)).error, /timed out after 1000 ms/u);
 	assert.equal((await run("return 1 + 1;")).value, 2, "a realm again after one was stopped");
 	await ask("files.delete", { "path": "scripted" });
+});
+
+test("a package the program imports loads in the run", async () => {
+	await session.request("files.write", { "path": "debugger-package.test.mjs", "content": `import assert from "node:assert/strict";
+import { test } from "node:test";
+import React from "react";
+
+test("react", () => { assert.equal(typeof React.createElement, "function"); });
+` }, 30_000);
+
+	const answer = await runTests(["debugger-package.test.mjs"]);
+
+	assert.deepEqual(answer.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(answer).slice(0, 1500));
+});
+
+test("a test file at a commit opened beside the work runs from there: its own modules as that commit has them", async () => {
+	await session.request("files.write", { "path": "refs-run/value.mjs", "content": "export const value = \"as committed\";\n" }, 30_000);
+	await session.request("files.write", { "path": "refs-run/value.test.mjs", "content": `import assert from "node:assert/strict";
+import { test } from "node:test";
+import { value } from "./value.mjs";
+
+test("imports its neighbour", () => {
+	assert.equal(value, "as committed");
+});
+` }, 30_000);
+	await session.request("git.commit", { "message": "refs: a test to run at its commit", "files": [{ "path": "refs-run/value.mjs" }, { "path": "refs-run/value.test.mjs" }] }, 60_000);
+	// (changed since: the commit's is what the run loads)
+	await session.request("files.write", { "path": "refs-run/value.mjs", "content": "export const value = \"changed since\";\n" }, 30_000);
+
+	const commit = (await session.request("git.log", { "limit": 1 }, 30_000)).commits[0].oid.slice(0, 12);
+	const { path } = await session.request("git.openRef", { "ref": commit }, 60_000);
+	const answer = await runTests([`${path}/refs-run/value.test.mjs`]);
+
+	assert.deepEqual(answer.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(answer).slice(0, 2000));
+});
+
+test("a write the policy doesn't decide stops the run and asks; approved, it's made", async () => {
+	await session.request("files.write", { "path": "debugger-writes.test.mjs", "content": `import assert from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
+import { test } from "node:test";
+
+test("writes", () => {
+	writeFileSync("/workspace/debugger-wrote.txt", "written");
+	assert.equal(readFileSync("/workspace/debugger-wrote.txt", "utf8"), "written");
+});
+` }, 30_000);
+
+	const asked = await runTests(["debugger-writes.test.mjs"]);
+
+	assert.match(asked.ask?.key ?? "", /^runs_tests:fs:write/u, JSON.stringify(asked).slice(0, 1500));
+
+	const approved = await runTests(["debugger-writes.test.mjs"], [asked.ask.key]);
+
+	assert.deepEqual(approved.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(approved).slice(0, 1500));
+});
+
+test("a run's stages are spans: under its run's, the runtime loaded, its entry parsed, its first step — and on its end, what it asked of the editor", async () => {
+	const ended = (stage) => (line) => line.startsWith("[debug-worker]") && line.includes("← editor.extensions.tsval.worker." + stage);
+	// (a run of its own: the page prints every record it collects, a span's end as `← name (ms)` and its attributes — but
+	// keeps only its latest 5,000 lines, which a cold page's CDN fetches on CI can push an earlier test's run out of)
+	await session.request("files.write", { "path": "debugger-spans.test.mjs", "content": "import { test } from \"node:test\";\n\ntest(\"runs\", () => {});\n" }, 30_000);
+	await runTests(["debugger-spans.test.mjs"]);
+
+	const run = await session.eventually("a run's span ended", async () => session.printed().findLast(ended("session.run")), 30_000).catch((error) => {
+		const worker = session.printed().filter((line) => line.startsWith("[debug-worker]"));
+
+		throw new Error(`${error.message}: of the ${String(session.printed().length)} lines the page printed, kept, ${String(worker.length)} are the debug worker's, the last: ${worker.slice(-8).join("\n")}`, { "cause": error });
+	});
+	const printed = session.printed().filter((line) => line.startsWith("[debug-worker]"));
+
+	for (const stage of ["session.load", "session.parse", "session.step"]) {
+		assert.ok(printed.some(ended(stage)), `${stage} ended: ${printed.slice(-12).join("\n")}`);
+	}
+
+	// (each file the run read through the editor, counted and timed, with its exit)
+	assert.match(run, /"exitCode":\d/u, run);
+	assert.match(run, /"readFile":\d+,"readFileMs":\d+/u, run);
+});
+
+test("the bridge: the extension host's one hub, linked to the workbench's, and every debug run's worker linked to it; other extensions only for their records", () => {
+	const { nodes, channels } = session.seen();
+	const linked = (one, other) => channels.some((channel) => channel.linked && ((channel.a === one && channel.b === other) || (channel.a === other && channel.b === one)));
+	// (the hub's links: the view's other channels are what's reported on it — extensions' command calls, their workers' traffic)
+	const onHub = [...new Set(channels.filter((channel) => channel.linked).flatMap((channel) => [channel.a, channel.b]))];
+
+	assert.ok(nodes.some((node) => node.id === "bridge" && node.state === "alive"), "the bridge reports on the page: its uplink works");
+	assert.ok(linked("workbench", "bridge"), JSON.stringify(onHub));
+	assert.ok(linked("bridge", "debug-worker"), "a debug run's worker links to the bridge (the workspace runtime's link)");
+	// (the other extensions are on the architecture view as their commands; on the hub, at most for their records —
+	// observeExtension's `ext:<name>`, linked to the workbench, never the bridge — and not as hubs of their own)
+	assert.deepEqual(onHub.filter((id) => ["tsval", "history", "source-control"].includes(id) || id.startsWith("exthost")), []);
+	assert.ok(channels.filter((channel) => channel.linked && (channel.a.startsWith("ext:") || channel.b.startsWith("ext:"))).every((channel) => [channel.a, channel.b].includes("workbench")), "an extension's records link to the workbench");
 });
