@@ -568,7 +568,13 @@ How it's kept:
      package loaded in a run, a test at a commit by its path, runs_tests' approval, a run's spans, the bridge's links — is
      agent-tools.mjs's (a package needs the starter's node_modules, which a seeded instance has none of). Answering in the
      margin needs the editor's room: the Debug Console, opened as a run starts, leaves a short window's editor a few lines,
-     so the panel's hidden while answering. 4 left. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
+     so the panel's hidden while answering. 4 left.
+     The 4 left stay outside, each for a reason a spec can't take away: worker-realms.mjs loads each built entry of dist/
+     in a fresh worker on the editor's origin (dist/ isn't in the workspace, and a spec's program has no Worker of its own);
+     agent-tools.mjs is the agents' requests, which have no UI; workbench.mjs keeps the system's colour scheme followed (a
+     page-wide emulation), the architecture plane's reports, and signing in with the API stood in for (Playwright's
+     `route`, which the editor's Playwright hasn't); performance.mjs measures the editor from outside, against its budgets.
+     What would move more: a `route` of the editor's own (the service worker answering for a test's routes) takes sign-in. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
      and the next full run. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
