@@ -141,15 +141,17 @@ How it's kept:
    within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
    the editor's 41 unit test files: 37 pass whole — git-fast-forward, git-status and silo-kept since a package's own
    version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
-   the root's 7 and 2; versions.json's format 3), history-ledger since almostnode's `node:module` has `registerHooks`
-   (resolve hooks, a runtime's own), page-tools since almostnode's `ws` says a server on an http server is listening
-   when that is (debug-mcp's `whenListening` waited for ever), cosmetic since almostnode resolves a linked package to its
-   real files (the program's, stepped by tsval, its TypeScript and all: page-tools ran 5,283 statements where it ran 646,
-   and each test reaching a linked package is told slower once) and node-test.js has node:test's `mock` (fn, method,
-   timers — held to node's own by node-test.test), hidden-timers since a timer native code sets — code `new Function`
-   made, which runs as the host's, not stepped — is set on the machine that called into it (tsval's `hostCalling`): it
-   was set nowhere, static-host since build/static-host.ts loads Vite only when it builds (the test checks the plugin
-   beside it, which needs none; real Vite in a run, rolldown's 11 MB of WebAssembly, was tried for it and taken back).
+   the root's 7 and 2; versions.json's format 3), history-ledger and cosmetic since each tests its feature's own logic
+   (the ledger's checks, extensions/history/ledger-checks.ts; which changes are cosmetic, extensions/cosmetic/verdicts.ts)
+   rather than its wiring through a stand-in `vscode` (which had taken `node:module`'s `registerHooks` in almostnode,
+   taken back, and node:test's `mock.timers`), page-tools since almostnode's `ws` says a server on an http server is
+   listening when that is (debug-mcp's `whenListening` waited for ever), hidden-timers since a timer native code sets —
+   code `new Function` made, which runs as the host's, not stepped — is set on the machine that called into it (tsval's
+   `hostCalling`): it was set nowhere, static-host since build/static-host.ts loads Vite only when it builds (the test
+   checks the plugin beside it, which needs none; real Vite in a run, rolldown's 11 MB of WebAssembly, was tried for it
+   and taken back). And almostnode resolves a linked package to its real files, as Node does: it's the program's then,
+   stepped by tsval, its TypeScript and all (page-tools ran 5,283 statements where it ran 646, and each test reaching a
+   linked package is told slower once).
    The rest, by cause:
    - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
@@ -157,8 +159,14 @@ How it's kept:
    - **A caller from the stack** (fs-boundaries, 1 of 4): `vscode`, not `ExplorerService` — tsval's stacks.
    - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
 
-   These tests go with the rewrite (item 3): what's worth fixing here is the runtime they find wrong, since the rebuilt
-   tests run, and are vouched for, in the editor.
+   A test failing here asks first whether it tests its subject directly (the user, 2026-11-16, after a day of shims
+   added to make tests pass): the runtime changes only for a gap a person's own program would hit, not for a test's
+   scaffolding — a stand-in module, a fake Worker, a module loaded that the test doesn't use. Added for scaffolding, and
+   to look at again as their tests are rewritten (item 3): node:test's `mock` (2660b618, ~200 lines, for cosmetic's
+   debounce — people's tests may use it, so not removed); tsval's `hostCalling` (56762658: a real bug, timers set by code
+   `new Function` made going nowhere, found only through hidden-timers.test's fake Worker, which a real one in the
+   browser would replace); and our Playwright's `page.request` (d5de713d, ~190 lines, for four checks in dev-server.spec
+   and workbench.spec of what a client hears — headers, a 503 — rather than what a person sees).
 3. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
    from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
    Waits on items 1 and 2 being good enough to work in. In order:
@@ -539,10 +547,11 @@ How it's kept:
      it drives too (2026-11-16; the user: everything that can run in the browser runs in the browser), with the dev server
      counting (COVERAGE=1): its window's realms, frames and workers, answer what they ran on a BroadcastChannel, each realm
      there since the page first went somewhere being the test's (the outer editor's and the service worker were there
-     before). features-view.spec reaches 257 files, 24,794 lines, where it reached its own two before. `npm run dev`
-     counts by default since (COVERAGE=0 doesn't): 9% slower to boot, 3% more memory, up to a third more script (the
-     extension host 14.9 → 20.1 MB); the harness's own servers and CI's don't, and the performance suite refuses a counting
-     one rather than hold it to the plain build's budgets. And the browser suites move into the editor, each as
+     before). features-view.spec reaches 257 files, 24,794 lines, where it reached its own two before. Counting is
+     asked for (`COVERAGE=1 npm run dev`): it was `npm run dev`'s default for a day (2026-11-16), but it boots 9% slower,
+     takes 3% more memory and up to a third more script (the extension host 14.9 → 20.1 MB, over its budget), so the
+     editor you work in daily doesn't; the performance suite refuses a counting one rather than hold it to the plain
+     build's budgets. And the browser suites move into the editor, each as
      the specs of the features it tested: git-views.mjs is four (review-panel, change-problems, commit-beside,
      source-control.spec.mjs), what it asked of hub requests read off the screen instead; on the way, in-editor Playwright
      clicks what's under the pointer, as a mouse does (a checkbox's drawn box toggles its input), and the review panel's

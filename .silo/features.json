@@ -909,6 +909,7 @@
       "packages/editor/build/history.ts",
       "packages/editor/extensions/history/engine.ts",
       "packages/editor/extensions/history/extension.ts",
+      "packages/editor/extensions/history/ledger-checks.ts",
       "packages/editor/extensions/history/ledger.ts",
       "packages/editor/extensions/history/package.json",
       "packages/editor/extensions/history/ts-external.js",
@@ -997,6 +998,7 @@
     ],
     "paths": [
       "packages/editor/extensions/cosmetic/extension.ts",
+      "packages/editor/extensions/cosmetic/verdicts.ts",
       "packages/editor/extensions/cosmetic/package.json",
       "packages/editor/extensions/bridge/annotations.ts"
     ],
@@ -2510,14 +2512,12 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "A real editor in headless Chromium for the browser suites (the architecture harness, through the workbench's `__architecture` and `__editor` hooks), and a stand-in `vscode` for Node's unit tests.",
+    "what": "A real editor in headless Chromium for the browser suites (the architecture harness, through the workbench's `__architecture` and `__editor` hooks).",
     "paths": [
       "packages/editor/test/architecture-harness.mjs",
-      "packages/editor/test/vscode/",
       "packages/editor/workbench/debug-bridge.ts"
     ],
     "tests": [
-      "packages/editor/test/history-ledger.test.mjs",
       "packages/editor/test/workbench.mjs"
     ]
   },

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsx build.ts",
-    "dev": "COVERAGE=${COVERAGE:-1} tsx dev.ts",
+    "dev": "tsx dev.ts",
     "lint": "util-lint",
     "test": "node --import tsx --test --test-concurrency=4 test/*.test.mjs workbench/terminal/commands/*/*.test.mjs",
     "test:architecture": "npm run test:architecture:realms && npm run test:architecture:performance",

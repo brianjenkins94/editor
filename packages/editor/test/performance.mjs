@@ -50,7 +50,7 @@ before(async () => {
 	await session.page.waitForLoadState("load");
 
 	if (process.env.COVERAGE !== "1" && await session.page.evaluate(() => "__evidence" in globalThis)) {
-		throw new Error("the dev server this uses counts coverage (npm run dev does, COVERAGE=1): the budgets are the plain build's — stop it and this starts its own, or run it with COVERAGE=0 npm run dev");
+		throw new Error("the dev server this uses counts coverage (COVERAGE=1): the budgets are the plain build's — stop it and this starts its own, or run plain npm run dev");
 	}
 });
 

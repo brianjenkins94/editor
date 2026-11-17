@@ -38,10 +38,9 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
  *  which it keeps per release outside the site for the admin app's stacks (packages/api/scripts/keep-source-maps.ts). */
 const sourcemap: boolean | "hidden" = !isCI || (process.env["SOURCE_MAPS"] === "hidden" ? "hidden" : false);
 
-/** COVERAGE=1: our modules instrumented in every pass (build/coverage.ts), so what each test ran can be read — a UI spec's
- *  in the editor, its window's (shell/preview-windows.tsx), and each architecture test's from outside. `npm run dev` counts
- *  (COVERAGE=0 doesn't): 9% slower to boot and up to a third more script (measured 2026-11-16); a server the harness starts
- *  itself, and CI's, don't. */
+/** COVERAGE=1 (off unless asked: `COVERAGE=1 npm run dev`): our modules instrumented in every pass (build/coverage.ts), so
+ *  what each test ran can be read — a UI spec's in the editor, its window's (shell/preview-windows.tsx), and each
+ *  architecture test's from outside. It costs: 9% slower to boot and up to a third more script (measured 2026-11-16). */
 const coverage = (): Plugin[] => (process.env["COVERAGE"] === "1" ? [coveragePlugin()] : []);
 
 /** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */

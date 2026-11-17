@@ -7,13 +7,12 @@
  *
  * `cosmetic.list`: each changed code file's verdict, as last read.
  */
-import type { ChangeVerdict, GitFileChange } from "@brianjenkins94/editor-api/git";
+import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import { annotations } from "@brianjenkins94/editor-api/annotations";
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 
-/** The files BABLR reads: code. */
-const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
+import { type Asks, changedBetween, type Verdict, verdictsOf } from "./verdicts";
 
 /** How long after a change the files are read again. */
 const SETTLE_MS = 2000;
@@ -30,42 +29,37 @@ export function activate(context: vscode.ExtensionContext): void {
 	}
 
 	const changed = new vscode.EventEmitter<vscode.Uri[]>();
-	/** Each changed code file's verdict, by URI. */
-	let verdicts = new Map<string, ChangeVerdict["verdict"]>();
+	/** Each changed code file's verdict, by its path. */
+	let verdicts = new Map<string, Verdict>();
 	const root = (): vscode.Uri | undefined => vscode.workspace.workspaceFolders?.[0]?.uri;
+	/** What a reading asks the editor: its git, and its BABLR. */
+	const asks: Asks = {
+		"status": async () => vscode.commands.executeCommand<{ "files": GitFileChange[] } | undefined>("editor.git.status"),
+		"file": async (path) => vscode.commands.executeCommand<{ "head": string; "working": string }>("editor.git.file", path),
+		"classify": async (head, working) => {
+			const answer = await annotations(vscode.commands).classify(head, working);
+
+			return answer !== undefined && "value" in answer
+				? answer.value.verdict
+				: undefined;
+		}
+	};
 
 	/** Every modified code file's verdict, read again — the files whose mark changed told. */
 	const readNow = async (): Promise<void> => {
 		const folder = root();
-		const status = await Promise.resolve(vscode.commands.executeCommand<{ "files": GitFileChange[] } | undefined>("editor.git.status")).catch(() => undefined);
+		const next = folder === undefined
+			? undefined
+			: await verdictsOf(asks);
 
-		if (folder === undefined || status === undefined) {
+		if (folder === undefined || next === undefined) {
 			return;
 		}
 
-		const next = new Map<string, ChangeVerdict["verdict"]>();
-
-		// One at a time: BABLR's worker queues them anyway, and a verdict over texts it has parsed is quick.
-		for (const file of status.files.filter((each) => each.status === "M" && CODE.test(each.path))) {
-			const texts = await Promise.resolve(vscode.commands.executeCommand<{ "head": string; "working": string }>("editor.git.file", file.path)).catch(() => undefined);
-			const answer = texts === undefined
-				? undefined
-				: await annotations(vscode.commands).classify(texts.head, texts.working);
-
-			next.set(vscode.Uri.joinPath(folder, file.path).toString(), answer !== undefined && "value" in answer
-				? answer.value.verdict
-				: "none");
-		}
-
-		const touched = [
-			...new Set([
-				...verdicts.keys(),
-				...next.keys()
-			])
-		].filter((uri) => verdicts.get(uri) !== next.get(uri));
+		const touched = changedBetween(verdicts, next);
 
 		verdicts = next;
-		changed.fire(touched.map((uri) => vscode.Uri.parse(uri)));
+		changed.fire(touched.map((path) => vscode.Uri.joinPath(folder, path)));
 	};
 
 	const read = async (): Promise<void> => {
@@ -106,7 +100,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		watcher,
 		vscode.window.registerFileDecorationProvider({
 			"onDidChangeFileDecorations": changed.event,
-			"provideFileDecoration": (uri) => (verdicts.get(uri.toString()) === "cosmetic"
+			"provideFileDecoration": (uri) => (verdicts.get(vscode.workspace.asRelativePath(uri, false)) === "cosmetic"
 				? {
 						"badge": "≈",
 						"tooltip": "Cosmetic — formatting or comments only",
@@ -119,10 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		watcher.onDidChange(changedFile),
 		watcher.onDidCreate(changedFile),
 		watcher.onDidDelete(changedFile),
-		vscode.commands.registerCommand("cosmetic.list", () => Object.fromEntries([...verdicts].map(([uri, verdict]) => [
-			vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false),
-			verdict
-		])))
+		vscode.commands.registerCommand("cosmetic.list", () => Object.fromEntries(verdicts))
 	);
 
 	const first = setTimeout(follow, FIRST_READ_MS);

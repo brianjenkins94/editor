@@ -5,9 +5,9 @@ import ts from "typescript";
 import { instrument } from "../../almostnode/frameworks/instrument.ts";
 
 /**
- * COVERAGE=1 (`npm run dev`'s, else off; build.ts): the editor's own modules instrumented for statement coverage with
- * almostnode's instrument.ts, counted in each realm by a small runtime of their own (RUNTIME): what each test ran — a UI
- * spec's, run in the editor, read from its window's realms as the test ends (shell/preview-windows.tsx); an architecture
+ * COVERAGE=1 (off unless asked, `COVERAGE=1 npm run dev`; build.ts): the editor's own modules instrumented for statement
+ * coverage with almostnode's instrument.ts, counted in each realm by a small runtime of their own (RUNTIME): what each
+ * test ran — a UI spec's, run in the editor, read from its window's realms as the test ends (shell/preview-windows.tsx); an architecture
  * test's, read by the harness from outside, for comparing with what the ledger declares (packages/silo/README.md,
  * *Declared against observed*).
  *

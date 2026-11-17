@@ -1,89 +1,90 @@
-// The feature ledger in the editor (extensions/history/ledger.ts), against the vscode stand-in (vscode/fake.ts): what's
-// been decided about a file (`history.decisions`: the ledger's entries holding it, the docs' lines naming it under their
-// headings) and `silo check`'s drift in Problems (a removed feature its docs still name; a file no feature owns).
-import "./vscode/hooks.mjs";
-
+// The feature ledger in the editor (extensions/history/ledger-checks.ts), over a workspace's files as given: what's been
+// decided about a file (`history.decisions`: the ledger's entries holding it, the docs' lines naming it under their
+// headings) and `silo check`'s drift, each problem where Problems shows it (a removed feature its docs still name, at its
+// entry in the ledger; a file no feature owns, on that file). ledger.ts reads the files and shows the problems.
 import * as assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { test } from "node:test";
 
-// (loaded as CommonJS, so the stand-in is too: one instance, the one the ledger view registers with)
-const require = createRequire(import.meta.url);
-const { fake, Uri } = require("vscode");
-const { ledgerView } = require("../extensions/history/ledger.ts");
+const { decisionsFor, driftOf } = await import("../extensions/history/ledger-checks.ts");
 
 const LEDGER = {
-	"Loading": { "status": "active", "why": "the core loads", "since": "2026-11-02", "paths": ["src/load.ts"] },
-	"Notes on code": { "status": "removed", "why": "out until reintroduced", "since": "2026-11-02", "paths": ["src/notes.ts"] }
+	"Loading": {
+		"status": "active",
+		"why": "the core loads",
+		"since": "2026-11-02",
+		"paths": ["src/load.ts"]
+	},
+	"Notes on code": {
+		"status": "removed",
+		"why": "out until reintroduced",
+		"since": "2026-11-02",
+		"paths": ["src/notes.ts"]
+	}
 };
+const TODAY = "2026-11-16";
 
-/** A workspace: the ledger, a doc and the code it's about — and the ledger view on it. */
-function workspace(docs) {
-	fake.reset();
-	fake.files.set(".silo/features.json", JSON.stringify(LEDGER, null, "\t"));
-	fake.files.set("NEXT.md", docs);
-	fake.files.set("src/load.ts", "export const load = 1;\n");
-
-	const subscriptions = [];
-
-	return { "view": ledgerView({ "subscriptions": subscriptions }, Uri.file("/workspace")), "subscriptions": subscriptions };
+/** A workspace's texts: the ledger, a doc and the code it's about, and `more`. */
+function workspace(docs, more = {}, ledger = LEDGER) {
+	return new Map(Object.entries({
+		".silo/features.json": JSON.stringify(ledger, null, "\t"),
+		"NEXT.md": docs,
+		"src/load.ts": "export const load = 1;\n",
+		...more
+	}));
 }
 
-test("what's been decided about a file: the ledger's entries holding it, and the docs' lines naming it, under their headings", async () => {
-	workspace("# Next\n\n## Queue\n\n- src/load.ts reads the repository first.\n- Nothing about it here.\n");
+/** Its drift, each problem by the file it's on. */
+function problems(texts) {
+	const placed = driftOf(texts.get(".silo/features.json"), new Set(texts.keys()), texts, new Map(), TODAY);
 
-	const decided = await fake.commands.get("history.decisions")("/workspace/src/load.ts");
+	return Map.groupBy(placed, (each) => each.path);
+}
+
+test("what's been decided about a file: the ledger's entries holding it, and the docs' lines naming it, under their headings", () => {
+	const texts = workspace("# Next\n\n## Queue\n\n- src/load.ts reads the repository first.\n- Nothing about it here.\n");
+	const decided = decisionsFor("/workspace/src/load.ts", texts.get(".silo/features.json"), texts);
 
 	assert.equal(decided.target, "src/load.ts");
 	assert.deepEqual(decided.ledger.map((entry) => entry.name), ["Loading"]);
-	assert.deepEqual(decided.docs, [{ "doc": "NEXT.md", "line": 5, "heading": "Queue", "text": "- src/load.ts reads the repository first." }]);
-	assert.equal(await fake.commands.get("history.decisions")(" "), undefined, "nothing asked, nothing answered");
+	assert.deepEqual(decided.docs, [
+		{
+			"doc": "NEXT.md",
+			"line": 5,
+			"heading": "Queue",
+			"text": "- src/load.ts reads the repository first."
+		}
+	]);
+	assert.equal(decisionsFor(" ", texts.get(".silo/features.json"), texts), undefined, "nothing asked, nothing answered");
 });
 
-test("drift in Problems: a removed feature its docs still name is a problem at its entry in the ledger", async () => {
-	const { view } = workspace("# Next\n\nsrc/notes.ts is still described here.\n");
+test("drift: a removed feature its docs still name is a problem at its entry in the ledger", () => {
+	const texts = workspace("# Next\n\nsrc/notes.ts is still described here.\n");
+	const [problem, ...more] = problems(texts).get(".silo/features.json") ?? [];
 
-	await view.check(new Map());
-
-	const problems = fake.diagnostics.get("silo").get(".silo/features.json");
-
-	assert.equal(problems.length, 1);
-	assert.match(problems[0].message, /^removed but documented: "Notes on code" was removed, and NEXT\.md still names it/u);
-	assert.equal(problems[0].source, "silo");
-	assert.equal(problems[0].range.start.line, JSON.stringify(LEDGER, null, "\t").split("\n").findIndex((line) => line.includes("\"Notes on code\"")));
+	assert.equal(more.length, 0);
+	assert.match(problem.message, /^removed but documented: "Notes on code" was removed, and NEXT\.md still names it/u);
+	assert.equal(problem.line, texts.get(".silo/features.json").split("\n").findIndex((line) => line.includes("\"Notes on code\"")));
 });
 
-test("drift in Problems: none when the docs don't name what was removed", async () => {
-	const { view } = workspace("# Next\n\nOnly src/load.ts here.\n");
-
-	await view.check(new Map());
-
-	assert.deepEqual(fake.diagnostics.get("silo").get(".silo/features.json"), []);
+test("drift: none when the docs don't name what was removed", () => {
+	assert.equal(problems(workspace("# Next\n\nOnly src/load.ts here.\n")).size, 0);
 });
 
-test("a code file no feature owns, tests and scripts among them, is a problem on that file; what's installed isn't", async () => {
-	const { view } = workspace("# Next\n");
+test("a code file no feature owns, tests and scripts among them, is a problem on that file; what's built isn't", () => {
+	const ledger = {
+		...LEDGER,
+		"Loading": { ...LEDGER["Loading"], "what": "Loads." }
+	};
+	const found = problems(workspace("# Next\n", { "src/stray.ts": "export const stray = 1;\n", "test/stray.test.mjs": "export const stray = 1;\n", "dist/built.js": "export const built = 1;\n" }, ledger));
 
-	fake.files.set(".silo/features.json", JSON.stringify({ ...LEDGER, "Loading": { ...LEDGER["Loading"], "what": "Loads." } }, null, "\t"));
-	fake.files.set("src/stray.ts", "export const stray = 1;\n");
-	fake.files.set("test/stray.test.mjs", "export const stray = 1;\n");
-	fake.files.set("dist/built.js", "export const built = 1;\n");
-	await view.check(new Map());
-
-	const silo = fake.diagnostics.get("silo");
-
-	assert.match(silo.get("src/stray.ts")?.[0]?.message ?? "", /^unowned file: src\/stray\.ts is owned by no feature/u);
-	assert.equal(silo.get("src/load.ts"), undefined, "owned by Loading");
-	assert.match(silo.get("test/stray.test.mjs")?.[0]?.message ?? "", /^unowned file: test\/stray\.test\.mjs/u);
-	assert.equal(silo.get("dist/built.js"), undefined, "built, not code to own");
-	assert.deepEqual(silo.get(".silo/features.json"), []);
+	assert.match(found.get("src/stray.ts")?.[0]?.message ?? "", /^unowned file: src\/stray\.ts is owned by no feature/u);
+	assert.equal(found.get("src/stray.ts")?.[0]?.line, 0);
+	assert.equal(found.get("src/load.ts"), undefined, "owned by Loading");
+	assert.match(found.get("test/stray.test.mjs")?.[0]?.message ?? "", /^unowned file: test\/stray\.test\.mjs/u);
+	assert.equal(found.get("dist/built.js"), undefined, "built, not code to own");
+	assert.equal(found.get(".silo/features.json"), undefined);
 });
 
-test("a repository whose ledger declares no feature isn't held to owners", async () => {
-	const { view } = workspace("# Next\n");
-
-	fake.files.set("src/stray.ts", "export const stray = 1;\n");
-	await view.check(new Map());
-
-	assert.equal(fake.diagnostics.get("silo").get("src/stray.ts"), undefined);
+test("a repository whose ledger declares no feature isn't held to owners", () => {
+	assert.equal(problems(workspace("# Next\n", { "src/stray.ts": "export const stray = 1;\n" })).get("src/stray.ts"), undefined);
 });
