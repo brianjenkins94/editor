@@ -9,7 +9,7 @@ const decisions: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "decisions_for",
 			"config": {
-				"description": "Before changing something, what's been decided about it: the feature ledger's entries (.silo/features.json: removed, parked, an experiment's expiry, each with why) that name it or whose paths hold the file or whose ways in name it, and each line of the docs (*.md, NEXT.md's queue and decisions among them) naming it, under its heading. Give a file (its path, or just its name) or a name (an identifier, a tool, a hub request, a feature). Returns { target, ledger: [{ name, status, why, since, … }], docs: [{ doc, line, heading, text }], counts }.",
+				"description": "Before changing something, what's been decided about it: the feature ledger's entries (.silo/features.json: removed, parked, an experiment's expiry, each with why) that name it or whose paths hold the file or whose ways in name it, and each line of the docs (*.md, NEXT.md's queue and decisions among them) naming it, under its heading. Give a file (its path, or just its name) or a name (an identifier, a tool, a hub request, a feature). And a file's notes: the whys kept beside its code, as the Margin shows them. Returns { target, ledger: [{ name, status, why, since, … }], docs: [{ doc, line, heading, text }], counts, notes?: [{ line, text, by, status }] }.",
 				"inputSchema": { "target": z.string().describe("A file's path or name, or an identifier, tool, hub request or feature.") }
 			},
 			"handler": async ({ target }, { signal }) => ok(request("decisions.for", { "target": target }, signal))

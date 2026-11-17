@@ -75,6 +75,25 @@ test("files: written, read numbered, edited, replaced across files or not at all
 	await assert.rejects(ask("files.delete", { "path": ".git" }), /git's own files/u);
 });
 
+test("a file's notes, read as the Margin shows them: beside its lines in files_read, among its whys in decisions_for", async () => {
+	await ask("files.write", { "path": "tools/noted.mjs", "content": "const rate = 2;\nconst total = rate * 10;\n" });
+	assert.deepEqual(await session.request("notes.add", { "path": "tools/noted.mjs", "at": "const total = rate * 10;", "text": "ten of them" }, 60_000), { "path": "tools/noted.mjs", "line": 2 });
+
+	const read = await session.eventually("the note beside its line", async () => {
+		const answer = await ask("files.read", { "path": "tools/noted.mjs" });
+
+		return answer.notes?.length === 1 ? answer : undefined;
+	}, 60_000);
+
+	assert.deepEqual(read.notes.map(({ line, text }) => [line, text]), [[2, "ten of them"]]);
+	// (lines it wasn't asked for, no note)
+	assert.equal((await ask("files.read", { "path": "tools/noted.mjs", "limit": 1 })).notes, undefined);
+	assert.deepEqual((await ask("decisions.for", { "target": "tools/noted.mjs" })).notes?.map(({ line, text }) => [line, text]), [[2, "ten of them"]]);
+	// (a file with none says nothing of notes)
+	await ask("files.write", { "path": "tools/plain.mjs", "content": "const plain = 1;\n" });
+	assert.equal((await ask("files.read", { "path": "tools/plain.mjs" })).notes, undefined);
+});
+
 test("git: a diff of what changed, then the log, a file at a commit and who changed each line", async () => {
 	await ask("files.write", { "path": "history.txt", "content": "first\n" });
 	await session.request("git.commit", { "message": "history: first", "files": [{ "path": "history.txt" }] }, 60_000);

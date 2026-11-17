@@ -10,7 +10,7 @@ const files: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "files_read",
 			"config": {
-				"description": "Read a workspace file, numbered as `cat -n` numbers it (`line<TAB>text`): what's open in an editor — unsaved edits included — else what's on disk. Returns { path, lines (in all), from, to, dirty (unsaved edits), content }. Read a long file in pieces with offset and limit.",
+				"description": "Read a workspace file, numbered as `cat -n` numbers it (`line<TAB>text`): what's open in an editor — unsaved edits included — else what's on disk. Returns { path, lines (in all), from, to, dirty (unsaved edits), content, notes? }: notes, the ones the Margin shows beside those lines — each { line, text, by, status }, one with no line lost its place. Read a long file in pieces with offset and limit.",
 				"inputSchema": {
 					"path": z.string().describe("The file, relative to the workspace (src/index.ts) or absolute under it (/workspace/src/index.ts)."),
 					"offset": z.number().optional().describe("The 1-based line to start at (default 1)."),

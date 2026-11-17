@@ -1367,6 +1367,7 @@
       "code actions provider||notes/extension.ts",
       "command|notes.add",
       "command|notes.dismiss",
+      "command|notes.on",
       "command|notes.paneView",
       "command|notes.place",
       "diagnostic collection||notes/extension.ts",

@@ -195,6 +195,20 @@ export function activate(context: vscode.ExtensionContext): void {
 		watcher.onDidDelete(changed),
 		// Saved: code moved into this file is on disk now, where a note that lost its place elsewhere looks for it.
 		vscode.workspace.onDidSaveTextDocument(changed),
+		// A file's notes as the Margin shows them, for what reads it another way (an agent's files_read, decisions_for): each
+		// found in its text now — its 1-based line, or none where it lost its place — with who wrote it. (No look at all, and
+		// so no parse, for a file with none.)
+		vscode.commands.registerCommand("notes.on", async (path: unknown): Promise<{ "line"?: number; "text": string; "by": string; "status": Resolved["status"] }[]> => {
+			const uri = vscode.Uri.joinPath(root, String(path).replace(/^\/workspace\//u, ""));
+
+			if (!CODE.test(uri.path) || (await notesOn(relative(uri))).length === 0) {
+				return [];
+			}
+
+			const found = await span("look", { "path": uri.path }, async () => look(await vscode.workspace.openTextDocument(uri))) ?? landed.get(uri.toString()) ?? [];
+
+			return found.map(({ note, owner, resolved, line }) => ({ ...line === undefined ? {} : { "line": line + 1 }, "text": textOf(note), "by": owner, "status": resolved.status }));
+		}),
 		vscode.commands.registerCommand("notes.paneView", async (uri: unknown): Promise<PaneContent | undefined> => {
 			const document = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 

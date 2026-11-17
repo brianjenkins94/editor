@@ -64,6 +64,15 @@ export function installDecisions(vscode: typeof vscodeApi, hub: Hub): void {
 			throw new TypeError("decisions.for takes { target }: a file (its path or its name) or a name (an identifier, a feature)");
 		}
 
-		return await asked("history.decisions", target.trim(), signal) ?? { "error": "the history extension didn't answer" };
+		const decided = await asked("history.decisions", target.trim(), signal) as Record<string, unknown> | undefined;
+
+		if (decided === undefined) {
+			return { "error": "the history extension didn't answer" };
+		}
+
+		// (a file's notes too: the whys kept beside its code, as the Margin shows them)
+		const notes = target.includes("/") ? await Promise.resolve(vscode.commands.executeCommand<unknown[]>("notes.on", target.trim())).catch(() => undefined) ?? [] : [];
+
+		return notes.length === 0 ? decided : { ...decided, "notes": notes };
 	});
 }

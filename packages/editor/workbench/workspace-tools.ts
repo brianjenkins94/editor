@@ -141,6 +141,8 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		const count = typeof limit === "number" && limit > 0 ? Math.floor(limit) : READ_LINES;
 		const shown = lines.slice(from - 1, from - 1 + count);
 		const width = String(from + shown.length - 1).length;
+		// (the notes the Margin shows beside these lines, and any that lost their place: what's said about the code, not in it)
+		const notes = (await Promise.resolve(vscode.commands.executeCommand<{ "line"?: number }[]>("notes.on", relative(uri))).catch(() => undefined) ?? []).filter(({ line }) => line === undefined || (line >= from && line < from + shown.length));
 
 		return {
 			"path": relative(uri),
@@ -148,7 +150,8 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			"from": from,
 			"to": from + shown.length - 1,
 			"dirty": dirty,
-			"content": shown.map((line, index) => `${String(from + index).padStart(width)}\t${line.length > LINE_CHARACTERS ? line.slice(0, LINE_CHARACTERS) + "…" : line}`).join("\n")
+			"content": shown.map((line, index) => `${String(from + index).padStart(width)}\t${line.length > LINE_CHARACTERS ? line.slice(0, LINE_CHARACTERS) + "…" : line}`).join("\n"),
+			...notes.length === 0 ? {} : { "notes": notes }
 		};
 	});
 
