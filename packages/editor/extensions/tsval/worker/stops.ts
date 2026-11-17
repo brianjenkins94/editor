@@ -42,7 +42,7 @@ export function askAt(vm: Vm, place: Place): CapabilityAsk | undefined {
 		for (const hit of hits) {
 			const before = resourceOf(vm, call.arguments[hit.argIndex], file);
 			// Computed on the line: what it will be, from a fork run to the call.
-			const probe = before.resolved ? undefined : probeResource(vm, place, hit.capability);
+			const probe = before.resolved ? undefined : probeResource(vm, place, hit.capability, hit.argIndex);
 			const { resource, resolved } = probe === undefined ? before : { "resource": probe, "resolved": true };
 
 			if (shouldBreak(state.policy, { ...hit, "resource": resolved ? resource : "" })) {

@@ -84,6 +84,28 @@ test("a program's capability calls stop in the margin, on their lines, and are m
 	await expect(shown("stop-denied.txt")).toHaveCount(0);
 });
 
+test("a copy is asked about where it lands, its paths computed on its line", async ({ page }) => {
+	const workbench = await openEditor(page, {
+		"source.txt": "copied\n",
+		"copies.mjs": [
+			"import { copyFileSync } from \"node:fs\";",
+			"import * as path from \"node:path\";",
+			"copyFileSync(path.join(\"/workspace\", \"source.txt\"), path.join(\"/workspace\", \"landed.txt\"));",
+			""
+		].join("\n")
+	});
+	const question = workbench.locator(".pane-item.tone-question, .pane-item.tone-warning");
+
+	await openFile(workbench, "copies.mjs");
+	await codeOf(workbench).press("F5");
+
+	// (the write is where it lands, not the source it reads: each path found by the probe of its own argument)
+	await expect(question.first()).toContainText("landed.txt", { "timeout": 60_000 });
+	await expect(question.first()).not.toContainText("source.txt");
+	await question.locator("wa-button", { "hasText": "Allow" }).first().click({ "timeout": 30_000 });
+	await expect(workbench.locator("[role='treeitem'][aria-level='1'][aria-label='landed.txt']")).toBeVisible({ "timeout": 30_000 });
+});
+
 test("a breakpoint stops the run; a step goes on a line, and a step back returns to it", async ({ page }) => {
 	const workbench = await openEditor(page, { "steps.mjs": "let x = 1;\nx = 2;\nx = 3;\nconsole.log(\"x is \" + x);\n" });
 

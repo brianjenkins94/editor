@@ -166,8 +166,9 @@ export interface State {
 	/** Where the run's event loop started (its clock then), for times shown since; and what a wait costs (Skip Waits). */
 	"loopStart": number;
 	"pace": "real" | "fast";
-	/** A probe running (probeResource): the capability whose call it's after, and the resource that call reached. */
-	"probing": { "capability": string; "resource"?: string } | undefined;
+	/** A probe running (probeResource): the capability whose call it's after, at which of its arguments (a copy's or a
+	 *  rename's second is where it lands), and the resource that call reached. */
+	"probing": { "capability": string; "argIndex"?: number; "resource"?: string } | undefined;
 	/** The functions the program was given — its built-in modules (node:fs and the rest, the capability stand-ins among them)
 	 *  and globals, two levels into each (`fs.promises.mkdir`): what a capability stop's call has to be one of to be one
 	 *  (lineReaches). Set as a run starts. */

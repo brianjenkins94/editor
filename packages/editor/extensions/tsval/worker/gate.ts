@@ -65,9 +65,10 @@ const probed = new WeakMap<Vm, Map<string, string | undefined>>();
  * evaluated as the run will evaluate them, every capability call on the way its inert stand-in, the event loop
  * deterministic — then thrown away. Undefined if the fork doesn't get there (it threw first, or took too long).
  */
-export function probeResource(vm: Vm, place: Place, capability: string): string | undefined {
+export function probeResource(vm: Vm, place: Place, capability: string, argIndex = 0): string | undefined {
 	const known = probed.get(vm);
-	const key = `${place.file}:${place.line}`;
+	// (by what it's after too: a copy's source and where it lands are two probes of one line)
+	const key = `${place.file}:${place.line}:${capability}:${String(argIndex)}`;
 
 	if (known?.has(key) === true) {
 		return known.get(key);
@@ -77,7 +78,7 @@ export function probeResource(vm: Vm, place: Place, capability: string): string 
 	let resource: string | undefined;
 
 	fork.breakpoints.clear();
-	state.probing = { "capability": capability };
+	state.probing = { "capability": capability, "argIndex": argIndex };
 
 	try {
 		for (let steps = 0; steps < 20_000 && !fork.finished && !fork.idle && state.probing.resource === undefined; steps += 1) {
@@ -266,8 +267,16 @@ export function reachedBy(argument: unknown): string {
 function probeCall(probe: NonNullable<typeof state.probing>, fn: (...args: unknown[]) => unknown, self: unknown, args: unknown[]): unknown {
 	const tagged = standinCapability(fn);
 
-	if (tagged?.capability === probe.capability) {
-		probe.resource = pathOrUrl(args[tagged.resourceArg]);
+	if (tagged === undefined) {
+		return fn.apply(self, args);
+	}
+
+	// (a copy's or a rename's landing is its own capability, at its second argument: FS_DESTINATION)
+	const argIndex = probe.argIndex ?? tagged.resourceArg;
+	const after = argIndex === tagged.resourceArg ? tagged.capability : tagged.landing;
+
+	if (after === probe.capability) {
+		probe.resource = pathOrUrl(args[argIndex]);
 
 		throw PROBED;
 	}

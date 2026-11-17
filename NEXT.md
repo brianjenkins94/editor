@@ -154,8 +154,9 @@ How it's kept:
    linked package is told slower once).
    The rest, by cause:
    - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
-     baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
-     `file:` URL source as the copy's destination.
+     baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: a stop's probe
+     for a path computed on its line was kept by the line, so where a copy lands got its source's (fixed, 2026-11-17:
+     kept by the capability and argument it's after, worker/gate.ts `probeResource`).
    - **A caller from the stack** (fs-boundaries, 1 of 4): `vscode`, not `ExplorerService` — tsval's stacks.
    - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
 
