@@ -622,9 +622,13 @@ How it's kept:
        checks it); the editor's own records (.silo/evidence, traces, edit history, reach, runs) in most, which a spec that
        reads them would see another's of (past-runs, features-view, coverage, way-in-reach). Nothing past what teardown can
        put back — files restored, runs stopped, editors closed — so none needs an instance of its own for what it leaves:
-       only the boot's own specs, for what they test. The boot's writes read as the test's for now — git's repository made
-       (no branch → main, 40), .vscode/settings.json (29, where 10 seed it), versions.json, .gitignore — so the baseline
-       is to be taken once the editor has come up, before the column shows them.
+       only the boot's own specs, for what they test. Counted from once the editor has come up (every readiness stage, and
+       git's repository there), the boot's writes are its own: git moves in 6 tests, all commits (change-problems,
+       commit-beside's three, review-panel, source-control), so teardown puts refs back too; settings in one
+       (eslint.spec, its own). The teardown that follows from it isn't a checkpoint's (Workspace: Restore Checkpoint
+       leaves `.silo/` alone, and refuses once HEAD has moved): a snapshot of the whole workspace as it came up, `.git` and
+       `.silo` in it, written back. What it can't show is state held in memory (an extension's caches that follow files
+       through watchers): specs run one after another in one editor will.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: the restarts every 12 specs go, and lanes are measured past two as memory allows. A spec that fails beside

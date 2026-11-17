@@ -11,6 +11,7 @@ import type * as vscodeApi from "vscode";
 import type { RunRegistry } from "./runs";
 import { instance } from "../shared/instance";
 import { branches, headCommit } from "./git-engine";
+import { STAGES, waitFor } from "./readiness";
 
 /** The channel a page asks on (shell/preview-windows.tsx), and answers come back on. */
 const CHANNEL = "editor.effects";
@@ -18,13 +19,20 @@ const CHANNEL = "editor.effects";
 /** Files that aren't the program's own: packages type acquisition writes, and git's. */
 const NOT_THE_WORKSPACE = /(?:^|\/)(?:node_modules|\.git)(?:\/|$)/u;
 
+/** How long the editor may take to come up before what it's left with is counted from then anyway. */
+const UP_MS = 120_000;
+/** How often whether git's repository is there yet is asked, as the editor comes up. */
+const REPO_POLL_MS = 250;
+
 export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log: Logger): void {
 	if (instance === undefined || typeof BroadcastChannel === "undefined") {
 		return;
 	}
 
-	/** Each file touched since, and how: a file made and then removed was never there. */
+	/** Each file touched since the editor came up, and how: a file made and then removed was never there. What it writes as
+	 *  it comes up (its seed, git's repository and .gitignore, the packages' versions) isn't a test's. */
 	const files = new Map<string, Leaves["files"][number]["how"]>();
+	let up = false;
 	const at = (uri: vscodeApi.Uri): string | undefined => {
 		const path = vscode.workspace.asRelativePath(uri, false);
 
@@ -33,21 +41,21 @@ export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log:
 	const watcher = vscode.workspace.createFileSystemWatcher("**/*");
 
 	watcher.onDidCreate((uri) => {
-		const path = at(uri);
+		const path = up ? at(uri) : undefined;
 
 		if (path !== undefined) {
 			files.set(path, files.get(path) === "removed" ? "changed" : "made");
 		}
 	});
 	watcher.onDidChange((uri) => {
-		const path = at(uri);
+		const path = up ? at(uri) : undefined;
 
 		if (path !== undefined && files.get(path) !== "made") {
 			files.set(path, "changed");
 		}
 	});
 	watcher.onDidDelete((uri) => {
-		const path = at(uri);
+		const path = up ? at(uri) : undefined;
 
 		if (path !== undefined) {
 			if (files.get(path) === "made") {
@@ -58,8 +66,21 @@ export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log:
 		}
 	});
 
-	// (git's, as the editor came up: a workspace that isn't a repository has none)
-	const before = Promise.all([branches().then(({ current }) => current, () => undefined), headCommit().catch(() => undefined)]);
+	// Up: every stage reached (readiness.ts), and git's repository there — the git service makes it as the editor comes up
+	// (git-engine.ts `ensureRepo`), waited for rather than made again beside it. Git's branch and HEAD then are where it started.
+	const before = (async (): Promise<[string | undefined, string | undefined]> => {
+		const deadline = Date.now() + UP_MS;
+
+		await waitFor(STAGES, UP_MS);
+
+		while (Date.now() < deadline && await branches().then(({ current }) => current === undefined, () => true)) {
+			await new Promise((resolve) => { setTimeout(resolve, REPO_POLL_MS); });
+		}
+
+		up = true;
+
+		return Promise.all([branches().then(({ current }) => current, () => undefined), headCommit().catch(() => undefined)]);
+	})();
 	const leaves = async (): Promise<Leaves> => {
 		const [[branchThen, headThen], branchNow, headNow] = await Promise.all([before, branches().then(({ current }) => current, () => undefined), headCommit().catch(() => undefined)]);
 
