@@ -265,11 +265,15 @@ How it's kept:
      its readers on the ledger), and every code file in the repository has an owner (decision 22). One owner a file is
      where that starts: once silo ingests coverage from runs and traces, reassess how to handle sharing from what they
      show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case). One attribution is
-     settled (the ledger's: silo README, *What doesn't fit* 4), and `silo observed` compares each test's reach with it. Next
-     for sharing: dispatch the architecture workflow for CI's reach, read what it says, and decide. That route is a stopgap
-     (the ledger's *What each test ran*, an experiment): the end goal is every test running in the editor, in the browser,
-     with in-editor Playwright driving previews and tsval running the tests, so what a test ran is its trace. It needs
-     *Preview windows* and *Playwright tests in the debugger* back, and `silo observed` reading traces.
+     settled (the ledger's: silo README, *What doesn't fit* 4), and `silo observed` compares each test's reach with it — the
+     editor's own now, as its runs keep it (`silo observed .silo/local/reach`, each test file's at its path, its ranges of
+     lines counted line by line), where CI's was a dispatched workflow's (the ledger's *What each test ran*, an experiment,
+     the stopgap until then). Read 2026-11-17 from a run of the editor's 41 unit test files in the editor: 149 tests, 101
+     with enough lines few others ran to tell, a median of 100% in their own features' code, 26 under half — mostly a
+     dependency (the hub's under runs, node-runner and tarballs; tsval's under replay and site-sums; *Review by hunk*'s
+     line diff under test-runs; the metrics under workspace-changes), which it says and a person decides. One to decide:
+     page-tools.test runs *Page tools* (130 lines, beside the hub's 406) but isn't among its tests — four other features
+     declare it. Its specs' reach is still read from outside.
    - **Notes for comments, and agents reading them**: the migration, notes in `decisions_for`, inline in `files_read`,
      an orphan warning from `files_edit`. Then the pass's third condition, to show notes lose nothing.
    - **The standard**, from the pass's gaps.

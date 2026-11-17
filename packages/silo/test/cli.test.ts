@@ -306,6 +306,25 @@ test("observed: each test against what its file declares, from a folder of its s
 	assert.match(spawnSync("npx", ["tsx", CLI, "observed", reach, "--repo", fresh], { "encoding": "utf8" }).stderr, /nowhere\.json: expected one test file named nowhere, found 0/u);
 });
 
+test("observed: from the editor's reach, each test file's at its own path, as its runs keep them (.silo/local/reach/)", async () => {
+	const reach = await fs.mkdtemp(path.join(fs.tmpdir(), "silo-reach-"));
+	const fresh = await repository({ "2026-10-01": {
+		".silo/features.json": JSON.stringify({ "Notes": { "status": "active", "why": "w", "since": "2026-10-01", "what": "N.", "paths": ["src/notes.ts"], "tests": ["test/notes.test.mjs"] }, "Git": { "status": "active", "why": "w", "since": "2026-10-01", "what": "G.", "paths": ["src/git.ts"] } }),
+		"src/notes.ts": "",
+		"src/git.ts": "",
+		"test/notes.test.mjs": ""
+	} });
+	fs.mkdirSync(path.join(reach, "test"));
+	// (the editor's ranges of lines, [from, to]: each line one, so one range of 25 lines is 25)
+	fs.writeFileSync(path.join(reach, "test", "notes.test.mjs.json"), JSON.stringify({ "test/notes.test.mjs › stray": { "src/git.ts": [[0, 24]] }, "test/notes.test.mjs › own": { "src/notes.ts": [[100, 109], [110, 124]] } }));
+
+	const told = spawnSync("npx", ["tsx", CLI, "observed", reach, "--repo", fresh], { "encoding": "utf8" });
+
+	assert.equal(told.status, 0, told.stderr);
+	assert.match(told.stdout, /\| 0% \| 25 \| notes\.test\.mjs: stray \| Git 25 \|/u);
+	assert.match(told.stdout, /\| 100% \| 25 \| notes\.test\.mjs: own \| Notes 25 \|/u);
+});
+
 test("remove: the tests only it names go with it, one another feature names stays, and its restore has them", async () => {
 	const entry = (paths: string[], tests: string[]): unknown => ({ "status": "active", "why": "w", "since": "2026-10-01", "what": "W.", "paths": paths, "tests": tests });
 	const fresh = await repository({ "2026-10-01": {

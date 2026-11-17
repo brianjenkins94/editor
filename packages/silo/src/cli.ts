@@ -640,9 +640,9 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "observed",
-			"description": "Each test against the features its file declares, by the statements few tests ran: where what runs shows disagrees with what the ledger says, and what sharing there is to reassess. Reads a folder of `<suite>.json`, as COVERAGE=1 writes them and a dispatched architecture run uploads them.",
+			"description": "Each test against the features its file declares, by the statements few tests ran: where what runs shows disagrees with what the ledger says, and what sharing there is to reassess. Reads a folder of each test file's reach: the editor's (`.silo/local/reach/`, each at its test file's path, `<path>.json`, as its runs keep them), or `<suite>.json`, as COVERAGE=1 writes them and a dispatched architecture run uploads them.",
 			"config": juvy({
-				"reach": { "format": String, "default": "", "positional": true, "doc": "The folder of each suite's reach." },
+				"reach": { "format": String, "default": "", "positional": true, "doc": "The folder of each test file's reach." },
 				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." },
 				"json": jsonFlag
 			}),
@@ -650,8 +650,22 @@ export const app = subcommands({
 				const repo = await repoOf(config.get("repo"));
 				const folder = path.resolve(config.get("reach"));
 				const tracked = await filesOf(repo);
-				const tests = fs.readdirSync(folder).filter((file) => file.endsWith(".json")).flatMap((file) => {
+				const kept = new Set(tracked);
+				const tests = (fs.readdirSync(folder, { "recursive": true }) as string[]).filter((file) => file.endsWith(".json")).flatMap((file) => {
 					const suite = file.replace(/\.json$/u, "");
+
+					// (the editor's: kept at its test file's own path, each test by its file and titles — named here by its titles —
+					// and what it ran as ranges of lines, each line one here, so tests whose ranges differ still meet on a line)
+					if (kept.has(suite)) {
+						const lines = (ranges: unknown[]): number[][] => ranges.flatMap((range) => {
+							const [from, to] = range as [number, number];
+
+							return Array.from({ "length": to - from + 1 }, (_, index) => [from + index]);
+						});
+
+						return parseReach(suite, fs.readFileSync(path.join(folder, file))).map((test) => ({ ...test, "name": test.name.replace(`${suite} › `, ""), "reach": Object.fromEntries(Object.entries(test.reach).map(([ran, ranges]) => [ran, lines(ranges)])) }));
+					}
+
 					const candidates = tracked.filter((each) => new RegExp(`(^|/)test/(.*/)?${suite.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\.[cm]?[jt]s$`, "u").test(each));
 
 					if (candidates.length !== 1) {
