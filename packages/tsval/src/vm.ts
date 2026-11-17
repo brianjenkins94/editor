@@ -6,7 +6,7 @@ import type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 import ts from "typescript";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 import type { Choice, Result } from "./event-loop.ts";
-import { arrived, choose, createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGlobals, nextTimer, takeTimer, timerLabel, waitForTurn } from "./event-loop.ts";
+import { arrived, choose, createLoop, forkLoop, hasRefTimers, hostCalling, INTRINSICS, loopGlobals, nextTimer, takeTimer, timerLabel, waitForTurn } from "./event-loop.ts";
 import { syntaxErrorIn, syntaxKindName } from "./frontend.ts";
 import { STANDARD_GLOBAL_NAMES, standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, isSimpleTree, nodeHandlers, pushHostCall, pushPattern, simpleValue, syntheticHandlers } from "./handlers.ts";
@@ -1045,6 +1045,9 @@ export class Machine implements VM {
 			this.wrote(into as object, writer.name);
 		}
 
+		// (this machine noted as the one calling: a timer native code sets is this machine's — event-loop.ts hostCalling)
+		const callingBefore = hostCalling(this);
+
 		try {
 			const target = this.hostGuard?.beforeCall === undefined ? callee : this.hostGuard.beforeCall(callee, thisArg, isConstruct, { "node": site, "args": args, "isConstruct": isConstruct });
 			const result = isConstruct ? Reflect.construct(target as unknown as new (...ctorArgs: unknown[]) => unknown, args) : target.apply(thisArg, args);
@@ -1066,6 +1069,7 @@ export class Machine implements VM {
 
 			return value;
 		} finally {
+			hostCalling(callingBefore);
 			this.callSite = previousSite;
 		}
 	}
@@ -2068,7 +2072,14 @@ export class Machine implements VM {
 		if (ownedBy(fired.fn, this)) {
 			this.pushCall(fired.fn.__tsval, fired.args, undefined);
 		} else {
-			(fired.fn as (...args: unknown[]) => unknown)(...fired.args);
+			// (a native callback: what it sets is this machine's too)
+			const callingBefore = hostCalling(this);
+
+			try {
+				(fired.fn as (...args: unknown[]) => unknown)(...fired.args);
+			} finally {
+				hostCalling(callingBefore);
+			}
 		}
 
 		return true;

@@ -226,6 +226,19 @@ function random(loop: Loop): number {
 }
 
 /** Register `fn` as an intrinsic acting by `behavior`. */
+/** The machine whose host call is running now (vm.ts notes it around one): where a timer set from native code — a
+ *  function `new Function` made, which the host compiles, not tsval — is set, as the guest's own are. */
+let calling: LoopMachine | undefined;
+
+/** `machine` noted as the one calling into the host, until what's returned is put back: `calling(previous)`. */
+export function hostCalling(machine: LoopMachine | undefined): LoopMachine | undefined {
+	const previous = calling;
+
+	calling = machine;
+
+	return previous;
+}
+
 function intrinsic<F extends object>(fn: F, behavior: Intrinsic): F {
 	INTRINSICS.set(fn, behavior);
 
@@ -296,7 +309,12 @@ const delayOf = (value: unknown): number => {
 	return Number.isFinite(delay) && delay >= 1 ? Math.floor(delay) : 1;
 };
 
-const clear = intrinsic(function clearTimer() { /* the machine's */ }, (machine, _thisArg, [handle]) => { loopOf(machine).timers.delete(idOf(handle)); });
+const clear = intrinsic(function clearTimer(handle: unknown) {
+	// (called from native code: the calling machine's)
+	if (calling?.loop !== undefined) {
+		calling.loop.timers.delete(idOf(handle));
+	}
+}, (machine, _thisArg, [handle]) => { loopOf(machine).timers.delete(idOf(handle)); });
 
 /** The intrinsic `Date`: `new Date()` and `Date.now()` on the virtual clock; with arguments, and as a value
  *  (`instanceof`, its prototype), the real one. Called directly (a subclass's `super()`), it falls back to the host's
@@ -369,9 +387,10 @@ const VirtualPerformance = {
 /** The globals an event loop gives the guest. */
 export function loopGlobals(): Record<string, unknown> {
 	return {
-		"setTimeout": intrinsic(function setTimeout() { /* the machine's */ }, (machine, _thisArg, [fn, delay, ...args]) => setTimer(machine, fn, delayOf(delay), args, false)),
-		"setInterval": intrinsic(function setInterval() { /* the machine's */ }, (machine, _thisArg, [fn, delay, ...args]) => setTimer(machine, fn, delayOf(delay), args, true)),
-		"setImmediate": intrinsic(function setImmediate() { /* the machine's */ }, (machine, _thisArg, [fn, ...args]) => setTimer(machine, fn, 0, args, false)),
+		// (each called from native code too — a function `new Function` made — set on the machine that called into it)
+		"setTimeout": intrinsic(function setTimeout(fn: unknown, delay?: unknown, ...args: unknown[]) { return calling === undefined ? undefined : setTimer(calling, fn, delayOf(delay), args, false); }, (machine, _thisArg, [fn, delay, ...args]) => setTimer(machine, fn, delayOf(delay), args, false)),
+		"setInterval": intrinsic(function setInterval(fn: unknown, delay?: unknown, ...args: unknown[]) { return calling === undefined ? undefined : setTimer(calling, fn, delayOf(delay), args, true); }, (machine, _thisArg, [fn, delay, ...args]) => setTimer(machine, fn, delayOf(delay), args, true)),
+		"setImmediate": intrinsic(function setImmediate(fn: unknown, ...args: unknown[]) { return calling === undefined ? undefined : setTimer(calling, fn, 0, args, false); }, (machine, _thisArg, [fn, ...args]) => setTimer(machine, fn, 0, args, false)),
 		"clearTimeout": clear,
 		"clearInterval": clear,
 		"clearImmediate": clear,

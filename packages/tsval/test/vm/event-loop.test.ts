@@ -165,3 +165,23 @@ setTimeout(() => { log(performance.now()); }, 250);
 	assert.equal(first[2], 0, "from where the loop started");
 	assert.equal(first[3], 250, "it moves as a timer fires");
 });
+
+test("event loop: a timer native code sets — a function the host compiled, `new Function`'s — is the machine's, as the guest's are", async () => {
+	const { lines, globals } = logged();
+	const src = [
+		"native(setTimeout, clearTimeout, log);",
+		"setTimeout(() => log('guest 20'), 20);"
+	].join("\n");
+	// (host code: its timers set, one from its own callback, and one cleared — what new Function's code does)
+	const native = (set: typeof setTimeout, clear: typeof clearTimeout, log: (value: unknown) => void): void => {
+		set(() => {
+			log("native 10");
+			set(() => { log("native, from its callback"); }, 15);
+		}, 10);
+		clear(set(() => { log("never"); }, 5));
+	};
+	const { vm } = createVM(src, { "globals": { ...globals, "native": native }, "eventLoop": { "pace": "fast" } });
+
+	await toEnd(vm);
+	assert.deepStrictEqual(lines, ["native 10", "guest 20", "native, from its callback"]);
+});
