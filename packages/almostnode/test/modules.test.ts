@@ -86,9 +86,13 @@ test("a linked package's imports up out of it resolve from where it really is, a
 	}
 
 	const vfs = new Linked();
+	// (its files at both, as the link shows them)
+	const sibling = {
+		"package.json": JSON.stringify({ "name": "sibling", "main": "src/index.js" }),
+		"src/index.js": "module.exports = require('../../neighbour/lib.js');"
+	};
 	const files = {
-		"/workspace/node_modules/sibling/package.json": JSON.stringify({ "name": "sibling", "main": "src/index.js" }),
-		"/workspace/node_modules/sibling/src/index.js": "module.exports = require('../../neighbour/lib.js');",
+		...Object.fromEntries(Object.entries(sibling).flatMap(([path, text]) => [[`/workspace/node_modules/sibling/${path}`, text], [`/workspace/packages/sibling/${path}`, text]])),
 		"/workspace/packages/neighbour/lib.js": "module.exports = 'neighbour';"
 	};
 
@@ -105,6 +109,32 @@ test("module's Module has the loader's _load and _resolveFilename, from the pare
 	const said = runtime.execute(`const module_ = require("module"); const { Module } = module_; const parent = { "filename": "/workspace/main.js" }; const before = Module._load; Object.defineProperty(Module, "_load", { ...Object.getOwnPropertyDescriptor(Module, "_load"), "value": (...args) => before(...args) }); module.exports = [Module._resolveFilename("greet", parent), Module._load("greet", parent).hello("ada"), module_.default === Module, typeof Module.createRequire("/workspace/main.js")("greet").hello];`, "/workspace/module.js").exports;
 
 	assert.deepEqual(said, ["/workspace/node_modules/greet/index.js", "hello, ada", true, "function"]);
+});
+
+test("a linked package resolves to its real files, as Node's does: the program's, not a package's", () => {
+	class Linked extends VirtualFS {
+		public override realpathSync(path: string): string {
+			return path.startsWith("/workspace/node_modules/sibling") ? path.replace("/workspace/node_modules/sibling", "/workspace/packages/sibling") : super.realpathSync(path);
+		}
+	}
+
+	const vfs = new Linked();
+
+	for (const [path, text] of Object.entries({
+		"/workspace/node_modules/sibling/package.json": JSON.stringify({ "name": "sibling", "main": "src/index.ts" }),
+		"/workspace/node_modules/sibling/src/index.ts": "export const one = 1;",
+		"/workspace/packages/sibling/src/index.ts": "export const one = 1;",
+		"/workspace/node_modules/greet/package.json": JSON.stringify({ "name": "greet", "main": "index.js" }),
+		"/workspace/node_modules/greet/index.js": "module.exports = {};"
+	})) {
+		vfs.mkdirSync(path.slice(0, path.lastIndexOf("/")), { "recursive": true });
+		vfs.writeFileSync(path, text);
+	}
+
+	const runtime = new Runtime(vfs, { "cwd": "/workspace" });
+
+	assert.deepEqual(runtime.resolve("sibling"), { "kind": "program", "filename": "/workspace/packages/sibling/src/index.ts" });
+	assert.deepEqual(runtime.resolve("greet"), { "kind": "package", "filename": "/workspace/node_modules/greet/index.js" }, "a package installed there is a package's");
 });
 
 test("registerHooks: a resolve hook redirects a specifier for what's resolved after — require and the runtime's resolve — others pass on, and deregistered it's gone", () => {

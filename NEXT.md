@@ -144,9 +144,12 @@ How it's kept:
    the root's 7 and 2; versions.json's format 3), history-ledger since almostnode's `node:module` has `registerHooks`
    (resolve hooks, a runtime's own), page-tools since almostnode's `ws` says a server on an http server is listening
    when that is (debug-mcp's `whenListening` waited for ever). The rest, by cause:
-   - **A linked package's TypeScript run as JavaScript** (cosmetic, past `registerHooks` now): "Unexpected token ']' (in
-     /workspace/node_modules/@brianjenkins94/editor-api/src/annotations.ts)" — resolved by its node_modules path, so a
-     package's, which almostnode evaluates as it is; editor-api's other modules, imported elsewhere, load. Not yet traced.
+   - **`node:test`'s `mock`** (cosmetic, `mock.timers`): the editor's node-test.js has none. cosmetic got here past
+     `registerHooks` and a linked package's TypeScript, which ran as a package's JavaScript ("Unexpected token ']'" in
+     editor-api's annotations.ts) until almostnode resolved a package to its real files, as Node does: a linked one's
+     are the workspace's, the program's, stepped by tsval — page-tools ran 5,283 statements where it ran 646, 13.6 s
+     where 3.9, and each test reaching a linked package is told slower once (`run.tests.slowerBy`), what it's measured by
+     now counting the workspace's own code it runs.
    - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
      `file:` URL source as the copy's destination.
@@ -722,6 +725,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   specs two at a time): the dev server served its page, and the toolbar, the session list and the status bar had nothing.
   Again on CI 2026-11-16 (cde152ee's specs, 1 of 40: no Stop, `{"toolbar":[],"sessions":[],"status":[]}`), passing in five
   full runs here that day.
+- **past-runs.spec's runs, after a reload: 2 of 3** (2026-11-16, three full runs of nine here): the run just before the
+  reload wasn't among those kept, 30 s on. Likely its record not yet written (debounced?) as the page went — which a
+  person reloading quickly would lose too. Not yet traced.
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems.

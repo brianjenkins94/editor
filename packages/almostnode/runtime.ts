@@ -708,7 +708,7 @@ function createRequire(
 		}
 	};
 
-	/** `dir` with its links followed (as it is, when the file system can't say). */
+	/** `dir` (or a file) with its links followed (as it is, when the file system can't say). */
 	const realDirOf = (dir: string): string => {
 		try {
 			return vfs.realpathSync(dir);
@@ -1019,7 +1019,8 @@ function createRequire(
 			return null;
 		};
 
-    // Node modules resolution
+    // Node modules resolution — a module found there by its real path, as Node's are (a linked package, a monorepo's
+		// sibling: its files where they are, so they're the program's, one module each however it was reached)
 		let searchDir = fromDir;
 
 		while (searchDir !== "/") {
@@ -1027,9 +1028,11 @@ function createRequire(
 			const resolved = tryResolveFromNodeModules(nodeModulesDir, id);
 
 			if (resolved) {
-				resolutionCache.set(cacheKey, resolved);
+				const real = realDirOf(resolved);
 
-				return resolved;
+				resolutionCache.set(cacheKey, real);
+
+				return real;
 			}
 
 			searchDir = pathShim.dirname(searchDir);
@@ -1039,9 +1042,11 @@ function createRequire(
 		const rootResolved = tryResolveFromNodeModules("/node_modules", id);
 
 		if (rootResolved) {
-			resolutionCache.set(cacheKey, rootResolved);
+			const real = realDirOf(rootResolved);
 
-			return rootResolved;
+			resolutionCache.set(cacheKey, real);
+
+			return real;
 		}
 
 		// Nothing installed it: the host's to install, then resolved again (its package.json read afresh).
