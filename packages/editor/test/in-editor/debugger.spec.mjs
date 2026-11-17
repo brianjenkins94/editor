@@ -66,7 +66,10 @@ test("a program's capability calls stop in the margin, on their lines, and are m
 	await expect(choice("Allow")).toBeAttached({ "timeout": 60_000 });
 	await runCommand(workbench, "View: Hide Panel");
 
-	for (const answer of ["Allow", "Skip", "Deny"]) {
+	// (each once it's asking about its own call: the one answered can still be showing a moment, and a click on it does
+	// nothing)
+	for (const [answer, file] of [["Allow", "stop-allowed.txt"], ["Skip", "stop-skipped.txt"], ["Deny", "stop-denied.txt"]]) {
+		await expect(question.first()).toContainText(file, { "timeout": 30_000 });
 		await choice(answer).click({ "timeout": 30_000 });
 	}
 

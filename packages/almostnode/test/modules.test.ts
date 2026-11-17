@@ -107,6 +107,22 @@ test("module's Module has the loader's _load and _resolveFilename, from the pare
 	assert.deepEqual(said, ["/workspace/node_modules/greet/index.js", "hello, ada", true, "function"]);
 });
 
+test("registerHooks: a resolve hook redirects a specifier for what's resolved after — require and the runtime's resolve — others pass on, and deregistered it's gone", () => {
+	const runtime = runtimeWith({ ...PACKAGE, "/workspace/stand-in.js": "module.exports = { 'standIn': true };" });
+	const said = runtime.execute(`
+		const { registerHooks } = require("node:module");
+		const handle = registerHooks({ "resolve": (specifier, context, next) => (specifier === "vscode" ? { "url": "file:///workspace/stand-in.js", "shortCircuit": true } : next(specifier, context)) });
+		module.exports = { "standIn": require("vscode").standIn, "passed": require("greet").hello("ada"), "builtin": typeof require("path").join, "handle": handle };
+	`, "/workspace/hooks.js").exports as { "standIn": boolean; "passed": string; "builtin": string; "handle": { "deregister": () => void } };
+
+	assert.deepEqual([said.standIn, said.passed, said.builtin], [true, "hello, ada", "function"]);
+	assert.deepEqual(runtime.resolve("vscode"), { "kind": "program", "filename": "/workspace/stand-in.js" });
+
+	said.handle.deregister();
+	assert.throws(() => runtime.resolve("vscode"), /Cannot find module 'vscode'/u);
+	assert.throws(() => runtime.execute("require('node:module').registerHooks({ 'load': () => ({}) });", "/workspace/load.js"), /`load` hook isn't here/u);
+});
+
 test("evaluateProgram: the program's files are the host's to evaluate, from their source — packages are almostnode's", () => {
 	const evaluated: string[] = [];
 	const runtime = runtimeWith({

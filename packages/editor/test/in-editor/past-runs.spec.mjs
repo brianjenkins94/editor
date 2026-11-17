@@ -59,7 +59,8 @@ test("each run a ball: picked, it shows its values and how it ended; alike, it's
 	await expect(workbench.getByRole("treeitem").first()).toBeVisible({ "timeout": 120_000 });
 	await openFile(workbench, "runs.mjs");
 	await expect(balls.last()).toHaveAttribute("aria-pressed", "true", { "timeout": 90_000 });
-	await expect(balls).toHaveCount(3);
+	// (the latest shown first, the others as they're read back: under load, a while after)
+	await expect(balls).toHaveCount(3, { "timeout": 30_000 });
 	await balls.first().click();
 	await expect(total).toContainText("2", { "timeout": 15_000 });
 });

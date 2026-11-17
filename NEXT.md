@@ -139,10 +139,13 @@ How it's kept:
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
    within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
-   the editor's 41 unit test files: 32 pass whole — git-fast-forward, git-status and silo-kept since a package's own
+   the editor's 41 unit test files: 33 pass whole — git-fast-forward, git-status and silo-kept since a package's own
    version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
-   the root's 7 and 2; versions.json's format 3). The rest, by cause:
-   - **`node:module`'s `registerHooks`** isn't almostnode's: cosmetic and history-ledger don't load.
+   the root's 7 and 2; versions.json's format 3), history-ledger since almostnode's `node:module` has `registerHooks`
+   (resolve hooks, a runtime's own). The rest, by cause:
+   - **A linked package's TypeScript run as JavaScript** (cosmetic, past `registerHooks` now): "Unexpected token ']' (in
+     /workspace/node_modules/@brianjenkins94/editor-api/src/annotations.ts)" — resolved by its node_modules path, so a
+     package's, which almostnode evaluates as it is; editor-api's other modules, imported elsewhere, load. Not yet traced.
    - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
      `file:` URL source as the copy's destination.

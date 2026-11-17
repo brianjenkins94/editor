@@ -557,6 +557,15 @@ export type Requester = "program" | "package";
 /** What a specifier resolves to: a built-in (its name), a package's file, or one of the program's own files. */
 export interface Resolved { "kind": "builtin" | "package" | "program"; "filename": string }
 
+/** What a resolve hook (`node:module`'s registerHooks) is given and gives back, as Node's are: a URL, `file:` or `node:`. */
+interface Resolution { "url": string; "shortCircuit"?: boolean }
+interface ResolveContext { "parentURL"?: string; "conditions": string[] }
+type ResolveHook = (specifier: string, context: ResolveContext, next: (specifier: string, context?: ResolveContext) => Resolution) => Resolution;
+
+/** Each runtime's resolve hooks, by its module cache (one run's don't reach another's): the last registered first, as
+ *  Node chains them. */
+const resolveHooksOf = new WeakMap<object, ResolveHook[]>();
+
 /** A program file, by default: anything outside node_modules. */
 const outsideNodeModules = (filename: string): boolean => !filename.includes("/node_modules/");
 
@@ -708,7 +717,35 @@ function createRequire(
 		}
 	};
 
+	// Through the runtime's resolve hooks (registerHooks), each given the next and the default last; a hook's URL back to
+	// what this resolves to — a path, or a built-in's name.
 	const resolveModule = (id: string, fromDir: string, installed = false): string => {
+		const hooks = resolveHooksOf.get(moduleCache);
+
+		if (hooks === undefined || hooks.length === 0) {
+			return resolveDefault(id, fromDir, installed);
+		}
+
+		const context: ResolveContext = { "parentURL": `file://${encodeURI(fromDir.endsWith("/") ? fromDir : fromDir + "/")}`, "conditions": ["node", "require"] };
+		const chain = (at: number) => (specifier: string, given?: ResolveContext): Resolution => {
+			if (at < 0) {
+				const resolved = resolveDefault(specifier, fromDir, installed);
+
+				return { "url": resolved.startsWith("/") ? `file://${encodeURI(resolved)}` : `node:${resolved}` };
+			}
+
+			return hooks[at]!(specifier, given ?? context, chain(at - 1));
+		};
+		const { url } = chain(hooks.length - 1)(id, context);
+
+		if (url.startsWith("node:")) {
+			return url.slice("node:".length);
+		}
+
+		return url.startsWith("file://") ? decodeURIComponent(new URL(url).pathname) : url;
+	};
+
+	const resolveDefault = (id: string, fromDir: string, installed = false): string => {
     // Handle node: protocol prefix (Node.js 16+)
 		if (id.startsWith("node:")) {
 			id = id.slice(5);
@@ -1014,7 +1051,7 @@ function createRequire(
 		if (!installed && options.install?.(name, fromDir) === true) {
 			packageJsonCache.clear();
 
-			return resolveModule(id, fromDir, true);
+			return resolveDefault(id, fromDir, true);
 		}
 
 		resolutionCache.set(cacheKey, null);
@@ -1275,13 +1312,36 @@ function createRequire(
 				"_resolveFilename": (request: string, parent?: { "filename"?: unknown }): string => requireFrom(parentPath(parent)).resolve(request)
 			};
 
+			// Node's synchronous hooks, `resolve` only: what this runtime resolves after, by its module cache — a test's
+			// stand-in for a package its code imports (`vscode`), say. A `load` hook isn't here.
+			const registerHooks = (hooks: { "resolve"?: ResolveHook; "load"?: unknown }): { "deregister": () => void } => {
+				if (hooks.load !== undefined) {
+					throw new Error("registerHooks: a `load` hook isn't here — only `resolve`");
+				}
+
+				const list = resolveHooksOf.get(moduleCache) ?? [];
+
+				if (hooks.resolve !== undefined) {
+					list.push(hooks.resolve);
+				}
+
+				resolveHooksOf.set(moduleCache, list);
+
+				return {
+					"deregister": () => {
+						list.splice(list.indexOf(hooks.resolve!) >>> 0, hooks.resolve === undefined ? 0 : 1);
+					}
+				};
+			};
+
 			return {
 				...shared,
 				"Module": Module,
 				"default": Module,
 				"_load": Module._load,
 				"_resolveFilename": Module._resolveFilename,
-				"createRequire": createRequireAt
+				"createRequire": createRequireAt,
+				"registerHooks": registerHooks
 			};
 		}
 
