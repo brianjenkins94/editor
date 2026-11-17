@@ -60,7 +60,8 @@ test("a race's endings, said on the line that differs, and one of them debugged 
 	await go.fill(":4:1");
 	await go.press("Enter");
 	await quickFix(workbench, "where it prints \"won by a\"");
-	await workbench.locator(".panel .action-label", { "hasText": "Debug Console" }).first().click();
+	// (opened, not found open: VS Code opens it on a window's first debug session only, and this editor may have had one)
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(workbench.locator(".repl .output", { "hasText": "won by a" }).first()).toBeVisible({ "timeout": 60_000 });
 	await expect(workbench.locator(".repl .output", { "hasText": "won by b" })).toHaveCount(0);
 

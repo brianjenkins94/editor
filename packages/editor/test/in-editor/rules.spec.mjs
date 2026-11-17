@@ -99,6 +99,7 @@ fetch("https://example.com/a");
 	await expect(workbench.getByRole("treeitem", { "name": "out", "exact": true })).toBeVisible({ "timeout": 60_000 });
 	await expect(call("fs:write")).toHaveCount(0, { "timeout": 30_000 });
 
-	await workbench.locator(".panel .action-label", { "hasText": "Debug Console" }).first().click();
+	// (opened, not found open: VS Code opens it on a window's first debug session only, and this editor may have had one)
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(workbench.locator(".repl .output", { "hasText": "said hello" }).first()).toBeVisible({ "timeout": 30_000 });
 });

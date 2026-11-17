@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, problems, quickFix, retype } from "./editor.mjs";
+import { codeOf, openEditor, openFile, problems, quickFix, retype, runCommand } from "./editor.mjs";
 
 const PROGRAM = `const rate = 2;
 const total = rate * 10;
@@ -34,7 +34,8 @@ test("a variable set on every run: the rule sets it, const or not, shows in the 
 
 	await codeOf(workbench).press("F5");
 	await expect(workbench.locator(".notes-margin-cell", { "hasText": "total =" })).toContainText("50", { "timeout": 60_000 });
-	await workbench.locator(".panel .action-label", { "hasText": "Debug Console" }).first().click();
+	// (opened, not found open: VS Code opens it on a window's first debug session only, and this editor may have had one)
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(said(workbench, "total 50")).toBeVisible({ "timeout": 30_000 });
 
 	// It follows its code.
@@ -60,7 +61,8 @@ test("the program's arguments on every run, from the lightbulb on process.argv",
 
 	await expect(workbench.getByRole("treeitem", { "name": ".silo", "exact": true })).toBeVisible({ "timeout": 30_000 });
 	await codeOf(workbench).press("F5");
-	await workbench.locator(".panel .action-label", { "hasText": "Debug Console" }).first().click();
+	// (opened, not found open: VS Code opens it on a window's first debug session only, and this editor may have had one)
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(said(workbench, "args --port+8 0")).toBeVisible({ "timeout": 60_000 });
 });
 
@@ -85,6 +87,7 @@ console.log("count " + count);
 	await expect(workbench.locator(".notes-margin-cell", { "hasText": "count =" })).toContainText("7", { "timeout": 30_000 });
 
 	await allow.click();
-	await workbench.locator(".panel .action-label", { "hasText": "Debug Console" }).first().click();
+	// (opened, not found open: VS Code opens it on a window's first debug session only, and this editor may have had one)
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(said(workbench, "count 7")).toBeVisible({ "timeout": 60_000 });
 });

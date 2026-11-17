@@ -9,6 +9,7 @@
  *   node --test --test-global-setup=test/architecture-harness.mjs test/in-editor.mjs
  */
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import { after, before, test } from "node:test";
 
@@ -43,7 +44,7 @@ async function ran(session, spec) {
 		answer = await session.request("tests.run", { "run": answer.run }, 120_000);
 	}
 
-	console.log(`${spec}: ${String(Date.now() - started)} ms`);
+	console.log(`${spec}: ${String(Date.now() - started)} ms${await heapOf(session)}`);
 
 	// What each test's editor was left with (workbench/effects.ts): the inventory of which can't share one.
 	for (const each of answer.files?.[0]?.tests ?? []) {
@@ -57,6 +58,31 @@ async function ran(session, spec) {
 	}
 
 	return answer.files[0];
+}
+
+/** IN_EDITOR_HEAP=1: the renderer's JS heap as each spec ends (every editor on the page shares it) — what a spec leaves an
+ *  editor that's shared, and whether a reset gives it back. */
+const HEAP = process.env.IN_EDITOR_HEAP === "1";
+const cdp = new WeakMap();
+
+async function heapOf(session) {
+	if (!HEAP) {
+		return "";
+	}
+
+	if (!cdp.has(session)) {
+		const client = await session.page.context().newCDPSession(session.page);
+
+		await client.send("Performance.enable");
+		cdp.set(session, client);
+	}
+
+	const { metrics } = await cdp.get(session).send("HeapProfiler.collectGarbage").then(async () => cdp.get(session).send("Performance.getMetrics"));
+	const used = metrics.find(({ name }) => name === "JSHeapUsedSize")?.value ?? 0;
+	// (the renderers as the system has them: their workers' heaps and buffers too, which the page's own heap doesn't count)
+	const renderers = execSync("ps -A -o rss=,command=", { "encoding": "utf8" }).split("\n").filter((line) => line.includes("--type=renderer") && line.includes("ms-playwright")).map((line) => Number(line.trim().split(/\s+/u)[0]) * 1024);
+
+	return `, heap ${String(Math.round(used / 1024 / 1024))} MB, renderers ${renderers.map((bytes) => String(Math.round(bytes / 1024 / 1024))).join("+")} MB`;
 }
 
 /** `work`, or undefined once `ms` pass: what's asked of a page that may have crashed (a frame's evaluate waits for ever). */
@@ -84,8 +110,10 @@ async function sayWhatHappened(session) {
  *  crashed near 9 three times in four runs; at two, 7.5 GB, for 168 s against 154. */
 const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 2);
 /** How many specs a session runs before the next one starts afresh: its renderer's peak, 2 at once, stays near 7 GB
- *  (2026-11-10), at a browser's start and the outer editor's boot each time. */
-const BATCH = Number(process.env.IN_EDITOR_BATCH ?? 12);
+ *  (2026-11-10), at a browser's start and the outer editor's boot each time. Eight since 2026-11-17: at twelve, a second
+ *  session crashed near 9 GB in 3 runs of 5 (its renderer at 5.6–7.3 GB between specs), as an editor doesn't yet give back
+ *  what its runs took (NEXT.md item 2, *Specs share an editor*). */
+const BATCH = Number(process.env.IN_EDITOR_BATCH ?? 8);
 /** COVERAGE=1 reads each test's counts around it (architecture-harness.mjs), so a spec is run in its test, one at a time, each
  *  with the page to itself, in one session. */
 const COUNTING = process.env.COVERAGE === "1";

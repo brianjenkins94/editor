@@ -64,6 +64,8 @@ test("a program's capability calls stop in the margin, on their lines, and are m
 	// (each asked on its line, in a cell of the margin's: the Debug Console, opened as the run starts, put out of the way for
 	// the room — a short window leaves the editor a few lines, under a cell or two — and brought back to read)
 	await expect(choice("Allow")).toBeAttached({ "timeout": 60_000 });
+	// (opened first, so it's there to hide: VS Code opens it on a window's first debug session only)
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await runCommand(workbench, "View: Hide Panel");
 
 	// (each once it's asking about its own call: the one answered can still be showing a moment, and a click on it does
@@ -73,7 +75,7 @@ test("a program's capability calls stop in the margin, on their lines, and are m
 		await choice(answer).click({ "timeout": 30_000 });
 	}
 
-	await runCommand(workbench, "View: Toggle Panel Visibility");
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(workbench.locator(".repl .output", { "hasText": "allowed: wrote, skipped: wrote, denied: refused" }).first()).toBeVisible({ "timeout": 60_000 });
 
 	// As the disk has it: the allowed write made, the skipped and the denied not.
@@ -126,6 +128,7 @@ test("a breakpoint stops the run; a step goes on a line, and a step back returns
 
 	// Continued (F5), it runs to its end: from line 2 again, x ends as it would have.
 	await codeOf(workbench).press("F5");
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(workbench.locator(".repl .output", { "hasText": "x is 3" }).first()).toBeVisible({ "timeout": 30_000 });
 });
 
