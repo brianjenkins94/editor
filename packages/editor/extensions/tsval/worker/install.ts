@@ -24,16 +24,20 @@ const MEMORY_MODULES = "/node_modules";
 /** What's installed there, by name: its version. */
 const installed = new Map<string, string>();
 
-/** The pinned versions as they are now, through the editor's runtime (the debugger's own read). */
+/** The pinned versions as they are now, through the editor's runtime (the debugger's own read): each package's by its
+ *  name, and one nested under the package that asked by its path there (`isomorphic-git/node_modules/ignore`). */
 export function readPins(): Record<string, string> {
 	try {
-		const { packages } = JSON.parse(keptText("versions.json")) as { "packages"?: Record<string, { "version": string }> };
+		const { packages } = JSON.parse(keptText("versions.json")) as { "packages"?: Record<string, { "version": string; "nested"?: Record<string, string> }> };
 
-		return Object.fromEntries(Object.entries(packages ?? {}).map(([name, { version }]) => [name, version]));
+		return Object.fromEntries(Object.entries(packages ?? {}).flatMap(([name, { version, nested }]) => [[name, version], ...Object.entries(nested ?? {}).map(([inner, at]) => [`${name}/node_modules/${inner}`, at])]));
 	} catch {
 		return {};
 	}
 }
+
+/** The path a pin's package is installed at (its name, or a nested one's path), and the package it is. */
+const packageOf = (pin: string): string => pin.slice(pin.lastIndexOf("/node_modules/") + 1).replace(/^node_modules\//u, "");
 
 /**
  * A package nothing in node_modules has (almostnode's `install`): its tarball, at the version the editor pins, unpacked
@@ -41,13 +45,28 @@ export function readPins(): Record<string, string> {
  * a banned package's does (onPackage). False when nothing pins it (it's no dependency).
  */
 export function installPackage(name: string): boolean {
-	const version = state.pins[name];
+	if (!unpackPin(name)) {
+		return false;
+	}
+
+	// (and what it depends on at a version of its own, in its own node_modules: found there before the one kept by name)
+	for (const pin of Object.keys(state.pins).filter((each) => each.startsWith(`${name}/node_modules/`) && !each.slice(name.length + "/node_modules/".length).includes("/node_modules/"))) {
+		unpackPin(pin);
+	}
+
+	return true;
+}
+
+/** `pin` (a package's name, or a nested one's path) unpacked at its pinned version where it goes in this worker's memory. */
+function unpackPin(pin: string): boolean {
+	const version = state.pins[pin];
+	const name = packageOf(pin);
 
 	if (version === undefined || state.editorLink === undefined || state.runtime === undefined) {
 		return false;
 	}
 
-	const dir = `${MEMORY_MODULES}/${name}`;
+	const dir = `${MEMORY_MODULES}/${pin}`;
 
 	if (state.policy !== undefined && packageDisposition(state.policy, { "name": name, "version": version }) === "deny") {
 		tally("load", `${name}@${version}`, "denied", `${name}@${version}`, "policy");
@@ -77,7 +96,7 @@ export function installPackage(name: string): boolean {
 			files += 1;
 		}
 
-		installed.set(name, version);
+		installed.set(pin, version);
 		span.end({ "bytes": archive.byteLength, "count": files });
 
 		return true;
@@ -99,10 +118,14 @@ export function dropUnpinned(): void {
 		}
 	};
 
-	for (const [name, version] of installed) {
-		if (state.pins[name] !== version) {
-			remove(`${MEMORY_MODULES}/${name}`);
-			installed.delete(name);
+	for (const [pin, version] of installed) {
+		// (one nested under a package removed went with it)
+		if (state.pins[pin] !== version && vfs?.existsSync(`${MEMORY_MODULES}/${pin}`) === true) {
+			remove(`${MEMORY_MODULES}/${pin}`);
+		}
+
+		if (state.pins[pin] !== version) {
+			installed.delete(pin);
 		}
 	}
 }

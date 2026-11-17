@@ -4,7 +4,7 @@
 // one. With deps.dev and npm's registry stood in.
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { aliasOf, resolveVersions } from "../workbench/versions.ts";
+import { aliasOf, lockedVersions, resolveVersions } from "../workbench/versions.ts";
 
 function json(body) {
 	return new Response(JSON.stringify(body), {
@@ -71,4 +71,48 @@ test("an alias resolves as the package it names, beside that package's own versi
 	} finally {
 		globalThis.fetch = real;
 	}
+});
+
+test("a dependency's range the version kept by its name doesn't satisfy is nested, at its own, under the package that asked", async () => {
+	const at = (version, date) => ({ "versionKey": { "version": version }, "publishedAt": date });
+	const published = {
+		"ignore": [at("5.3.2", "2024-08-01T00:00:00Z"), at("7.0.5", "2026-01-01T00:00:00Z")],
+		"isomorphic-git": [at("1.30.0", "2026-01-01T00:00:00Z")]
+	};
+	const manifests = { "isomorphic-git/1.30.0": { "dependencies": { "ignore": "^5.1.4" } }, "ignore/7.0.5": {}, "ignore/5.3.2": {} };
+	const real = globalThis.fetch;
+
+	globalThis.fetch = async (url) => {
+		const name = String(url).match(/systems\/npm\/packages\/(.+)$/u)?.[1];
+
+		if (name !== undefined) {
+			return json({ "versions": published[decodeURIComponent(name)] ?? [] });
+		}
+
+		const manifest = manifests[String(url).replace("https://registry.npmjs.org/", "")];
+
+		return manifest === undefined ? new Response("", { "status": 404 }) : json(manifest);
+	};
+
+	try {
+		const resolved = await resolveVersions({ "ignore": "^7", "isomorphic-git": "^1" }, { "now": Date.parse("2026-11-15T00:00:00Z") });
+
+		assert.equal(resolved.ignore.version, "7.0.5");
+		assert.deepEqual(resolved["isomorphic-git"].nested, { "ignore": "5.3.2" });
+		assert.equal(resolved.ignore.nested, undefined, "one whose ranges the kept versions satisfy has none");
+	} finally {
+		globalThis.fetch = real;
+	}
+});
+
+test("a lockfile's package nested a level down under the one that asked is on that one's entry", () => {
+	const locked = lockedVersions({ "packages": {
+		"": {},
+		"node_modules/ignore": { "version": "7.0.12" },
+		"node_modules/isomorphic-git": { "version": "1.30.0", "dependencies": { "ignore": "^5.1.4" } },
+		"node_modules/isomorphic-git/node_modules/ignore": { "version": "5.3.2" }
+	} });
+
+	assert.equal(locked.ignore.version, "7.0.12");
+	assert.deepEqual(locked["isomorphic-git"].nested, { "ignore": "5.3.2" });
 });

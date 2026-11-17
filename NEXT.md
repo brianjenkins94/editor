@@ -138,17 +138,19 @@ How it's kept:
      `debug_start`.
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
-   within 50 s, done or not, and is waited on again by its run id). Passing in Brave, 2026-11-01: architecture-model,
-   code, collab-identity, event-sheet, game-anchors, game-rules, git-fast-forward, sourcemap, span-annotations, and the
-   terminal's git, history, less, node and ps; npm and terminal-session since 2026-11-02 (just-bash's sandbox: its context
-   carried across awaits, a run's own global, a returned promise adopted in the return's context); page-tools since
-   2026-11-02: a run's WebSocket to a server of its own is joined to it in the run, as Node's reaches its own machine,
-   and seen — each frame and its close on the architecture view as that server's traffic (`server:<port>`), the
-   connection a span. (A preview's WebSocket to a run's server still goes to the network; it'd be seen the same way.)
-   preview-instrument, replay and silo-kept too, a run's package installs no longer waiting on a busy page (git
-   status walks only what a run wrote; a package's dependencies fetched with it): cold — a fresh browser context, no
-   HTTP cache — silo-kept takes 4.2 s, warm 4.0 s (it was 17.7 s). Still failing:
-   - Can't run in a browser: baseline (execFileSync).
+   within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
+   the editor's 41 unit test files: 32 pass whole — git-fast-forward, git-status and silo-kept since a package's own
+   version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
+   the root's 7 and 2; versions.json's format 3). The rest, by cause:
+   - **`node:module`'s `registerHooks`** isn't almostnode's: cosmetic and history-ledger don't load.
+   - **A process started** (`execFileSync`), which a browser can't: git-push (git), node-test (node itself) — as
+     baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: the gate takes a
+     `file:` URL source as the copy's destination.
+   - **Timers in a hidden tab** (hidden-timers, 2 of 4): the worker's timers never fire under the debugger's clock.
+   - **A caller from the stack** (fs-boundaries, 1 of 4): `vscode`, not `ExplorerService` — tsval's stacks.
+   - **page-tools stalls**: "nothing for 120 s: the session had no frame" (it passed 2026-11-02).
+   - **static-host**: `require()` of util's vite/build.js, an ES module with top-level await.
+   - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
 
    These tests go with the rewrite (item 3): what's worth fixing here is the runtime they find wrong, since the rebuilt
    tests run, and are vouched for, in the editor.

@@ -37,8 +37,10 @@ export const MIN_AGE_DAYS = 7;
  *  a build for particular operating systems or CPUs only (its manifest's `os`/`cpu` — a native binary, such as each of
  *  TypeScript 7's `@typescript/typescript-<os>-<arch>`): npm installs only the one for the machine, and none runs in the
  *  browser, so nothing reads it (the baseline skips it). `link`: a `file:`/`link:` dependency's folder, relative to
- *  the workspace root — workspace code, not a package to fetch. */
-export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true; "link"?: string; "alias"?: string }
+ *  the workspace root — workspace code, not a package to fetch. `nested`: of what it depends on, each whose range the
+ *  version kept under that name doesn't satisfy, at a version of its own (dependency name → version), as npm nests one
+ *  under the package that asked: what a debug run installs in this one's own node_modules (install.ts). */
+export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true; "link"?: string; "alias"?: string; "nested"?: Record<string, string> }
 
 /** An npm alias's range (`npm:typescript@7.1.0`): the package it installs under another name, and that package's range.
  *  Its entry says which (`alias`), with that package's tarball: what fetches it by name fetches the package it is. */
@@ -104,11 +106,13 @@ export function linkedFolder(dir: string, range: string): string {
 	return parts.join("/");
 }
 
-/** What `.silo/versions.json` holds. `format`: 2 since entries say `platform` (an older file's are read again once). */
+/** What `.silo/versions.json` holds. `format`: 2 since entries say `platform`, 3 since they say `nested` (an older file's
+ *  are read again once). */
 export interface VersionsFile { "resolvedAt": string; "minAgeDays": number; "from": "package-lock.json" | "package.json"; "format"?: number; "packages": Record<string, Resolved> }
 
-/** The file's format: 2 marks a platform build (Resolved's `platform`). */
-const FORMAT = 2;
+/** The file's format: 2 marks a platform build (Resolved's `platform`), 3 what's nested under the package that asked
+ *  (Resolved's `nested`). */
+const FORMAT = 3;
 
 /** One version of a package, and when it was published (`latest`: npm's `latest` tag is it). */
 export interface Published { "version": string; "at": string; "latest"?: boolean }
@@ -202,6 +206,8 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 	const cutoff = now - minAgeDays * 24 * 60 * 60 * 1000;
 	const resolved: Record<string, Resolved> = { ...known };
 	const queue: [string, string][] = Object.entries(roots);
+	// (what each package read this time depends on, by range: where the one kept under a name doesn't satisfy it, nested)
+	const ranges = new Map<string, Record<string, string>>();
 	// (one resolved before what it depends on was kept: what it depends on read now — its version kept as it is)
 	const unread = Object.entries(known).filter(([, each]) => each.dependencies === undefined);
 
@@ -211,6 +217,7 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 
 			if (manifest !== undefined) {
 				resolved[name] = { ...each, "dependencies": Object.keys(manifest.dependencies).toSorted(), ...manifest.platform ? { "platform": true as const } : {} };
+				ranges.set(name, manifest.dependencies);
 				queue.push(...Object.entries<string>(manifest.dependencies));
 			}
 		}));
@@ -230,6 +237,7 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 					const manifest = await manifestOf(source, chosen.version);
 
 					resolved[name] ??= { "version": chosen.version, "range": range, ...chosen.young ? { "young": true as const } : {}, ...alias === undefined ? {} : { "alias": source, "tarball": tarballUrl(source, chosen.version) }, "dependencies": Object.keys(manifest.dependencies).toSorted(), ...manifest.platform ? { "platform": true as const } : {} };
+					ranges.set(name, manifest.dependencies);
 					queue.push(...Object.entries<string>(manifest.dependencies));
 				}
 			} catch {
@@ -238,11 +246,38 @@ export async function resolveVersions(roots: Record<string, string>, { minAgeDay
 		}));
 	}
 
+	await nestUnsatisfied(resolved, ranges, cutoff);
+
 	return Object.fromEntries(Object.entries(resolved).toSorted(([one], [other]) => one.localeCompare(other)));
 }
 
+/**
+ * Of what each package in `ranges` depends on, each whose range the version kept under its name doesn't satisfy (a root's
+ * `ignore@^7`, isomorphic-git's `^5`): resolved for that package alone (`nested`), as npm nests it under the package that
+ * asked. One level: a nested one's own dependencies are the kept ones. A range that isn't a version range (a URL, an
+ * alias, a tag) is left to the kept one.
+ */
+export async function nestUnsatisfied(resolved: Record<string, Resolved>, ranges: Map<string, Record<string, string>>, cutoff: number): Promise<void> {
+	const wanted = [...ranges].flatMap(([parent, dependencies]) => Object.entries(dependencies).filter(([name, range]) => {
+		const kept = resolved[name];
+
+		return kept !== undefined && kept.link === undefined && kept.alias === undefined && resolvable(range) && semver.validRange(range) !== null && !semver.satisfies(kept.version, range, { "includePrerelease": true });
+	}).map(([name, range]) => ({ "parent": parent, "name": name, "range": range })));
+
+	for (let at = 0; at < wanted.length; at += PARALLEL) {
+		await Promise.all(wanted.slice(at, at + PARALLEL).map(async ({ parent, name, range }) => {
+			const chosen = choose(await published(name).catch(() => []), range, cutoff);
+
+			if (chosen !== undefined && resolved[parent] !== undefined) {
+				resolved[parent] = { ...resolved[parent], "nested": { ...resolved[parent].nested, [name]: chosen.version } };
+			}
+		}));
+	}
+}
+
 /** The packages a lockfile installs (npm's v2/v3 `packages`), each name once — the first, root before nested; a linked
- *  one by its folder (relative to the workspace root: the lockfile is in `dir`), its version still to be read. */
+ *  one by its folder (relative to the workspace root: the lockfile is in `dir`), its version still to be read. One nested
+ *  a level down under the package that asked, at a version of its own, is on that package's entry (`nested`). */
 export function lockedVersions(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean; "os"?: unknown; "cpu"?: unknown } & Partial<Record<"dependencies" | "peerDependencies" | "optionalDependencies", Record<string, string>>>> }, dir = ""): Record<string, Resolved> {
 	const locked: Record<string, Resolved> = {};
 
@@ -255,6 +290,13 @@ export function lockedVersions(lock: { "packages"?: Record<string, { "version"?:
 			const dependencies = Object.keys({ ...entry.peerDependencies, ...entry.optionalDependencies, ...entry.dependencies }).toSorted();
 
 			locked[name] = { "version": entry.version, "range": entry.version, ...entry.resolved?.startsWith("https://") === true ? { "tarball": entry.resolved } : {}, "dependencies": dependencies, ...isPlatform(entry) ? { "platform": true as const } : {} };
+		} else if (entry.version !== undefined && entry.link !== true && /^node_modules\/((?:@[^/]+\/)?[^/]+)\/node_modules\/((?:@[^/]+\/)?[^/]+)$/u.test(path)) {
+			// (a version of its own under the package that asked, one level down: on that package's entry, as `nested`)
+			const [, parent] = /^node_modules\/((?:@[^/]+\/)?[^/]+)\//u.exec(path)!;
+
+			if (locked[parent!] !== undefined && locked[name]?.version !== entry.version) {
+				locked[parent!] = { ...locked[parent!], "nested": { ...locked[parent!].nested, [name]: entry.version } };
+			}
 		}
 	}
 
