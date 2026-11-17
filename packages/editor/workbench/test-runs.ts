@@ -555,9 +555,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			const result = await runFile(file, signal, approvals);
 
-			// (a question for the person: the run ends here, to be run again once it's answered)
+			// (a question for the person: the run ends here, to go on from this file once it's answered — `rest`)
 			if (result.asked !== undefined) {
-				return { "ask": result.asked };
+				return { "ask": result.asked, "rest": chosen.slice(index) };
 			}
 
 			// (each test against its own earlier runs, before this one's kept among them)
@@ -602,8 +602,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 	/** The runs, by id, to be asked about again: any still going, and the latest of the rest. */
 	const batches = new Map<string, Batch>();
-	const startBatch = (args: Record<string, unknown>): Batch => {
-		const batch: Batch = { "id": crypto.randomUUID().slice(0, 8), "args": args, "ran": [], "controller": new AbortController(), "done": Promise.resolve() };
+	/** A batch of `args`; or `resumed`'s, going on — its id, and what it ran before its question, kept. */
+	const startBatch = (args: Record<string, unknown>, resumed?: Batch): Batch => {
+		const batch: Batch = { "id": resumed?.id ?? crypto.randomUUID().slice(0, 8), "args": args, "ran": [...resumed?.ran ?? []], "controller": new AbortController(), "done": Promise.resolve() };
 
 		batch.done = runBatch(batch).then((result) => {
 			batch.result = result;
@@ -633,11 +634,20 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			throw new Error(`no test run ${run} here (this page keeps its latest ${String(KEPT)}; a reload forgets them)`);
 		}
 
-		// (its question answered: the same files again, from the start, with the approval)
-		const asked = (batch?.result as { "ask"?: Asked } | undefined)?.ask;
+		// A run its question stopped, answered — asked again by its id, or with the same files (as a tool's call is made
+		// again, the approval added): it goes on from the file that asked, the ones before it kept.
+		const answers = (each: Batch | undefined): each is Batch => {
+			const asked = (each?.result as { "ask"?: Asked } | undefined)?.ask;
 
-		if (batch !== undefined && asked !== undefined && Array.isArray(approved) && approved.includes(asked.key)) {
-			batch = startBatch({ ...batch.args, "approved": approved });
+			return asked !== undefined && Array.isArray(approved) && approved.includes(asked.key);
+		};
+
+		batch ??= typeof run === "string" ? undefined : [...batches.values()].reverse().find((each) => answers(each) && JSON.stringify(each.args["files"] ?? null) === JSON.stringify(given["files"] ?? null));
+
+		if (answers(batch)) {
+			const { rest } = batch.result as { "rest"?: string[] };
+
+			batch = startBatch({ ...batch.args, ...rest === undefined ? {} : { "files": rest }, "approved": approved }, batch);
 		}
 
 		batch ??= startBatch(given);

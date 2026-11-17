@@ -456,7 +456,8 @@ test("imports its neighbour", () => {
 	assert.deepEqual(answer.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(answer).slice(0, 2000));
 });
 
-test("a write the policy doesn't decide stops the run and asks; approved, it's made", async () => {
+test("a write the policy doesn't decide stops the run and asks; approved, it's made, the run going on from there", async () => {
+	await session.request("files.write", { "path": "debugger-first.test.mjs", "content": "import { test } from \"node:test\";\n\ntest(\"first\", () => {});\n" }, 30_000);
 	await session.request("files.write", { "path": "debugger-writes.test.mjs", "content": `import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
@@ -467,13 +468,17 @@ test("writes", () => {
 });
 ` }, 30_000);
 
-	const asked = await runTests(["debugger-writes.test.mjs"]);
+	const files = ["debugger-first.test.mjs", "debugger-writes.test.mjs"];
+	const asked = await runTests(files);
 
 	assert.match(asked.ask?.key ?? "", /^runs_tests:fs:write/u, JSON.stringify(asked).slice(0, 1500));
 
-	const approved = await runTests(["debugger-writes.test.mjs"], [asked.ask.key]);
+	// (made again with the approval, as a tool's call is: the same run, on from the file that asked, the first kept)
+	const approved = await runTests(files, [asked.ask.key]);
 
-	assert.deepEqual(approved.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(approved).slice(0, 1500));
+	assert.equal(approved.run, asked.run, JSON.stringify(approved).slice(0, 1500));
+	assert.deepEqual(approved.files.map((each) => each.file), files);
+	assert.deepEqual(approved.counts, { "files": 2, "pass": 2, "fail": 0, "skip": 0 }, JSON.stringify(approved).slice(0, 1500));
 });
 
 test("a run's stages are spans: under its run's, the runtime loaded, its entry parsed, its first step — and on its end, what it asked of the editor", async () => {

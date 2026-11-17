@@ -138,8 +138,8 @@ How it's kept:
      `debug_start`.
    - (d) CI on the pushed branch checks the work.
 2. **The editor's tests in the editor** (debug-mcp `runs_tests`, one file at a time in the tsval debugger; it answers
-   within a minute, done or not, and is waited on again by its run id). Measured 2026-11-16 in Brave on main (760e9340),
-   the editor's 41 unit test files: 38 pass whole — fs-boundaries since an error's stack in tsval is the program's
+   within a minute, done or not, and is waited on again by its run id). Measured 2026-11-17 in Brave on main, all 41 in
+   one call (4½ minutes), the editor's 41 unit test files: 39 pass whole — fs-boundaries since an error's stack in tsval is the program's
    (tsval's src/stacks.ts: its frames, `at async` back through awaits, `Error.prepareStackTrace`'s call sites), git-fast-forward, git-status and silo-kept since a package's own
    version of a dependency is installed under it (Resolved's `nested`: isomorphic-git's `ignore@5` and `pako@1`, beside
    the root's 7 and 2; versions.json's format 3), history-ledger and cosmetic since each tests its feature's own logic
@@ -158,7 +158,11 @@ How it's kept:
      baseline was. node-test's copy *from* the editor's node-test.js was asked about as a write *to* it: a stop's probe
      for a path computed on its line was kept by the line, so where a copy lands got its source's (fixed, 2026-11-17:
      kept by the capability and argument it's after, worker/gate.ts `probeResource`).
-   - **All 41 in one call** hung at the tenth file with the workbench blank; in batches of eight they didn't.
+   - **Each file costs 5–8 s** however little it runs (ata's four tests take 8 ms of a 1.2 s file, cosmetic's three 4 ms
+     of 6 s): most of a run of all 41 is that, not their tests. Not yet looked into — the run's spans would say where.
+   (All 41 in one call hung at the tenth file on 2026-11-16, the workbench blank; on 2026-11-17 they ran through. A
+   question one stopped on, answered, started the run over from its first file: it goes on from the file that asked
+   now, under the same id, the files before it kept — test-runs.ts `tests.run`, as Features and Tests' Run does.)
 
    A test failing here asks first whether it tests its subject directly (the user, 2026-11-16, after a day of shims
    added to make tests pass): the runtime changes only for a gap a person's own program would hit, not for a test's

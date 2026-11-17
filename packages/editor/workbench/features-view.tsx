@@ -332,7 +332,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		redraw();
 	});
 
-	/** `files` run in the debugger; a capability stop is put to the person, and on their yes the run starts again. */
+	/** `files` run in the debugger; a capability stop is put to the person, and on their yes the run goes on from there. */
 	const run = async (files: string[]): Promise<void> => log.span("editor.workbench.features-view.run", { "count": files.length }, async (span) => {
 		for (const file of files) {
 			running.add(file);
@@ -350,7 +350,8 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 					}
 
 					approved.push(answer.ask.key);
-					answer = await rpc.request("tests.run", { "files": files, "approved": approved }, { "timeoutMs": 120_000 }) as Answer;
+					// (the run goes on from the file that asked)
+					answer = await rpc.request("tests.run", { "run": answer.run, "approved": approved }, { "timeoutMs": 120_000 }) as Answer;
 				} else if (answer.running === undefined) {
 					break;
 				} else {
