@@ -18,6 +18,10 @@ export const configuration: Record<string, unknown> = {
 	"editor.scrollBeyondLastLine": true,
 	"editor.mouseWheelZoom": true,
 	"files.autoSave": "off",
+	// A file moved has its imports kept right by the editor, with nothing asked (code-refactor.ts): TypeScript's own would ask
+	// too, once its project's up — after the edit's made, so a Yes edited them again.
+	"javascript.updateImportsOnFileMove.enabled": "never",
+	"typescript.updateImportsOnFileMove.enabled": "never",
 	"workbench.sideBar.location": "left",
 	// Keep the seeded node_modules type surface out of the explorer/search (a UI filter — doesn't affect
 	// module resolution).

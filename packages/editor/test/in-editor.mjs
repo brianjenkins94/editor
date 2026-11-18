@@ -34,6 +34,10 @@ async function sessionWithSpecs() {
  *  each — or, the page crashed, for ever (2026-11-17: 2 h 40 min on playwright-in-editor.spec). */
 const SPEC_MS = Number(process.env.IN_EDITOR_SPEC_MS ?? 300_000);
 
+/** How many sessions run at once, each its own browser (and so its own renderer, where ~9 GB is the limit: two specs at once in
+ *  one crashed it, 2026-11-18), taking specs from one queue. */
+const SESSIONS = Number(process.env.IN_EDITOR_SESSIONS ?? 1);
+
 /** A spec, run to its end in `session`'s editor's debugger. */
 async function ran(session, spec) {
 	const started = Date.now();
@@ -44,7 +48,8 @@ async function ran(session, spec) {
 		answer = await session.request("tests.run", { "run": answer.run }, 120_000);
 	}
 
-	console.log(`${spec}: ${String(Date.now() - started)} ms${await heapOf(session)}`);
+	// (with sessions at once, which one: the specs before it there are the ones it may meet)
+	console.log(`${SESSIONS > 1 ? `[session ${String(session.lane)}] ` : ""}${spec}: ${String(Date.now() - started)} ms${await heapOf(session)}`);
 
 	// What each test's editor was left with (workbench/effects.ts): the inventory of which can't share one.
 	for (const each of answer.files?.[0]?.tests ?? []) {
@@ -125,9 +130,6 @@ const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 1);
 /** How many specs a session runs before the next one starts afresh (a browser's start and the outer editor's boot each
  *  time): all of them, one at a time leaving the renderer nothing that grows. Eight, two at once. */
 const BATCH = Number(process.env.IN_EDITOR_BATCH ?? (SPECS.length || 1));
-/** How many sessions run at once, each its own browser (and so its own renderer, where ~9 GB is the limit: two specs at once in
- *  one crashed it, 2026-11-18), taking specs from one queue. */
-const SESSIONS = Number(process.env.IN_EDITOR_SESSIONS ?? 1);
 /** COVERAGE=1 reads each test's counts around it (architecture-harness.mjs), so a spec is run in its test, one at a time, each
  *  with the page to itself, in one session. */
 const COUNTING = process.env.COVERAGE === "1";
@@ -155,13 +157,14 @@ function runs() {
 		const queue = [...SPECS];
 
 		void (async () => {
-			await Promise.all(Array.from({ "length": SESSIONS }, async () => {
+			await Promise.all(Array.from({ "length": SESSIONS }, async (_, lane) => {
 				while (queue.length > 0) {
 					let session;
 					let taken = 0;
 
 					try {
 						session = await sessionWithSpecs();
+						session.lane = lane + 1;
 						await Promise.all(Array.from({ "length": AT_ONCE }, async () => {
 							while (queue.length > 0 && taken < BATCH) {
 								const spec = queue.shift();

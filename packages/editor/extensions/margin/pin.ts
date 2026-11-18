@@ -5,6 +5,8 @@
  */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Predicate, Rule } from "@brianjenkins94/util/silo/policy";
+import type { RunTrace } from "@brianjenkins94/util/silo/traces";
+import { Anchors } from "@brianjenkins94/editor-api/anchors";
 import { recordedResult, replaceRule } from "@brianjenkins94/editor-api/policy";
 import * as vscode from "vscode";
 import { keptRuns } from "./runs";
@@ -28,9 +30,23 @@ function previewed(text: string): { "value": unknown } | undefined {
 	}
 }
 
-/** The values past runs saw at a call on `line` of `uri`: what it returned the last time it ran for real, then what was bound or
- *  returned on that line in the runs kept of the file, each once, the most seen first. */
-async function pastValues(uri: string, capability: string, resource: string, line: number): Promise<{ "value": unknown; "label": string; "detail": string }[]> {
+/** The line each of `trace`'s values is on in `source` (the text of the run the question's on), where a past run's text
+ *  differs — an edit, a fix on save, above the call — followed there by its code; undefined where it's gone, or for a value
+ *  with no range to follow. Its own lines, where the text is the same (or either isn't known). */
+async function linesIn(trace: RunTrace, path: string, source: string | undefined): Promise<(number | undefined)[]> {
+	if (source === undefined || trace.source === undefined || trace.source === source) {
+		return trace.values.map((value) => value.line);
+	}
+
+	const lines = await new Anchors(vscode, path, trace.source).lines(source, trace.values.map((value) => value.at ?? [0, 0]));
+
+	return trace.values.map((value, index) => (value.at === undefined ? undefined : lines[index]));
+}
+
+/** The values past runs saw at a call on `line` of `uri` (of `source`, the text of the run asking): what it returned the last
+ *  time it ran for real, then what was bound or returned on that line in the runs kept of the file, each once, the most seen
+ *  first. */
+async function pastValues(uri: string, capability: string, resource: string, line: number, source?: string): Promise<{ "value": unknown; "label": string; "detail": string }[]> {
 	const found = new Map<string, { "value": unknown; "label": string; "detail": string; "seen": number }>();
 	const recorded = await recordedResult(capability, resource).catch(() => undefined);
 
@@ -39,11 +55,12 @@ async function pastValues(uri: string, capability: string, resource: string, lin
 	}
 
 	for (const trace of await keptRuns(vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false))) {
+		const lines = await linesIn(trace, vscode.Uri.parse(uri).path, source);
 		// (a run that didn't make the call saw its stand-in's value, or the one it was already given: nothing it returned)
-		const made = !trace.values.some((value) => value.line === line && (value.kind === "skip" || value.kind === "given"));
+		const made = !trace.values.some((value, index) => lines[index] === line && (value.kind === "skip" || value.kind === "given"));
 
-		for (const value of made ? trace.values : []) {
-			const parsed = value.line === line && (value.kind === "bind" || value.kind === "return") && value.value !== undefined ? previewed(value.value) : undefined;
+		for (const [index, value] of made ? trace.values.entries() : []) {
+			const parsed = lines[index] === line && (value.kind === "bind" || value.kind === "return") && value.value !== undefined ? previewed(value.value) : undefined;
 
 			if (parsed !== undefined) {
 				const key = JSON.stringify(parsed.value);
@@ -72,8 +89,8 @@ export function installPin(context: vscode.ExtensionContext, log?: ObservedExten
 	};
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand("margin.pin", async (uri: string, capability: string, resource: string, line: number) => {
-			const values = await pastValues(uri, capability, resource, line);
+		vscode.commands.registerCommand("margin.pin", async (uri: string, capability: string, resource: string, line: number, source?: string) => {
+			const values = await pastValues(uri, capability, resource, line, source);
 
 			if (values.length === 0) {
 				void vscode.window.showInformationMessage(`Nothing's been seen of ${capability} ${resource}: once it runs for real (Run), what it returned is there to pin. Rule… gives any value.`);

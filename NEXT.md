@@ -680,9 +680,14 @@ How it's kept:
        as fast as alone. What two sessions found, each a spec meeting another's editor in an order one session never gives:
        the Margin lost a line's values when the file stopped parsing after a fix on save had moved it (its lines were
        followed by position only: fixed, `lineMap` keeps lines still there, editor-api's anchors.test.mjs) — a person's bug,
-       ESLint being up already decided it; still failing there, 3 of 43: live-runs' first test finds a debug toolbar and
-       Pin…'s picker doesn't open, mock-value's first problem row never comes, edits-change's History output starts with
-       another run's lines.
+       ESLint being up already decided it. And the rest, each fixed (2026-11-18): Pin… found what past runs saw at a call
+       by its line number, so a line put above it (that same fix on save) left it nothing to offer — now each past run's
+       values are followed into the text by their code, as the Margin's are (pin.ts); TypeScript's own "Update imports?"
+       asked after a move the editor had already made the edits for, once its project was up (a Yes would make them
+       again) — its `*.updateImportsOnFileMove.enabled` are "never" by default (workbench/workspace.ts), file-moves renames
+       a second time with TypeScript up; and two specs that assumed a window nothing had run in — a debug toolbar VS
+       Code keeps, hidden (live-runs: hidden, not absent), and History's "Runs say" count, said as what changed once
+       anything's run (edits-change: either). Two sessions: 43 of 43 in 170 s, one session 43 of 43 in 306.
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,

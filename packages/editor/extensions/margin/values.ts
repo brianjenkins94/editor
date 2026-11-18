@@ -279,7 +279,7 @@ function unmadeActions(uri: string, row: Row, session: Session): PaneAction[] {
 	const resource = rest.join(" ");
 
 	return [
-		{ "title": "Pin…", "command": "margin.pin", "arguments": [uri, capability, resource, row.line], "tooltip": "Keep a value past runs saw here: runs after an edit are given it" },
+		{ "title": "Pin…", "command": "margin.pin", "arguments": [uri, capability, resource, row.line, ...session.anchors === undefined ? [] : [session.anchors.text]], "tooltip": "Keep a value past runs saw here: runs after an edit are given it" },
 		{ "title": "Rule…", "command": "margin.unattended", "arguments": [uri, capability, resource], "tooltip": "What runs after an edit, which nobody's watching, do with this call" }
 	];
 }

@@ -55,7 +55,10 @@ test("the History output says what a pause changed, and whether runs used it", a
 	await codeOf(workbench).press("F5");
 	await expect(workbench.locator(".notes-margin-run.ran")).toHaveCount(1, { "timeout": 60_000 });
 	await runCommand(workbench, "History: Show What Changed");
-	await expect(told).toContainText("Runs say: 1 features exercised, 1 dormant", { "timeout": 30_000 });
+	// (said as a count the first time anything's run in this window, as what changed after: in an editor that's run
+	// something before, the second. `\s`: the output's spaces are drawn as non-breaking ones, which a pattern doesn't take
+	// for spaces as a string's match does)
+	await expect(told).toContainText(/Runs\ssay:\s1\sfeatures\sexercised,\s1\sdormant|runs:\sexercised\shub\srequest\sdemo\.greet;\sdormant\shub\srequest\sdemo\.idle/u, { "timeout": 30_000 });
 
 	// Another run calls the other: said as it changes.
 	await retype(workbench, "import { idle } from \"./app.mjs\";\n\nconst said = idle();\n");

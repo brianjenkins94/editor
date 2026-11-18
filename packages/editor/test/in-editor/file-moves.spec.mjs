@@ -72,4 +72,24 @@ test("a file renamed in the Explorer: what imports it follows, and nothing's ask
 	// (once TypeScript can say, which on a workspace just opened may be a minute or more)
 	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("./prices.mjs", { "timeout": 120_000 });
 	await expect(workbench.locator(".dialog-box")).toHaveCount(0);
+
+	// Again, TypeScript up now: its own "Update imports?" asked then, a moment after the edit — over this Explorer, or in the
+	// next test, an editor shared.
+	await workbench.getByRole("treeitem", { "name": "prices.mjs", "exact": true }).click();
+	await list.focus();
+	await list.press("F2");
+
+	try {
+		await expect(input).toBeVisible({ "timeout": 3000 });
+	} catch {
+		await list.focus();
+		await list.press("Enter");
+		await expect(input).toBeVisible({ "timeout": 15_000 });
+	}
+
+	await input.fill("costs.mjs");
+	await input.press("Enter");
+	await workbench.locator(".tab", { "hasText": "total.mjs" }).first().click();
+	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("./costs.mjs", { "timeout": 60_000 });
+	await expect(workbench.locator(".dialog-box")).toHaveCount(0);
 });

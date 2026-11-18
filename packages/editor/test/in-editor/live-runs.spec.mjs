@@ -26,7 +26,9 @@ test("an edit runs on its own: the Margin keeps up, nothing happens to the world
 	const workbench = await openEditor(page, { "live.mjs": "const total = 1 + 1;\n" });
 
 	await openFile(workbench, "live.mjs");
+	// (a blank line after the imports, as ESLint's fix on save puts one: the half-written text below is shorter above it)
 	await retype(workbench, `import { readFileSync, writeFileSync } from "node:fs";
+
 const total = 3 * 10;
 writeFileSync("/workspace/out.txt", "written " + total);
 const back = readFileSync("/workspace/out.txt", "utf8");
@@ -35,8 +37,8 @@ const back = readFileSync("/workspace/out.txt", "utf8");
 	await expect(cell(workbench, "total =")).toContainText("30", { "timeout": 60_000 });
 	await expect(cell(workbench, "back =")).toContainText("written 30", { "timeout": 30_000 });
 	await expect(workbench.getByRole("treeitem", { "name": "out.txt" })).toHaveCount(0);
-	// Quiet: no toolbar, nothing asked.
-	await expect(workbench.locator(".debug-toolbar")).toHaveCount(0);
+	// Quiet: no toolbar, nothing asked. (Shown, not there: VS Code keeps a window's toolbar, hidden, once it has debugged.)
+	await expect(workbench.locator(".debug-toolbar")).toBeHidden();
 
 	// A statement half written: the last run's stay.
 	await retype(workbench, "const total = 3 * 10;\nconst more = (\n");
@@ -126,8 +128,9 @@ test("Pin… keeps a value a past run saw there; cancelled, the line's buttons s
 	await input.press("Enter");
 	await expect(cell(workbench, "listed =")).toContainText("seen", { "timeout": 60_000 });
 
-	// After an edit it's skipped, and says so.
-	await retype(workbench, `${program}const total = 1 + 1;\n`);
+	// After an edit it's skipped, and says so. (The edit puts a line above the call, as ESLint's fix on save does after the
+	// imports: what past runs saw there is found by its code, not its line.)
+	await retype(workbench, `${program.replace("\n", "\n\n")}const total = 1 + 1;\n`);
 	await expect(cell(workbench, "total =")).toContainText("2", { "timeout": 60_000 });
 	await action(workbench, "Pin…").click({ "timeout": 30_000 });
 	await expect(workbench.locator(".quick-input-list .monaco-list-row", { "hasText": "seen" }).first()).toBeVisible({ "timeout": 15_000 });
