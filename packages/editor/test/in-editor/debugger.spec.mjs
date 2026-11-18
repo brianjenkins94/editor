@@ -38,7 +38,7 @@ test("a test file run from Features and tests: each test's outcome, a failure's 
 	}
 
 	// The failure, with its sides.
-	await expect(row(/^failsfail/u)).toHaveAttribute("title", /\b2\b[\s\S]*\b3\b/u);
+	await expect(row(/^failsfail/u)).toHaveAttribute("title", /\b2\b[\s\S]+\b3\b/u);
 });
 
 test("a program's capability calls stop in the margin, on their lines, and are made, skipped or refused as answered", async ({ page }) => {

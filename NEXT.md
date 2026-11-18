@@ -597,8 +597,8 @@ How it's kept:
      how tests are written from the beginning, not a speed-up after). A spec is written to run in an editor another spec used
      before it and beside another: it makes what it needs, puts back what it changed, and assumes nothing it didn't make.
      Today each test boots a VS Code of its own (editor.mjs `openEditor`, a fresh `?instance=`: coverage.spec 9.4 s, 1.0 s of
-     it the test), and the harness starts the browser again every 12 specs to stay under the renderer's ~9 GB, which three
-     specs still crashed into on 2026-11-17 (`Target crashed`). The design:
+     it the test). The harness runs them one at a time in one session since 2026-11-18 (test/in-editor.mjs): two at once,
+     restarted every 8 or 12 specs, crashed near the renderer's ~9 GB (`Target crashed`, 2026-11-17). The design:
      - **A lane's editor**: one editor a lane, booted once, its window kept between specs (preview-windows.tsx's `release`
        hands it back to the lane rather than removing it); two lanes, as now, each its own instance, so lanes never meet.
      - **Setup and teardown are fixtures, not the spec's own code** (specs do what a person does): an `editor` fixture seeds
@@ -647,7 +647,7 @@ How it's kept:
        it didn't serve.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
-     - **Then**: the restarts every 12 specs go, and lanes are measured past two as memory allows. A spec that fails beside
+     - **Then**: lanes are measured past one as memory allows (one at a time, the renderer peaked at 5.1 GB). A spec that fails beside
        a copy of itself is a bug in the spec (unit test files already pass so, 2026-11-04: *Tests at once*).
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
@@ -751,10 +751,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `files_write` still try again (workspace-tools.ts `applyAndSave`).
 - **The in-editor specs' renderer** (found 2026-11-10): every spec's editor is a frame of one page, so they share its
   renderer, which kept about 60 MB a spec that never came back (not JavaScript: at the end of a run that held 6.2 GB,
-  `measureUserAgentSpecificMemory` found 0.8 GB live, the outer editor alone), and near 9 GB it crashed. Now the specs run
-  in batches of 12, each in a session of its own (test/in-editor.mjs): the peak is the outer editor and two specs' editors,
-  7.4–7.9 GB with cspell, where unbatched it climbed to 8.8 and crashed, for about 190 s against 170. What's left to
-  shrink is the editor itself: each of the three runs its own TypeScript servers, ESLint, BABLR and so on.
+  `measureUserAgentSpecificMemory` found 0.8 GB live, the outer editor alone), and near 9 GB it crashed. Measured one
+  spec at a time (2026-11-17), little stays: the climb was two specs' editors live at once, and a popup left open as its
+  editor went (theme `src/popups.js`). So the specs run one at a time in one session (2026-11-18, test/in-editor.mjs),
+  peaking at 5.1 GB. What's left to shrink is the editor itself: each runs its own TypeScript servers, ESLint, BABLR and
+  so on.
 - **A new terminal didn't come in preview-profile.spec on CI** (1b36c848 and 4e9ae421, 2026-11-10): Terminal: Create New
   Terminal, and no `.xterm-rows` within 30 s. Both times beside preview-devtools.spec, which opens a terminal of its own at
   the same point, in the same page: the palette closes when its window loses focus, and an Enter then runs nothing. Not

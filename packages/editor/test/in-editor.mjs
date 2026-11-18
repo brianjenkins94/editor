@@ -106,14 +106,14 @@ async function sayWhatHappened(session) {
 }
 
 /** How many specs run at once: each has an editor of its own in a window of its own, all in one renderer process (they're
- *  the page's same-origin frames). Two, not three (2026-11-09): at three its peak was 8.7 GB of all 29 specs and it
- *  crashed near 9 three times in four runs; at two, 7.5 GB, for 168 s against 154. */
-const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 2);
-/** How many specs a session runs before the next one starts afresh: its renderer's peak, 2 at once, stays near 7 GB
- *  (2026-11-10), at a browser's start and the outer editor's boot each time. Eight since 2026-11-17: at twelve, a second
- *  session crashed near 9 GB in 3 runs of 5 (its renderer at 5.6–7.3 GB between specs, two editors live at a time). One at
- *  a time, all 43 ran in one session, peaking at 5.1 GB, in 351 s (NEXT.md item 2, *Specs share an editor*). */
-const BATCH = Number(process.env.IN_EDITOR_BATCH ?? 8);
+ *  the page's same-origin frames). One since 2026-11-18: two at once (since 2026-11-09, when three crashed near 9 GB) held
+ *  two editors live in that renderer, 5.6–7.3 GB between specs, and a session of twelve crashed near 9 in 3 runs of 5; and
+ *  beside each other some specs took ten times as long (commit-beside, dependency-baseline). One at a time, all 43 ran in
+ *  one session, peaking at 5.1 GB, in 351 s against 266 (NEXT.md item 2, *Specs share an editor*). */
+const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 1);
+/** How many specs a session runs before the next one starts afresh (a browser's start and the outer editor's boot each
+ *  time): all of them, one at a time leaving the renderer nothing that grows. Eight, two at once. */
+const BATCH = Number(process.env.IN_EDITOR_BATCH ?? (SPECS.length || 1));
 /** COVERAGE=1 reads each test's counts around it (architecture-harness.mjs), so a spec is run in its test, one at a time, each
  *  with the page to itself, in one session. */
 const COUNTING = process.env.COVERAGE === "1";
