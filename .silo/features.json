@@ -660,6 +660,7 @@
       "packages/editor-api/src/annotations.ts"
     ],
     "tests": [
+      "packages/editor-api/test/anchors.test.mjs",
       "packages/editor-api/test/annotations.test.mjs"
     ]
   },

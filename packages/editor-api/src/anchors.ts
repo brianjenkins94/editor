@@ -44,9 +44,48 @@ function lineOf(starts: number[], at: number): number {
 	return low;
 }
 
-/** Each line of `before` at its line in `after`, by the lines they share — the common head and tail, and the changed
- *  middle line for line — for when `after` can't be read as code (typing paused mid-statement): what's placed follows
- *  the lines around the edit until the code parses again. */
+/** How many line pairs the changed middle's matching may weigh (its lines times the edit's): past it, the middle is
+ *  followed line for line alone. */
+const MATCH_CELLS = 250_000;
+
+/** Each line of `was[from, to)` paired with an equal one of `now[at, until)`, in order and as many as can be (their longest
+ *  common subsequence): by index in `was`, its index in `now`. */
+function pairs(was: string[], from: number, to: number, now: string[], at: number, until: number): Map<number, number> {
+	const rows = to - from;
+	const columns = until - at;
+	const paired = new Map<number, number>();
+
+	if (rows === 0 || columns === 0 || rows * columns > MATCH_CELLS) {
+		return paired;
+	}
+
+	// (lengths of the common subsequences of each pair of suffixes, a row a line of `was`)
+	const lengths = Array.from({ "length": rows + 1 }, () => new Uint32Array(columns + 1));
+
+	for (let row = rows - 1; row >= 0; row -= 1) {
+		for (let column = columns - 1; column >= 0; column -= 1) {
+			lengths[row][column] = was[from + row] === now[at + column] ? lengths[row + 1][column + 1] + 1 : Math.max(lengths[row + 1][column], lengths[row][column + 1]);
+		}
+	}
+
+	for (let row = 0, column = 0; row < rows && column < columns;) {
+		if (was[from + row] === now[at + column]) {
+			paired.set(from + row, at + column);
+			row += 1;
+			column += 1;
+		} else if (lengths[row + 1][column] >= lengths[row][column + 1]) {
+			row += 1;
+		} else {
+			column += 1;
+		}
+	}
+
+	return paired;
+}
+
+/** Each line of `before` at its line in `after`, by the lines they share — the common head and tail, the lines of the
+ *  changed middle that are still there, and the rest of it line for line between those — for when `after` can't be read
+ *  as code (typing paused mid-statement): what's placed follows the lines around the edit until the code parses again. */
 function lineMap(before: string, after: string): (line: number) => number | undefined {
 	const was = before.split("\n");
 	const now = after.split("\n");
@@ -61,6 +100,9 @@ function lineMap(before: string, after: string): (line: number) => number | unde
 		tail += 1;
 	}
 
+	// (a line still there in the middle — one a fix on save moved, say — is where it is now)
+	const kept = pairs(was, head, was.length - tail, now, head, now.length - tail);
+
 	return (line) => {
 		if (line < head) {
 			return line;
@@ -70,7 +112,28 @@ function lineMap(before: string, after: string): (line: number) => number | unde
 			return line - was.length + now.length;
 		}
 
-		return line - head < now.length - head - tail ? line : undefined;
+		const paired = kept.get(line);
+
+		if (paired !== undefined) {
+			return paired;
+		}
+
+		// (one that isn't: line for line from the kept line before it, if that's still before the kept line after it)
+		let previous = line - 1;
+
+		while (previous >= head && !kept.has(previous)) {
+			previous -= 1;
+		}
+
+		let next = line + 1;
+
+		while (next < was.length - tail && !kept.has(next)) {
+			next += 1;
+		}
+
+		const at = (previous < head ? head - 1 : kept.get(previous)!) + line - previous;
+
+		return at < (next < was.length - tail ? kept.get(next)! : now.length - tail) ? at : undefined;
 	};
 }
 

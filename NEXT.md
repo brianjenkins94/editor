@@ -671,7 +671,18 @@ How it's kept:
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: lanes are measured past one as memory allows (one at a time, the renderer peaked at 5.1 GB). A spec that fails beside
-       a copy of itself is a bug in the spec (unit test files already pass so, 2026-11-04: *Tests at once*).
+       a copy of itself is a bug in the spec (unit test files already pass so, 2026-11-04: *Tests at once*). Measured
+       2026-11-18, sharing: two specs at once in one session crashed its renderer by the fourteenth (5.6 GB after the first,
+       the page's own heap 180 MB: one editor is ~0.8 GB of JavaScript once a file's open — the workbench 241 MB, the
+       extension host 224, four extension workers 51–110 each — and 1.7–2.4 GB of renderer). The ~9 GB limit is a
+       renderer's, so lanes are sessions, each its own browser (`IN_EDITOR_SESSIONS`, test/in-editor.mjs: one queue, each
+       session taking the next spec): two ran all 43 in 213 s against 304 one at a time, each renderer near 5 GB, most specs
+       as fast as alone. What two sessions found, each a spec meeting another's editor in an order one session never gives:
+       the Margin lost a line's values when the file stopped parsing after a fix on save had moved it (its lines were
+       followed by position only: fixed, `lineMap` keeps lines still there, editor-api's anchors.test.mjs) — a person's bug,
+       ESLint being up already decided it; still failing there, 3 of 43: live-runs' first test finds a debug toolbar and
+       Pin…'s picker doesn't open, mock-value's first problem row never comes, edits-change's History output starts with
+       another run's lines.
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,

@@ -125,6 +125,9 @@ const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 1);
 /** How many specs a session runs before the next one starts afresh (a browser's start and the outer editor's boot each
  *  time): all of them, one at a time leaving the renderer nothing that grows. Eight, two at once. */
 const BATCH = Number(process.env.IN_EDITOR_BATCH ?? (SPECS.length || 1));
+/** How many sessions run at once, each its own browser (and so its own renderer, where ~9 GB is the limit: two specs at once in
+ *  one crashed it, 2026-11-18), taking specs from one queue. */
+const SESSIONS = Number(process.env.IN_EDITOR_SESSIONS ?? 1);
 /** COVERAGE=1 reads each test's counts around it (architecture-harness.mjs), so a spec is run in its test, one at a time, each
  *  with the page to itself, in one session. */
 const COUNTING = process.env.COVERAGE === "1";
@@ -148,40 +151,48 @@ function runs() {
 		const started = Date.now();
 
 		answers = settled;
+		// (one queue: each session takes the next spec as it's free, so a slow spec holds only its own)
+		const queue = [...SPECS];
+
 		void (async () => {
-			for (let first = 0; first < SPECS.length; first += BATCH) {
-				const left = SPECS.slice(first, first + BATCH);
-				let session;
+			await Promise.all(Array.from({ "length": SESSIONS }, async () => {
+				while (queue.length > 0) {
+					let session;
+					let taken = 0;
 
-				try {
-					session = await sessionWithSpecs();
-					await Promise.all(Array.from({ "length": AT_ONCE }, async () => {
-						while (left.length > 0) {
-							const spec = left.shift();
-							const file = await ran(session, spec).catch((error) => ({ "tests": [], "error": String(error) }));
+					try {
+						session = await sessionWithSpecs();
+						await Promise.all(Array.from({ "length": AT_ONCE }, async () => {
+							while (queue.length > 0 && taken < BATCH) {
+								const spec = queue.shift();
 
-							if (failed(file)) {
-								await within(sayWhatHappened(session).catch(() => undefined), 15_000);
+								taken += 1;
 
-								if (AT_ONCE === 1) {
-									await within(closeLeftOpen(session).catch(() => undefined), 30_000);
+								const file = await ran(session, spec).catch((error) => ({ "tests": [], "error": String(error) }));
+
+								if (failed(file)) {
+									await within(sayWhatHappened(session).catch(() => undefined), 15_000);
+
+									if (AT_ONCE === 1) {
+										await within(closeLeftOpen(session).catch(() => undefined), 30_000);
+									}
 								}
+
+								settled.get(spec).finish(file);
 							}
-
-							settled.get(spec).finish(file);
+						}));
+					} catch (error) {
+						// (a session that didn't start: the batch it would have run says so)
+						for (const spec of queue.splice(0, BATCH - taken)) {
+							settled.get(spec).finish({ "tests": [], "error": `its session didn't start: ${String(error)}` });
 						}
-					}));
-				} catch (error) {
-					// (a session that didn't start: its batch's specs say so)
-					for (const spec of left.splice(0)) {
-						settled.get(spec).finish({ "tests": [], "error": `its session didn't start: ${String(error)}` });
+					} finally {
+						await within(session?.close("in-editor").catch(() => undefined), 30_000);
 					}
-				} finally {
-					await within(session?.close("in-editor").catch(() => undefined), 30_000);
 				}
-			}
+			}));
 
-			console.log(`all specs, ${String(AT_ONCE)} at once, ${String(BATCH)} a session: ${String(Date.now() - started)} ms`);
+			console.log(`all specs, ${String(SESSIONS)} sessions, ${String(AT_ONCE)} at once in each, ${String(BATCH)} a session: ${String(Date.now() - started)} ms`);
 		})();
 	}
 
