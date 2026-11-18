@@ -111,8 +111,8 @@ async function sayWhatHappened(session) {
 const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 2);
 /** How many specs a session runs before the next one starts afresh: its renderer's peak, 2 at once, stays near 7 GB
  *  (2026-11-10), at a browser's start and the outer editor's boot each time. Eight since 2026-11-17: at twelve, a second
- *  session crashed near 9 GB in 3 runs of 5 (its renderer at 5.6–7.3 GB between specs), as an editor doesn't yet give back
- *  what its runs took (NEXT.md item 2, *Specs share an editor*). */
+ *  session crashed near 9 GB in 3 runs of 5 (its renderer at 5.6–7.3 GB between specs, two editors live at a time). One at
+ *  a time, all 43 ran in one session, peaking at 5.1 GB, in 351 s (NEXT.md item 2, *Specs share an editor*). */
 const BATCH = Number(process.env.IN_EDITOR_BATCH ?? 8);
 /** COVERAGE=1 reads each test's counts around it (architecture-harness.mjs), so a spec is run in its test, one at a time, each
  *  with the page to itself, in one session. */

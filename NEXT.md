@@ -635,12 +635,16 @@ How it's kept:
        that keeps shared editors' windows and hands an idle one to the next test (`?shared`), booted empty. What it found:
        specs that assumed a fresh editor — the Debug Console open (VS Code opens it on a window's first debug session
        only), the panel open to hide, the Explorer showing — fixed on main to open what they need; mock-value's three
-       tests passed on one editor in 9 s (22 before), explore-orderings in 5 (14). What stopped it: a shared editor doesn't
-       give back what a test's work took — its renderer 3.8 GB after one spec, 6.4 after ten (dev-server and coverage
-       left ~900 MB each; the page's own heap stayed under 350 MB, so it's workers and buffers), a crash near 9 GB at the
-       eleventh — and with the mechanism in every editor, even used by one spec, sessions crashed where they hadn't (live-runs'
-       every run). Next: what outlives a test's runs and editors (workers, buffers), which a person's long session would
-       meet too; and which part of the mechanism crashed sessions it didn't serve.
+       tests passed on one editor in 9 s (22 before), explore-orderings in 5 (14). What stopped it: sessions crashed near
+       9 GB, the renderer 3.8 GB after one spec and 6.4 after ten — read then as a shared editor not giving back what a
+       test's work took. Measured again one spec at a time (2026-11-17), that was mostly two specs at once, each reading
+       counting the other's live editor: alone, each spec's frame and workers go as it ends, the JavaScript of every realm
+       stays near 950 MB, the renderer between 2.5 and 3.7 GB; all 43 specs ran in one session, one at a time, peaking at
+       5.1 GB (351 s, against 200–265 s two at once in sessions of 12). What did outlive its editor: a popup open as its
+       page went away (playground-links' Share, run-menu's Run menu) — Floating UI's listener on the top window's
+       visualViewport held the whole closed editor, 80–110 MB each, fixed in the theme (`src/popups.js`: stopped on
+       `pagehide`). Next: the shared mechanism again, measured one spec at a time, and which part of it crashed sessions
+       it didn't serve.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: the restarts every 12 specs go, and lanes are measured past two as memory allows. A spec that fails beside

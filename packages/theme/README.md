@@ -70,6 +70,10 @@ through this package (`webawesome/through-theme`), and uses only the components 
 to allow another, add `src/components/<name>.js` and `.d.ts`, each a one-line re-export
 ([*Only through the theme*](#only-through-the-theme)).
 
+A component that opens a popup (dropdown, popover, select) loads `src/popups.js`, which stops every open one as its page
+goes away: open, a popup listens on the windows above it (to keep its place), so a frame removed with one open was kept
+by them, whole.
+
 ## The layer order and docked windows: `theme/sheet`
 
 Class names in code are a closed set (`webawesome/known-classes`): Web Awesome's, or one the theme styles. Every style

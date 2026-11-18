@@ -2729,7 +2729,8 @@
     "paths": [
       "packages/admin/src/wa-jsx.d.ts",
       "packages/api/scripts/webawesome.ts",
-      "packages/theme/src/components"
+      "packages/theme/src/components",
+      "packages/theme/src/popups.js"
     ],
     "tests": [
       "packages/theme/test/web-awesome.mjs"
