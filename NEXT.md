@@ -651,8 +651,16 @@ How it's kept:
        main: a tsconfig made or changed restarts its worker), commit-beside (the commits opened beside the work stayed open;
        the branch's reset closes them now, by a new *Git: Close the Commits Opened Read-Only*, and its second ref box still
        loses the focus between its typing and Enter, cause not found) and eslint's config that fails to load (its file
-       never linted after the reset's config changes, cause not found). Next: those two, then the whole run sharing, a
-       failed test's window let go once what it showed is said.
+       never linted after the reset's config changes, cause not found). Then (2026-11-18): every spec sharing, one at a time,
+       40 of 43 passed with no crash in 435 s; sharing saved 25 s of 287 on the specs that passed both ways (an editor opens
+       in about a second), so it's for the design and the inventory, not for time. A failed spec's windows are closed now
+       once what they showed is said (test/in-editor.mjs), which the crashes were. What sharing found, beyond the reset's
+       reach: ESLint's problems for removed files (fixed on main), and still on the branch — TypeScript keeps a removed
+       tsconfig.json's problems, crowding the Problems view so a spec's row isn't drawn (eslint.spec's first test after
+       edits-change); live-values' inline value (its run doesn't stop at the breakpoint F9 set after its first test);
+       commit-beside (after a commit from the shell's panel, the next command's box is closed by its own Enter, taken as a
+       quick-access picker's — the test driver only, not a person: its tests keep editors of their own). Breakpoints are
+       the editor's, not the workspace's: the reset removes them.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: lanes are measured past one as memory allows (one at a time, the renderer peaked at 5.1 GB). A spec that fails beside

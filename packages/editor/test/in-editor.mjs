@@ -105,6 +105,17 @@ async function sayWhatHappened(session) {
 	console.log(`[in-editor] printed:\n  ${session.printed().filter((line) => !/^\{"context|^%c|^console\.group|^\s*$|^[←→]|observability\.|node_modules|ata\.|\.cdn/u.test(line)).slice(-120).map((line) => line.slice(0, 220)).join("\n  ")}`);
 }
 
+/** The windows a failed spec's tests left open (test windows: no server's), closed by their Close once what they showed is
+ *  said: each holds a whole editor, and three left open crashed a session's renderer (2026-11-18). Only one spec at a time,
+ *  when every test window open is the failed spec's. */
+async function closeLeftOpen(session) {
+	const close = session.page.locator("app-window[data-preview-port='0']").locator(".app-window-controls [title='Close'], .app-window-controls [aria-label='Close']");
+
+	for (let left = await close.count(); left > 0; left -= 1) {
+		await close.first().click({ "timeout": 5000 }).catch(() => undefined);
+	}
+}
+
 /** How many specs run at once: each has an editor of its own in a window of its own, all in one renderer process (they're
  *  the page's same-origin frames). One since 2026-11-18: two at once (since 2026-11-09, when three crashed near 9 GB) held
  *  two editors live in that renderer, 5.6–7.3 GB between specs, and a session of twelve crashed near 9 in 3 runs of 5; and
@@ -151,6 +162,10 @@ function runs() {
 
 							if (failed(file)) {
 								await within(sayWhatHappened(session).catch(() => undefined), 15_000);
+
+								if (AT_ONCE === 1) {
+									await within(closeLeftOpen(session).catch(() => undefined), 30_000);
+								}
 							}
 
 							settled.get(spec).finish(file);
