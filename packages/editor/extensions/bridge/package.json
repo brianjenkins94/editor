@@ -31,6 +31,11 @@
         "category": "Git"
       },
       {
+        "command": "editor.git.closeRefs",
+        "title": "Close the Commits Opened Read-Only",
+        "category": "Git"
+      },
+      {
         "command": "editor.pane.toggleNative",
         "title": "Switch Between Beside the Code and Annotations",
         "category": "Pane"

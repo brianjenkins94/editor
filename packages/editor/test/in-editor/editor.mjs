@@ -1,14 +1,19 @@
 /**
- * What a test running in the editor uses to open one: an instance of its own, in a preview window (shared/instance.ts),
- * holding only the files it's given, and the way a person gets around it.
+ * What a test running in the editor uses to open one, holding only the files it's given, and the way a person gets around
+ * it: one booted once and reset for each test with its files (workbench/effects.ts, shell/preview-windows.tsx; NEXT.md
+ * item 2, *Specs share an editor, by design*), so a test meets what one before it may have left, as a person's editor does.
+ * One about what a reset doesn't put back (a reload, a user setting, a window's first anything) has one of its own, and says
+ * why (`own`).
  */
 import { expect } from "@playwright/test";
 
-/** An editor of its own, holding `files` (each path from its workspace's root, with its text): its workbench, once it's up. `extension`: one from outside the editor, by its address. */
-export async function openEditor(page, files, { extension } = {}) {
+/** An editor holding `files` (each path from its workspace's root, with its text): its workbench, once it's up. A shared one,
+ *  reset for this test; or its own, where `own` says why, and with `extension` (one from outside the editor, by its address). */
+export async function openEditor(page, files, { extension, own } = {}) {
 	const seed = encodeURIComponent(Buffer.from(JSON.stringify(files)).toString("base64"));
+	const shared = own === undefined && extension === undefined;
 
-	await page.goto(`?instance=test-${crypto.randomUUID()}&seed=${seed}${extension === undefined ? "" : `&extension=${encodeURIComponent(extension)}`}`);
+	await page.goto(shared ? `?shared&seed=${seed}` : `?instance=test-${crypto.randomUUID()}&seed=${seed}${extension === undefined ? "" : `&extension=${encodeURIComponent(extension)}`}`);
 
 	const workbench = page.frameLocator("iframe[title='editor']").frameLocator("iframe");
 

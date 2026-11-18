@@ -596,8 +596,8 @@ How it's kept:
    - **Specs share an editor, by design** (the user, 2026-11-17: set up and tear down, idempotent, not in each other's way —
      how tests are written from the beginning, not a speed-up after). A spec is written to run in an editor another spec used
      before it and beside another: it makes what it needs, puts back what it changed, and assumes nothing it didn't make.
-     Today each test boots a VS Code of its own (editor.mjs `openEditor`, a fresh `?instance=`: coverage.spec 9.4 s, 1.0 s of
-     it the test). The harness runs them one at a time in one session since 2026-11-18 (test/in-editor.mjs): two at once,
+     Since 2026-11-18 they do (below, *Tried*): `openEditor` hands a test an editor another used, reset; before, each test
+     booted a VS Code of its own (a fresh `?instance=`: coverage.spec 9.4 s, 1.0 s of it the test). The harness runs them one at a time in one session since 2026-11-18 (test/in-editor.mjs): two at once,
      restarted every 8 or 12 specs, crashed near the renderer's ~9 GB (`Target crashed`, 2026-11-17). The design:
      - **A lane's editor**: one editor a lane, booted once, its window kept between specs (preview-windows.tsx's `release`
        hands it back to the lane rather than removing it); two lanes, as now, each its own instance, so lanes never meet.
@@ -629,7 +629,7 @@ How it's kept:
        leaves `.silo/` alone, and refuses once HEAD has moved): a snapshot of the whole workspace as it came up, `.git` and
        `.silo` in it, written back. What it can't show is state held in memory (an extension's caches that follow files
        through watchers): specs run one after another in one editor will.
-     - **Tried, 2026-11-17** (kept on the local branch `wip/shared-editors`, not on main): an editor that snapshots its
+     - **Tried, 2026-11-17; on main 2026-11-18**: an editor that snapshots its
        workspace once it's up and resets to it when asked (effects.ts: runs and debug sessions stopped, terminals,
        editors, panel and quick input closed, the Explorer shown, files written back, the next test's seeded), and a shell
        that keeps shared editors' windows and hands an idle one to the next test (`?shared`), booted empty. What it found:
@@ -664,7 +664,10 @@ How it's kept:
        TypeScript when it removed a tsconfig (*Watching*); live-values sets its breakpoint by Go to Line (a file opened
        before keeps its cursor where it was left); commit-beside was the driver — keepFocus held every blur, a focus moving
        within a document's too (fixed on main). Every spec sharing, one at a time: 43 of 43 in 300 s, against 350 with an
-       editor each, the renderer at 5.3 GB at most (`wip/shared-editors`). Next: main gets sharing, by default.
+       editor each, the renderer at 5.3 GB at most. On main since (2026-11-18): every test shares but those whose subject a
+       reset doesn't put back, each saying why (`own`: a reload in reload, past-runs and your-edits; a user setting in
+       workbench; a window's first debug session in live-runs) and those with `?extension=`. A shared editor serves 4 tests,
+       then goes (`SHARED_USES`), and one idle 15 s goes too.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: lanes are measured past one as memory allows (one at a time, the renderer peaked at 5.1 GB). A spec that fails beside

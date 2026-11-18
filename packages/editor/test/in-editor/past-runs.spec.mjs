@@ -11,7 +11,8 @@ import { codeOf, openEditor, openFile, retype } from "./editor.mjs";
 const files = { ".vscode/settings.json": "{ \"run.liveRuns\": false }\n", "runs.mjs": "const total = 1 + 1;\n" };
 
 test("each run a ball: picked, it shows its values and how it ended; alike, it's counted; kept across a reload", async ({ page }) => {
-	const workbench = await openEditor(page, files);
+	// (its own: a reload is what it tests, and a shared editor's address is the first test's)
+	const workbench = await openEditor(page, files, { "own": "reloads" });
 	const balls = workbench.locator(".notes-margin-run");
 	const total = workbench.locator(".live-values-row", { "hasText": "total =" });
 	const run = async (expected) => {

@@ -50,6 +50,17 @@ const ASK_MS = 1000;
 /** The channel an editor says on what it was left with (workbench/effects.ts), and how long one is waited for. */
 const EFFECTS_CHANNEL = "editor.effects";
 const LEAVES_MS = 2000;
+/** How long a shared editor's reset may take: what it closes and stops, and the workspace written back. */
+const RESET_MS = 60_000;
+/** How many tests a shared editor serves before it's let go: its renderer grew ~250 MB a test on 2026-11-17 (3.8 GB to 6.4 over
+ *  ten specs, a crash near 9 at the eleventh), what runs leave behind not all given back by a reset. */
+const SHARED_USES = 4;
+/** How long a shared editor waits for another test before it's let go. */
+const IDLE_MS = 15_000;
+/** A shared editor's first reset waits for it to come up too (workbench/effects.ts waits up to 2 minutes for that). */
+const FIRST_RESET_MS = 180_000;
+/** How often a reset is asked again until it's heard. */
+const ASK_AGAIN_MS = 1000;
 
 /** Each instrumented realm's answer to `ask` on COVERAGE_CHANNEL, within ASK_MS: its id, and what it ran when asked. */
 async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": string; "ran"?: Record<string, [number, number][]> }[]> {
@@ -98,6 +109,74 @@ async function leavesOf(element: HTMLElement | undefined): Promise<Leaves | unde
 			});
 			channel.postMessage({ "ask": "leaves", "instance": named, "nonce": nonce });
 			setTimeout(() => { resolve(undefined); }, LEAVES_MS);
+		});
+	} finally {
+		channel.close();
+	}
+}
+
+/** Whether `url` asks for a shared editor (`?shared`): test/in-editor/editor.mjs's `openEditor`. */
+function sharedAddress(url: string): boolean {
+	return new URL(url, location.href).searchParams.has("shared");
+}
+
+/** The files a test's address seeds (`seed`: base64 of their JSON, by path). */
+function seedOf(url: string): Record<string, string> {
+	const seed = new URL(url, location.href).searchParams.get("seed");
+
+	return seed === null ? {} : JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(seed), (character) => character.charCodeAt(0)))) as Record<string, string>;
+}
+
+/** A shared editor's first address: booted under a name of its own, empty (its first test's files come as a reset's). */
+function bootAddress(url: string): string {
+	const address = new URL(url, location.href);
+
+	address.searchParams.delete("shared");
+	address.searchParams.set("instance", `shared-${crypto.randomUUID()}`);
+	address.searchParams.set("seed", btoa("{}"));
+
+	return `${address.pathname}${address.search}`;
+}
+
+/** The shared editor in `element`'s window reset with `seed`'s files (workbench/effects.ts), within RESET_MS: false when it
+ *  didn't answer, or couldn't. */
+async function resetEditor(element: HTMLElement, seed: Record<string, string>, within = RESET_MS): Promise<boolean> {
+	let named: string | null | undefined;
+
+	try {
+		named = new URLSearchParams(element.querySelector("iframe")?.contentWindow?.location.search ?? "").get("instance");
+	} catch {
+		return false;
+	}
+
+	if (named === null || named === undefined) {
+		return false;
+	}
+
+	const channel = new BroadcastChannel(EFFECTS_CHANNEL);
+	const nonce = crypto.randomUUID();
+
+	try {
+		return await new Promise<boolean>((resolve) => {
+			// (asked again until it's heard: an editor just loaded isn't listening yet, and a channel keeps nothing for later)
+			const ask = (): void => { channel.postMessage({ "ask": "reset", "instance": named, "nonce": nonce, "seed": seed }); };
+			const again = setInterval(ask, ASK_AGAIN_MS);
+			const late = setTimeout(() => {
+				clearInterval(again);
+				resolve(false);
+			}, within);
+			const done = (reset: boolean): void => {
+				clearInterval(again);
+				clearTimeout(late);
+				resolve(reset);
+			};
+
+			channel.addEventListener("message", ({ data }: MessageEvent<{ "answer"?: string; "reset"?: boolean }>) => {
+				if (data.answer === nonce) {
+					done(data.reset === true);
+				}
+			});
+			ask();
 		});
 	} finally {
 		channel.close();
@@ -454,6 +533,9 @@ function install(hub: Hub): void {
 	/** The window each test's page has, while its test runs; and which of them it opened. */
 	const claimed = new Map<string, HTMLElement>();
 	const openedForPage = new Set<HTMLElement>();
+	/** Shared editors' windows no test has now, each an editor up and reset for the next (NEXT.md item 2, *Specs share an
+	 *  editor*): a test going to a `shared` address takes one, rather than booting an editor of its own. */
+	const idle: HTMLElement[] = [];
 
 	// With the dev server counting (COVERAGE=1, build/coverage.ts): what a page's window ran is the test's. The realms there
 	// were as the page first went somewhere — the editor around it, the service worker — aren't its; every realm since is
@@ -516,6 +598,46 @@ function install(hub: Hub): void {
 	serve(hub, "playwright.run", async (args) => {
 		const { call, "args": given = [], "page": asking = "" } = args as PlaywrightCall;
 
+		// A test's editor, shared (`?shared&seed=…`): its own window's, or an idle one's, reset with its files — else a window
+		// of its own, an editor booted in it under a name of its own, to be shared after.
+		if (call === "goto" && typeof given[0] === "string" && sharedAddress(given[0])) {
+			const seed = seedOf(given[0]);
+			let element = claimed.get(asking) ?? idle.pop();
+
+			while (element !== undefined) {
+				claimed.set(asking, element);
+
+				if (element.isConnected && await resetEditor(element, seed)) {
+					return undefined;
+				}
+
+				// (one that didn't answer isn't used again)
+				claimed.delete(asking);
+				element.remove();
+				element = idle.pop();
+			}
+
+			// (booted empty, so what it's reset to is no test's; the test's files then as anyone's are)
+			const found = windowOf(asking, true);
+			const frame = found?.querySelector("iframe")?.contentWindow;
+
+			if (found === undefined || frame === null || frame === undefined) {
+				throw new Error("no preview window could be opened");
+			}
+
+			found.dataset["sharedEditor"] = "";
+
+			const { windowDriver } = await import("@brianjenkins94/playwright");
+
+			await windowDriver(frame).goto?.(bootAddress(given[0]));
+
+			if (!await resetEditor(found, seed, FIRST_RESET_MS)) {
+				throw new Error("a shared editor didn't come up to be reset");
+			}
+
+			return undefined;
+		}
+
 		if (call === "release") {
 			await collect(asking);
 
@@ -528,6 +650,26 @@ function install(hub: Hub): void {
 			ranSoFar.delete(asking);
 
 			claimed.delete(asking);
+
+			// (a shared editor's, its test passed, waits for the next — until it's served SHARED_USES, as an editor doesn't yet give back
+			// all a test's work took: NEXT.md item 2; one that failed is left to look at, and not shared again)
+			const uses = Number(element?.dataset["sharedEditor"] || 0) + 1;
+
+			if (element?.dataset["sharedEditor"] !== undefined && given[0] !== true && element.isConnected && uses < SHARED_USES) {
+				element.dataset["sharedEditor"] = String(uses);
+				idle.push(element);
+				// (unused for IDLE_MS, it goes: an editor kept for nobody holds what an editor holds)
+				setTimeout(() => {
+					const at = idle.indexOf(element);
+
+					if (at !== -1) {
+						idle.splice(at, 1);
+						element.remove();
+					}
+				}, IDLE_MS);
+
+				return { ...reach === undefined ? {} : { "reach": Object.fromEntries(reach) }, ...leaves === undefined ? {} : { "leaves": leaves } };
+			}
 
 			// (nor is one closed while its counts are to be read from outside, COVERAGE=1's harness's: it closes it, having read them)
 			if (element !== undefined && openedForPage.delete(element) && given[0] !== true && !("__countedFromOutside" in globalThis)) {

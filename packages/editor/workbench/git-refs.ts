@@ -274,6 +274,23 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 		}
 	});
 
+	// Every commit opened, closed: `.refs/` goes from the workspace (and what was read of them from memory).
+	vscode.commands.registerCommand("editor.git.closeRefs", () => {
+		if (opened.size === 0) {
+			return;
+		}
+
+		const names = [...opened.keys()];
+
+		opened.clear();
+		trees.clear();
+		blobs.clear();
+
+		for (const listener of listeners) {
+			listener([{ "resource": Uri.file(DIR), "type": FileChangeType.UPDATED }, ...names.map((name) => ({ "resource": Uri.file(`${ROOT}/${name}`), "type": FileChangeType.DELETED })), { "resource": Uri.file(ROOT), "type": FileChangeType.DELETED }]);
+		}
+	});
+
 	serve(hub, "git.openRef", async (args) => {
 		const { ref, stripped } = (args ?? {}) as { "ref"?: unknown; "stripped"?: unknown };
 

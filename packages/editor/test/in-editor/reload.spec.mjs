@@ -11,7 +11,8 @@ import { expect, test } from "@playwright/test";
 import { codeOf, openEditor, openFile, retype, runCommand } from "./editor.mjs";
 
 test("the open file comes back as it was saved", async ({ page }) => {
-	const workbench = await openEditor(page, { "kept.mjs": "const kept = 1;\n", "other.mjs": "const other = 2;\n" });
+	// (its own: a reload is what it tests)
+	const workbench = await openEditor(page, { "kept.mjs": "const kept = 1;\n", "other.mjs": "const other = 2;\n" }, { "own": "reloads" });
 	const finding = workbench.locator(".find-widget.visible");
 
 	await openFile(workbench, "kept.mjs");

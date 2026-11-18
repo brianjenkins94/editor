@@ -30,6 +30,7 @@
     "docs": "packages/editor/ARCHITECTURE.md, *The rewrite, in place*",
     "ways": [
       "agent tool|git_open",
+      "command|editor.git.closeRefs",
       "command|editor.git.openRef",
       "core module|installGitRefs",
       "hub request|git.openRef"
@@ -1592,7 +1593,9 @@
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "ways": [
       "core module|installEffects",
-      "hub request|playwright.run"
+      "hub request|playwright.run",
+      "url parameter|?seed",
+      "url parameter|?shared"
     ],
     "paths": [
       "packages/editor/extensions/tsval/playwright-test.js",
