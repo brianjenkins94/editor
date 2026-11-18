@@ -87,10 +87,10 @@ test("at a stop, a line's latest value is VS Code's own inline value too", async
 	const workbench = await openEditor(page, files);
 
 	await openFile(workbench, "program.mjs");
-	await codeOf(workbench).press("ArrowDown");
-	await codeOf(workbench).press("ArrowDown");
-	await codeOf(workbench).press("ArrowDown");
-	await codeOf(workbench).press("ArrowDown");
+	// (line 5 by Go to Line, not counted from the cursor: a file opened before has its cursor where it was left)
+	await codeOf(workbench).press("Control+g");
+	await workbench.locator(".quick-input-widget input").first().fill(":5");
+	await workbench.locator(".quick-input-widget input").first().press("Enter");
 	await codeOf(workbench).press("F9");
 	await codeOf(workbench).press("F5");
 

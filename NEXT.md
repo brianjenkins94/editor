@@ -660,7 +660,11 @@ How it's kept:
        edits-change); live-values' inline value (its run doesn't stop at the breakpoint F9 set after its first test);
        commit-beside (after a commit from the shell's panel, the next command's box is closed by its own Enter, taken as a
        quick-access picker's — the test driver only, not a person: its tests keep editors of their own). Breakpoints are
-       the editor's, not the workspace's: the reset removes them.
+       the editor's, not the workspace's: the reset removes them. All three since (2026-11-18): the reset restarts
+       TypeScript when it removed a tsconfig (*Watching*); live-values sets its breakpoint by Go to Line (a file opened
+       before keeps its cursor where it was left); commit-beside was the driver — keepFocus held every blur, a focus moving
+       within a document's too (fixed on main). Every spec sharing, one at a time: 43 of 43 in 300 s, against 350 with an
+       editor each, the renderer at 5.3 GB at most (`wip/shared-editors`). Next: main gets sharing, by default.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: lanes are measured past one as memory allows (one at a time, the renderer peaked at 5.1 GB). A spec that fails beside
@@ -789,7 +793,13 @@ packages/editor (`--all`, `--runs N`, `--json`).
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
   gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files), not
-  seen for a load. And TypeScript's: a removed tsconfig.json's "Cannot write file … would overwrite input file" stays.
+  seen for a load.
+- **TypeScript keeps a removed tsconfig.json's project** (found 2026-11-18): its problems (with `allowJs` and `include`
+  `**/*`, "Cannot write file … would overwrite input file") stay on the gone file, which a person removing it in the
+  terminal sees. Its server doesn't hear the removal — ESLint's glob watcher does, TypeScript's web watch on its config
+  says nothing — and *TypeScript: Reload Project* doesn't drop it; restarting the server does. Not a blind restart (the
+  "Analyzing…" race, ata.ts): the fix is the watch reaching the server. The shared editors' reset restarts it when it
+  removed one (no editor open then).
 
 ## Decisions
 
