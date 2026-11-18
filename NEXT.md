@@ -779,7 +779,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   person reloading quickly would lose too. Not yet traced. Again 2026-11-18: once in a full run, once in two alone.
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
-  the project service") stays in Problems.
+  the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
+  gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files), not
+  seen for a load. And TypeScript's: a removed tsconfig.json's "Cannot write file … would overwrite input file" stays.
 
 ## Decisions
 

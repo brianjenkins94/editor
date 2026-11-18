@@ -437,6 +437,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
+		// (a file gone from disk, its text not changed since: nothing to lint — its document lives on a while, and a lint of it
+		// would put its problems back)
+		if (document.uri.scheme === "file" && !document.isDirty && !await vscode.workspace.fs.stat(document.uri).then(() => true, () => false)) {
+			collection.delete(document.uri);
+
+			return;
+		}
+
 		const { version } = document;
 		const text = document.getText();
 		const messages = await log.span("editor.extensions.eslint.lint", { "path": document.uri.fsPath, "bytes": text.length }, async (span) => {
@@ -446,17 +454,21 @@ export function activate(context: vscode.ExtensionContext): void {
 				return undefined;
 			});
 
-			span.end({ "count": said?.length ?? 0 });
+			// (what it said is kept only for the text it linted: closed meanwhile, its version moved, or ESLint turned off for
+			// it — that lint cleared it, and this one mustn't put its problems back)
+			const dropped = said === undefined ? undefined : document.isClosed ? "closed" : document.version === version ? validates(document) ? undefined : "off" : "moved";
 
-			return said;
+			span.end({ "count": said?.length ?? 0, ...dropped === undefined ? {} : { "dropped": dropped } });
+
+			return { "said": said, "dropped": dropped };
 		});
 
-		// (closed meanwhile, or edited: a later lint is on its way; or ESLint turned off for it meanwhile — that lint
-		// cleared it, and this one mustn't put its problems back)
-		if (messages !== undefined && !document.isClosed && document.version === version && validates(document)) {
-			collection.set(document.uri, messages.map((message) => diagnosticOf(document, message)).filter((diagnostic) => diagnostic !== undefined));
+		if (messages.said !== undefined && messages.dropped === undefined) {
+			collection.set(document.uri, messages.said.map((message) => diagnosticOf(document, message)).filter((diagnostic) => diagnostic !== undefined));
 		}
 	};
+
+	const gone = vscode.workspace.createFileSystemWatcher("**/*", true, true, false);
 
 	const schedule = (document: vscode.TextDocument, delay: number): void => {
 		const key = document.uri.toString();
@@ -477,6 +489,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (event.contentChanges.length > 0) {
 				schedule(event.document, SETTLE_MS);
 			}
+		}),
+		// A file (or a folder of them) gone: its problems go with it, as its document may live on.
+		gone,
+		gone.onDidDelete((uri) => {
+			const under = uri.path.endsWith("/") ? uri.path : uri.path + "/";
+
+			collection.forEach((each) => {
+				if (each.path === uri.path || each.path.startsWith(under)) {
+					clearTimeout(timers.get(each.toString()));
+					timers.delete(each.toString());
+					collection.delete(each);
+				}
+			});
 		}),
 		vscode.workspace.onDidCloseTextDocument((document) => {
 			clearTimeout(timers.get(document.uri.toString()));
