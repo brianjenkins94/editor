@@ -973,7 +973,9 @@ function keepFocus(document: Document): void {
 			return;
 		}
 
-		if (toldAfterAll.has(event)) {
+		// (told now, as it happens: what's already told, and focus moving within this document — its relatedTarget is
+		// where to. Only a blur to nowhere here, the frame losing the focus, waits to see who took it.)
+		if (toldAfterAll.has(event) || (event as FocusEvent).relatedTarget !== null) {
 			return;
 		}
 
