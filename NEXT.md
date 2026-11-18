@@ -643,8 +643,16 @@ How it's kept:
        5.1 GB (351 s, against 200–265 s two at once in sessions of 12). What did outlive its editor: a popup open as its
        page went away (playground-links' Share, run-menu's Run menu) — Floating UI's listener on the top window's
        visualViewport held the whole closed editor, 80–110 MB each, fixed in the theme (`src/popups.js`: stopped on
-       `pagehide`). Next: the shared mechanism again, measured one spec at a time, and which part of it crashed sessions
-       it didn't serve.
+       `pagehide`). Measured again one spec at a time (2026-11-18, `wip/shared-editors`), the mechanism crashed nothing it
+       didn't serve: with only mock-value sharing, all 43 passed in 345 s, the renderer at 5.5 GB at most. With every spec
+       sharing by default, one editor grew about 7 MB of page heap a spec; what climbed to a crash by the eleventh spec was
+       each failed test's window, kept open with its whole editor. Three specs failed sharing, each on what the reset
+       didn't put back: eslint's tsconfig test (ESLint kept the tsconfig it started with — a person's bug too, fixed on
+       main: a tsconfig made or changed restarts its worker), commit-beside (the commits opened beside the work stayed open;
+       the branch's reset closes them now, by a new *Git: Close the Commits Opened Read-Only*, and its second ref box still
+       loses the focus between its typing and Enter, cause not found) and eslint's config that fails to load (its file
+       never linted after the reset's config changes, cause not found). Next: those two, then the whole run sharing, a
+       failed test's window let go once what it showed is said.
      - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
        (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
      - **Then**: lanes are measured past one as memory allows (one at a time, the renderer peaked at 5.1 GB). A spec that fails beside
@@ -768,7 +776,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   full runs here that day.
 - **past-runs.spec's runs, after a reload: 2 of 3** (2026-11-16, three full runs of nine here): the run just before the
   reload wasn't among those kept, 30 s on. Likely its record not yet written (debounced?) as the page went — which a
-  person reloading quickly would lose too. Not yet traced.
+  person reloading quickly would lose too. Not yet traced. Again 2026-11-18: once in a full run, once in two alone.
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems.

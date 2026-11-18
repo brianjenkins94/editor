@@ -46,6 +46,9 @@ interface Message { "line"?: number; "column"?: number; "endLine"?: number; "end
 
 /** The names ESLint finds a config by, in any folder (worker.ts: ESLint's own lookup). */
 const CONFIG_GLOB = "**/eslint.config.{js,mjs,cjs,ts,mts,cts}";
+/** What else a worker reads as it starts and keeps: the tsconfigs the type-aware rules' project service reads (worker.ts
+ *  lends the root a stand-in where it has none). */
+const TSCONFIG_GLOB = "**/tsconfig*.json";
 /** What marks a folder as a project's, for `{ "mode": "auto" }`: the desktop server's marks, flat config's names among them. */
 const PROJECT_MARKS = new Set(["package.json", ".eslintignore", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", "eslint.config.mts", "eslint.config.cts"]);
 
@@ -575,12 +578,13 @@ export function activate(context: vscode.ExtensionContext): void {
 		schedule(document, 0);
 	}
 
-	// A config made, changed or removed: a worker afresh — the old one's config and plugins stay loaded in it — and every
-	// open document linted with what it loads.
+	// A config made, changed or removed — ESLint's, or a tsconfig its project service read — a worker afresh: the old one's
+	// config, plugins and programs stay loaded in it; and every open document linted with what it loads.
 	const folder = vscode.workspace.workspaceFolders?.[0];
 
 	if (folder !== undefined) {
 		const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, CONFIG_GLOB));
+		const tsconfigs = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, TSCONFIG_GLOB));
 		let restart: ReturnType<typeof setTimeout> | undefined;
 		const restarted = (): void => {
 			clearTimeout(restart);
@@ -595,7 +599,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			}, SETTLE_MS);
 		};
 
-		context.subscriptions.push(watcher, watcher.onDidCreate(restarted), watcher.onDidChange(restarted), watcher.onDidDelete(restarted), { "dispose": () => {
+		// (not a package's own, as one is installed)
+		const project = (uri: vscode.Uri): void => {
+			if (!uri.path.includes("/node_modules/")) {
+				restarted();
+			}
+		};
+
+		context.subscriptions.push(watcher, watcher.onDidCreate(restarted), watcher.onDidChange(restarted), watcher.onDidDelete(restarted), tsconfigs, tsconfigs.onDidCreate(project), tsconfigs.onDidChange(project), tsconfigs.onDidDelete(project), { "dispose": () => {
 			clearTimeout(restart);
 		} });
 	}

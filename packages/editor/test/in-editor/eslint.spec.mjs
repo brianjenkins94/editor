@@ -1,11 +1,12 @@
 /**
  * ESLint in the editor (extensions/eslint), as a person has it: real ESLint on the file that's open, its problems in Problems,
- * fixes on save, a folder's own config, a config that won't load said on itself, and silence when it's turned off. What an
- * agent reads of it, and its spans, have no UI: test/agent-tools.mjs. Runs in the editor: test/in-editor.mjs.
+ * fixes on save, a folder's own config, a config that won't load said on itself, a tsconfig changed as it runs, and silence
+ * when it's turned off. What an agent reads of it, and its spans, have no UI: test/agent-tools.mjs. Runs in the editor:
+ * test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, problems } from "./editor.mjs";
+import { codeOf, openEditor, openFile, problems, retype } from "./editor.mjs";
 
 /** What ESLint takes to start (its toolchain, from the build), the first time; less than a run may sit quiet (test-runs.ts). */
 const LINTED = { "timeout": 90_000 };
@@ -32,6 +33,25 @@ test("a tsconfig that can't be read is said on the file linted, where a message 
 
 	const rows = await problems(workbench);
 
+	await expect(rows.filter({ "hasText": "Parsing error" })).toHaveCount(1, LINTED);
+});
+
+test("a tsconfig changed once ESLint is up is what it lints with after", async ({ page }) => {
+	// (typed as it's saved: no brackets or quotes closed for it, nor the text it replaces put in braces)
+	const workbench = await openEditor(page, {
+		".vscode/settings.json": "{ \"editor.autoClosingBrackets\": \"never\", \"editor.autoClosingQuotes\": \"never\", \"editor.autoSurround\": \"never\" }\n",
+		"tsconfig.json": "{}\n",
+		"lint/probe.ts": "export function run(): void {\n\tdebugger;\n}\n"
+	});
+
+	await openFile(workbench, "lint/probe.ts");
+
+	const rows = await problems(workbench);
+
+	// (up, with the tsconfig as it was)
+	await expect(rows.filter({ "hasText": "no-debugger" })).toHaveCount(1, LINTED);
+	await openFile(workbench, "tsconfig.json");
+	await retype(workbench, "{ \"extends\": \"./missing.json\" }");
 	await expect(rows.filter({ "hasText": "Parsing error" })).toHaveCount(1, LINTED);
 });
 
