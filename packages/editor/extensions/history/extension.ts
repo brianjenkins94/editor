@@ -13,10 +13,12 @@
  * hub, no core capture: the TypeScript server already sees every edit.
  */
 import type { CoverageEvent } from "@brianjenkins94/editor-api";
+import type { Span } from "@brianjenkins94/util/logger";
 import type { WayIn } from "@brianjenkins94/util/silo/features";
 import type { Analysis, Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { FileAnalysis } from "@brianjenkins94/util/silo/ts-analysis";
 import type { Exercise } from "./runs-say";
+import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import { featuresOf, waysInManifest } from "@brianjenkins94/util/silo/features";
 import { includeByDefault, Replayer } from "@brianjenkins94/util/silo/history";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
@@ -54,6 +56,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const root = folder.uri;
 	const output = vscode.window.createOutputChannel("History");
+	const observed = observeExtension("history");
+
+	if (observed !== undefined) {
+		context.subscriptions.push(observed);
+	}
+
 	const readings = new Map<string, { "analysis": FileAnalysis; "revision": number }>();
 	const manifests = new Map<string, WayIn[]>();
 	// The program as the plugin last read it: no snapshot is read here, so `read` is never asked.
@@ -218,17 +226,40 @@ export function activate(context: vscode.ExtensionContext): void {
 	async function step(attempt = 0): Promise<void> {
 		const file = [...edited][0] ?? vscode.window.activeTextEditor?.document.uri.path;
 		const asked = rescan;
-		const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: ReadAnswer } | undefined>("typescript.tsserverRequest", "_history.read", {
-			"root": root.path,
-			"known": Object.fromEntries([...readings].map(([path, reading]) => [path, reading.revision])),
+		// (a span: what a way in's lightbulb waits on, through TypeScript's server, which on a slow runner can take a while to come up)
+		const ask = async (span?: Span): Promise<ReadAnswer | undefined> => {
+			const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: ReadAnswer } | undefined>("typescript.tsserverRequest", "_history.read", {
+				"root": root.path,
+				"known": Object.fromEntries([...readings].map(([path, reading]) => [path, reading.revision])),
+				...file === undefined
+					? {}
+					: { "file": file },
+				...asked
+					? { "rescan": true }
+					: {}
+			})).catch(() => undefined);
+
+			span?.end({
+				"ready": response?.body?.ready === true,
+				"count": Object.keys(response?.body?.files ?? {}).length,
+				...response?.body?.error === undefined
+					? {}
+					: { "error": response.body.error }
+			});
+
+			return response?.body;
+		};
+
+		const attrs = {
+			"count": attempt,
 			...file === undefined
 				? {}
-				: { "file": file },
-			...asked
-				? { "rescan": true }
-				: {}
-		})).catch(() => undefined);
-		const answer = response?.body;
+				: { "path": file }
+		};
+
+		const answer = await (observed === undefined
+			? ask()
+			: observed.log.span("editor.extensions.history.read", attrs, ask));
 
 		if (answer?.ready !== true) {
 			// The server isn't up yet, or its plugin's engine is still loading: ask again shortly.
@@ -238,6 +269,8 @@ export function activate(context: vscode.ExtensionContext): void {
 				}, RETRY_MS);
 			} else if (answer?.error !== undefined) {
 				output.appendLine("The history plugin's engine didn't load: " + answer.error);
+			} else {
+				output.appendLine(`TypeScript's server didn't answer in ${String(RETRIES * RETRY_MS / 1000)} s: the program's read again on the next edit.`);
 			}
 
 			return;
@@ -272,11 +305,21 @@ export function activate(context: vscode.ExtensionContext): void {
 				...manifests.keys()
 			].map((path) => ({ "path": path, "oid": "manifest" }))
 		];
-		const result = await replayer.step({
-			"id": "edit:" + String(steps),
-			"date": new Date().toISOString(),
-			"files": files
-		});
+		const replay = async (span?: Span): Promise<Awaited<ReturnType<Replayer["step"]>>> => {
+			const stepped = await replayer.step({
+				"id": "edit:" + String(steps),
+				"date": new Date().toISOString(),
+				"files": files
+			});
+
+			span?.end({ "count": stepped.events.length });
+
+			return stepped;
+		};
+
+		const result = await (observed === undefined
+			? replay()
+			: observed.log.span("editor.extensions.history.replay", { "count": files.length }, replay));
 		const changed = [...edited].sort();
 
 		edited.clear();

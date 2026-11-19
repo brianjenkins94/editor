@@ -198,9 +198,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
-- **way-in-reach.spec's lightbulb missed once on CI** (d0cf69cb, 2026-11-19): not looked at yet. A hover that didn't
-  come once (cosmetic.spec's on CI, ef97772b; pane-views.spec's in a full run here) is hovered again from elsewhere now,
-  as a person would (in-editor/editor.mjs, `hoverUntil`); why it didn't come isn't known.
+- **way-in-reach.spec failed twice on CI** (d0cf69cb's lightbulb; 96bb5b36, 90 s, its error lost to the job's limit):
+  it passes here alone and after type-queries.spec (CI's order) beside another session, in 6–9 s. Its lightbulb waits on
+  History's read through TypeScript's server, which now has spans (`editor.extensions.history.read`, its `ready` and
+  `count`; `.replay`), and test/in-editor.mjs prints a failing test's error as it fails: the next miss says which.
+  A hover that didn't come once (cosmetic.spec's on CI, ef97772b; pane-views.spec's in a full run here) is hovered
+  again from elsewhere now, as a person would (in-editor/editor.mjs, `hoverUntil`); why it didn't come isn't known.
 
 ## Decisions
 

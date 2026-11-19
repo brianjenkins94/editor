@@ -25,7 +25,7 @@
   # since the last green run here — whose `performance` artifact is its baseline. Each on a runner of its own, so
   # nothing shares the CPU while performance measures. They catch a wiring regression or an upstream monaco-vscode-api
   # release (the component installs the latest) before it ships. `specs` is what runs in an editor, as a person uses it
-  # (test/in-editor.mjs, one spec at a time), a shard of its own: 9 minutes here two at once, which went past `workbench`'s time beside the rest. Its own workflow, not a job in `ci`, so it doesn't gate
+  # (test/in-editor.mjs, one spec at a time), two shards of their own (`specs-1`, `specs-2`: half the specs each). Its own workflow, not a job in `ci`, so it doesn't gate
   # the deploy.
   #
   # The rewrite (packages/editor/ARCHITECTURE.md, *The rewrite, in place*) reduced these to the core's: the tours, the
@@ -44,7 +44,9 @@
           "include": [
             { "shard": "realms", "files": "test/worker-realms.mjs" },
             { "shard": "workbench", "files": "test/agent-tools.mjs test/workbench.mjs" },
-            { "shard": "specs", "files": "test/in-editor.mjs" },
+            # (two halves, each on a runner of its own: one at a time, every spec took 32 min on 2026-11-19, past the limit)
+            { "shard": "specs-1", "files": "test/in-editor.mjs", "part": "1/2" },
+            { "shard": "specs-2", "files": "test/in-editor.mjs", "part": "2/2" },
             { "shard": "performance", "files": "test/performance.mjs" }
           ]
         }
@@ -84,6 +86,7 @@
           "env": {
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
             "PERF_BASELINE": "/tmp/performance-baseline/performance.json",
+            "IN_EDITOR_SHARD": "${{ matrix.part }}",
             # Dispatched by hand, what each test ran is recorded (build/coverage.ts), for `silo observed`. Not on every run:
             # instrumented modules are slower, and not while performance measures.
             "COVERAGE": "${{ github.event_name == 'workflow_dispatch' && matrix.shard != 'performance' && '1' || '' }}"
@@ -107,8 +110,8 @@
           "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json\n/tmp/architecture-*.png", "if-no-files-found": "ignore" }
         }
       ],
-      # (the specs shard is the longest: 21–22 min of specs after 3 of setup on 2026-11-10, more as features come back with
-      # theirs; this is a hang's limit, not a budget)
+      # (the specs shards are the longest: 21–22 min of specs after 3 of setup on 2026-11-10, in one; 32 on 2026-11-19, so
+      # two halves since; this is a hang's limit, not a budget)
       "timeout-minutes": 35
     }
   }
