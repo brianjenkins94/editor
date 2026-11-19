@@ -14,683 +14,82 @@ How it's kept:
 ## Queue
 
 1. **The refactor bench: refactor this repo in the editor, reading from and committing to GitHub.** Its first job is
-   item 2's rebuild, and what that takes is the product, for any repository (ARCHITECTURE.md, *The bench does it*):
-   a step it can't support is a gap here. It loads: the clone
-   of `brianjenkins94/editor` (2,212 files) arrives in about 2 s, and an editor is open in under 10 s. Its
-   dependencies are in node_modules as npm puts them (ARCHITECTURE.md, *Packages*):
-   - `file:` siblings are linked;
-   - Pages tarballs are unpacked;
-   - registry packages are pinned in `versions.json` (in `.silo/local/` until the repository commits it) and load from
-     the CDN;
-   - type acquisition reads every package's manifest and tsconfig.
-
-   features-map.ts went from 32 TypeScript errors to 2, and a linked file has one name. Still open:
-   - **`silo check` runs in the editor** (2026-11-15): `node packages/silo/src/cli.ts check` in its terminal says the
-     ledger and the code agree, in 19 s (3.3 s natively), and a run before it caught two stray files as owned by no
-     feature. Nothing it needs is spawned: its analysis is TypeScript 7's WebAssembly build where no native compiler
-     can start (lib's `apiOf`; `@typescript/typescript-wasip1-wasm`, on npm since 2026-10-30; unpkg serves its 53 MB
-     tsc.wasm, jsDelivr won't), and its git is isomorphic-git (silo's git.ts); under Node with neither spawned,
-     `check --json --prices` is byte-identical to native's (15 s). silo's TypeScript is an npm alias, `typescript-7`, as
-     lib's is: the workspace installs one version of a name (versions.ts), and the root's is TypeScript 6 — an alias
-     resolves as the package it names, with that package's tarball (`alias`). Fixed on the way: util's env took the
-     debugger for a browser (isEntry, and juvy reading `--json`'s environment variable from globalThis); a run's
-     packages had almostnode's own process (its argv, stdout, exit); `path.resolve` started from `/`; `execFileSync`
-     wasn't ENOSYS; almostnode's synchronous hashes weren't SHA-1 (isomorphic-git took every pack for corrupted); an
-     alias's folder matched its exports by the manifest's name; and a package's `import()` of a `file:` URL outside the
-     workspace went to the browser's loader. It took 74 s at first: measured apart (2026-11-15), two listings of the
-     untracked files were ~30 s each — isomorphic-git's isIgnored reads the excludes and every parent's .gitignore for
-     each file (~167,000 fs calls, 52,000 of them failing), each a runtime-fs round trip at 0.5–1 ms — so git.ts walks
-     the tree itself, a read of each folder and of each .gitignore there is (0.05 s under Node). Of the 28 s left,
-     TypeScript's analysis is ~11–16 s and makes no runtime-fs calls; the wasm loads in no measurable time; a run starts
-     in 0.3 s and silo's modules load in ~2.5 s. Those were timed by exiting early; a run's stages are spans now
-     (2026-11-16): `…tsval.worker.session.run` from its launch to its end, with what it asked of the editor on its end
-     (`stat: 5762, statMs: 8836`, each call the run waited on: readFile, stat, readdir, tarball, decide), and under it
-     the runtime's `load`, the entry's `parse`, each package's `install.fetch` (bytes, files) and the first `step`. They
-     showed 12 s of a 29 s check waiting on 5,762 stats and 1,124 readdirs — the listing's `withFileTypes`, a stat an
-     entry, as the runtime's readdir gave names only. Its folders' entries now come with their kinds, as VS Code lists
-     them (RuntimeFs `entries`; almostnode's fs asks a VFS's `direntsSync` before statting): 10 stats, and the check
-     19 s, of which 3 s is the 1,124 listings and the rest mostly TypeScript. (A `@latest` tarball isn't fetched again
-     while its version is the same, util's 0.1.0, as npm without `npm install <url>`: delete it to refresh.)
-   - **Type gaps** (2026-10-31, the repository loaded locally): features-map.ts's `wa-card` (ts 2345, L157) resolves —
-     go-to-definition reaches theme's card.d.ts and from it Web Awesome's in the root node_modules, and the file has no
-     2345 — but one run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's
-     types, and never told after (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing
-     that. eslint.config.js's `@brianjenkins94/util/eslint` has no declaration file (ts 7016, a suggestion here).
-   - **Used on itself, 2026-11-10** (`env/brianjenkins94/editor` in an instance, in Brave): the clone in 3.4 s, a file open
-     under 10 s, 2,888 files stored in 15.5 s, the main thread idle again within a minute (1.3 GB). What it found, and what
-     came of it: the dependency baseline's 169 uses "grown" from files TypeScript read late (fixed: 971bc9b2, lib f73c086);
-     `unenv/node/*` unresolved, 40 errors, as type acquisition took a package's subpaths only from named exports, and
-     fetched unenv before the workspace's versions were pinned (the CDN's latest, 1.10.0, kept in the store) — it now
-     waits for the pins, refetches a package stored at another version, and acquires each subpath imported, through a
-     wildcard export too; History's 21 dead ends, commands it hadn't read the registering code of yet (now taken as
-     registered until it's read: CI's `silo check` reads everything); spell check twice over, on a diff's `git-head:` side
-     too (files only now); the repository's eslint.config.js not loading, as Web Awesome's `dist/components`, a folder it
-     lists, wasn't there for a package served from the CDN a file at a time (now ESLint's worker waits for the packages its
-     configs name to be read ahead, whole, from their tarballs: node-modules-provider.ts's prefetchFor); and capabilities
-     reading `customElements.get(…)` as a net call, as `*.get` matches any receiver: the user ruled it out, so an HTTP verb
-     whose method TypeScript's own lib declares isn't a request now (lib c4effef, findReach's `program`).
-   - **Load cost:** measured again 2026-11-11 (a first load of this repository in Brave): the workspace buffer at 32 of
-     128 MB. The one long block was the write-back's first flush, 15 s on the main thread: a folder and the files in
-     it both in its batch, each file was walked again under every folder above it (read ~6 times, 145,560 stats for
-     3,768 paths, 75 MB read for 21 MB of files). Now a path under a folder in the batch that's still there is left to
-     that folder's walk, and the walk takes one lstat an entry: 1.6 s, 16,763 stats, each file read once; a reload
-     restores all 3,038 (workspace-fs.ts's flush). The restore at boot was next: 27,919 stats for 3,759 paths (1.9 s of
-     the workbench's 5.5 s boot), as zen-fs's writeFileSync resolves a new file's path ~9 times; it now makes each file
-     in the store itself, a create and a write (stats 8,278, 0.43 s; the boot 3.9 s; git sees nothing changed). What's
-     left of it is the folders, made through zen-fs (723 for 8,278 stats). What follows is the history. Profiled 2026-10-30 (the
-     harness's Chromium, a DevTools CPU profile of the load; logpoints on zen-fs's lookups and the file provider for
-     who): the main thread is busy 100% for the 4 minutes measured. Fixed so far: git re-parsing .git/index for every
-     file it checked, a read bumping zen-fs's ctime (b7430d91); and the load writing each file through VS Code's file
-     service — a validation stat, two mkdirp walks and a listing of its folder per file, quadratic in a folder's size —
-     now straight into the store, one batch to VS Code (provider calls 18.9k → 4.8k in the first 2 minutes); the change
-     watcher's stat before a write's own touch, the boot seed's per-file folder check, and overlapping git status walks
-     (one shared). An address's load now settles in ~3½ minutes rather than past 4 (zen-fs 193 s → 169 s). Still busy:
-     each zen-fs lookup walks from the root, decoding every parent's listing (StoreFS with `no_id_tables`), ~10 per file
-     written (the write, and the change watcher's checks around it), plus isomorphic-git's status walks. Next, by gain:
-     zen-fs's own path cache — StoreFS's id tables, off for shared buffers (`no_id_tables`) — asked of upstream (not
-     in our patch, 2026-10-30); meanwhile the provider's readdir stats every child for VS Code's listings. zen-fs 2.8's SingleBuffer v2 (on it since 2026-11-02, our
-     cross-realm lock ported) doesn't change this. BABLR isn't reached in those 4 minutes.
-     Profiled again 2026-10-31 (a first load of this repository, 4 minutes, the main thread's samples attributed to
-     their owners): ~75% is zen-fs resolving paths, almost all of it asked by VS Code's file service through the
-     workspace provider (workspace-fs.ts) — `readdir` 52 s (zen-fs stats each entry to list it, and the provider stat'd
-     each child again), `stat` 19 s, `readFile` 3 s — then persistence's write-back 14 s and the load's writes 7 s. Git
-     (~1 s), type acquisition (<1 s), the hub (4 s) and observability (2 s) are small. The provider's second stat is
-     gone (zen-fs 190 s → 150 s). Counted the same day, the provider's calls over a 4-minute load: ~190,000 for 14,000
-     paths, most of them whole-tree walks by our workspace search (components/monaco-vscode-api/workspace-search.ts:
-     every `findFiles` walks the tree, uncached). The steady one, a walk a second from 140 s on, was history's manifest
-     watcher re-reading every package.json for each one type acquisition wrote into node_modules: it skips those now,
-     and a burst is one reading (`readdir` 55,300 → 7,700, `stat` 117,500 → 69,600). The extension host's calls,
-     counted by caller 2026-11-02 (its outgoing RPC hooked in a cold load, 4 minutes): 16,752 `stat`s, 99.9% of them
-     tsserver's module resolution relayed by VS Code's TypeScript extension (`fileSystem/stat`, a blocking round trip
-     each), mostly node_modules probes — directories, `.d.ts`, `.ts`/`.tsx`/`.js` per import — and 3.8 per distinct
-     path (4,412: `/workspace/node_modules` 313 times, a missing `@types/node_modules` 121); its reads 4,054 of 1,449
-     files, listings 1,390, watches 1,899. Next by count, silo.history's readManifests: 2,319 reads of nearly every
-     file, 1,325 of them packages/tsval/vendor. At ~0.14 ms a v2 lookup the stats are ~2–5 s of the load's 54 s of
-     main-thread work, before VS Code's own cost per call. Cheapest cuts: the provider answering a path's stat from
-     a cache its change path invalidates (16.7k → ~4.4k lookups), and history reading only the files that can hold a
-     manifest. zen-fs's id tables would make each lookup ~10× cheaper (measured on 2.7.6: statting the repo's 2,249
-     files 248 ms → 25 ms) — asked upstream (#329). Then the file store's work in a worker. On zen-fs 2.8.3 (2026-11-02) a cold
-     first load (a fresh browser context) settles later: at 74–75 s against 58–62 s on 2.7.6 (the repository in the
-     explorer at 5 s either way; 54 s of main-thread work against 46–51 s). zen-fs alone is ~30% slower on its v2,
-     patched or not (this repository's 2,258 files: write 2.8 → 3.7 s, stat 1.2 → 1.6 s, read 1.0 → 1.3 s, readdir
-     1.9 → 2.5 s), so it's v2's own cost, not our lock: upstream's to hear of.
-   - (b) Push: done. The proxy allows `git-receive-pack` (a pack up to 32 MB). The workbench's isomorphic-git pushes
-     through the shell (`git.remote`, shell/git-push.ts), and commits are by the signed-in GitHub user
-     (`git.identity`). The terminal has `git push` / `switch` / `checkout`, and agents have `git_push`, `git_branch`
-     and `git_checkout`, and `git_pull`: a fast-forward to GitHub's branch when it can be one, keeping the working
-     tree's changes (git-engine.ts `fastForward`), which the Commit button does before it commits.
-
-     First real push, 2026-10-27, from editor.unusuallygood.dev to `bench/first-push`: a new branch, then a
-     fast-forward. It found two bugs, both fixed:
-     - the first commit was by the placeholder: the identity was asked cold, while the page was still loading, and
-       timed out; it's now asked as the git service starts;
-     - four executable scripts went out as 100644: the workspace's filesystem keeps no executable bit, so HEAD's are
-       now given back before each commit.
-
-     The shell's Commit button commits and pushes (2026-10-30): the workbench's `git.commit` with every change, then
-     `git.push` of the current branch, in place of `commitFiles`'s one REST commit of the whole workspace. The scratch
-     branch `bench/first-push` is deleted.
-   - Review by hunk: done. `git_review` gives the changes as hunks with ids, BABLR's cosmetic verdict per hunk and the
-     features each is in; `git_commit` / `git_discard` take hunk ids. The review panel runs on the same requests
-     (`git.review`, and line picks as `except` / `rows`), so an agent's commits show up there.
-   - No shell for agents: their shell tool is removed (2026-10-27; ARCHITECTURE.md, *Workspace tools*), so the bench is
-     worked through the editor's tools alone (ARCHITECTURE.md, *Workspace tools*, has them all). A program runs under
-     `debug_start`.
-   - (d) CI on the pushed branch checks the work.
+   item 2's rebuild, and what that takes is the product, for any repository (ARCHITECTURE.md, *The bench does it*): a
+   step it can't support is a gap here. It works: a clone of this repository in ~2 s and an editor open in under 10 s,
+   its packages in node_modules as npm puts them (ARCHITECTURE.md, *Packages*), commits pushed through the editor's
+   sign-in, pulls that fast-forward, review by hunk, `silo check` in its terminal (19 s), CI's outcome in its status bar,
+   and no shell for agents (ARCHITECTURE.md, *Workspace tools*). Still open:
+   - **Load cost** (a first load of this repository, last measured 2026-11-11: the workspace buffer at 32 of 128 MB, the
+     first write-back 1.6 s, the restore at boot 0.43 s). What's left, by gain: each zen-fs lookup walks from the root
+     (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — asked upstream (#329); the
+     provider answering a path's `stat` from a cache its change path invalidates (16.7k → ~4.4k lookups in a cold load,
+     99.9% of them tsserver's module resolution, 2026-11-02); history's readManifests reading only files that can hold a
+     manifest (2,319 reads, 1,325 of them packages/tsval/vendor); the folders the restore makes through zen-fs (723 for
+     8,278 stats); then the file store's work in a worker. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
+     (write 2.8 → 3.7 s, stat 1.2 → 1.6 s for 2,258 files), patched or not: upstream's to hear of.
+   - **Type gaps** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one run showed it after 4
+     minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never told after
+     (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing that. eslint.config.js's
+     `@brianjenkins94/util/eslint` has no declaration file (ts 7016, a suggestion).
 2. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
-   from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
-   Waits on items 1 and 2 being good enough to work in. In order:
-   - **What the rehearsal found, still open** (2026-11-02, on `cosmetic`: measured, declared, removed with its test,
-     reintroduced with a test of its own and its whys as notes, all through the editor and its agent tools). By the step
-     it blocks:
+   from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item. The
+   reduction landed 2026-11-03 (4fbb0f68, `full-editor` the tag before it), every code file has one owner (decision
+   22), the measures were taken (`.silo/zero-knowledge.json`, `.silo/last-run/`), and the features came back to rough
+   parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
+   changes marked*). In order:
+   - **What the rehearsal found, still open** (2026-11-02, on `cosmetic`). By the step it blocks:
      - *Working in it at all:* two tabs back from a reset both cloned into one workspace; a tab sometimes missing from
        `tabs_list`; the workspace store fills with a day's pulls — nothing collects the packs they fetch (its buffer
-       64 → 128 MB, 2026-11-03: about three days' room, within the workbench's memory budget; measure a day's pulls on a
-       loaded repository before building it: what collecting keeps decides how much history a workspace has).
+       64 → 128 MB, 2026-11-03: about three days' room; measure a day's pulls on a loaded repository before building
+       it: what collecting keeps decides how much history a workspace has).
      - *Measure:* CI's reach covers the architecture suites only, and there `activate` is reached by nearly every test.
-   - **Visibility first**, so the rewrite is measured from its start: a span at every filesystem boundary, with its
-     caller, duration, bytes and parent (*Visibility*). Done when the 2026-10-30/31 load questions are answered from
-     `metrics_query` and `logs_query` alone. It serves item 1's load cost too, so it can go ahead of the rest.
-     Begun 2026-11-03: the workbench's boundaries counted as the metrics plane's `fs` (ARCHITECTURE.md, *Visibility*,
-     *Built so far*), every zen-fs call by a named caller. A reload of this repository's workspace, from it alone: VS
-     Code's provider 2.8 `stat`s and 3 `readdir`s per path (2.2 s in `readdir`), zen-fs 7.5 `stat`s per path under them;
-     git the most, 77,779 `stat`s for 3,561 paths (22 a path, 4.5 s) — a third of it the review panel's change problems,
-     each a whole-tree walk (~1.5 s), until the panel asked for only what changed (git's `stat`s 77,779 → 29,927); a
-     write-back 4 ms for 317 KB. The bridge's runtime-fs, a span per call, is counted instead (`runtime-fs`, by the
-     worker's kind: ESLint's first lint of a file here, 9,177 `stat`s for 4,738 paths and 10.6 MB read). The workers'
-     own stores need nothing (2026-11-03): a debug run's program reads and stats, and ESLint's, all cross runtime-fs —
-     a probe's `statSync` and `readFileSync` arrived there as `debug-worker`'s, and its shared mount made no store
-     call. VS Code's callers
-     named apart (2026-11-03): who asked its file service, the class past it on the call's stack — of a load's 3,450
-     provider calls, 3,112 were file search's walk (`WorkspaceSearch`, 20,345 zen-fs calls under it), 323 extensions'
-     `workspace.fs` (`MainThreadFileSystem`), 8 left as `vscode`. The walk was three
-     searches at once as the project opens — type acquisition's package.jsons and tsconfigs (one search now, a span:
-     `editor.workbench.ata.project`) and versions' package.jsons — and searches walking at once now share each folder's
-     listing (the component's workspace-search.ts): a load's search readdirs 1,556 → 519, one walk. A single call
-     on demand (2026-11-03): Trace File Calls (the command; `fs.trace`, agents' `files_trace`) — for a while, each
-     call at a boundary (or all), of a path, with its caller, time and bytes, a record in the span
-     `editor.workbench.fs-trace.window` and a line in the Output channel "File Calls". A record, not a span of its
-     own: a span starts when it's opened, and a call's is known when it ends.
-     Before it, so the spans CLAUDE.md asks for (*Spans*) count (a throwing span and hub requests: done 2026-11-02):
-     - span names from their file's path (CLAUDE.md, *Spans*): lib's `logger/span-names` (util/eslint.ts) is built
-       and this repository's spans take it already; the editor's lint holds them once lib publishes util.
-   - **Measure, while all the code is there**: what of the scope BABLR parses, a sample of its comments sorted into
-     dropped, kept, note, and note citing a doc, and the zero-knowledge baseline on 3–5 features (the code alone
-     against the code as it is). And the whole test suite run one last time, in CI and in the editor, for each test's
-     reach and outcome: what each feature's tests held it to, once they're gone. The reduction landed first, so it reads
-     `full-editor`, in the editor (user, 2026-11-03: the editor's gap first). Built for it: *A commit beside the
-     work* (workbench/git-refs.ts) — Git: Open a Commit Read-Only… (agents' `git_open`) opens a branch, tag or commit
-     at `.refs/<name>/`, read from git's objects, fetched one commit deep (`full-editor`: 14 s), read-only, out of git
-     and of the globs that don't name it; the Explorer, Quick Open, Find in Files and files_* read it as any folder.
-     - *What BABLR parses: all of it* (2026-11-03) — *Unparsable files flagged* back for it (workbench/bablr.ts, its
-       worker in workers/, started on first use; the user's choice over a node run): BABLR: Check Which Files Parse…
-       (agents' `code_parses`) parses a folder's code files one at a time, each kept by its blob oid, a file it can't
-       take a warning in Problems until it parses. `full-editor`'s packages/editor, tests, demo and dist aside: 317 of
-       317 files, 62,734 lines, in 17 minutes (about 16 ms a line); main's: 192 of 192, 28,428 lines. Found: after a
-       reload, a restored editor tab can say its file wasn't found (package.json, seen each reload today).
-     - *A sample of its comments, sorted* (2026-11-03, read at `.refs/full-editor/` with files_read) — 128 comments in 9
-       files, core and removed, by the realms' shares of the scope's 4,351 comment starts (extensions' insights hover,
-       notes, margin runs, the bridge's capability stops; workbench's checkpoints, git review, readiness; shared's
-       architecture; the shell's git panel): **68 dropped** (53%), **50 notes** (39%), **8 notes citing a doc** (6%), **2
-       kept** (2%: the JSX pragma, an `eslint-disable` with its reason). What sorts which way: the dropped are nearly all
-       JSDoc on a declaration saying what its name and body do (a constant's, a function's, a field's); the notes are
-       whys and gotchas (why one at a time, why a write is serialized, what a race would miss), a contract with another
-       file (who produces or reads it: `runtime-fs.ts`, `history.features`), and history (what a timing or a structure
-       came from). Every file's header is a note, and 6 of 9 cite a doc — a header's "what" is its feature's ledger
-       `what`, its "why" a note. Found on the way: 2 comments stale against their code (shared/architecture.ts's header,
-       "unless already probed", which the code doesn't do; the git panel's `git-panel.css` after the move to Stitches); a
-       cite of a queue entry by number (checkpoints.ts' "NEXT.md item 2"), which drifts as items move; and a JSDoc
-       block on nothing (two in a row before `renderGitPanel`).
-     - *The zero-knowledge baseline* (2026-11-03, `.silo/zero-knowledge.json`: questions, key, grades) — three
-       features (Answer a call where it stops, core; Experiments that undo themselves and Notes on code, removed), the
-       pass's five questions each, answered by an agent per feature and condition through files_* alone: the code alone
-       (`.refs/full-editor~stripped/`, built for it: git_open's `stripped`, comments blanked by BABLR line for line, no
-       Markdown or `.silo/`) **12 of 15**; the code as it is (comments, still no docs) **14.5 of 15**. Every point the
-       comments carried was a why: the three "why is it this way" answers came from a comment as it is, and the code
-       alone guessed them — one wrong, two right but unsure (one from an agent tool's description string, which stripping
-       keeps). What it's for, its ways in, what's its own and what removing it takes held without comments: the names,
-       the registrations and the strings say them. Both missed half of a feature's what (Experiments' preview of a
-       replacement lives in files_replace): a boundary to draw, not a comment to keep. Found: the stripped tree is slow
-       cold — each file is parsed as it's read, so greps across folders timed out until BABLR had them (its cache, warmed by
-       BABLR: Check Which Files Parse…); the code-alone agents took 15–24 minutes against 2.
-     - *The old suite's last run* (2026-11-03, `.silo/last-run/`: outcomes.json, each test's; reach.json, the
-       architecture suites' reach as selection folds it) — **in CI**, the architecture workflow dispatched on the tag
-       (every shard, instrumented; none had run at the tag, a docs commit): 132 of 133 passed, `tour-selection`'s "an edit
-       to an imported module reruns the programs that ran what changed" timing out; 115 tests' reach (tour-selection's
-       failure kept its back). The unit suite passed whole at the tag's push run, and CI keeps no unit test's reach.
-       **In the editor**, every unit test file run from `.refs/full-editor/` in the debugger (built for it: a run's
-       modules under `.refs/` read through its link, as its program's files are — tsval's worker/runtime.ts): 57 files,
-       201 passed and 8 failed, 5 didn't load and 2 stalled — each one the editor's gap, not the code's, CI's run being
-       green: no `ReadableStream`, `child_process.execFileSync`, `module.registerHooks` or
-       `net.getDefaultAutoSelectFamilyAttemptTimeout` in the debugger's runtime; BABLR's `dist`, a build's output git
-       hasn't; timers while the tab is hidden; `mailbox.test.mjs` and `page-tools.test.mjs` never finishing. And no reach
-       from the editor: a test's trace was the Margin's (*Runs kept*), out since the reduction — what Reintroduce compares
-       a feature's new tests with is CI's reach until it's back.
-   - **The boundaries**: one feature to an extension, the candidates in *The architecture, reassessed* decided split
-     or kept, each "stays because" reason checked again. Checked 2026-11-03 (ARCHITECTURE.md has the reasons): the
-     reduction settled the candidates that went with their features; tsval's seven features, the bridge's four and
-     features across realm folders stay, nothing split. A stopped run had no way for a person to answer (the Margin's buttons
-     went; only `runs_tests`' approvals called `editor.capability.decide`): it asks in the margin again, on its line, for
-     as long as it waits (the user: not a notification, which can be dismissed) — *Pane beside every editor* back for
-     it, and `extensions/margin` with only that question; Rule… waits for the Rule editor, and the pane's span and
-     ran placings for BABLR's annotations. Left: whether tsval can give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one
-     file). Found on the way, CI's `workbench` shard red on 3 of 4 pushes while local runs passed: two tests read the shell
-     before the reports they assert reached it (the theme's colours, the extensions' reports), fixed to wait for what they
-     assert.
+   - **The boundaries** (ARCHITECTURE.md has the reasons, checked 2026-11-03: nothing split). Left: whether tsval can
+     give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file).
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
-     fit* answered. The manifest is done (2026-11-03: its 66 features in the ledger, marked `moved from the manifest`, and
-     its readers on the ledger), and every code file in the repository has an owner (decision 22). One owner a file is
-     where that starts: once silo ingests coverage from runs and traces, reassess how to handle sharing from what they
-     show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case). One attribution is
-     settled (the ledger's: silo README, *What doesn't fit* 4), and `silo observed` compares each test's reach with it — the
-     editor's own now, as its runs keep it (`silo observed .silo/local/reach`, each test file's at its path, its ranges of
-     lines counted line by line), where CI's was a dispatched workflow's (the ledger's *What each test ran*, an experiment,
-     the stopgap until then). Read 2026-11-17 from a run of the editor's 41 unit test files in the editor: 149 tests, 101
-     with enough lines few others ran to tell, a median of 100% in their own features' code, 26 under half — mostly a
-     dependency (the hub's under runs, node-runner and tarballs; tsval's under replay and site-sums; *Review by hunk*'s
-     line diff under test-runs; the metrics under workspace-changes), which it says and a person decides. One decided:
-     page-tools.test runs *Page tools* (130 lines, beside the hub's 406), so it's among its tests now (the user,
-     2026-11-17). Its specs' reach is still read from outside.
+     fit* answered. One owner a file is where that starts: once silo ingests coverage from runs and traces, reassess
+     sharing from what they show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case).
+     `silo observed .silo/local/reach` compares each test's reach with the ledger (2026-11-17: 149 tests, a median of
+     100% in their own features' code, 26 under half, mostly a dependency); the specs' reach is still read from outside.
    - **Notes for comments, and agents reading them**: the migration, and an orphan warning from `files_edit`. Then the
-     pass's third condition, to show notes lose nothing. Agents read them now (2026-11-17), as the Margin shows them:
-     `files_read` with the notes beside the lines it read, `decisions_for` with a file's among its whys (the notes
-     extension's `notes.on`: each found in the text as it is, its line, who wrote it, or that it lost its place).
+     pass's third condition, to show notes lose nothing. Agents read them (2026-11-17): `files_read` with the notes
+     beside its lines, `decisions_for` with a file's among its whys. What the measure found to go on (2026-11-03, 128
+     comments in 9 files): 53% dropped (JSDoc saying what a declaration's name and body do), 39% notes (whys, gotchas, a
+     contract with another file, history), 6% notes citing a doc, 2% kept (a pragma, an `eslint-disable` with its
+     reason); every file's header a note. The zero-knowledge baseline: the code alone 12 of 15, as it is 14.5 — every
+     point the comments carried a why. Open (*Decisions*): whose a note migrated from a comment is.
    - **The standard**, from the pass's gaps.
-   - **Reduce to the core** — started 2026-11-02 on the branch `reduction`, in the editor. Done: the composition roots
-     cut to the core (the workbench's extensions and services, build.ts, the app realm, the shell's top bar, the agent
-     tool families); what the core no longer reaches deleted with its tests and theme surfaces; CI's architecture
-     workflow down to `realms` and `performance`. Then the bridge and History split, one job each: the bridge is core's
-     runtime crossing into VS Code (the uplink, capability decisions and stops, the workspace runtime, the run
-     contract's events, the terminal's auto-attach); History reads the program and holds the ledger to it (drift in
-     Problems, `history.decisions`); code-reach.ts became decisions.ts. What removed features left in the core went
-     (notes.add, "Your edits", Share's workspace.files, BABLR's annotations). 45 features are tombstoned in the ledger;
-     the 10 more the core keeps are declared there; `silo check` agrees. The core boots, loads this repository and runs
-     its tests in the editor (git's, reset's, the workspace's: 20 of 20); the editor's unit tests pass in Node (94 of 94).
-     And the shell split: shell.tsx is its core (the page, the hub, the theme, the review panel; 1,111 lines to
-     307), and each other part of the top window a feature module started and placed from one list (shell/feature.ts:
-     sign-in, repo load, the GitHub popover, Commit, Reset, the push's serves, error reports). And previews out: the node
-     worker (the in-browser dev server), the preview taps, the service worker's preview routing and gate, the runner's
-     preview hooks and the COVERAGE=1 build; `vite` is a command the terminal says isn't here; the four preview features
-     tombstoned. CI's suites pass locally (realms 4 of 4, performance 5 of 5: boot 1.4 s, a typed hover 1 s, a 1000-file
-     load 0.9 s; memory read from the metrics plane through debug-mcp now).
-     The reduction moved `packages.tarball` from evidence.ts to tarballs.ts, whose feature it is, with a span per fetch.
-     Then more cut, the same day: BABLR (its last job the review's cosmetic verdicts, whose feature was already out;
-     git_review's verdicts and owners with it), docking (the editor's iframe fills the main region; VS Code's new windows
-     are real ones), error reports and the session timeline (the API keeps its side, for the deployed full editor), the
-     shell's placeholder buttons, Explore Orderings, the debugger's browser tests (nothing drove a preview's page once
-     previews went; their locator engine's package with them), and the architecture model's and view's previews, node worker,
-     ESLint and provoke (71 subject families nothing sent); then the live architecture diagram itself, its declared
-     model and conformance check (the reports and their store stay: debug-mcp's architecture_state and the CI harness
-     read them). And the terminal down to the core's commands (node, npm, ps, kill, git). The core's tests: 4 new (history-ledger, tarballs, runs,
-     shell-feature), below. Realms and performance pass (8 of 8).
-     Left, in order:
-     - *Kept, a decision rather than a cut:* extensions by URL (`?extension=`, `extensions.json`) and the extension
-       template (contrib/) — editor-contrib's site is the editor with its extension added, and contrib.yml syncs
-       contrib/ there, so taking them out is a decision about editor-contrib.
-     - *What the reduction left:* tsval's site sums, the architecture reports and metrics, extensions by URL and
-       the extension template, declared in the ledger with the rest of the manifest (*Silo, firmed up*). A debug run's
-       own server is still answered (editor-api's runtime link), asked by nothing until previews come back.
-     - *Docs:* done 2026-11-02 — ARCHITECTURE.md (1,277 lines to 688) and RUNNING.md (320 to 126) describe the core;
-       RUNTIME-EVIDENCE.md says it's out, kept as the design its features come back to.
-     - *Every file one feature's:* done 2026-11-03 — `silo check` fails on a code file no live feature's `paths` (or
-       `tests`) holds, and on one two features' `paths` both hold (silo README, decision 22), in CI's lint and in the editor's Problems. Then the files that mixed features split along their
-       lines, each part into a module of its feature's: the debug worker (worker/, a module per feature) and the
-       adapter's stops; workbench-entry down to the boot and its wiring (project.ts, theme-follow.ts, bridge-link.ts);
-       workspace-fs's stores report to architecture-zenfs.ts; git-service.ts to git alone (git-push.ts, git-history.ts,
-       git-review.ts' discard and partial commit, the origin to project.ts, unpushed.ts); the build's parts for one
-       feature each beside it in build/ (command-tap, history, static-host, package-types; snapshot.ts the starter's);
-       the debug worker's session to the stepping debugger alone; the shell's icons out of shared/theme.ts. ata.ts,
-       test-runs.ts and workspace-tools.ts were one feature's each.
-     - *The core's tests:* begun 2026-11-02 — the ledger declares each core feature's tests (`tests`, which `silo check`
-       holds to the files): all 35 have them (2026-11-03). New: history-ledger, tarballs, runs, shell-feature (2026-11-02); and
-       git's (2026-11-03): git-push (pushed, pulled, branches, a refusal's reason, through `git http-backend`), commit
-       (the top bar's Commit, its flow as `commitAndPush`), git-views (the review panel and Source Control, in the
-       browser, in CI's `realms`); and the agent's (agent-tools: what its files, git, terminal and editor tools ask,
-       answered by the real workbench) and a capability stop answered at the call (debugger-runs: allowed once, skipped,
-       denied). They found: `files.read` gave a deleted file's text (an unedited document VS Code kept), and a line's
-       breakpoint stopped at every statement starting on it (tsval), so `try { write(); }` asked twice and the first
-       answer went to the wrong question. Then search (agent-tools: findFiles' globs, Quick Open, Find in Files; its
-       provider is the monaco-vscode-api component's workspace-search.ts, now in the feature's paths) and the bridge
-       (debugger-runs: the extension host's one hub, linked to the workbench's and to each debug run's worker). And the
-       editor's own surfaces (workbench.mjs: the theme following the system, the starter opened, the service worker
-       serving a package once it controls the page, every context on the architecture plane, an extension by URL, a
-       sign-in started — the API stood in for), with starter, static-host and editor-metrics in Node. The build and the
-       test harnesses are tested by use: worker-realms loads what's built, and workbench.mjs and history-ledger drive the
-       harness and the stand-in `vscode`. CI's browser suites are three shards now: realms, workbench, performance. The
-       unit suite passes in Node.
-     - *Landed* 2026-11-03: `EDITOR_DEPLOYS` set to `off` (production keeps the full editor), then `reduction` merged into
-       main (4fbb0f68). Pages and the published editor package are the core now.
-     Found while reducing: the editor's runner has no `globalThis.crypto` (runs.test.mjs fails there, passes in Node);
-     it can't run the theme's budget test (`Unsupported encoding: latin1`) or a
-     test that hooks `vscode` (`registerHooks` isn't in almostnode's `node:module`); `git_checkout` can't switch to a
-     branch the shallow clone hasn't fetched (`git.show` fetches one; checkout should too); `git_pull` reports
-     "diverged" when main moved under a branch (a merge in the editor would settle it); the editor's GitHub Apps
-     couldn't push a change to `.github/workflows` (workflows read/write added to both apps 2026-11-02); writing the
-     ledger has no editor UI yet (the tombstones were written with silo's own code from a checkout); the editor reloaded
-     itself three times under large edits (8:24, 8:39, 8:46 pm): Vite's socket closed on both frames at once and its
-     client reloaded the page, while the dev server and debug-mcp kept running — the work in the workspace survived,
-     the calls in flight didn't; `files_edit` has no line-range cut, so a 360-line cut is 360 lines in the call (the
-     longest cuts were made from a checkout); `runs_stop` doesn't stop a `runs_tests` run (a test that starts a server
-     hung in the editor's runner); `files_grep`'s scope argument is `glob`, and `editor_problems` has no severity
-     filter (cspell's infos drown the rest — moot now cspell is out). The bridge's capability decisions asked the shell's
-     `capability.prompt`, which nothing answered once the shell's prompt went: now an undecided call is refused and said
-     once, with how to allow it (a rule). tsval's busy heartbeat rides its `observe` and `called` hooks, so its site sums,
-     coverage and purity (which nothing reads now) can go only once the heartbeat has a source of its own.
-   - **Reintroduce, one feature at a time, only with a purpose**: declared, built to the standard, spans, notes, its
-     tests written again (declared, each with its own state, checked against what its old tests reached), vouched in the
-     editor's commit flow, its pass run again. The first is the standard's worked example. Each is its own item here
-     when it's next. **First, what contributes an ESLint rule** (user, 2026-11-03): ESLint in the editor
-     (`extensions/eslint`, its worker and build/eslint-toolchain at `full-editor`), so the rules CI holds the code to —
-     util's preset (span names among them), the Web Awesome plugin, the realms' boundaries in eslint.config.js — hold as
-     the code is written in the editor too; then what's built on it (*A change's problems*); and any feature that brings a
-     rule of its own comes back with it, early.
-     - *ESLint: back* 2026-11-03 — `extensions/eslint` and its worker, the toolchain built beside them (263 packages,
-       10 MB), declared in the ledger with its tests (eslint.mjs, in CI's `workbench`: the preset where there's no
-       config, a folder's own config, a broken one said on itself, fix-all on save, `eslint.enable`), budgets back
-       (realm 294 of 400 MB). The first extension on `observeExtension`: its load and each lint and fix a span of
-       `ext:eslint`'s (first lint ~5 s, waiting on ESLint's load of ~4 s; then ~65 ms). `_eslint.problems` stays out until
-       *A change's problems* comes back to call it. Found: a file an agent writes (`files_write`, not shown) isn't linted
-       until it's opened in an editor, and its save isn't fixed — ESLint, in the web worker host, lints the documents that
-       host has, and an unshown one isn't; records an extension logs as it activates reached debug-mcp under the tab
-       before a reload at least once (not pinned down).
-     - *A change's problems: back* 2026-11-03 — with the UI first (CLAUDE.md, *Agent tools*; the user's choice): each
-       changed file's row in the review panel shows the problems the change made (+N) and fixed (−M), against HEAD, each
-       one's line and message on hover (shell/change-problems.tsx); agents' `code_problems` asks the same `code.problems`.
-       TypeScript's side is its own extension's tsserver plugin (extensions/change-problems, out of history's, which
-       holds the ledger to the program); ESLint's, `_eslint.problems`, ESLint's way in again. Tests: code-problems
-       (the delta), git-views (a fix and a new problem, from the request and on the row), page-tools (the tool).
-       Found: a request sent before anything serves it waits out its timeout (the shell starts before the workbench's
-       services), so the panel waits for a responder first.
-     - *In-browser dev server: back* 2026-11-03 — `vite` in the terminal serves a project from the dev-server worker,
-       answered at its address by the service worker, with hot updates. Tested in dev-server.mjs, in CI's `workbench`:
-       a real page of it running in a frame, a save reaching it, a second server in one folder refused, stopping it.
-     - *Preview windows: back* 2026-11-03 — `vite` opens a window onto its server (shell/preview-windows.tsx, on
-       `app-window`), its page running, a save reaching it, as many windows as you open, the last closing stopping the
-       server. Tested in in-editor/preview-windows.spec.mjs, in CI's `workbench`. Out with its tap for now: a page's console and errors.
-     - *Playwright tests in the debugger: back* 2026-11-03 — a `@playwright/test` file runs in the debugger against the
-       preview window you have open, each op on its page through the shell (playwright-in-editor.mjs, in CI's `workbench`).
-       packages/playwright came back as it was, held to real Playwright by its own tests. With no window, a test fails
-       rather than hangs, but says `received false`, not why.
-     - *Every test in the editor: what stands in the way*, tried 2026-11-04: a Playwright test in the debugger navigated a
-       preview window to the editor itself, and the editor booted in it, cross-origin isolated, extension host and all.
-       In the way: (1) *done 2026-11-04* it shared the outer editor's state: `?instance=<name>` keeps one apart (*Editor
-       instances*), and a frame with the name is the top of itself, with its shell. (2) *done* `page.goto` waits for the
-       frame's document to change, not a `load` on the window navigation replaces. (3) *done* `frameLocator`, as deep as
-       frames nest, held to real Playwright. A Playwright test in the debugger now drives a whole editor in a preview window,
-       apart from the real one: through its frames, clicking a file in its Explorer and seeing its tab open
-       (playwright-in-editor.mjs). And (4) *done* open shadow roots, gone into as Playwright goes, selectors crossing them
-       too, so Web Awesome's controls are found. **No `evaluate`** (decided 2026-11-04, with the user): a test does what a
-       person does, through locators, the palette and what's on screen, so a UI that's missing or broken fails it. An
-       instance starts with the files a test gives it, by its address (`&seed=`), and `page.goto` opens a window if none is.
-       *First suite moved:* in-editor/bablr.spec.mjs (test/in-editor.mjs runs them, in CI's `workbench`): palette, its
-       toast, the warning in Problems. **Typing:** an element with an EditContext (Monaco's) takes text as the browser gives it, the context updated and
-       `textupdate` told, held to real keys in engine.test, so a test edits a file, and saves with the keyboard.
-       **A terminal too** (in-editor/terminal.spec.mjs): keys go to its helper textarea, punctuation arriving once key codes
-       were a real keyboard's (with the old ones `.`, `-` and `&&` were lost), and a test reads it as DOM rows, by seeding
-       `terminal.integrated.gpuAcceleration` off (READABLE_TERMINAL), as it draws on a canvas otherwise, so it reads a renderer
-       a default setup doesn't draw with. `ControlOrMeta+a` selects in Monaco now; why it didn't before wasn't found. The parses kept and the agents'
-       request, which have no UI to read, are agent-tools.mjs's now (test/bablr.mjs gone). And the suites' own needs: they ask over the hub
-       (`session.request`), which a test in the debugger doesn't have, and the debugger's runtime gaps as they come up. A
-       page's console and errors (the tap) follow.
-       *Second suite moved:* in-editor/eslint.spec.mjs, each case a seeded instance and what's on screen: the preset, a
-       folder's own config, a broken one said on itself, fix-all on save, `eslint.enable` off and on by editing and saving
-       settings.json. test/eslint.mjs keeps what has no UI to read: the agents' request and the span. **What moving it
-       found:** a workspace with no root tsconfig got nothing and no word, every TypeScript file a parse error with no line
-       that threw on its way to Problems. Now a message with no place goes on the first line, and the worker lends a root
-       with no tsconfig an empty one (only it sees that; a real one wins). The engine sent a character's own code as its
-       legacy keyCode, so Monaco took `.` for Delete and `"` for PageDown; a key's code and keyCode are now a US keyboard's,
-       held to real Playwright, and typing in an email or number field no longer throws. Seen once in six runs, not pinned down: `frame.evaluate: Execution
-       context was destroyed` from the outer workbench while eslint.spec ran. A test run's results come only at its end, so
-       a stall (120 s quiet: test-runs.ts) loses the tests that passed before it.
-       *Third and fourth moved:* in-editor/dev-server.spec.mjs and preview-windows.spec.mjs: `vite` typed in the inner editor's
-       terminal, its page running in the inner shell's window, a save retyped in Monaco reaching it, another window, closing,
-       `kill`. test/preview-windows.mjs is gone; test/dev-server.mjs keeps the service worker's answers (isolation headers, the
-       compiled module, 503 once stopped), which have no UI. Found: a click on a button whose icon is slotted into it was called
-       covered, the engine's walk up skipping the slot; held to real Playwright. A window of the size of the preview it opens in
-       covers the whole inner workbench, so a spec opens its file first and works by keyboard, and the palette takes Enter, not a click.
-       *Fifth moved:* in-editor/pane-views.spec.mjs, its extension by its address (`?extension=`, which now takes a path on the
-       site), with no server or interception. `editor.pane.toggleNative` had no UI, so it has a palette entry now
-       (Pane: Switch Between Beside the Code and Annotations). test/pane-views.mjs is gone.
-   - *Features and tests: back* 2026-11-04 — a table in the panel (workbench/features-view.tsx; Features and Tests: Show): the
-     ledger's features with their test files under them, each file's kind, whether it can't run in parallel and why, its last
-     run's effects, when it last passed and failed, its typical time, and a button that runs it; tests:
-     in-editor/features-view.spec.mjs. It reads the run record test-runs.ts now keeps, `.silo/local/runs.jsonl` (each file's
-     last 30 runs: time, each test's outcome and time, effects), and refreshes as any run ends. It's the view `runs_affected`
-     and `runs_tests` lacked. The flag so far: a browser suite, or a file that writes a path another does, by last runs only. A
-     custom view in the panel, as core has no way to open a tab of its own without exporting `registerEditorPane` from the
-     component; *Features map*, the treemap, stays out. Not yet: `touched` and `resting`, CI's outcomes, coverage, per-test
-     effects, or a filter. A UI spec's effects are the spec's, not the editor's it drives.
-   - *Annotations that stay on their code: back* 2026-11-04 — `editor.annotations.spans`, `.refer` and `.resolve` (workbench/bablr.ts,
-     registered there, the bridge sharing its realm), silo's resolver in BABLR's worker, the last 16 parses kept in memory; a reference
-     not found by its id is followed from its commit or a known text, and looked for in other changed files. Not back: verdicts and
-     edit groups, and a span's types for the typed strategy, until a feature needs them.
-   - *Coverage in the gutter: back* 2026-11-04 — the debugger's `coverage` event again, and marks in the Margin's gutter column and the
-     scrollbar (extensions/margin/coverage.ts, into the Margin); tests: in-editor/coverage.spec.mjs. Each program's latest run counts, so
-     a line didn't run only if no run reached it. Runs this session only (the old git evidence stays out), not while paused
-     (`getCoverage`), and a marks-only file shows the Margin's tab and divider over nothing. A UI spec's run marks only the spec's own
-     files: what it drives isn't the debugger's to see.
-   - *Capabilities confirmed by runs* 2026-11-04 (the user: re-confirm that code uses a capability, not let it grow and never
-     shrink). An allow rule no kept test run has used, after 5 runs since it was added, is a problem on the rule with a quick fix
-     (workbench/capability-confirm.ts), and a test's row says what it newly uses or has stopped using against its run before. Runs
-     are tests', so a rule only a person's debug run or a preview uses reads as unused. Not yet: the static half, whether the code
-     could still make the call (the findings below read open files only, so that needs a sweep of the project); the baseline's
-     join; capabilities by feature.
-   - *Capability findings in the code: back* 2026-11-04 — extensions/capabilities (`_capabilities.findings`, its tsserver plugin):
-     a call that reaches outside is marked and in Problems, what it reaches as written or from the sandboxed canary run, in open
-     files. Tests: in-editor/capability-findings.spec.mjs. The rest of that extension (the calls panel, the baseline, Exceptions,
-     rules) comes back with those features. TypeScript 7 still won't load a tsserver plugin, so this moves when the editor does.
-   - *What your edits change: back* 2026-11-04 — the History output (History: Show What Changed): what a pause added, removed or
-     changed, by feature, and what runs said of each. Tests: in-editor/edits-change.spec.mjs. Lib no longer has `exercise`, so the
-     join is extensions/history/runs-say.ts, over this session's runs' `coverage` events: kept nowhere, and a file edited since
-     it ran is unsaid until its next run. Its statements are the run's, so one whose code spans a handler (`const f = () => {…}`)
-     reads as that code having run.
-   - *Run a file in the debugger: back* 2026-11-05 — a play button above a code file and *Debug: Run* (`editor.debugFile`,
-     extensions/tsval/run-file.ts), written from what it's for. F5 with no launch.json runs the code file in sight rather than the active
-     editor, which with the Output view focused was its channel (found 2026-11-04). Tests: in-editor/run-file.spec.mjs.
-   - *Run from the shell* and *Package scripts as tasks and the run picker: back* 2026-11-05, written from what they're for. A Run menu
-     in the top bar (shell/run-menu.tsx) has the file in the editor and every package.json script; each script is a VS Code task
-     (workbench/tasks.ts, so they're in *Run Task* too) running `npm run` in the workspace's terminal, in a terminal of its own,
-     ending with the script's exit code. A script whose service is up shows its preview (`preview.show`) rather than starting a
-     second. Tests: in-editor/run-menu.spec.mjs.
-   - *Preview's dev server as a debug session: back* 2026-11-05, written from what it's for (workbench/preview-session.ts). A dev
-     server coming up is a session with Restart and Stop on the debug toolbar, and what it says in the Debug Console as well as
-     its terminal; a session on its own has no row in Call Stack, so the toolbar's where Stop is. Tests: in-editor/preview-session.spec.mjs.
-   - *Terminal commands beyond the core's: back* 2026-11-06, written from what they're for: `code`, `open`, `less`, `more`, `history`, `pnpm`,
-     `yarn`, `npx`, and what isn't here saying what to do instead (`notHere` in a command's definition, git's in `subcommandsNotHere`).
-     A terminal running one task's command isn't back: tasks run in terminals of their own (workbench/tasks.ts).
-   - Seen once each in 6 runs of all the specs on CI (2026-11-06), not looked into: eslint.spec's *saving fixes what can be fixed*
-     (`var value` still there) and edits-change.spec's *the History output says what a pause changed* (the panel empty, no
-     `Reading`; again on 76afc45f, passing on a rerun, and on cb0d53bc, a runner twice as slow as usual with `git.status` timing out
-     beside it: load, it looks like, though not proved). That slow runner took `specs` past its 15 minutes, so it's 25: all the specs
-     take about 7 minutes on a usual runner and 14 on that one, and each new one adds to it. Worth two shards if that keeps growing. A click on a row of a task picker closes it on CI (10 of 10) and not in a browser: run-menu.spec uses the keyboard. And playwright-in-editor.mjs's *drives the preview you have open*: its button test failed once locally in the whole workbench shard (2026-11-06), then passed 4 of 4 alone, and twice more in 3 whole shards (2026-11-07, with code_reach's test before it making History read the program); it clicked with nothing to say the page's script had attached, so the page's script now says "ready" on the button and the test waits for that, and says each test's error. And preview-session.spec's Stop button on the debug toolbar, not there in 2 of the 8 CI runs since the move to monaco-vscode-api 39 (2026-11-07), never locally: the spec now says what the debugger showed when it isn't, and the next time (2026-11-08) it was nothing at all, no toolbar, no session, no status item: the dev server's session never started. preview-prompts.spec failed once too, in a slower dispatched run. And the browser itself crashed once in the whole specs shard ("Target crashed" in preview-windows.spec, every spec after it failing at once; 2026-11-07), not on a rerun of all 25. Then twice in a row as preview-devtools.spec came in (2026-11-09), not on a third run of all 27: its renderer peaked at 8.8 GB there, against about 8.2 GB before it, as DevTools' frontend (about 12 MB of code, in a frame) loads beside two other editors. It's the memory ceiling the shard runs near, not this spec's alone. It crashed once more as recorded-stops.spec came in, so the specs run two at once now (test/in-editor.mjs): all 29 peaked at 7.5 GB there in 168 s, against 8.7 GB in 154 s at three. A lighter editor would buy the third back. And test/eslint.mjs's *a lint is a span of ext:eslint's* timed out once in the whole workbench shard, no no-debugger on its probe in 120 s (2026-11-09), then passed alone twice (7 s) and in the whole shard again.
-   - **The objective now: back to rough feature parity with `full-editor`** (the user, 2026-11-05). So what's below comes before
-     more test machinery (selection, the live loop's own work) and before item 1's bench: those wait
-     for parity. Each feature is still written from what it's for, checked in Brave, and main kept green.
-   - **The order of what's left** (the user, 2026-11-04: house in order first). Next, in this order: deciding what programs may do (*Rules* is back, on the call rather than in a panel, and *Capability calls panel* went
-     with it: RUNNING.md, *Rules*; the user, 2026-11-06: the old Capability Calls, Rules and Exceptions panels were too out
-     of the way and easy to ignore, so what they did comes back and they don't. *Rule editor* is back as a picker from a stop or the lightbulb, *Mock a value* and *Rules placed in the code* from the lightbulb
-     on the line, and *Capability prompts for previews* in the preview's window (not yet asked about: a worker's sockets);
-     *Dependency baseline and exceptions* later, with no Exceptions view); *Live runs after an edit* is back (RUNTIME-EVIDENCE.md, *Live
-     runs*; not yet what a save reaches, which is the live loop's); *Notes on code* is back, beside the code in the Margin (RUNTIME-EVIDENCE.md, *Durable annotations
-     on spans*); and for
-     developing and testing the editor in the editor, *Agents drive the debugger* (back: RUNNING.md, *For agents*), *Refactoring for agents* (back: ARCHITECTURE.md, *Workspace tools*), *Experiments that undo
-     themselves* (back, with Workspace: Save and Restore Checkpoint: ARCHITECTURE.md, *Workspace tools*), *Scripts over the workspace* (back,
-     agent-only by the user's exception, 2026-11-07: ARCHITECTURE.md, *Workspace tools*), *What a way in reaches* (back, on the
-     lightbulb at a way in's registration: ARCHITECTURE.md, *Workspace tools*) and *How a commit did in CI* (back, in the status
-     bar: ARCHITECTURE.md, *Workspace tools*). Now: the
-     runtime insights (*Runtime evidence kept in git*, its hover, *What could go, in purple* and *Evidence from previews*:
-     back, RUNTIME-EVIDENCE.md), and the previews' (*Preview DevTools*, *Preview CPU profiles* and *Debug toolbar in the preview
-     title bar*, back: ARCHITECTURE.md, *Preview windows*; the profiles reworked, the user 2026-11-09: their times on the
-     code, kept with the run, RUNTIME-EVIDENCE.md, *Time*; *Breakpoints in a page's code*, back: RUNNING.md, *Apps: recorded
-     stops, not live ones*). *Dependency baseline and exceptions* is back too, on the code (ARCHITECTURE.md, *Dependency
-     baseline*). *Explore orderings* is back, on the code (RUNNING.md, *Explore orderings*), and *Playground links*, each opening in an editor of its own (ARCHITECTURE.md, *Instances*), and *Type queries*, and *Your edits since the last commit* (its command for placed rules left out: nothing uses it), and *Performance monitor*, in the status bar (ARCHITECTURE.md, *The metrics plane*). *Error reports from the editor* is back as it was (packages/api/README.md, *Errors and timelines*),
-     and *Formatting-only changes marked*, a ≈ badge on a file changed only in its formatting; *Docking editors into windows*
-     is parked; and *Spell check* is back, its unknown words hints on the code, not infos in Problems (which a file's worth
-     drowned when it was in). That is the list. Far off, still the mission: *Event Sheet*, *Build a
-     game by painting a level*.
-   - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Each test's reach is kept, its lines of each
-     file (`.silo/local/reach/`, test-runs.ts), `tests.affected` reads it (traces had no writer), and the table shows each file's
-     reach, what only it reaches, and *touched*, with a button to run those. Since 2026-11-16 a change selects by its lines,
-     not its file (those changed since the last commit, either side of the change: `selectionOf`), and says for each changed
-     file why it selected what it did: a test, lines run, lines not run, not run, config or not code. The table names what's
-     changed that no test here checks, and what every test runs under, above its rows; runs_affected's `why`. A save that
-     fixes a file (the `!` ESLint drops) changes more lines than the edit, and selects by them, rightly. What has no reach
-     yet (`untraced`) is the unit tests and specs a run here would trace, 180 here; the 12 browser suites are counted
-     apart (`outside`), and the 749 helpers and fixtures in test folders aren't tests. And a UI spec's reach is the editor
-     it drives too (2026-11-16; the user: everything that can run in the browser runs in the browser), with the dev server
-     counting (COVERAGE=1): its window's realms, frames and workers, answer what they ran on a BroadcastChannel, each realm
-     there since the page first went somewhere being the test's (the outer editor's and the service worker were there
-     before). features-view.spec reaches 257 files, 24,794 lines, where it reached its own two before. Counting is
-     asked for (`COVERAGE=1 npm run dev`): it was `npm run dev`'s default for a day (2026-11-16), but it boots 9% slower,
-     takes 3% more memory and up to a third more script (the extension host 14.9 → 20.1 MB, over its budget), so the
-     editor you work in daily doesn't; the performance suite refuses a counting one rather than hold it to the plain
-     build's budgets. And the browser suites move into the editor, each as
-     the specs of the features it tested: git-views.mjs is four (review-panel, change-problems, commit-beside,
-     source-control.spec.mjs), what it asked of hub requests read off the screen instead; on the way, in-editor Playwright
-     clicks what's under the pointer, as a mouse does (a checkbox's drawn box toggles its input), and the review panel's
-     Discard shows on the open or focused row, not the hovered one alone. instances.mjs is instances.spec.mjs: a change
-     kept, and a reset taking it back, where IndexedDB's database names were read (an instance's seed is where it starts
-     each time, not what it keeps). bablr.mjs is bablr.spec.mjs and, for its request, agent-tools.mjs. 8 left
-     (`outside`), what has no UI in them the open question. Not yet explained: a second "Open a Commit Read-Only" in one
-     editor, with another spec's beside it, took no ref in about half the runs here — its box showing, its input not visible
-     and the focus on nothing or the empty editor group, five tries over 15 s — so commit-beside opens it once an editor.
-     dev-server.mjs is dev-server.spec.mjs: its page says it's isolated (`crossOriginIsolated`), and what the service worker
-     answers a client (a module compiled, 503 once stopped, a port nobody served) is the test's own requests — Playwright's
-     `request` (`page.request`, the fixture), made by the shell as a client of the origin, not the program's `fetch`, which
-     the debugger's capability gate decides (tried, it threw "Cannot read properties of undefined (reading '0')"; the user
-     chose `request`, 2026-11-16). packages/playwright/src/request.ts, held to Playwright's own by request.test.mjs. eslint.mjs's
-     request and span, with no UI, are agent-tools.mjs's (test/eslint.mjs gone, as bablr.mjs). 6 left.
-     workbench.mjs is mostly workbench.spec.mjs: a colour theme picked and the shell in its colours (`toHaveCSS`, the
-     editor's Playwright's now), the starter workspace, TypeScript formatted on save by ESLint and JSON not, an extension by
-     its address saying hello, a CDN package file as a client gets it (`request`). It keeps the three with no UI: the theme
-     following the system's (a frame's `prefers-color-scheme` is the browser's, not its element's `color-scheme`: tried in
-     Chromium), the architecture plane's reports, and signing in with the API routed.
-     playwright-in-editor.mjs is playwright-in-editor.spec.mjs: an app served from an editor's terminal, its spec run from
-     Features and tests there — a test passing and one failing, each said, the passing one's click in the window that's
-     open — then, the server stopped, a spec that needs a window failing rather than hanging. Its "a whole editor in a window
-     of its own" is what every spec here is. The workbench, beside a preview window, is narrow: the table's Run column was
-     past its edge until the panel and side bar were hidden. 5 left.
-     debugger-runs.mjs is debugger.spec.mjs: a test file run from Features and tests (each outcome, a failure's sides on its
-     row, a timer, a read), a program's capability calls answered Allow, Skip and Deny in the margin and the Debug Console and
-     Explorer saying what came of each, a breakpoint (F9, F5), Step Over and Step Back by the toolbar as Call Stack says, and
-     stdin typed at a terminal's run. Its syntax-error case was features-view.spec's already. What only agents have — a
-     package loaded in a run, a test at a commit by its path, runs_tests' approval, a run's spans, the bridge's links — is
-     agent-tools.mjs's (a package needs the starter's node_modules, which a seeded instance has none of). Answering in the
-     margin needs the editor's room: the Debug Console, opened as a run starts, leaves a short window's editor a few lines,
-     so the panel's hidden while answering. 4 left.
-     The 4 left stay outside, each for a reason a spec can't take away: worker-realms.mjs loads each built entry of dist/
-     in a fresh worker on the editor's origin (dist/ isn't in the workspace, and a spec's program has no Worker of its own);
-     agent-tools.mjs is the agents' requests, which have no UI; workbench.mjs keeps the system's colour scheme followed (a
-     page-wide emulation), the architecture plane's reports, and signing in with the API stood in for (Playwright's
-     `route`, which the editor's Playwright hasn't); performance.mjs measures the editor from outside, against its budgets.
-     What would move more: a `route` of the editor's own (the service worker answering for a test's routes) takes sign-in. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
-     and the next full run; again 2026-11-18, beside mock-value.spec's first miss (its "A rule's place in this file is lost" row not in Problems), both
-     passing alone after. Measured, 386 passing tests of 64 files in the
-     debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
-     line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
-     the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test
-     here reaches, so selection can't be trusted yet: what it needs is reach for what's untested here, the UI specs' most. Same
-     reach isn't the same check: a drop wants a person's decision, and mutation testing could show it. With the specs and browser
-     suites too, by COVERAGE=1 (test/in-editor.mjs runs specs one at a time there; a stopgap, *What each test ran*): 426 tests of 80
-     files reach 48,196 of about 105,800 lines. 101 tests reach the same lines, 9 reach 90%, as most of it is an editor booting; by
-     file 50 of 80, 538 s of 699. Replayed over the last 80 commits by a rule of nothing for docs alone, a test for itself, a test's helper for the
-     browser tests, everything for config, scripts or code nothing reaches, else what its changed lines reach (read at HEAD's line
-     numbers): 15 ran nothing, 34 everything, 31 a median 16 files, 52% of the time. Forcing everything most: code nothing reaches
-     (37 files), package.json (21) and the workflow (15).
-     Checked against CI's history: of 885 failures on main, 10 are of tests that exist today, too few to call it safe: 6 selected, and
-     4 not, each apparently a flake, 3 of them on commits that changed only docs. Most history's tests are gone. A browser test's
-     reach also over-selects, including the session's own editor. The table's reach is the debugger's alone. Then rerun as you write,
-     checking coverage and capability expansion (silo README; removed: *Live runs after an edit*, *Coverage in the gutter*,
-     *capability engine*).
-   - **Tests at once** (2026-11-04; the user: tests are to be written to run in parallel, and a prominent column says which
-     aren't). Unit files in one editor: 56 files, 261 s one at a time, 155 at 2, 89 at 4, 85 at 8, all 285 tests passing, and
-     none fails beside a copy of itself; `tests.run` was dropping a run still going once 20 had ended since, which parallel
-     runs hit. An editor opens in about 1 s, so a test keeps one of its own. Specs: each test's page has a window of its own,
-     released as it ends and left open if it failed (shell/preview-windows.tsx), and a frame driven as a page keeps its focus when
-     another takes it (packages/playwright, `keepFocus`), since only one frame on a page can really have it. All 7 specs: 50 s
-     one at a time, 40 s at 3, 41 s at 5, the ESLint spec the floor; test/in-editor.mjs runs 3. At 7 the page crashed, cause not
-     found. `page.goto` is among a run's effects (`page:goto`), for the column to flag. To come: what a test touches (the gate's
-     effects) as the source of that flag; each grant re-confirmed by the code and by runs, so capabilities can shrink.
-   - **Specs share an editor, by design** (the user, 2026-11-17: set up and tear down, idempotent, not in each other's way —
-     how tests are written from the beginning, not a speed-up after). A spec is written to run in an editor another spec used
-     before it and beside another: it makes what it needs, puts back what it changed, and assumes nothing it didn't make.
-     Since 2026-11-18 they do (below, *Tried*): `openEditor` hands a test an editor another used, reset; before, each test
-     booted a VS Code of its own (a fresh `?instance=`: coverage.spec 9.4 s, 1.0 s of it the test). The harness runs them one at a time in one session since 2026-11-18 (test/in-editor.mjs): two at once,
-     restarted every 8 or 12 specs, crashed near the renderer's ~9 GB (`Target crashed`, 2026-11-17). The design:
-     - **A lane's editor**: one editor a lane, booted once, its window kept between specs (preview-windows.tsx's `release`
-       hands it back to the lane rather than removing it); two lanes, as now, each its own instance, so lanes never meet.
-     - **Setup and teardown are fixtures, not the spec's own code** (specs do what a person does): an `editor` fixture seeds
-       the spec's files on a checkpoint taken as the lane's editor booted, and as the spec ends restores it (Workspace: Save
-       and Restore Checkpoint, a person's way to do the same), closes its editors, quick input and panels, and puts its
-       settings back. What a spec writes to the workspace's own files — .vscode/settings.json (10 specs), .silo/features.json
-       (5), .silo/policy.json (3) — is gone before the next.
-     - **First, what each test affects** (the user, 2026-11-17: an inventory, so we know which can never share an
-       instance). Declared: what it seeds and asks for — workspace files, settings, a port, git refs, the editor's own
-       identity (a reload, an instance, `?extension=`), runs and terminals left going. Observed: what's different in its
-       editor after it than before — files, settings, open editors, runs still going, ports listening, refs, browser
-       storage — kept with its run as its effects are, and shown in Features and Tests' column of what can't run at
-       once. A keyword pass over the specs (2026-11-17): 77 tests in 43 specs, 73 booting an editor of their own; settings
-       written by 10, the ledger by 5, the policy or baseline by 3; port 5173 by 10 (a dev server's address names its
-       tab, `__virtual__/<tab>/5173`, so lanes may not collide there: to be observed); git state by 15, whose teardown
-       puts refs back, not only files. Observed (2026-11-17, workbench/effects.ts: each editor says what it was left with as a
-       test lets its window go, kept with the test's run as `leaves`, printed by test/in-editor.mjs): 74 tests of 43 specs.
-       Program files made, changed or removed, ~45; editors left open, up to 3; runs still going in 7 specs — a dev server
-       on :5173 (preview-devtools, preview-profile, preview-prompts, recorded-stops, run-menu), debugger's stdin run,
-       live-runs' Run — which in one editor would meet the next (a second dev server on :5173 is refused: dev-server.spec
-       checks it); the editor's own records (.silo/evidence, traces, edit history, reach, runs) in most, which a spec that
-       reads them would see another's of (past-runs, features-view, coverage, way-in-reach). Nothing past what teardown can
-       put back — files restored, runs stopped, editors closed — so none needs an instance of its own for what it leaves:
-       only the boot's own specs, for what they test. Counted from once the editor has come up (every readiness stage, and
-       git's repository there), the boot's writes are its own: git moves in 6 tests, all commits (change-problems,
-       commit-beside's three, review-panel, source-control), so teardown puts refs back too; settings in one
-       (eslint.spec, its own). The teardown that follows from it isn't a checkpoint's (Workspace: Restore Checkpoint
-       leaves `.silo/` alone, and refuses once HEAD has moved): a snapshot of the whole workspace as it came up, `.git` and
-       `.silo` in it, written back. What it can't show is state held in memory (an extension's caches that follow files
-       through watchers): specs run one after another in one editor will.
-     - **Tried, 2026-11-17; on main 2026-11-18**: an editor that snapshots its
-       workspace once it's up and resets to it when asked (effects.ts: runs and debug sessions stopped, terminals,
-       editors, panel and quick input closed, the Explorer shown, files written back, the next test's seeded), and a shell
-       that keeps shared editors' windows and hands an idle one to the next test (`?shared`), booted empty. What it found:
-       specs that assumed a fresh editor — the Debug Console open (VS Code opens it on a window's first debug session
-       only), the panel open to hide, the Explorer showing — fixed on main to open what they need; mock-value's three
-       tests passed on one editor in 9 s (22 before), explore-orderings in 5 (14). What stopped it: sessions crashed near
-       9 GB, the renderer 3.8 GB after one spec and 6.4 after ten — read then as a shared editor not giving back what a
-       test's work took. Measured again one spec at a time (2026-11-17), that was mostly two specs at once, each reading
-       counting the other's live editor: alone, each spec's frame and workers go as it ends, the JavaScript of every realm
-       stays near 950 MB, the renderer between 2.5 and 3.7 GB; all 43 specs ran in one session, one at a time, peaking at
-       5.1 GB (351 s, against 200–265 s two at once in sessions of 12). What did outlive its editor: a popup open as its
-       page went away (playground-links' Share, run-menu's Run menu) — Floating UI's listener on the top window's
-       visualViewport held the whole closed editor, 80–110 MB each, fixed in the theme (`src/popups.js`: stopped on
-       `pagehide`). Measured again one spec at a time (2026-11-18, `wip/shared-editors`), the mechanism crashed nothing it
-       didn't serve: with only mock-value sharing, all 43 passed in 345 s, the renderer at 5.5 GB at most. With every spec
-       sharing by default, one editor grew about 7 MB of page heap a spec; what climbed to a crash by the eleventh spec was
-       each failed test's window, kept open with its whole editor. Three specs failed sharing, each on what the reset
-       didn't put back: eslint's tsconfig test (ESLint kept the tsconfig it started with — a person's bug too, fixed on
-       main: a tsconfig made or changed restarts its worker), commit-beside (the commits opened beside the work stayed open;
-       the branch's reset closes them now, by a new *Git: Close the Commits Opened Read-Only*, and its second ref box still
-       loses the focus between its typing and Enter, cause not found) and eslint's config that fails to load (its file
-       never linted after the reset's config changes, cause not found). Then (2026-11-18): every spec sharing, one at a time,
-       40 of 43 passed with no crash in 435 s; sharing saved 25 s of 287 on the specs that passed both ways (an editor opens
-       in about a second), so it's for the design and the inventory, not for time. A failed spec's windows are closed now
-       once what they showed is said (test/in-editor.mjs), which the crashes were. What sharing found, beyond the reset's
-       reach: ESLint's problems for removed files (fixed on main), and still on the branch — TypeScript keeps a removed
-       tsconfig.json's problems, crowding the Problems view so a spec's row isn't drawn (eslint.spec's first test after
-       edits-change); live-values' inline value (its run doesn't stop at the breakpoint F9 set after its first test);
-       commit-beside (after a commit from the shell's panel, the next command's box is closed by its own Enter, taken as a
-       quick-access picker's — the test driver only, not a person: its tests keep editors of their own). Breakpoints are
-       the editor's, not the workspace's: the reset removes them. All three since (2026-11-18): the reset restarts
-       TypeScript when it removed a tsconfig (*Watching*); live-values sets its breakpoint by Go to Line (a file opened
-       before keeps its cursor where it was left); commit-beside was the driver — keepFocus held every blur, a focus moving
-       within a document's too (fixed on main). Every spec sharing, one at a time: 43 of 43 in 300 s, against 350 with an
-       editor each, the renderer at 5.3 GB at most. On main since (2026-11-18): every test shares but those whose subject a
-       reset doesn't put back, each saying why (`own`: a reload in reload, past-runs and your-edits; a user setting in
-       workbench; a window's first debug session in live-runs) and those with `?extension=`. A shared editor serves 4 tests,
-       then goes (`SHARED_USES`), and one idle 15 s goes too.
-     - **What can't share**: a test that leaves what teardown can't put back, or needs what only one editor can have
-       (its boot: instances, reload, the starter, `?extension=`), keeps `openEditor`, and says why.
-     - **Then**: lanes are measured past one as memory allows (one at a time, the renderer peaked at 5.1 GB). A spec that fails beside
-       a copy of itself is a bug in the spec (unit test files already pass so, 2026-11-04: *Tests at once*). Measured
-       2026-11-18, sharing: two specs at once in one session crashed its renderer by the fourteenth (5.6 GB after the first,
-       the page's own heap 180 MB: one editor is ~0.8 GB of JavaScript once a file's open — the workbench 241 MB, the
-       extension host 224, four extension workers 51–110 each — and 1.7–2.4 GB of renderer). The ~9 GB limit is a
-       renderer's, so lanes are sessions, each its own browser (`IN_EDITOR_SESSIONS`, test/in-editor.mjs: one queue, each
-       session taking the next spec): two ran all 43 in 213 s against 304 one at a time, each renderer near 5 GB, most specs
-       as fast as alone. What two sessions found, each a spec meeting another's editor in an order one session never gives:
-       the Margin lost a line's values when the file stopped parsing after a fix on save had moved it (its lines were
-       followed by position only: fixed, `lineMap` keeps lines still there, editor-api's anchors.test.mjs) — a person's bug,
-       ESLint being up already decided it. And the rest, each fixed (2026-11-18): Pin… found what past runs saw at a call
-       by its line number, so a line put above it (that same fix on save) left it nothing to offer — now each past run's
-       values are followed into the text by their code, as the Margin's are (pin.ts); TypeScript's own "Update imports?"
-       asked after a move the editor had already made the edits for, once its project was up (a Yes would make them
-       again) — its `*.updateImportsOnFileMove.enabled` are "never" by default (workbench/workspace.ts), file-moves renames
-       a second time with TypeScript up; and two specs that assumed a window nothing had run in — a debug toolbar VS
-       Code keeps, hidden (live-runs: hidden, not absent), and History's "Runs say" count, said as what changed once
-       anything's run (edits-change: either). Two sessions: 43 of 43 in 170 s, one session 43 of 43 in 306. Two is the default here, one on CI (`CI` set).
-       Made the default, eslint.spec's first test failed after dev-server.spec, every time: a lint waiting on ESLint's
-       boot outlasted its file (the reset removed it; its document lived on, not closed), and put its problems back on
-       a file that was gone — crowding Problems so the test's row wasn't drawn. A person deleting a file while ESLint is
-       busy has the same. Fixed (extensions/eslint: dropped `gone` when its file isn't there once it returns). Its
-       problem, "isolated.ts was not found by the project service", was the same race, not a boot's: the lint ran once
-       ESLint was up, after the reset had removed the file (a file made from the terminal while ESLint boots is linted,
-       and dev-server.spec alone leaves no problems, 2026-11-18).
-   - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
-     into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
-     green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,
-     `stream/web` and `stream/consumers` there, 57 and 398. A run's clock and randomness stay its event loop's, so step-back
-     still replays. What holds the rest, by tests: the Worker runtime (`workerd`, `miniflare`: packages/api, 170); real
-     Playwright launching a browser (`engine.test`, 78); `registerHooks` (73); silent for 120 s, slow or hung, not known which
-     (52; a stall loses what passed before it); the script's own copying of `zod` and `typescript` (47, not measured); the
-     capability policy, on `/tmp` and `exec` (32). `BroadcastChannel` is left out on purpose: this one reaches every tab of
-     the origin, the editor's own included, so its 2 tests want one of the run's own. 19 of the 32 files under
-     packages/almostnode/test and packages/bablr-language-ts/test are scripts, not tests. A UI spec's coverage isn't visible to
-     tsval (the editor it drives runs as a plain bundle) until everything runs in tsval, as it's meant to.
+   - **Gaps found while reducing** (2026-11-02, not seen to since): `git_checkout` can't switch to a branch the shallow
+     clone hasn't fetched (`git.show` fetches one); `git_pull` says "diverged" when main moved under a branch (a merge in
+     the editor would settle it); the editor reloaded itself three times under large edits (Vite's socket closed on both
+     frames, its client reloading the page; the calls in flight lost); `files_edit` has no line-range cut; `runs_stop`
+     doesn't stop a `runs_tests` run; `files_grep`'s scope argument is `glob`; tsval's busy heartbeat rides its
+     `observe` and `called` hooks, so its site sums, coverage and purity (which nothing reads) can go only once it has a
+     source of its own.
+   - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
+     (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
+     `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Not yet trusted:
+     every commit of the last 80 touched a file no test here reaches; replayed, 34 of them would run everything (code
+     nothing reaches, package.json, the workflow). Next: reach for what's untested here, the UI specs' most; then rerun as
+     you write, checking coverage and capability expansion (silo README).
+   - **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
+     reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
+     (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
+     API stood in for: a `route` of the editor's own would move it) and performance.mjs (budgets, from outside). Of the
+     unit tests across the repository (measured 2026-11-04, 124 files), what holds the rest in the debugger: the Worker
+     runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
+     (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
+   - **What reintroduced features left for later**: Features and tests without CI's outcomes, coverage, per-test
+     effects or a filter (`touched` and `resting` are item 3's); *Capabilities confirmed by runs* without its static half
+     (whether the code could still make the call: a sweep of the project), the baseline's join, or capabilities by
+     feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin; *Tests at once*' flag from
+     what a test touches (the gate's effects) rather than last runs.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
-     as its feature is reintroduced (`code_move` has the Explorer's move now, which keeps imports right). `code_query` and `code_rewrite` (no command), `decisions_for` (`code_reach` has the lightbulb's *What … reaches* now), `git_blame`, `runs_affected`
-     and `runs_ledger` (the tests-by-feature list would be their view),
-     `editor_trace`, `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable
-     view; the monitor has rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`,
-     `runs_tests` have the terminal (`git`, `node --test`, `node`), which agents gave up on 2026-10-27;
-     `page_eval` and `page_query`, the browser's devtools.
+     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `decisions_for`, `git_blame`,
+     `runs_affected` and `runs_ledger` (the tests-by-feature list would be their view), `editor_trace`,
+     `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable view; the monitor has
+     rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`, `runs_tests` have the
+     terminal (`git`, `node --test`, `node`); `page_eval` and `page_query`, the browser's devtools.
+   - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
 3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
    what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is
    made at commit time, per person, by the tests run in the editor, and names the declarations each ran, so it lapses
@@ -742,18 +141,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   sent to someone-…@example.com", bc7a208, a workflow-only change; passed on rerun). If it comes back, find what a
   second test's sign-in code reaches in the first's mailbox (a shared mail stub, or an address not unique enough).
 
-- **tour-capabilities' package prompt timed out waiting for the baseline** once in CI (af79463; passed on rerun). The
-  baseline is made as the project opens, from the CDN; the same run's log has CDN fetches failing. If it comes back,
-  find whether the baseline waits on a fetch that failed, and make the test (or the baseline) say so.
-
 - **isomorphic-git's "racy git"**: a same-size rewrite within the second it was staged goes unseen (the terminal's
   `git` test notes it; real git guards against it). Fix in the git engine if it bites.
-
-- **tour-capabilities' `debug.start` hang** (pre-existing; none in nine reruns, then on 6e60505 and a74004d in a row).
-  Both times the second start of *a gated call asks on its line* (Skip, right after Deny's run ended with EACCES) stuck
-  at "followed, waiting for its first stop" (`Session.settled`): once it answered 30 ms later with no reason, once never.
-  The whole tour passes locally (24/24). The assertion now prints the outcome's state, line and output: read it on the
-  next failure, fix that step, then delete this.
 
 - **A file made on disk doesn't join the TypeScript project** (found 2026-10-29) until a language feature asks of it:
   VS Code's TypeScript extension builds the watchers its browser server asks for from `Uri.file(path)`, and that
@@ -773,60 +162,43 @@ packages/editor (`--all`, `--runs N`, `--json`).
   2026-11-04, on CI's first saves. ESLint's fix doesn't wait for its worker to load, and saves again when it sees that cancel
   (`extensions/eslint/extension.ts`). Another provider that's slow to answer could still lose a save. The agents' `files_edit` /
   `files_write` still try again (workspace-tools.ts `applyAndSave`).
+
 - **The in-editor specs' renderer** (found 2026-11-10): every spec's editor is a frame of one page, so they share its
   renderer, which kept about 60 MB a spec that never came back (not JavaScript: at the end of a run that held 6.2 GB,
   `measureUserAgentSpecificMemory` found 0.8 GB live, the outer editor alone), and near 9 GB it crashed. Measured one
   spec at a time (2026-11-17), little stays: the climb was two specs' editors live at once, and a popup left open as its
-  editor went (theme `src/popups.js`). So the specs run one at a time in one session (2026-11-18, test/in-editor.mjs),
-  peaking at 5.1 GB. What's left to shrink is the editor itself: each runs its own TypeScript servers, ESLint, BABLR and
+  editor went (theme `src/popups.js`). So the specs run one at a time in each session (two here, one on CI: test/in-editor.mjs),
+  a renderer peaking near 5 GB. What's left to shrink is the editor itself: each runs its own TypeScript servers, ESLint, BABLR and
   so on.
+
 - **A new terminal didn't come in preview-profile.spec on CI** (1b36c848 and 4e9ae421, 2026-11-10): Terminal: Create New
   Terminal, and no `.xterm-rows` within 30 s. Both times beside preview-devtools.spec, which opens a terminal of its own at
   the same point, in the same page: the palette closes when its window loses focus, and an Enter then runs nothing. Not
   reproduced locally (three runs of the preview specs two at a time, CPU four times slower). editor.mjs's `openTerminal`
   now asks again if none has come in 15 s, and `runCommand` opens the palette again if it lost focus before Enter (not by
   its keys, Ctrl+Shift+`: with a file open that brought none). If it comes back, it wasn't the focus.
+
 - **preview-session.spec saw no debug session** (local, 2026-11-10, once in three with the CPU four times slower and the preview
   specs two at a time): the dev server served its page, and the toolbar, the session list and the status bar had nothing.
   Again on CI 2026-11-16 (cde152ee's specs, 1 of 40: no Stop, `{"toolbar":[],"sessions":[],"status":[]}`), passing in five
   full runs here that day.
-- **past-runs.spec's runs, after a reload: 2 of 3** (2026-11-16; fixed 2026-11-18): not the reload — the first run was never
-  kept. Its keep's `mkdir` under `.silo/local` (VS Code's provider, synchronous) met the folder held by the save's edit
-  history (edit-history.ts, zen-fs's `promises`, between its awaits), and a synchronous call can't wait on zen-fs's folder
-  lock: EAGAIN, "resource temporarily unavailable", the run lost. Under load, about one run in four. A person's too: any
-  write through the provider beside git's or edit history's on the same folder. The provider asks again for up to 2 s
-  (workbench/workspace-fs.ts `settled`); 12 of 12 two at once since, none lost.
-- **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
-  replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
-  the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
-  gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files; and a
-  lint that outlasts its file is dropped, `gone`), not seen for a load.
-- **source-control.spec listed a file it had just committed** (CI at 87e3620f, 2026-11-19; fixed the same day): a
-  commit wasn't a change to the git service's shared walks (workbench/git-service.ts), so a walk begun before it (one a
-  late write started) answered the Source Control view's refresh after it. Its commit counts as one now, as it begins
-  and as it's made (test/git-service.test.mjs fails without it). Counting every `git.changed` instead (5ba4ac64) made a
-  walk more a burst of changes, and rules.spec's run never reached the Debug Console in two full runs of two (38 s
-  against 9–14), passing alone; with only the commit counted, 43 of 43. Three different specs failed in three CI runs
-  that day, each passing the next.
-- **mock-value.spec's lost rule not in Problems** (2026-11-18 locally, 2026-11-19 on CI at d0cf69cb): "a variable set on
-  every run…" waits 60 s for the row "A rule's place in this file is lost" (extensions/margin/placed.ts) and sees none.
-  Both times live-values.spec ran just before it in the same session; on CI the status bar said 2 errors and 1 warning
-  as it failed, so a warning was there and the row wasn't found. Not reproduced in nine runs (alone; four in a row
-  beside a loaded session; after live-values; after live-runs and live-values, twice). Fixed by reading, not
-  reproduced (2026-11-19): `placedMarks` set the file's problems from whatever answer came back last — the pane drops a
-  draw that finishes late, its problems didn't — so under load an answer for a text the spec had typed past (mid-retype,
-  unparsable: none) wiped out the lost rule's warning. Now an answer for an edited text, or no answer, leaves them. The same CI run: way-in-reach.spec's lightbulb never showed (once); the next
-  push's run passed whole.
+
 - **unpkg answered 404 for a file it has** (02be5dbc's architecture run, 2026-11-18): workbench.spec's "the service worker
   serves a package's file from the CDN" got 404 for `react@18.3.1/package.json` through the dev server's CDN proxy
   (build/package-types.ts `nodeModulesCdnPlugin`, unpkg), which unpkg served a few hours later. Its first. If it comes
   back, the proxy could ask jsDelivr when unpkg says 404, as the service worker's own CDN fallback might.
+
 - **TypeScript keeps a removed tsconfig.json's project** (found 2026-11-18): its problems (with `allowJs` and `include`
   `**/*`, "Cannot write file … would overwrite input file") stayed on the gone file after a shared editor's reset, which
   restarts TypeScript's server when it removed one. Not a person's: removed from the terminal — a file open, or every
   editor closed first — its problem goes within seconds (2026-11-18, a throwaway spec, both watchers:
   `typescript.tsserver.experimental.useVsCodeWatcher` on and off). What's different in the reset (its writes straight to
   zen-fs, in a burst) isn't known; the restart stays.
+
+- **mock-value.spec's lost rule, way-in-reach.spec's lightbulb** (CI, 2026-11-18 and -19, once each, passing alone and the
+  next run): the first fixed by reading (2026-11-19: the Margin set Problems from whatever answer came back last, the
+  pane's own draw guarded and its problems not; extensions/margin/placed.ts), not reproduced; the second not looked
+  into. If either comes back, the fix didn't take.
 
 ## Decisions
 

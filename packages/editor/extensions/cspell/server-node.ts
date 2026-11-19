@@ -56,7 +56,7 @@ async function check(uri: string, languageId: string, text: string): Promise<voi
 
 			return {
 				// (a hint: dots under the word and its message on hover, not a row in Problems, where a file's worth drowned
-				// everything else — NEXT.md)
+				// everything else)
 				"severity": DiagnosticSeverity.Hint,
 				"range": { "start": start, "end": end },
 				"message": `Unknown word: "${issue.text}"`,

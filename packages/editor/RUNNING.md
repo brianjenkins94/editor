@@ -110,7 +110,7 @@ stepping back through UI code, but stepping back needs stopping first. Not plann
 
 A test file is a program like any other: `node --test` in the terminal runs each file it's given (or every test file
 under the directory, as node finds them) in the debugger, one after another, and fails if a test did. Breakpoints,
-stepping and capability stops work in a test as anywhere. Decided 2026-10-23 (NEXT.md's decision c): tests run on
+stepping and capability stops work in a test as anywhere. Decided 2026-10-23: tests run on
 tsval, in the editor.
 
 **`node:test` is the editor's** (extensions/tsval/node-test.js): JavaScript tsval runs as the program's own code, so a
@@ -153,6 +153,19 @@ added to make tests pass): the runtime changes only for a gap a person's own pro
 copy's destination asked about, a timer native code sets — not for a test's scaffolding, a stand-in module, a fake
 Worker, a module loaded that the test doesn't use. Where it's the test, its logic moves out of its wiring to be tested
 directly (history's ledger-checks.ts, cosmetic's verdicts.ts).
+
+**The editor's own specs share an editor** (test/in-editor/; the user, 2026-11-17: set up and tear down, idempotent,
+not in each other's way — how tests are written from the start, not a speed-up after). A spec is written to run in an
+editor another spec used before it, and beside another: it makes what it needs and assumes nothing it didn't make.
+`openEditor` hands a test a shared editor (`?shared`, shell/preview-windows.tsx), reset as the test before let it go
+(workbench/effects.ts): runs and debug sessions stopped, breakpoints removed, terminals, editors, panel and quick input
+closed, the Explorer shown, the workspace — `.git` and `.silo` in it — written back as it came up, and the test's files
+seeded. Each editor says what it was left with as a test lets it go (`leaves`, printed by test/in-editor.mjs): the
+inventory of what a reset has to put back. A shared editor serves four tests (`SHARED_USES`); a failed test's window is
+left to look at, and its editor isn't shared again. A test whose subject a reset doesn't put back — a reload, a user
+setting, a window's first debug session, an extension by its address — has an editor of its own and says why (`own`).
+Specs run one at a time in each session, two sessions here and one on CI (`IN_EDITOR_SESSIONS`), each its own browser:
+an editor is about 0.8 GB of JavaScript and 2 GB of renderer, and a renderer crashes near 9 GB.
 
 ## Capability stops
 

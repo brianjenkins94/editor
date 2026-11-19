@@ -57,7 +57,7 @@ fetch("https://example.com/a");
 
 	const rows = await problems(workbench);
 	const call = (text) => rows.filter({ "hasText": text });
-	// (by the keyboard: a click on a row can close a picker when it isn't a person's: NEXT.md)
+	// (by the keyboard: a click on a row of a picker closed it on CI, 10 of 10, and not in a browser)
 	const pick = async (text) => {
 		const input = workbench.locator(".quick-input-widget input").first();
 		const row = workbench.locator(".quick-input-list .monaco-list-row.focused", { "hasText": text });

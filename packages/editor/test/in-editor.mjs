@@ -126,7 +126,7 @@ async function closeLeftOpen(session) {
  *  the page's same-origin frames). One since 2026-11-18: two at once (since 2026-11-09, when three crashed near 9 GB) held
  *  two editors live in that renderer, 5.6–7.3 GB between specs, and a session of twelve crashed near 9 in 3 runs of 5; and
  *  beside each other some specs took ten times as long (commit-beside, dependency-baseline). One at a time, all 43 ran in
- *  one session, peaking at 5.1 GB, in 351 s against 266 (NEXT.md item 2, *Specs share an editor*). */
+ *  one session, peaking at 5.1 GB, in 351 s against 266 (RUNNING.md, *Tests*). */
 const AT_ONCE = Number(process.env.IN_EDITOR_AT_ONCE ?? 1);
 /** How many specs a session runs before the next one starts afresh (a browser's start and the outer editor's boot each
  *  time): all of them, one at a time leaving the renderer nothing that grows. Eight, two at once. */

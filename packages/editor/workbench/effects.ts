@@ -1,5 +1,5 @@
 /**
- * What this editor has done to itself since it came up (NEXT.md item 2, *Specs share an editor, by design*): the workspace's
+ * What this editor has done to itself since it came up (RUNNING.md, *Tests*: specs share an editor): the workspace's
  * files made, changed or removed, git's branch and HEAD if they moved, runs still going (and the ports they serve) and the
  * editors left open. A test that drove it says so as it lets its window go — what it leaves, which a test after it in the
  * same editor would meet — asked on `editor.effects` by this editor's instance, as a page's realms are asked what they ran
@@ -106,7 +106,7 @@ export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log:
 	};
 
 	/**
-	 * The editor as it came up, for the next test that shares it (NEXT.md item 2, *Specs share an editor*), with `seed`'s
+	 * The editor as it came up, for the next test that shares it (RUNNING.md, *Tests*), with `seed`'s
 	 * files on it: its runs and debug sessions stopped, its breakpoints removed, its terminals, editors, panel, quick input and
 	 * notifications closed, the Explorer shown (a test may have left another view in the side bar), and the workspace written
 	 * back as it was — a file made since removed, one changed or removed since as it was, git's

@@ -533,8 +533,8 @@ function install(hub: Hub): void {
 	/** The window each test's page has, while its test runs; and which of them it opened. */
 	const claimed = new Map<string, HTMLElement>();
 	const openedForPage = new Set<HTMLElement>();
-	/** Shared editors' windows no test has now, each an editor up and reset for the next (NEXT.md item 2, *Specs share an
-	 *  editor*): a test going to a `shared` address takes one, rather than booting an editor of its own. */
+	/** Shared editors' windows no test has now, each an editor up and reset for the next (RUNNING.md,
+	 *  *Tests*: specs share an editor): a test going to a `shared` address takes one, rather than booting an editor of its own. */
 	const idle: HTMLElement[] = [];
 
 	// With the dev server counting (COVERAGE=1, build/coverage.ts): what a page's window ran is the test's. The realms there
@@ -652,7 +652,7 @@ function install(hub: Hub): void {
 			claimed.delete(asking);
 
 			// (a shared editor's, its test passed, waits for the next — until it's served SHARED_USES, as an editor doesn't yet give back
-			// all a test's work took: NEXT.md item 2; one that failed is left to look at, and not shared again)
+			// all a test's work took; one that failed is left to look at, and not shared again)
 			const uses = Number(element?.dataset["sharedEditor"] || 0) + 1;
 
 			if (element?.dataset["sharedEditor"] !== undefined && given[0] !== true && element.isConnected && uses < SHARED_USES) {

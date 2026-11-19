@@ -261,7 +261,7 @@ const HELD_FOR_MS = 2000;
  *  provider's methods, which do all their work synchronously. A folder held by async work on this thread (zen-fs's
  *  `promises`, between its awaits: edit-history.ts, git-engine.ts) is EAGAIN to a synchronous call, which can't wait for
  *  it — so it's asked again shortly, as zen-fs's own async calls wait: a run's keep under `.silo/local` while a save's
- *  edit history was written there was lost (NEXT.md, *past-runs.spec's runs*). Each method does the same again, asked
+ *  edit history was written there was lost (past-runs.spec, fixed in 022d6766). Each method does the same again, asked
  *  again: a parent made, a file written whole, a removal forced. */
 function settled<T>(body: () => T): Promise<T> {
 	const until = Date.now() + HELD_FOR_MS;

@@ -1,7 +1,7 @@
 /**
  * What a test running in the editor uses to open one, holding only the files it's given, and the way a person gets around
- * it: one booted once and reset for each test with its files (workbench/effects.ts, shell/preview-windows.tsx; NEXT.md
- * item 2, *Specs share an editor, by design*), so a test meets what one before it may have left, as a person's editor does.
+ * it: one booted once and reset for each test with its files (workbench/effects.ts, shell/preview-windows.tsx;
+ * RUNNING.md, *Tests*: specs share an editor), so a test meets what one before it may have left, as a person's editor does.
  * One about what a reset doesn't put back (a reload, a user setting, a window's first anything) has one of its own, and says
  * why (`own`).
  */
