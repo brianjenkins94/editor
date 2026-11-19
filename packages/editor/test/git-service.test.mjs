@@ -1,8 +1,7 @@
 /**
  * The git service's walks of the working tree (workbench/git-service.ts): askers that overlap share one, so long as nothing
- * changed since it began. A commit, a checkout or a pull — whatever says `git.changed` — is a change too: a walk begun
- * before it answered whoever asked after it, so the Source Control view kept listing a file just committed (CI,
- * source-control.spec, 2026-11-19). VS Code's API, stood in for what the service reaches of it; on zen-fs's in-memory
+ * changed since it began. Its commit is a change too: a walk begun before it answered whoever asked after it, so the
+ * Source Control view kept listing a file just committed (CI, source-control.spec, 2026-11-19). VS Code's API, stood in for what the service reaches of it; on zen-fs's in-memory
  * filesystem.
  *
  *   node --import tsx --test test/git-service.test.mjs
@@ -18,9 +17,17 @@ const { installGitService } = await import("../workbench/git-service.ts");
 
 const DIR = "/workspace";
 const event = () => () => ({ "dispose": () => undefined });
+/** The commands the service registers, by name. */
+const commands = new Map();
 const vscode = {
 	"Uri": { "file": (path) => ({ "path": path }) },
-	"commands": { "registerCommand": () => ({ "dispose": () => undefined }) },
+	"commands": {
+		"registerCommand": (name, handler) => {
+			commands.set(name, handler);
+
+			return { "dispose": () => undefined };
+		}
+	},
 	"workspace": {
 		"fs": { "readFile": async ({ path }) => fs.promises.readFile(path) },
 		"onDidSaveTextDocument": event(),
@@ -46,7 +53,7 @@ function counting() {
 	return { "log": log, "walks": walks };
 }
 
-test("a walk begun before git.changed doesn't answer who asks after it: they walk again", async () => {
+test("a walk begun before a commit doesn't answer who asks after it begins: they walk again", async () => {
 	await fs.promises.rm(DIR, { "recursive": true, "force": true });
 	await fs.promises.mkdir(DIR, { "recursive": true });
 	await engine.ensureRepo();
@@ -65,13 +72,13 @@ test("a walk begun before git.changed doesn't answer who asks after it: they wal
 	const alongside = service.status();
 
 	assert.equal(walks.count, 1);
-	// (git.changed said while that walk is out — a commit, a checkout, a pull — and asked again)
-	hub.publish("git.changed");
 
+	// (a commit begun while that walk is out — the Source Control view's, from its input box — and asked again)
+	const committing = commands.get("editor.git.commit")("a");
 	const after = service.status();
 
-	assert.equal(walks.count, 2, "asked after git.changed, it walks again");
-	await Promise.all([first, alongside, after]);
+	assert.equal(walks.count, 2, "asked after the commit began, it walks again");
+	await Promise.all([first, alongside, committing, after]);
 });
 
 test("after a commit, the committed file isn't listed", async () => {
@@ -83,7 +90,6 @@ test("after a commit, the committed file isn't listed", async () => {
 
 	await fs.promises.writeFile(`${DIR}/b.txt`, "b\n");
 	assert.ok((await service.status()).files.some(({ path }) => path === "b.txt"));
-	await engine.commitAll("b");
-	hub.publish("git.changed");
+	await commands.get("editor.git.commit")("b");
 	assert.deepEqual((await service.status()).files.filter(({ path }) => path === "b.txt"), []);
 });

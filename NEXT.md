@@ -838,17 +838,19 @@ packages/editor (`--all`, `--runs N`, `--json`).
   lint that outlasts its file is dropped, `gone`), not seen for a load.
 - **source-control.spec listed a file it had just committed** (CI at 87e3620f, 2026-11-19; fixed the same day): a
   commit wasn't a change to the git service's shared walks (workbench/git-service.ts), so a walk begun before it (one a
-  late write started) answered the Source Control view's refresh after it. Whatever says `git.changed` — a commit, a
-  checkout, a pull — counts now (test/git-service.test.mjs fails without it). The same full run here: rules.spec's
-  Debug Console output didn't show once (passing alone); three different specs failed in three CI runs that day, each
-  passing the next.
+  late write started) answered the Source Control view's refresh after it. Its commit counts as one now, as it begins
+  and as it's made (test/git-service.test.mjs fails without it). Counting every `git.changed` instead (5ba4ac64) made a
+  walk more a burst of changes, and rules.spec's run never reached the Debug Console in two full runs of two (38 s
+  against 9–14), passing alone; with only the commit counted, 43 of 43. Three different specs failed in three CI runs
+  that day, each passing the next.
 - **mock-value.spec's lost rule not in Problems** (2026-11-18 locally, 2026-11-19 on CI at d0cf69cb): "a variable set on
   every run…" waits 60 s for the row "A rule's place in this file is lost" (extensions/margin/placed.ts) and sees none.
   Both times live-values.spec ran just before it in the same session; on CI the status bar said 2 errors and 1 warning
   as it failed, so a warning was there and the row wasn't found. Not reproduced in nine runs (alone; four in a row
-  beside a loaded session; after live-values; after live-runs and live-values, twice). A lead, unconfirmed: `placedIn`
-  answers nothing when BABLR has no answer (`unavailable`, `unparsable`), and `placedMarks` then clears the file's
-  problems until the Margin is asked again. The same CI run: way-in-reach.spec's lightbulb never showed (once); the next
+  beside a loaded session; after live-values; after live-runs and live-values, twice). Fixed by reading, not
+  reproduced (2026-11-19): `placedMarks` set the file's problems from whatever answer came back last — the pane drops a
+  draw that finishes late, its problems didn't — so under load an answer for a text the spec had typed past (mid-retype,
+  unparsable: none) wiped out the lost rule's warning. Now an answer for an edited text, or no answer, leaves them. The same CI run: way-in-reach.spec's lightbulb never showed (once); the next
   push's run passed whole.
 - **unpkg answered 404 for a file it has** (02be5dbc's architecture run, 2026-11-18): workbench.spec's "the service worker
   serves a package's file from the CDN" got 404 for `react@18.3.1/package.json` through the dev server's CDN proxy

@@ -115,13 +115,6 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		return result;
 	};
 
-	// A commit, a checkout or a pull is a change too, said as `git.changed` (by this service, git-push.ts, the terminal's
-	// git): a walk begun before it doesn't answer who asks after it — the Source Control view's refresh after its commit
-	// kept listing what it had just committed (CI, source-control.spec, 2026-11-19).
-	hub.subscribe("git.changed", () => {
-		changes += 1;
-	});
-
 	serve(hub, "git.status", async (args) => status({ "whole": (args as { "whole"?: boolean } | null | undefined)?.whole === true }));
 	vscode.commands.registerCommand("editor.git.status", async () => status());
 
@@ -174,6 +167,12 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 		let made: engine.Committed;
 
+		// (a commit is a change to the working tree's status: a walk begun before it, or while it's made, doesn't answer
+		// who asks after it — the Source Control view's refresh after its commit kept listing what it had just committed,
+		// CI's source-control.spec, 2026-11-19. Only the commit's: every `git.changed` counted made a walk more a change,
+		// and under load rules.spec's run never reached the Debug Console.)
+		changes += 1;
+
 		// `files` present → a selective commit (the panel's picks, an agent's files or hunks); absent → every change.
 		if (request?.files === undefined) {
 			made = await engine.commitAll(message);
@@ -184,6 +183,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 			made = await engine.commitSelection(message, picked.filter((each) => each !== undefined));
 		}
 
+		changes += 1;
 		hub.publish("git.changed");
 		log.info("git commit (service)", { "oid": made.oid.slice(0, 7), "files": request?.files?.length });
 

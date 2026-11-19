@@ -37,8 +37,8 @@ export async function referLine(document: vscode.TextDocument, line: number): Pr
 	return "value" in answer ? answer.value[0] : undefined;
 }
 
-/** The rules placed in `document`, as it is now. */
-export async function placedIn(document: vscode.TextDocument): Promise<Placed[]> {
+/** The rules placed in `document`, as it is now; undefined when that can't be said (it doesn't parse, or there's no BABLR). */
+export async function placedIn(document: vscode.TextDocument): Promise<Placed[] | undefined> {
 	const file = vscode.workspace.asRelativePath(document.uri, false);
 	const files = await loadPolicyFiles();
 	const rules = (["mine", "shared"] as const).flatMap((whose) => (files?.[whose].rules ?? []).flatMap((rule) => (policy.placesOf(rule) as SpanRef[]).filter((ref) => ref.file === file).map((ref) => ({ "rule": rule, "whose": whose, "ref": ref }))));
@@ -52,7 +52,7 @@ export async function placedIn(document: vscode.TextDocument): Promise<Placed[]>
 
 	// (the text can't be parsed as it is, or there's no BABLR: nothing to say this time)
 	if (!("value" in answer)) {
-		return [];
+		return undefined;
 	}
 
 	return rules.map((placed, index) => {
@@ -89,7 +89,15 @@ export async function placedMarks(uri: string): Promise<PaneMark[]> {
 		return [];
 	}
 
+	const { version } = document;
 	const placed = await placedIn(document);
+
+	// (nothing to say — mid-edit, the text doesn't parse — or said of a text edited since, which a later ask answers: what
+	// was said stays. An answer coming back late for a text typed past wiped out the one for the text as it is, under load:
+	// mock-value.spec's lost rule, missing from Problems, NEXT.md)
+	if (placed === undefined || document.version !== version) {
+		return [];
+	}
 
 	// On the code too, as a call a rule decides is: what runs isn't what this line says.
 	collection?.set(document.uri, placed.map((each) => {
@@ -145,7 +153,7 @@ export function installPlaced(context: vscode.ExtensionContext, log: ObservedExt
 					return made;
 				};
 
-				return (await placedIn(document)).flatMap((each) => [
+				return (await placedIn(document) ?? []).flatMap((each) => [
 					...applies(each) ? [] : [action(`Put the rule back here: ${each.sentence}`, "margin.placeRule", each.whose, each.rule, document.uri.toString(), range.start.line)],
 					...(each.line === range.start.line || !applies(each)) && each.whose === "mine" ? [action(`Take out your rule: ${each.sentence}`, "capabilities.takeOut", each.rule)] : []
 				]);

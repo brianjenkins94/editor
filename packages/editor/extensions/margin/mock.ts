@@ -74,7 +74,7 @@ export function installMock(context: vscode.ExtensionContext, log?: ObservedExte
 				}
 
 				const target = `variables.${name}`;
-				const previous = (await placedIn(document)).find((each) => each.whose === "mine" && each.line === line && each.rule.then.some((action) => action.target_id === target));
+				const previous = (await placedIn(document) ?? []).find((each) => each.whose === "mine" && each.line === line && each.rule.then.some((action) => action.target_id === target));
 				const rule: Rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "at", "operator_id": "is", "argument": ref }] }, "then": [{ "action_id": "set", "target_id": target, "argument": valueOf(typed) }] };
 
 				await replaceRule(previous?.rule, rule);
