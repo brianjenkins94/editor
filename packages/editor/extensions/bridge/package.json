@@ -26,6 +26,11 @@
         "category": "Editor"
       },
       {
+        "command": "editor.decisions.show",
+        "title": "What's Been Decided About This File…",
+        "category": "History"
+      },
+      {
         "command": "editor.git.openRef",
         "title": "Open a Commit Read-Only…",
         "category": "Git"

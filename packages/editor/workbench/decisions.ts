@@ -1,6 +1,8 @@
 /**
  * What's been decided about a file or a name: `decisions.for` { target } — History's `history.decisions`, the ledger's
- * entries and the docs' lines naming it. Its reader: agents' `decisions_for`.
+ * entries and the docs' lines naming it, and a file's notes. Its readers: a person's *History: What's Been Decided About
+ * This File…* (`editor.decisions.show`: the file in front, or a name asked for, shown read-only beside it) and agents'
+ * `decisions_for`, which asks the same.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
@@ -54,8 +56,54 @@ export function historyAsker(vscode: typeof vscodeApi): (command: string, target
 	};
 }
 
+/** What `decisions.for` answers. */
+interface Decided {
+	"target"?: string;
+	"ledger"?: { "name": string; "status"?: string; "why"?: string; "since"?: string; "what"?: string }[];
+	"docs"?: { "doc": string; "line": number; "heading": string; "text": string }[];
+	"counts"?: { "docs": number };
+	"notes"?: { "line"?: number; "text"?: string; "by"?: string; "status"?: string }[];
+	"error"?: string;
+}
+
+/** The scheme what's been decided is shown under: a read-only document a person reads beside the code. */
+const SCHEME = "editor-decisions";
+
+/** What was decided, as a person reads it. */
+function markdownOf(decided: Decided): string {
+	const lines = [`# What's been decided about ${decided.target ?? "it"}`, ""];
+
+	if (decided.error !== undefined) {
+		return [...lines, decided.error, ""].join("\n");
+	}
+
+	lines.push("## The feature ledger", "");
+	lines.push(...(decided.ledger ?? []).length === 0 ? ["Nothing names it.", ""] : (decided.ledger ?? []).flatMap((entry) => [`- **${entry.name}** — ${entry.status ?? ""}${entry.since === undefined ? "" : ` since ${entry.since}`}: ${entry.why ?? ""}${entry.what === undefined ? "" : `\n  ${entry.what}`}`]), "");
+	lines.push("## The docs", "");
+	lines.push(...(decided.docs ?? []).length === 0 ? ["No line names it.", ""] : [...(decided.docs ?? []).map((doc) => `- ${doc.doc}:${String(doc.line)}${doc.heading === "" ? "" : ` (*${doc.heading}*)`}: ${doc.text}`), ...(decided.counts?.docs ?? 0) > (decided.docs ?? []).length ? [`- …and ${String((decided.counts?.docs ?? 0) - (decided.docs ?? []).length)} more`] : [], ""]);
+
+	if ((decided.notes ?? []).length > 0) {
+		lines.push("## Its notes", "", ...(decided.notes ?? []).map((note) => `- ${note.line === undefined ? "(its place lost)" : `line ${String(note.line)}`}: ${note.text ?? ""}${note.by === undefined ? "" : ` — ${note.by}`}`), "");
+	}
+
+	return lines.join("\n");
+}
+
 export function installDecisions(vscode: typeof vscodeApi, hub: Hub): void {
 	const asked = historyAsker(vscode);
+
+	const decide = async (target: string, signal: AbortSignal): Promise<Decided> => {
+		const decided = await asked("history.decisions", target, signal) as Decided | undefined;
+
+		if (decided === undefined) {
+			return { "target": target, "error": "the history extension didn't answer" };
+		}
+
+		// (a file's notes too: the whys kept beside its code, as the Margin shows them)
+		const notes = target.includes("/") ? await Promise.resolve(vscode.commands.executeCommand<Decided["notes"]>("notes.on", target)).catch(() => undefined) ?? [] : [];
+
+		return notes.length === 0 ? decided : { ...decided, "notes": notes };
+	};
 
 	serve(hub, "decisions.for", async (args, { signal }) => {
 		const { target } = (args ?? {}) as { "target"?: unknown };
@@ -64,15 +112,32 @@ export function installDecisions(vscode: typeof vscodeApi, hub: Hub): void {
 			throw new TypeError("decisions.for takes { target }: a file (its path or its name) or a name (an identifier, a feature)");
 		}
 
-		const decided = await asked("history.decisions", target.trim(), signal) as Record<string, unknown> | undefined;
+		return decide(target.trim(), signal);
+	});
 
-		if (decided === undefined) {
-			return { "error": "the history extension didn't answer" };
+	// A person's: the file in front (or a name, asked for), shown read-only beside it.
+	const shown = new Map<string, string>();
+	const changed = new vscode.EventEmitter<vscodeApi.Uri>();
+
+	vscode.workspace.registerTextDocumentContentProvider(SCHEME, { "onDidChange": changed.event, "provideTextDocumentContent": (uri) => shown.get(uri.toString()) ?? "" });
+	vscode.commands.registerCommand("editor.decisions.show", async (given?: unknown) => {
+		const editor = vscode.window.activeTextEditor;
+		const front = editor?.document.uri.scheme === "file" ? vscode.workspace.asRelativePath(editor.document.uri, false) : undefined;
+		const target = typeof given === "string" && given.trim() !== "" ? given.trim() : await vscode.window.showInputBox({ "title": "What's Been Decided About…", "prompt": "A file's path or name, or a name: an identifier, a feature, a way in", "value": front ?? "" });
+
+		if (target === undefined || target.trim() === "") {
+			return;
 		}
 
-		// (a file's notes too: the whys kept beside its code, as the Margin shows them)
-		const notes = target.includes("/") ? await Promise.resolve(vscode.commands.executeCommand<unknown[]>("notes.on", target.trim())).catch(() => undefined) ?? [] : [];
+		const decided = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Window, "title": `What's been decided about ${target.trim()}` }, async () => decide(target.trim(), new AbortController().signal));
+		const uri = vscode.Uri.from({ "scheme": SCHEME, "path": `/${target.trim()}.md` });
 
-		return notes.length === 0 ? decided : { ...decided, "notes": notes };
+		shown.set(uri.toString(), markdownOf(decided));
+		changed.fire(uri);
+
+		const document = await vscode.workspace.openTextDocument(uri);
+
+		await vscode.languages.setTextDocumentLanguage(document, "markdown");
+		await vscode.window.showTextDocument(document, { "viewColumn": vscode.ViewColumn.Beside, "preview": true });
 	});
 }

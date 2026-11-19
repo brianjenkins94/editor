@@ -23,8 +23,8 @@ How it's kept:
      first write-back 1.6 s, the restore at boot 0.43 s). What's left, by gain: each zen-fs lookup walks from the root
      (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — asked upstream (#329); the
      provider answering a path's `stat` from a cache its change path invalidates (16.7k → ~4.4k lookups in a cold load,
-     99.9% of them tsserver's module resolution, 2026-11-02); history's readManifests reading only files that can hold a
-     manifest (2,319 reads, 1,325 of them packages/tsval/vendor); the folders the restore makes through zen-fs (723 for
+     99.9% of them tsserver's module resolution, 2026-11-02: ~2–5 s of a 54 s cold load, and every realm that writes
+     zen-fs directly — git, the workers, a run — would have to keep it true); the folders the restore makes through zen-fs (723 for
      8,278 stats); then the file store's work in a worker. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
      (write 2.8 → 3.7 s, stat 1.2 → 1.6 s for 2,258 files), patched or not: upstream's to hear of.
    - **Type gaps** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one run showed it after 4
@@ -73,7 +73,7 @@ How it's kept:
      feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin; *Tests at once*' flag from
      what a test touches (the gate's effects) rather than last runs.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
-     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `decisions_for`, `git_blame`,
+     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `git_blame`,
      `runs_affected` and `runs_ledger` (the tests-by-feature list would be their view), `editor_trace`,
      `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable view; the monitor has
      rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`, `runs_tests` have the
@@ -206,6 +206,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   run it started 5 s later took the Debug Console from F5's. A live run follows a change only when it's typed (the
   document dirty: extensions/tsval/live-run.ts). Blamed at first on counting every `git.changed` (5ba4ac64), which two
   full runs of two seemed to show; it failed without that too.
+
+- **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
+  took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
 - **mock-value.spec's lost rule not in Problems** (2026-11-18 and twice on 2026-11-19: locally, on CI at d0cf69cb, and
   locally again after the fix below; each after live-values.spec in its session, passing alone): "a variable set on

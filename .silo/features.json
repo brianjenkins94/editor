@@ -2866,14 +2866,17 @@
       "agent tool|decisions_for",
       "command|history.decisions",
       "core module|installDecisions",
-      "hub request|decisions.for"
+      "hub request|decisions.for",
+      "command|editor.decisions.show",
+      "text document content provider||workbench/decisions.ts"
     ],
     "paths": [
       "packages/editor/app/tools/decisions/",
       "packages/editor/workbench/decisions.ts"
     ],
     "tests": [
-      "packages/editor/test/history-ledger.test.mjs"
+      "packages/editor/test/history-ledger.test.mjs",
+      "packages/editor/test/in-editor/decisions.spec.mjs"
     ]
   },
   "Workbench boot": {
