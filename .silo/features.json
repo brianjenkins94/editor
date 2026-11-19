@@ -1028,7 +1028,8 @@
       "packages/editor/test/git-fast-forward.test.mjs",
       "packages/editor/test/git-diff.test.mjs",
       "packages/editor/test/silo-kept.test.mjs",
-      "packages/editor/workbench/terminal/commands/git/git.test.mjs"
+      "packages/editor/workbench/terminal/commands/git/git.test.mjs",
+      "packages/editor/test/git-service.test.mjs"
     ]
   },
   "GitHub API proxy": {

@@ -447,11 +447,11 @@ export const app = subcommands({
 				}
 
 				const more = Object.fromEntries((["key", "until", "in", "restore", "what", "docs"] as const).flatMap((name) => (config.get(name) === "" ? [] : [[name, config.get(name) as string]])));
-				// (each list given, in place of the entry's own — or, with --add, added to it, sorted as the ledger keeps them)
+				// (each list given, in place of the entry's own — or, with --add, added after it, once each: the ledger's order kept)
 				const lists = Object.fromEntries((["paths", "ways", "tests"] as const).flatMap((name) => {
 					const given = config.get(name) as string[];
 
-					return given.length === 0 ? [] : [[name, config.get("add") === true ? [...new Set([...before[entry]?.[name] ?? [], ...given])].toSorted() : given]];
+					return given.length === 0 ? [] : [[name, config.get("add") === true ? [...new Set([...before[entry]?.[name] ?? [], ...given])] : given]];
 				}));
 
 				try {

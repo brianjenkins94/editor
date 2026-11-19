@@ -170,7 +170,7 @@ How it's kept:
        2026-11-03. The clone one commit deep, so `git_log` saw nothing older: the terminal's `git fetch --deepen=<n>` /
        `--unshallow` and agents' `git_fetch` fetch more since 2026-11-18, and `git log` says where it ends.)
      - *Declare:* (no way but editing `.silo/features.json` by hand, and no fields for ways in or tests: `silo status`
-       writes `what`, `docs`, `paths`, `ways` and `tests` since 2026-11-19, a list added to with `--add`, an entry's
+       writes `what`, `docs`, `paths`, `ways` and `tests` since 2026-11-19, a list added to with `--add` (its order kept), an entry's
        status and why kept when left out — `silo status "<feature>" --ways "<key>" --add`.) `silo check` runs in the
        editor's terminal since 2026-11-15 (item 1).
      - *Remove:* every save runs ESLint's fix-all, rewriting
@@ -836,6 +836,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
   the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
   gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files; and a
   lint that outlasts its file is dropped, `gone`), not seen for a load.
+- **source-control.spec listed a file it had just committed** (CI at 87e3620f, 2026-11-19; fixed the same day): a
+  commit wasn't a change to the git service's shared walks (workbench/git-service.ts), so a walk begun before it (one a
+  late write started) answered the Source Control view's refresh after it. Whatever says `git.changed` — a commit, a
+  checkout, a pull — counts now (test/git-service.test.mjs fails without it). The same full run here: rules.spec's
+  Debug Console output didn't show once (passing alone); three different specs failed in three CI runs that day, each
+  passing the next.
 - **mock-value.spec's lost rule not in Problems** (2026-11-18 locally, 2026-11-19 on CI at d0cf69cb): "a variable set on
   every run…" waits 60 s for the row "A rule's place in this file is lost" (extensions/margin/placed.ts) and sees none.
   Both times live-values.spec ran just before it in the same session; on CI the status bar said 2 errors and 1 warning

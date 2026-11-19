@@ -115,6 +115,13 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		return result;
 	};
 
+	// A commit, a checkout or a pull is a change too, said as `git.changed` (by this service, git-push.ts, the terminal's
+	// git): a walk begun before it doesn't answer who asks after it — the Source Control view's refresh after its commit
+	// kept listing what it had just committed (CI, source-control.spec, 2026-11-19).
+	hub.subscribe("git.changed", () => {
+		changes += 1;
+	});
+
 	serve(hub, "git.status", async (args) => status({ "whole": (args as { "whole"?: boolean } | null | undefined)?.whole === true }));
 	vscode.commands.registerCommand("editor.git.status", async () => status());
 
