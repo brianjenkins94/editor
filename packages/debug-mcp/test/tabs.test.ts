@@ -200,3 +200,17 @@ test("once a tab goes, its architecture goes with it, and the one left needs no 
 	// Its records stay, still filed under it.
 	assert.deepEqual((await queryLogs({ "from": "t1", "textIncludes": "hello from" })).map((row) => row.message), ["hello from t1"]);
 });
+
+test("a linked tab that doesn't answer in time (its page busy) is listed as silent, not left out", async () => {
+	// (a page linked whose hub never answers discovery: a long task, a load)
+	const busy = createHub({ "id": "root" });
+
+	await connect(busy, "busy");
+
+	const { value } = await call("tabs_list");
+	const listed = value as { "tab"?: string; "silent"?: boolean }[];
+
+	assert.deepEqual(listed.filter((tab) => tab.silent !== true).map((tab) => tab.tab), ["t2"]);
+	assert.equal(listed.filter((tab) => tab.silent === true).length, 1, JSON.stringify(listed));
+	sockets.get("busy")?.close();
+});

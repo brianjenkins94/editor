@@ -38,8 +38,7 @@ How it's kept:
    parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
    changes marked*). In order:
    - **What the rehearsal found, still open** (2026-11-02, on `cosmetic`). By the step it blocks:
-     - *Working in it at all:* two tabs back from a reset both cloned into one workspace; a tab sometimes missing from
-       `tabs_list`; the workspace store fills with a day's pulls — nothing collects the packs they fetch (its buffer
+     - *Working in it at all:* the workspace store fills with a day's pulls — nothing collects the packs they fetch (its buffer
        64 → 128 MB, 2026-11-03: about three days' room; measure a day's pulls on a loaded repository before building
        it: what collecting keeps decides how much history a workspace has).
      - *Measure:* CI's reach covers the architecture suites only, and there `activate` is reached by nearly every test.
@@ -192,6 +191,17 @@ packages/editor (`--all`, `--runs N`, `--json`).
   editor closed first — its problem goes within seconds (2026-11-18, a throwaway spec, both watchers:
   `typescript.tsserver.experimental.useVsCodeWatcher` on and off). What's different in the reset (its writes straight to
   zen-fs, in a burst) isn't known; the restart stays.
+
+- **Two tabs loading one repository** (fixed 2026-11-19 for tabs that arrive together, as two back from a reset do): an
+  address's load holds a Web Lock (shell/repo-load.tsx), and a tab that finds another loading says so rather than
+  cloning too. A tab that arrives after the load ends but before its files are written back to IndexedDB still finds
+  no repository in its copy, and clones: if that's seen, the load wants a signal that its write-back is done.
+
+- **rules.spec's Debug Console without its output** (3 of 5 full runs, 2026-11-19; fixed the same day): a document left
+  open by its first test reloaded from disk as the second's file was seeded and opened, counted as an edit, and the live
+  run it started 5 s later took the Debug Console from F5's. A live run follows a change only when it's typed (the
+  document dirty: extensions/tsval/live-run.ts). Blamed at first on counting every `git.changed` (5ba4ac64), which two
+  full runs of two seemed to show; it failed without that too.
 
 - **mock-value.spec's lost rule, way-in-reach.spec's lightbulb** (CI, 2026-11-18 and -19, once each, passing alone and the
   next run): the first fixed by reading (2026-11-19: the Margin set Problems from whatever answer came back last, the

@@ -160,7 +160,9 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			const { document } = event;
 
-			if (event.contentChanges.length > 0 && isProgram(document) && vscode.window.activeTextEditor?.document === document) {
+			// (yours: typed, so not yet saved — not the file reloaded as it changed on disk, a checkout's or another test's in a
+			// shared editor, which ran a live run beside rules.spec's F5 and took its Debug Console)
+			if (event.contentChanges.length > 0 && document.isDirty && isProgram(document) && vscode.window.activeTextEditor?.document === document) {
 				edited.add(document.uri.path);
 				stop(document.uri.path);
 			}

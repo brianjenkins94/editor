@@ -8,6 +8,7 @@
 import type { ShellContext, ShellFeature } from "./feature";
 import type { RepoBinding } from "./github-auth";
 import { ghError } from "theme/styles/shell";
+import { instance } from "../shared/instance";
 import { envRepo, showRepo } from "./address";
 import { createStore, errText, githubLog, shared, statusOf, useStore } from "./feature";
 import { signInSettled } from "./sign-in";
@@ -105,9 +106,38 @@ async function loadRepo(input = state.get().input): Promise<void> {
  *  workspace that's no repository's clone is replaced from the address. One the workspace couldn't say (unanswered) is
  *  kept, as is another repository's clone, which asks: either may hold work not pushed anywhere. */
 async function fromAddress(rpc: ShellContext["rpc"]): Promise<void> {
-	const wanted = envRepo();
-
 	await signInSettled;
+
+	// One tab's load at a time, in a workspace (an instance's own): every tab keeps its own copy of the workspace, from its
+	// store as it booted, so two back from a reset each found no repository and each cloned into the one store. A tab
+	// that finds another loading doesn't: it says so, and a reload once that's done opens what it loaded.
+	const locks = typeof navigator === "undefined" ? undefined : (navigator as Navigator & { "locks"?: LockManager }).locks;
+
+	if (locks === undefined) {
+		await fromAddressNow(rpc);
+
+		return;
+	}
+
+	const ran = await locks.request(`editor.repo-load${instance === undefined ? "" : `.${instance}`}`, { "ifAvailable": true }, async (lock) => {
+		if (lock === null) {
+			return false;
+		}
+
+		await fromAddressNow(rpc);
+
+		return true;
+	});
+
+	if (!ran && envRepo() !== undefined) {
+		githubLog.info("another tab is loading into this workspace: this one waits for a reload");
+		shared.set({ "githubOpen": true });
+		state.set({ "error": "Another tab of the editor is loading a repository into this workspace. Reload this tab once it's done to see it here." });
+	}
+}
+
+async function fromAddressNow(rpc: ShellContext["rpc"]): Promise<void> {
+	const wanted = envRepo();
 
 	// (asked as the workbench answers: by then the app, which takes a load's files, listens too)
 	const asked = await rpc.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 120_000 }).then((origin) => ({ "origin": origin as RepoBinding | null }), (error: unknown) => ({ "error": errText(error) }));
