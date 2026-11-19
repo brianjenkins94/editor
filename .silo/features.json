@@ -1005,7 +1005,8 @@
       "packages/editor/extensions/bridge/annotations.ts"
     ],
     "tests": [
-      "packages/editor/test/cosmetic.test.mjs"
+      "packages/editor/test/cosmetic.test.mjs",
+      "packages/editor/test/in-editor/cosmetic.spec.mjs"
     ]
   },
   "Git in the browser": {

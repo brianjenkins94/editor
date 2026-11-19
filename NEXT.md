@@ -140,49 +140,14 @@ How it's kept:
 2. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
    from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item.
    Waits on items 1 and 2 being good enough to work in. In order:
-   - **Before the reduction: what the rehearsal found** (2026-11-02, on `cosmetic`: measured, declared, removed with its
-     test, reintroduced with a test of its own and its whys as notes, all through the editor and its agent tools; the
-     branch `rehearsal/cosmetic`, never pushed, was lost when a reload cloned over it — the repo binding read from the
-     workspace took an unanswered origin for "not this repository", fixed below). Fixed as found: the editor's reset and
-     its repo binding read from the workspace (216bfc89); notes' threads remade ~60 times a second (each thread's input
-     editor counts as visible, and every visibility change re-showed every note); the Margin's gutter overlay taking
-     the clicks meant for VS Code's comment icons and folding. Fixed after (2026-11-02): an address replaces only a
-     workspace that's no repository's clone (an unanswered origin keeps it; another repository's asks); the reset counts
-     commits no remote has (`git.unpushed`); the shell's logs and spans reach debug-mcp (`shell`); a span that throws
-     logs an error inside it (lib util/logger); every hub request is a span, its trace carried to the server
-     (`observability.call` / `.serve`); History's tools open a TypeScript file to start TypeScript when none is; agents
-     have `files_delete` and `notes_add`; notes and runs are authored by the signed-in GitHub user (the workspace's git
-     config says who); a refused push or pull says the remote's reason (the 403 didn't come back: a push from localhost
-     works). Still to do, by the step it blocks:
-     - *Working in it at all:* (one agent session per machine drove the editor, a second with no tools and nothing saying
-       why: fixed 2026-11-18, a second session's debug-mcp relays to the one holding the port and takes it when that
-       one goes, debug-mcp's sessions.ts and relay.ts; another program on the port is said in its instructions. Sessions
-       already running keep the old debug-mcp until they reconnect it.) Two tabs back from a reset both cloned into one
-       workspace; a tab sometimes missing from `tabs_list`; the workspace store fills with a day's pulls — nothing
-       collects the packs they fetch (its buffer 64 → 128 MB, 2026-11-03: about three days' room, within the workbench's
-       memory budget).
-     - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced) — as a reset
-       is meant to (everything goes, a first load), and it says so now: `untraced` lists the tests with no trace here,
-       and running them traces them; CI's reach
-       covers the architecture suites only, and there `activate` is reached by nearly every test; `decisions_for` named five
-       features for one file — now one a code file (decision 22), and a test file every feature whose `tests` hold it,
-       which it named none of until 2026-11-18 (210 test files: `decisionsFor` read only `paths`). (Code with its comments stripped: Git: Open a Commit Read-Only…'s "The code alone", since
-       2026-11-03. The clone one commit deep, so `git_log` saw nothing older: the terminal's `git fetch --deepen=<n>` /
-       `--unshallow` and agents' `git_fetch` fetch more since 2026-11-18, and `git log` says where it ends.)
-     - *Declare:* (no way but editing `.silo/features.json` by hand, and no fields for ways in or tests: `silo status`
-       writes `what`, `docs`, `paths`, `ways` and `tests` since 2026-11-19, a list added to with `--add` (its order kept), an entry's
-       status and why kept when left out — `silo status "<feature>" --ways "<key>" --add`.) `silo check` runs in the
-       editor's terminal since 2026-11-15 (item 1).
-     - *Remove:* every save runs ESLint's fix-all, rewriting
-       lines an edit didn't touch (an import moved, a line split and left unindented) — review by hunk kept them out.
-       Decided (the user, 2026-11-19): kept, whole-file fix-all on save as lib's defaults have it; review by hunk is how
-       a commit leaves the rest out.
-     - *Reintroduce:* (a note on a `for` anchored to its loop variable: fixed 2026-11-18, `pickAnchor` takes the
-       statement a line begins when nothing inside the line begins where it does, bablr-language-ts's
-       pick-anchor.test.mjs; the editor's `npm test` collects an extension's own `test/` since 2026-11-18); nothing tests an extension's wiring (activate → read →
-       badge) short of the architecture harness — the old tour step did, end to end, the new unit test doesn't. (The
-       Explorer not listing files an agent wrote until a reload: gone — `files_write` into a new folder is listed within
-       seconds, checked 2026-11-18.)
+   - **What the rehearsal found, still open** (2026-11-02, on `cosmetic`: measured, declared, removed with its test,
+     reintroduced with a test of its own and its whys as notes, all through the editor and its agent tools). By the step
+     it blocks:
+     - *Working in it at all:* two tabs back from a reset both cloned into one workspace; a tab sometimes missing from
+       `tabs_list`; the workspace store fills with a day's pulls — nothing collects the packs they fetch (its buffer
+       64 → 128 MB, 2026-11-03: about three days' room, within the workbench's memory budget; measure a day's pulls on a
+       loaded repository before building it: what collecting keeps decides how much history a workspace has).
+     - *Measure:* CI's reach covers the architecture suites only, and there `activate` is reached by nearly every test.
    - **Visibility first**, so the rewrite is measured from its start: a span at every filesystem boundary, with its
      caller, duration, bytes and parent (*Visibility*). Done when the 2026-10-30/31 load questions are answered from
      `metrics_query` and `logs_query` alone. It serves item 1's load cost too, so it can go ahead of the rest.
