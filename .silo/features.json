@@ -1226,7 +1226,7 @@
     "status": "active",
     "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
     "since": "2026-11-03",
-    "what": "Reports every context (hubs, workers, extension hosts, webviews, network endpoints) and the traffic between them, with optional capture of message payloads, for an agent and for the editor's architecture view.",
+    "what": "Reports every context (hubs, workers, extension hosts, webviews, network endpoints) and the traffic between them, with optional capture of message payloads: for an agent (architecture_state, payloads_capture) and a person (Developer: Show the Editor's Messages, in the Output).",
     "ways": [
       "agent tool|architecture_state",
       "agent tool|payloads_capture",
@@ -1234,7 +1234,10 @@
       "core module|installWindowMessageProbe",
       "core module|installWorkerProbe",
       "hub subscription|ARCH_SUBJECT + \".>\"",
-      "hub subscription|SYNC_SUBJECT"
+      "hub subscription|SYNC_SUBJECT",
+      "command|editor.messages.show",
+      "output channel|Editor Messages",
+      "command|editor.messages.stop"
     ],
     "paths": [
       "packages/debug-mcp/src/tools/architecture.ts",
@@ -1242,14 +1245,16 @@
       "packages/observability/src/arch-probes.ts",
       "packages/observability/src/arch-store.ts",
       "packages/observability/src/arch.ts",
-      "packages/observability/src/flows.ts"
+      "packages/observability/src/flows.ts",
+      "packages/editor/extensions/bridge/message-channel.ts"
     ],
     "tests": [
       "packages/debug-mcp/test/capture.test.ts",
       "packages/observability/test/arch.test.ts",
       "packages/observability/test/flows.test.ts",
       "packages/observability/test/media.test.ts",
-      "packages/observability/test/probes.test.ts"
+      "packages/observability/test/probes.test.ts",
+      "packages/editor/test/in-editor/messages.spec.mjs"
     ]
   },
   "Live architecture diagram": {
@@ -1811,7 +1816,8 @@
       "hub subscription|LOG_BACKLOG",
       "hub subscription|LOG_SUBJECT + \".>\"",
       "command|editor.log.show",
-      "output channel|Editor Log"
+      "output channel|Editor Log",
+      "command|editor.log.stop"
     ],
     "paths": [
       "packages/debug-mcp/src/tools/logs.ts",

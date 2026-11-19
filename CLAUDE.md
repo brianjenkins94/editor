@@ -67,5 +67,4 @@ An agent's tool (`packages/editor/app/tools/<family>`, debug-mcp's) lets an agen
 editor; it isn't a way in of its own. What it does has a command, view or panel first, and the tool asks the same hub
 request or runs the same command. A tool only an agent could use is a gap in the editor: build its UI, then the tool.
 Reading what's on screen (`editor_state`, `editor_problems`) counts, and so do tools about the agent's own connection
-(`tabs_list`, `tree_state`). The tools from before this rule that have no UI (NEXT.md item 2, *Agent-only tools*) get
-one or go as the rewrite reaches their feature.
+(`tabs_list`, `tree_state`). The tools from before this rule all have theirs since 2026-11-19.

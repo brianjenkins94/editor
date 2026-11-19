@@ -109,8 +109,8 @@ export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log:
 
 	/**
 	 * The editor as it came up, for the next test that shares it (RUNNING.md, *Tests*), with `seed`'s
-	 * files on it: its runs and debug sessions stopped, its breakpoints removed, its terminals, editors, panel, quick input and
-	 * notifications closed, Problems' filter cleared, the Explorer shown (a test may have left another view in the side bar), and the workspace written
+	 * files on it: its runs, debug sessions and the editor's log and messages stopped, its breakpoints removed, its terminals, editors, panel, quick input and
+	 * notifications closed, Problems' and the Output's filters cleared, the Explorer shown (a test may have left another view in the side bar), and the workspace written
 	 * back as it was — a file made since removed, one changed or removed since as it was, git's
 	 * refs and `.silo`'s records among them (not a checkpoint's, which leaves those).
 	 */
@@ -124,6 +124,10 @@ export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log:
 		}
 
 		await vscode.debug.stopDebugging();
+		// (the editor's log and messages, collected for minutes once shown, payloads captured with the messages: not the next
+		// test's)
+		await Promise.resolve(vscode.commands.executeCommand("editor.log.stop")).catch(() => undefined);
+		await Promise.resolve(vscode.commands.executeCommand("editor.messages.stop")).catch(() => undefined);
 		// (breakpoints are the editor's, by a file's path, not the workspace's: the next test's F9 on the same line would take one away)
 		vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
 
@@ -143,8 +147,10 @@ export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log:
 		// (Problems' filter too, which stays with its view: one a test typed — features-view.spec's "No test run" — hides every
 		// row the next test looks for in Problems. Its box applies a change 300 ms on, and only with Problems showing: hidden
 		// sooner — another panel's view shown just after — the box can say nothing and the filter still be on, and clearing
-		// an empty box changes nothing. Errors shown or not, toggled twice, applies the box as it is, at once.)
-		for (const command of ["workbench.action.closeQuickOpen", "editor.git.closeRefs", "workbench.action.files.saveAll", "workbench.action.closeAllEditors", "workbench.actions.view.problems", "problems.action.clearFilterText", PROBLEMS_ERRORS, PROBLEMS_ERRORS, "workbench.action.closePanel", "notifications.clearAll", "workbench.view.explorer"]) {
+		// an empty box changes nothing. Errors shown or not, toggled twice, applies the box as it is, at once. And the Output's
+		// filter, which every channel is shown through — log.spec's "[workbench] ←" hid the next test's channel when it
+		// applied in time: it hears its box whether it's showing or not.)
+		for (const command of ["workbench.action.closeQuickOpen", "editor.git.closeRefs", "workbench.action.files.saveAll", "workbench.action.closeAllEditors", "workbench.actions.view.problems", "problems.action.clearFilterText", PROBLEMS_ERRORS, PROBLEMS_ERRORS, "workbench.panel.output.focus", "workbench.actions.workbench.panel.output.clearFilterText", "workbench.action.closePanel", "notifications.clearAll", "workbench.view.explorer"]) {
 			await Promise.resolve(vscode.commands.executeCommand(command)).catch(() => undefined);
 		}
 

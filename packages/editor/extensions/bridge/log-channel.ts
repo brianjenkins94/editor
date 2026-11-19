@@ -5,8 +5,8 @@
  * `→ name` when it opens and `← name (Xms)` when it ends, a record at its level, each under its source. The Output
  * view's filter finds a source or a name, its log level hides the quieter ones (a span's open is a trace).
  *
- * Only for LOG_MINUTES from when it's asked (asked again, from then): every record would otherwise cross into this
- * extension host for nobody.
+ * Only for LOG_MINUTES from when it's asked (asked again, from then), or until *Developer: Stop the Editor's Log*: every
+ * record would otherwise cross into this extension host for nobody.
  */
 import { installHubCollector } from "@brianjenkins94/observability";
 import { renderRecord } from "@brianjenkins94/util/logger";
@@ -28,6 +28,12 @@ export function registerLogChannel(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		{ "dispose": stop },
+		vscode.commands.registerCommand("editor.log.stop", () => {
+			if (collecting !== undefined) {
+				stop();
+				channel?.info("Stopped.");
+			}
+		}),
 		vscode.commands.registerCommand("editor.log.show", () => {
 			channel ??= vscode.window.createOutputChannel("Editor Log", { "log": true });
 			channel.show(true);

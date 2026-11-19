@@ -46,6 +46,21 @@
         "category": "Developer"
       },
       {
+        "command": "editor.messages.show",
+        "title": "Show the Editor's Messages",
+        "category": "Developer"
+      },
+      {
+        "command": "editor.log.stop",
+        "title": "Stop the Editor's Log",
+        "category": "Developer"
+      },
+      {
+        "command": "editor.messages.stop",
+        "title": "Stop the Editor's Messages",
+        "category": "Developer"
+      },
+      {
         "command": "editor.git.openRef",
         "title": "Open a Commit Read-Only…",
         "category": "Git"
