@@ -167,8 +167,9 @@ How it's kept:
        `silo check` runs in the editor's terminal since 2026-11-15 (item 1).
      - *Remove:* every save runs ESLint's fix-all, rewriting
        lines an edit didn't touch (an import moved, a line split and left unindented) — review by hunk kept them out.
-     - *Reintroduce:* a note on a `for` anchored to its loop variable (the editor's `npm test` collects an extension's
-       own `test/` since 2026-11-18, `extensions/*/test/*.test.mjs`); nothing tests an extension's wiring (activate → read →
+     - *Reintroduce:* (a note on a `for` anchored to its loop variable: fixed 2026-11-18, `pickAnchor` takes the
+       statement a line begins when nothing inside the line begins where it does, bablr-language-ts's
+       pick-anchor.test.mjs; the editor's `npm test` collects an extension's own `test/` since 2026-11-18); nothing tests an extension's wiring (activate → read →
        badge) short of the architecture harness — the old tour step did, end to end, the new unit test doesn't. (The
        Explorer not listing files an agent wrote until a reload: gone — `files_write` into a new folder is listed within
        seconds, checked 2026-11-18.)

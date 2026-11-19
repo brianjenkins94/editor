@@ -48,11 +48,14 @@ export function spanAnchors(src: string, production = "Program", cst: { "spans":
 /**
  * The anchor id that best stands for the range [start, end) of `src` — a node another parser found (TypeScript's, say),
  * whose boundaries needn't match BABLR's exactly: the LARGEST BARE-hash span fully inside it (bare = unique content, no
- * `#ordinal`, so it tracks moves without duplicate-ordinal churn), falling back to the span overlapping it most.
- * Punctuation is never a handle. Undefined when nothing overlaps.
+ * `#ordinal`, so it tracks moves without duplicate-ordinal churn), falling back to the span overlapping it most. But
+ * where what's inside doesn't begin where the range does, and a span begins there and reaches past it, the smallest such
+ * span: a line that begins a statement running on past it (a `for`'s first line, a note's) is that statement, not the
+ * largest thing inside the line (its loop variable). Punctuation is never a handle. Undefined when nothing overlaps.
  */
 export function pickAnchor(anchors: SpanAnchor[], start: number, end: number): string | undefined {
-	let inside: { "id": string; "bare": boolean; "size": number } | undefined;
+	let inside: { "id": string; "bare": boolean; "size": number; "start": number } | undefined;
+	let begun: { "id": string; "size": number } | undefined;
 	let overlap: { "id": string; "score": number } | undefined;
 
 	for (const anchor of anchors) {
@@ -72,8 +75,10 @@ export function pickAnchor(anchors: SpanAnchor[], start: number, end: number): s
 
 			// bare beats ordinal'd; then larger beats smaller (the node's own top span).
 			if (inside === undefined || (bare && !inside.bare) || (bare === inside.bare && size > inside.size)) {
-				inside = { "id": anchor.id, "bare": bare, "size": size };
+				inside = { "id": anchor.id, "bare": bare, "size": size, "start": anchor.start };
 			}
+		} else if (anchor.start === start && anchor.end > end && (begun === undefined || anchor.end - anchor.start < begun.size)) {
+			begun = { "id": anchor.id, "size": anchor.end - anchor.start };
 		}
 
 		if (overlap === undefined || score > overlap.score) {
@@ -81,5 +86,5 @@ export function pickAnchor(anchors: SpanAnchor[], start: number, end: number): s
 		}
 	}
 
-	return (inside ?? overlap)?.id;
+	return (begun !== undefined && inside?.start !== start ? begun : inside ?? overlap)?.id;
 }
