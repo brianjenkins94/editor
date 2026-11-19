@@ -28,6 +28,8 @@ const NOT_THE_WORKSPACE = /(?:^|\/)(?:node_modules|\.git)(?:\/|$)/u;
 const UP_MS = 120_000;
 /** How long a reset's own writes take to be told (a watcher's events come a little after), before counting starts again. */
 const SETTLE_MS = 500;
+/** Problems' "Show Errors": toggled, it applies the filter box's text then and there. */
+const PROBLEMS_ERRORS = "workbench.actions.workbench.panel.markers.view.toggleErrors";
 /** How often whether git's repository is there yet is asked, as the editor comes up. */
 const REPO_POLL_MS = 250;
 
@@ -139,8 +141,10 @@ export function installEffects(vscode: typeof vscodeApi, runs: RunRegistry, log:
 		})));
 
 		// (Problems' filter too, which stays with its view: one a test typed — features-view.spec's "No test run" — hides every
-		// row the next test looks for in Problems. It clears only with Problems showing.)
-		for (const command of ["workbench.action.closeQuickOpen", "editor.git.closeRefs", "workbench.action.files.saveAll", "workbench.action.closeAllEditors", "workbench.actions.view.problems", "problems.action.clearFilterText", "workbench.action.closePanel", "notifications.clearAll", "workbench.view.explorer"]) {
+		// row the next test looks for in Problems. Its box applies a change 300 ms on, and only with Problems showing: hidden
+		// sooner — another panel's view shown just after — the box can say nothing and the filter still be on, and clearing
+		// an empty box changes nothing. Errors shown or not, toggled twice, applies the box as it is, at once.)
+		for (const command of ["workbench.action.closeQuickOpen", "editor.git.closeRefs", "workbench.action.files.saveAll", "workbench.action.closeAllEditors", "workbench.actions.view.problems", "problems.action.clearFilterText", PROBLEMS_ERRORS, PROBLEMS_ERRORS, "workbench.action.closePanel", "notifications.clearAll", "workbench.view.explorer"]) {
 			await Promise.resolve(vscode.commands.executeCommand(command)).catch(() => undefined);
 		}
 

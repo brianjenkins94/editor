@@ -8,7 +8,9 @@
  *
  * VS Code binds F5 to starting only while nothing's debugging, and a live run counts: pressed just after a save, F5 would do
  * nothing. So while only live runs are going, `run.liveGoing` binds it (this extension's package.json). And it opens the Debug
- * Console on a page's first session, which a live run would use up: the first of yours is told to open it.
+ * Console on a page's first session, which any session that never opens it would use up — a live run, a test file run from
+ * Features and tests, a terminal's `node` — and the run of yours after them would end unseen, the console opened later showing
+ * the first of the ended ones: the first of yours is told to open it.
  */
 import { appRootOf } from "@brianjenkins94/editor-api/lifecycle";
 import { logger } from "@brianjenkins94/util/logger";
@@ -32,6 +34,8 @@ const log = logger({ "source": "live-run" });
 const readText = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 const enabled = (): boolean => vscode.workspace.getConfiguration("run").get<boolean>("liveRuns", true);
 const isLive = (session: vscode.DebugSession): boolean => session.configuration["__live"] === true;
+/** A session that never opens the Debug Console (above). */
+const isQuiet = (session: vscode.DebugSession): boolean => session.configuration.internalConsoleOptions === "neverOpen";
 const isProgram = (document: vscode.TextDocument): boolean => document.uri.scheme === "file" && PROGRAM.test(document.uri.path);
 
 export function registerLiveRuns(context: vscode.ExtensionContext): void {
@@ -50,8 +54,8 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	const sessions = new Map<string, vscode.DebugSession>();
 	const ended = new Set<string>();
 	const programOf = (session: vscode.DebugSession): string => String(session.configuration["program"]);
-	/** Whether a live run has started and one of yours hasn't, for the Debug Console (above). */
-	let liveFirst = false;
+	/** Whether a quiet session has started and one of yours hasn't, for the Debug Console (above). */
+	let quietFirst = false;
 	let yoursStarted = false;
 	let told = false;
 	/** Whether only live runs are going, for F5 (above). */
@@ -116,7 +120,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		vscode.debug.registerDebugConfigurationProvider("*", {
-			"resolveDebugConfiguration": (_folder, config) => (liveFirst && config["__live"] !== true && config.internalConsoleOptions === undefined && vscode.workspace.getConfiguration("debug").get<string>("internalConsoleOptions") === "openOnFirstSessionStart" ? { ...config, "internalConsoleOptions": "openOnSessionStart" } : config)
+			"resolveDebugConfiguration": (_folder, config) => (quietFirst && config.internalConsoleOptions === undefined && vscode.workspace.getConfiguration("debug").get<string>("internalConsoleOptions") === "openOnFirstSessionStart" ? { ...config, "internalConsoleOptions": "openOnSessionStart" } : config)
 		}),
 		vscode.debug.onDidStartDebugSession((session) => {
 			if (ended.has(session.id)) {
@@ -131,12 +135,16 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 					void vscode.debug.stopDebugging(session);
 				} else {
 					running.set(programOf(session), session);
-					liveFirst ||= !yoursStarted;
 				}
 			} else {
-				yoursStarted = true;
-				liveFirst = false;
 				stop(programOf(session));
+			}
+
+			if (isQuiet(session)) {
+				quietFirst ||= !yoursStarted;
+			} else {
+				yoursStarted = true;
+				quietFirst = false;
 			}
 
 			tell();

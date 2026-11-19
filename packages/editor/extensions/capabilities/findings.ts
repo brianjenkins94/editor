@@ -128,6 +128,15 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 		}, delay));
 	}
 
+	/** `uri`'s findings, and its asking, gone. */
+	const forget = (uri: vscode.Uri): void => {
+		clearTimeout(timers.get(uri.toString()));
+		timers.delete(uri.toString());
+		placed.delete(uri.toString());
+		collection.delete(uri);
+	};
+	const gone = vscode.workspace.createFileSystemWatcher("**/*", true, true, false);
+
 	context.subscriptions.push(
 		collection,
 		vscode.languages.registerCodeActionsProvider([...LANGUAGES].map((language) => ({ "language": language, "scheme": "file" })), {
@@ -168,10 +177,19 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 			}
 		}),
 		vscode.workspace.onDidCloseTextDocument((document) => {
-			clearTimeout(timers.get(document.uri.toString()));
-			timers.delete(document.uri.toString());
-			placed.delete(document.uri.toString());
-			collection.delete(document.uri);
+			forget(document.uri);
+		}),
+		// (a file gone — from the terminal or a shared editor's reset as much as the Explorer — takes its findings with it: its
+		// document can stay open with no editor, so no close says so, and its rows in Problems outlived it)
+		gone,
+		gone.onDidDelete((uri) => {
+			for (const each of [...placed.keys(), ...timers.keys()]) {
+				const known = vscode.Uri.parse(each);
+
+				if (known.path === uri.path || known.path.startsWith(`${uri.path}/`)) {
+					forget(known);
+				}
+			}
 		}),
 		{ "dispose": () => {
 			for (const timer of timers.values()) {

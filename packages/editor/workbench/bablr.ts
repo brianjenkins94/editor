@@ -84,6 +84,22 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		diagnostics.set(uri, [warning]);
 	};
 
+	// (a file gone — from the terminal or a shared editor's reset as much as the Explorer — takes its warning with it: one
+	// said of a text since deleted outlived its file in Problems)
+	vscode.workspace.createFileSystemWatcher("**/*", true, true, false).onDidDelete((uri) => {
+		const under: vscodeApi.Uri[] = [];
+
+		diagnostics.forEach((each) => {
+			if (each.path === uri.path || each.path.startsWith(`${uri.path}/`)) {
+				under.push(each);
+			}
+		});
+
+		for (const each of under) {
+			diagnostics.delete(each);
+		}
+	});
+
 	/** The worker, started on first use, asked one text at a time: BABLR is slow, and a check is many. */
 	const worker = (): NonNullable<typeof started> => {
 		if (started !== undefined) {

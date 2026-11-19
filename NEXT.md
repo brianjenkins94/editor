@@ -210,14 +210,17 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
-- **mock-value.spec after features-view.spec, in one editor: reproduced** (2026-11-19, three of three with the scratch
-  trace runner: `features-view.spec.mjs mock-value.spec.mjs` in one session). "A variable set on every run…" fails —
-  its F5 run's "total 50" never in the Debug Console, or later its lost rule not in Problems: the flake seen since
-  2026-11-18, whenever its session's editor had run features-view's seven test files before. The F5 run is made (exit
-  0 in 115 ms) and no other session is going; what the Debug Console shows instead isn't known yet. Not Problems'
-  filter (features-view leaves "No test run" in it: a reset clears that now, and the failure stays), and not the
-  Margin's late answers (its guard, 2026-11-19, stays). Next: what the Debug Console's session is after those runs.
-  way-in-reach.spec's lightbulb missed once on CI too (d0cf69cb).
+- **mock-value.spec after features-view.spec, in one editor** (2026-11-19, three of three with the scratch trace runner;
+  fixed the same day, three of three since, capability-findings.spec between them too): three things features-view
+  left. Its seven test runs' sessions, none opening the Debug Console, used up VS Code's opening it on a page's first
+  session, so F5's run ended unseen and the console, opened after, showed the first ended session's — `node
+  break.test.mjs`: a session that never opens the console counts now as a live run did (extensions/tsval/live-run.ts).
+  Problems' filter box was empty with "No test run" still applied: the box applies a change 300 ms on and only while
+  Problems shows, and clearing an empty box changes nothing, so the reset toggles Show Errors twice, which applies the
+  box as it is (workbench/effects.ts). And the problems of files the reset deleted took the rows Problems had room for:
+  a deleted file's capability findings and BABLR warning go with it (no editor closing says so). CI's mock-value miss
+  (b08eab9f) was these. Not looked at yet: way-in-reach.spec's lightbulb, missed once on CI (d0cf69cb); cosmetic.spec's
+  hover on real.ts, not shown in 15 s once on CI (ef97772b); pane-views.spec's hover, once in a full run here.
 
 ## Decisions
 

@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { openEditor, openFile, problems, retype } from "./editor.mjs";
+import { openEditor, openFile, openTerminal, problems, READABLE_TERMINAL, retype, runCommand } from "./editor.mjs";
 
 const PROGRAM = `import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -33,4 +33,24 @@ test("a call that reaches outside says so in Problems: a literal's resource at o
 	await retype(workbench, "const name = \"report\";\n");
 	await expect(row("exec: execSync")).toHaveCount(0, { "timeout": 30_000 });
 	await expect(row("writeFileSync")).toHaveCount(0, { "timeout": 30_000 });
+});
+
+test("a file deleted from the terminal takes its findings out of Problems, though nothing closed it", async ({ page }) => {
+	const workbench = await openEditor(page, { ...READABLE_TERMINAL, "gone.mjs": "import { execSync } from \"node:child_process\";\n\nexecSync(\"ls\");\n" });
+
+	await openFile(workbench, "gone.mjs");
+
+	const rows = await problems(workbench);
+	const row = rows.filter({ "hasText": "exec: execSync → ls" });
+
+	await expect(row).toHaveCount(1, { "timeout": 90_000 });
+	// (its editor closed, its document stays: what's there is still its)
+	await runCommand(workbench, "View: Close All Editors");
+	await expect(row).toHaveCount(1);
+
+	const { input } = await openTerminal(workbench);
+
+	await input.pressSequentially("rm gone.mjs\n");
+	await problems(workbench);
+	await expect(row).toHaveCount(0, { "timeout": 30_000 });
 });

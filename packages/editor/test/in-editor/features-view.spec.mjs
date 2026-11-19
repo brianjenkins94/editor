@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, retype, runCommand } from "./editor.mjs";
+import { codeOf, openEditor, openFile, openTerminal, READABLE_TERMINAL, retype, runCommand } from "./editor.mjs";
 
 const entry = (what, tests) => ({ "status": "active", "why": what, "since": "2026-11-04", "what": what, ...tests === undefined ? {} : { "tests": tests } });
 const unit = (body) => `import assert from "node:assert/strict";\nimport * as fs from "node:fs";\nimport { test } from "node:test";\n\n${body}\n`;
@@ -24,6 +24,7 @@ const LEDGER = {
 const rule = (capability, resource) => ({ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": capability }, { "target_id": "resource", "operator_id": "matches", "argument": resource }] }, "then": [{ "action_id": "allow" }] });
 const WRITES = "test(\"writes\", () => {\n\tfs.writeFileSync(\"/workspace/shared.txt\", \"x\");\n\tassert.ok(fs);\n});";
 const files = {
+	...READABLE_TERMINAL,
 	".silo/features.json": JSON.stringify(LEDGER, null, 2) + "\n",
 	// (one rule these tests use, one none does: what's confirmed by running, and what isn't)
 	".silo/policy.json": JSON.stringify({ "version": 1, "rules": [rule("fs:write", "/workspace/*"), rule("net", "https://nobody.example/*")] }, null, 2) + "\n",
@@ -37,7 +38,8 @@ const files = {
 	"suite.mjs": "import { startSession } from \"./architecture-harness.mjs\";\n",
 	"view.spec.mjs": "import { test } from \"@playwright/test\";\n",
 	"one.test.mjs": unit(WRITES),
-	"two.test.mjs": unit(WRITES)
+	"two.test.mjs": unit(WRITES),
+	"aloud.mjs": "const said = 1 + 1;\nconsole.log(\"said \" + said);\n"
 };
 
 test("each feature's tests, what kind they are, run from there, how they came out, and which can't run in parallel", async ({ page }) => {
@@ -136,4 +138,28 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await expect(workbench.locator(".editor-instance .view-lines")).not.toContainText("nobody.example", { "timeout": 15_000 });
 	await codeOf(workbench).press("ControlOrMeta+s");
 	await expect(unused).toHaveCount(0, { "timeout": 30_000 });
+
+	// A file gone takes its problems with it, deleted from the terminal too, which no editor closing says: math.mjs's, its
+	// first line commented out above, so it doesn't parse (capability-findings.spec: a call's).
+	const filter = workbench.locator(".viewpane-filter input");
+	const unparsed = workbench.locator(".markers-panel .monaco-list-row", { "hasText": "math.mjs" });
+
+	await filter.fill("BABLR can't parse");
+	await expect(unparsed).toHaveCount(1, { "timeout": 30_000 });
+
+	const { input } = await openTerminal(workbench);
+
+	await input.pressSequentially("rm math.mjs\n");
+	await runCommand(workbench, "View: Focus Problems");
+	await expect(unparsed).toHaveCount(0, { "timeout": 30_000 });
+	await filter.fill("");
+
+	// And a run of yours after these is what the Debug Console shows, not the first of theirs: they never opened it, and
+	// over a run that ended before it was opened, it shows the first session it has (extensions/tsval/live-run.ts).
+	await openFile(workbench, "aloud.mjs");
+	await codeOf(workbench).press("F5");
+	await expect(workbench.locator(".notes-margin-cell", { "hasText": "said =" })).toContainText("2", { "timeout": 60_000 });
+	// (opened, not found open: VS Code opens it on a window's first debug session only, and this editor may have had one)
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
+	await expect(workbench.locator(".repl .output", { "hasText": "said 2" }).first()).toBeVisible({ "timeout": 30_000 });
 });
