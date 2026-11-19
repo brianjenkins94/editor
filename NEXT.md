@@ -38,9 +38,6 @@ How it's kept:
    parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
    changes marked*). In order:
    - **What the rehearsal found, still open** (2026-11-02, on `cosmetic`). By the step it blocks:
-     - *Working in it at all:* the workspace store fills with a day's pulls — nothing collects the packs they fetch (its buffer
-       64 → 128 MB, 2026-11-03: about three days' room; measure a day's pulls on a loaded repository before building
-       it: what collecting keeps decides how much history a workspace has).
      - *Measure:* CI's reach covers the architecture suites only, and there `activate` is reached by nearly every test.
    - **The boundaries** (ARCHITECTURE.md has the reasons, checked 2026-11-03: nothing split). Left: whether tsval can
      give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file).
@@ -187,6 +184,13 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `typescript.tsserver.experimental.useVsCodeWatcher` on and off). What's different in the reset (its writes straight to
   zen-fs, in a burst) isn't known; the restart stays.
 
+- **The workspace store and its packs** (measured 2026-11-19, this repository in Node, 20 commits pulled one at a time):
+  nothing collects the packs a fetch brings, but a pull that fast-forwards adds ~70 KB, and this repository's clone
+  leaves the store at 36 of 128 MB: over a thousand pulls of room. What filled it fast was a fetch that didn't move the
+  branch (a `git fetch`, a pull that diverged or conflicts) sending every commit since again, 110 KB growing to 400 KB
+  a fetch: it now names origin's tip as what it has (git-engine.ts `haveRef`). If the store does fill: collect by
+  repacking what's reachable, which decides how much history a workspace keeps.
+
 - **The editor reloaded itself under large edits** (2026-11-02, three times in an evening): Vite's socket closed on both
   frames at once and its client reloaded the page, while the dev server and debug-mcp kept running — the workspace's
   work survived, the calls in flight didn't. Not seen since. If it comes back: what closed the socket (the dev server's
@@ -203,10 +207,13 @@ packages/editor (`--all`, `--runs N`, `--json`).
   document dirty: extensions/tsval/live-run.ts). Blamed at first on counting every `git.changed` (5ba4ac64), which two
   full runs of two seemed to show; it failed without that too.
 
-- **mock-value.spec's lost rule, way-in-reach.spec's lightbulb** (CI, 2026-11-18 and -19, once each, passing alone and the
-  next run): the first fixed by reading (2026-11-19: the Margin set Problems from whatever answer came back last, the
-  pane's own draw guarded and its problems not; extensions/margin/placed.ts), not reproduced; the second not looked
-  into. If either comes back, the fix didn't take.
+- **mock-value.spec's lost rule not in Problems** (2026-11-18 and twice on 2026-11-19: locally, on CI at d0cf69cb, and
+  locally again after the fix below; each after live-values.spec in its session, passing alone): "a variable set on
+  every run…" waits 60 s for "A rule's place in this file is lost" (extensions/margin/placed.ts) and sees no row. The
+  fix by reading (the Margin set Problems from whatever answer came back last; now only an answer for the text as it
+  is) didn't take. Not reproduced: alone, beside a loaded session, after live-values, and a traced rerun of the failing
+  session's whole order (21 of 21). Next time: what the Margin's `placedMarks` was answered, from the page's console
+  (scratchpad trace.mjs captures every frame's). way-in-reach.spec's lightbulb missed once on CI too (d0cf69cb).
 
 ## Decisions
 

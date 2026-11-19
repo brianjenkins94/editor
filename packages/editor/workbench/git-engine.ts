@@ -471,6 +471,17 @@ export interface Pulled {
 	"conflicts"?: string[];
 }
 
+/** What a fetch of `branch` tells the remote it has: the tip it last fetched of it (`origin/<branch>`), else the branch.
+ *  isomorphic-git's single-branch fetch names one ref's tip as what it has, and the branch's own stays where it was until a
+ *  fast-forward moves it: each fetch that didn't (a `git fetch`, a pull that diverged or conflicts) was sent again every
+ *  commit since — measured 2026-11-19 on this repository, 110 KB a fetch growing to 400 KB by the twentieth, against
+ *  ~70 KB a pull that fast-forwards. The remote's name is origin either way, and `remoteRef` is what's fetched. */
+async function haveRef(branch: string): Promise<string> {
+	const tracking = `refs/remotes/origin/${branch}`;
+
+	return await resolveRef({ "fs": fs, "dir": DIR, "ref": tracking }).then(() => tracking, () => branch);
+}
+
 /** Fetch `ref` (the current branch, by default) from `url` over `http`, and fast-forward to it if it can
  *  (`fastForward`). A shallow clone fetches what it lacks down to what it has. */
 export async function pull(http: HttpClient, url: string, ref?: string): Promise<Pulled> {
@@ -480,7 +491,7 @@ export async function pull(http: HttpClient, url: string, ref?: string): Promise
 		throw new Error("HEAD is on no branch: name one to bring up to date");
 	}
 
-	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": branchName, "remoteRef": branchName, "singleBranch": true, "tags": false });
+	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": await haveRef(branchName), "remoteRef": branchName, "singleBranch": true, "tags": false });
 
 	if (fetched.fetchHead === null) {
 		throw new Error(`the remote has no branch ${branchName}`);
@@ -511,7 +522,7 @@ export async function fetchBranch(http: HttpClient, url: string, ref?: string, d
 		throw new Error("HEAD is on no branch: name one to fetch");
 	}
 
-	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": branchName, "remoteRef": branchName, "singleBranch": true, "tags": false, ...deepen === undefined ? {} : { "depth": deepen === Infinity ? ALL : deepen, "relative": true } });
+	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": await haveRef(branchName), "remoteRef": branchName, "singleBranch": true, "tags": false, ...deepen === undefined ? {} : { "depth": deepen === Infinity ? ALL : deepen, "relative": true } });
 
 	if (fetched.fetchHead === null) {
 		throw new Error(`the remote has no branch ${branchName}`);

@@ -192,6 +192,38 @@ test("a clone one commit deep: fetch deepens its history by as many as asked, un
 	await assert.rejects(rpc.request("git.fetch", { "deepen": 0 }), /more than none/u);
 });
 
+test("a fetch that doesn't move the branch tells the remote what it last fetched: the next sends only what's new", async () => {
+	const { http } = editor();
+	const source = path.join(root, "source");
+	const commitBig = (name) => {
+		// (incompressible, so a pack's size says which files it carries)
+		execFileSync("sh", ["-c", `head -c 100000 /dev/urandom | base64 > ${name}`], { "cwd": source });
+		git("-C", source, "add", ".");
+		git("-C", source, "commit", "--quiet", "-m", name);
+		git("-C", source, "push", "--quiet", "--force", bare, "main");
+	};
+	const newestPack = async () => {
+		const packs = (await fs.promises.readdir(`${DIR}/.git/objects/pack`)).filter((name) => name.endsWith(".pack"));
+		const sized = await Promise.all(packs.map(async (name) => ({ "name": name, "stat": await fs.promises.stat(`${DIR}/.git/objects/pack/${name}`) })));
+
+		return sized.toSorted((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)[0].stat.size;
+	};
+
+	rmSync(source, { "recursive": true, "force": true });
+	git("init", "--quiet", "--initial-branch=main", source);
+	commitBig("first.txt");
+	await fs.promises.rm(DIR, { "recursive": true, "force": true });
+	await clone({ "fs": fs, "http": http, "dir": DIR, "url": ORIGIN, "corsProxy": "", "depth": 1, "singleBranch": true });
+	commitBig("second.txt");
+	await engine.fetchBranch(http, ORIGIN, "main");
+	commitBig("third.txt");
+	await engine.fetchBranch(http, ORIGIN, "main");
+
+	// (the third's file alone, ~135 KB as base64 — not the second's again beside it)
+	assert.ok(await newestPack() < 200_000, `the last fetch's pack is ${String(await newestPack())} bytes`);
+	assert.equal((await engine.history()).length, 1, "the branch left where it was");
+});
+
 test("a branch the clone hasn't fetched is checked out from the repository's: fetched one commit deep, then switched to", async () => {
 	const { rpc, http } = editor();
 	const source = path.join(root, "source");
