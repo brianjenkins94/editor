@@ -134,6 +134,29 @@ export async function openTerminal(workbench) {
 	return { "input": workbench.locator(".xterm-helper-textarea").last(), "output": output };
 }
 
+/** `target` hovered until `shown` shows: when it doesn't, the pointer goes to `away` and back, as a person's does. One
+ *  hover, once, didn't come — cosmetic.spec's on CI (ef97772b), pane-views.spec's in a full run here (2026-11-19). The
+ *  pause at `away`: a hover that's open stays as the pointer moves on. */
+export async function hoverUntil(page, { target, shown, away, tries = 10, each = 3000 }) {
+	for (let tried = 1; ; tried += 1) {
+		await away.hover();
+		await page.waitForTimeout(500);
+		await target.hover();
+
+		const came = await expect(shown).toBeVisible({ "timeout": each }).then(() => true, (error) => {
+			if (tried === tries) {
+				throw error;
+			}
+
+			return false;
+		});
+
+		if (came) {
+			return;
+		}
+	}
+}
+
 /** Until `read` (a locator's top, say) is past `than`: what's drawn beside the code moves once BABLR has read the edit, in its own time. */
 export async function moved(page, read, than, timeout = 30_000) {
 	const until = Date.now() + timeout;

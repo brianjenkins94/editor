@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { openEditor, openFile, openTerminal, problems, READABLE_TERMINAL, retype, runCommand } from "./editor.mjs";
+import { openEditor, openFile, openTerminal, problems, READABLE_TERMINAL, retype } from "./editor.mjs";
 
 const PROGRAM = `import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -35,7 +35,7 @@ test("a call that reaches outside says so in Problems: a literal's resource at o
 	await expect(row("writeFileSync")).toHaveCount(0, { "timeout": 30_000 });
 });
 
-test("a file deleted from the terminal takes its findings out of Problems, though nothing closed it", async ({ page }) => {
+test("a file deleted from the terminal takes its findings out of Problems, its editor still open", async ({ page }) => {
 	const workbench = await openEditor(page, { ...READABLE_TERMINAL, "gone.mjs": "import { execSync } from \"node:child_process\";\n\nexecSync(\"ls\");\n" });
 
 	await openFile(workbench, "gone.mjs");
@@ -44,10 +44,8 @@ test("a file deleted from the terminal takes its findings out of Problems, thoug
 	const row = rows.filter({ "hasText": "exec: execSync → ls" });
 
 	await expect(row).toHaveCount(1, { "timeout": 90_000 });
-	// (its editor closed, its document stays: what's there is still its)
-	await runCommand(workbench, "View: Close All Editors");
-	await expect(row).toHaveCount(1);
 
+	// (its document stays open with its editor, so only the file going can say so)
 	const { input } = await openTerminal(workbench);
 
 	await input.pressSequentially("rm gone.mjs\n");

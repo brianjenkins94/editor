@@ -219,8 +219,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   Problems shows, and clearing an empty box changes nothing, so the reset toggles Show Errors twice, which applies the
   box as it is (workbench/effects.ts). And the problems of files the reset deleted took the rows Problems had room for:
   a deleted file's capability findings and BABLR warning go with it (no editor closing says so). CI's mock-value miss
-  (b08eab9f) was these. Not looked at yet: way-in-reach.spec's lightbulb, missed once on CI (d0cf69cb); cosmetic.spec's
-  hover on real.ts, not shown in 15 s once on CI (ef97772b); pane-views.spec's hover, once in a full run here.
+  (b08eab9f) was these. Not looked at yet: way-in-reach.spec's lightbulb, missed once on CI (d0cf69cb). A hover that
+  didn't come once — cosmetic.spec's on real.ts on CI (ef97772b), pane-views.spec's in a full run here — is hovered
+  again from elsewhere now, as a person would (in-editor/editor.mjs, `hoverUntil`); why it didn't come isn't known.
 
 ## Decisions
 

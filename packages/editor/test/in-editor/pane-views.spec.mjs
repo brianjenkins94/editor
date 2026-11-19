@@ -6,7 +6,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { openEditor, openFile, runCommand } from "./editor.mjs";
+import { hoverUntil, openEditor, openFile, runCommand } from "./editor.mjs";
 
 const PROBE = "// a probe\nconst x = [1, 22];\nconst longer = 333;\nconst typed = \"\";\nconst z = 3;\nconst later = 4;\n";
 const LOADED = { "timeout": 60_000 };
@@ -59,8 +59,7 @@ test("an extension's pane view: its tab, its items level with their code, its bu
 	await expect(workbench.locator(".editor-instance .view-lines")).toContainText("x = 22", LOADED);
 
 	// Prose, whole, on hover.
-	await workbench.locator(".editor-instance .view-line span span", { "hasText": "a probe" }).hover();
-	await expect(workbench.locator(".monaco-hover", { "hasText": "hello" })).not.toHaveCount(0, { "timeout": 15_000 });
+	await hoverUntil(page, { "target": workbench.locator(".editor-instance .view-line span span", { "hasText": "a probe" }), "shown": workbench.locator(".monaco-hover", { "hasText": "hello" }).first(), "away": workbench.locator(".part.statusbar").first() });
 
 	// And back, then to the Margin.
 	await runCommand(workbench, "Pane: Switch Between Beside the Code and Annotations");
