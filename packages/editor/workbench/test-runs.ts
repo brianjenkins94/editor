@@ -397,7 +397,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A
 	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). One that
 	 *  does nothing for STALL_MS ends too (`stalled`: where it was). */
-	const runFile = async (file: string, signal: AbortSignal, approved: string[]): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "asked"?: Asked; "stalled"?: string }> => {
+	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "asked"?: Asked; "stalled"?: string }> => {
 		const controller = new AbortController();
 		const stop = (): void => {
 			controller.abort();
@@ -405,7 +405,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		signal.addEventListener("abort", stop, { "once": true });
 
-		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stop);
+		// (stopped from outside — runs_stop, the run's Stop — the whole run stops, as Ctrl+C stops `node --test`, not only this
+		// file; a stall or a question stops this file alone)
+		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stopAll);
 		let reported: TestsEvent | undefined;
 		let effects: Effect[] = [];
 		let asked: Asked | undefined;
@@ -556,7 +558,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				continue;
 			}
 
-			const result = await runFile(file, signal, approvals);
+			const result = await runFile(file, signal, approvals, () => { batch.controller.abort(); });
 
 			// (a question for the person: the run ends here, to go on from this file once it's answered — `rest`)
 			if (result.asked !== undefined) {
@@ -599,6 +601,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return {
 			"files": batch.ran,
 			"counts": counted(batch.ran),
+			// (stopped: the files after it not run)
+			...signal.aborted ? { "stopped": "stopped: the files after the one it stopped in weren't run" } : {},
 			...chosen.length === 0 ? { "nothing": listed.length === 0 ? "no affected test is stale: name files to run them anyway" : "no files" } : {}
 		};
 	};

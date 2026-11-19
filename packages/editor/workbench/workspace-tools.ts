@@ -226,11 +226,37 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 	});
 
 	serve(hub, "files.edit", async (args) => {
-		const { path, old, "new": replacement, all } = (args ?? {}) as { "path"?: unknown; "old"?: unknown; "new"?: unknown; "all"?: unknown };
+		const { path, old, "new": replacement, all, lines } = (args ?? {}) as { "path"?: unknown; "old"?: unknown; "new"?: unknown; "all"?: unknown; "lines"?: unknown };
 		const uri = uriOf(path);
 
+		// Whole lines, by their numbers (as files_read numbers them): a long cut needn't carry what it cuts.
+		if (Array.isArray(lines)) {
+			const [from, to] = lines as unknown[];
+
+			if (typeof replacement !== "string" || !Number.isInteger(from) || !Number.isInteger(to) || (from as number) < 1 || (to as number) < (from as number)) {
+				throw new TypeError("files.edit takes { path, lines: [from, to], new }: lines from and to (1-based, both in), and what replaces them whole");
+			}
+
+			const { text } = await textOf(uri);
+			const all = text.split("\n");
+			const count = text.endsWith("\n") ? all.length - 1 : all.length;
+
+			if ((to as number) > count) {
+				throw new Error(`${relative(uri)} has ${String(count)} line${count === 1 ? "" : "s"}, not ${String(to)}`);
+			}
+
+			const start = all.slice(0, (from as number) - 1).reduce((at, line) => at + line.length + 1, 0);
+			const end = Math.min(text.length, all.slice(0, to as number).reduce((at, line) => at + line.length + 1, 0));
+			const cut = text.slice(start, end).split("\n");
+
+			await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(start), document.positionAt(end)), "text": replacement }]);
+
+			// (what went, its first and last lines: that it was the lines meant)
+			return { "path": relative(uri), "replaced": 1, "lines": (to as number) - (from as number) + 1, "first": cut[0], "last": cut.at(cut.at(-1) === "" ? -2 : -1) };
+		}
+
 		if (typeof old !== "string" || old === "" || typeof replacement !== "string") {
-			throw new TypeError("files.edit takes { path, old, new, all? }: the exact text to replace, and what replaces it");
+			throw new TypeError("files.edit takes { path, old, new, all? }: the exact text to replace, and what replaces it — or { path, lines: [from, to], new }");
 		}
 
 		const { text } = await textOf(uri);
@@ -389,7 +415,10 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		}
 
 		const expression = new RegExp(pattern, ignoreCase === true ? "iu" : "u");
-		const include = typeof glob === "string" && glob !== "" ? glob : "**/*";
+		// (a folder or a file named without a wildcard is what's in it, or it: a folder's name alone matches no file)
+		const named = typeof glob === "string" && glob !== "" ? glob.replace(/^\/workspace\//u, "").replace(/\/+$/u, "") : undefined;
+		const folder = named !== undefined && !/[*?{[]/u.test(named) && await Promise.resolve(vscode.workspace.fs.stat(uriOf(named))).then((stat) => stat.type === vscode.FileType.Directory, () => false);
+		const include = named === undefined ? "**/*" : folder ? `${named}/**/*` : named;
 		const most = typeof limit === "number" && limit > 0 ? limit : GREP_RESULTS;
 		const matches: { "file": string; "line": number; "text": string }[] = [];
 		let total = 0;

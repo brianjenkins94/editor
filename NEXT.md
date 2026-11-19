@@ -58,13 +58,11 @@ How it's kept:
      reason); every file's header a note. The zero-knowledge baseline: the code alone 12 of 15, as it is 14.5 — every
      point the comments carried a why. Open (*Decisions*): whose a note migrated from a comment is.
    - **The standard**, from the pass's gaps.
-   - **Gaps found while reducing** (2026-11-02, not seen to since): `git_checkout` can't switch to a branch the shallow
-     clone hasn't fetched (`git.show` fetches one); `git_pull` says "diverged" when main moved under a branch (a merge in
-     the editor would settle it); the editor reloaded itself three times under large edits (Vite's socket closed on both
-     frames, its client reloading the page; the calls in flight lost); `files_edit` has no line-range cut; `runs_stop`
-     doesn't stop a `runs_tests` run; `files_grep`'s scope argument is `glob`; tsval's busy heartbeat rides its
-     `observe` and `called` hooks, so its site sums, coverage and purity (which nothing reads) can go only once it has a
-     source of its own.
+   - **Gaps found while reducing** (2026-11-02, not seen to since): `git_pull` says "diverged" when main moved under a
+     branch (a merge in the editor would settle it, and this git combines no history: a decision first); the editor
+     reloaded itself three times under large edits (Vite's socket closed on both frames, its client reloading the page;
+     the calls in flight lost); tsval's busy heartbeat rides its `observe` and `called` hooks, so its site sums, coverage
+     and purity (which nothing reads) can go only once it has a source of its own.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
      (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
      `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Not yet trusted:

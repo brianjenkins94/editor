@@ -42,7 +42,7 @@ async function runTests(files, approved) {
 	return answer;
 }
 
-test("files: written, read numbered, edited, replaced across files or not at all, found, searched and deleted", async () => {
+test("files: written, read numbered, edited (by text, or by lines), replaced across files or not at all, found, searched (a glob, or a folder's) and deleted", async () => {
 	assert.deepEqual(await ask("files.write", { "path": "tools/one.txt", "content": "alpha\nbeta\nalpha\n" }), { "path": "tools/one.txt", "created": true, "lines": 4 });
 	await ask("files.write", { "path": "tools/two.txt", "content": "gamma\n" });
 
@@ -69,6 +69,12 @@ test("files: written, read numbered, edited, replaced across files or not at all
 
 	assert.deepEqual((await ask("files.glob", { "pattern": "tools/*.txt" })).files.toSorted(), ["tools/one.txt", "tools/two.txt"]);
 	assert.deepEqual(await ask("files.grep", { "pattern": "^ALPHA$", "glob": "tools/**" }), { "matches": [{ "file": "tools/one.txt", "line": 1, "text": "ALPHA" }, { "file": "tools/one.txt", "line": 3, "text": "ALPHA" }], "total": 2 });
+	assert.equal((await ask("files.grep", { "pattern": "^ALPHA$", "glob": "tools" })).total, 2, "a folder's name: what's in it");
+
+	// Whole lines by their numbers: what went said, its first and last.
+	assert.deepEqual(await ask("files.edit", { "path": "tools/one.txt", "lines": [1, 2], "new": "" }), { "path": "tools/one.txt", "replaced": 1, "lines": 2, "first": "ALPHA", "last": "beta" });
+	assert.equal((await ask("files.read", { "path": "tools/one.txt" })).content, "1\tALPHA\n2\t");
+	await assert.rejects(ask("files.edit", { "path": "tools/one.txt", "lines": [1, 9], "new": "" }), /has 1 line, not 9/u);
 
 	assert.deepEqual(await ask("files.delete", { "path": "tools" }), { "path": "tools", "folder": true });
 	await assert.rejects(ask("files.read", { "path": "tools/one.txt" }), /doesn't exist/u);
@@ -498,6 +504,38 @@ test("writes", () => {
 	assert.equal(approved.run, asked.run, JSON.stringify(approved).slice(0, 1500));
 	assert.deepEqual(approved.files.map((each) => each.file), files);
 	assert.deepEqual(approved.counts, { "files": 2, "pass": 2, "fail": 0, "skip": 0 }, JSON.stringify(approved).slice(0, 1500));
+});
+
+test("a run of test files stopped from outside (runs_stop) stops whole, as Ctrl+C stops node --test: the files after it not run", async () => {
+	await session.request("files.write", { "path": "stop-hangs.test.mjs", "content": "import { test } from \"node:test\";\n\ntest(\"hangs\", () => new Promise(() => { setInterval(() => {}, 1000); }));\n" }, 30_000);
+	await session.request("files.write", { "path": "stop-after.test.mjs", "content": "import { test } from \"node:test\";\n\ntest(\"after\", () => {});\n" }, 30_000);
+
+	const started = await session.request("tests.run", { "files": ["stop-hangs.test.mjs", "stop-after.test.mjs"], "answerMs": 3000 }, 60_000);
+
+	assert.ok(started.running !== undefined, JSON.stringify(started).slice(0, 800));
+
+	// (its file's run, as runs_list has it, stopped as runs_stop stops it)
+	let hanging;
+
+	for (let tries = 0; hanging === undefined && tries < 60; tries++) {
+		hanging = (await ask("runs.list", {})).find((run) => run.title === "node --test stop-hangs.test.mjs" && run.state === "running");
+
+		if (hanging === undefined) {
+			await new Promise((resolve) => { setTimeout(resolve, 500); });
+		}
+	}
+
+	assert.ok(hanging !== undefined, "its file's run is listed");
+	await ask("runs.stop", { "id": hanging.id });
+
+	let answer = started;
+
+	for (let asked = 0; answer.running !== undefined && asked < 10; asked++) {
+		answer = await session.request("tests.run", { "run": started.run }, 120_000);
+	}
+
+	assert.match(answer.stopped ?? "", /stopped/u, JSON.stringify(answer).slice(0, 1500));
+	assert.deepEqual(answer.files.map((each) => each.file), ["stop-hangs.test.mjs"], "the file after it isn't run");
 });
 
 test("a run's stages are spans: under its run's, the runtime loaded, its entry parsed, its first step — and on its end, what it asked of the editor", async () => {

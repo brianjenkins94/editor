@@ -52,15 +52,16 @@ const files: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "files_edit",
 			"config": {
-				"description": "Replace an exact string in a workspace file — found once (else it fails: give more of the text around it), or every time with all. Matched against the file as the editor has it (unsaved edits included), whitespace and all — not files_read's line numbers. An open editor shows the change, undo takes it back; then it's saved. Returns { path, replaced }.",
+				"description": "Replace an exact string in a workspace file — found once (else it fails: give more of the text around it), or every time with all. Matched against the file as the editor has it (unsaved edits included), whitespace and all. Or whole lines by files_read's numbers (lines: [from, to]), for a long cut: the answer has the first and last lines that went, to check they were the ones meant. An open editor shows the change, undo takes it back; then it's saved. Returns { path, replaced, lines?, first?, last? }.",
 				"inputSchema": {
 					"path": z.string().describe("The file, relative to the workspace or absolute under it."),
-					"old": z.string().describe("The exact text to replace."),
+					"old": z.string().optional().describe("The exact text to replace (or lines)."),
+					"lines": z.array(z.number().int().positive()).length(2).optional().describe("Lines from and to (1-based, both in), replaced whole by new: end new with a line break to keep one."),
 					"new": z.string().describe("What replaces it."),
 					"all": z.boolean().optional().describe("Replace every occurrence (default: there must be exactly one).")
 				}
 			},
-			"handler": async ({ path, old, "new": replacement, all }, { signal }) => ok(request("files.edit", { "path": path, "old": old, "new": replacement, "all": all }, signal))
+			"handler": async ({ path, old, "new": replacement, all, lines }, { signal }) => ok(request("files.edit", { "path": path, "old": old, "new": replacement, "all": all, "lines": lines }, signal))
 		})
 	},
 	{
@@ -105,7 +106,7 @@ const files: ToolFamily = ({ request }) => [
 				"description": "Search the workspace's files for a regular expression (JavaScript syntax), line by line — open files as the editor has them. Returns { matches: [{ file, line (1-based), text }], total }.",
 				"inputSchema": {
 					"pattern": z.string().describe("A regular expression, e.g. `function \\w+Run`."),
-					"glob": z.string().optional().describe("Only the files this glob matches (default: every file but node_modules and .git)."),
+					"glob": z.string().optional().describe("Only the files this glob matches, or a folder's (its path alone); default, every file but node_modules and .git."),
 					"ignoreCase": z.boolean().optional().describe("Match regardless of case."),
 					"limit": z.number().optional().describe("At most this many matches (default 200); total says how many there are.")
 				}

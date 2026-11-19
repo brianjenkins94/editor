@@ -192,6 +192,28 @@ test("a clone one commit deep: fetch deepens its history by as many as asked, un
 	await assert.rejects(rpc.request("git.fetch", { "deepen": 0 }), /more than none/u);
 });
 
+test("a branch the clone hasn't fetched is checked out from the repository's: fetched one commit deep, then switched to", async () => {
+	const { rpc, http } = editor();
+	const source = path.join(root, "source");
+
+	rmSync(source, { "recursive": true, "force": true });
+	git("init", "--quiet", "--initial-branch=main", source);
+	execFileSync("sh", ["-c", "echo main > a.txt"], { "cwd": source });
+	git("-C", source, "add", ".");
+	git("-C", source, "commit", "--quiet", "-m", "main");
+	git("-C", source, "switch", "--quiet", "-c", "other");
+	execFileSync("sh", ["-c", "echo other > a.txt"], { "cwd": source });
+	git("-C", source, "commit", "--quiet", "-am", "other");
+	git("-C", source, "push", "--quiet", "--force", bare, "main", "other");
+	await fs.promises.rm(DIR, { "recursive": true, "force": true });
+	await clone({ "fs": fs, "http": http, "dir": DIR, "url": ORIGIN, "corsProxy": "", "depth": 1, "singleBranch": true, "ref": "main" });
+
+	assert.deepEqual((await engine.branches()).all, ["main"]);
+	assert.equal((await rpc.request("git.checkout", { "name": "other" }, { "timeoutMs": 30_000 })).current, "other");
+	assert.equal(await read("a.txt"), "other\n");
+	await assert.rejects(rpc.request("git.checkout", { "name": "nowhere" }, { "timeoutMs": 30_000 }));
+});
+
 test("a refused push says the remote's reason, not only its status", async () => {
 	const { rpc } = editor({ "refuse": { "status": 403, "body": "Permission to someone/repo.git denied to you." } });
 

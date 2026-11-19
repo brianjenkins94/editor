@@ -87,8 +87,9 @@ test("a tool's input survives the trip: zod in the tab, JSON Schema on the wire,
 	const { tools } = await mcp.client.listTools();
 	const edit = tools.find((tool) => tool.name === "files_edit").inputSchema;
 
-	assert.deepEqual([...edit.required].sort(), ["new", "old", "path"], "required stays required, optional stays optional");
-	assert.equal(edit.properties.old.description, "The exact text to replace.");
+	assert.deepEqual([...edit.required].sort(), ["new", "path"], "required stays required, optional stays optional");
+	assert.ok(!edit.required.includes("old") && !edit.required.includes("lines"), "the text or the lines: neither required alone");
+	assert.equal(edit.properties.old.description, "The exact text to replace (or lines).");
 	assert.ok("tab" in edit.properties, "debug-mcp's own tab argument added");
 });
 

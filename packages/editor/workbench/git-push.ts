@@ -26,20 +26,6 @@ export function installGitPush(hub: Hub, log: Logger): HttpClient {
 
 		return engine.branches();
 	});
-	// Onto another branch — made at HEAD first with `create` (`git switch -c`), the working tree as it is.
-	serve(hub, "git.checkout", async (args) => {
-		const { name, create } = (args ?? {}) as { "name"?: unknown; "create"?: unknown };
-
-		if (typeof name !== "string" || name === "") {
-			throw new TypeError("git.checkout needs a branch name.");
-		}
-
-		await engine.switchBranch(name, create === true);
-		hub.publish("git.changed");
-
-		return engine.branches();
-	});
-
 	const remote = remoteHttp(async (request) => await shell.request("git.remote", request, { "timeoutMs": 300_000 }) as RemoteResponse);
 	// A remote's refusal says why in its answer's body (the proxy's `{ "error": … }`, GitHub's "Permission … denied"):
 	// isomorphic-git keeps it on the error and says only "HTTP Error: 403".
@@ -48,6 +34,30 @@ export function installGitPush(hub: Hub, log: Logger): HttpClient {
 
 		throw typeof body === "string" && body.trim() !== "" ? new Error(`${(error as Error).message}: ${body.trim().slice(0, 300)}`) : error;
 	};
+
+	// Onto another branch — made at HEAD first with `create` (`git switch -c`), the working tree as it is. One the clone
+	// hasn't (it's one commit deep, its own branch only) is fetched from the repository first, one commit deep, and made
+	// from origin's, as `git switch <name>` does.
+	serve(hub, "git.checkout", async (args) => {
+		const { name, create } = (args ?? {}) as { "name"?: unknown; "create"?: unknown };
+
+		if (typeof name !== "string" || name === "") {
+			throw new TypeError("git.checkout needs a branch name.");
+		}
+
+		if (create !== true && !(await engine.branches()).all.includes(name)) {
+			const url = await engine.githubRemote();
+
+			if (url === undefined || !await engine.fetchRef(remote, url, name).catch(said)) {
+				throw new Error(`${name} isn't a branch here${url === undefined ? "" : " or on GitHub"} (git switch -c ${name} makes it)`);
+			}
+		}
+
+		await engine.switchBranch(name, create === true);
+		hub.publish("git.changed");
+
+		return engine.branches();
+	});
 
 	// A branch (the current one, by default) brought up to the repository's, when that's a fast-forward: what GitHub has
 	// that this workspace hasn't, its files written over a working tree whose changes are elsewhere (git-engine.ts `pull`).

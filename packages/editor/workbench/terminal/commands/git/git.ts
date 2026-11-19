@@ -156,7 +156,14 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 		}
 
 		if (!create && !(await engine.branches()).all.includes(name)) {
-			return fail(`fatal: invalid reference: ${name} (git switch -c ${name} makes it; git restore <path> undoes a file's changes)`, 128);
+			if (await engine.githubRemote() === undefined) {
+				return fail(`fatal: invalid reference: ${name} (git switch -c ${name} makes it; git restore <path> undoes a file's changes)`, 128);
+			}
+
+			// (one the clone hasn't fetched: the git service fetches it, through the shell's sign-in, and makes it from origin's)
+			await createRpcClient(hub).request("git.checkout", { "name": name }, { "timeoutMs": 300_000 });
+
+			return { "stdout": "", "stderr": `branch '${name}' set up to track 'origin/${name}'.\nSwitched to a new branch '${name}'\n`, "exitCode": 0 };
 		}
 
 		await engine.switchBranch(name, create);

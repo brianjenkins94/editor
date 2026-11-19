@@ -58,7 +58,7 @@ export default {
 		"branch": { "summary": "List the branches, or make one at HEAD.", "options": { "name": { "format": String, "default": "", "positional": true, "doc": "A branch to make." } } },
 		"version": { "summary": "Which git this is.", "aliases": ["--version"] },
 		"switch": {
-			"summary": "Onto another branch; -c makes it at HEAD first, keeping your changes.",
+			"summary": "Onto another branch (one the clone hasn't, fetched from GitHub first); -c makes it at HEAD first, keeping your changes.",
 			"options": { "create": { "format": Boolean, "default": false, "short": "c", "doc": "Make it first." }, "name": { "format": String, "default": "", "positional": true, "doc": "The branch." } }
 		},
 		"checkout": {

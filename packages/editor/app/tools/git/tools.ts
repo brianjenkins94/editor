@@ -142,7 +142,7 @@ const git: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "git_checkout",
 			"config": {
-				"description": "Switch to a branch; with create, make it at HEAD first, keeping the working tree's changes (git switch -c). Returns { current, all }.",
+				"description": "Switch to a branch; with create, make it at HEAD first, keeping the working tree's changes (git switch -c). A branch the clone hasn't fetched (it's one commit deep, its own branch only) is fetched from the GitHub repository first and made from origin's, as git switch does. Returns { current, all }.",
 				"inputSchema": {
 					"name": z.string().describe("The branch."),
 					"create": z.boolean().optional().describe("Make it first.")
