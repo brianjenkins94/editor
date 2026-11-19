@@ -156,6 +156,8 @@ export async function relay(client: Transport, connect: () => Promise<Upstream>,
 	let initialized = false;
 	/** The client's requests the upstream hasn't answered. */
 	const waiting = new Set<number | string>();
+	/** Those still being sent: one whose send fails is sent again to the next upstream, not refused. */
+	const sending = new Set<number | string>();
 	let replays = 0;
 	let queue = Promise.resolve();
 	let closed = false;
@@ -248,10 +250,11 @@ export async function relay(client: Transport, connect: () => Promise<Upstream>,
 		say(`[debug-mcp] lost its upstream (${why})`);
 
 		for (const id of waiting) {
-			void refuse(id, `debug-mcp's upstream went before it answered (${why}); ask again`);
+			if (!sending.has(id)) {
+				void refuse(id, `debug-mcp's upstream went before it answered (${why}); ask again`);
+				waiting.delete(id);
+			}
 		}
-
-		waiting.clear();
 		void gone.transport.close().catch(() => undefined);
 		queue = queue.then(async () => {
 			if (upstream === undefined && !closed) {
@@ -282,10 +285,15 @@ export async function relay(client: Transport, connect: () => Promise<Upstream>,
 
 			if (request !== undefined) {
 				waiting.add(request);
+				sending.add(request);
 			}
 
 			try {
-				await to.transport.send(message);
+				await to.transport.send(message).finally(() => {
+					if (request !== undefined) {
+						sending.delete(request);
+					}
+				});
 
 				// (once it's sent: asked again of each upstream after this one)
 				if (isInitializeRequest(message)) {

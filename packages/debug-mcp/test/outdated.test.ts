@@ -47,7 +47,8 @@ test("tabs_list says when a page is newer than this debug-mcp, and what to do", 
 	for (let attempt = 0; attempt < 30 && tab === undefined; attempt += 1) {
 		const result = await client.callTool({ "name": "tabs_list", "arguments": {} }) as { "content": { "text": string }[] };
 
-		[tab] = JSON.parse(result.content[0]!.text) as { "tab": string; "outdated"?: string }[];
+		// (a tab linked that hasn't answered yet is listed as silent: the one answering is the one meant)
+		tab = (JSON.parse(result.content[0]!.text) as { "tab"?: string; "outdated"?: string; "silent"?: boolean }[]).find((each) => each.silent !== true) as typeof tab;
 	}
 
 	assert.equal(tab?.tab, "new");
