@@ -836,6 +836,14 @@ packages/editor (`--all`, `--runs N`, `--json`).
   the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
   gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files; and a
   lint that outlasts its file is dropped, `gone`), not seen for a load.
+- **mock-value.spec's lost rule not in Problems** (2026-11-18 locally, 2026-11-19 on CI at d0cf69cb): "a variable set on
+  every run…" waits 60 s for the row "A rule's place in this file is lost" (extensions/margin/placed.ts) and sees none.
+  Both times live-values.spec ran just before it in the same session; on CI the status bar said 2 errors and 1 warning
+  as it failed, so a warning was there and the row wasn't found. Not reproduced in nine runs (alone; four in a row
+  beside a loaded session; after live-values; after live-runs and live-values, twice). A lead, unconfirmed: `placedIn`
+  answers nothing when BABLR has no answer (`unavailable`, `unparsable`), and `placedMarks` then clears the file's
+  problems until the Margin is asked again. The same CI run: way-in-reach.spec's lightbulb never showed (once); the next
+  push's run passed whole.
 - **unpkg answered 404 for a file it has** (02be5dbc's architecture run, 2026-11-18): workbench.spec's "the service worker
   serves a package's file from the CDN" got 404 for `react@18.3.1/package.json` through the dev server's CDN proxy
   (build/package-types.ts `nodeModulesCdnPlugin`, unpkg), which unpkg served a few hours later. Its first. If it comes
