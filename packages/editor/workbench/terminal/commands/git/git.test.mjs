@@ -102,3 +102,22 @@ test("a script HEAD has as executable stays so through an edit: the workspace's 
 
 	assert.equal(tree.tree.find((entry) => entry.path === "run.sh")?.mode, "100755");
 });
+
+test("a shallow clone's log says where its history ends and how to see further; fetch takes a number to deepen by", async () => {
+	const head = await resolveRef({ "fs": fs, "dir": "/workspace", "ref": "HEAD" });
+
+	// (as a clone one commit deep leaves it)
+	fs.writeFileSync("/workspace/.git/shallow", head + "\n");
+
+	try {
+		const said = await git("log --oneline");
+
+		assert.match(said.stdout, new RegExp(`^${head.slice(0, 7)} `, "u"));
+		assert.match(said.stderr, /the clone's history ends here: git fetch --deepen=<n>/u);
+		assert.match((await git("fetch --deepen=many")).stderr, /depth many is not a positive number/u);
+	} finally {
+		fs.unlinkSync("/workspace/.git/shallow");
+	}
+
+	assert.equal((await git("log --oneline")).stderr, "", "a whole history says nothing");
+});

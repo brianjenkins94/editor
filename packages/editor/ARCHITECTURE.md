@@ -786,7 +786,8 @@ tools*). What the code doesn't say:
 - `git_diff` is jsdiff's (the `diff` package, already bundled for just-bash) in git's format: isomorphic-git has no
   text diff of its own.
 - `git_log`, `git_show` and `git_blame` (2026-10-29) read what this clone holds, which is shallow on the bench, and say
-  where it ends (`.git/shallow`). isomorphic-git has no blame, so it's built from the file's versions, newest first
+  where it ends (`.git/shallow`); the terminal's `git fetch --deepen=<n>` / `--unshallow` (agents' `git_fetch`, the
+  workbench's `git.fetch`, 2026-11-18) fetches more of it, and its `git log` says where it ends. isomorphic-git has no blame, so it's built from the file's versions, newest first
   (the working tree's, then each commit that changed it): a line belongs to the newest version that has it where the
   next older one doesn't, by a line diff (shared/git-hunks.ts `blameOf`). A line every version read has is marked
   boundary: as old as the oldest version, or older.

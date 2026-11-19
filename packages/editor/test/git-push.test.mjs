@@ -2,7 +2,8 @@
  * A branch pushed to GitHub and brought up to it, through the shell (workbench/git-push.ts, shared/git-remote.ts): the
  * workspace's git on zen-fs's in-memory filesystem makes a remote's requests, and each crosses the hub whole as
  * `git.remote` to the shell, which sends it. The shell here hands each to `git http-backend` over a bare repository on
- * disk, as GitHub would answer it — so what's pushed is checked with git itself. And the branches, made and switched to.
+ * disk, as GitHub would answer it — so what's pushed is checked with git itself. And the branches, made and switched to,
+ * and a shallow clone's history fetched deeper.
  *
  *   node --import tsx --test test/git-push.test.mjs
  */
@@ -15,7 +16,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { fs } from "@zenfs/core";
-import { setConfig } from "isomorphic-git";
+import { clone, setConfig } from "isomorphic-git";
 
 const engine = await import("../workbench/git-engine.ts");
 const { installGitPush } = await import("../workbench/git-push.ts");
@@ -78,9 +79,9 @@ function editor({ refuse } = {}) {
 
 		return backend(request);
 	});
-	installGitPush(hub, quiet);
+	const http = installGitPush(hub, quiet);
 
-	return { "rpc": createRpcClient(hub), "sent": sent, "changed": (() => {
+	return { "rpc": createRpcClient(hub), "http": http, "sent": sent, "changed": (() => {
 		let count = 0;
 
 		hub.subscribe("git.changed", () => {
@@ -156,6 +157,41 @@ test("a branch made at HEAD, then switched to; a push of it makes it there", asy
 	assert.equal(git("--git-dir", bare, "show", "other:a.txt"), "one, on other");
 });
 
+test("a clone one commit deep: fetch deepens its history by as many as asked, unshallow all of it, the branch left where it is", async () => {
+	const { rpc, http } = editor();
+	const source = path.join(root, "source");
+
+	rmSync(source, { "recursive": true, "force": true });
+	git("init", "--quiet", "--initial-branch=main", source);
+
+	for (const each of ["one", "two", "three", "four"]) {
+		execFileSync("sh", ["-c", `echo ${each} > a.txt`], { "cwd": source });
+		git("-C", source, "add", ".");
+		git("-C", source, "commit", "--quiet", "-m", each);
+	}
+
+	git("-C", source, "push", "--quiet", "--force", bare, "main");
+	// (as a repository loaded from GitHub is: one commit deep)
+	await fs.promises.rm(DIR, { "recursive": true, "force": true });
+	await clone({ "fs": fs, "http": http, "dir": DIR, "url": ORIGIN, "corsProxy": "", "depth": 1, "singleBranch": true });
+
+	const head = await engine.headCommit();
+
+	assert.equal((await engine.history()).length, 1);
+	assert.deepEqual(await engine.shallowEnds(), [head]);
+
+	const deepened = await rpc.request("git.fetch", { "deepen": 2 }, { "timeoutMs": 30_000 });
+
+	assert.deepEqual(deepened, { "ref": "main", "tip": head, "commits": 3, "shallow": true, "url": ORIGIN });
+	assert.deepEqual((await engine.history()).map((entry) => entry.message.trim()), ["four", "three", "two"]);
+
+	const all = await rpc.request("git.fetch", { "unshallow": true }, { "timeoutMs": 30_000 });
+
+	assert.deepEqual([all.commits, all.shallow], [4, false]);
+	assert.equal(await engine.headCommit(), head, "the branch stays where it was");
+	await assert.rejects(rpc.request("git.fetch", { "deepen": 0 }), /more than none/u);
+});
+
 test("a refused push says the remote's reason, not only its status", async () => {
 	const { rpc } = editor({ "refuse": { "status": 403, "body": "Permission to someone/repo.git denied to you." } });
 
@@ -168,4 +204,5 @@ test("a workspace that isn't a GitHub repository's has nowhere to push or pull",
 	await setConfig({ "fs": fs, "dir": DIR, "path": "remote.origin.url", "value": undefined });
 	await assert.rejects(rpc.request("git.push", {}), /nowhere to push/u);
 	await assert.rejects(rpc.request("git.pull", {}), /nothing to bring it up to/u);
+	await assert.rejects(rpc.request("git.fetch", {}), /nothing to fetch from/u);
 });

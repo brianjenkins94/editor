@@ -489,6 +489,37 @@ export async function pull(http: HttpClient, url: string, ref?: string): Promise
 	return fastForward(branchName, fetched.fetchHead);
 }
 
+/** What `git fetch` brought: the branch's tip there, how many commits HEAD's history has here now, and whether it still
+ *  ends where a shallow clone's does. */
+export interface Fetched {
+	"ref": string;
+	"tip": string;
+	"commits": number;
+	"shallow": boolean;
+}
+
+/** All of a history, as git asks for it (`--unshallow`). */
+const ALL = 2_147_483_647;
+
+/** Fetch `ref` (the current branch, by default) from `url` over `http` (`git fetch`): what the remote has that this
+ *  hasn't, into `origin/<ref>`, the branch itself left where it is. `deepen` reaches that many commits further back
+ *  than a shallow clone's history ends (`--deepen`); Infinity, all of it (`--unshallow`). */
+export async function fetchBranch(http: HttpClient, url: string, ref?: string, deepen?: number): Promise<Fetched> {
+	const branchName = ref ?? (await currentBranch({ "fs": fs, "dir": DIR }) || undefined);
+
+	if (branchName === undefined) {
+		throw new Error("HEAD is on no branch: name one to fetch");
+	}
+
+	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": branchName, "remoteRef": branchName, "singleBranch": true, "tags": false, ...deepen === undefined ? {} : { "depth": deepen === Infinity ? ALL : deepen, "relative": true } });
+
+	if (fetched.fetchHead === null) {
+		throw new Error(`the remote has no branch ${branchName}`);
+	}
+
+	return { "ref": branchName, "tip": fetched.fetchHead, "commits": (await history()).length, "shallow": (await shallowEnds()).length > 0 };
+}
+
 /**
  * Move `branchName` (HEAD's) to `to` when that's a fast-forward, keeping the working tree's changes: the files that
  * changed between the two are written and staged as `to` has them, then the branch moved. Refused — nothing touched —

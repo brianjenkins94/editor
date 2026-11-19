@@ -163,8 +163,9 @@ How it's kept:
        memory budget).
      - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced); CI's reach
        covers the architecture suites only, and there `activate` is reached by nearly every test; `decisions_for` named five
-       features for one file; nothing shows code with its comments stripped (the zero-knowledge pass's first
-       condition); the clone is one commit deep, so `git_log` sees nothing older.
+       features for one file. (Code with its comments stripped: Git: Open a Commit Read-Only…'s "The code alone", since
+       2026-11-03. The clone one commit deep, so `git_log` saw nothing older: the terminal's `git fetch --deepen=<n>` /
+       `--unshallow` and agents' `git_fetch` fetch more since 2026-11-18, and `git log` says where it ends.)
      - *Declare:* no way but editing `.silo/features.json` by hand, and no fields for ways in or tests (decision 21);
        `silo check` runs in the editor's terminal since 2026-11-15 (item 1).
      - *Remove:* every save runs ESLint's fix-all, rewriting

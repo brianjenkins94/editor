@@ -11,7 +11,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { remoteHttp } from "../shared/git-remote";
 import * as engine from "./git-engine";
 
-/** Serve `git.branch`, `git.checkout`, `git.pull` and `git.push` on `hub`; the remote, as the shell reaches it, for
+/** Serve `git.branch`, `git.checkout`, `git.fetch`, `git.pull` and `git.push` on `hub`; the remote, as the shell reaches it, for
  *  whoever else fetches (git-history.ts). */
 export function installGitPush(hub: Hub, log: Logger): HttpClient {
 	const shell = createRpcClient(hub);
@@ -68,6 +68,28 @@ export function installGitPush(hub: Hub, log: Logger): HttpClient {
 		log.info("git pull", { "ref": pulled.ref, "outcome": pulled.outcome, "files": pulled.files?.length });
 
 		return { ...pulled, "url": url };
+	});
+
+	// What the repository has that this workspace hasn't (`git fetch`), the branch left where it is; with `deepen`, that
+	// many commits more of the history a shallow clone ends (`unshallow`, all of it) — so `git log` sees past one commit.
+	serve(hub, "git.fetch", async (args) => {
+		const { ref, deepen, unshallow } = (args ?? {}) as { "ref"?: unknown; "deepen"?: unknown; "unshallow"?: unknown };
+		const url = await engine.githubRemote();
+
+		if (url === undefined) {
+			throw new Error("this workspace wasn't loaded from a GitHub repository, so there's nothing to fetch from");
+		}
+
+		if (deepen !== undefined && !(Number.isInteger(deepen) && (deepen as number) > 0)) {
+			throw new TypeError("git.fetch's deepen is a number of commits, more than none");
+		}
+
+		const fetched = await engine.fetchBranch(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined, unshallow === true ? Infinity : deepen as number | undefined).catch(said);
+
+		hub.publish("git.changed");
+		log.info("git fetch", { "ref": fetched.ref, "commits": fetched.commits, "shallow": fetched.shallow });
+
+		return { ...fetched, "url": url };
 	});
 
 	// A branch (the current one, by default) pushed to the repository it was cloned from, through the shell.

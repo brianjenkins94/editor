@@ -107,11 +107,14 @@ async function log(config: Juvy): Promise<Result> {
 		return fail("fatal: your current branch does not have any commits yet", 128);
 	}
 
+	// (where a shallow clone's history ends — a clone is one commit deep — said, and how to see further)
+	const ends = (await engine.shallowEnds()).includes(entries.at(-1)!.oid) ? "(the clone's history ends here: git fetch --deepen=<n> brings n commits more, --unshallow all of it)\n" : "";
+
 	if (config.get("oneline") === true) {
-		return ok(entries.map((entry) => `${entry.oid.slice(0, 7)} ${entry.message.split("\n")[0]}\n`).join(""));
+		return { ...ok(entries.map((entry) => `${entry.oid.slice(0, 7)} ${entry.message.split("\n")[0]}\n`).join("")), "stderr": ends };
 	}
 
-	return ok(entries.map((entry) => `commit ${entry.oid}\nAuthor: ${entry.author.name} <${entry.author.email}>\nDate:   ${new Date(entry.author.timestamp * 1000).toString()}\n\n${entry.message.trimEnd().split("\n").map((line) => "    " + line).join("\n")}\n`).join("\n"));
+	return { ...ok(entries.map((entry) => `commit ${entry.oid}\nAuthor: ${entry.author.name} <${entry.author.email}>\nDate:   ${new Date(entry.author.timestamp * 1000).toString()}\n\n${entry.message.trimEnd().split("\n").map((line) => "    " + line).join("\n")}\n`).join("\n")), "stderr": ends };
 }
 
 /** The changed files `paths` (as typed in `cwd`) name: a file, a folder's changed files, `.` — or an error. */
@@ -266,6 +269,23 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 		},
 		"switch": async (config) => switchTo(config),
 		"checkout": async (config) => switchTo(config),
+		"fetch": async (config) => {
+			if (config.get("remote") !== "origin") {
+				return fail(`fatal: '${config.get("remote") as string}' does not appear to be a git repository — this workspace has origin, where it was loaded from`, 128);
+			}
+
+			const deepen = config.get("deepen") as string;
+
+			if (deepen !== "" && !/^[1-9]\d*$/u.test(deepen)) {
+				return fail(`fatal: depth ${deepen} is not a positive number`, 128);
+			}
+
+			const branch = config.get("branch") as string;
+			// (the git service's fetch: it asks the shell, which has the sign-in, to send its requests)
+			const fetched = await createRpcClient(hub).request("git.fetch", { ...branch === "" ? {} : { "ref": branch }, ...deepen === "" ? {} : { "deepen": Number(deepen) }, "unshallow": config.get("unshallow") === true }, { "timeoutMs": 300_000 }) as { "ref": string; "tip": string; "commits": number; "shallow": boolean; "url": string };
+
+			return { "stdout": "", "stderr": `From ${fetched.url}\n * branch            ${fetched.ref} -> origin/${fetched.ref} (${fetched.tip.slice(0, 7)})\n${String(fetched.commits)} commit${fetched.commits === 1 ? "" : "s"} from HEAD here${fetched.shallow ? ", where the clone's history ends" : ", all of its history"}\n`, "exitCode": 0 };
+		},
 		"push": async (config) => {
 			if (config.get("remote") !== "origin") {
 				return fail(`fatal: '${config.get("remote") as string}' does not appear to be a git repository — this workspace has origin, where it was loaded from`, 128);

@@ -3,8 +3,8 @@ import type { CommandDefinition } from "../../catalog";
 const PATHS = { "format": Array, "default": [], "positional": "rest", "doc": "Paths (files or folders); none: all." } as const;
 
 /** What this git doesn't do, as much as there's to say. */
-const NOT_HERE = "isn't here: this git has status, diff, log, add, restore, commit, branch, switch and push.";
-const NO_HISTORY_EDITS = "isn't here: nothing in this git rewrites or combines history. It has status, diff, log, add, restore, commit, branch, switch and push.";
+const NOT_HERE = "isn't here: this git has status, diff, log, add, restore, commit, branch, switch, fetch and push.";
+const NO_HISTORY_EDITS = "isn't here: nothing in this git rewrites or combines history. It has status, diff, log, add, restore, commit, branch, switch, fetch and push.";
 
 export default {
 	"name": "git",
@@ -20,14 +20,13 @@ export default {
 		"clone": "isn't here: the top bar's GitHub button loads a repository.",
 		"show": "isn't here: git log says what's been committed.",
 		"blame": "isn't here: git log says what's been committed.",
-		"fetch": "isn't here: the top bar's Commit pulls before it pushes.",
 		"pull": "isn't here: the top bar's Commit pulls before it pushes.",
 		"remote": NOT_HERE,
 		"tag": NOT_HERE,
 		"config": NOT_HERE,
 		"init": NOT_HERE
 	},
-	"summary": "The workspace's git: status, diff, log, add, restore, commit, branch, switch, push.",
+	"summary": "The workspace's git: status, diff, log, add, restore, commit, branch, switch, fetch, push.",
 	"subcommands": {
 		"status": { "summary": "What's changed: staged, not staged, untracked.", "options": { "short": { "format": Boolean, "default": false, "short": "s", "doc": "Two letters a file." } } },
 		"diff": {
@@ -65,6 +64,15 @@ export default {
 		"checkout": {
 			"summary": "A branch, as switch does; -b makes it first. (A file's changes: git restore.)",
 			"options": { "create": { "format": Boolean, "default": false, "short": "b", "doc": "Make it first." }, "name": { "format": String, "default": "", "positional": true, "doc": "The branch." } }
+		},
+		"fetch": {
+			"summary": "What the GitHub repository has that this hasn't, into origin/<branch> (the branch stays put); --deepen or --unshallow brings the history a clone ends at one commit.",
+			"options": {
+				"deepen": { "format": String, "default": "", "doc": "That many commits further back than the history ends." },
+				"unshallow": { "format": Boolean, "default": false, "doc": "All of it." },
+				"remote": { "format": String, "default": "origin", "positional": true, "doc": "origin, the only one." },
+				"branch": { "format": String, "default": "", "positional": true, "doc": "The branch; none: the current one." }
+			}
 		},
 		"push": {
 			"summary": "Push a branch (the current one) to the GitHub repository this was loaded from — signed in with GitHub.",

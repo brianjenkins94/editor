@@ -11,7 +11,7 @@ const git: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "git_log",
 			"config": {
-				"description": "The commits from HEAD back, newest first: every one, or only those that changed a file (its renames followed). Each with its oid, short oid, first line of its message, author and date. A shallow clone's history ends where it ends: `shallow` says so. Returns { commits: [{ oid, short, message, author, date }], shallow? }.",
+				"description": "The commits from HEAD back, newest first: every one, or only those that changed a file (its renames followed). Each with its oid, short oid, first line of its message, author and date. A shallow clone's history ends where it ends: `shallow` says so, and git_fetch's deepen brings more. Returns { commits: [{ oid, short, message, author, date }], shallow? }.",
 				"inputSchema": {
 					"path": z.string().optional().describe("Only the commits that changed this file (relative to the workspace)."),
 					"limit": z.number().optional().describe("How many, at most (default 20, at most 500).")
@@ -160,6 +160,21 @@ const git: ToolFamily = ({ request }) => [
 				"inputSchema": { "ref": z.string().optional().describe("The branch; default, the current one.") }
 			},
 			"handler": async ({ ref }, { signal }) => ok(request("git.pull", { "ref": ref }, signal))
+		})
+	},
+	{
+		"timeoutMs": 300000,
+		"tool": defineTool({
+			"name": "git_fetch",
+			"config": {
+				"description": "What the GitHub repository has that the workspace hasn't, into origin/<branch>, the branch itself left where it is (the terminal's git fetch), through the editor's sign-in. With deepen, that many commits further back than the history ends — a loaded repository is one commit deep, so git_log sees nothing older until then (--deepen); with unshallow, all of it. Returns { ref, tip, commits (HEAD's history here now), shallow (whether it still ends short), url }.",
+				"inputSchema": {
+					"ref": z.string().optional().describe("The branch; default, the current one."),
+					"deepen": z.number().int().positive().optional().describe("That many commits more of the history."),
+					"unshallow": z.boolean().optional().describe("All of the history.")
+				}
+			},
+			"handler": async ({ ref, deepen, unshallow }, { signal }) => ok(request("git.fetch", { "ref": ref, "deepen": deepen, "unshallow": unshallow === true }, signal))
 		})
 	},
 	{
