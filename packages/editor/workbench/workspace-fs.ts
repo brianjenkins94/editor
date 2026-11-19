@@ -253,11 +253,33 @@ function forgetPersisted(db: IDBDatabase | undefined, paths: string[]): void {
 	}
 }
 
+/** How often, and for how long, a provider call whose folder this thread's async work holds asks again. */
+const HELD_RETRY_MS = 5;
+const HELD_FOR_MS = 2000;
+
 /** `body`'s result as a promise, and what it throws as the rejection — as an async function settles. For the
- *  provider's methods, which do all their work synchronously. */
+ *  provider's methods, which do all their work synchronously. A folder held by async work on this thread (zen-fs's
+ *  `promises`, between its awaits: edit-history.ts, git-engine.ts) is EAGAIN to a synchronous call, which can't wait for
+ *  it — so it's asked again shortly, as zen-fs's own async calls wait: a run's keep under `.silo/local` while a save's
+ *  edit history was written there was lost (NEXT.md, *past-runs.spec's runs*). Each method does the same again, asked
+ *  again: a parent made, a file written whole, a removal forced. */
 function settled<T>(body: () => T): Promise<T> {
-	return new Promise((resolve) => {
-		resolve(body());
+	const until = Date.now() + HELD_FOR_MS;
+
+	return new Promise((resolve, reject) => {
+		const attempt = (): void => {
+			try {
+				resolve(body());
+			} catch (error) {
+				if ((error as { "code"?: string }).code === "EAGAIN" && Date.now() < until) {
+					setTimeout(attempt, HELD_RETRY_MS);
+				} else {
+					reject(error);
+				}
+			}
+		};
+
+		attempt();
 	});
 }
 

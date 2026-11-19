@@ -811,10 +811,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
   specs two at a time): the dev server served its page, and the toolbar, the session list and the status bar had nothing.
   Again on CI 2026-11-16 (cde152ee's specs, 1 of 40: no Stop, `{"toolbar":[],"sessions":[],"status":[]}`), passing in five
   full runs here that day.
-- **past-runs.spec's runs, after a reload: 2 of 3** (2026-11-16, three full runs of nine here): the run just before the
-  reload wasn't among those kept, 30 s on. Likely its record not yet written (debounced?) as the page went — which a
-  person reloading quickly would lose too. Not yet traced. Again 2026-11-18: once in a full run, once in two alone, and
-  once in a full run of two sessions (its editor its own; alone after, it passed twice).
+- **past-runs.spec's runs, after a reload: 2 of 3** (2026-11-16; fixed 2026-11-18): not the reload — the first run was never
+  kept. Its keep's `mkdir` under `.silo/local` (VS Code's provider, synchronous) met the folder held by the save's edit
+  history (edit-history.ts, zen-fs's `promises`, between its awaits), and a synchronous call can't wait on zen-fs's folder
+  lock: EAGAIN, "resource temporarily unavailable", the run lost. Under load, about one run in four. A person's too: any
+  write through the provider beside git's or edit history's on the same folder. The provider asks again for up to 2 s
+  (workbench/workspace-fs.ts `settled`); 12 of 12 two at once since, none lost.
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
