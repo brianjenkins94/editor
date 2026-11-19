@@ -1,6 +1,7 @@
 /**
  * What changed and when, as `git diff`, `git log`, `git show <rev>:<path>` and `git blame` say it — over the hub for
- * agents' git_diff, git_log, git_show and git_blame (app/tools/git). What a shallow clone holds of the history, and where
+ * agents' git_diff, git_log, git_show and git_blame (app/tools/git), and the blame as a person reads it too: Git: Show
+ * Blame for This File, beside the code. What a shallow clone holds of the history, and where
  * that ends, said.
  */
 import type { Hub } from "@brianjenkins94/hub";
@@ -19,6 +20,14 @@ const BLAME_COMMITS = 200;
 
 /** Serve `git.diff`, `git.log`, `git.show` and `git.blame` on `hub`; `remote`, where `git.show` fetches a branch or tag
  *  the clone hasn't (git-push.ts' — without it, only what's here). */
+/** A run of lines one commit last changed (`working`: not committed yet). */
+interface BlameRun { "from": number; "to": number; "commit": string; "boundary"?: boolean; "message"?: string; "author"?: string; "date"?: string }
+
+/** What a run says beside its first line: the commit, when and who — `working`, a change not yet committed. */
+function labelOf(run: BlameRun): string {
+	return run.commit === "working" ? "working" : `${run.commit} ${run.date?.slice(0, 10) ?? ""} ${run.author ?? ""}${run.boundary === true ? " (or older)" : ""}`.trimEnd();
+}
+
 export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: HttpClient): void {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
@@ -75,13 +84,8 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 		return { "path": path, "rev": rev, "lines": text.split("\n").length, "content": text.length > MOST_SHOWN ? text.slice(0, MOST_SHOWN) : text, ...text.length > MOST_SHOWN ? { "truncated": true } : {} };
 	});
 
-	serve(hub, "git.blame", async (args) => {
-		const { path, from, to } = (args ?? {}) as { "path"?: unknown; "from"?: unknown; "to"?: unknown };
-
-		if (typeof path !== "string" || path === "") {
-			throw new TypeError("git.blame takes { path, from?, to? }: a file, and the lines (1-based) to say");
-		}
-
+	/** Which commit last changed each line of `path`, as runs of lines from `first` to `last` (both 1-based). */
+	const blame = async (path: string, first = 1, last = Number.POSITIVE_INFINITY): Promise<{ "path": string; "runs": BlameRun[]; "versions": number; "boundary"?: string; "working": string }> => {
 		const commits = await engine.history(BLAME_COMMITS, path);
 		const versions: { "oid": string; "text": string }[] = [{ "oid": "working", "text": await readWorking(path).catch(() => "") }];
 
@@ -97,9 +101,7 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 		}
 
 		const byOid = new Map(commits.map((commit) => [commit.oid, commit]));
-		const first = typeof from === "number" && from > 0 ? from : 1;
-		const last = typeof to === "number" && to >= first ? to : Number.POSITIVE_INFINITY;
-		const runs: { "from": number; "to": number; "commit": string; "boundary"?: boolean; "message"?: string; "author"?: string; "date"?: string }[] = [];
+		const runs: BlameRun[] = [];
 
 		for (const { line, oid, boundary } of blameOf(versions)) {
 			if (line < first || line > last) {
@@ -117,6 +119,46 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 			}
 		}
 
-		return { "path": path, "runs": runs, "versions": versions.length - 1, ...runs.some((run) => run.boundary === true) ? { "boundary": "lines marked boundary are as old as the oldest version read, or older: the history here ends there" } : {}, ...await ends(commits) };
+		return { "path": path, "runs": runs, "versions": versions.length - 1, "working": versions[0].text, ...runs.some((run) => run.boundary === true) ? { "boundary": "lines marked boundary are as old as the oldest version read, or older: the history here ends there" } : {}, ...await ends(commits) };
+	};
+
+	serve(hub, "git.blame", async (args) => {
+		const { path, from, to } = (args ?? {}) as { "path"?: unknown; "from"?: unknown; "to"?: unknown };
+
+		if (typeof path !== "string" || path === "") {
+			throw new TypeError("git.blame takes { path, from?, to? }: a file, and the lines (1-based) to say");
+		}
+
+		const first = typeof from === "number" && from > 0 ? from : 1;
+		const { working, ...said } = await blame(path, first, typeof to === "number" && to >= first ? to : Number.POSITIVE_INFINITY);
+
+		return said;
+	});
+
+	// A person's: each line of the file in front beside the commit that last changed it, read-only, beside it — what
+	// agents' git_blame asks (`git.blame`).
+	const shown = new Map<string, string>();
+	const changed = new vscode.EventEmitter<vscodeApi.Uri>();
+
+	vscode.workspace.registerTextDocumentContentProvider("editor-blame", { "onDidChange": changed.event, "provideTextDocumentContent": (uri) => shown.get(uri.toString()) ?? "" });
+	vscode.commands.registerCommand("editor.git.blame", async () => {
+		const editor = vscode.window.activeTextEditor;
+
+		if (editor?.document.uri.scheme !== "file") {
+			void vscode.window.showInformationMessage("Git: Show Blame — open a file of the workspace first.");
+
+			return;
+		}
+
+		const path = vscode.workspace.asRelativePath(editor.document.uri, false);
+		const said = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Window, "title": `Blame of ${path}` }, async () => blame(path));
+		const lines = said.working.split("\n");
+		const width = Math.max(...said.runs.map((run) => labelOf(run).length), 0);
+		const text = said.runs.flatMap((run) => Array.from({ "length": run.to - run.from + 1 }, (_, index) => `${(index === 0 ? labelOf(run) : "").padEnd(width)} │ ${lines[run.from - 1 + index] ?? ""}`));
+		const uri = vscode.Uri.from({ "scheme": "editor-blame", "path": `/${path}` });
+
+		shown.set(uri.toString(), [...text, ...said.boundary === undefined ? [] : ["", `(${said.boundary})`]].join("\n"));
+		changed.fire(uri);
+		await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { "viewColumn": vscode.ViewColumn.Beside, "preview": true });
 	});
 }

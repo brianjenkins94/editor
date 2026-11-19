@@ -73,7 +73,7 @@ How it's kept:
      feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin; *Tests at once*' flag from
      what a test touches (the gate's effects) rather than last runs.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes,
-     as its feature is reintroduced. `code_query` and `code_rewrite` (no command), `git_blame`,
+     as its feature is reintroduced. `code_query` and `code_rewrite` (no command),
      `runs_affected` and `runs_ledger` (the tests-by-feature list would be their view), `editor_trace`,
      `previews_provoke` (a test harness), `logs_query`, `logs_wait` and `spans_query` (no searchable view; the monitor has
      rates, the architecture view traffic), and `payloads_capture`. `git_log`, `git_show`, `runs_tests` have the

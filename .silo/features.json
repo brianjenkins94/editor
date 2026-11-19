@@ -172,7 +172,9 @@
       "hub request|git.diff",
       "hub request|git.log",
       "hub request|git.show",
-      "hub request|terminal.state"
+      "hub request|terminal.state",
+      "command|editor.git.blame",
+      "text document content provider|editor-blame"
     ],
     "paths": [
       "packages/editor/app/tools/files/",
@@ -183,7 +185,8 @@
     ],
     "tests": [
       "packages/editor/test/agent-tools.mjs",
-      "packages/editor/test/page-tools.test.mjs"
+      "packages/editor/test/page-tools.test.mjs",
+      "packages/editor/test/in-editor/blame.spec.mjs"
     ]
   },
   "Agents drive the debugger": {
