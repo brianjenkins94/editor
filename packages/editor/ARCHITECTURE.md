@@ -173,7 +173,9 @@ next event, so it remembers nothing between requests: it asks the page for a hub
 
 **One service worker serves every tab.** It links each tab's root hub separately and **non-transit** (a hub link
 option: nothing passes between two non-transit links), so tabs are never joined through it. debug-mcp links every open
-tab the same way (non-transit), for the same reason.
+tab the same way (non-transit), for the same reason. Every agent session on the machine shares that one debug-mcp: the
+first holds the port, and a second's relays its MCP to the first's over HTTP (`/mcp`: debug-mcp's sessions.ts and
+relay.ts), taking the port when the first goes.
 
 ### The workspace filesystem (zen-fs)
 

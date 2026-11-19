@@ -2963,13 +2963,15 @@
     "status": "active",
     "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
     "since": "2026-11-03",
-    "what": "Runs a local collector that the editor's hubs connect to over a WebSocket, and offers what they send to an agent as MCP tools over stdio.",
+    "what": "Runs a local collector that the editor's hubs connect to over a WebSocket, and offers what they send to an agent as MCP tools over stdio; every agent session on the machine gets them, a second through the one holding the port, taking it when that one goes.",
     "paths": [
       "packages/debug-mcp/agent-hook.mjs",
       "packages/debug-mcp/src/agent.ts",
       "packages/debug-mcp/src/bin.ts",
       "packages/debug-mcp/src/mcp.ts",
+      "packages/debug-mcp/src/relay.ts",
       "packages/debug-mcp/src/server.ts",
+      "packages/debug-mcp/src/sessions.ts",
       "packages/debug-mcp/src/store.ts",
       "packages/debug-mcp/src/testing.ts",
       "packages/debug-mcp/src/tools/context.ts",
@@ -2977,6 +2979,7 @@
     ],
     "tests": [
       "packages/debug-mcp/test/agent.test.ts",
+      "packages/debug-mcp/test/sessions.test.ts",
       "packages/debug-mcp/test/store.test.ts"
     ]
   },

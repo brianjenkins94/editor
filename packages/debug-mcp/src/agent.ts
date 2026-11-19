@@ -28,8 +28,8 @@ export interface AgentToolCall {
 
 export interface AgentCalls {
 	"log": Logger;
-	/** `transport` with each `tools/call` across it spanned. */
-	"observe": (transport: Transport) => Transport;
+	/** `transport` with each `tools/call` across it spanned — with its `session` when it's one of several (sessions.ts). */
+	"observe": (transport: Transport, session?: () => string | undefined) => Transport;
 	/** One the agent's client reported. */
 	"report": (call: AgentToolCall) => void;
 	"dispose": () => void;
@@ -62,7 +62,7 @@ export function agentCalls(store: RecordStore, editorLinked: () => boolean): Age
 
 	return {
 		"log": log,
-		"observe": (inner) => {
+		"observe": (inner, session) => {
 			const open = new Map<string | number, Span>();
 			const outer: Transport = {
 				"start": async () => inner.start(),
@@ -90,7 +90,7 @@ export function agentCalls(store: RecordStore, editorLinked: () => boolean): Age
 					const params = (message.params ?? {}) as { "name"?: unknown; "arguments"?: Record<string, unknown> };
 					const tab = params.arguments?.["tab"];
 
-					open.set(message.id, log.span("debug-mcp.agent.call", { "tool": String(params.name), "via": "editor", "argBytes": sizeOf(params.arguments), ...typeof tab === "string" ? { "tab": tab } : {} }));
+					open.set(message.id, log.span("debug-mcp.agent.call", { "tool": String(params.name), "via": "editor", "argBytes": sizeOf(params.arguments), ...typeof tab === "string" ? { "tab": tab } : {}, ...session?.() === undefined ? {} : { "session": session() } }));
 				}
 
 				outer.onmessage?.(message, extra);

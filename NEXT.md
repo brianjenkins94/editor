@@ -154,8 +154,10 @@ How it's kept:
      have `files_delete` and `notes_add`; notes and runs are authored by the signed-in GitHub user (the workspace's git
      config says who); a refused push or pull says the remote's reason (the 403 didn't come back: a push from localhost
      works). Still to do, by the step it blocks:
-     - *Working in it at all:* one agent session per machine drives the editor (debug-mcp's port), and a session that
-       couldn't start one has no tools with nothing saying why; two tabs back from a reset both cloned into one
+     - *Working in it at all:* (one agent session per machine drove the editor, a second with no tools and nothing saying
+       why: fixed 2026-11-18, a second session's debug-mcp relays to the one holding the port and takes it when that
+       one goes, debug-mcp's sessions.ts and relay.ts; another program on the port is said in its instructions. Sessions
+       already running keep the old debug-mcp until they reconnect it.) Two tabs back from a reset both cloned into one
        workspace; a tab sometimes missing from `tabs_list`; the workspace store fills with a day's pulls — nothing
        collects the packs they fetch (its buffer 64 → 128 MB, 2026-11-03: about three days' room, within the workbench's
        memory budget).
@@ -825,6 +827,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
   the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
   gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files; and a
   lint that outlasts its file is dropped, `gone`), not seen for a load.
+- **unpkg answered 404 for a file it has** (02be5dbc's architecture run, 2026-11-18): workbench.spec's "the service worker
+  serves a package's file from the CDN" got 404 for `react@18.3.1/package.json` through the dev server's CDN proxy
+  (build/package-types.ts `nodeModulesCdnPlugin`, unpkg), which unpkg served a few hours later. Its first. If it comes
+  back, the proxy could ask jsDelivr when unpkg says 404, as the service worker's own CDN fallback might.
 - **TypeScript keeps a removed tsconfig.json's project** (found 2026-11-18): its problems (with `allowJs` and `include`
   `**/*`, "Cannot write file … would overwrite input file") stayed on the gone file after a shared editor's reset, which
   restarts TypeScript's server when it removed one. Not a person's: removed from the terminal — a file open, or every

@@ -3,12 +3,14 @@
  *
  * The browser (the editor's rootHub) connects to `ws://localhost:<port>/`; an MCP client (Claude Code) spawns
  * this process and speaks MCP over stdio. Because MCP owns stdout, ALL diagnostics here go to stderr — a single
- * stray stdout write would corrupt the JSON-RPC stream. Port: --port <n> or DEV_HUB_PORT, default 7378.
+ * stray stdout write would corrupt the JSON-RPC stream. Port: --port <n> or DEV_HUB_PORT, default 7378. A second agent
+ * session's finds the port taken and goes through the one that has it (relay.ts).
  */
+import type { Relay } from "./relay.ts";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { createMcpServer } from "./mcp.ts";
-import { createDebugMcp } from "./server.ts";
+import { portOf, relay } from "./relay.ts";
 
 function resolvePort(): number {
 	const flagIndex = process.argv.indexOf("--port");
@@ -20,19 +22,20 @@ function resolvePort(): number {
 }
 
 async function main(): Promise<void> {
-	const port = resolvePort();
-	const debugMcp = createDebugMcp({ "port": port });
+	const port = portOf(resolvePort());
+	const stdio = new StdioServerTransport();
+	// The port, or — another agent session's debug-mcp has it — that one's MCP, relayed (relay.ts), taking the port when it goes.
+	const debugMcp = await port.take();
+	let relayed: Relay | undefined;
 
-	// Wait for the socket to actually bind before announcing it — rejects on EADDRINUSE etc. (handled below),
-	// instead of the old unhandled 'error' that crashed the process on a port collision.
-	await debugMcp.whenListening;
-
-	console.error(`[debug-mcp] WebSocket collector listening on ws://localhost:${port}`);
-
-	const mcp = createMcpServer(debugMcp);
-
-	await mcp.connect(debugMcp.agent.observe(new StdioServerTransport()));
-	console.error("[debug-mcp] MCP server ready on stdio");
+	if (debugMcp === undefined) {
+		console.error(`[debug-mcp] port ${String(resolvePort())} is taken: this session's MCP goes through what holds it`);
+		relayed = await relay(stdio, port.connect);
+	} else {
+		console.error(`[debug-mcp] WebSocket collector listening on ws://localhost:${String(resolvePort())}`);
+		await createMcpServer(debugMcp).connect(debugMcp.agent.observe(stdio));
+		console.error("[debug-mcp] MCP server ready on stdio");
+	}
 
 	let closing = false;
 	const shutdown = (): void => {
@@ -44,7 +47,8 @@ async function main(): Promise<void> {
 		// Hard stop after a beat so a hung close() (e.g. a socket that won't finish closing) can't leave us holding
 		// the port — the exact orphan this teardown exists to prevent. unref so it never keeps us alive on its own.
 		setTimeout(() => process.exit(0), 1000).unref();
-		void debugMcp.close().then(() => process.exit(0));
+		// (a relay's session ended at its upstream too, and the port let go if this one took it meanwhile)
+		void Promise.all([relayed?.close(), port.owned()?.close()]).then(() => process.exit(0));
 	};
 
 	process.on("SIGINT", shutdown);
@@ -60,11 +64,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-	if ((error as { "code"?: string } | undefined)?.code === "EADDRINUSE") {
-		console.error(`[debug-mcp] port ${resolvePort()} already in use — another debug-mcp is likely running. Exiting.`);
-	} else {
-		console.error("[debug-mcp] fatal:", error);
-	}
-
+	console.error("[debug-mcp] fatal:", error);
 	process.exit(1);
 });

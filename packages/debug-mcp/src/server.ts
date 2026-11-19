@@ -25,6 +25,7 @@ import { discoverTabs, markOutdated, TAB_HERE } from "../../observability/src/ta
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { agentCalls } from "./agent.ts";
+import { mcpSessions } from "./sessions.ts";
 import { RecordStore } from "./store.ts";
 
 /** Reserved observability namespace — must match `@brianjenkins94/observability`'s `LOG_SUBJECT` (kept as its
@@ -85,6 +86,8 @@ export interface DebugMcp {
 	"whenListening": Promise<number>;
 	/** The agent's tool calls, as spans on the `agent` source (agent.ts). */
 	"agent": AgentCalls;
+	/** The other agent sessions served here, relayed over HTTP (sessions.ts): how many are open. */
+	"sessions": () => number;
 	"close": () => Promise<void>;
 }
 
@@ -123,7 +126,13 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	const store = new RecordStore({ "max": options.max });
 	const links = new Set<WebSocket>();
 	const agent = agentCalls(store, () => links.size > 0);
-	const http = createServer((request, response) => { agentReport(agent, request, response); });
+	// (another agent session's MCP, relayed: sessions.ts; else a hook's report)
+	const sessions = mcpSessions(() => debugMcp);
+	const http = createServer((request, response) => {
+		if (!sessions.handle(request, response)) {
+			agentReport(agent, request, response);
+		}
+	});
 	const server = new WebSocketServer({ "server": http });
 	/** Tabs already warned about being newer than this debug-mcp. */
 	const warnedOutdated = new Set<string>();
@@ -273,7 +282,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 
 	});
 
-	return {
+	const debugMcp: DebugMcp = {
 		"hub": hub,
 		"store": store,
 		"archOf": (tab) => {
@@ -310,10 +319,13 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		}),
 		"whenListening": whenListening,
 		"agent": agent,
+		"sessions": sessions.count,
 		"close": () => new Promise<void>((resolve) => {
 			for (const socket of links) {
 				socket.close();
 			}
+
+			void sessions.close();
 
 			agent.dispose();
 			server.close(() => {
@@ -322,4 +334,6 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			});
 		})
 	};
+
+	return debugMcp;
 }

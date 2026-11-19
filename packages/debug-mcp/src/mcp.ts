@@ -34,7 +34,10 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	// Everything a tab exposes — page_eval, page_query, the editor's debugger, a game's own — is a page tool, registered
 	// while a tab serving it is connected (each call to ONE tab: the one named, or the only one connected — forward.ts).
 	// Last, so a page can't take over any of the tools above.
-	syncPageTools(server, debugMcp);
+	const sync = syncPageTools(server, debugMcp);
+
+	// (one of several sessions, relayed (sessions.ts), ends before debug-mcp does: its page tools stop following the tabs)
+	server.server.onclose = () => { sync.dispose(); };
 
 	return server;
 }
