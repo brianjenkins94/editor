@@ -167,10 +167,11 @@ How it's kept:
        `silo check` runs in the editor's terminal since 2026-11-15 (item 1).
      - *Remove:* every save runs ESLint's fix-all, rewriting
        lines an edit didn't touch (an import moved, a line split and left unindented) — review by hunk kept them out.
-     - *Reintroduce:* the editor's `npm test` didn't collect an extension's own `test/` (added on the lost branch); a
-       note on a `for` anchored to its loop variable; nothing tests an extension's wiring (activate → read →
-       badge) short of the architecture harness — the old tour step did, end to end, the new unit test doesn't; the
-       Explorer didn't list files an agent wrote until a reload.
+     - *Reintroduce:* a note on a `for` anchored to its loop variable (the editor's `npm test` collects an extension's
+       own `test/` since 2026-11-18, `extensions/*/test/*.test.mjs`); nothing tests an extension's wiring (activate → read →
+       badge) short of the architecture harness — the old tour step did, end to end, the new unit test doesn't. (The
+       Explorer not listing files an agent wrote until a reload: gone — `files_write` into a new folder is listed within
+       seconds, checked 2026-11-18.)
    - **Visibility first**, so the rewrite is measured from its start: a span at every filesystem boundary, with its
      caller, duration, bytes and parent (*Visibility*). Done when the 2026-10-30/31 load questions are answered from
      `metrics_query` and `logs_query` alone. It serves item 1's load cost too, so it can go ahead of the rest.
