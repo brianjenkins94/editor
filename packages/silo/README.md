@@ -710,7 +710,10 @@ computed facts, no model. It's Remember (what was decided) and Gate (the checks 
   name is kept by evidence alone. Statuses `active` (with a reason), `experiment` (with an `until`), `parked`,
   `stopped`, `removed` (a tombstone: where it went, why, and the command that restores it). An entry names a feature
   key (`command|tsval.explore`) or a name with `paths`; most code worth deciding about is reached from a way in rather
-  than being one, so `paths` is first-class. `silo status <entry> <status> "<why>"`, or one click in the editor.
+  than being one, so `paths` is first-class. `silo status <entry> <status> "<why>"`, or one click in the editor. A
+  declared feature's fields too (2026-11-19): `--what`, `--docs`, and `--paths`, `--ways`, `--tests` in place of its own
+  or, with `--add`, added to them; an entry there keeps its status and why when they're left out, so a new way in is
+  `silo status "<feature>" --ways "<key>" --add`.
 - **Drift (`silo check`):** stopped but present; parked but running (reached at boot) or changing (`history` says so
   since it was parked); experiment expired; removed but still named in a `.md`; dead ends (a button with no handler, a
   declared command nobody registers, a setting nobody reads); reached only by tests; an entry matching nothing (with

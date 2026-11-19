@@ -187,6 +187,19 @@ test("silo status, then silo check: the ledger's decisions held to the code — 
 	assert.equal(JSON.parse(fs.readFileSync(path.join(ledgered, ".silo/features.json")))["old exporter"].in, "abc1234");
 	assert.equal(silo("status", "half", "experiment", "trying", "--repo", ledgered).status, 1, "an experiment needs an end");
 
+	// (a feature declared, then a way in and a test added to it without restating its status or why)
+	assert.equal(silo("status", "Notes", "active", "the core keeps notes", "--what", "Notes beside their code.", "--paths", "notes/extension.ts", "--ways", "command|notes.add", "--repo", ledgered).status, 0);
+	assert.equal(silo("status", "Notes", "--ways", "setting|notes.size", "--tests", "notes/test", "--add", "--repo", ledgered).status, 0);
+
+	const notes = JSON.parse(fs.readFileSync(path.join(ledgered, ".silo/features.json")))["Notes"];
+
+	assert.deepEqual([notes.status, notes.why, notes.what, notes.paths, notes.ways, notes.tests], ["active", "the core keeps notes", "Notes beside their code.", ["notes/extension.ts"], ["command|notes.add", "setting|notes.size"], ["notes/test"]]);
+	assert.equal(silo("status", "nothing yet", "--repo", ledgered).status, 1, "a new entry says its status and why");
+	assert.equal(silo("status", "Notes", "removed", "out", "--repo", ledgered).status, 0);
+	assert.equal(JSON.parse(fs.readFileSync(path.join(ledgered, ".silo/features.json")))["Notes"].status, "removed");
+	// (taken out again: a declared feature holds every code file to an owner, which isn't what the check below is about)
+	fs.writeFileSync(path.join(ledgered, ".silo/features.json"), JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(ledgered, ".silo/features.json")))).filter(([name]) => name !== "Notes")), null, "\t"));
+
 	const checked = silo("check", ledgered, "--json");
 	const { drift } = JSON.parse(String(checked.stdout)) as { "drift": { "check": string; "entry"?: string; "message": string }[] };
 

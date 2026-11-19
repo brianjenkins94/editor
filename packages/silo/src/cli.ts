@@ -413,13 +413,18 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "status",
-			"description": "Write a decision about a feature into the ledger (.silo/features.json, shared — commit it): its status (active, experiment, parked, stopped, removed) and why, stamped with today when the status changes; what it is by a way in's key (as `silo features` names it) and/or paths; an experiment's end; a removal's commit and how to restore it. `silo check` holds the code to it.",
+			"description": "Write a decision about a feature into the ledger (.silo/features.json, shared — commit it): its status (active, experiment, parked, stopped, removed) and why, stamped with today when the status changes; what it is by a way in's key (as `silo features` names it) and/or paths; what it's for and where it's written up; the ways in, code and tests it owns (each list in place of its own, or with --add, added to it — a new command into the ways of the feature it serves); an experiment's end; a removal's commit and how to restore it. An entry there keeps its status and why when they're left out. `silo check` holds the code to it.",
 			"config": juvy({
 				"entry": { "format": String, "default": "", "positional": true, "doc": "Its name, as people call it (\"capability engine\")." },
 				"status": { "format": String, "default": "", "positional": true, "doc": `One of ${STATUSES.join(", ")}.` },
 				"why": { "format": String, "default": "", "positional": true, "doc": "Why: what the decision rests on." },
 				"key": { "format": String, "default": "", "doc": "The way in it is, as `silo features` keys it (command|tsval.explore)." },
 				"paths": { "format": Array, "default": [], "doc": "Its files or folders, from the repository's root." },
+				"ways": { "format": Array, "default": [], "doc": "The ways in it owns, as `silo features` keys them (agent tool|git_fetch)." },
+				"tests": { "format": Array, "default": [], "doc": "Its tests' files or folders, from the repository's root." },
+				"add": { "format": Boolean, "default": false, "doc": "Add --paths, --ways and --tests to the entry's own, rather than replace them." },
+				"what": { "format": String, "default": "", "doc": "What it's for, in a sentence." },
+				"docs": { "format": String, "default": "", "doc": "Where it's written up (a file, and its heading)." },
 				"until": { "format": String, "default": "", "doc": "An experiment's end, YYYY-MM-DD." },
 				"in": { "format": String, "default": "", "doc": "A removal's commit." },
 				"restore": { "format": String, "default": "", "doc": "A removal's command that brings it back." },
@@ -429,20 +434,28 @@ export const app = subcommands({
 				const repo = await repoOf(config.get("repo"));
 				const file = path.join(repo, ledgerPath());
 				const entry = config.get("entry") as string;
-				const why = config.get("why") as string;
+				const before = parseLedger(fs.existsSync(file) ? fs.readFileSync(file) : undefined);
+				// (an entry there keeps its status and why: a way in declared needn't restate them)
+				const status = (config.get("status") as string) || before[entry]?.status;
+				const why = (config.get("why") as string) || before[entry]?.why;
 
-				if (entry === "" || why === "") {
+				if (entry === "" || status === undefined || why === undefined || why === "") {
 					process.stderr.write("silo status: say which entry, its status and why — silo status \"capability engine\" parked \"records move into the run ledger first\"\n");
 					process.exitCode = 1;
 
 					return;
 				}
 
-				const more = Object.fromEntries((["key", "until", "in", "restore"] as const).flatMap((name) => (config.get(name) === "" ? [] : [[name, config.get(name) as string]])));
-				const paths = config.get("paths") as string[];
+				const more = Object.fromEntries((["key", "until", "in", "restore", "what", "docs"] as const).flatMap((name) => (config.get(name) === "" ? [] : [[name, config.get(name) as string]])));
+				// (each list given, in place of the entry's own — or, with --add, added to it, sorted as the ledger keeps them)
+				const lists = Object.fromEntries((["paths", "ways", "tests"] as const).flatMap((name) => {
+					const given = config.get(name) as string[];
+
+					return given.length === 0 ? [] : [[name, config.get("add") === true ? [...new Set([...before[entry]?.[name] ?? [], ...given])].toSorted() : given]];
+				}));
 
 				try {
-					const ledger = withStatus(parseLedger(fs.existsSync(file) ? fs.readFileSync(file) : undefined), entry, config.get("status") as LedgerStatus, why, new Date().toISOString().slice(0, 10), { ...more, ...paths.length === 0 ? {} : { "paths": paths } });
+					const ledger = withStatus(before, entry, status as LedgerStatus, why, new Date().toISOString().slice(0, 10), { ...more, ...lists });
 
 					// (.silo/ as silo keeps it: its .gitignore keeping local/ out of git, its .gitattributes)
 					await ensureSiloDir(siloPaths(repo));

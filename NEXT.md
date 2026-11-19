@@ -161,16 +161,22 @@ How it's kept:
        workspace; a tab sometimes missing from `tabs_list`; the workspace store fills with a day's pulls — nothing
        collects the packs they fetch (its buffer 64 → 128 MB, 2026-11-03: about three days' room, within the workbench's
        memory budget).
-     - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced); CI's reach
+     - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced) — as a reset
+       is meant to (everything goes, a first load), and it says so now: `untraced` lists the tests with no trace here,
+       and running them traces them; CI's reach
        covers the architecture suites only, and there `activate` is reached by nearly every test; `decisions_for` named five
        features for one file — now one a code file (decision 22), and a test file every feature whose `tests` hold it,
        which it named none of until 2026-11-18 (210 test files: `decisionsFor` read only `paths`). (Code with its comments stripped: Git: Open a Commit Read-Only…'s "The code alone", since
        2026-11-03. The clone one commit deep, so `git_log` saw nothing older: the terminal's `git fetch --deepen=<n>` /
        `--unshallow` and agents' `git_fetch` fetch more since 2026-11-18, and `git log` says where it ends.)
-     - *Declare:* no way but editing `.silo/features.json` by hand, and no fields for ways in or tests (decision 21);
-       `silo check` runs in the editor's terminal since 2026-11-15 (item 1).
+     - *Declare:* (no way but editing `.silo/features.json` by hand, and no fields for ways in or tests: `silo status`
+       writes `what`, `docs`, `paths`, `ways` and `tests` since 2026-11-19, a list added to with `--add`, an entry's
+       status and why kept when left out — `silo status "<feature>" --ways "<key>" --add`.) `silo check` runs in the
+       editor's terminal since 2026-11-15 (item 1).
      - *Remove:* every save runs ESLint's fix-all, rewriting
        lines an edit didn't touch (an import moved, a line split and left unindented) — review by hunk kept them out.
+       Decided (the user, 2026-11-19): kept, whole-file fix-all on save as lib's defaults have it; review by hunk is how
+       a commit leaves the rest out.
      - *Reintroduce:* (a note on a `for` anchored to its loop variable: fixed 2026-11-18, `pickAnchor` takes the
        statement a line begins when nothing inside the line begins where it does, bablr-language-ts's
        pick-anchor.test.mjs; the editor's `npm test` collects an extension's own `test/` since 2026-11-18); nothing tests an extension's wiring (activate → read →
