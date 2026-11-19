@@ -55,6 +55,10 @@ test("what's been decided about a file: the ledger's entries holding it, and the
 		}
 	]);
 	assert.equal(decisionsFor(" ", texts.get(".silo/features.json"), texts), undefined, "nothing asked, nothing answered");
+	// (a test file is its feature's too, by the feature's `tests`)
+	const tested = workspace("", {}, { ...LEDGER, "Loading": { ...LEDGER.Loading, "tests": ["test/load.test.mjs"] } });
+
+	assert.deepEqual(decisionsFor("test/load.test.mjs", tested.get(".silo/features.json"), tested).ledger.map((entry) => entry.name), ["Loading"]);
 });
 
 test("drift: a removed feature its docs still name is a problem at its entry in the ledger", () => {

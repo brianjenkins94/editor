@@ -163,7 +163,8 @@ How it's kept:
        memory budget).
      - *Measure:* a reset deletes the local test traces, so `runs_affected` knew nothing (905 files untraced); CI's reach
        covers the architecture suites only, and there `activate` is reached by nearly every test; `decisions_for` named five
-       features for one file. (Code with its comments stripped: Git: Open a Commit Read-Only…'s "The code alone", since
+       features for one file — now one a code file (decision 22), and a test file every feature whose `tests` hold it,
+       which it named none of until 2026-11-18 (210 test files: `decisionsFor` read only `paths`). (Code with its comments stripped: Git: Open a Commit Read-Only…'s "The code alone", since
        2026-11-03. The clone one commit deep, so `git_log` saw nothing older: the terminal's `git fetch --deepen=<n>` /
        `--unshallow` and agents' `git_fetch` fetch more since 2026-11-18, and `git log` says where it ends.)
      - *Declare:* no way but editing `.silo/features.json` by hand, and no fields for ways in or tests (decision 21);
@@ -572,7 +573,8 @@ How it's kept:
      page-wide emulation), the architecture plane's reports, and signing in with the API stood in for (Playwright's
      `route`, which the editor's Playwright hasn't); performance.mjs measures the editor from outside, against its budgets.
      What would move more: a `route` of the editor's own (the service worker answering for a test's routes) takes sign-in. pane-views.spec saw no hover once in a full run here that day (2026-11-16), passing alone twice
-     and the next full run. Measured, 386 passing tests of 64 files in the
+     and the next full run; again 2026-11-18, beside mock-value.spec's first miss (its "A rule's place in this file is lost" row not in Problems), both
+     passing alone after. Measured, 386 passing tests of 64 files in the
      debugger, 15,695 lines of code reached of about 111,000: 120 tests (31%) reach the same lines, 34 reach 90%, and 311 have no
      line only they reach; by file, 57 of 64 are needed, so little time comes back, as the slow files reach what no other does. Over
      the last 80 commits, 28 touched no code; of the other 52 the median selected 0 tests, but every one touched a file no test

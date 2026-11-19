@@ -20,7 +20,7 @@ export interface Decisions {
 }
 
 /** What's been decided about `target` (a path, or a file's name; or a name: an identifier, a feature, a way in's id): the
- *  ledger's entries naming it (or whose paths hold the file, or ways in name it), and each line of the docs naming it,
+ *  ledger's entries naming it (or whose paths or tests hold the file, or ways in name it), and each line of the docs naming it,
  *  under its heading. Nothing asked, nothing answered. */
 export function decisionsFor(target: unknown, ledgerText: string | undefined, texts: ReadonlyMap<string, string>): Decisions | undefined {
 	if (typeof target !== "string" || target.trim() === "") {
@@ -38,7 +38,7 @@ export function decisionsFor(target: unknown, ledgerText: string | undefined, te
 	const said = (text: string | undefined): boolean => text !== undefined && words.some((word) => word.test(text));
 	const holds = (paths: string[] | undefined): boolean => isPath && (paths ?? []).some((each) => wanted === each.replace(/\/+$/u, "") || wanted.startsWith(each.replace(/\/+$/u, "") + "/"));
 	const ledger = parseLedger(ledgerText);
-	const entries = Object.entries(ledger).filter(([name, entry]) => said(name) || said(entry.why) || said(entry.key) || holds(entry.paths) || (entry.ways ?? []).some((key) => said(key))).map(([name, entry]) => ({ "name": name, ...entry }));
+	const entries = Object.entries(ledger).filter(([name, entry]) => said(name) || said(entry.why) || said(entry.key) || holds(entry.paths) || holds(entry.tests) || (entry.ways ?? []).some((key) => said(key))).map(([name, entry]) => ({ "name": name, ...entry }));
 	const docs: Decisions["docs"] = [];
 
 	for (const [file, text] of [...texts].filter(([path]) => path.endsWith(".md")).sort(([left], [right]) => left.localeCompare(right))) {
