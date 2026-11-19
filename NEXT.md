@@ -198,6 +198,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
+- **notes.spec's Problems row didn't show on CI** (a3c3bea3's `specs-1`, 2026-11-19, after messages.spec): the status
+  bar counted the note's problem (an info) and the list had no row for it in 60 s. It passes here after the same
+  specs, in one session as CI runs them. It finds its row by Problems' filter now, and a failing spec prints Problems'
+  rows and the filter's text (test/in-editor.mjs, `sayWhatHappened`): a next miss says whether the list was filtered,
+  or crowded out.
+
 - **way-in-reach.spec failed twice on CI** (d0cf69cb's lightbulb; 96bb5b36, 90 s, its error lost to the job's limit):
   it passes here alone and after type-queries.spec (CI's order) beside another session, in 6–9 s. Its lightbulb waits on
   History's read through TypeScript's server, which now has spans (`editor.extensions.history.read`, its `ready` and

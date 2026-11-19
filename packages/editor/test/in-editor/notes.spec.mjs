@@ -50,6 +50,8 @@ test("a note is beside its code, follows it, and when its code goes waits in Pro
 
 	const rows = await problems(workbench);
 
+	// (found by Problems' filter: on CI once, 2026-11-19, the status bar counted it and the list showed no row for it)
+	await workbench.locator(".part.panel .viewpane-filter input").first().fill("note lost its place");
 	await expect(rows.filter({ "hasText": "A note lost its place" })).toHaveCount(1, { "timeout": 60_000 });
 	await expect(workbench.locator(".pane-item.tone-info", { "hasText": "ten of them" })).toHaveCount(0);
 

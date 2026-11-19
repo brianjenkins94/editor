@@ -111,7 +111,8 @@ async function within(work, ms) {
 /** What's on screen in each frame still open, and what the page printed: why a spec failed on a runner nobody can watch. */
 async function sayWhatHappened(session) {
 	for (const frame of session.page.frames()) {
-		const shown = await frame.evaluate(() => [...document.querySelectorAll(".tab, .notification-list-item, .monaco-dialog-box, .statusbar-item.left, .quick-input-widget:not([style*='display: none'])")].map((element) => `${element.className}: ${element.textContent.slice(0, 200)}`).filter((line) => !/: $/u.test(line))).catch(() => []);
+		// (Problems' rows and a filter box's text too: what a list showed, and what it was filtered by)
+		const shown = await frame.evaluate(() => [...document.querySelectorAll(".tab, .notification-list-item, .monaco-dialog-box, .statusbar-item.left, .quick-input-widget:not([style*='display: none']), .markers-panel .monaco-list-row, .viewpane-filter input")].map((element) => `${element.className}: ${(element.value ?? element.textContent).slice(0, 200)}`).filter((line) => !/: $/u.test(line))).catch(() => []);
 
 		if (shown.some((line) => line.startsWith("tab "))) {
 			console.log(`[in-editor] on screen in ${frame.url().slice(0, 100)}:\n  ${shown.join("\n  ")}`);
