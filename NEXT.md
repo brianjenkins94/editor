@@ -57,11 +57,6 @@ How it's kept:
      reason); every file's header a note. The zero-knowledge baseline: the code alone 12 of 15, as it is 14.5 — every
      point the comments carried a why. Open (*Decisions*): whose a note migrated from a comment is.
    - **The standard**, from the pass's gaps.
-   - **Gaps found while reducing** (2026-11-02, not seen to since): `git_pull` says "diverged" when main moved under a
-     branch (a merge in the editor would settle it, and this git combines no history: a decision first); the editor
-     reloaded itself three times under large edits (Vite's socket closed on both frames, its client reloading the page;
-     the calls in flight lost); tsval's busy heartbeat rides its `observe` and `called` hooks, so its site sums, coverage
-     and purity (which nothing reads) can go only once it has a source of its own.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
      (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
      `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Not yet trusted:
@@ -192,6 +187,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `typescript.tsserver.experimental.useVsCodeWatcher` on and off). What's different in the reset (its writes straight to
   zen-fs, in a burst) isn't known; the restart stays.
 
+- **The editor reloaded itself under large edits** (2026-11-02, three times in an evening): Vite's socket closed on both
+  frames at once and its client reloaded the page, while the dev server and debug-mcp kept running — the workspace's
+  work survived, the calls in flight didn't. Not seen since. If it comes back: what closed the socket (the dev server's
+  log at that moment), and whether the editor's own frames should take Vite's reload at all.
+
 - **Two tabs loading one repository** (fixed 2026-11-19 for tabs that arrive together, as two back from a reset do): an
   address's load holds a Web Lock (shell/repo-load.tsx), and a tab that finds another loading says so rather than
   cloning too. A tab that arrives after the load ends but before its files are written back to IndexedDB still finds
@@ -225,6 +225,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   running tests; the ledger holds what the manifest did (`what`, `docs`, `paths`, `ways`, `tests`) and becomes the
   source of truth, `silo check` erroring on drift; ownership by file, runs, tests and traces giving continuous
   coverage. Open: whose a note migrated from a comment is (the repository's, or its `git blame` author's).
+
+- **A merge in the editor** (found 2026-11-02): `git_pull` says "diverged" when main moved under a branch, and the
+  terminal's git says "nothing in this git rewrites or combines history". A merge (isomorphic-git has one) would settle
+  it, with conflicts shown as VS Code shows them; or a rebase; or neither, a branch's work kept as it is and pushed
+  for GitHub to merge. Yours to say which.
 
 ## Parked
 
