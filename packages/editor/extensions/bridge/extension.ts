@@ -17,6 +17,7 @@ import { registerDebugEvents } from "./debug-events";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { bridgeHub, workspace, workspaceRuntime } from "./hub";
 import { registerAnnotations } from "./annotations";
+import { registerLogChannel } from "./log-channel";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { installPreviewGate } from "./preview-gate";
 import { serveRuntimeFiles } from "./runtime-fs";
@@ -73,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	serveRuntimeFiles(context, bridgeHub);
 	// The metrics plane's samples, for VS Code's side (the insights extension's status bar reads them by command).
 	registerMetricsBridge(context);
+	registerLogChannel(context);
 	// What a change is, cosmetic or meaningful, for extensions (the cosmetic extension's badge): the workbench's BABLR.
 	registerAnnotations(context);
 	installPreviewGate(context, bridgeHub, bridgeLog);

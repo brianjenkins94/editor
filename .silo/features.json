@@ -1803,18 +1803,24 @@
     "status": "active",
     "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
     "since": "2026-11-03",
-    "what": "Lets an agent query the live editor's log records and timed spans from all its contexts, or wait until a matching record arrives.",
+    "what": "Shows a person every context's log records and spans as they come (Developer: Show the Editor's Log, in the Output), and lets an agent query them, or wait until a matching record arrives.",
     "ways": [
       "agent tool|logs_query",
       "agent tool|logs_wait",
       "agent tool|spans_query",
       "hub subscription|LOG_BACKLOG",
-      "hub subscription|LOG_SUBJECT + \".>\""
+      "hub subscription|LOG_SUBJECT + \".>\"",
+      "command|editor.log.show",
+      "output channel|Editor Log"
     ],
     "paths": [
       "packages/debug-mcp/src/tools/logs.ts",
       "packages/debug-mcp/src/tools/spans.ts",
-      "packages/observability/src/log-subject.ts"
+      "packages/observability/src/log-subject.ts",
+      "packages/editor/extensions/bridge/log-channel.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/log.spec.mjs"
     ]
   },
   "Rate limits": {

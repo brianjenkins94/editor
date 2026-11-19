@@ -73,10 +73,10 @@ How it's kept:
      feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin; *Tests at once*' flag from
      what a test touches (the gate's effects) rather than last runs.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes.
-     Left: `logs_query`, `logs_wait` and `spans_query` (debug-mcp's, with no searchable view in the editor: the monitor
-     has rates, the architecture view traffic) and `payloads_capture`. Given theirs since 2026-11-19: `decisions_for`
-     (History: What's Been Decided About This File…), `git_blame` (Git: Show Blame for This File) and `editor_trace`
-     (Developer: Trace a VS Code Component…); `runs_affected` is Features and Tests' (touched, each file's why, Run the
+     Left: `payloads_capture`. Given theirs since 2026-11-19: `decisions_for` (History: What's Been Decided About This
+     File…), `git_blame` (Git: Show Blame for This File), `editor_trace` (Developer: Trace a VS Code Component…), and
+     `logs_query`, `logs_wait` and `spans_query` (Developer: Show the Editor's Log: every context's records in the
+     Output as they come, for ten minutes); `runs_affected` is Features and Tests' (touched, each file's why, Run the
      touched).
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
 3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
@@ -201,27 +201,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
   cloning too. A tab that arrives after the load ends but before its files are written back to IndexedDB still finds
   no repository in its copy, and clones: if that's seen, the load wants a signal that its write-back is done.
 
-- **rules.spec's Debug Console without its output** (3 of 5 full runs, 2026-11-19; fixed the same day): a document left
-  open by its first test reloaded from disk as the second's file was seeded and opened, counted as an edit, and the live
-  run it started 5 s later took the Debug Console from F5's. A live run follows a change only when it's typed (the
-  document dirty: extensions/tsval/live-run.ts). Blamed at first on counting every `git.changed` (5ba4ac64), which two
-  full runs of two seemed to show; it failed without that too.
-
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
-- **mock-value.spec after features-view.spec, in one editor** (2026-11-19, three of three with the scratch trace runner;
-  fixed the same day, three of three since, capability-findings.spec between them too): three things features-view
-  left. Its seven test runs' sessions, none opening the Debug Console, used up VS Code's opening it on a page's first
-  session, so F5's run ended unseen and the console, opened after, showed the first ended session's — `node
-  break.test.mjs`: a session that never opens the console counts now as a live run did (extensions/tsval/live-run.ts).
-  Problems' filter box was empty with "No test run" still applied: the box applies a change 300 ms on and only while
-  Problems shows, and clearing an empty box changes nothing, so the reset toggles Show Errors twice, which applies the
-  box as it is (workbench/effects.ts). And the problems of files the reset deleted took the rows Problems had room for:
-  a deleted file's capability findings and BABLR warning go with it (no editor closing says so). CI's mock-value miss
-  (b08eab9f) was these. Not looked at yet: way-in-reach.spec's lightbulb, missed once on CI (d0cf69cb). A hover that
-  didn't come once — cosmetic.spec's on real.ts on CI (ef97772b), pane-views.spec's in a full run here — is hovered
-  again from elsewhere now, as a person would (in-editor/editor.mjs, `hoverUntil`); why it didn't come isn't known.
+- **way-in-reach.spec's lightbulb missed once on CI** (d0cf69cb, 2026-11-19): not looked at yet. A hover that didn't
+  come once (cosmetic.spec's on CI, ef97772b; pane-views.spec's in a full run here) is hovered again from elsewhere now,
+  as a person would (in-editor/editor.mjs, `hoverUntil`); why it didn't come isn't known.
 
 ## Decisions
 

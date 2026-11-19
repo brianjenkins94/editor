@@ -41,6 +41,11 @@
         "category": "Developer"
       },
       {
+        "command": "editor.log.show",
+        "title": "Show the Editor's Log",
+        "category": "Developer"
+      },
+      {
         "command": "editor.git.openRef",
         "title": "Open a Commit Read-Only…",
         "category": "Git"
