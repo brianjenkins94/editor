@@ -691,9 +691,10 @@ How it's kept:
        Made the default, eslint.spec's first test failed after dev-server.spec, every time: a lint waiting on ESLint's
        boot outlasted its file (the reset removed it; its document lived on, not closed), and put its problems back on
        a file that was gone — crowding Problems so the test's row wasn't drawn. A person deleting a file while ESLint is
-       busy has the same. Fixed (extensions/eslint: dropped `gone` when its file isn't there once it returns). Seen there
-       and not looked into: a file made while ESLint boots (dev-server's isolated.ts) is a parse error, "not found by the
-       project service", until something restarts it.
+       busy has the same. Fixed (extensions/eslint: dropped `gone` when its file isn't there once it returns). Its
+       problem, "isolated.ts was not found by the project service", was the same race, not a boot's: the lint ran once
+       ESLint was up, after the reset had removed the file (a file made from the terminal while ESLint boots is linted,
+       and dev-server.spec alone leaves no problems, 2026-11-18).
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,
@@ -823,11 +824,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files; and a
   lint that outlasts its file is dropped, `gone`), not seen for a load.
 - **TypeScript keeps a removed tsconfig.json's project** (found 2026-11-18): its problems (with `allowJs` and `include`
-  `**/*`, "Cannot write file … would overwrite input file") stay on the gone file, which a person removing it in the
-  terminal sees. Its server doesn't hear the removal — ESLint's glob watcher does, TypeScript's web watch on its config
-  says nothing — and *TypeScript: Reload Project* doesn't drop it; restarting the server does. Not a blind restart (the
-  "Analyzing…" race, ata.ts): the fix is the watch reaching the server. The shared editors' reset restarts it when it
-  removed one (no editor open then).
+  `**/*`, "Cannot write file … would overwrite input file") stayed on the gone file after a shared editor's reset, which
+  restarts TypeScript's server when it removed one. Not a person's: removed from the terminal — a file open, or every
+  editor closed first — its problem goes within seconds (2026-11-18, a throwaway spec, both watchers:
+  `typescript.tsserver.experimental.useVsCodeWatcher` on and off). What's different in the reset (its writes straight to
+  zen-fs, in a burst) isn't known; the restart stays.
 
 ## Decisions
 
