@@ -127,7 +127,9 @@
       "hub request|editor.state",
       "hub request|editor.trace",
       "hub request|notifications.list",
-      "hub request|problems.list"
+      "hub request|problems.list",
+      "command|editor.trace.show",
+      "output channel|VS Code Trace"
     ],
     "paths": [
       "packages/editor/app/tools/editor/",
@@ -135,7 +137,8 @@
     ],
     "tests": [
       "packages/editor/test/agent-tools.mjs",
-      "packages/editor/test/page-tools.test.mjs"
+      "packages/editor/test/page-tools.test.mjs",
+      "packages/editor/test/in-editor/trace.spec.mjs"
     ]
   },
   "Agent workspace tools": {

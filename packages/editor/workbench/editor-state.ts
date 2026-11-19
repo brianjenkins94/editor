@@ -10,7 +10,8 @@
  *   can't list (the component reads the notification service's model);
  * - `editor.trace` { component, seconds? }: VS Code's own log at trace, for a while, for one component — the messages
  *   naming it (`text file model`, `extension host`) — forwarded into the editor's log stream (source `vscode-trace`),
- *   where logs_query and logs_wait read it. It answers at once; the window closes on its own.
+ *   where logs_query and logs_wait read it. It answers at once; the window closes on its own. A person's way to the same:
+ *   *Developer: Trace a VS Code Component…* (`editor.trace.show`), its messages in the Output channel "VS Code Trace" too.
  *
  * Lines and columns are 1-based, as an agent reads code. Runs in the workbench realm (core), with its own extension API.
  */
@@ -86,6 +87,19 @@ export function installEditorState(hub: Hub, vscode: typeof vscodeApi, log: Logg
 
 	serve(hub, "notifications.list", async () => shownNotifications());
 
+	/** VS Code's trace for `component`, for `seconds`: each message into the log stream, and to `also` (a person's Output). */
+	const trace = (component: string, seconds: unknown, also?: (line: string) => void): { "lasting": number; "window": Promise<void> } => {
+		const lasting = Math.min(typeof seconds === "number" && seconds > 0 ? seconds : TRACE_SECONDS, TRACE_MOST);
+		const wanted = component.trim().toLowerCase();
+		// (opened now and closed on its own; one already going is said by the window's error)
+		const window = traceLog((message) => message.toLowerCase().includes(wanted), (level, message) => {
+			log.info(message, { "source": "vscode-trace", "level": level, "component": component });
+			also?.(`${new Date().toISOString().slice(11, 23)} [${String(level)}] ${message}`);
+		}, lasting * 1000);
+
+		return { "lasting": lasting, "window": window };
+	};
+
 	serve(hub, "editor.trace", (args) => {
 		const { component, seconds } = (args ?? {}) as { "component"?: unknown; "seconds"?: unknown };
 
@@ -93,15 +107,29 @@ export function installEditorState(hub: Hub, vscode: typeof vscodeApi, log: Logg
 			throw new TypeError("editor.trace takes { component, seconds? }: the text its messages carry (\"text file model\", say)");
 		}
 
-		const lasting = Math.min(typeof seconds === "number" && seconds > 0 ? seconds : TRACE_SECONDS, TRACE_MOST);
-		const wanted = component.trim().toLowerCase();
-		// (opened now and closed on its own; one already going is said by the answer's error)
-		const window = traceLog((message) => message.toLowerCase().includes(wanted), (level, message) => {
-			log.info(message, { "source": "vscode-trace", "level": level, "component": component });
-		}, lasting * 1000);
+		const { lasting, window } = trace(component, seconds);
 
 		return Promise.race([window.then(() => ({ "closed": true })), new Promise((resolve) => {
 			setTimeout(resolve, 50);
 		}).then(() => ({ "tracing": component, "until": new Date(Date.now() + lasting * 1000).toISOString(), "read": `logs_query or logs_wait with source vscode-trace (or the text "${component}")` }))]);
+	});
+
+	// A person's: which component, then its messages in an Output channel of their own as they come, for the window.
+	let output: vscodeApi.OutputChannel | undefined;
+
+	vscode.commands.registerCommand("editor.trace.show", async () => {
+		const component = await vscode.window.showInputBox({ "title": "Trace a VS Code Component", "prompt": "Text its messages carry, as VS Code writes them", "placeHolder": "text file model, extension host, configuration…" });
+
+		if (component === undefined || component.trim() === "") {
+			return;
+		}
+
+		output ??= vscode.window.createOutputChannel("VS Code Trace");
+		output.show(true);
+		output.appendLine(`Tracing "${component.trim()}" for ${String(TRACE_SECONDS)} s…`);
+
+		const { window } = trace(component, TRACE_SECONDS, (line) => { output?.appendLine(line); });
+
+		void window.then(() => { output?.appendLine(`Done tracing "${component.trim()}".`); }, (error: unknown) => { output?.appendLine(`Couldn't trace: ${error instanceof Error ? error.message : String(error)}`); });
 	});
 }

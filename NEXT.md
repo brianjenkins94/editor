@@ -73,11 +73,11 @@ How it's kept:
      feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin; *Tests at once*' flag from
      what a test touches (the gate's effects) rather than last runs.
    - **Agent-only tools** (CLAUDE.md, *Agent tools*; found 2026-11-02): each gets the editor UI it mirrors, or goes.
-     Left: `editor_trace` (VS Code's own Developer: Set Log Level and its Output are a person's way to the same, but the
-     tool asks `editor.trace`, which no command does), `logs_query`, `logs_wait` and `spans_query` (debug-mcp's, with no
-     searchable view in the editor: the monitor has rates, the architecture view traffic) and `payloads_capture`. Given
-     theirs since 2026-11-19: `decisions_for` (History: What's Been Decided About This File…) and `git_blame` (Git: Show
-     Blame for This File); `runs_affected` is Features and Tests' (touched, each file's why, Run the touched).
+     Left: `logs_query`, `logs_wait` and `spans_query` (debug-mcp's, with no searchable view in the editor: the monitor
+     has rates, the architecture view traffic) and `payloads_capture`. Given theirs since 2026-11-19: `decisions_for`
+     (History: What's Been Decided About This File…), `git_blame` (Git: Show Blame for This File) and `editor_trace`
+     (Developer: Trace a VS Code Component…); `runs_affected` is Features and Tests' (touched, each file's why, Run the
+     touched).
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
 3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
    what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is
@@ -210,13 +210,14 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
-- **mock-value.spec's lost rule not in Problems** (2026-11-18 and twice on 2026-11-19: locally, on CI at d0cf69cb, and
-  locally again after the fix below; each after live-values.spec in its session, passing alone): "a variable set on
-  every run…" waits 60 s for "A rule's place in this file is lost" (extensions/margin/placed.ts) and sees no row. The
-  fix by reading (the Margin set Problems from whatever answer came back last; now only an answer for the text as it
-  is) didn't take. Not reproduced: alone, beside a loaded session, after live-values, and a traced rerun of the failing
-  session's whole order (21 of 21). Next time: what the Margin's `placedMarks` was answered, from the page's console
-  (scratchpad trace.mjs captures every frame's). way-in-reach.spec's lightbulb missed once on CI too (d0cf69cb).
+- **mock-value.spec after features-view.spec, in one editor: reproduced** (2026-11-19, three of three with the scratch
+  trace runner: `features-view.spec.mjs mock-value.spec.mjs` in one session). "A variable set on every run…" fails —
+  its F5 run's "total 50" never in the Debug Console, or later its lost rule not in Problems: the flake seen since
+  2026-11-18, whenever its session's editor had run features-view's seven test files before. The F5 run is made (exit
+  0 in 115 ms) and no other session is going; what the Debug Console shows instead isn't known yet. Not Problems'
+  filter (features-view leaves "No test run" in it: a reset clears that now, and the failure stays), and not the
+  Margin's late answers (its guard, 2026-11-19, stays). Next: what the Debug Console's session is after those runs.
+  way-in-reach.spec's lightbulb missed once on CI too (d0cf69cb).
 
 ## Decisions
 

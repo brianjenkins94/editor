@@ -155,7 +155,8 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 		const lines = said.working.split("\n");
 		const width = Math.max(...said.runs.map((run) => labelOf(run).length), 0);
 		const text = said.runs.flatMap((run) => Array.from({ "length": run.to - run.from + 1 }, (_, index) => `${(index === 0 ? labelOf(run) : "").padEnd(width)} │ ${lines[run.from - 1 + index] ?? ""}`));
-		const uri = vscode.Uri.from({ "scheme": "editor-blame", "path": `/${path}` });
+		// (named as no language's file: `kept.ts` would be TypeScript's, taken into its server as a file of its own)
+		const uri = vscode.Uri.from({ "scheme": "editor-blame", "path": `/${path}.blame` });
 
 		shown.set(uri.toString(), [...text, ...said.boundary === undefined ? [] : ["", `(${said.boundary})`]].join("\n"));
 		changed.fire(uri);

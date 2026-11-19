@@ -36,6 +36,11 @@
         "category": "Git"
       },
       {
+        "command": "editor.trace.show",
+        "title": "Trace a VS Code Component…",
+        "category": "Developer"
+      },
+      {
         "command": "editor.git.openRef",
         "title": "Open a Commit Read-Only…",
         "category": "Git"
