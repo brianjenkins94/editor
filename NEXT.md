@@ -687,7 +687,13 @@ How it's kept:
        again) — its `*.updateImportsOnFileMove.enabled` are "never" by default (workbench/workspace.ts), file-moves renames
        a second time with TypeScript up; and two specs that assumed a window nothing had run in — a debug toolbar VS
        Code keeps, hidden (live-runs: hidden, not absent), and History's "Runs say" count, said as what changed once
-       anything's run (edits-change: either). Two sessions: 43 of 43 in 170 s, one session 43 of 43 in 306.
+       anything's run (edits-change: either). Two sessions: 43 of 43 in 170 s, one session 43 of 43 in 306. Two is the default here, one on CI (`CI` set).
+       Made the default, eslint.spec's first test failed after dev-server.spec, every time: a lint waiting on ESLint's
+       boot outlasted its file (the reset removed it; its document lived on, not closed), and put its problems back on
+       a file that was gone — crowding Problems so the test's row wasn't drawn. A person deleting a file while ESLint is
+       busy has the same. Fixed (extensions/eslint: dropped `gone` when its file isn't there once it returns). Seen there
+       and not looked into: a file made while ESLint boots (dev-server's isolated.ts) is a parse error, "not found by the
+       project service", until something restarts it.
    - **All the tests in the editor: where they stand** (measured 2026-11-04, a throwaway script: each test file's reach copied
      into a real editor's workspace, run by `tests.run`). 124 unit test files, 869 tests, all passing under Node: 52 files
      green and 375 tests passing in the debugger at first; with a run's `crypto`, `performance`, web streams, `MessageChannel`,
@@ -807,12 +813,13 @@ packages/editor (`--all`, `--runs N`, `--json`).
   full runs here that day.
 - **past-runs.spec's runs, after a reload: 2 of 3** (2026-11-16, three full runs of nine here): the run just before the
   reload wasn't among those kept, 30 s on. Likely its record not yet written (debounced?) as the page went — which a
-  person reloading quickly would lose too. Not yet traced. Again 2026-11-18: once in a full run, once in two alone.
+  person reloading quickly would lose too. Not yet traced. Again 2026-11-18: once in a full run, once in two alone, and
+  once in a full run of two sessions (its editor its own; alone after, it passed twice).
 - **ESLint's problems outlive a file a load replaces** (found 2026-11-09): opening a Playground link (or loading a repository)
   replaces the workspace's files, and a parse error ESLint had for one that's gone (the starter's `src/index.ts`, "not found by
   the project service") stays in Problems. Likely fixed 2026-11-18 (a removed file's problems go, and a document whose file is
-  gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files), not
-  seen for a load.
+  gone isn't linted: seen in an editor shared between specs, where a restart relinted the last test's removed files; and a
+  lint that outlasts its file is dropped, `gone`), not seen for a load.
 - **TypeScript keeps a removed tsconfig.json's project** (found 2026-11-18): its problems (with `allowJs` and `include`
   `**/*`, "Cannot write file … would overwrite input file") stay on the gone file, which a person removing it in the
   terminal sees. Its server doesn't hear the removal — ESLint's glob watcher does, TypeScript's web watch on its config

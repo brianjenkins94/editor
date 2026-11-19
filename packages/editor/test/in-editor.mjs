@@ -35,8 +35,9 @@ async function sessionWithSpecs() {
 const SPEC_MS = Number(process.env.IN_EDITOR_SPEC_MS ?? 300_000);
 
 /** How many sessions run at once, each its own browser (and so its own renderer, where ~9 GB is the limit: two specs at once in
- *  one crashed it, 2026-11-18), taking specs from one queue. */
-const SESSIONS = Number(process.env.IN_EDITOR_SESSIONS ?? 1);
+ *  one crashed it, 2026-11-18), taking specs from one queue. Two here (all 43 in 170 s against 306, ~10 GB of renderers
+ *  between them); one on CI, whose runner has less to spare. */
+const SESSIONS = Number(process.env.IN_EDITOR_SESSIONS ?? (process.env.CI === undefined ? 2 : 1));
 
 /** A spec, run to its end in `session`'s editor's debugger. */
 async function ran(session, spec) {

@@ -454,9 +454,11 @@ export function activate(context: vscode.ExtensionContext): void {
 				return undefined;
 			});
 
-			// (what it said is kept only for the text it linted: closed meanwhile, its version moved, or ESLint turned off for
-			// it — that lint cleared it, and this one mustn't put its problems back)
-			const dropped = said === undefined ? undefined : document.isClosed ? "closed" : document.version === version ? validates(document) ? undefined : "off" : "moved";
+			// (what it said is kept only for the text it linted: closed meanwhile, removed from disk (a lint waiting on ESLint's
+			// boot can outlast its file, whose document lives on), its version moved, or ESLint turned off for it — that cleared
+			// it, and this one mustn't put its problems back)
+			const there = said === undefined || document.uri.scheme !== "file" || document.isDirty || await vscode.workspace.fs.stat(document.uri).then(() => true, () => false);
+			const dropped = said === undefined ? undefined : document.isClosed ? "closed" : there ? document.version === version ? validates(document) ? undefined : "off" : "moved" : "gone";
 
 			span.end({ "count": said?.length ?? 0, ...dropped === undefined ? {} : { "dropped": dropped } });
 
