@@ -199,6 +199,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
+- **log.spec's Output didn't show on CI** (1bbba327's `specs-2`, 2026-11-20, after live-runs.spec): no Output view in
+  30 s after *Developer: Show the Editor's Log*. It passes here after live-runs.spec (twice) and in all of `specs-2`'s
+  order in one session. A failing spec's dump says what every editor showed now, a file open in it or not (its editor
+  had none, and went unsaid).
+
 - **notes.spec's Problems row didn't show on CI** (a3c3bea3's `specs-1`, 2026-11-19, after messages.spec): the status
   bar counted the note's problem (an info) and the list had no row for it in 60 s. It passes here after the same
   specs, in one session as CI runs them. It finds its row by Problems' filter now, and a failing spec prints Problems'

@@ -108,13 +108,25 @@ async function within(work, ms) {
 	return Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, ms); })]).finally(() => { clearTimeout(timer); });
 }
 
+/** What a failed spec's editors are asked for (sayWhatHappened). */
+const ON_SCREEN = ".tab, .notification-list-item, .monaco-dialog-box, .statusbar-item.left, .quick-input-widget:not([style*='display: none']), .markers-panel .monaco-list-row, .viewpane-filter input";
+
 /** What's on screen in each frame still open, and what the page printed: why a spec failed on a runner nobody can watch. */
 async function sayWhatHappened(session) {
 	for (const frame of session.page.frames()) {
-		// (Problems' rows and a filter box's text too: what a list showed, and what it was filtered by)
-		const shown = await frame.evaluate(() => [...document.querySelectorAll(".tab, .notification-list-item, .monaco-dialog-box, .statusbar-item.left, .quick-input-widget:not([style*='display: none']), .markers-panel .monaco-list-row, .viewpane-filter input")].map((element) => `${element.className}: ${(element.value ?? element.textContent).slice(0, 200)}`).filter((line) => !/: $/u.test(line))).catch(() => []);
+		// (Problems' rows and a filter box's text too: what a list showed, and what it was filtered by — in every editor, a
+		// file open in it or not: log.spec's had none when it failed on CI, 1bbba327, and wasn't said)
+		const shown = await frame.evaluate((selectors) => {
+			if (document.querySelector(".monaco-workbench") === null) {
+				return [];
+			}
 
-		if (shown.some((line) => line.startsWith("tab "))) {
+			const said = (element) => element.value ?? (element.getAttribute("aria-label") || element.textContent);
+
+			return Array.from(document.querySelectorAll(selectors), (element) => `${element.className}: ${said(element).slice(0, 200)}`).filter((line) => !line.endsWith(": "));
+		}, ON_SCREEN).catch(() => []);
+
+		if (shown.length > 0) {
 			console.log(`[in-editor] on screen in ${frame.url().slice(0, 100)}:\n  ${shown.join("\n  ")}`);
 		}
 	}
