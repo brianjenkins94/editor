@@ -22,8 +22,7 @@ async function yourEdits(page, file) {
 }
 
 test("a file's bursts of typing are kept, and Your edits shows the code each touched, after a reload too", async ({ page }) => {
-	// (its own: a reload is what it tests, and a shared editor's address is the first test's)
-	await openEditor(page, { "program.ts": "const start = 1;\n" }, { "own": "reloads" });
+	await openEditor(page, { "program.ts": "const start = 1;\n" });
 
 	const workbench = page.frameLocator("iframe[title='editor']").frameLocator("iframe");
 

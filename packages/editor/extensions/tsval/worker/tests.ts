@@ -70,12 +70,7 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 					? []
 					: ranSince(started),
 				...state.windowReach.splice(0)
-			],
-			...state.windowLeaves.length === 0
-				? {}
-				: {
-						"leaves": state.windowLeaves.splice(0)
-					}
+			]
 		});
 	} else if (kind === "done") {
 		state.testsFailed = Number(titles ?? 0);

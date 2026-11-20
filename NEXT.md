@@ -177,13 +177,6 @@ packages/editor (`--all`, `--runs N`, `--json`).
   (build/package-types.ts `nodeModulesCdnPlugin`, unpkg), which unpkg served a few hours later. Its first. If it comes
   back, the proxy could ask jsDelivr when unpkg says 404, as the service worker's own CDN fallback might.
 
-- **TypeScript keeps a removed tsconfig.json's project** (found 2026-11-18): its problems (with `allowJs` and `include`
-  `**/*`, "Cannot write file … would overwrite input file") stayed on the gone file after a shared editor's reset, which
-  restarts TypeScript's server when it removed one. Not a person's: removed from the terminal — a file open, or every
-  editor closed first — its problem goes within seconds (2026-11-18, a throwaway spec, both watchers:
-  `typescript.tsserver.experimental.useVsCodeWatcher` on and off). What's different in the reset (its writes straight to
-  zen-fs, in a burst) isn't known; the restart stays.
-
 - **The workspace store and its packs** (measured 2026-11-19, this repository in Node, 20 commits pulled one at a time):
   nothing collects the packs a fetch brings, but a pull that fast-forwards adds ~70 KB, and this repository's clone
   leaves the store at 36 of 128 MB: over a thousand pulls of room. What filled it fast was a fetch that didn't move the
@@ -204,16 +197,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
-- **log.spec's Output didn't show on CI** (1bbba327's `specs-2`, 2026-11-20, after live-runs.spec): no Output view in
-  30 s after *Developer: Show the Editor's Log*. It passes here after live-runs.spec (twice) and in all of `specs-2`'s
-  order in one session. A failing spec's dump says what every editor showed now, a file open in it or not (its editor
-  had none, and went unsaid).
-
-- **notes.spec's Problems row didn't show on CI** (a3c3bea3's `specs-1`, 2026-11-19, after messages.spec): the status
-  bar counted the note's problem (an info) and the list had no row for it in 60 s. It passes here after the same
-  specs, in one session as CI runs them. It finds its row by Problems' filter now, and a failing spec prints Problems'
-  rows and the filter's text (test/in-editor.mjs, `sayWhatHappened`): a next miss says whether the list was filtered,
-  or crowded out.
+- **Three CI misses in shared editors**, before every spec had an editor of its own again (2026-11-20): log.spec's
+  Output didn't show (1bbba327's `specs-2`, after live-runs.spec), notes.spec's Problems row didn't (a3c3bea3's
+  `specs-1`, after messages.spec: the status bar counted it), and way-in-reach.spec's below. None reproduced here, in CI's
+  order in one session. If none comes back, they were sharing's; if one does, a failing spec's dump says what every editor
+  showed, Problems' rows and filter among it (test/in-editor.mjs, `sayWhatHappened`), and notes.spec finds its row by
+  Problems' filter.
 
 - **way-in-reach.spec failed twice on CI** (d0cf69cb's lightbulb; 96bb5b36, 90 s, its error lost to the job's limit):
   it passes here alone and after type-queries.spec (CI's order) beside another session, in 6–9 s. Its lightbulb waits on

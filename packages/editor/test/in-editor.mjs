@@ -55,13 +55,6 @@ async function ran(session, spec) {
 	// (with sessions at once, which one: the specs before it there are the ones it may meet)
 	console.log(`${SESSIONS > 1 ? `[session ${String(session.lane)}] ` : ""}${spec}: ${String(Date.now() - started)} ms${await heapOf(session)}`);
 
-	// What each test's editor was left with (workbench/effects.ts): the inventory of which can't share one.
-	for (const each of answer.files?.[0]?.tests ?? []) {
-		if (each.leaves !== undefined) {
-			console.log(`[leaves] ${JSON.stringify({ "test": each.id, "leaves": each.leaves })}`);
-		}
-	}
-
 	if (answer.running !== undefined) {
 		return { "tests": [], "error": `still running after ${String(SPEC_MS / 1000)} s: ${answer.running}` };
 	}

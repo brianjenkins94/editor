@@ -1606,14 +1606,10 @@
     "what": "A Playwright test file (`@playwright/test`) runs in the debugger against the preview you have open: its locators, actions and expect are the editor's own Playwright (packages/playwright), each op run on the preview's page, its own HTTP requests (`request`) made by the shell as a client's, and its tests told and traced as node:test's are.",
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "ways": [
-      "core module|installEffects",
-      "hub request|playwright.run",
-      "url parameter|?seed",
-      "url parameter|?shared"
+      "hub request|playwright.run"
     ],
     "paths": [
       "packages/editor/extensions/tsval/playwright-test.js",
-      "packages/editor/workbench/effects.ts",
       "packages/playwright"
     ],
     "tests": [

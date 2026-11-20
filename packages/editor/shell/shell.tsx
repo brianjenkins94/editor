@@ -24,7 +24,6 @@ import { asidePane, editorFrame, injectGlobals, mainWrap, overlay, overlayBar, o
 import { applyVsCodeColors } from "theme/vscode-colors";
 import { reportArchitecture } from "../shared/architecture";
 import { reportShellMetrics } from "../shared/editor-metrics";
-import { instance } from "../shared/instance";
 import { ci } from "./ci";
 import { commit } from "./commit";
 import { renderGitPanel } from "./git-panel";
@@ -188,24 +187,6 @@ function Shell() {
 		}
 
 		setShell(context);
-	}, []);
-
-	// A shared editor's reset (workbench/effects.ts, asked by the page around it: preview-windows.tsx) puts the shell back too,
-	// as it starts: its changes panel collapsed, where a test before may have left it open and the editor beside it narrow.
-	useEffect(() => {
-		if (instance === undefined || typeof BroadcastChannel === "undefined") {
-			return undefined;
-		}
-
-		const channel = new BroadcastChannel("editor.effects");
-
-		channel.onmessage = ({ data }: MessageEvent<{ "ask"?: string; "instance"?: string }>) => {
-			if (data.ask === "reset" && data.instance === instance) {
-				setRhsCollapsed(true);
-			}
-		};
-
-		return () => { channel.close(); };
 	}, []);
 
 	// Apply the pane's width to wa-page's CSS var (collapsed → the rail's). Clamp against the live max so a narrow viewport

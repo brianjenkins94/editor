@@ -2,7 +2,6 @@
  * The program's module system (packages/tsval/README.md, *Modules*): almostnode on the shared workspace, its built-ins
  * the capability stand-ins, and the editor's own modules a program imports as its code (node:test).
  */
-import type { Leaves } from "@brianjenkins94/editor-api";
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Fetched, Outcome } from "@brianjenkins94/playwright";
 import type { ModuleLoader } from "@brianjenkins94/tsval";
@@ -199,21 +198,15 @@ export const editorPlaywright = {
 		return page;
 	},
 	/** A test's page, done with: its window let go, and closed if the page opened it, unless it's `kept` to look at. What
-	 *  the editor in it ran, when the dev server counts it, is the test's (state's `windowReach`), and so is what that editor
-	 *  was left with (`windowLeaves`). */
+	 *  the editor in it ran, when the dev server counts it, is the test's (state's `windowReach`). */
 	"release": async (page: Page, kept: boolean) => {
 		const id = pageIds.get(page);
 
 		if (id !== undefined) {
-			const { reach, leaves } = (await playwrightCall(id, "release", kept) ?? {}) as { "reach"?: Record<string, [number, number][]>; "leaves"?: Leaves };
+			const { reach } = (await playwrightCall(id, "release", kept) ?? {}) as { "reach"?: Record<string, [number, number][]> };
 
 			for (const [file, lines] of Object.entries(reach ?? {})) {
 				state.windowReach.push({ "file": file, "statements": lines.map(([from, to]): [[number, number], [number, number]] => [[from, 0], [to, 0]]) });
-			}
-
-			// (and what its editor was left with: what a test after it in the same editor would meet)
-			if (leaves !== undefined) {
-				state.windowLeaves.push(leaves);
 			}
 		}
 	},

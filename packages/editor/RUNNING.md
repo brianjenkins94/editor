@@ -154,18 +154,14 @@ copy's destination asked about, a timer native code sets — not for a test's sc
 Worker, a module loaded that the test doesn't use. Where it's the test, its logic moves out of its wiring to be tested
 directly (history's ledger-checks.ts, cosmetic's verdicts.ts).
 
-**The editor's own specs share an editor** (test/in-editor/; the user, 2026-11-17: set up and tear down, idempotent,
-not in each other's way — how tests are written from the start, not a speed-up after). A spec is written to run in an
-editor another spec used before it, and beside another: it makes what it needs and assumes nothing it didn't make.
-`openEditor` hands a test a shared editor (`?shared`, shell/preview-windows.tsx), reset as the test before let it go
-(workbench/effects.ts): runs and debug sessions stopped, breakpoints removed, terminals, editors, panel and quick input
-closed, the Explorer shown, the workspace — `.git` and `.silo` in it — written back as it came up, and the test's files
-seeded. Each editor says what it was left with as a test lets it go (`leaves`, printed by test/in-editor.mjs): the
-inventory of what a reset has to put back. A shared editor serves four tests (`SHARED_USES`); a failed test's window is
-left to look at, and its editor isn't shared again. A test whose subject a reset doesn't put back — a reload, a user
-setting, a window's first debug session, an extension by its address — has an editor of its own and says why (`own`).
-Specs run one at a time in each session, two sessions here and one on CI (`IN_EDITOR_SESSIONS`), each its own browser:
-an editor is about 0.8 GB of JavaScript and 2 GB of renderer, and a renderer crashes near 9 GB.
+**Each of the editor's own specs has an editor of its own** (test/in-editor/; `openEditor`: an instance of its own,
+`?instance=test-<id>&seed=…`, shared/instance.ts). Each test still makes what it needs and assumes nothing it didn't make
+(the user, 2026-11-17; silo decision 15). From 2026-11-18 to 2026-11-20 specs shared editors, each reset for the next
+test; it saved 44 s of 350 here, and its reset grew a step for each leftover a test found (filters, channels, a first debug
+session), with misses on CI that didn't reproduce here, so the user had it taken out (2026-11-20; 3bbc7f6e is the commit
+that added it). Specs run one at a time in each session, two sessions here and one on CI (`IN_EDITOR_SESSIONS`), each its
+own browser, CI's in two shards (`IN_EDITOR_SHARD`): an editor is about 0.8 GB of JavaScript and 2 GB of renderer, and a
+renderer crashes near 9 GB.
 
 ## Capability stops
 

@@ -73,8 +73,7 @@ test("a save runs it, off the interval; too long a run stops where it got to, sa
 });
 
 test("F5 just after a save starts your run, with a live one going, and opens the Debug Console", async ({ page }) => {
-	// (its own: VS Code opens the Debug Console on a window's first debug session only, and a shared editor has had others)
-	const workbench = await openEditor(page, { "mine.mjs": "const nothing = 0;\n" }, { "own": "a window's first debug session" });
+	const workbench = await openEditor(page, { "mine.mjs": "const nothing = 0;\n" });
 
 	await openFile(workbench, "mine.mjs");
 	// (long enough to still be going: a live run's what's in front of it)

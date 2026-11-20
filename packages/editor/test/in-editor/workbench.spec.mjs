@@ -46,8 +46,7 @@ async function pickTheme(workbench, theme) {
 }
 
 test("a colour theme picked: VS Code draws in it, and so does the shell", async ({ page }) => {
-	// (its own: a theme is a user setting, which a shared editor's reset — its workspace — doesn't put back)
-	const workbench = await openEditor(page, { "a.txt": "a\n" }, { "own": "a user setting" });
+	const workbench = await openEditor(page, { "a.txt": "a\n" });
 
 	await pickTheme(workbench, "Dark+");
 	await expect(page.locator("body")).toHaveCSS("--vscode-editor-background", /^#1e1e1e$/iu, { "timeout": 30_000 });

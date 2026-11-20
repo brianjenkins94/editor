@@ -179,7 +179,7 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 		vscode.workspace.onDidCloseTextDocument((document) => {
 			forget(document.uri);
 		}),
-		// (a file gone — from the terminal or a shared editor's reset as much as the Explorer — takes its findings with it: its
+		// (a file gone — from the terminal as much as the Explorer — takes its findings with it: its
 		// document can stay open with no editor, so no close says so, and its rows in Problems outlived it)
 		gone,
 		gone.onDidDelete((uri) => {
