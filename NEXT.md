@@ -39,15 +39,18 @@ How it's kept:
    22), the measures were taken (`.silo/zero-knowledge.json`, `.silo/last-run/`), and the features came back to rough
    parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
    changes marked*). In order:
-   - **What the rehearsal found, still open** (2026-11-02, on `cosmetic`). By the step it blocks:
-     - *Measure:* CI's reach covers the architecture suites only, and there `activate` is reached by nearly every test.
    - **The boundaries** (ARCHITECTURE.md has the reasons, checked 2026-11-03: nothing split). Left: whether tsval can
      give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file).
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
      fit* answered. One owner a file is where that starts: once silo ingests coverage from runs and traces, reassess
      sharing from what they show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case).
      `silo observed .silo/local/reach` compares each test's reach with the ledger (2026-11-17: 149 tests, a median of
-     100% in their own features' code, 26 under half, mostly a dependency); the specs' reach is still read from outside.
+     100% in their own features' code, 26 under half, mostly a dependency). CI's reach, from a dispatched architecture
+     run (2026-11-20, 44800937124: half the specs, the other half past the limit, 60 min since), each spec its own file's
+     now: 41 tests to tell, a median of 17% in their own features' code — review-panel, checkpoints, way-in-reach and
+     code_parses 79–98%; capability-findings, instances and cosmetic 0–2%, their features' code run by every editor and so
+     not counted, what's left the terminal and review they lean on. `activate`, reached by every test, says nothing to
+     it (`RARE`: a statement at most 10% of the tests ran).
    - **Notes for comments, and agents reading them**: the migration. Then the pass's third condition, to show notes lose
      nothing. An edit that orphans a note says so (2026-11-20: files_edit, files_write and files_replace answer
      `orphaned`, as Problems says "A note lost its place"). Agents read them (2026-11-17): `files_read` with the notes

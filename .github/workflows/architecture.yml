@@ -111,8 +111,9 @@
         }
       ],
       # (the specs shards are the longest: 21–22 min of specs after 3 of setup on 2026-11-10, in one; 32 on 2026-11-19, so
-      # two halves since; this is a hang's limit, not a budget)
-      "timeout-minutes": 35
+      # two halves since; this is a hang's limit, not a budget. Dispatched, every spec counted alone in one session: one
+      # half took 27 min on 2026-11-20 and the other ran past 35)
+      "timeout-minutes": "${{ github.event_name == 'workflow_dispatch' && 60 || 35 }}"
     }
   }
 }
