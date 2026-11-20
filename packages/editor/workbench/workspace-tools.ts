@@ -132,6 +132,40 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		await saveDocument(document, relative(uri));
 	};
 
+	/** The notes on `uri` as the Margin shows them (the notes extension's `notes.on`): each with its line, or none where it
+	 *  lost its place. */
+	const notesOn = async (uri: vscodeApi.Uri): Promise<{ "line"?: number; "text": string; "by": string }[]> => await Promise.resolve(vscode.commands.executeCommand<{ "line"?: number; "text": string; "by": string }[]>("notes.on", relative(uri))).catch(() => undefined) ?? [];
+
+	/** `edit` made to `uris`, and its answer with the notes it orphaned, if any: each one beside code before it and beside
+	 *  none after, its code gone — as Problems says "A note lost its place" to a person (NEXT.md item 2, *Notes for
+	 *  comments*: an orphan warning). */
+	const orphaning = async <T extends object>(uris: vscodeApi.Uri[], edit: () => Promise<T>): Promise<T & { "orphaned"?: { "path": string; "text": string; "by": string }[] }> => {
+		const before = new Map<string, { "line"?: number; "text": string; "by": string }[]>();
+
+		for (const uri of uris) {
+			const placed = (await notesOn(uri)).filter(({ line }) => line !== undefined);
+
+			if (placed.length > 0) {
+				before.set(uri.toString(), placed);
+			}
+		}
+
+		const answer = await edit();
+		const orphaned = [];
+
+		for (const uri of uris.filter((each) => before.has(each.toString()))) {
+			const lost = (await notesOn(uri)).filter(({ line }) => line === undefined);
+
+			for (const note of before.get(uri.toString()) ?? []) {
+				if (lost.some(({ text, by }) => text === note.text && by === note.by)) {
+					orphaned.push({ "path": relative(uri), "text": note.text, "by": note.by });
+				}
+			}
+		}
+
+		return orphaned.length === 0 ? answer : { ...answer, "orphaned": orphaned };
+	};
+
 	serve(hub, "files.read", async (args) => {
 		const { path, offset, limit } = (args ?? {}) as { "path"?: unknown; "offset"?: unknown; "limit"?: unknown };
 		const uri = uriOf(path);
@@ -142,7 +176,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		const shown = lines.slice(from - 1, from - 1 + count);
 		const width = String(from + shown.length - 1).length;
 		// (the notes the Margin shows beside these lines, and any that lost their place: what's said about the code, not in it)
-		const notes = (await Promise.resolve(vscode.commands.executeCommand<{ "line"?: number }[]>("notes.on", relative(uri))).catch(() => undefined) ?? []).filter(({ line }) => line === undefined || (line >= from && line < from + shown.length));
+		const notes = (await notesOn(uri)).filter(({ line }) => line === undefined || (line >= from && line < from + shown.length));
 
 		return {
 			"path": relative(uri),
@@ -165,13 +199,17 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 
 		const exists = await vscode.workspace.fs.stat(uri).then(() => true, () => false);
 
-		if (exists) {
-			await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), "text": content }]);
-		} else {
+		if (!exists) {
 			await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+
+			return { "path": relative(uri), "created": true, "lines": content.split("\n").length };
 		}
 
-		return { "path": relative(uri), "created": !exists, "lines": content.split("\n").length };
+		return orphaning([uri], async () => {
+			await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), "text": content }]);
+
+			return { "path": relative(uri), "created": false, "lines": content.split("\n").length };
+		});
 	});
 
 	// A file or a folder deleted, as the Explorer's Delete does (a folder with what's in it). Not the repository's own
@@ -249,10 +287,12 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			const end = Math.min(text.length, all.slice(0, to as number).reduce((at, line) => at + line.length + 1, 0));
 			const cut = text.slice(start, end).split("\n");
 
-			await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(start), document.positionAt(end)), "text": replacement }]);
+			return orphaning([uri], async () => {
+				await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(start), document.positionAt(end)), "text": replacement }]);
 
-			// (what went, its first and last lines: that it was the lines meant)
-			return { "path": relative(uri), "replaced": 1, "lines": (to as number) - (from as number) + 1, "first": cut[0], "last": cut.at(cut.at(-1) === "" ? -2 : -1) };
+				// (what went, its first and last lines: that it was the lines meant)
+				return { "path": relative(uri), "replaced": 1, "lines": (to as number) - (from as number) + 1, "first": cut[0], "last": cut.at(cut.at(-1) === "" ? -2 : -1) };
+			});
 		}
 
 		if (typeof old !== "string" || old === "" || typeof replacement !== "string") {
@@ -270,9 +310,11 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			throw new Error(`the text to replace is in ${relative(uri)} ${at.length} times: give more of it around the one meant, or { all: true } for every one`);
 		}
 
-		await applyAndSave(uri, (document) => at.map((index) => ({ "range": new vscode.Range(document.positionAt(index), document.positionAt(index + old.length)), "text": replacement })));
+		return orphaning([uri], async () => {
+			await applyAndSave(uri, (document) => at.map((index) => ({ "range": new vscode.Range(document.positionAt(index), document.positionAt(index + old.length)), "text": replacement })));
 
-		return { "path": relative(uri), "replaced": at.length };
+			return { "path": relative(uri), "replaced": at.length };
+		});
 	});
 
 	serve(hub, "files.replace", async (args) => {
@@ -354,28 +396,32 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			return { "preview": true, "replaced": planned.length, "diff": diffs.join("") };
 		}
 
-		const edit = new vscode.WorkspaceEdit();
-		const documents = new Map<string, vscodeApi.TextDocument>();
+		const touched = [...new Map(planned.map(({ uri }) => [uri.toString(), uri])).values()];
 
-		for (const { uri, start, end, text } of planned) {
-			const document = documents.get(uri.toString()) ?? await vscode.workspace.openTextDocument(uri);
+		return orphaning(touched, async () => {
+			const edit = new vscode.WorkspaceEdit();
+			const documents = new Map<string, vscodeApi.TextDocument>();
 
-			documents.set(uri.toString(), document);
-			edit.replace(uri, new vscode.Range(document.positionAt(start), document.positionAt(end)), text);
-		}
+			for (const { uri, start, end, text } of planned) {
+				const document = documents.get(uri.toString()) ?? await vscode.workspace.openTextDocument(uri);
 
-		if (!await vscode.workspace.applyEdit(edit)) {
-			throw new Error("VS Code didn't apply the edit: nothing was changed");
-		}
+				documents.set(uri.toString(), document);
+				edit.replace(uri, new vscode.Range(document.positionAt(start), document.positionAt(end)), text);
+			}
 
-		for (const document of documents.values()) {
-			await saveDocument(document, relative(document.uri));
-		}
+			if (!await vscode.workspace.applyEdit(edit)) {
+				throw new Error("VS Code didn't apply the edit: nothing was changed");
+			}
 
-		return {
-			"files": [...documents.values()].map((document) => ({ "path": relative(document.uri), "replaced": planned.filter(({ uri }) => uri.toString() === document.uri.toString()).length })),
-			"replaced": planned.length
-		};
+			for (const document of documents.values()) {
+				await saveDocument(document, relative(document.uri));
+			}
+
+			return {
+				"files": [...documents.values()].map((document) => ({ "path": relative(document.uri), "replaced": planned.filter(({ uri }) => uri.toString() === document.uri.toString()).length })),
+				"replaced": planned.length
+			};
+		});
 	});
 
 	serve(hub, "files.glob", async (args) => {

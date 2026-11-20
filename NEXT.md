@@ -48,8 +48,9 @@ How it's kept:
      sharing from what they show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case).
      `silo observed .silo/local/reach` compares each test's reach with the ledger (2026-11-17: 149 tests, a median of
      100% in their own features' code, 26 under half, mostly a dependency); the specs' reach is still read from outside.
-   - **Notes for comments, and agents reading them**: the migration, and an orphan warning from `files_edit`. Then the
-     pass's third condition, to show notes lose nothing. Agents read them (2026-11-17): `files_read` with the notes
+   - **Notes for comments, and agents reading them**: the migration. Then the pass's third condition, to show notes lose
+     nothing. An edit that orphans a note says so (2026-11-20: files_edit, files_write and files_replace answer
+     `orphaned`, as Problems says "A note lost its place"). Agents read them (2026-11-17): `files_read` with the notes
      beside its lines, `decisions_for` with a file's among its whys. What the measure found to go on (2026-11-03, 128
      comments in 9 files): 53% dropped (JSDoc saying what a declaration's name and body do), 39% notes (whys, gotchas, a
      contract with another file, history), 6% notes citing a doc, 2% kept (a pragma, an `eslint-disable` with its

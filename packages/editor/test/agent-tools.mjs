@@ -95,6 +95,8 @@ test("a file's notes, read as the Margin shows them: beside its lines in files_r
 	// (lines it wasn't asked for, no note)
 	assert.equal((await ask("files.read", { "path": "tools/noted.mjs", "limit": 1 })).notes, undefined);
 	assert.deepEqual((await ask("decisions.for", { "target": "tools/noted.mjs" })).notes?.map(({ line, text }) => [line, text]), [[2, "ten of them"]]);
+	// (an edit that takes a note's code out says so: an orphan, as Problems tells a person)
+	assert.deepEqual((await ask("files.edit", { "path": "tools/noted.mjs", "old": "const total = rate * 10;\n", "new": "" })).orphaned?.map(({ path, text }) => [path, text]), [["tools/noted.mjs", "ten of them"]]);
 	// (a file with none says nothing of notes)
 	await ask("files.write", { "path": "tools/plain.mjs", "content": "const plain = 1;\n" });
 	assert.equal((await ask("files.read", { "path": "tools/plain.mjs" })).notes, undefined);

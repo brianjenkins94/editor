@@ -25,7 +25,7 @@ const files: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "files_write",
 			"config": {
-				"description": "Make a workspace file, or replace its whole text. An open editor shows the change and undo takes it back, as if it were typed; then it's saved (format on save runs). Prefer files_edit to change part of a file. Returns { path, created, lines }.",
+				"description": "Make a workspace file, or replace its whole text. An open editor shows the change and undo takes it back, as if it were typed; then it's saved (format on save runs). Prefer files_edit to change part of a file. Returns { path, created, lines, orphaned? } — orphaned: the notes whose code it took out, each { path, text, by }, as Problems says \"A note lost its place\".",
 				"inputSchema": {
 					"path": z.string().describe("The file, relative to the workspace or absolute under it. Its folders are made as needed."),
 					"content": z.string().describe("The file's whole text.")
@@ -52,7 +52,7 @@ const files: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "files_edit",
 			"config": {
-				"description": "Replace an exact string in a workspace file — found once (else it fails: give more of the text around it), or every time with all. Matched against the file as the editor has it (unsaved edits included), whitespace and all. Or whole lines by files_read's numbers (lines: [from, to]), for a long cut: the answer has the first and last lines that went, to check they were the ones meant. An open editor shows the change, undo takes it back; then it's saved. Returns { path, replaced, lines?, first?, last? }.",
+				"description": "Replace an exact string in a workspace file — found once (else it fails: give more of the text around it), or every time with all. Matched against the file as the editor has it (unsaved edits included), whitespace and all. Or whole lines by files_read's numbers (lines: [from, to]), for a long cut: the answer has the first and last lines that went, to check they were the ones meant. An open editor shows the change, undo takes it back; then it's saved. Returns { path, replaced, lines?, first?, last?, orphaned? } — orphaned: the notes whose code it took out, each { path, text, by }, as Problems says \"A note lost its place\".",
 				"inputSchema": {
 					"path": z.string().describe("The file, relative to the workspace or absolute under it."),
 					"old": z.string().optional().describe("The exact text to replace (or lines)."),
@@ -69,7 +69,7 @@ const files: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "files_replace",
 			"config": {
-				"description": "Replace exact strings across files, all or nothing: each replacement must be found as it says — once (the default), `count` times, or every time with `all` — and none may overlap another, or nothing changes and the answer says each one that didn't hold. Then it's one edit (an open editor shows it, one undo takes it back) and every file is saved. Use it for a change that spans files (a signature and its callers); for a rename or a move, code_rename and code_move. With preview, the diff it would make and nothing changed; to see what it would break first, workspace_checkpoint, make it, code_problems, then workspace_restore if need be. Returns { files: [{ path, replaced }], replaced }, or { preview, replaced, diff }.",
+				"description": "Replace exact strings across files, all or nothing: each replacement must be found as it says — once (the default), `count` times, or every time with `all` — and none may overlap another, or nothing changes and the answer says each one that didn't hold. Then it's one edit (an open editor shows it, one undo takes it back) and every file is saved. Use it for a change that spans files (a signature and its callers); for a rename or a move, code_rename and code_move. With preview, the diff it would make and nothing changed; to see what it would break first, workspace_checkpoint, make it, code_problems, then workspace_restore if need be. Returns { files: [{ path, replaced }], replaced, orphaned? } (the notes whose code it took out, each { path, text, by }), or { preview, replaced, diff }.",
 				"inputSchema": {
 					"edits": z.array(z.object({
 						"path": z.string().describe("The file, relative to the workspace or absolute under it."),
