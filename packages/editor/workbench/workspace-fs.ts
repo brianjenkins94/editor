@@ -36,6 +36,7 @@ import { countCall, timeCall } from "../shared/fs-boundaries";
 import { fsCaller, vscodeCaller } from "../shared/fs-caller";
 import { watchWorkspaceStore, WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
+import { statCache } from "./stat-cache";
 
 /** VS Code's platform `FilePermission.Readonly` bit (vs/platform/files/common/files: `Readonly = 1 << 0`). Set in
  *  a file's `stat`, it makes the editor render the read-only lock, disable editing the buffer, and block Save. The
@@ -53,6 +54,9 @@ export interface WorkspaceFs {
 	"provider": IFileSystemProviderWithFileReadWriteCapability;
 	"reads": number;
 	"writes": number;
+	/** Stats the provider answered, and how many of those from what it last found (its `stats`, forgotten as each path changes). */
+	"stats": number;
+	"statsCached": number;
 	"has": (path: string) => boolean;
 	"isReadonly": (path: string) => boolean;
 	"buffer"?: SharedArrayBuffer;
@@ -642,6 +646,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		"provider": undefined as unknown as IFileSystemProviderWithFileReadWriteCapability,
 		"reads": 0,
 		"writes": 0,
+		"stats": 0,
+		"statsCached": 0,
 		// (asked for every file type acquisition might fetch: counted as its own caller)
 		"has": as("has", (path: string) => fs.existsSync(path)),
 		"isReadonly": (path) => readonlyPaths.has(path),
@@ -663,7 +669,14 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	// .git (the index's stat cache, verdict caches) — announcing those would loop. (VS Code's own watcherExclude
 	// leaves .git out for the same reason.)
 	const inGit = (path: string): boolean => /\/\.git(?:\/|$)/u.test(path);
+	// Each path's stat as the provider last found it (stat-cache.ts), forgotten as it changes: this realm's writes as they're
+	// made (the store's watcher, `onNow`), the provider's own among them, and other realms' as the change stream brings
+	// them (`apply`), before VS Code hears of them.
+	const found = statCache<IStat>();
+	const forget = found.forget;
 	const apply = (changes: WorkspaceChange[]): void => {
+		forget(changes);
+
 		for (const change of changes) {
 			if ((change.path === "/workspace" || change.path.startsWith("/workspace/")) && !(localStore !== undefined && inLocal(change.path))) {
 				persist(change.path);
@@ -678,7 +691,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	if (store !== undefined) {
 		watchWorkspaceStore(store, buffer !== undefined ? "/workspace" : "", hub === undefined ? apply : (changes) => {
 			hub.publish(WORKSPACE_CHANGED, changes);
-		});
+		}, undefined, forget);
 	}
 
 	// Silo's local/ changes too: announced to VS Code (a saved profile, say), but neither persisted (its store is its
@@ -688,7 +701,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			for (const change of changes) {
 				fire(Uri.file(change.path), CHANGE_TYPES[change.type]);
 			}
-		});
+		}, undefined, forget);
 	}
 
 	hub?.subscribe(WORKSPACE_CHANGED, (data) => {
@@ -704,9 +717,34 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		// (each a missing path's not-found, from the call itself: asked first whether it exists, a path found was looked up
 		// twice, each a walk from the store's root — NEXT.md item 1, load cost)
 		"stat": (resource): Promise<IStat> => settled(() => {
+			let result = found.get(resource.path);
+
+			handle.stats += 1;
+
+			if (result === undefined) {
+				try {
+					const stat = fs.statSync(resource.path);
+
+					result = { "type": fileType(stat), "ctime": stat.ctimeMs, "mtime": stat.mtimeMs, "size": stat.size };
+				} catch (error) {
+					const { code } = error as { "code"?: string };
+
+					if (code !== "ENOENT" && code !== "ENOTDIR") {
+						throw error;
+					}
+
+					result = null;
+				}
+
+				found.remember(resource.path, result);
+			} else {
+				handle.statsCached += 1;
+			}
+
 			// (not found: a lower overlay's, the CDN node_modules provider's, to answer)
-			const stat = orNotFound(() => fs.statSync(resource.path));
-			const result: IStat = { "type": fileType(stat), "ctime": stat.ctimeMs, "mtime": stat.mtimeMs, "size": stat.size };
+			if (result === null) {
+				throw notFound();
+			}
 
 			return readonlyPaths.has(resource.path) ? { ...result, "permissions": FILE_PERMISSION_READONLY } : result;
 		}),

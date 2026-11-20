@@ -65,9 +65,11 @@ function coalesce(batch: Map<string, WorkspaceChangeType>, change: WorkspaceChan
 /**
  * Watch every tree-changing operation `store` (a zen-fs FileSystem mounted at `mountPoint`, whose methods take
  * mount-relative paths) performs, and hand `onChanges` coalesced batches of absolute paths, `delayMs` after the
- * first change of a burst. A change is reported once its operation has completed. Idempotent per store.
+ * first change of a burst. A change is reported once its operation has completed. Idempotent per store. `onNow` hears
+ * each change as it's made, unbatched: what must know before anything after it in this realm asks (workspace-fs.ts's
+ * stats).
  */
-export function watchWorkspaceStore(store: object, mountPoint: string, onChanges: (changes: WorkspaceChange[]) => void, delayMs = 5): void {
+export function watchWorkspaceStore(store: object, mountPoint: string, onChanges: (changes: WorkspaceChange[]) => void, delayMs = 5, onNow?: (changes: WorkspaceChange[]) => void): void {
 	const target = store as Record<string | symbol, unknown>;
 
 	if (target[WATCHED] === true) {
@@ -83,8 +85,12 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 			return; // a quiet touch (a read's access time): nothing to publish
 		}
 
-		for (const change of changes) {
-			coalesce(batch, { "path": prefix + (change.path === "/" ? "" : change.path), "type": change.type });
+		const absolute = changes.map((change) => ({ "path": prefix + (change.path === "/" ? "" : change.path), "type": change.type }));
+
+		onNow?.(absolute);
+
+		for (const change of absolute) {
+			coalesce(batch, change);
 		}
 
 		timer ??= setTimeout(() => {

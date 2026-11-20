@@ -2941,11 +2941,13 @@
       "packages/editor/shared/zenfs-vfs.ts",
       "packages/editor/workbench/provider-base.ts",
       "packages/editor/workbench/workspace-fs.ts",
-      "packages/editor/workbench/workspace.ts"
+      "packages/editor/workbench/workspace.ts",
+      "packages/editor/workbench/stat-cache.ts"
     ],
     "tests": [
       "packages/editor/test/workspace-changes.test.mjs",
-      "packages/editor/test/in-editor/reload.spec.mjs"
+      "packages/editor/test/in-editor/reload.spec.mjs",
+      "packages/editor/test/stat-cache.test.mjs"
     ]
   },
   "Your account page": {

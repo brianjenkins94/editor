@@ -21,11 +21,11 @@ How it's kept:
    and no shell for agents (ARCHITECTURE.md, *Workspace tools*). Still open:
    - **Load cost** (a first load of this repository, last measured 2026-11-11: the workspace buffer at 32 of 128 MB, the
      first write-back 1.6 s, the restore at boot 0.43 s). What's left, by gain: each zen-fs lookup walks from the root
-     (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — asked upstream (#329); the
-     provider's `stat`, `readFile` and `readdir` ask once since 2026-11-20 (a path found 3 lookups → 1: zen-fs's `existsSync`
-     is two), and a cache its change path invalidates is next (16.7k → ~4.4k lookups in a cold load,
-     99.9% of them tsserver's module resolution, 2026-11-02: ~2–5 s of a 54 s cold load, and every realm that writes
-     zen-fs directly — git, the workers, a run — would have to keep it true); then the file store's work in a worker. The
+     (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — asked upstream (#329); since
+     2026-11-20 the provider's `stat`, `readFile` and `readdir` ask once (a path found 3 lookups → 1: zen-fs's
+     `existsSync` is two), and its stats are kept until a change says otherwise (workbench/stat-cache.ts: 32,490 of a
+     reload's first 39,718 stats answered so, this repository with TypeScript loading it); then the file store's work in
+     a worker. The
      restore's span (`editor.workbench.workspace-fs.restore`, 2026-11-20): this repository's 3,065 files, 698 folders, in
      0.71 s of a reload. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
      (write 2.8 → 3.7 s, stat 1.2 → 1.6 s for 2,258 files), patched or not: upstream's to hear of.
