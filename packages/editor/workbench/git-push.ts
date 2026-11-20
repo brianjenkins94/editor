@@ -59,8 +59,9 @@ export function installGitPush(hub: Hub, log: Logger): HttpClient {
 		return engine.branches();
 	});
 
-	// A branch (the current one, by default) brought up to the repository's, when that's a fast-forward: what GitHub has
-	// that this workspace hasn't, its files written over a working tree whose changes are elsewhere (git-engine.ts `pull`).
+	// A branch (the current one, by default) brought up to the repository's: what GitHub has that this workspace hasn't,
+	// its files written over a working tree whose changes are elsewhere, as a fast-forward or, when each has moved on, a
+	// merge — its conflicts written with both sides marked, to be settled and committed (git-engine.ts `pull`).
 	serve(hub, "git.pull", async (args) => {
 		const { ref } = (args ?? {}) as { "ref"?: unknown };
 		const url = await engine.githubRemote();
@@ -71,7 +72,7 @@ export function installGitPush(hub: Hub, log: Logger): HttpClient {
 
 		const pulled = await engine.pull(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined).catch(said);
 
-		if (pulled.outcome === "fast-forwarded") {
+		if (pulled.outcome === "fast-forwarded" || pulled.outcome === "merged" || pulled.outcome === "merge conflicts") {
 			hub.publish("git.changed");
 		}
 

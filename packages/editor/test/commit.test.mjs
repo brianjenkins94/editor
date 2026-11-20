@@ -1,8 +1,9 @@
 /**
  * The top bar's Commit (shell/commit.tsx `commitAndPush`): the branch brought up to GitHub's first, then every change
  * committed and the branch pushed — each step the workbench's git over the hub, here a stand-in that answers as told and
- * keeps what it was asked. What it says, and what it doesn't do: nothing committed when it can't catch up, no commit when
- * nothing changed, the commit kept and said when the push after it is refused.
+ * keeps what it was asked. What it says, and what it doesn't do: nothing committed when GitHub changed a file changed here,
+ * a merge after the commit when each moved on (and no push while its conflicts wait), no commit when nothing changed, the
+ * commit kept and said when the push after it is refused.
  *
  *   node --import tsx --test test/commit.test.mjs
  */
@@ -56,13 +57,29 @@ test("nothing changed — or only .silo's own seeds — pushes what's committed,
 	assert.equal(asked.includes("git.commit"), false);
 });
 
-test("when it can't catch up — the two moved on, or a file changed on both — nothing is committed, and it says why", async () => {
-	const diverged = workbench({ "git.pull": { "ref": "main", "outcome": "diverged" } });
+test("when GitHub changed a file changed here, nothing is committed, and it says which", async () => {
 	const conflicts = workbench({ "git.pull": { "ref": "main", "outcome": "conflicts", "conflicts": ["a.txt", "b.txt"] } });
 
-	assert.match((await commitAndPush(diverged.rpc, "m", "someone/repo")).said, /each moved on.*rebase or a merge/u);
 	assert.equal((await commitAndPush(conflicts.rpc, "m", "someone/repo")).said, "GitHub changed files you've changed here, so it can't catch up: a.txt, b.txt");
-	assert.deepEqual([diverged.asked, conflicts.asked], [["git.pull"], ["git.pull"]]);
+	assert.deepEqual(conflicts.asked, ["git.pull"]);
+});
+
+test("each moved on: the changes committed, then GitHub's merged in, then pushed", async () => {
+	const pulls = [{ "ref": "main", "outcome": "diverged" }, { "ref": "main", "outcome": "merged", "files": ["x"] }];
+	const { rpc, asked } = workbench({ "git.pull": () => pulls.shift(), "git.status": { "files": [] }, "git.commit": { "oid": "abcdef0123" }, "git.push": pushed });
+
+	assert.deepEqual(await commitAndPush(rpc, "m", "someone/repo"), { "said": "Merged GitHub (1 files). Committed abcdef0 and pushed main", "failed": false, "made": "abcdef0" });
+	assert.deepEqual(asked, ["git.pull", "git.commit", "git.pull", "git.status", "git.push"]);
+});
+
+test("a merge with conflicts: committed here, not pushed, and which files to settle", async () => {
+	const pulls = [{ "ref": "main", "outcome": "diverged" }, { "ref": "main", "outcome": "merge conflicts", "conflicts": ["a.txt"] }];
+	const { rpc, asked } = workbench({ "git.pull": () => pulls.shift(), "git.commit": { "oid": "abcdef0123" } });
+	const outcome = await commitAndPush(rpc, "m", "someone/repo");
+
+	assert.equal(outcome.failed, true);
+	assert.match(outcome.said, /^Committed abcdef0, but not pushed: GitHub and this workspace changed the same lines of a\.txt: both are marked in the file\. Settle them and commit again/u);
+	assert.equal(asked.includes("git.push"), false);
 });
 
 test("a push refused after the commit: the commit's kept and said, with GitHub's reason", async () => {

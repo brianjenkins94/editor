@@ -71,6 +71,10 @@ async function status(config: Juvy): Promise<Result> {
 		lines.push("Untracked files:", "  (use \"git add <file>...\" to include in what will be committed)", ...untracked.map((change) => `\t${change.path}`), "");
 	}
 
+	if (await engine.mergingIn() !== undefined) {
+		lines.splice(1, 0, "You have unmerged paths.", "  (fix conflicts and run \"git commit\")", "  (use \"git merge --abort\" to abort the merge)", "");
+	}
+
 	if (staged.length + changed.length + untracked.length === 0) {
 		lines.push("nothing to commit, working tree clean");
 	}
@@ -292,6 +296,48 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 			const fetched = await createRpcClient(hub).request("git.fetch", { ...branch === "" ? {} : { "ref": branch }, ...deepen === "" ? {} : { "deepen": Number(deepen) }, "unshallow": config.get("unshallow") === true }, { "timeoutMs": 300_000 }) as { "ref": string; "tip": string; "commits": number; "shallow": boolean; "url": string };
 
 			return { "stdout": "", "stderr": `From ${fetched.url}\n * branch            ${fetched.ref} -> origin/${fetched.ref} (${fetched.tip.slice(0, 7)})\n${String(fetched.commits)} commit${fetched.commits === 1 ? "" : "s"} from HEAD here${fetched.shallow ? ", where the clone's history ends" : ", all of its history"}\n`, "exitCode": 0 };
+		},
+		"pull": async (config) => {
+			if (config.get("remote") !== "origin") {
+				return fail(`fatal: '${config.get("remote") as string}' does not appear to be a git repository — this workspace has origin, where it was loaded from`, 128);
+			}
+
+			const branch = config.get("branch") as string;
+			// (the git service's pull: it asks the shell, which has the sign-in, to send its requests)
+			const pulled = await createRpcClient(hub).request("git.pull", branch === "" ? {} : { "ref": branch }, { "timeoutMs": 300_000 }) as engine.Pulled & { "url": string };
+			const from = `From ${pulled.url}\n * branch            ${pulled.ref} -> origin/${pulled.ref}\n`;
+			const files = (pulled.files ?? []).map((file) => ` ${file}\n`).join("");
+
+			switch (pulled.outcome) {
+				case "up to date":
+				case "ahead":
+					return { "stdout": "Already up to date.\n", "stderr": from, "exitCode": 0 };
+				case "fast-forwarded":
+					return { "stdout": `Updating ${pulled.from?.slice(0, 7) ?? ""}..${pulled.to?.slice(0, 7) ?? ""}\nFast-forward\n${files}`, "stderr": from, "exitCode": 0 };
+				case "merged":
+					return { "stdout": `Merge made: ${pulled.to?.slice(0, 7) ?? ""}\n${files}`, "stderr": from, "exitCode": 0 };
+				case "merge conflicts":
+					return { "stdout": `${(pulled.conflicts ?? []).map((file) => `CONFLICT (content): Merge conflict in ${file}\n`).join("")}Automatic merge failed; fix conflicts and then commit the result.\n`, "stderr": from, "exitCode": 1 };
+				case "diverged":
+					return fail(`${from}error: your local changes would be overwritten by merge.\nhint: commit them first: git commit -am <message>, then git pull.`);
+				case "conflicts":
+				default:
+					return fail(`${from}error: your local changes to the following files would be overwritten by merge:\n${(pulled.conflicts ?? []).map((file) => `\t${file}\n`).join("")}Please commit your changes or restore them before you merge.\nAborting`);
+			}
+		},
+		"merge": async (config) => {
+			if (config.get("abort") !== true) {
+				return fail("fatal: git merge isn't here but for --abort: git pull merges GitHub's branch into yours when each has moved on", 128);
+			}
+
+			if (await engine.mergingIn() === undefined) {
+				return fail("fatal: There is no merge to abort (MERGE_HEAD missing).", 128);
+			}
+
+			await engine.abortMerge();
+			changed();
+
+			return ok("");
 		},
 		"push": async (config) => {
 			if (config.get("remote") !== "origin") {

@@ -3,13 +3,12 @@ import type { CommandDefinition } from "../../catalog";
 const PATHS = { "format": Array, "default": [], "positional": "rest", "doc": "Paths (files or folders); none: all." } as const;
 
 /** What this git doesn't do, as much as there's to say. */
-const NOT_HERE = "isn't here: this git has status, diff, log, add, restore, commit, branch, switch, fetch and push.";
-const NO_HISTORY_EDITS = "isn't here: nothing in this git rewrites or combines history. It has status, diff, log, add, restore, commit, branch, switch, fetch and push.";
+const NOT_HERE = "isn't here: this git has status, diff, log, add, restore, commit, branch, switch, fetch, pull, merge --abort and push.";
+const NO_HISTORY_EDITS = "isn't here: nothing in this git rewrites history, and git pull is what merges. It has status, diff, log, add, restore, commit, branch, switch, fetch, pull, merge --abort and push.";
 
 export default {
 	"name": "git",
 	"subcommandsNotHere": {
-		"merge": NO_HISTORY_EDITS,
 		"rebase": NO_HISTORY_EDITS,
 		"cherry-pick": NO_HISTORY_EDITS,
 		"revert": NO_HISTORY_EDITS,
@@ -20,13 +19,12 @@ export default {
 		"clone": "isn't here: the top bar's GitHub button loads a repository.",
 		"show": "isn't here: git log says what's been committed.",
 		"blame": "isn't here: git log says what's been committed.",
-		"pull": "isn't here: the top bar's Commit pulls before it pushes.",
 		"remote": NOT_HERE,
 		"tag": NOT_HERE,
 		"config": NOT_HERE,
 		"init": NOT_HERE
 	},
-	"summary": "The workspace's git: status, diff, log, add, restore, commit, branch, switch, fetch, push.",
+	"summary": "The workspace's git: status, diff, log, add, restore, commit, branch, switch, fetch, pull, merge --abort, push.",
 	"subcommands": {
 		"status": { "summary": "What's changed: staged, not staged, untracked.", "options": { "short": { "format": Boolean, "default": false, "short": "s", "doc": "Two letters a file." } } },
 		"diff": {
@@ -73,6 +71,17 @@ export default {
 				"remote": { "format": String, "default": "origin", "positional": true, "doc": "origin, the only one." },
 				"branch": { "format": String, "default": "", "positional": true, "doc": "The branch; none: the current one." }
 			}
+		},
+		"pull": {
+			"summary": "Bring a branch (the current one) up to the GitHub repository's: a fast-forward, or a merge when each has moved on (your changes committed first); a conflict's files have both sides marked, and the commit that settles them is the merge.",
+			"options": {
+				"remote": { "format": String, "default": "origin", "positional": true, "doc": "origin, the only one." },
+				"branch": { "format": String, "default": "", "positional": true, "doc": "The branch; none: the current one." }
+			}
+		},
+		"merge": {
+			"summary": "Only --abort here: a merge waiting on its conflicts, given up (git pull is what merges).",
+			"options": { "abort": { "format": Boolean, "default": false, "doc": "Every file back as HEAD has it, and the merge forgotten." } }
 		},
 		"push": {
 			"summary": "Push a branch (the current one) to the GitHub repository this was loaded from — signed in with GitHub.",

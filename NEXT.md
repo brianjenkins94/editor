@@ -28,10 +28,6 @@ How it's kept:
      restore's span (`editor.workbench.workspace-fs.restore`, 2026-11-20): this repository's 3,065 files, 698 folders, in
      0.71 s of a reload. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
      (write 2.8 → 3.7 s, stat 1.2 → 1.6 s for 2,258 files), patched or not: upstream's to hear of.
-   - **A merge in the editor** (decided 2026-11-20: a merge, not a rebase): `git_pull` says "diverged" when main moved
-     under a branch, and the terminal's git says "nothing in this git rewrites or combines history". isomorphic-git's
-     merge brings the two together, conflicts shown and resolved as VS Code shows them; the pull, the terminal's `git
-     merge` and Source Control's sync each do it, and `git_pull` with them.
    - **Type gaps** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one run showed it after 4
      minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never told after
      (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing that. eslint.config.js's

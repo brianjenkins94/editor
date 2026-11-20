@@ -17,7 +17,7 @@ import { Buffer } from "node:buffer";
 import { KEPT, localOf } from "@brianjenkins94/editor-api/git";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs as zenfs } from "@zenfs/core";
-import { add, branch, checkout, commit, currentBranch, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, readBlob, readCommit, readTree, remove, resetIndex, resolveRef, setConfig, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
+import { add, branch, checkout, commit, currentBranch, deleteRef, Errors, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, merge, readBlob, readCommit, readTree, remove, resetIndex, resolveRef, setConfig, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 import { callerFs } from "../shared/fs-caller";
 
 /** The workspace's store as git reaches it: each of isomorphic-git's calls git's, in the store's counts (fs-caller.ts). */
@@ -32,6 +32,9 @@ const fs = callerFs(zenfs, "git");
 
 /** The workspace is the repo root (zen-fs mounts the SingleBuffer here; see workspace-fs.ts). */
 const DIR = "/workspace";
+/** Where a merge waiting on its conflicts keeps the commit it's merging, as git does: the commit that settles them has
+ *  it as its second parent (`committed`). isomorphic-git keeps no such state of its own. */
+const MERGE_HEAD = `${DIR}/.git/MERGE_HEAD`;
 /** Who a commit is by when nothing says (signed out). */
 const AUTHOR = { "name": "editor", "email": "editor@localhost" };
 
@@ -355,7 +358,15 @@ async function committed(message: string): Promise<Committed> {
 		await recordIdentity(author).catch(() => { /* the commit's author is what matters here */ });
 	}
 
-	return { "oid": await commit({ "fs": fs, "dir": DIR, "message": message, "author": author ?? AUTHOR }) };
+	// (a merge's conflicts settled: this commit is the merge, theirs its second parent)
+	const merging = await mergingIn();
+	const oid = await commit({ "fs": fs, "dir": DIR, "message": message, "author": author ?? AUTHOR, ...merging === undefined ? {} : { "parent": [await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }), merging] } });
+
+	if (merging !== undefined) {
+		await fs.promises.unlink(MERGE_HEAD).catch(() => undefined);
+	}
+
+	return { "oid": oid };
 }
 
 /** Commit what's staged, and only that (`git commit`): the new commit (`Committed`). */
@@ -457,14 +468,17 @@ export async function push(http: HttpClient, url: string, ref?: string, force = 
 }
 
 /**
- * What bringing a branch up to the remote's did (`git pull --ff-only`): `up to date`, nothing new there; `ahead`, only
- * this workspace has commits the other hasn't (a push is a fast-forward); `fast-forwarded`, the branch moved `from` →
- * `to` and the `files` the remote changed written; or nothing done, `diverged` (each has commits the other hasn't:
- * a rebase or a merge, not this) or `conflicts` (the remote changed files this workspace has changes to).
+ * What bringing a branch up to the remote's did (`git pull`): `up to date`, nothing new there; `ahead`, only this
+ * workspace has commits the other hasn't (a push is a fast-forward); `fast-forwarded`, the branch moved `from` → `to` and
+ * the `files` the remote changed written; `merged`, each had commits the other hadn't, and a merge commit `to` of both
+ * made, the `files` it changed written; `merge conflicts`, the same, but both changed the same lines of the `conflicts`,
+ * written with both sides marked in them — settled and committed, the commit is the merge (`committed`). Or nothing done:
+ * `diverged`, each has moved on and this workspace has changes to tracked files (commit them, then it merges), or
+ * `conflicts`, the remote changed files this workspace has changes to.
  */
 export interface Pulled {
 	"ref": string;
-	"outcome": "up to date" | "ahead" | "fast-forwarded" | "diverged" | "conflicts";
+	"outcome": "up to date" | "ahead" | "fast-forwarded" | "merged" | "merge conflicts" | "diverged" | "conflicts";
 	"from"?: string;
 	"to"?: string;
 	"files"?: string[];
@@ -497,7 +511,9 @@ export async function pull(http: HttpClient, url: string, ref?: string): Promise
 		throw new Error(`the remote has no branch ${branchName}`);
 	}
 
-	return fastForward(branchName, fetched.fetchHead);
+	const forward = await fastForward(branchName, fetched.fetchHead);
+
+	return forward.outcome === "diverged" ? mergeWith(branchName, fetched.fetchHead) : forward;
 }
 
 /** What `git fetch` brought: the branch's tip there, how many commits HEAD's history has here now, and whether it still
@@ -531,28 +547,9 @@ export async function fetchBranch(http: HttpClient, url: string, ref?: string, d
 	return { "ref": branchName, "tip": fetched.fetchHead, "commits": (await history()).length, "shallow": (await shallowEnds()).length > 0 };
 }
 
-/**
- * Move `branchName` (HEAD's) to `to` when that's a fast-forward, keeping the working tree's changes: the files that
- * changed between the two are written and staged as `to` has them, then the branch moved. Refused — nothing touched —
- * when a file it would write has a change here (staged, unstaged or untracked), as `git merge --ff-only` refuses.
- */
-export async function fastForward(branchName: string, to: string): Promise<Pulled> {
-	const from = await resolveRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}` });
-	const descends = async (oid: string, ancestor: string): Promise<boolean> => isDescendent({ "fs": fs, "dir": DIR, "oid": oid, "ancestor": ancestor, "depth": -1 }).catch(() => false);
-
-	if (from === to) {
-		return { "ref": branchName, "outcome": "up to date" };
-	}
-
-	if (await descends(from, to)) {
-		return { "ref": branchName, "outcome": "ahead", "from": from, "to": to };
-	}
-
-	if (!await descends(to, from)) {
-		return { "ref": branchName, "outcome": "diverged", "from": from, "to": to };
-	}
-
-	// (each file that differs between the two commits: what `to` has of it, or nothing — a subtree they share, skipped)
+/** Each file that differs between commits `from` and `to`: what `to` has of it, or nothing (removed). A subtree they
+ *  share is skipped. */
+async function changedBetween(from: string, to: string): Promise<{ "path": string; "oid"?: string; "mode"?: number }[]> {
 	const changed: { "path": string; "oid"?: string; "mode"?: number }[] = [];
 
 	await walk({
@@ -580,14 +577,19 @@ export async function fastForward(branchName: string, to: string): Promise<Pulle
 		}
 	});
 
+	return changed;
+}
+
+/** Which of `changed` this workspace has a change to (staged, unstaged or untracked): what writing them would lose. */
+async function changedHere(changed: { "path": string }[]): Promise<string[]> {
 	const { staged, unstaged } = await status();
 	const here = new Set([...staged, ...unstaged].map((change) => change.path));
-	const conflicts = changed.filter(({ path }) => here.has(path)).map(({ path }) => path);
 
-	if (conflicts.length > 0) {
-		return { "ref": branchName, "outcome": "conflicts", "from": from, "to": to, "conflicts": conflicts };
-	}
+	return changed.filter(({ path }) => here.has(path)).map(({ path }) => path);
+}
 
+/** `changed` written to the working tree and staged as it has them (`changedBetween`), each removed one deleted. */
+async function writeChanged(changed: { "path": string; "oid"?: string; "mode"?: number }[]): Promise<void> {
 	for (const { path, oid, mode } of changed) {
 		const full = `${DIR}/${path}`;
 
@@ -602,10 +604,114 @@ export async function fastForward(branchName: string, to: string): Promise<Pulle
 			await updateIndex({ "fs": fs, "dir": DIR, "filepath": path, "oid": oid, ...mode === undefined ? {} : { "mode": mode }, "add": true });
 		}
 	}
+}
 
+/**
+ * Move `branchName` (HEAD's) to `to` when that's a fast-forward, keeping the working tree's changes: the files that
+ * changed between the two are written and staged as `to` has them, then the branch moved. Refused — nothing touched —
+ * when a file it would write has a change here (staged, unstaged or untracked), as `git merge --ff-only` refuses.
+ */
+export async function fastForward(branchName: string, to: string): Promise<Pulled> {
+	const from = await resolveRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}` });
+	const descends = async (oid: string, ancestor: string): Promise<boolean> => isDescendent({ "fs": fs, "dir": DIR, "oid": oid, "ancestor": ancestor, "depth": -1 }).catch(() => false);
+
+	if (from === to) {
+		return { "ref": branchName, "outcome": "up to date" };
+	}
+
+	if (await descends(from, to)) {
+		return { "ref": branchName, "outcome": "ahead", "from": from, "to": to };
+	}
+
+	if (!await descends(to, from)) {
+		return { "ref": branchName, "outcome": "diverged", "from": from, "to": to };
+	}
+
+	const changed = await changedBetween(from, to);
+	const conflicts = await changedHere(changed);
+
+	if (conflicts.length > 0) {
+		return { "ref": branchName, "outcome": "conflicts", "from": from, "to": to, "conflicts": conflicts };
+	}
+
+	await writeChanged(changed);
 	await writeRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}`, "value": to, "force": true });
 
 	return { "ref": branchName, "outcome": "fast-forwarded", "from": from, "to": to, "files": changed.map(({ path }) => path) };
+}
+
+/** The commit a merge waiting on its conflicts is merging in, if one is. */
+export async function mergingIn(): Promise<string | undefined> {
+	return fs.promises.readFile(MERGE_HEAD, "utf8").then((text) => text.trim() || undefined, () => undefined);
+}
+
+/**
+ * `theirs` merged into `branchName` (HEAD's) when each has commits the other hasn't, as `git merge` does: a merge commit
+ * of both and the files it changed written (`merged`); or, where both changed the same lines, every file written as the
+ * merge has it, those with both sides marked, to be settled and committed (`merge conflicts`). Refused — nothing touched —
+ * while tracked files have changes here (`diverged`: a conflict's merge writes every file), or when a file the remote
+ * changed has one (`conflicts`), an untracked file among them.
+ */
+export async function mergeWith(branchName: string, theirs: string): Promise<Pulled> {
+	const from = await resolveRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}` });
+	const { staged, unstaged } = await status();
+
+	if (staged.length > 0 || unstaged.some((change) => change.status !== "A")) {
+		return { "ref": branchName, "outcome": "diverged", "from": from, "to": theirs };
+	}
+
+	const conflicts = await changedHere(await changedBetween(from, theirs));
+
+	if (conflicts.length > 0) {
+		return { "ref": branchName, "outcome": "conflicts", "from": from, "to": theirs, "conflicts": conflicts };
+	}
+
+	// (merged by a ref of its own: isomorphic-git merges refs, and the fetched tip may be in none — a fetch moves
+	// origin's only when it names one)
+	const merging = "refs/merging";
+
+	await writeRef({ "fs": fs, "dir": DIR, "ref": merging, "value": theirs, "force": true });
+
+	try {
+		const merged = await merge({ "fs": fs, "dir": DIR, "ours": branchName, "theirs": merging, "abortOnConflict": false, "message": `Merge ${theirs.slice(0, 7)} into ${branchName}`, "author": await authorOf().catch(() => undefined) ?? AUTHOR });
+		const changed = await changedBetween(from, merged.oid);
+
+		await writeChanged(changed);
+
+		return { "ref": branchName, "outcome": "merged", "from": from, "to": merged.oid, "files": changed.map(({ path }) => path) };
+	} catch (error) {
+		if (!(error instanceof Errors.MergeConflictError)) {
+			throw error;
+		}
+
+		await fs.promises.writeFile(MERGE_HEAD, `${theirs}\n`);
+
+		return { "ref": branchName, "outcome": "merge conflicts", "from": from, "to": theirs, "conflicts": error.data.filepaths };
+	} finally {
+		await deleteRef({ "fs": fs, "dir": DIR, "ref": merging }).catch(() => undefined);
+	}
+}
+
+/** A merge waiting on its conflicts given up (`git merge --abort`): every file back as HEAD has it, the merge forgotten.
+ *  What was settled so far goes too. */
+export async function abortMerge(): Promise<void> {
+	const theirs = await mergingIn();
+
+	if (theirs === undefined) {
+		throw new Error("there's no merge to abort");
+	}
+
+	const head = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
+	const branchName = await currentBranch({ "fs": fs, "dir": DIR });
+
+	// (what only theirs has goes, which a checkout of HEAD leaves: the merge wrote it)
+	for (const { path } of (await changedBetween(theirs, head)).filter(({ oid }) => oid === undefined)) {
+		await fs.promises.unlink(`${DIR}/${path}`).catch(() => undefined);
+		await remove({ "fs": fs, "dir": DIR, "filepath": path });
+	}
+
+	await checkout({ "fs": fs, "dir": DIR, "ref": branchName || "HEAD", "force": true });
+	await fs.promises.unlink(MERGE_HEAD).catch(() => undefined);
 }
 
 /** Stage all changes, then commit: the new commit (`Committed`). */
