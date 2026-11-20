@@ -200,11 +200,13 @@ function seedFiles(files: WorkbenchFile[], readonlyPaths: Set<string>): Set<stri
 }
 
 /** Bring the persisted writes back over the seed (`localMounted`: silo's local/ has a store of its own), each file made
- *  by `create`. Returns how many were restored and tombstoned, the retired paths (to drop from persistence) and the ones
- *  moved into local/. */
-function restorePersisted(persisted: [string, Uint8Array | null][], localMounted: boolean, create: (path: string, contents: Uint8Array) => void): { "restored": number; "tombstoned": number; "retired": string[]; "moved": string[] } {
-	// (each folder made once: asking whether it exists is a lookup from the root, for each of a repository's files)
-	const made = new Set<string>();
+ *  by `create` and each folder by `mkdir`, given the folders there already (`folders`: the seed's, and the root). Returns
+ *  how many were restored and tombstoned, the retired paths (to drop from persistence) and the ones moved into local/. */
+function restorePersisted(persisted: [string, Uint8Array | null][], localMounted: boolean, folders: Set<string>, mkdir: (path: string) => void, create: (path: string, contents: Uint8Array) => void): { "restored": number; "tombstoned": number; "retired": string[]; "moved": string[] } {
+	// (each folder made once, and only those not there: asking whether one exists is a lookup from the root, and making
+	// it through zen-fs a lookup for each folder above it — 7,100 lookups for this repository's 507 folders, 551 made in
+	// the store, in Node 2026-11-20)
+	const made = new Set(folders);
 	let restored = 0;
 	let tombstoned = 0;
 	const retired: string[] = [];
@@ -226,12 +228,23 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 				fs.rmSync(path, { "recursive": true, "force": true }); // seeded, deleted since: it stays deleted
 				tombstoned += 1;
 			} catch { /* a file stands where its folder was: already gone */ }
-		} else {
-			const dir = path.slice(0, path.lastIndexOf("/"));
 
-			if (!made.has(dir)) {
+			// (a folder deleted is made again for a file restored under it)
+			for (const folder of made) {
+				if (folder === path || folder.startsWith(path + "/")) {
+					made.delete(folder);
+				}
+			}
+		} else {
+			const missing: string[] = [];
+
+			for (let dir = path.slice(0, path.lastIndexOf("/")); dir !== "" && !made.has(dir); dir = dir.slice(0, dir.lastIndexOf("/"))) {
+				missing.push(dir);
+			}
+
+			for (const dir of missing.reverse()) {
+				mkdir(dir);
 				made.add(dir);
-				ensureParent(path);
 			}
 
 			create(path, contents);
@@ -424,8 +437,35 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			store.writeSync(inStore, contents, 0);
 		};
 
+		// (a folder too: one lookup, its parent's, where zen-fs's mkdirSync looks up each folder above it)
+		let made = 0;
+		const mkdir = (path: string): void => {
+			made += 1;
+
+			try {
+				if (store === undefined) {
+					throw new Error("no store");
+				}
+
+				store.mkdirSync(path.slice(mountedAt.length), { "mode": 0o755, "uid": 0, "gid": 0 });
+			} catch {
+				if (!fs.existsSync(path)) {
+					fs.mkdirSync(path, { "recursive": true });
+				}
+			}
+		};
+
 		caller = "restore";
-		({ restored, tombstoned, retired, moved } = restorePersisted(persisted, localStore !== undefined, create));
+		// (the folders there: the seed's, every seeded path's parent)
+		const folders = new Set([...seeded].map((path) => path.slice(0, path.lastIndexOf("/"))));
+
+		folders.add("/workspace");
+
+		// (a span: what every boot of a loaded repository waits on)
+		const span = log.span("editor.workbench.workspace-fs.restore", { "count": persisted.length });
+
+		({ restored, tombstoned, retired, moved } = restorePersisted(persisted, localStore !== undefined, folders, mkdir, create));
+		span.end({ "restored": restored, "tombstoned": tombstoned, "folders": made });
 		caller = undefined;
 	}
 

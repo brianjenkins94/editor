@@ -24,8 +24,9 @@ How it's kept:
      (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — asked upstream (#329); the
      provider answering a path's `stat` from a cache its change path invalidates (16.7k → ~4.4k lookups in a cold load,
      99.9% of them tsserver's module resolution, 2026-11-02: ~2–5 s of a 54 s cold load, and every realm that writes
-     zen-fs directly — git, the workers, a run — would have to keep it true); the folders the restore makes through zen-fs (723 for
-     8,278 stats); then the file store's work in a worker. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
+     zen-fs directly — git, the workers, a run — would have to keep it true); then the file store's work in a worker. The
+     restore's span (`editor.workbench.workspace-fs.restore`, 2026-11-20): this repository's 3,065 files, 698 folders, in
+     0.71 s of a reload. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
      (write 2.8 → 3.7 s, stat 1.2 → 1.6 s for 2,258 files), patched or not: upstream's to hear of.
    - **Type gaps** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one run showed it after 4
      minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never told after
