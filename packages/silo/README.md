@@ -492,7 +492,8 @@ tells CI they passed. CI decides for itself whether to run them again. It's a de
   the window (a week), it failed or flaked lately in CI's ledger, or it can't run where vouches are made (a
   browser suite, say). Otherwise CI skips it, recorded as vouched by whom and when, so a vouched pass never reads as
   CI's.
-- **Audits.** CI runs a few vouched tests anyway, at random. One CI fails that a vouch said passed stops that person's
+- **Audits.** CI runs a few vouched tests anyway, at random, as many as a setting says, which may be none (decision
+  17). One CI fails that a vouch said passed stops that person's
   vouches counting for a while, and says so loudly: a local setup that disagrees with CI is a finding.
 - **What it doesn't stop.** A vouch forged on purpose: a key in a browser or a laptop isn't one CI can trust. The
   window, the lapse and the audits bound what a wrong one costs, and whose vouches count is a setting (decision 18).
@@ -1000,7 +1001,7 @@ From tests and purity (both above):
 8. **A selection's safety**, which needs the failure history first: judged once selection has run in CI a while. The
    history is readable now (lib `util/silo/outcomes`, from CI's own runs).
 9. ~~**A subcommand, or not.**~~ Decided 2026-10-24: neither — selection isn't the silo command line's; it's the
-   editor's (on a save) and CI's.
+   editor's (on a save) and CI's. Reopened by decision 20 (2026-11-20): CI's half is a subcommand.
 10. ~~**How much purity static analysis decides.**~~ Measured 2026-10-24 (*Purity*, above): 80% of functions get a
     definite verdict, 22% of them pure; the unknown 20% are mostly dynamic dispatch and external packages.
 
@@ -1018,17 +1019,19 @@ From *Tests by feature* (above), for the rewrite:
     can be (by the code their reach runs), and shown as attributed rather than declared.
 14. ~~**Resting.**~~ Decided 2026-10-29: a test rests after 20 green runs in a row; the full run is weekly. A test never
     retires on its own.
-15. **Tests that lean on each other**: made independent before resting works, or resting by test file for suites that
-    share a session. The editor's rebuilt suite answers it by how its tests are written: each sets up its own state.
-    Still open for a suite kept as it is.
+15. ~~**Tests that lean on each other.**~~ Decided 2026-11-20: a test that sets up its own state rests on its own; a
+    suite whose tests share a session rests as a whole file, so no repository has to rewrite its tests first. The
+    editor's rebuilt suite is written the first way.
 16. ~~**A vouch's window.**~~ Decided 2026-10-29: 7 days. CI runs a vouched test itself when it hasn't in a week.
-17. **The audit rate**: how many vouched tests CI runs anyway.
-18. **Whose vouches count**: by default only your own, or the people you list.
-19. **Different runtimes**: a vouch counts only for tests whose outcomes have matched on both runtimes before, or CI
-    runs on the one vouches are made on (the editor's case: tsval in CI too, through `silo run`'s host).
-20. **CI's entry point**: a silo subcommand any CI calls (reopening decision 9, which kept selection out of the command
-    line while it was only the editor's and its CI's), or a library call each project's CI script makes. And which
-    runner reports silo reads first.
+17. ~~**The audit rate.**~~ Decided 2026-11-20: a setting, and zero is allowed. Audits aren't where the effort goes:
+    knowing which code warrants which tests is, made better continually (reach, selection), so a vouched test that
+    still needs running is selected for what changed rather than sampled.
+18. ~~**Whose vouches count.**~~ Decided 2026-11-20: anyone who can push.
+19. ~~**Different runtimes.**~~ Decided 2026-11-20: a vouch counts on the other runtime only for a test whose outcomes
+    have matched on both before (the editor's case: tsval where vouches are made, Node in CI); CI isn't made to run
+    tsval for it.
+20. ~~**CI's entry point.**~~ Decided 2026-11-20: a silo subcommand any CI calls, which asks which tests a change needs
+    and takes the runner's report back (reopening decision 9). Open still: which runner reports it reads first.
 21. ~~**What a declared feature's ledger entry holds.**~~ Decided 2026-11-02: what the manifest held — `what` (what it's
     for), `docs`, `paths` (the code it owns), `ways` (its ways in) — and the `tests` it owns, beside the decision's
     `status`, `why` and `since`. The ledger becomes the source of truth: `silo check` errors on any drift between it and

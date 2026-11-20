@@ -28,6 +28,10 @@ How it's kept:
      restore's span (`editor.workbench.workspace-fs.restore`, 2026-11-20): this repository's 3,065 files, 698 folders, in
      0.71 s of a reload. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
      (write 2.8 → 3.7 s, stat 1.2 → 1.6 s for 2,258 files), patched or not: upstream's to hear of.
+   - **A merge in the editor** (decided 2026-11-20: a merge, not a rebase): `git_pull` says "diverged" when main moved
+     under a branch, and the terminal's git says "nothing in this git rewrites or combines history". isomorphic-git's
+     merge brings the two together, conflicts shown and resolved as VS Code shows them; the pull, the terminal's `git
+     merge` and Source Control's sync each do it, and `git_pull` with them.
    - **Type gaps** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one run showed it after 4
      minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never told after
      (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing that. eslint.config.js's
@@ -53,7 +57,8 @@ How it's kept:
      comments in 9 files): 53% dropped (JSDoc saying what a declaration's name and body do), 39% notes (whys, gotchas, a
      contract with another file, history), 6% notes citing a doc, 2% kept (a pragma, an `eslint-disable` with its
      reason); every file's header a note. The zero-knowledge baseline: the code alone 12 of 15, as it is 14.5 — every
-     point the comments carried a why. Open (*Decisions*): whose a note migrated from a comment is.
+     point the comments carried a why. A migrated note is the repository's, its comment's author kept on it (decided
+     2026-11-20).
    - **The standard**, from the pass's gaps.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
      (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
@@ -80,8 +85,8 @@ How it's kept:
    when that code changes; a test rests after 20 green runs, with a weekly full run; CI reruns a vouched test after 7
    days. Built so far is only what it stands on: tests run in the editor (`runs_tests`, the in-editor specs), the ledger
    declares each feature's tests, and runs record their reach. Not built: vouches, `touched` and `resting`, and CI
-   reading them. Open: decisions 15, 17–19 and 20. Done when a push's CI runs fewer tests because the rest are vouched
-   for or resting.
+   reading them, the `silo` subcommand CI calls (decision 20). Decided 2026-11-20: decisions 15, 17–20 (silo README).
+   Done when a push's CI runs fewer tests because the rest are vouched for or resting.
 
 ## Watching
 
@@ -222,8 +227,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
-  a weekly full run; CI reruns a vouched test after 7 days. Open: decision 15 (tests that lean on each other), 17–19
-  (the audit rate, whose vouches count, different runtimes), and 20 (CI's entry point).
+  a weekly full run; CI reruns a vouched test after 7 days. Decided 2026-11-20 (silo README, 15 and 17–20): resting by
+  test, by file for a suite that shares a session; the audit rate a setting that may be zero, the effort going into
+  knowing which code warrants which tests; anyone who can push vouches; a vouch crosses runtimes only for a test whose
+  outcomes have matched on both; CI calls a silo subcommand. Open: which runner reports silo reads first.
 - **The rewrite** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Decided 2026-11-02: in place, in this
   repository, worked in the editor; reduced to a minimal core, then features reintroduced one at a time with a
   purpose, no allowance for undeclared code; code no feature explicitly owns is an error (silo README, decision 22);
@@ -233,12 +240,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   from), production keeping the full editor by skipping only its deploy step; the core is step 2's candidates plus
   running tests; the ledger holds what the manifest did (`what`, `docs`, `paths`, `ways`, `tests`) and becomes the
   source of truth, `silo check` erroring on drift; ownership by file, runs, tests and traces giving continuous
-  coverage. Open: whose a note migrated from a comment is (the repository's, or its `git blame` author's).
-
-- **A merge in the editor** (found 2026-11-02): `git_pull` says "diverged" when main moved under a branch, and the
-  terminal's git says "nothing in this git rewrites or combines history". A merge (isomorphic-git has one) would settle
-  it, with conflicts shown as VS Code shows them; or a rebase; or neither, a branch's work kept as it is and pushed
-  for GitHub to merge. Yours to say which.
+  coverage. Decided 2026-11-20: a note migrated from a comment is the repository's, its `git blame` author kept on it.
 
 ## Parked
 

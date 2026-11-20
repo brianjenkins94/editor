@@ -732,10 +732,8 @@ score. No new silo subcommand.
   between it and the code; the manifest went once its entries had moved (packages/silo/README.md, decision 21).
 - **Ownership is checked by file** (decision 22): a feature's `paths`. Runs, tests and traces give continuous coverage —
   what each feature's code is seen doing — and show where a declaration and the code's use of it disagree.
-
-**Open:**
-- **Whose a migrated note is.** Notes are kept per author, and only a note's author rewrites it when its code moves. A
-  comment's note could be the repository's (an owner of its own), or its `git blame` author's.
+- **A migrated note is the repository's** (the user, 2026-11-20): shared, as the comment was, an owner of its own rather
+  than any one person's; who wrote the comment (its `git blame` author) is kept on the note as its history.
 
 ## Workspace tools (2026-10-10)
 
