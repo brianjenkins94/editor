@@ -96,6 +96,21 @@ function ensureParent(path: string): void {
 	}
 }
 
+/** `read`'s answer, or, for a path that isn't there (or a file where a folder is on its way), VS Code's not-found. */
+function orNotFound<T>(read: () => T): T {
+	try {
+		return read();
+	} catch (error) {
+		const { code } = error as { "code"?: string };
+
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			throw notFound();
+		}
+
+		throw error;
+	}
+}
+
 /** Map a zen-fs stat to a vscode FileType. */
 function fileType(stat: { "isDirectory": () => boolean; "isSymbolicLink": () => boolean }): FileType {
 	if (stat.isSymbolicLink()) {
@@ -686,37 +701,29 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		"onDidChangeFile": onDidChangeFile,
 		"watch": () => ({ "dispose": () => undefined }),
 
+		// (each a missing path's not-found, from the call itself: asked first whether it exists, a path found was looked up
+		// twice, each a walk from the store's root — NEXT.md item 1, load cost)
 		"stat": (resource): Promise<IStat> => settled(() => {
-			if (!fs.existsSync(resource.path)) {
-				throw notFound(); // fall through to a lower overlay (the CDN node_modules provider)
-			}
-
-			const stat = fs.statSync(resource.path);
+			// (not found: a lower overlay's, the CDN node_modules provider's, to answer)
+			const stat = orNotFound(() => fs.statSync(resource.path));
 			const result: IStat = { "type": fileType(stat), "ctime": stat.ctimeMs, "mtime": stat.mtimeMs, "size": stat.size };
 
 			return readonlyPaths.has(resource.path) ? { ...result, "permissions": FILE_PERMISSION_READONLY } : result;
 		}),
 
 		"readFile": (resource): Promise<Uint8Array> => settled(() => {
-			if (!fs.existsSync(resource.path)) {
-				throw notFound();
-			}
+			const data = orNotFound(() => fs.readFileSync(resource.path));
 
 			handle.reads += 1;
-			const data = fs.readFileSync(resource.path);
 
 			return typeof data === "string" ? new TextEncoder().encode(data) : data;
 		}),
 
 		"readdir": (resource): Promise<[string, FileType][]> => settled(() => {
-			if (!fs.existsSync(resource.path)) {
-				throw notFound();
-			}
-
 			// Each entry's type as zen-fs's listing found it (it stats every entry to list it), rather than a walk from the
 			// root again for each — a quarter of a load's main thread, VS Code listing folders. A link is followed, as `stat`
 			// follows it (a `file:` sibling's folder reads as a folder).
-			return fs.readdirSync(resource.path, { "withFileTypes": true }).map((entry): [string, FileType] => [entry.name, fileType(entry.isSymbolicLink() ? fs.statSync(resource.path.replace(/\/$/u, "") + "/" + entry.name) : entry)]);
+			return orNotFound(() => fs.readdirSync(resource.path, { "withFileTypes": true })).map((entry): [string, FileType] => [entry.name, fileType(entry.isSymbolicLink() ? fs.statSync(resource.path.replace(/\/$/u, "") + "/" + entry.name) : entry)]);
 		}),
 
 		"writeFile": (resource, content): Promise<void> => settled(() => {

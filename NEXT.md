@@ -22,7 +22,8 @@ How it's kept:
    - **Load cost** (a first load of this repository, last measured 2026-11-11: the workspace buffer at 32 of 128 MB, the
      first write-back 1.6 s, the restore at boot 0.43 s). What's left, by gain: each zen-fs lookup walks from the root
      (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — asked upstream (#329); the
-     provider answering a path's `stat` from a cache its change path invalidates (16.7k → ~4.4k lookups in a cold load,
+     provider's `stat`, `readFile` and `readdir` ask once since 2026-11-20 (a path found 3 lookups → 1: zen-fs's `existsSync`
+     is two), and a cache its change path invalidates is next (16.7k → ~4.4k lookups in a cold load,
      99.9% of them tsserver's module resolution, 2026-11-02: ~2–5 s of a 54 s cold load, and every realm that writes
      zen-fs directly — git, the workers, a run — would have to keep it true); then the file store's work in a worker. The
      restore's span (`editor.workbench.workspace-fs.restore`, 2026-11-20): this repository's 3,065 files, 698 folders, in
