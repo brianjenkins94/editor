@@ -197,6 +197,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
   took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
 
+- **log.spec's Output filter not applied, with the CPU four times slower** (2026-11-20, `ARCH_CPU_THROTTLE=4`, the third
+  log.spec in one session): "notes.look" typed in the Output's filter box, and the channel's lines still unfiltered in
+  30 s. Not seen on CI or at speed here. Problems' box applies a change 300 ms on, and only while it's showing; whether
+  the Output's does the same is the place to look.
+
 - **Three CI misses in shared editors**, before every spec had an editor of its own again (2026-11-20): log.spec's
   Output didn't show (1bbba327's `specs-2`, after live-runs.spec), notes.spec's Problems row didn't (a3c3bea3's
   `specs-1`, after messages.spec: the status bar counted it), and way-in-reach.spec's below. None reproduced here, in CI's

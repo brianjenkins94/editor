@@ -15,6 +15,7 @@ import type { ArchReport } from "@brianjenkins94/observability";
 import { collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import * as vscode from "vscode";
 import { bridgeHub } from "./hub";
+import { showUntilSeen } from "./output-shown";
 
 const MESSAGES_MINUTES = 10;
 
@@ -47,7 +48,7 @@ export function registerMessageChannel(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand("editor.messages.show", () => {
 			// (a log channel: the Output view's filter works on those)
 			channel ??= vscode.window.createOutputChannel("Editor Messages", { "log": true });
-			channel.show(true);
+			showUntilSeen(channel);
 
 			if (collecting === undefined) {
 				const to = channel;

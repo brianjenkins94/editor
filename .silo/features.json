@@ -1819,7 +1819,8 @@
       "packages/debug-mcp/src/tools/logs.ts",
       "packages/debug-mcp/src/tools/spans.ts",
       "packages/observability/src/log-subject.ts",
-      "packages/editor/extensions/bridge/log-channel.ts"
+      "packages/editor/extensions/bridge/log-channel.ts",
+      "packages/editor/extensions/bridge/output-shown.ts"
     ],
     "tests": [
       "packages/editor/test/in-editor/log.spec.mjs"

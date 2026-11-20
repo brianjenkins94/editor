@@ -12,6 +12,7 @@ import { installHubCollector } from "@brianjenkins94/observability";
 import { renderRecord } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 import { bridgeHub } from "./hub";
+import { showUntilSeen } from "./output-shown";
 
 const LOG_MINUTES = 10;
 
@@ -36,7 +37,7 @@ export function registerLogChannel(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand("editor.log.show", () => {
 			channel ??= vscode.window.createOutputChannel("Editor Log", { "log": true });
-			channel.show(true);
+			showUntilSeen(channel);
 
 			if (collecting === undefined) {
 				const to = channel;
