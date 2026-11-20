@@ -319,6 +319,27 @@ test("observed: each test against what its file declares, from a folder of its s
 	assert.match(spawnSync("npx", ["tsx", CLI, "observed", reach, "--repo", fresh], { "encoding": "utf8" }).stderr, /nowhere\.json: expected one test file named nowhere, found 0/u);
 });
 
+test("observed: a suite that runs other test files, each its test named by it, has each test its file's", async () => {
+	const reach = await fs.mkdtemp(path.join(fs.tmpdir(), "silo-reach-"));
+	const fresh = await repository({ "2026-10-01": {
+		".silo/features.json": JSON.stringify({ "Notes": { "status": "active", "why": "w", "since": "2026-10-01", "what": "N.", "paths": ["notes.ts"], "tests": ["test/specs/notes.spec.mjs"] }, "Runner": { "status": "active", "why": "w", "since": "2026-10-01", "what": "R.", "paths": ["runner.ts"], "tests": ["test/specs.mjs"] } }),
+		"notes.ts": "",
+		"runner.ts": "",
+		"test/specs.mjs": "",
+		"test/specs/notes.spec.mjs": ""
+	} });
+	const statements = (from: number): number[][] => Array.from({ "length": 25 }, (_, index) => [from + index]);
+
+	fs.writeFileSync(path.join(reach, "specs.json"), JSON.stringify({ "notes.spec.mjs": { "notes.ts": statements(0) }, "unknown.spec.mjs": { "runner.ts": statements(100) } }));
+
+	const told = spawnSync("npx", ["tsx", CLI, "observed", reach, "--repo", fresh], { "encoding": "utf8" });
+
+	assert.equal(told.status, 0, told.stderr);
+	assert.match(told.stdout, /\| 100% \| 25 \| notes\.spec\.mjs: notes\.spec\.mjs \| Notes 25 \|/u);
+	// (a test named by no file there stays the suite's)
+	assert.match(told.stdout, /\| 100% \| 25 \| specs\.mjs: unknown\.spec\.mjs \| Runner 25 \|/u);
+});
+
 test("observed: from the editor's reach, each test file's at its own path, as its runs keep them (.silo/local/reach/)", async () => {
 	const reach = await fs.mkdtemp(path.join(fs.tmpdir(), "silo-reach-"));
 	const fresh = await repository({ "2026-10-01": {

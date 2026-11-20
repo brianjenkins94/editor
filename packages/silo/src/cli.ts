@@ -685,7 +685,15 @@ export const app = subcommands({
 						throw new Error(`${file}: expected one test file named ${suite}, found ${String(candidates.length)}`);
 					}
 
-					return parseReach(candidates[0]!, fs.readFileSync(path.join(folder, file)));
+					// (a suite that runs other test files, each its test, named by it — the editor's test/in-editor.mjs and its
+					// specs: each test is its file's, the one the ledger names, under the suite's folder)
+					const under = path.posix.dirname(candidates[0]!) + "/";
+
+					return parseReach(candidates[0]!, fs.readFileSync(path.join(folder, file))).map((test) => {
+						const runs = tracked.filter((each) => each.startsWith(under) && each.endsWith(`/${test.name}`));
+
+						return runs.length === 1 ? { ...test, "file": runs[0]! } : test;
+					});
 				});
 				const observed = observedAgainstDeclared(ledgerOf(repo), tests);
 
