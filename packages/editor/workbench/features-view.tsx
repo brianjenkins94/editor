@@ -28,6 +28,7 @@ import { isTestFile } from "./terminal/commands/node/node";
 import "theme/components/badge";
 import "theme/components/button";
 import "theme/components/checkbox";
+import "theme/components/input";
 import "theme/components/relative-time";
 import "theme/components/spinner";
 
@@ -172,6 +173,9 @@ function Unchecked({ label, title, paths }: { "label": string; "title": string; 
 function Table({ model, running, onRun, onOpen }: { "model": Model; "running": Set<string>; "onRun": (files: string[]) => void; "onOpen": (file: string) => void }): JSX.Element {
 	const [all, setAll] = useState(false);
 	const [open, setOpen] = useState<Set<string>>(new Set());
+	// (a feature by its name or what it's for, or a test file by its path: a feature found by itself shows all its files,
+	// one found by a file only those that match)
+	const [filter, setFilter] = useState("");
 	const runsOf = Map.groupBy(model.history, (run) => run.file);
 	const writers = new Map<string, Set<string>>();
 
@@ -188,11 +192,19 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 
 		return kind === "unit" || kind === "UI spec";
 	};
-	const shown = model.features.filter(([name]) => all || (model.files.get(name) ?? []).length > 0);
+	const wanted = filter.trim().toLowerCase();
+	const matches = (text: string | undefined): boolean => wanted === "" || (text ?? "").toLowerCase().includes(wanted);
+	const filesOf = (name: string, entry: LedgerEntry): string[] => {
+		const files = model.files.get(name) ?? [];
+
+		return matches(name) || matches(entry.what) ? files : files.filter((file) => matches(file));
+	};
+	const shown = model.features.filter(([name, entry]) => (all || (model.files.get(name) ?? []).length > 0) && (wanted === "" || matches(name) || matches(entry.what) || filesOf(name, entry).length > 0));
 
 	return (
 		<div class="fv">
 			<div class="wa-cluster wa-gap-s">
+				<wa-input size="small" placeholder="Filter features and tests" aria-label="Filter features and tests" value={filter} onInput={(event: Event) => { setFilter((event.currentTarget as HTMLInputElement).value); }} />
 				<wa-checkbox size="small" checked={all} onChange={() => { setAll(!all); }}>Show features with no tests</wa-checkbox>
 				<span class="wa-caption-s">{`${String(shown.length)} of ${String(model.features.length)} features`}</span>
 				{model.touched.size === 0 ? null : <wa-button size="small" variant="brand" aria-label="Run touched" onClick={() => { onRun([...model.touched]); }}>{`Run the ${String(model.touched.size)} touched`}</wa-button>}
@@ -206,7 +218,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 				</thead>
 				<tbody>
 					{shown.flatMap(([name, entry]) => {
-						const files = model.files.get(name) ?? [];
+						const files = filesOf(name, entry);
 						const failing = files.filter((file) => { const last = runsOf.get(file)?.at(-1); return last !== undefined && (last.exitCode !== 0 || last.tests.some((test) => test.outcome !== "pass")); }).length;
 						const toRun = files.filter(runnable);
 

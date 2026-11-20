@@ -71,8 +71,8 @@ How it's kept:
      unit tests across the repository (measured 2026-11-04, 124 files), what holds the rest in the debugger: the Worker
      runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
      (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
-   - **What reintroduced features left for later**: Features and tests without CI's outcomes, coverage, per-test
-     effects or a filter (`touched` and `resting` are item 3's); *Capabilities confirmed by runs* without its static half
+   - **What reintroduced features left for later**: Features and tests without CI's outcomes, coverage or per-test
+     effects (its filter came 2026-11-20) (`touched` and `resting` are item 3's); *Capabilities confirmed by runs* without its static half
      (whether the code could still make the call: a sweep of the project), the baseline's join, or capabilities by
      feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin; *Tests at once*' flag from
      what a test touches (the gate's effects) rather than last runs.
@@ -192,8 +192,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   cloning too. A tab that arrives after the load ends but before its files are written back to IndexedDB still finds
   no repository in its copy, and clones: if that's seen, the load wants a signal that its write-back is done.
 
-- **live-runs.spec's "F5 just after a save" without its Debug Console output** (once, 2026-11-19, a full run here that
-  took 237 s against ~175, the spec 146 s against 32 alone; passing alone and the next full run).
+- **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
+  in 237 s against ~175, and 2026-11-20 in 282 s; "a rule gives it a value" without its value, 2026-11-20 in 253 s).
+  Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run; not seen on CI.
 
 - **log.spec's Output filter not applied, with the CPU four times slower** (2026-11-20, `ARCH_CPU_THROTTLE=4`, the third
   log.spec in one session): "notes.look" typed in the Output's filter box, and the channel's lines still unfiltered in

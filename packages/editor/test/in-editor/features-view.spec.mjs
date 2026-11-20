@@ -163,3 +163,34 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(workbench.locator(".repl .output", { "hasText": "said 2" }).first()).toBeVisible({ "timeout": 30_000 });
 });
+
+test("the filter finds a feature by its name or what it's for, or a test file by its path", async ({ page }) => {
+	const workbench = await openEditor(page, files);
+	const feature = (name) => workbench.locator(".fv-table tbody tr.fv-feature", { "hasText": name });
+	const row = (text) => workbench.locator(".fv-table tbody tr", { "hasText": text });
+	const filter = workbench.locator("wa-input[aria-label='Filter features and tests'] input");
+
+	await runCommand(workbench, "Features and Tests: Show");
+	await expect(row("add.test.mjs")).toHaveCount(1, { "timeout": 30_000 });
+
+	// A test file by its path: its feature, and only that file.
+	await filter.fill("times");
+	await expect(feature("Multiplying")).toHaveCount(1);
+	await expect(workbench.locator(".fv-table tbody tr.fv-feature")).toHaveCount(1);
+
+	// A feature by what it's for: all its files.
+	await filter.fill("two tests on one file");
+	await expect(feature("Writing")).toHaveCount(1);
+	await expect(row("one.test.mjs")).toHaveCount(1);
+	await expect(row("two.test.mjs")).toHaveCount(1);
+
+	// One file of a feature's two: that one.
+	await filter.fill("two.test");
+	await expect(row("two.test.mjs")).toHaveCount(1);
+	await expect(row("one.test.mjs")).toHaveCount(0);
+
+	// Nothing: every feature with tests again.
+	await filter.fill("");
+	await expect(feature("Adding")).toHaveCount(2);
+	await expect(feature("Nothing yet")).toHaveCount(0);
+});
