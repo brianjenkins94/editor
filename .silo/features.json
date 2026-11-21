@@ -507,6 +507,12 @@
       "packages/tsval/scripts",
       "packages/tsval/test/differential",
       "packages/tsval/vendor"
+    ],
+    "tests": [
+      "packages/tsval/test/differential/differential.test.ts",
+      "packages/tsval/test/differential/test262.test.ts",
+      "packages/tsval/test/differential/ts-cases.test.ts",
+      "packages/tsval/test/differential/ts-evaluator.test.ts"
     ]
   },
   "Connected tabs and hub tree health": {

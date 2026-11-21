@@ -60,7 +60,7 @@ interface Model {
 	/** How much slower than typical a passing test may run before it's said to be (setting `run.tests.slowerBy`). */
 	"slowerBy": number;
 	/** The titles each test file declares, to join CI's tests to their files by. */
-	"titles": Map<string, Set<string>>;
+	"titles": Map<string, Set<string | RegExp>>;
 	/** How each file's tests have come out in CI (`ci.outcomes`), how many runs that's over, or why it couldn't be read. */
 	"ci": { "byFile": Map<string, TestStanding[]>; "runs": number; "refused"?: string };
 	/** How much of each feature's own code the tests here ran: its statements, how many ran, and its code files no test's

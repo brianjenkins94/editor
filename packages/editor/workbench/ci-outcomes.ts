@@ -149,7 +149,8 @@ export async function ciRuns(ask: Ask, repository: string, branch: string, kept:
 const PNPM_LINE = /^(\d{4}-\d\d-\d\dT[\d:.]+Z )?((?:\.|[\w@.-]*\/[\w@./-]*) [\w:.-]+): (.*)$/u;
 
 /** The tests a job's log reported (node:test's spec reporter, lib's `nodeTestOutcomes`): its colours off, and a package's
- *  lines read apart from another's, pnpm printing them as they come, each after its package's name. */
+ *  lines read apart from another's, pnpm printing them as they come, each after its package's name. A line with no time
+ *  isn't a test's (`reported`). */
 export function testsInLog(log: string): TestOutcome[] {
 	const byPackage = new Map<string, string[]>();
 
@@ -167,12 +168,17 @@ export function testsInLog(log: string): TestOutcome[] {
 
 	return [
 		...byPackage.values()
-	].flatMap((lines) => nodeTestOutcomes(lines.join("\n")));
+	].flatMap((lines) => nodeTestOutcomes(lines.join("\n"))).filter(reported);
 }
 
+/** Whether an outcome is a test's: the reporter gives each its time, as ESLint's `✖ 50394 problems (1 error, …)`, read as a
+ *  failure too, hasn't. */
+const reported = (test: TestOutcome): boolean => test.ms !== undefined;
+
 /** The test file a standing is of: one whose name is its first title (a suite that names each test by its file, as
- *  test/in-editor.mjs does its specs), else the one file that declares a test of that title. */
-export function fileOf(standing: Pick<TestStanding, "id">, titles: Map<string, Set<string>>): string | undefined {
+ *  test/in-editor.mjs does its specs), else the one file that declares a test of that title, else the one whose titles
+ *  made as it runs (`titlesOf`'s patterns) it fits. */
+export function fileOf(standing: Pick<TestStanding, "id">, titles: Map<string, Set<string | RegExp>>): string | undefined {
 	const first = standing.id.split(" › ")[1];
 
 	if (first === undefined) {
@@ -189,16 +195,77 @@ export function fileOf(standing: Pick<TestStanding, "id">, titles: Map<string, S
 
 	const declaring = [...titles].filter(([, declared]) => declared.has(first));
 
-	return declaring.length === 1
-		? declaring[0][0]
+	if (declaring.length > 0) {
+		return declaring.length === 1
+			? declaring[0][0]
+			: undefined;
+	}
+
+	const fitting = [...titles].filter(([, declared]) => [...declared].some((title) => title instanceof RegExp && title.test(first)));
+
+	return fitting.length === 1
+		? fitting[0][0]
 		: undefined;
 }
 
-/** The titles a test file declares, as literals (`test("…"`, `it(`, `describe(`, `suite(`), as a reporter prints them. */
-export function titlesOf(text: string): Set<string> {
-	return new Set([
-		...text.matchAll(/\b(?:test|it|describe|suite)(?:\.(?:only|skip|todo|serial))?\(\s*(["'`])((?:(?!\1)[^\\]|\\.)*)\1/gu)
-	].map((match) => match[2].replaceAll(/\\(.)/gu, "$1")));
+/** A quoted literal's text, its escapes undone. */
+const unescaped = (text: string): string => text.replaceAll(/\\(.)/gu, "$1");
+
+/** How much of a pattern's title must be its own words, not what's made as it runs, for it to say which file it's of. */
+const WORDS = 4;
+
+/**
+ * The titles a test file declares (`test("…"`, `it(`, `describe(`, `suite(`), as a reporter prints them: a literal as it
+ * is; one made as it runs — a template (`test262 ${testCase.id}`), or a constant holding one (`test(title, …)`, `const
+ * title = `…``) — as a pattern its words must match, what's put in them anything. A pattern of fewer than WORDS
+ * characters of its own isn't one: it would fit any title.
+ */
+export function titlesOf(text: string): Set<string | RegExp> {
+	const quoted = String.raw`(["'\u0060])((?:(?!\1)[^\\]|\\.)*)\1`;
+	// (what a title's `${name}` or a bare `name` reads: a constant of the file's holding a string or a template)
+	const constants = new Map([
+		...text.matchAll(new RegExp(String.raw`\b(?:const|let)\s+([\w$]+)\s*=\s*${quoted.replaceAll("\\1", "\\2")}`, "gu"))
+	].map((match) => [match[1], match[3]]));
+	const patternOf = (template: string, depth = 0): string => template.split(/(\$\{[^}]*\})/u).map((part) => {
+		const name = /^\$\{\s*([\w$]+)\s*\}$/u.exec(part)?.[1];
+
+		if (name !== undefined && constants.has(name) && depth < 2) {
+			return patternOf(constants.get(name) ?? "", depth + 1);
+		}
+
+		return part.startsWith("${")
+			? "\u0000"
+			: unescaped(part).replaceAll(/[$()*+.?[\\\]^{|}]/gu, "\\$&");
+	}).join("");
+	const titles = new Set<string | RegExp>();
+	const call = String.raw`\b(?:test|it|describe|suite)(?:\.(?:only|skip|todo|serial))?\(\s*(?:${quoted}|([\w$]+)\s*,)`;
+
+	for (const match of text.matchAll(new RegExp(call, "gu"))) {
+		// (a quoted literal is what it says: only a template puts anything in)
+		if (match[1] === "\"" || match[1] === "'") {
+			titles.add(unescaped(match[2]));
+
+			continue;
+		}
+
+		const template = match[3] === undefined
+			? match[2]
+			: constants.get(match[3]);
+
+		if (template === undefined) {
+			continue;
+		}
+
+		const pattern = patternOf(template);
+
+		if (!pattern.includes("\u0000")) {
+			titles.add(unescaped(template));
+		} else if (pattern.replaceAll("\u0000", "").replaceAll(/\\(.)/gu, "$1").trim().length >= WORDS) {
+			titles.add(new RegExp(`^${pattern.replaceAll("\u0000", ".*")}$`, "su"));
+		}
+	}
+
+	return titles;
 }
 
 export function installCiOutcomes(vscode: typeof vscodeApi, hub: Hub, log: Observed["log"]): void {
@@ -222,8 +289,9 @@ export function installCiOutcomes(vscode: typeof vscodeApi, hub: Hub, log: Obser
 		return log.span("editor.workbench.ci-outcomes.read", { "caller": "ci.outcomes", "op": "standings" }, async (span) => {
 			// (what an older reading of the logs kept is read again: `reader` says which)
 			const file = await Promise.resolve(vscode.workspace.fs.readFile(keptUri)).then((bytes) => JSON.parse(new TextDecoder().decode(bytes)) as { "reader"?: number; "jobs"?: Kept }, () => ({}));
+			// (what's kept from before `reported` has ESLint's lines among it)
 			const kept = file.reader === READER
-				? file.jobs ?? {}
+				? Object.fromEntries(Object.entries(file.jobs ?? {}).map(([id, tests]) => [id, tests.filter(reported)]))
 				: {};
 			const before = Object.keys(kept).length;
 			const read = await ciRuns(ask, repository, on, kept);

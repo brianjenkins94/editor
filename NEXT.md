@@ -74,9 +74,7 @@ How it's kept:
      unit tests across the repository (measured 2026-11-04, 124 files), what holds the rest in the debugger: the Worker
      runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
      (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
-   - **What reintroduced features left for later**: Features and tests' CI column joins 963 of this repository's 2,694
-     CI tests to a file the ledger names (workbench/ci-outcomes.ts), the rest's titles worked out as they run or shared
-     by two files (`touched` and `resting` are item 3's); *Capabilities confirmed by runs* without its static half
+   - **What reintroduced features left for later**: *Capabilities confirmed by runs* without its static half
      (whether the code could still make the call: a sweep of the project), the baseline's join, or capabilities by
      feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin.
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.

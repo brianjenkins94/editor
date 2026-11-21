@@ -340,3 +340,42 @@ test("a log of pnpm running each package's tests: each package's lines read apar
 		["subtracts", "fail"]
 	]);
 });
+
+/* eslint-disable no-template-curly-in-string -- a test file's source, its templates as it has them */
+test("a title made as the test runs: a template's or a constant's words, anything between, joins the one file it fits", () => {
+	const titles = new Map([
+		[
+			"packages/tsval/test/test262.test.ts",
+			titlesOf("for (const testCase of cases) {\n\ttest(`test262 ${testCase.id}`, async () => {});\n}")
+		],
+		[
+			"packages/tsval/test/evaluator.test.ts",
+			titlesOf("const title = `evaluator ${program.id}: ${program.name}`;\ntest(title, () => {});\ntest(`${title} [out of scope: ${why}]`, () => {});")
+		],
+		[
+			"packages/theme/test/budget.mjs",
+			// (too few words of its own to say which file it's of: it would fit any title)
+			titlesOf("test(`${name}: ${total}`, () => {});\ntest(\"a literal ${not} a template\", () => {});")
+		]
+	]);
+
+	assert.deepEqual([...titles.get("packages/theme/test/budget.mjs")], ["a literal ${not} a template"]);
+	assert.equal(fileOf({ "id": "test › test262 expressions/grouping/S11.1.6_A3_T2.js" }, titles), "packages/tsval/test/test262.test.ts");
+	assert.equal(fileOf({ "id": "test › evaluator 12: closures" }, titles), "packages/tsval/test/evaluator.test.ts");
+	assert.equal(fileOf({ "id": "test › evaluator 13: eval [out of scope: eval]" }, titles), "packages/tsval/test/evaluator.test.ts");
+	assert.equal(fileOf({ "id": "test › a literal ${not} a template" }, titles), "packages/theme/test/budget.mjs");
+	assert.equal(fileOf({ "id": "test › stitchesDeclarations: 582" }, titles), undefined);
+	// (a title a file declares as it is wins over one another file's pattern fits)
+	titles.set("packages/editor/test/other.mjs", titlesOf("test(\"test262 sample is present\", () => {});"));
+	assert.equal(fileOf({ "id": "test › test262 sample is present" }, titles), "packages/editor/test/other.mjs");
+});
+/* eslint-enable no-template-curly-in-string */
+
+test("a line with no time isn't a test's: ESLint's summary, read as a failure, is left out", () => {
+	const log = [
+		line("✔", "adds"),
+		"2026-11-21T13:25:10.0000000Z \u001B[31m✖ 50394 problems (1 error, 50393 warnings)\u001B[39m"
+	].join("\n");
+
+	assert.deepEqual(testsInLog(log).map((test) => test.titles.join(" › ")), ["adds"]);
+});
