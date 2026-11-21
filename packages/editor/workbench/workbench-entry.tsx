@@ -49,6 +49,7 @@ import { installBablr } from "./bablr";
 import { wireWorkbenchHub } from "./bridge-link";
 import { installCapabilityConfirm } from "./capability-confirm";
 import { installCheckpoints } from "./checkpoints";
+import { installCiOutcomes } from "./ci-outcomes";
 import { installCiStatus } from "./ci-status";
 import { installCodeProblems } from "./code-problems";
 import { installCodeReach } from "./code-reach";
@@ -534,6 +535,8 @@ function maybeBoot(): void {
 				installCodeReach(api as typeof import("vscode"), workbenchHub);
 				// Tests for agents: which a change reaches, by their traces, and their results as data (test-runs.ts).
 				installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner);
+				// How each test has come out in CI, for the table (ci-outcomes.ts).
+				installCiOutcomes(api as typeof import("vscode"), workbenchHub, paneLog);
 				// Features and their tests, a table (features-view.tsx).
 				installFeaturesView(api as typeof import("vscode"), workbenchHub, paneLog);
 				// An allow rule no test run uses, said on the rule (capability-confirm.ts).

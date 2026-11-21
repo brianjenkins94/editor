@@ -4,15 +4,18 @@
  * ledger, with its test files under it, each opening to its tests. A file's row says what kind of test it is, whether it can't
  * run beside the others and why, the effects its last run had, how much code it reaches and how much of that only it does, when
  * it last passed and failed, how long it typically takes (and which of its tests last ran slower than they typically do, by more
- * than `run.tests.slowerBy`), whether code it ran has changed since (the lines it ran: test-runs.ts `selectionOf`), and a
- * button that runs it; and above it, what's changed since the last commit that no test here checks. Tests
- * are meant to run at once, so only one that can't says anything in that column.
+ * than `run.tests.slowerBy`), whether code it ran has changed since (the lines it ran: test-runs.ts `selectionOf`), how it
+ * has come out in CI (its tests' last verdicts, how many runs in a row, which flaked), and a button that runs it; and above
+ * it, what's changed since the last commit that no test here checks. Tests are meant to run at once, so only one that
+ * can't says anything in that column.
  *
  * What it says comes from the ledger and the runs kept here (test-runs.ts, `tests.history`); a file not run here says so.
+ * CI's column is GitHub's runs of the branch (ci-outcomes.ts, `ci.outcomes`), read as the view opens.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { LedgerEntry } from "@brianjenkins94/util/silo/ledger";
+import type { TestStanding } from "@brianjenkins94/util/silo/outcomes";
 import type { JSX } from "preact";
 import type * as vscodeApi from "vscode";
 import type { Kind, RunRecord, Slower, Why } from "./test-runs";
@@ -23,6 +26,7 @@ import { parseLedger } from "@brianjenkins94/util/silo/ledger";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { featuresViewStyles } from "theme/styles/features-view";
+import { fileOf, titlesOf } from "./ci-outcomes";
 import { kindOf, slowerOf } from "./test-runs";
 import { isTestFile } from "./terminal/commands/node/node";
 import "theme/components/badge";
@@ -53,6 +57,10 @@ interface Model {
 	"unchecked": Record<"not run" | "lines not run" | "config", string[]>;
 	/** How much slower than typical a passing test may run before it's said to be (setting `run.tests.slowerBy`). */
 	"slowerBy": number;
+	/** The titles each test file declares, to join CI's tests to their files by. */
+	"titles": Map<string, Set<string>>;
+	/** How each file's tests have come out in CI (`ci.outcomes`), how many runs that's over, or why it couldn't be read. */
+	"ci": { "byFile": Map<string, TestStanding[]>; "runs": number; "refused"?: string };
 }
 
 const KIND_TITLE: Record<Kind, string> = {
@@ -152,6 +160,31 @@ function SlowerBadge({ slower }: { "slower": Slower }): JSX.Element {
 	return <wa-badge variant="warning" appearance="outlined" title={`Its last run took ${String(slower.by)}% more ${slower.measure === "statements" ? "statements" : "time"} than its typical ${typical}.`}>{`${String(slower.by)}% slower`}</wa-badge>;
 }
 
+/** How a test file's tests have come out in CI: any failing, else how many runs in a row they've passed; and which flaked.
+ *  Each test's standing in its title. */
+function Ci({ standings }: { "standings": TestStanding[] | undefined }): JSX.Element | null {
+	if (standings === undefined || standings.length === 0) {
+		return null;
+	}
+
+	const failing = standings.filter((standing) => standing.last.verdict === "fail").length;
+	const flaked = standings.filter((standing) => standing.flakes > 0).length;
+	const tried = standings.filter((standing) => standing.last.verdict !== "skip");
+	const green = tried.length === 0 ? 0 : Math.min(...tried.map((standing) => standing.streak.runs));
+	const title = standings.map((standing) => {
+		const failed = standing.lastFailed === undefined ? "" : `, last ${standing.lastFailed.verdict === "fail" ? "failed" : "flaked"} ${standing.lastFailed.at.slice(0, 10)} (${standing.lastFailed.commit.slice(0, 7)})`;
+
+		return `${standing.id}: ${standing.last.verdict}, ${String(standing.streak.runs)} of ${String(standing.runs)} runs in a row${standing.flakes > 0 ? `, flaked in ${String(standing.flakes)}` : ""}${failed}`;
+	}).join("\n");
+
+	return (
+		<span class="wa-cluster wa-gap-3xs" title={title}>
+			{failing > 0 ? <wa-badge variant="danger">{`${String(failing)} failing`}</wa-badge> : tried.length === 0 ? <span>skipped</span> : <span>{`${String(green)} ${green === 1 ? "run" : "runs"} green`}</span>}
+			{flaked === 0 ? null : <wa-badge variant="warning" appearance="outlined">{`${String(flaked)} flaked`}</wa-badge>}
+		</span>
+	);
+}
+
 function When({ run }: { "run": RunRecord | undefined }): JSX.Element | null {
 	return run === undefined ? null : <wa-relative-time date={run.at} title={run.at} />;
 }
@@ -212,9 +245,10 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 			<Unchecked label="No test here runs" title="Code changed since the last commit that no test's last run here ran: nothing here checks it." paths={model.unchecked["not run"]} />
 			<Unchecked label="No test here ran the lines changed in" title="Tests here run these files, but none ran the lines changed since the last commit." paths={model.unchecked["lines not run"]} />
 			<Unchecked label="Changed, under every test" title="What every test runs under (its packages, its compiler's settings, what its program may do): any test may come out differently." paths={model.unchecked.config} />
+			{model.ci.refused === undefined ? null : <div class="wa-caption-s">{`CI's outcomes: ${model.ci.refused}`}</div>}
 			<table class="fv-table">
 				<thead>
-					<tr><th>Test</th><th>Type</th><th>Can't run in parallel</th><th>Effects</th><th>Reach</th><th>Last passed</th><th>Last failed</th><th>Typical</th><th /></tr>
+					<tr><th>Test</th><th>Type</th><th>Can't run in parallel</th><th>Effects</th><th>Reach</th><th>Last passed</th><th>Last failed</th><th>Typical</th><th title={`How its tests have come out in CI, over the branch's last ${String(model.ci.runs)} runs that ran tests.`}>CI</th><th /></tr>
 				</thead>
 				<tbody>
 					{shown.flatMap(([name, entry]) => {
@@ -232,6 +266,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										{failing === 0 ? null : <wa-badge variant="danger">{`${String(failing)} failing`}</wa-badge>}
 									</span>
 								</td>
+								<td />
 								<td />
 								<td>{toRun.length === 0 ? null : <wa-button size="small" appearance="plain" aria-label={`Run ${name}`} onClick={() => { onRun(toRun); }}>Run</wa-button>}</td>
 							</tr>,
@@ -275,9 +310,10 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 														</span>
 													)}
 										</td>
+										<td><Ci standings={model.ci.byFile.get(file)} /></td>
 										<td>{running.has(file) ? <wa-spinner /> : runnable(file) ? <wa-button size="small" appearance="plain" aria-label={`Run ${file}`} onClick={() => { onRun([file]); }}>Run</wa-button> : null}</td>
 									</tr>,
-									...opened && last?.output !== undefined ? [<tr key={`${file} output`}><td class="fv-case" colSpan={9}>{last.output}</td></tr>] : [],
+									...opened && last?.output !== undefined ? [<tr key={`${file} output`}><td class="fv-case" colSpan={10}>{last.output}</td></tr>] : [],
 									...opened ? (last?.tests ?? []).map((test) => (
 										<tr key={test.id} title={test.error}>
 											<td class="fv-case">{test.id.split(" › ").slice(1).join(" › ")}</td>
@@ -288,6 +324,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 													{slower.has(test.id) ? <SlowerBadge slower={slower.get(test.id) as Slower} /> : null}
 												</span>
 											</td>
+											<td />
 											<td />
 										</tr>
 									)) : []
@@ -306,7 +343,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	const ledgerUri = vscode.Uri.file(`${ROOT}/${ledgerPath()}`);
 	const approved: string[] = [];
 	const running = new Set<string>();
-	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "unchecked": { "not run": [], "lines not run": [], "config": [] }, "slowerBy": 25 };
+	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "unchecked": { "not run": [], "lines not run": [], "config": [] }, "slowerBy": 25, "titles": new Map(), "ci": { "byFile": new Map(), "runs": 0 } };
 	const redraws = new Set<() => void>();
 	const redraw = (): void => {
 		for (const each of redraws) {
@@ -328,21 +365,48 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		return (await vscode.workspace.findFiles(new vscode.RelativePattern(uri, "**/*"), "**/node_modules/**")).map((each) => vscode.workspace.asRelativePath(each, false)).filter((path) => isTestFile(path)).toSorted((one, other) => one.localeCompare(other));
 	};
 
+	/** CI's standings as read last, each joined to the test file it's of. */
+	let standings: TestStanding[] = [];
+	const joined = (ofCi: TestStanding[]): Map<string, TestStanding[]> => {
+		const byFile = new Map<string, TestStanding[]>();
+
+		for (const standing of ofCi) {
+			const file = fileOf(standing, model.titles);
+
+			if (file !== undefined) {
+				byFile.set(file, [...byFile.get(file) ?? [], standing]);
+			}
+		}
+
+		return byFile;
+	};
+
 	/** The ledger, what kind each of its tests is, and the runs kept, read again. */
 	const read = async (): Promise<void> => log.span("editor.workbench.features-view.read", { "path": ledgerPath() }, async (span) => {
 		const features = Object.entries(parseLedger(await textOf(ledgerUri))).toSorted(([one], [other]) => one.localeCompare(other));
 		const files = new Map(await Promise.all(features.map(async ([name, entry]): Promise<[string, string[]]> => [name, [...new Set((await Promise.all((entry.tests ?? []).map(filesIn))).flat())]])));
-		const kinds = new Map(await Promise.all([...new Set([...files.values()].flat())].map(async (file): Promise<[string, Kind]> => [file, kindOf(await textOf(vscode.Uri.file(`${ROOT}/${file}`)) ?? "")])));
+		const texts = new Map(await Promise.all([...new Set([...files.values()].flat())].map(async (file): Promise<[string, string]> => [file, await textOf(vscode.Uri.file(`${ROOT}/${file}`)) ?? ""])));
+		const kinds = new Map([...texts].map(([file, text]): [string, Kind] => [file, kindOf(text)]));
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 
 		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
 		const { "tests": affected, why } = await rpc.request("tests.affected", { "glance": true }, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
 		const changesThat = (reason: Why): string[] => why.filter((each) => each.why === reason).map((each) => each.path);
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25) };
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci };
+		model.ci = { ...model.ci, "byFile": joined(standings) };
 		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length });
 		redraw();
 	});
+
+	/** How each test has come out in CI, read again (GitHub's: as the view opens, not on every save). */
+	const readCi = async (): Promise<void> => {
+		const answer = await rpc.request("ci.outcomes", {}, { "timeoutMs": 300_000, "waitForResponderMs": 60_000 }).catch((error: unknown) => ({ "standings": [], "runs": 0, "refused": error instanceof Error ? error.message : String(error) })) as { "standings": TestStanding[]; "runs": number; "refused"?: string };
+
+		standings = answer.standings;
+		model = { ...model, "ci": { "byFile": joined(standings), "runs": answer.runs, ...answer.refused === undefined ? {} : { "refused": answer.refused } } };
+		redraw();
+	};
 
 	/** `files` run in the debugger; a capability stop is put to the person, and on their yes the run goes on from there. */
 	const run = async (files: string[]): Promise<void> => log.span("editor.workbench.features-view.run", { "count": files.length }, async (span) => {
@@ -411,6 +475,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	vscode.commands.registerCommand("editor.features.show", async () => {
 		await vscode.commands.executeCommand("editor.features.focus");
 		await read();
+		void readCi();
 	});
 
 	// (a save may have touched a test's code)
@@ -438,5 +503,5 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		});
 	}
 
-	void read();
+	void read().then(readCi);
 }

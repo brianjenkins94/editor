@@ -214,10 +214,11 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 			}));
 		},
 
-		/** A run's jobs (its latest attempt's), each with its steps. */
+		/** A run's jobs (its latest attempt's, or with `attempts` every attempt's, each saying its `run_attempt`), each with
+		 *  its steps. */
 		// eslint-disable-next-line ts/naming-convention -- GitHub's wire fields
-		"runJobs": function(owner: string, repo: string, runId: number): Promise<{ "total_count": number; "jobs": Record<string, unknown>[] }> {
-			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/runs/" + String(runId) + "/jobs", { "per_page": 100 }));
+		"runJobs": function(owner: string, repo: string, runId: number, attempts = false): Promise<{ "total_count": number; "jobs": Record<string, unknown>[] }> {
+			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/runs/" + String(runId) + "/jobs", { "per_page": 100, ...attempts ? { "filter": "all" } : {} }));
 		},
 
 		/** A job's log, as text (GitHub answers with its storage's signed URL, which the proxy follows). */
@@ -252,17 +253,17 @@ export async function connectGitHub(): Promise<GitHub> {
 }
 
 /**
- * `github.actions` (the workbench's `ci.status`, ci-status.ts): a repository's Actions runs (a commit's, or a branch's),
- * a run's jobs, or a job's log, as this sign-in sees them: through the API's proxy signed in with GitHub, else straight
- * to GitHub with no credential (a public repository's, and no logs). GitHub's refusal is answered, not thrown, with
- * whether this is signed in, so the reader can say why.
+ * `github.actions` (the workbench's `ci.status`, ci-status.ts, and `ci.outcomes`, ci-outcomes.ts): a repository's Actions
+ * runs (a commit's, or a branch's), a run's jobs (`attempts`: every attempt's), or a job's log, as this sign-in sees them:
+ * through the API's proxy signed in with GitHub, else straight to GitHub with no credential (a public repository's, and
+ * no logs). GitHub's refusal is answered, not thrown, with whether this is signed in, so the reader can say why.
  */
 export async function actions(request: unknown): Promise<unknown> {
-	const { repository, commit, branch, run, job, limit } = (request ?? {}) as { "repository"?: unknown; "commit"?: unknown; "branch"?: unknown; "run"?: unknown; "job"?: unknown; "limit"?: unknown };
+	const { repository, commit, branch, run, attempts, job, limit } = (request ?? {}) as { "repository"?: unknown; "commit"?: unknown; "branch"?: unknown; "run"?: unknown; "attempts"?: unknown; "job"?: unknown; "limit"?: unknown };
 	const [owner, repo, ...more] = typeof repository === "string" ? repository.split("/") : [];
 
 	if (owner === undefined || repo === undefined || more.length > 0) {
-		throw new TypeError("github.actions takes { repository: \"owner/repo\", commit?, branch?, run?, job? }");
+		throw new TypeError("github.actions takes { repository: \"owner/repo\", commit?, branch?, run?, attempts?, job? }");
 	}
 
 	const signedIn = await viaProxy();
@@ -274,7 +275,7 @@ export async function actions(request: unknown): Promise<unknown> {
 		}
 
 		if (typeof run === "number") {
-			return { "signedIn": signedIn, ...await gh.runJobs(owner, repo, run) };
+			return { "signedIn": signedIn, ...await gh.runJobs(owner, repo, run, attempts === true) };
 		}
 
 		return { "signedIn": signedIn, ...await gh.runs(owner, repo, { ...typeof commit === "string" ? { "commit": commit } : {}, ...typeof branch === "string" ? { "branch": branch } : {}, ...typeof limit === "number" ? { "limit": limit } : {} }) };

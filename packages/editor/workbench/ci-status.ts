@@ -41,7 +41,7 @@ export interface Asked {
 export type Ask = (request: Record<string, unknown>) => Promise<Asked>;
 
 /** Why GitHub refused, for what this sign-in can see. */
-function refusal(asked: Asked): string {
+export function refusal(asked: Asked): string {
 	const message = asked.refused?.message ?? "GitHub refused";
 
 	if (asked.signedIn !== true) {

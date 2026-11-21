@@ -559,6 +559,8 @@ function installDataChannelProbe(sink: ArchSink, skip: (data: unknown) => boolea
 	if (onmessage?.set !== undefined) {
 		Object.defineProperty(Channel.prototype, "onmessage", {
 			...onmessage,
+			// (named, not left to the spread: ESLint's accessor-pairs, since 10.15, doesn't see a getter spread in)
+			"get": onmessage.get,
 			"set": function(this: RTCDataChannel, handler: unknown) {
 				watch(this);
 				onmessage.set!.call(this, handler);
