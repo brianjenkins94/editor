@@ -171,15 +171,17 @@ test("a run's statements: each code file it loaded, ran and not — not the test
 	}), { "math.mjs": { "ran": [[0, 1], [1, 1]], "not": [[4, 1]] } });
 });
 
-test("coverage: a statement any test file's run ran, of a code file's statements as its latest run saw them", () => {
+test("coverage: a statement any test file's run ran, of a code file's statements as its latest run saw them, and which ran any", () => {
 	const coverage = coverageOf([
-		{ "at": "2026-11-21T10:00:00Z", "files": { "math.mjs": { "ran": [[0, 1], [1, 1]], "not": [[4, 1], [5, 1]] } } },
+		{ "at": "2026-11-21T10:00:00Z", "file": "a.test.mjs", "files": { "math.mjs": { "ran": [[0, 1], [1, 1]], "not": [[4, 1], [5, 1]] } } },
 		// (later, math.mjs edited: what the earlier run ran at a place that's no longer a statement doesn't count)
-		{ "at": "2026-11-21T11:00:00Z", "files": { "math.mjs": { "ran": [[4, 1]], "not": [[0, 1], [6, 1]] }, "other.mjs": { "ran": [], "not": [[0, 1]] } } }
+		{ "at": "2026-11-21T11:00:00Z", "file": "b.test.mjs", "files": { "math.mjs": { "ran": [[4, 1]], "not": [[0, 1], [6, 1]] }, "other.mjs": { "ran": [], "not": [[0, 1]] } } },
+		// (and a run kept before it said whose it was: counted, by no file)
+		{ "at": "2026-11-21T09:00:00Z", "files": { "other.mjs": { "ran": [[0, 1]], "not": [] } } }
 	]);
 
 	assert.deepEqual(Object.fromEntries(coverage), {
-		"math.mjs": { "statements": 3, "ran": 2 },
-		"other.mjs": { "statements": 1, "ran": 0 }
+		"math.mjs": { "statements": 3, "ran": 2, "by": ["a.test.mjs", "b.test.mjs"] },
+		"other.mjs": { "statements": 1, "ran": 1, "by": [] }
 	});
 });

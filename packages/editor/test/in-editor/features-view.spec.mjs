@@ -75,6 +75,8 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	// (and the code it ran, of a feature's: add's half of math.mjs, not times')
 	await expect(row("Multiplying")).toContainText("50% of its code run", { "timeout": 30_000 });
 	await expect(row("Multiplying")).not.toContainText("no test loads");
+	// (math.mjs is Multiplying's, run by Adding's test: shared, whatever its one owner)
+	await expect(row("Multiplying")).toContainText("1 file other features' tests run");
 
 	// One that fails says so on its feature, and when; opened, each test.
 	await run("break.test.mjs");

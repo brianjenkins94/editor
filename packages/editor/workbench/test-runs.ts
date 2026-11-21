@@ -163,9 +163,9 @@ export function slowerOf(earlier: RunRecord[], id: string, latest: { "ms"?: numb
  *  didn't. */
 export interface Statements { "ran": [number, number][]; "not": [number, number][] }
 
-/** What a test file's last run kept of the code it loaded (`.silo/local/coverage/<file>.json`): when, and each code
- *  file's statements. */
-export interface CoverageKept { "at": string; "files": Record<string, Statements> }
+/** What a test file's last run kept of the code it loaded (`.silo/local/coverage/<file>.json`): when, the test file
+ *  (one kept before it was said, none), and each code file's statements. */
+export interface CoverageKept { "at": string; "file"?: string; "files": Record<string, Statements> }
 
 /** Each code file a run loaded (its `coverage` event: the entry's and every other's), its statements, ran or not: not a
  *  test's own, nor what's installed. */
@@ -178,9 +178,10 @@ export function statementsOf(event: CoverageEvent): Record<string, Statements> {
 
 /**
  * How much of each code file the tests here ran, over every test file's last run: its statements as the latest run that
- * loaded it saw them (an older one's may be of a text since edited), and how many of those any run ran.
+ * loaded it saw them (an older one's may be of a text since edited), how many of those any run ran, and which test files'
+ * runs ran any (`by`).
  */
-export function coverageOf(kept: CoverageKept[]): Map<string, { "statements": number; "ran": number }> {
+export function coverageOf(kept: CoverageKept[]): Map<string, { "statements": number; "ran": number; "by": string[] }> {
 	const latest = new Map<string, { "at": string; "all": Set<string> }>();
 	const ran = new Map<string, Set<string>>();
 	const key = ([line, character]: [number, number]): string => `${String(line)}:${String(character)}`;
@@ -195,7 +196,11 @@ export function coverageOf(kept: CoverageKept[]): Map<string, { "statements": nu
 		}
 	}
 
-	return new Map([...latest].map(([file, { all }]) => [file, { "statements": all.size, "ran": [...ran.get(file) ?? []].filter((each) => all.has(each)).length }]));
+	const by = (file: string, all: Set<string>): string[] => [
+		...new Set(kept.filter((run) => run.file !== undefined && (run.files[file]?.ran ?? []).some((statement) => all.has(key(statement)))).map((run) => run.file as string))
+	].toSorted();
+
+	return new Map([...latest].map(([file, { all }]) => [file, { "statements": all.size, "ran": [...ran.get(file) ?? []].filter((each) => all.has(each)).length, "by": by(file, all) }]));
 }
 
 /** What one test file touches that another does too, so the two can't run at once: one writes what the other reads or
@@ -533,7 +538,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 	/** What `file`'s run loaded of the code, its statements ran and not. A file's run replaces its own. */
 	const keepCoverage = async (file: string, files: Record<string, Statements>): Promise<void> => {
-		await vscode.workspace.fs.writeFile(vscode.Uri.file(`${ROOT}/${COVERAGE}/${file}.json`), new TextEncoder().encode(JSON.stringify({ "at": new Date().toISOString(), "files": files } satisfies CoverageKept)));
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(`${ROOT}/${COVERAGE}/${file}.json`), new TextEncoder().encode(JSON.stringify({ "at": new Date().toISOString(), "file": file, "files": files } satisfies CoverageKept)));
 	};
 
 	serve(hub, "tests.coverage", async () => ({ "coverage": Object.fromEntries(coverageOf(await keptIn(COVERAGE) as CoverageKept[])) }));

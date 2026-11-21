@@ -42,8 +42,9 @@ How it's kept:
    - **The boundaries** (ARCHITECTURE.md has the reasons, checked 2026-11-03: nothing split). Left: whether tsval can
      give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file).
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
-     fit* answered. One owner a file is where that starts: once silo ingests coverage from runs and traces, reassess
-     sharing from what they show (packages/admin/src/views.tsx, four features' pages under one owner, is a known case).
+     fit* answered. One owner a file is where that starts: reassess sharing from what runs show — Features and tests
+     says which of a feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx,
+     four features' pages under one owner, is a known case.
      `silo observed .silo/local/reach` compares each test's reach with the ledger (2026-11-17: 149 tests, a median of
      100% in their own features' code, 26 under half, mostly a dependency). CI's reach, from a dispatched architecture
      run (2026-11-20, 44800937124: half the specs, the other half past the limit, 60 min since), each spec its own file's

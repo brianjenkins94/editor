@@ -68,17 +68,18 @@ interface Model {
 	"coverage": Map<string, FeatureCoverage>;
 }
 
-/** How much of a feature's own code the tests here ran (`coverageByFeature`). */
-interface FeatureCoverage { "statements": number; "ran": number; "unloaded": string[] }
+/** How much of a feature's own code the tests here ran (`coverageByFeature`), and which of its files other features'
+ *  tests run, with those features (its code shared, whatever the ledger's one owner says). */
+interface FeatureCoverage { "statements": number; "ran": number; "unloaded": string[]; "shared": Map<string, string[]> }
 
 /** Each feature's coverage: the statements of its code files (what its `paths` hold, by the ledger's owners) that the
  *  tests here ran, of those their runs loaded, and the files none loaded. */
-function coverageByFeature(ledger: Ledger, code: string[], ofFile: Record<string, { "statements": number; "ran": number }>): Map<string, FeatureCoverage> {
+function coverageByFeature(ledger: Ledger, code: string[], ofFile: Record<string, { "statements": number; "ran": number; "by"?: string[] }>, featuresOf: Map<string, string[]>): Map<string, FeatureCoverage> {
 	const byFeature = new Map<string, FeatureCoverage>();
 
 	for (const file of code) {
 		for (const owner of ownersOf(ledger, file)) {
-			const its = byFeature.get(owner) ?? { "statements": 0, "ran": 0, "unloaded": [] };
+			const its = byFeature.get(owner) ?? { "statements": 0, "ran": 0, "unloaded": [], "shared": new Map() };
 			const counted = ofFile[file];
 
 			if (counted === undefined) {
@@ -86,6 +87,12 @@ function coverageByFeature(ledger: Ledger, code: string[], ofFile: Record<string
 			} else {
 				its.statements += counted.statements;
 				its.ran += counted.ran;
+
+				const others = [...new Set((counted.by ?? []).flatMap((test) => featuresOf.get(test) ?? []))].filter((feature) => feature !== owner).toSorted();
+
+				if (others.length > 0) {
+					its.shared.set(file, others);
+				}
 			}
 
 			byFeature.set(owner, its);
@@ -95,18 +102,24 @@ function coverageByFeature(ledger: Ledger, code: string[], ofFile: Record<string
 	return byFeature;
 }
 
+/** The features each test file is declared by. */
+const featuresOfTests = (files: Map<string, string[]>): Map<string, string[]> => new Map([
+	...Map.groupBy([...files].flatMap(([feature, tests]) => tests.map((test) => [test, feature] as const)), ([test]) => test)
+].map(([test, pairs]) => [test, pairs.map(([, feature]) => feature)]));
+
 /** A feature's coverage, said: what share of its loaded code ran, and the files no test loads (named in its title). */
 function Covered({ coverage }: { "coverage": FeatureCoverage | undefined }): JSX.Element | null {
 	if (coverage === undefined) {
 		return null;
 	}
 
-	const { statements, ran, unloaded } = coverage;
+	const { statements, ran, unloaded, shared } = coverage;
 
 	return (
 		<span class="wa-cluster wa-gap-3xs">
 			{statements === 0 ? null : <span title={`${String(ran)} of the ${String(statements)} statements in its code that tests here loaded ran, over each test file's last run.`}>{`${String(Math.floor((ran / statements) * 100))}% of its code run`}</span>}
 			{unloaded.length === 0 ? null : <wa-badge appearance="outlined" variant="warning" title={unloaded.join("\n")}>{`${String(unloaded.length)} ${unloaded.length === 1 ? "file" : "files"} no test loads`}</wa-badge>}
+			{shared.size === 0 ? null : <wa-badge appearance="outlined" variant="neutral" title={[...shared].map(([file, features]) => `${file}: ${features.join(", ")}`).join("\n")}>{`${String(shared.size)} ${shared.size === 1 ? "file" : "files"} other features' tests run`}</wa-badge>}
 		</span>
 	);
 }
@@ -442,13 +455,13 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 
 		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
-		const { coverage } = await rpc.request("tests.coverage", {}, { "timeoutMs": 60_000 }) as { "coverage": Record<string, { "statements": number; "ran": number }> };
+		const { coverage } = await rpc.request("tests.coverage", {}, { "timeoutMs": 60_000 }) as { "coverage": Record<string, { "statements": number; "ran": number; "by"?: string[] }> };
 		// (the workspace's code a feature could own: not a test, nothing installed or built)
 		const code = (await vscode.workspace.findFiles("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", "**/node_modules/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isOwnedCode(path) && !isTestFile(path));
 		const { "tests": affected, why } = await rpc.request("tests.affected", { "glance": true }, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
 		const changesThat = (reason: Why): string[] => why.filter((each) => each.why === reason).map((each) => each.path);
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci, "coverage": coverageByFeature(ledger, code, coverage) };
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci, "coverage": coverageByFeature(ledger, code, coverage, featuresOfTests(files)) };
 		model.ci = { ...model.ci, "byFile": joined(standings) };
 		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length, "files": code.length });
 		redraw();

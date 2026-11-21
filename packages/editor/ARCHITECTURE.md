@@ -595,7 +595,7 @@ any workspace's. So each step is built as the bench's, and this rebuild is its f
 - **Tests**: the feature's list (packages/silo/README.md, *Tests by feature, in your face*), its tests run in the
   editor, and the vouches its commit flow makes.
 - **Shared code**: runs and coverage by feature (Features and tests: each feature's own code the tests here ran, and
-  its files none loads; what other features' tests run of it, not yet).
+  its files none loads, and which of them other features' tests run: shared, whatever its one owner).
 - **Progress**: the features map's core, out and back, and for each one back, how much of its old tests' reach its
   new tests cover.
 
