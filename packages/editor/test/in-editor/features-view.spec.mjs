@@ -115,8 +115,10 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await row("one.test.mjs").locator(".fv-toggle").click();
 	await expect(row(/^writes/u).locator("wa-badge", { "hasText": "fs:write" })).toHaveCount(1, { "timeout": 30_000 });
 	await run("two.test.mjs");
-	await expect(row(/^\S+ two\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, as one.test.mjs does", { "timeout": 60_000 });
-	await expect(row(/^\S+ one\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, as two.test.mjs does");
+	await expect(row(/^\S+ two\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, which one.test.mjs writes", { "timeout": 60_000 });
+	await expect(row(/^\S+ one\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, which two.test.mjs writes");
+	// (and the test that does it, on its own row)
+	await expect(row(/^writes/u)).toContainText("writes /workspace/shared.txt");
 
 	// A test that comes to use something says so, on its row.
 	await run("grow.test.mjs");

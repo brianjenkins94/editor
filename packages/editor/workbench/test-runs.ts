@@ -156,6 +156,100 @@ export function slowerOf(earlier: RunRecord[], id: string, latest: { "ms"?: numb
 	return by > percent ? { "by": by, "measure": compared.measure, "typical": compared.typical } : undefined;
 }
 
+/** What one test file touches that another does too, so the two can't run at once: one writes what the other reads or
+ *  writes. `test` and `otherTest` are the tests that did it, where their runs said (a run before tests carried their own
+ *  effects, or the file's code outside any test, says only the file). */
+export interface Contention {
+	"test"?: string;
+	"touches": "reads" | "writes";
+	"resource": string;
+	"other": string;
+	"otherTest"?: string;
+	"otherTouches": "reads" | "writes";
+}
+
+/** A file an effect touched in the world everyone shares: made (not denied, not given back from a recording, not written
+ *  into the run's own layer and thrown away with it), and of a file. */
+function touchOf(effect: Effect): "reads" | "writes" | undefined {
+	if (effect.how !== "made" || effect.decided === "layer") {
+		return undefined;
+	}
+
+	return effect.capability === "fs:write" ? "writes" : effect.capability === "fs:read" ? "reads" : undefined;
+}
+
+/**
+ * Each test file's contentions with the others (the table's *Can't run in parallel*), from every run kept, not only the
+ * last: a test that wrote a file once may not every time. Writes first, then by resource; one per other file and
+ * resource.
+ */
+export function contentionsOf(history: RunRecord[]): Map<string, Contention[]> {
+	type Touch = { "file": string; "test"?: string; "touches": "reads" | "writes"; "resource": string };
+	const byResource = new Map<string, Map<string, Touch>>();
+	const add = (touch: Touch): void => {
+		const touches = byResource.get(touch.resource) ?? new Map<string, Touch>();
+		const known = touches.get(touch.file);
+
+		// (one touch a file: a write beats a read, then a test named beats the file alone)
+		if (known === undefined || (known.touches === "reads" && touch.touches === "writes") || (known.touches === touch.touches && known.test === undefined && touch.test !== undefined)) {
+			touches.set(touch.file, touch);
+		}
+
+		byResource.set(touch.resource, touches);
+	};
+
+	for (const run of history) {
+		const named = new Set<string>();
+
+		for (const test of run.tests) {
+			for (const effect of test.effects ?? []) {
+				const touches = touchOf(effect);
+
+				if (touches !== undefined) {
+					named.add(`${touches}\0${effect.resource}`);
+					add({ "file": run.file, "test": test.id, "touches": touches, "resource": effect.resource });
+				}
+			}
+		}
+
+		for (const effect of run.effects) {
+			const touches = touchOf(effect);
+
+			if (touches !== undefined && !named.has(`${touches}\0${effect.resource}`)) {
+				add({ "file": run.file, "touches": touches, "resource": effect.resource });
+			}
+		}
+	}
+
+	const contentions = new Map<string, Contention[]>();
+
+	for (const [resource, touches] of byResource) {
+		for (const touch of touches.values()) {
+			// (a file's own reads and writes of one file, and two that only read it, don't contend)
+			const others = [...touches.values()].filter((other) => other.file !== touch.file && (touch.touches === "writes" || other.touches === "writes"));
+			for (const other of others) {
+				const its = contentions.get(touch.file) ?? [];
+
+				its.push({
+					...touch.test === undefined ? {} : { "test": touch.test },
+					"touches": touch.touches,
+					"resource": resource,
+					"other": other.file,
+					...other.test === undefined ? {} : { "otherTest": other.test },
+					"otherTouches": other.touches
+				});
+				contentions.set(touch.file, its);
+			}
+		}
+	}
+
+	for (const its of contentions.values()) {
+		its.sort((one, other) => Number(one.touches === "reads") - Number(other.touches === "reads") || one.resource.localeCompare(other.resource) || one.other.localeCompare(other.other));
+	}
+
+	return contentions;
+}
+
 /** A run of test files (tests.run): what it was asked, what it's doing, each file's result as it comes, and its end. */
 interface Batch {
 	"id": string;

@@ -2,12 +2,13 @@
  * A test that ran slower than it typically does (workbench/test-runs.ts `slowerOf`): by its statements, where they're
  * counted, against the median of the earlier runs it passed in; else by its time, once there are enough runs to go by.
  * And which tests a change selects (`selectionOf`, `changedLines`): by the lines it changed and what each test last ran,
- * and why each changed file selected what it did.
+ * and why each changed file selected what it did. And which test files can't run at once (`contentionsOf`): one writes
+ * what another reads or writes, over every run kept, said by the tests that did it.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { changedLines, kindOf, selectionOf, slowerOf } from "../workbench/test-runs.ts";
+import { changedLines, contentionsOf, kindOf, selectionOf, slowerOf } from "../workbench/test-runs.ts";
 
 const ID = "a.test.mjs › adds";
 
@@ -104,4 +105,51 @@ test("a test file's kind is what its imports say, not what its text mentions: a 
 	assert.equal(kindOf("import { expect, test } from \"@playwright/test\";\n"), "UI spec");
 	assert.equal(kindOf("import { test } from \"node:test\";\nimport { startSession } from \"./architecture-harness.mjs\";\n"), "browser suite");
 	assert.equal(kindOf("export const fixture = \"import { test } from 'node:test'\";\n"), "not a test");
+});
+
+/** A made call to `capability` on `resource`, as a run keeps it. */
+const touch = (capability, resource, decided = "policy") => ({ "capability": capability, "resource": resource, "how": "made", "calls": 1, "decided": decided });
+
+/** A run of `file`: `tests` as [title, effects], and the file's own effects besides. */
+const ranWith = (file, tests, effects = []) => ({
+	"file": file,
+	"at": "",
+	"ms": 1,
+	"exitCode": 0,
+	"tests": tests.map(([title, its]) => ({ "id": `${file} › ${title}`, "outcome": "pass", "effects": its })),
+	"effects": [...effects, ...tests.flatMap(([, its]) => its)]
+});
+
+test("contentions: a write against another file's write or read, by the tests that did it, over every run kept", () => {
+	const contentions = contentionsOf([
+		ranWith("one.test.mjs", [["writes", [touch("fs:write", "/workspace/shared.txt"), touch("fs:read", "/workspace/shared.txt")]]]),
+		// (it wrote once, then didn't: still can't run beside the others)
+		ranWith("two.test.mjs", [["writes too", [touch("fs:write", "/workspace/shared.txt")]]]),
+		ranWith("two.test.mjs", [["writes too", []]]),
+		// (the file's own code, outside any test)
+		ranWith("three.test.mjs", [], [touch("fs:read", "/workspace/shared.txt")]),
+		// (only reads: no contention between two readers)
+		ranWith("four.test.mjs", [["reads", [touch("fs:read", "/workspace/data.json")]]]),
+		ranWith("five.test.mjs", [["reads", [touch("fs:read", "/workspace/data.json")]]])
+	]);
+
+	assert.deepEqual(contentions.get("one.test.mjs"), [
+		{ "test": "one.test.mjs › writes", "touches": "writes", "resource": "/workspace/shared.txt", "other": "three.test.mjs", "otherTouches": "reads" },
+		{ "test": "one.test.mjs › writes", "touches": "writes", "resource": "/workspace/shared.txt", "other": "two.test.mjs", "otherTest": "two.test.mjs › writes too", "otherTouches": "writes" }
+	]);
+	assert.deepEqual(contentions.get("three.test.mjs")?.map((each) => [each.test, each.touches, each.other]), [
+		[undefined, "reads", "one.test.mjs"],
+		[undefined, "reads", "two.test.mjs"]
+	]);
+	assert.equal(contentions.has("four.test.mjs"), false);
+	assert.equal(contentions.has("five.test.mjs"), false);
+});
+
+test("contentions: a write the world never saw — denied, given back from a recording, into the run's own layer — contends with nothing", () => {
+	const contentions = contentionsOf([
+		ranWith("one.test.mjs", [["writes", [touch("fs:write", "/workspace/a.txt", "layer"), { ...touch("fs:write", "/workspace/b.txt"), "how": "denied" }, { ...touch("fs:write", "/workspace/c.txt"), "how": "given" }]]]),
+		ranWith("two.test.mjs", [["writes", [touch("fs:write", "/workspace/a.txt"), touch("fs:write", "/workspace/b.txt"), touch("fs:write", "/workspace/c.txt")]]])
+	]);
+
+	assert.equal(contentions.size, 0);
 });

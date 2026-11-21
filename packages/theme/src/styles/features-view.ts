@@ -18,6 +18,11 @@ export const featuresViewStyles = stylesheet({
 		"borderCollapse": "collapse",
 		"fontSize": "var(--wa-font-size-xs)"
 	},
+	// (a header on one line, as its cells are: wrapped, it grew as tall as a short view's middle, where a row scrolled to
+	// would be, under it)
+	".fv-table th, .fv-table td": {
+		"whiteSpace": "nowrap"
+	},
 	".fv-table th": {
 		"position": "sticky",
 		"top": 0,
@@ -29,7 +34,6 @@ export const featuresViewStyles = stylesheet({
 	},
 	".fv-table td": {
 		"padding": "var(--wa-space-3xs) var(--wa-space-xs)",
-		"whiteSpace": "nowrap",
 		"borderTop": "var(--wa-border-width-s) solid var(--wa-color-surface-border)"
 	},
 	".fv-feature td": {

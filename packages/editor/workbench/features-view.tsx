@@ -18,7 +18,7 @@ import type { LedgerEntry } from "@brianjenkins94/util/silo/ledger";
 import type { TestStanding } from "@brianjenkins94/util/silo/outcomes";
 import type { JSX } from "preact";
 import type * as vscodeApi from "vscode";
-import type { Kind, RunRecord, Slower, Why } from "./test-runs";
+import type { Contention, Kind, RunRecord, Slower, Why } from "./test-runs";
 import { registerCustomView, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
@@ -27,7 +27,7 @@ import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { featuresViewStyles } from "theme/styles/features-view";
 import { fileOf, titlesOf } from "./ci-outcomes";
-import { kindOf, slowerOf } from "./test-runs";
+import { contentionsOf, kindOf, slowerOf } from "./test-runs";
 import { isTestFile } from "./terminal/commands/node/node";
 import "theme/components/badge";
 import "theme/components/button";
@@ -110,24 +110,29 @@ function reachOf(reach: Record<string, Record<string, [number, number][]>>): Mod
 	return new Map([...byFile].map(([file, lines]) => [file, { "lines": lines.size, "only": [...lines].filter((key) => reachers.get(key)?.size === 1).length }]));
 }
 
-/** Why `file` can't run beside the others, if it can't: what stops it, or what it touches that another does too. */
-function blockOf(file: string, kind: Kind, writers: Map<string, Set<string>>, runs: RunRecord[]): string | undefined {
+/** Why `file` can't run beside the others, if it can't: what stops it, or what it touches that another does too (every
+ *  contention in its title, by the tests that did it). */
+function blockOf(kind: Kind, contentions: Contention[] | undefined): { "said": string; "title"?: string } | undefined {
 	if (kind === "browser suite") {
-		return "started from outside";
+		return { "said": "started from outside" };
 	}
 
-	const wrote = runs.at(-1)?.effects.filter((effect) => effect.capability === "fs:write") ?? [];
+	const all = contentions ?? [];
+	const [first] = all;
 
-	for (const { resource } of wrote) {
-		const other = [...writers.get(resource) ?? []].find((each) => each !== file);
-
-		if (other !== undefined) {
-			return `writes ${resource}, as ${other.split("/").at(-1) ?? other} does`;
-		}
-	}
-
-	return undefined;
+	return first === undefined
+		? undefined
+		: {
+				"said": `${first.touches} ${first.resource}, which ${nameOf(first.other)} ${first.otherTouches}${all.length > 1 ? ` (+${String(all.length - 1)})` : ""}`,
+				"title": all.map(saidOf).join("\n")
+			};
 }
+
+/** A test file's name, without its folders. */
+const nameOf = (file: string): string => file.split("/").at(-1) ?? file;
+
+/** A contention said whole: which test, what it does, and which test of which file does what too. */
+const saidOf = (contention: Contention): string => `${contention.test === undefined ? "the file" : `"${contention.test.split(" › ").slice(1).join(" › ")}"`} ${contention.touches} ${contention.resource}; ${contention.otherTest === undefined ? nameOf(contention.other) : `${nameOf(contention.other)}'s "${contention.otherTest.split(" › ").slice(1).join(" › ")}"`} ${contention.otherTouches} it`;
 
 /** An effect as runs of a test compare: not what's different every time, a temporary folder's name or an address's query. */
 const shapeOf = ({ capability, resource }: RunRecord["effects"][number]): string => `${capability} ${resource.replace(/^(\/tmp\/[^/]*?)-?[A-Za-z0-9]{6}(?=\/|$)/u, "$1*").replace(/\?.*$/u, "")}`;
@@ -211,15 +216,8 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 	// one found by a file only those that match)
 	const [filter, setFilter] = useState("");
 	const runsOf = Map.groupBy(model.history, (run) => run.file);
-	const writers = new Map<string, Set<string>>();
-
-	for (const [file, runs] of runsOf) {
-		for (const { capability, resource } of runs.at(-1)?.effects ?? []) {
-			if (capability === "fs:write") {
-				writers.set(resource, (writers.get(resource) ?? new Set()).add(file));
-			}
-		}
-	}
+	// (what each file touches that another does too, over every run kept)
+	const contentions = contentionsOf(model.history);
 
 	const runnable = (file: string): boolean => {
 		const kind = model.kinds.get(file);
@@ -275,7 +273,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 								const runs = runsOf.get(file) ?? [];
 								const last = runs.at(-1);
 								const kind = model.kinds.get(file) ?? "not a test";
-								const block = blockOf(file, kind, writers, runs);
+								const block = blockOf(kind, contentions.get(file));
 								const typical = median(runs.filter(passed).map((run) => run.ms));
 								// (each test of its last run against its runs before)
 								const slower = new Map((last?.tests ?? []).flatMap((test) => {
@@ -294,7 +292,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 											{model.touched.has(file) ? <wa-badge variant="warning" title="Code it ran has changed since it last ran."> touched</wa-badge> : null}
 										</td>
 										<td title={KIND_TITLE[kind]}>{kind}</td>
-										<td>{block === undefined ? null : <wa-badge variant="danger">{block}</wa-badge>}</td>
+										<td>{block === undefined ? null : <wa-badge variant="danger" title={block.title}>{block.said}</wa-badge>}</td>
 										<td><Effects effects={last?.effects} before={runs.at(-2)?.effects} /></td>
 										<td title="Lines of code it ran, and how many no other test file runs.">
 											{reached === undefined || reached.lines === 0 ? null : reached.only > 0 ? `${String(reached.lines)} lines · ${String(reached.only)} only here` : <span class="wa-cluster wa-gap-3xs">{`${String(reached.lines)} lines`}<wa-badge appearance="outlined" variant="neutral">nothing only here</wa-badge></span>}
@@ -318,7 +316,8 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 									...opened ? (last?.tests ?? []).map((test) => (
 										<tr key={test.id} title={test.error}>
 											<td class="fv-case">{test.id.split(" › ").slice(1).join(" › ")}</td>
-											<td colSpan={2}>{test.outcome === "pass" ? null : <wa-badge variant="danger">{test.outcome}</wa-badge>}</td>
+											<td>{test.outcome === "pass" ? null : <wa-badge variant="danger">{test.outcome}</wa-badge>}</td>
+											<td>{(contentions.get(file) ?? []).filter((each) => each.test === test.id).map((each) => <wa-badge key={`${each.resource} ${each.other}`} variant="danger" appearance="outlined" title={saidOf(each)}>{`${each.touches} ${each.resource}`}</wa-badge>)}</td>
 											<td><Effects effects={test.effects} before={runs.at(-2)?.tests.find((each) => each.id === test.id)?.effects} /></td>
 											<td colSpan={3} />
 											<td>

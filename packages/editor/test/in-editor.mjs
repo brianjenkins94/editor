@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import { after, before, test } from "node:test";
 
 import { startSession } from "./architecture-harness.mjs";
@@ -104,8 +105,16 @@ async function within(work, ms) {
 /** What a failed spec's editors are asked for (sayWhatHappened). */
 const ON_SCREEN = ".tab, .notification-list-item, .monaco-dialog-box, .statusbar-item.left, .quick-input-widget:not([style*='display: none']), .markers-panel .monaco-list-row, .viewpane-filter input";
 
-/** What's on screen in each frame still open, and what the page printed: why a spec failed on a runner nobody can watch. */
+/** What's on screen in each frame still open, and what the page printed: why a spec failed on a runner nobody can watch.
+ *  And how it looked, as `architecture-spec-<time>.png` in the temp folder (CI uploads its `architecture-*` files when a
+ *  run fails): a click refused for what's on top of its element is a layout's, which no text says. */
 async function sayWhatHappened(session) {
+	const shot = `${os.tmpdir()}/architecture-spec-${String(Date.now())}.png`;
+
+	if (await session.page.screenshot({ "path": shot }).then(() => true, () => false)) {
+		console.log(`[in-editor] how it looked: ${shot}`);
+	}
+
 	for (const frame of session.page.frames()) {
 		// (Problems' rows and a filter box's text too: what a list showed, and what it was filtered by — in every editor, a
 		// file open in it or not: log.spec's had none when it failed on CI, 1bbba327, and wasn't said)

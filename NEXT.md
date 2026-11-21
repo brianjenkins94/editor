@@ -80,8 +80,7 @@ How it's kept:
      join a file the ledger names, the rest's titles worked out as they run or shared by two files) (`touched` and
      `resting` are item 3's); *Capabilities confirmed by runs* without its static half
      (whether the code could still make the call: a sweep of the project), the baseline's join, or capabilities by
-     feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin; *Tests at once*' flag from
-     what a test touches (the gate's effects) rather than last runs.
+     feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin.
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
 3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
    what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is
