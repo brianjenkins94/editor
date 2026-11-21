@@ -32,8 +32,8 @@ test("a test file run from Features and tests: each test's outcome, a failure's 
 	await expect(workbench.locator(".fv-table tbody tr.fv-feature", { "hasText": "Adding" })).toContainText("1 failing", { "timeout": 120_000 });
 	await row("adds.test.mjs").locator(".fv-toggle").click();
 
-	// (each test's row its name, then its outcome if it failed, then its time)
-	for (const passing of [/^adds\d/u, /^waits\d/u, /^reads its own file\d/u]) {
+	// (each test's row its name, then its outcome if it failed, its effects, then its time)
+	for (const passing of [/^adds\d/u, /^waits\d/u, /^reads its own filefs:read/u]) {
 		await expect(row(passing)).toHaveCount(1);
 	}
 

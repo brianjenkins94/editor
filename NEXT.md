@@ -74,8 +74,8 @@ How it's kept:
      unit tests across the repository (measured 2026-11-04, 124 files), what holds the rest in the debugger: the Worker
      runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
      (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
-   - **What reintroduced features left for later**: Features and tests without coverage or per-test effects (its filter
-     came 2026-11-20; CI's outcomes 2026-11-21: each file's tests' last verdicts, runs green and flakes on the branch,
+   - **What reintroduced features left for later**: Features and tests without coverage (its filter came 2026-11-20;
+     each test's own effects 2026-11-21, the debugger's gate tallying a call for the tests running as it's made; CI's outcomes 2026-11-21: each file's tests' last verdicts, runs green and flakes on the branch,
      read from GitHub's logs through the sign-in, workbench/ci-outcomes.ts — 963 of this repository's 2,694 CI tests
      join a file the ledger names, the rest's titles worked out as they run or shared by two files) (`touched` and
      `resting` are item 3's); *Capabilities confirmed by runs* without its static half

@@ -1,10 +1,10 @@
 /** @jsxImportSource preact */
 /**
  * Features and tests (packages/silo/README.md, *Tests by feature, in your face*), a table in the panel: each feature of the
- * ledger, with its test files under it, each opening to its tests. A file's row says what kind of test it is, whether it can't
- * run beside the others and why, the effects its last run had, how much code it reaches and how much of that only it does, when
- * it last passed and failed, how long it typically takes (and which of its tests last ran slower than they typically do, by more
- * than `run.tests.slowerBy`), whether code it ran has changed since (the lines it ran: test-runs.ts `selectionOf`), how it
+ * ledger, with its test files under it, each opening to its tests (each with its own effects). A file's row says what kind
+ * of test it is, whether it can't run beside the others and why, the effects its last run had, how much code it reaches and
+ * how much of that only it does, when it last passed and failed, how long it typically takes (and which of its tests last
+ * ran slower than they typically do, by more than `run.tests.slowerBy`), whether code it ran has changed since (the lines it ran: test-runs.ts `selectionOf`), how it
  * has come out in CI (its tests' last verdicts, how many runs in a row, which flaked), and a button that runs it; and above
  * it, what's changed since the last commit that no test here checks. Tests are meant to run at once, so only one that
  * can't says anything in that column.
@@ -132,10 +132,11 @@ function blockOf(file: string, kind: Kind, writers: Map<string, Set<string>>, ru
 /** An effect as runs of a test compare: not what's different every time, a temporary folder's name or an address's query. */
 const shapeOf = ({ capability, resource }: RunRecord["effects"][number]): string => `${capability} ${resource.replace(/^(\/tmp\/[^/]*?)-?[A-Za-z0-9]{6}(?=\/|$)/u, "$1*").replace(/\?.*$/u, "")}`;
 
-function Effects({ run, before }: { "run": RunRecord | undefined; "before": RunRecord | undefined }): JSX.Element | null {
-	const byKind = Map.groupBy(run?.effects ?? [], (effect) => effect.capability);
-	const was = new Set(before?.effects.map(shapeOf));
-	const now = new Set(run?.effects.map(shapeOf));
+/** Effects by kind, and against `before` (a run's, or a test's in the run before): what's new, and what's stopped. */
+function Effects({ effects, before }: { "effects": RunRecord["effects"] | undefined; "before": RunRecord["effects"] | undefined }): JSX.Element | null {
+	const byKind = Map.groupBy(effects ?? [], (effect) => effect.capability);
+	const was = new Set(before?.map(shapeOf));
+	const now = new Set(effects?.map(shapeOf));
 	// (what it uses now that it didn't, and what it's stopped: how its reach of the world changes, run to run)
 	const grew = before === undefined ? [] : [...now].filter((shape) => !was.has(shape));
 	const shrank = before === undefined ? [] : [...was].filter((shape) => !now.has(shape));
@@ -294,7 +295,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										</td>
 										<td title={KIND_TITLE[kind]}>{kind}</td>
 										<td>{block === undefined ? null : <wa-badge variant="danger">{block}</wa-badge>}</td>
-										<td><Effects run={last} before={runs.at(-2)} /></td>
+										<td><Effects effects={last?.effects} before={runs.at(-2)?.effects} /></td>
 										<td title="Lines of code it ran, and how many no other test file runs.">
 											{reached === undefined || reached.lines === 0 ? null : reached.only > 0 ? `${String(reached.lines)} lines · ${String(reached.only)} only here` : <span class="wa-cluster wa-gap-3xs">{`${String(reached.lines)} lines`}<wa-badge appearance="outlined" variant="neutral">nothing only here</wa-badge></span>}
 										</td>
@@ -317,7 +318,9 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 									...opened ? (last?.tests ?? []).map((test) => (
 										<tr key={test.id} title={test.error}>
 											<td class="fv-case">{test.id.split(" › ").slice(1).join(" › ")}</td>
-											<td colSpan={6}>{test.outcome === "pass" ? null : <wa-badge variant="danger">{test.outcome}</wa-badge>}</td>
+											<td colSpan={2}>{test.outcome === "pass" ? null : <wa-badge variant="danger">{test.outcome}</wa-badge>}</td>
+											<td><Effects effects={test.effects} before={runs.at(-2)?.tests.find((each) => each.id === test.id)?.effects} /></td>
+											<td colSpan={3} />
 											<td>
 												<span class="wa-cluster wa-gap-3xs">
 													{lasted(test.ms)}

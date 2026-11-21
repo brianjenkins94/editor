@@ -1,9 +1,9 @@
 /**
  * A test file's tests as node-test.js tells them (`__editorTest`): each one's outcome, what it threw, a failed
- * assertion's sides, its time, and the statements it ran — its program's, and those of the editor its page drove, when
- * that's counted (state's `windowReach`).
+ * assertion's sides, its time, the statements it ran — its program's, and those of the editor its page drove, when
+ * that's counted (state's `windowReach`) — and the gated calls it made (its effects).
  */
-import type { CoverageEvent, TestReport } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, TestReport } from "@brianjenkins94/editor-api";
 import type ts from "typescript";
 import type { Vm } from "./state";
 import { siteObservations } from "../site-sums";
@@ -19,6 +19,15 @@ export const testStarts = new Map<string, Map<ts.SourceFile, number[]>>();
 const testClock = new Map<string, number>();
 const testStatements = new Map<string, number>();
 
+/** Each running test's effects so far (the gate's tally, gate.ts), by its titles: a suite's its tests' too, as its
+ *  statements are. Tests run at once in one file would each take the others' too. */
+const testEffects = new Map<string, Map<string, Effect>>();
+
+/** Where an effect made now is tallied for the tests running. */
+export function testsEffects(): Map<string, Effect>[] {
+	return [...testEffects.values()];
+}
+
 /** node-test.js's `__editorTest`: a test started (`titles`), ended (and how: `outcome`, what it threw, and what a failed
  *  assertion compared, as JSON), or the file's tests are done (`titles` then the count that failed). Called from the
  *  program's code, with strings only. */
@@ -31,6 +40,7 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 			[...entry.counts]
 		])));
 		testClock.set(titles, performance.now());
+		testEffects.set(titles, new Map());
 
 		if (state.current !== undefined) {
 			testStatements.set(titles, state.current.statements);
@@ -39,11 +49,13 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 		const started = testStarts.get(titles);
 		const clocked = testClock.get(titles);
 		const counted = testStatements.get(titles);
+		const effects = [...testEffects.get(titles)?.values() ?? []];
 		const statements = counted === undefined || state.current === undefined ? undefined : state.current.statements - counted;
 
 		testStarts.delete(titles);
 		testClock.delete(titles);
 		testStatements.delete(titles);
+		testEffects.delete(titles);
 		state.testsRan.push({
 			"titles": JSON.parse(titles) as string[],
 			"outcome": outcome as TestReport["outcome"],
@@ -65,6 +77,9 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 				: {
 						"statements": statements
 					},
+			...effects.length === 0
+				? {}
+				: { "effects": effects },
 			"files": [
 				...started === undefined
 					? []
@@ -162,6 +177,7 @@ export function tellCoverage(): void {
 export function startTests(): void {
 	state.testsRan = [];
 	testStarts.clear();
+	testEffects.clear();
 	state.testsFailed = 0;
 	state.testsDone = false;
 }

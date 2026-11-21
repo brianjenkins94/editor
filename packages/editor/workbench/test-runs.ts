@@ -28,7 +28,7 @@
  *   rather than as its tool call never coming back.
  * - `tests.reach`: what each test last ran, by file and line, kept here (`.silo/local/reach/`, this machine's).
  * - `tests.history`: the runs kept here (`.silo/local/runs.jsonl`, this machine's): each file's run, when, how long, each
- *   test's outcome and time, and what it did to the world (its effects). What the table of features and tests reads.
+ *   test's outcome and time, and what it did to the world (its effects, the run's and each test's). What the table of features and tests reads.
  */
 import type { Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
@@ -117,7 +117,7 @@ export interface RunRecord {
 	"ms": number;
 	"exitCode": number;
 	"stalled"?: string;
-	"tests": { "id": string; "outcome": string; "ms"?: number; "statements"?: number; "error"?: string }[];
+	"tests": { "id": string; "outcome": string; "ms"?: number; "statements"?: number; "error"?: string; "effects"?: Effect[] }[];
 	"effects": Effect[];
 	/** Why a file that failed without a failed test did: the end of what it said. */
 	"output"?: string;
@@ -575,7 +575,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				"ms": result.ms,
 				"exitCode": result.exitCode,
 				...result.stalled === undefined ? {} : { "stalled": result.stalled },
-				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...test.error === undefined ? {} : { "error": test.error } })),
+				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...test.error === undefined ? {} : { "error": test.error }, ...test.effects === undefined ? {} : { "effects": test.effects } })),
 				"effects": result.effects,
 				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
 			});

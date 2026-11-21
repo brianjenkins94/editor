@@ -111,6 +111,9 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	// Two that write one file: each says it can't run in parallel, and why.
 	await run("one.test.mjs");
 	await expect(row("one.test.mjs").locator("wa-badge", { "hasText": "fs:write" })).toHaveCount(1, { "timeout": 60_000 });
+	// (and opened, each of its tests says what it did, on its own row)
+	await row("one.test.mjs").locator(".fv-toggle").click();
+	await expect(row(/^writes/u).locator("wa-badge", { "hasText": "fs:write" })).toHaveCount(1, { "timeout": 30_000 });
 	await run("two.test.mjs");
 	await expect(row(/^\S+ two\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, as one.test.mjs does", { "timeout": 60_000 });
 	await expect(row(/^\S+ one\.test\.mjs/u)).toContainText("writes /workspace/shared.txt, as two.test.mjs does");

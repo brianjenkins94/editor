@@ -4,8 +4,9 @@
  * each job's log reported (lib's `nodeTestOutcomes`), folded into each test's standing (lib's `standings`: its last
  * verdict, its streak, its flakes, when it last failed). Nothing is recorded for it: GitHub keeps the runs and their logs.
  *
- * - `ci.outcomes` { branch? }: those standings, the workspace's branch unless asked of another. What the table of
- *   features and tests reads (features-view.tsx), each standing joined to the test file it's of (`fileOf`).
+ * - `ci.outcomes` { branch? }: those standings, the workspace's branch unless asked of another (none, and `origin` false,
+ *   for a workspace with no github.com origin). What the table of features and tests reads (features-view.tsx), each
+ *   standing joined to the test file it's of (`fileOf`).
  *
  * A finished job's tests are kept here (`.silo/local/ci/outcomes.json`, this machine's: a finished log never changes), so
  * only runs since are asked of GitHub again. A workflow whose latest QUIET runs' logs report no tests (a deploy's) isn't
@@ -210,7 +211,8 @@ export function installCiOutcomes(vscode: typeof vscodeApi, hub: Hub, log: Obser
 		const repository = /github\.com\/(.+)\.git$/u.exec(await engine.githubRemote() ?? "")?.[1];
 
 		if (repository === undefined) {
-			return { "standings": [], "runs": 0, "refused": "the workspace has no github.com origin: CI's runs are its GitHub Actions'" };
+			// (no CI to speak of: nothing said, rather than a line above the table in every workspace that isn't GitHub's)
+			return { "standings": [], "runs": 0, "origin": false };
 		}
 
 		const on = typeof branch === "string" && branch !== ""

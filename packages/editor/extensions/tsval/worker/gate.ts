@@ -16,6 +16,7 @@ import { capabilityStandins, standinCapability, givenAs } from "../canary";
 import { EXITED, stdin } from "./process";
 import { guestConsole, guestStream, placeOf } from "./session";
 import { post, state } from "./state";
+import { testsEffects } from "./tests";
 import { tellReplayed, tellSkipped } from "./values";
 
 /** The run's effects (the run contract's `Effect`): each gated call it made, was denied, skipped or was given, by its
@@ -25,8 +26,9 @@ const effects = new Map<string, Effect>();
 let tallying = false;
 
 /** A gated call, counted among the run's effects — a package's (`pkg`, its name@version) apart from the program's — with
- *  how it was decided: within the package's baseline, by the policy, or at the call (the person's answer). */
-export function tally(capability: string, resource: string, how: Effect["how"], pkg?: string, decided?: Effect["decided"]): void {
+ *  how it was decided: within the package's baseline, by the policy, or at the call (the person's answer). And among each
+ *  running test's; only theirs (`ofRun` false) for a call the editor keeps among the run's itself. */
+export function tally(capability: string, resource: string, how: Effect["how"], pkg?: string, decided?: Effect["decided"], ofRun = true): void {
 	// (a package's call is an effect of each of the program's calls it's in: the program's own are told at their gate)
 	if (pkg !== undefined) {
 		state.evaluating?.impure("effect", capability);
@@ -37,12 +39,14 @@ export function tally(capability: string, resource: string, how: Effect["how"], 
 	}
 
 	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}\0${decided ?? ""}`;
-	const known = effects.get(key);
+	const effect = (): Effect => ({ "capability": capability, "resource": resource, "how": how, "calls": 0, ...pkg === undefined ? {} : { "package": pkg }, ...decided === undefined ? {} : { "decided": decided } });
 
-	if (known === undefined) {
-		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": 1, ...pkg === undefined ? {} : { "package": pkg }, ...decided === undefined ? {} : { "decided": decided } });
-	} else {
+	// (the run's, and each test's going on as it's made: tests.ts)
+	for (const tallied of [...ofRun ? [effects] : [], ...testsEffects()]) {
+		const known = tallied.get(key) ?? effect();
+
 		known.calls += 1;
+		tallied.set(key, known);
 	}
 }
 
@@ -427,12 +431,12 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		// own layer, which the editor never sees)
 		if (intoLayer) {
 			tally(tagged.capability, resource, "made", undefined, "layer");
-		} else if (!(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg]))) {
-			tally(tagged.capability, resource, "made", undefined, decided);
+		} else {
+			tally(tagged.capability, resource, "made", undefined, decided, !(programFs !== undefined && editorKeeps(tagged.capability, made[tagged.resourceArg])));
 		}
 
-		if (landing !== undefined && !(programFs !== undefined && editorKeeps(landing.capability, made[1]))) {
-			tally(landing.capability, landing.resource, "made", undefined, decided);
+		if (landing !== undefined) {
+			tally(landing.capability, landing.resource, "made", undefined, decided, !(programFs !== undefined && editorKeeps(landing.capability, made[1])));
 		}
 
 		// (what a layer gave back isn't what the call returns for real)

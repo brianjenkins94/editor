@@ -132,8 +132,8 @@ export interface FunctionRun {
 	"unseen"?: string;
 }
 
-/** One test a run ran: its suites' and its own titles, how it came out (and, failed, what it threw), and the
- *  statements it ran, in each file of the program's — while it ran, its hooks and subtests included. */
+/** One test a run ran: its suites' and its own titles, how it came out (and, failed, what it threw), the gated calls it
+ *  made, and the statements it ran, in each file of the program's — while it ran, its hooks and subtests included. */
 export interface TestReport {
 	"titles": string[];
 	"outcome": "pass" | "fail" | "skip" | "todo";
@@ -145,6 +145,8 @@ export interface TestReport {
 	/** How many statements it ran (the machine's statement clock, as it went on): its work, which what ran beside it
 	 *  doesn't change, as it does its time. */
 	"statements"?: number;
+	/** The gated calls it made while it ran (its hooks' and subtests' too), as the run's `effects` are told. */
+	"effects"?: Effect[];
 	"files": { "file": string; "statements": [[number, number], [number, number]][] }[];
 }
 

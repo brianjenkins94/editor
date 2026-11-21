@@ -931,7 +931,7 @@
     "status": "active",
     "why": "the user wants to see the test suite and its coverage whole, by feature, and from there work out which tests can share an editor and run in parallel; the design's list view (silo README, *Tests by feature, in your face*)",
     "since": "2026-11-04",
-    "what": "A table in the panel of the ledger's features with their test files under them: each file's kind, whether it can't run in parallel and why, its last run's effects, how much code it reaches and how much of that only it does, whether code it ran has changed since, when it last passed and failed, how long it typically takes, how its tests have come out in CI on the branch (failing, how many runs green, which flaked: GitHub's runs and logs, read as the view opens), and a button that runs it.",
+    "what": "A table in the panel of the ledger's features with their test files under them, each opening to its tests and what each did (its effects): each file's kind, whether it can't run in parallel and why, its last run's effects, how much code it reaches and how much of that only it does, whether code it ran has changed since, when it last passed and failed, how long it typically takes, how its tests have come out in CI on the branch (failing, how many runs green, which flaked: GitHub's runs and logs, read as the view opens), and a button that runs it.",
     "docs": "packages/silo/README.md, *Tests by feature, in your face*",
     "ways": [
       "command|editor.features.show",
