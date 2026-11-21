@@ -1,7 +1,9 @@
 /** @jsxImportSource preact */
 /**
  * Features and tests (packages/silo/README.md, *Tests by feature, in your face*), a table in the panel: each feature of the
- * ledger, with its test files under it, each opening to its tests (each with its own effects). A file's row says what kind
+ * ledger, with its test files under it, each opening to its tests (each with its own effects). A feature's row says how
+ * much of its own code (what its `paths` hold) the tests here ran, by statements, and which of its files none loaded
+ * (test-runs.ts, `tests.coverage`). A file's row says what kind
  * of test it is, whether it can't run beside the others and why, the effects its last run had, how much code it reaches and
  * how much of that only it does, when it last passed and failed, how long it typically takes (and which of its tests last
  * ran slower than they typically do, by more than `run.tests.slowerBy`), whether code it ran has changed since (the lines it ran: test-runs.ts `selectionOf`), how it
@@ -14,7 +16,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
-import type { LedgerEntry } from "@brianjenkins94/util/silo/ledger";
+import type { Ledger, LedgerEntry } from "@brianjenkins94/util/silo/ledger";
 import type { TestStanding } from "@brianjenkins94/util/silo/outcomes";
 import type { JSX } from "preact";
 import type * as vscodeApi from "vscode";
@@ -22,7 +24,7 @@ import type { Contention, Kind, RunRecord, Slower, Why } from "./test-runs";
 import { registerCustomView, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
-import { parseLedger } from "@brianjenkins94/util/silo/ledger";
+import { isOwnedCode, ownersOf, parseLedger } from "@brianjenkins94/util/silo/ledger";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { featuresViewStyles } from "theme/styles/features-view";
@@ -61,6 +63,52 @@ interface Model {
 	"titles": Map<string, Set<string>>;
 	/** How each file's tests have come out in CI (`ci.outcomes`), how many runs that's over, or why it couldn't be read. */
 	"ci": { "byFile": Map<string, TestStanding[]>; "runs": number; "refused"?: string };
+	/** How much of each feature's own code the tests here ran: its statements, how many ran, and its code files no test's
+	 *  last run loaded. */
+	"coverage": Map<string, FeatureCoverage>;
+}
+
+/** How much of a feature's own code the tests here ran (`coverageByFeature`). */
+interface FeatureCoverage { "statements": number; "ran": number; "unloaded": string[] }
+
+/** Each feature's coverage: the statements of its code files (what its `paths` hold, by the ledger's owners) that the
+ *  tests here ran, of those their runs loaded, and the files none loaded. */
+function coverageByFeature(ledger: Ledger, code: string[], ofFile: Record<string, { "statements": number; "ran": number }>): Map<string, FeatureCoverage> {
+	const byFeature = new Map<string, FeatureCoverage>();
+
+	for (const file of code) {
+		for (const owner of ownersOf(ledger, file)) {
+			const its = byFeature.get(owner) ?? { "statements": 0, "ran": 0, "unloaded": [] };
+			const counted = ofFile[file];
+
+			if (counted === undefined) {
+				its.unloaded.push(file);
+			} else {
+				its.statements += counted.statements;
+				its.ran += counted.ran;
+			}
+
+			byFeature.set(owner, its);
+		}
+	}
+
+	return byFeature;
+}
+
+/** A feature's coverage, said: what share of its loaded code ran, and the files no test loads (named in its title). */
+function Covered({ coverage }: { "coverage": FeatureCoverage | undefined }): JSX.Element | null {
+	if (coverage === undefined) {
+		return null;
+	}
+
+	const { statements, ran, unloaded } = coverage;
+
+	return (
+		<span class="wa-cluster wa-gap-3xs">
+			{statements === 0 ? null : <span title={`${String(ran)} of the ${String(statements)} statements in its code that tests here loaded ran, over each test file's last run.`}>{`${String(Math.floor((ran / statements) * 100))}% of its code run`}</span>}
+			{unloaded.length === 0 ? null : <wa-badge appearance="outlined" variant="warning" title={unloaded.join("\n")}>{`${String(unloaded.length)} ${unloaded.length === 1 ? "file" : "files"} no test loads`}</wa-badge>}
+		</span>
+	);
 }
 
 const KIND_TITLE: Record<Kind, string> = {
@@ -263,6 +311,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										{entry.status === "active" ? null : <wa-badge appearance="outlined" variant="neutral">{entry.status}</wa-badge>}
 										<span>{files.length === 0 ? "no tests" : `${String(files.length)} ${files.length === 1 ? "file" : "files"}`}</span>
 										{failing === 0 ? null : <wa-badge variant="danger">{`${String(failing)} failing`}</wa-badge>}
+										<Covered coverage={model.coverage.get(name)} />
 									</span>
 								</td>
 								<td />
@@ -345,7 +394,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	const ledgerUri = vscode.Uri.file(`${ROOT}/${ledgerPath()}`);
 	const approved: string[] = [];
 	const running = new Set<string>();
-	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "unchecked": { "not run": [], "lines not run": [], "config": [] }, "slowerBy": 25, "titles": new Map(), "ci": { "byFile": new Map(), "runs": 0 } };
+	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "unchecked": { "not run": [], "lines not run": [], "config": [] }, "slowerBy": 25, "titles": new Map(), "ci": { "byFile": new Map(), "runs": 0 }, "coverage": new Map() };
 	const redraws = new Set<() => void>();
 	const redraw = (): void => {
 		for (const each of redraws) {
@@ -385,19 +434,23 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 
 	/** The ledger, what kind each of its tests is, and the runs kept, read again. */
 	const read = async (): Promise<void> => log.span("editor.workbench.features-view.read", { "path": ledgerPath() }, async (span) => {
-		const features = Object.entries(parseLedger(await textOf(ledgerUri))).toSorted(([one], [other]) => one.localeCompare(other));
+		const ledger = parseLedger(await textOf(ledgerUri));
+		const features = Object.entries(ledger).toSorted(([one], [other]) => one.localeCompare(other));
 		const files = new Map(await Promise.all(features.map(async ([name, entry]): Promise<[string, string[]]> => [name, [...new Set((await Promise.all((entry.tests ?? []).map(filesIn))).flat())]])));
 		const texts = new Map(await Promise.all([...new Set([...files.values()].flat())].map(async (file): Promise<[string, string]> => [file, await textOf(vscode.Uri.file(`${ROOT}/${file}`)) ?? ""])));
 		const kinds = new Map([...texts].map(([file, text]): [string, Kind] => [file, kindOf(text)]));
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 
 		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
+		const { coverage } = await rpc.request("tests.coverage", {}, { "timeoutMs": 60_000 }) as { "coverage": Record<string, { "statements": number; "ran": number }> };
+		// (the workspace's code a feature could own: not a test, nothing installed or built)
+		const code = (await vscode.workspace.findFiles("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", "**/node_modules/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isOwnedCode(path) && !isTestFile(path));
 		const { "tests": affected, why } = await rpc.request("tests.affected", { "glance": true }, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
 		const changesThat = (reason: Why): string[] => why.filter((each) => each.why === reason).map((each) => each.path);
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci };
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci, "coverage": coverageByFeature(ledger, code, coverage) };
 		model.ci = { ...model.ci, "byFile": joined(standings) };
-		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length });
+		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length, "files": code.length });
 		redraw();
 	});
 

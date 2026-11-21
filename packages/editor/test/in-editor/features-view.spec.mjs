@@ -12,7 +12,8 @@ const unit = (body) => `import assert from "node:assert/strict";\nimport * as fs
 const LEDGER = {
 	"Adding": entry("Adds.", ["add.test.mjs"]),
 	"Adding too": entry("Adds, again.", ["again.test.mjs"]),
-	"Multiplying": entry("Multiplies.", ["times.test.mjs"]),
+	// (math.mjs its code: how much of it the tests here ran)
+	"Multiplying": { ...entry("Multiplies.", ["times.test.mjs"]), "paths": ["math.mjs"] },
 	"Breaking": entry("Fails on purpose.", ["break.test.mjs"]),
 	"Not parsing": entry("A test file with a syntax error.", ["broken.test.mjs"]),
 	"Nothing yet": entry("Has no tests."),
@@ -62,10 +63,16 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await expect(row("suite.mjs").locator("wa-button")).toHaveCount(0);
 	await expect(row("add.test.mjs").locator("wa-badge")).toHaveCount(0);
 
+	// A feature's own code that no test has loaded says so.
+	await expect(row("Multiplying")).toContainText("1 file no test loads");
+
 	// Run: when it passed, and how long.
 	await run("add.test.mjs");
 	await expect(row("add.test.mjs").locator("wa-relative-time")).toHaveCount(1, { "timeout": 60_000 });
 	await expect(row("add.test.mjs")).not.toContainText("not run");
+	// (and the code it ran, of a feature's: add's half of math.mjs, not times')
+	await expect(row("Multiplying")).toContainText("50% of its code run", { "timeout": 30_000 });
+	await expect(row("Multiplying")).not.toContainText("no test loads");
 
 	// One that fails says so on its feature, and when; opened, each test.
 	await run("break.test.mjs");
@@ -83,6 +90,8 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	// How much each reaches, and how much only it does.
 	await run("times.test.mjs");
 	await expect(row("times.test.mjs")).toContainText(/\d+ lines · \d+ only here/u, { "timeout": 60_000 });
+	// (times' half of math.mjs too, now: all of it, counted over each test file's last run)
+	await expect(row("Multiplying")).toContainText("100% of its code run", { "timeout": 30_000 });
 	await run("again.test.mjs");
 	await expect(row("again.test.mjs")).toContainText("nothing only here", { "timeout": 60_000 });
 	await expect(row("add.test.mjs")).toContainText("nothing only here");

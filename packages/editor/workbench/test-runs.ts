@@ -27,10 +27,12 @@
  *   So a run that's slow, stuck before a file's clock starts, or in a tab that went away reads as that to an agent,
  *   rather than as its tool call never coming back.
  * - `tests.reach`: what each test last ran, by file and line, kept here (`.silo/local/reach/`, this machine's).
+ * - `tests.coverage`: how much of each code file the tests here ran, by statements (`coverageOf`), from what each test
+ *   file's last run loaded, kept here (`.silo/local/coverage/`, this machine's).
  * - `tests.history`: the runs kept here (`.silo/local/runs.jsonl`, this machine's): each file's run, when, how long, each
  *   test's outcome and time, and what it did to the world (its effects, the run's and each test's). What the table of features and tests reads.
  */
-import type { Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import type { GitReader } from "./git-service";
@@ -55,6 +57,7 @@ const ANSWER_MS = 50_000;
 /** Where runs are kept, and how many of each file's; and what each test last ran, by its file. */
 const HISTORY = ".silo/local/runs.jsonl";
 const REACH = ".silo/local/reach";
+const COVERAGE = ".silo/local/coverage";
 const KEPT_RUNS = 30;
 
 /** Runs kept to be asked about by id: the latest that have ended, and any still going. */
@@ -154,6 +157,45 @@ export function slowerOf(earlier: RunRecord[], id: string, latest: { "ms"?: numb
 	const by = Math.round((compared.now / compared.typical - 1) * 100);
 
 	return by > percent ? { "by": by, "measure": compared.measure, "typical": compared.typical } : undefined;
+}
+
+/** A code file's statements as one test file's run saw them, each by where it starts: those that ran, and those that
+ *  didn't. */
+export interface Statements { "ran": [number, number][]; "not": [number, number][] }
+
+/** What a test file's last run kept of the code it loaded (`.silo/local/coverage/<file>.json`): when, and each code
+ *  file's statements. */
+export interface CoverageKept { "at": string; "files": Record<string, Statements> }
+
+/** Each code file a run loaded (its `coverage` event: the entry's and every other's), its statements, ran or not: not a
+ *  test's own, nor what's installed. */
+export function statementsOf(event: CoverageEvent): Record<string, Statements> {
+	return Object.fromEntries([event, ...event.files ?? []].map((loaded) => [loaded.file.replace(/^\/workspace\//u, ""), loaded] as const).filter(([file]) => CODE.test(file) && !file.includes("node_modules/") && !isTestFile(file)).map(([file, loaded]) => [file, {
+		"ran": loaded.statements.filter((statement) => statement.count > 0).map((statement) => statement.start),
+		"not": loaded.statements.filter((statement) => statement.count === 0).map((statement) => statement.start)
+	}]));
+}
+
+/**
+ * How much of each code file the tests here ran, over every test file's last run: its statements as the latest run that
+ * loaded it saw them (an older one's may be of a text since edited), and how many of those any run ran.
+ */
+export function coverageOf(kept: CoverageKept[]): Map<string, { "statements": number; "ran": number }> {
+	const latest = new Map<string, { "at": string; "all": Set<string> }>();
+	const ran = new Map<string, Set<string>>();
+	const key = ([line, character]: [number, number]): string => `${String(line)}:${String(character)}`;
+
+	for (const { at, files } of kept) {
+		for (const [file, { "ran": its, not }] of Object.entries(files)) {
+			if ((latest.get(file)?.at ?? "") < at) {
+				latest.set(file, { "at": at, "all": new Set([...its, ...not].map(key)) });
+			}
+
+			ran.set(file, new Set([...ran.get(file) ?? [], ...its.map(key)]));
+		}
+	}
+
+	return new Map([...latest].map(([file, { all }]) => [file, { "statements": all.size, "ran": [...ran.get(file) ?? []].filter((each) => all.has(each)).length }]));
 }
 
 /** What one test file touches that another does too, so the two can't run at once: one writes what the other reads or
@@ -370,24 +412,26 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
 	/** What each test last ran: each code file's lines, by the test's id. */
-	const readReach = async (): Promise<Record<string, Record<string, [number, number][]>>> => {
-		const reach: Record<string, Record<string, [number, number][]>> = {};
-		const walk = async (folder: vscodeApi.Uri): Promise<void> => {
-			for (const [name, type] of await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscodeApi.FileType][])) {
-				const uri = vscode.Uri.joinPath(folder, name);
+	/** Every JSON file kept under `folder`, read. */
+	const keptIn = async (folder: string): Promise<unknown[]> => {
+		const found: unknown[] = [];
+		const walk = async (uri: vscodeApi.Uri): Promise<void> => {
+			for (const [name, type] of await Promise.resolve(vscode.workspace.fs.readDirectory(uri)).catch(() => [] as [string, vscodeApi.FileType][])) {
+				const each = vscode.Uri.joinPath(uri, name);
 
 				if (type === vscode.FileType.Directory) {
-					await walk(uri);
+					await walk(each);
 				} else if (name.endsWith(".json")) {
-					Object.assign(reach, JSON.parse(decoder.decode(await vscode.workspace.fs.readFile(uri))));
+					found.push(JSON.parse(decoder.decode(await vscode.workspace.fs.readFile(each))));
 				}
 			}
 		};
 
-		await walk(vscode.Uri.file(`${ROOT}/${REACH}`));
+		await walk(vscode.Uri.file(`${ROOT}/${folder}`));
 
-		return reach;
+		return found;
 	};
+	const readReach = async (): Promise<Record<string, Record<string, [number, number][]>>> => Object.assign({}, ...await keptIn(REACH)) as Record<string, Record<string, [number, number][]>>;
 
 	/** Each test-named file's kind (kindOf), read once, and again once it's changed. */
 	const kindsKnown = new Map<string, Kind>();
@@ -487,10 +531,17 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 	serve(hub, "tests.reach", async () => ({ "reach": await readReach() }));
 
+	/** What `file`'s run loaded of the code, its statements ran and not. A file's run replaces its own. */
+	const keepCoverage = async (file: string, files: Record<string, Statements>): Promise<void> => {
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(`${ROOT}/${COVERAGE}/${file}.json`), new TextEncoder().encode(JSON.stringify({ "at": new Date().toISOString(), "files": files } satisfies CoverageKept)));
+	};
+
+	serve(hub, "tests.coverage", async () => ({ "coverage": Object.fromEntries(coverageOf(await keptIn(COVERAGE) as CoverageKept[])) }));
+
 	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A
 	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). One that
 	 *  does nothing for STALL_MS ends too (`stalled`: where it was). */
-	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "asked"?: Asked; "stalled"?: string }> => {
+	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "statements"?: Record<string, Statements>; "asked"?: Asked; "stalled"?: string }> => {
 		const controller = new AbortController();
 		const stop = (): void => {
 			controller.abort();
@@ -502,6 +553,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		// file; a stall or a question stops this file alone)
 		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stopAll);
 		let reported: TestsEvent | undefined;
+		let covered: CoverageEvent | undefined;
 		let effects: Effect[] = [];
 		let asked: Asked | undefined;
 		let stalled: string | undefined;
@@ -551,6 +603,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				({ effects } = event.body as { "effects": Effect[] });
 			} else if (event.event === "tests") {
 				reported = event.body as TestsEvent;
+			} else if (event.event === "coverage") {
+				covered = event.body as CoverageEvent;
 			} else if (event.event === "ask") {
 				const { line, callee, capability, resource, resolved, "file": where = `${ROOT}/${file}` } = event.body as { "line": number; "callee": string; "capability": string; "resource": string; "resolved"?: boolean; "file"?: string };
 				// (a path not known before its line runs — `path.join(dir, name)` — is asked about as the test file's: keyed by
@@ -591,7 +645,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			effects = [...effects, ...kept];
 
-			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "effects": effects, "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
+			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "effects": effects, "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...covered === undefined ? {} : { "statements": statementsOf(covered) }, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
 		} finally {
 			clearInterval(watching);
 			starting.dispose();
@@ -663,6 +717,10 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			const percent = vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25);
 
 			await keepReach(file, result.tests);
+
+			if (result.statements !== undefined) {
+				await keepCoverage(file, result.statements);
+			}
 			await keep({
 				"file": file,
 				"at": new Date().toISOString(),

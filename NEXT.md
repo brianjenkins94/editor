@@ -74,11 +74,9 @@ How it's kept:
      unit tests across the repository (measured 2026-11-04, 124 files), what holds the rest in the debugger: the Worker
      runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
      (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
-   - **What reintroduced features left for later**: Features and tests without coverage (its filter came 2026-11-20;
-     each test's own effects 2026-11-21, the debugger's gate tallying a call for the tests running as it's made; CI's outcomes 2026-11-21: each file's tests' last verdicts, runs green and flakes on the branch,
-     read from GitHub's logs through the sign-in, workbench/ci-outcomes.ts — 963 of this repository's 2,694 CI tests
-     join a file the ledger names, the rest's titles worked out as they run or shared by two files) (`touched` and
-     `resting` are item 3's); *Capabilities confirmed by runs* without its static half
+   - **What reintroduced features left for later**: Features and tests' CI column joins 963 of this repository's 2,694
+     CI tests to a file the ledger names (workbench/ci-outcomes.ts), the rest's titles worked out as they run or shared
+     by two files (`touched` and `resting` are item 3's); *Capabilities confirmed by runs* without its static half
      (whether the code could still make the call: a sweep of the project), the baseline's join, or capabilities by
      feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin.
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
@@ -222,6 +220,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `count`; `.replay`), and test/in-editor.mjs prints a failing test's error as it fails: the next miss says which.
   A hover that didn't come once (cosmetic.spec's on CI, ef97772b; pane-views.spec's in a full run here) is hovered
   again from elsewhere now, as a person would (in-editor/editor.mjs, `hoverUntil`); why it didn't come isn't known.
+- **source-control.spec's commit didn't land in a slow full run** (here, 2026-11-21, 307 s against ~220; alone, it
+  passed): after Ctrl+Enter its screenshot showed the message box emptied and all three files staged, none committed
+  within 60 s, the page at 1.72 GB. Staged and the message taken, so the commit itself was slow or dropped.
 
 ## Decisions
 

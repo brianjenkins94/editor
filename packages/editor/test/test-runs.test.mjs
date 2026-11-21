@@ -3,12 +3,13 @@
  * counted, against the median of the earlier runs it passed in; else by its time, once there are enough runs to go by.
  * And which tests a change selects (`selectionOf`, `changedLines`): by the lines it changed and what each test last ran,
  * and why each changed file selected what it did. And which test files can't run at once (`contentionsOf`): one writes
- * what another reads or writes, over every run kept, said by the tests that did it.
+ * what another reads or writes, over every run kept, said by the tests that did it. And how much of each code file the
+ * tests ran (`statementsOf`, `coverageOf`): by statements, over each test file's last run.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { changedLines, contentionsOf, kindOf, selectionOf, slowerOf } from "../workbench/test-runs.ts";
+import { changedLines, contentionsOf, coverageOf, kindOf, selectionOf, slowerOf, statementsOf } from "../workbench/test-runs.ts";
 
 const ID = "a.test.mjs › adds";
 
@@ -152,4 +153,33 @@ test("contentions: a write the world never saw — denied, given back from a rec
 	]);
 
 	assert.equal(contentions.size, 0);
+});
+
+/** A statement at `line` (from 0) that ran `count` times, as a coverage event has it. */
+const statement = (line, count) => ({ "start": [line, 1], "end": [line, 9], "count": count });
+
+test("a run's statements: each code file it loaded, ran and not — not the test's own, nor what's installed", () => {
+	assert.deepEqual(statementsOf({
+		"file": "/workspace/a.test.mjs",
+		"statements": [statement(0, 1)],
+		"sites": [],
+		"files": [
+			{ "file": "/workspace/math.mjs", "statements": [statement(0, 1), statement(1, 2), statement(4, 0)], "sites": [] },
+			{ "file": "/workspace/node_modules/x/index.js", "statements": [statement(0, 1)], "sites": [] },
+			{ "file": "/workspace/data.json", "statements": [statement(0, 1)], "sites": [] }
+		]
+	}), { "math.mjs": { "ran": [[0, 1], [1, 1]], "not": [[4, 1]] } });
+});
+
+test("coverage: a statement any test file's run ran, of a code file's statements as its latest run saw them", () => {
+	const coverage = coverageOf([
+		{ "at": "2026-11-21T10:00:00Z", "files": { "math.mjs": { "ran": [[0, 1], [1, 1]], "not": [[4, 1], [5, 1]] } } },
+		// (later, math.mjs edited: what the earlier run ran at a place that's no longer a statement doesn't count)
+		{ "at": "2026-11-21T11:00:00Z", "files": { "math.mjs": { "ran": [[4, 1]], "not": [[0, 1], [6, 1]] }, "other.mjs": { "ran": [], "not": [[0, 1]] } } }
+	]);
+
+	assert.deepEqual(Object.fromEntries(coverage), {
+		"math.mjs": { "statements": 3, "ran": 2 },
+		"other.mjs": { "statements": 1, "ran": 0 }
+	});
 });
