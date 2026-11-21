@@ -35,8 +35,10 @@
       "steps": [
         # The commit cd shipped to Pages, not whatever main is by now (a manual run: main's head).
         { "uses": "actions/checkout@v4", "with": { "ref": "${{ github.event.workflow_run.head_sha || github.sha }}" } },
-        # Only what cd already shipped: a manual run of a commit cd hasn't passed stops here.
+        # Only what cd already shipped: a manual run of a commit cd hasn't passed stops here. (Not asked after cd's own
+        # success: GitHub's list of runs by commit lags the event that started this one, and said no 14 s after it.)
         {
+          "if": "${{ github.event_name == 'workflow_dispatch' }}",
           "run": "test \"$(gh run list --workflow cd --commit \"$(git rev-parse HEAD)\" --status success --json databaseId --jq length)\" -gt 0 || { echo \"cd hasn't succeeded for $(git rev-parse HEAD)\"; exit 1; }",
           "env": { "GH_TOKEN": "${{ github.token }}" }
         },
