@@ -40,7 +40,9 @@ const files = {
 	"view.spec.mjs": "import { test } from \"@playwright/test\";\n",
 	"one.test.mjs": unit(WRITES),
 	"two.test.mjs": unit(WRITES),
-	"aloud.mjs": "const said = 1 + 1;\nconsole.log(\"said \" + said);\n"
+	"aloud.mjs": "const said = 1 + 1;\nconsole.log(\"said \" + said);\n",
+	// (code that could make the call the unused rule allows, though no test reaches it)
+	"asks.mjs": "export async function ask() {\n\treturn fetch(\"https://nobody.example/question\");\n}\n"
 };
 
 test("each feature's tests, what kind they are, run from there, how they came out, and which can't run in parallel", async ({ page }) => {
@@ -138,7 +140,8 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await run("grow.test.mjs");
 	await expect(row("grow.test.mjs").locator("wa-badge", { "hasText": "1 new" })).toHaveCount(1, { "timeout": 60_000 });
 
-	// And an allow rule no run has used is a problem, on the rule; one a run has used isn't. A person takes it out.
+	// And an allow rule no run has used is a problem, on the rule, saying which code could still make the call; one a run has
+	// used isn't. A person takes it out.
 	await runCommand(workbench, "View: Focus Problems");
 	// (filtered to it: the list draws only the rows it has room for)
 	await workbench.locator(".viewpane-filter input").fill("No test run");
@@ -146,6 +149,8 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	const unused = workbench.locator(".markers-panel .monaco-list-row", { "hasText": "No test run has used this allow rule" });
 
 	await expect(unused).toHaveCount(1, { "timeout": 30_000 });
+	// (and whether the code could still make the call: here it could, untested)
+	await expect(unused).toContainText("but asks.mjs can make the call");
 	await unused.dblclick();
 	await codeOf(workbench).press("ControlOrMeta+.");
 	await workbench.locator(".action-widget .action-item, .action-widget .monaco-list-row", { "hasText": "Take this rule out" }).first().click({ "timeout": 15_000 });

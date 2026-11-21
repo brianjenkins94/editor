@@ -383,7 +383,7 @@
     "status": "active",
     "why": "the user: continuously re-confirm that code uses a capability rather than letting it grow but never shrink (2026-11-04)",
     "since": "2026-11-04",
-    "what": "An allow rule no kept test run has used is a problem on the rule, with a quick fix that takes it out; a test's row in the table says what it newly uses, or has stopped using, against its run before.",
+    "what": "An allow rule no kept test run has used is a problem on the rule, with a quick fix that takes it out, saying whether any of the workspace's own code could still make the call (each file's capabilities as its text says) and which; a test's row in the table says what it newly uses, or has stopped using, against its run before.",
     "docs": "packages/silo/README.md, *Each dependency, seen four ways*",
     "ways": [
       "code actions provider||workbench/capability-confirm.ts",
@@ -394,6 +394,7 @@
       "packages/editor/workbench/capability-confirm.ts"
     ],
     "tests": [
+      "packages/editor/test/capability-confirm.test.mjs",
       "packages/editor/test/in-editor/features-view.spec.mjs"
     ]
   },

@@ -74,9 +74,9 @@ How it's kept:
      unit tests across the repository (measured 2026-11-04, 124 files), what holds the rest in the debugger: the Worker
      runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
      (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
-   - **What reintroduced features left for later**: *Capabilities confirmed by runs* without its static half
-     (whether the code could still make the call: a sweep of the project), the baseline's join, or capabilities by
-     feature; *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin.
+   - **What reintroduced features left for later**: *Capabilities confirmed by runs* without the baseline's join (a
+     rule only a dependency's call needs reads as one none of the code can make), or capabilities by feature;
+     *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin.
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
 3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
    what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is

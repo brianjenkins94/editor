@@ -4,8 +4,10 @@
  * (packages/silo/README.md: "The join allows what no run used"). It's a person's to remove: code may need it where no test goes,
  * an error's path, say. Runs only say what ran, so a rule about anything but a call's capability and resource isn't judged.
  *
- * What a run used comes from its record (test-runs.ts), read again as each ends. The other half, whether the code could still
- * make the call at all, comes back with the static analysis (*Capability findings in the code*).
+ * What a run used comes from its record (test-runs.ts), read again as each ends. And whether the code could still make the
+ * call at all: what each of the workspace's code files can do (lib's `detect`, a scan of its text — a capability, never what
+ * it reaches), read once a rule goes unused. None that can, and the rule is likely left over (a dependency's call may still
+ * need it: what a package can do is the baseline's); a file that can, and it's a test that reaches it that's missing.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
@@ -13,6 +15,7 @@ import type { Policy, Predicate, Rule } from "@brianjenkins94/util/silo/policy";
 import type * as vscodeApi from "vscode";
 import type { RunRecord } from "./test-runs";
 import { createRpcClient } from "@brianjenkins94/hub";
+import { detect, refine } from "@brianjenkins94/util/silo/detect";
 import { parsePolicy, ruleMatches } from "@brianjenkins94/util/silo/policy";
 
 const ROOT = "/workspace";
@@ -44,6 +47,58 @@ export function unconfirmed(policy: Policy, history: RunRecord[]): { "rule": Rul
 	});
 }
 
+/** Whether `when` holds of a call of `capability` whose resource isn't known: true, false, or undefined for either (a row
+ *  about the resource could go both ways). */
+function holdsOf(when: Predicate, then: Rule["then"], capability: string): boolean | undefined {
+	if (!("predicates" in when)) {
+		return when.target_id === "capability"
+			? ruleMatches({ "when": when, "then": then }, { "capability": capability })
+			: undefined;
+	}
+
+	const each = when.predicates.map((predicate) => holdsOf(predicate, then, capability));
+
+	if (when.logicalType_id === "any") {
+		return each.includes(true) ? true : each.includes(undefined) ? undefined : false;
+	}
+
+	if (when.logicalType_id === "none") {
+		return each.includes(true) ? false : each.includes(undefined) ? undefined : true;
+	}
+
+	return each.includes(false) ? false : each.includes(undefined) ? undefined : true;
+}
+
+/** The code files (of `capabilities`, each one's as `detect` reads its text) that could make a call `rule` allows. */
+export function callersOf(rule: Rule, capabilities: Map<string, string[]>): string[] {
+	return [...capabilities].filter(([, can]) => can.some((capability) => holdsOf(rule.when, rule.then, capability) !== false)).map(([file]) => file).toSorted();
+}
+
+/** What a rule no run has used says, given the files whose code could make the call it allows (undefined: not read). */
+export function sayUnconfirmed(runs: number, callers: string[] | undefined): string {
+	const unused = `No test run has used this allow rule: ${String(runs)} kept since it was added`;
+
+	if (callers === undefined) {
+		return `${unused}. Take it out if the code no longer needs it.`;
+	}
+
+	return callers.length === 0
+		? `${unused}, and none of the workspace's own code can make the call. Take it out, unless a dependency's call needs it.`
+		: `${unused}, but ${callers[0]}${callers.length > 1 ? ` and ${String(callers.length - 1)} more` : ""} can make the call: a test that reaches it would confirm it.`;
+}
+
+/** Each of the workspace's code files under `root` (not node_modules, a dot-folder or a declaration file), and what its
+ *  text says it can do. */
+async function capabilitiesOf(vscode: typeof vscodeApi, root: string): Promise<Map<string, string[]>> {
+	const uris = (await vscode.workspace.findFiles("**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}", "{**/node_modules/**,**/.*/**}")).filter((uri) => !/\.d\.[cm]?ts$/u.test(uri.path));
+	const read = await Promise.all(uris.map(async (uri): Promise<[string, string[]]> => [
+		uri.path.slice(root.length + 1),
+		await Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => refine(detect(new TextDecoder().decode(bytes))), () => [])
+	]));
+
+	return new Map(read.filter(([, can]) => can.length > 0));
+}
+
 export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
 	const rpc = createRpcClient(hub);
 	const problems = vscode.languages.createDiagnosticCollection("capabilities-confirmed");
@@ -58,6 +113,8 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 	const check = async (): Promise<void> => log.span("editor.workbench.capability-confirm.check", {}, async (span) => {
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 		let count = 0;
+		// (what the code can do, read only once a rule's gone unused: every code file of the workspace)
+		let capabilities: Map<string, string[]> | undefined;
 
 		problems.clear();
 
@@ -72,19 +129,29 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 				const found = unconfirmed(parsePolicy(text), history);
 
 				count += found.length;
-				problems.set(uri, found.map(({ index, runs }) => {
+
+				if (found.length > 0) {
+					capabilities ??= await capabilitiesOf(vscode, ROOT);
+				}
+
+				const can = capabilities;
+
+				problems.set(uri, found.map(({ rule, index, runs }) => {
 					const at = document.positionAt(starts[index] ?? 0);
-					const problem = new vscode.Diagnostic(new vscode.Range(at, at.translate(0, 6)), `No test run has used this allow rule: ${String(runs)} kept since it was added. Take it out if the code no longer needs it.`, vscode.DiagnosticSeverity.Information);
+					const callers = can === undefined ? undefined : callersOf(rule, can);
+					const problem = new vscode.Diagnostic(new vscode.Range(at, at.translate(0, 6)), sayUnconfirmed(runs, callers), vscode.DiagnosticSeverity.Information);
 
 					problem.source = "capabilities";
 					problem.code = index;
+					// (each file that can, a click away)
+					problem.relatedInformation = (callers ?? []).slice(0, 20).map((file) => new vscode.DiagnosticRelatedInformation(new vscode.Location(vscode.Uri.file(`${ROOT}/${file}`), new vscode.Position(0, 0)), `can make the call: ${(can?.get(file) ?? []).filter((capability) => holdsOf(rule.when, rule.then, capability) !== false).join(", ")}`));
 
 					return problem;
 				}));
 			}
 		}
 
-		span.end({ "count": count, "runs": history.length });
+		span.end({ "count": count, "runs": history.length, ...capabilities === undefined ? {} : { "files": capabilities.size } });
 	});
 
 	vscode.languages.registerCodeActionsProvider({ "pattern": "**/.silo/{policy.json,policy/*.json}" }, {
