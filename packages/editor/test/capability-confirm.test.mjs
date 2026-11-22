@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { callersOf, sayUnconfirmed } = await import("../workbench/capability-confirm.ts");
+const { callersOf, dependenciesOf, sayUnconfirmed } = await import("../workbench/capability-confirm.ts");
 
 const is = (target, argument) => ({ "target_id": target, "operator_id": "is", "argument": argument });
 const matches = (target, argument) => ({ "target_id": target, "operator_id": "matches", "argument": argument });
@@ -29,7 +29,15 @@ test("the files that could make a call a rule allows: its capability's, whatever
 });
 
 test("what an unused rule says: none of the code can make the call, or which file can", () => {
-	assert.match(sayUnconfirmed(6, []), /^No test run has used this allow rule: 6 kept since it was added, and none of the workspace's own code can make the call/u);
+	assert.match(sayUnconfirmed(6, []), /^No test run has used this allow rule: 6 kept since it was added, and neither the workspace's own code nor its dependencies, as it uses them, can make the call\. Take it out\.$/u);
+	assert.match(sayUnconfirmed(6, [], ["react", "undici"]), /none of the workspace's own code can make the call, but react and 1 more can, as the code uses it/u);
 	assert.match(sayUnconfirmed(6, ["fetches.mjs", "other.mjs"]), /but fetches\.mjs and 1 more can make the call: a test that reaches it would confirm it\.$/u);
 	assert.match(sayUnconfirmed(6, undefined), /Take it out if the code no longer needs it\.$/u);
+});
+
+test("what each dependency can do as the code uses it: its uses' joins, across workspaces; a file of the code's own isn't one", () => {
+	const baseline = { "consumer": { ".": { "react": { "kind": "package", "caps": ["env"] }, "./local.mjs": { "kind": "file", "caps": ["net"] } }, "packages/app": { "react": { "kind": "package", "caps": ["net"] } } } };
+
+	assert.deepEqual([...dependenciesOf(baseline)], [["react", ["env", "net"]]]);
+	assert.deepEqual(dependenciesOf(undefined).size, 0);
 });

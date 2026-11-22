@@ -56,16 +56,35 @@ export function callersOf(rule: Rule, capabilities: Map<string, string[]>): stri
 	return [...capabilities].filter(([, can]) => can.some((capability) => holdsOf(rule.when, rule.then, capability) !== false)).map(([file]) => file).toSorted();
 }
 
-export function sayUnconfirmed(runs: number, callers: string[] | undefined): string {
+export function sayUnconfirmed(runs: number, callers: string[] | undefined, dependencies: string[] = []): string {
 	const unused = `No test run has used this allow rule: ${String(runs)} kept since it was added`;
+	const some = (names: string[]): string => `${names[0]!}${names.length > 1 ? ` and ${String(names.length - 1)} more` : ""}`;
 
 	if (callers === undefined) {
 		return `${unused}. Take it out if the code no longer needs it.`;
 	}
 
-	return callers.length === 0
-		? `${unused}, and none of the workspace's own code can make the call. Take it out, unless a dependency's call needs it.`
-		: `${unused}, but ${callers[0]}${callers.length > 1 ? ` and ${String(callers.length - 1)} more` : ""} can make the call: a test that reaches it would confirm it.`;
+	if (callers.length > 0) {
+		return `${unused}, but ${some(callers)} can make the call: a test that reaches it would confirm it.`;
+	}
+
+	return dependencies.length === 0
+		? `${unused}, and neither the workspace's own code nor its dependencies, as it uses them, can make the call. Take it out.`
+		: `${unused}, and none of the workspace's own code can make the call, but ${some(dependencies)} can, as the code uses it: a test that reaches that use would confirm it.`;
+}
+
+export function dependenciesOf(baseline: { "consumer"?: Record<string, Record<string, { "kind": string; "caps": string[] }>> } | undefined): Map<string, string[]> {
+	const can = new Map<string, string[]>();
+
+	for (const entries of Object.values(baseline?.consumer ?? {})) {
+		for (const [spec, entry] of Object.entries(entries)) {
+			if (entry.kind === "package") {
+				can.set(spec, [...new Set([...can.get(spec) ?? [], ...entry.caps])]);
+			}
+		}
+	}
+
+	return can;
 }
 
 const known = new Map<string, { "mtime": number; "size": number; "can": string[] }>();
@@ -137,11 +156,12 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 				}
 
 				const can = capabilities;
+				const dependencies = found.length === 0 ? new Map<string, string[]>() : dependenciesOf(JSON.parse(await textOf(vscode.Uri.file(`${ROOT}/.silo/baseline.json`)) ?? await textOf(vscode.Uri.file(`${ROOT}/.silo/local/baseline.json`)) ?? "{}") as Parameters<typeof dependenciesOf>[0]);
 
 				problems.set(uri, found.map(({ rule, index, runs }) => {
 					const at = document.positionAt(starts[index] ?? 0);
 					const callers = can === undefined ? undefined : callersOf(rule, can);
-					const problem = new vscode.Diagnostic(new vscode.Range(at, at.translate(0, 6)), sayUnconfirmed(runs, callers), vscode.DiagnosticSeverity.Information);
+					const problem = new vscode.Diagnostic(new vscode.Range(at, at.translate(0, 6)), sayUnconfirmed(runs, callers, callersOf(rule, dependencies)), vscode.DiagnosticSeverity.Information);
 
 					problem.source = "capabilities";
 					problem.code = index;
