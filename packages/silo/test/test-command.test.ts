@@ -6,11 +6,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { reportedIn, standingsByTest } from "../src/test.ts";
 
-test("silo's reporter's lines in a log, timestamps and all: each test its file first, the rest of the log left", () => {
+test("silo's reporter's lines in a log, timestamps, pnpm's prefix and all: each test its file first, the rest of the log left", () => {
 	const log = [
 		"2026-11-22T18:00:00.0000000Z ✔ adds (0.3ms)",
 		"2026-11-22T18:00:00.0000001Z silo:test {\"file\":\"packages/editor/test/add.test.mjs\",\"titles\":[\"adds\"],\"outcome\":\"pass\",\"ms\":0.3}",
-		"silo:test {\"file\":\"packages/editor/test/add.test.mjs\",\"titles\":[\"a suite\",\"fails\"],\"outcome\":\"fail\"}",
+		"2026-11-22T18:00:00.0000002Z packages/editor test: silo:test {\"file\":\"packages/editor/test/add.test.mjs\",\"titles\":[\"a suite\",\"fails\"],\"outcome\":\"fail\"}",
 		"silo:test {not json",
 		"silo:test {\"titles\":[\"no file\"],\"outcome\":\"pass\"}"
 	].join("\n");

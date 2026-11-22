@@ -22,8 +22,9 @@ import { githubRuns, standings } from "@brianjenkins94/util/silo/outcomes";
 import { filesToRun, fingerprintsOf, parseVouches, selectionText, selectTests, staticReach, testId } from "@brianjenkins94/util/silo/select";
 import { gitObjects } from "@brianjenkins94/util/silo/git-snapshots";
 
-/** What silo's reporter (./reporter.mjs) writes, a line a test. */
-const LINE = /^(?:\d{4}-\d\d-\d\dT[\d:.]+Z )?silo:test (\{.*\})\s*$/u;
+/** What silo's reporter (./reporter.mjs) writes, a line a test — after whatever a log puts first (a timestamp, pnpm's
+ *  `packages/editor test: `). */
+const LINE = /silo:test (\{.*\})\s*$/u;
 
 /** The tests silo's reporter reported in `log` (a CI job's, or a run's own output), each its file first in its titles. */
 export function reportedIn(log: string): TestOutcome[] {

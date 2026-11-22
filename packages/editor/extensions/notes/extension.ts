@@ -259,8 +259,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			const file = relative(document.uri);
 
 			return span("fromComment", { "path": file, "count": comment.to - comment.from + 1 }, async () => {
-				const after = [...lines.slice(0, comment.from), ...lines.slice(comment.to + 1)];
-				const on = comment.below - (comment.to - comment.from + 1);
+				// (a comment beside code leaves its line, less the comment; one on lines of its own, those lines)
+				const kept = comment.column === undefined ? undefined : lines[comment.from]!.slice(0, comment.column).trimEnd();
+				const after = kept === undefined ? [...lines.slice(0, comment.from), ...lines.slice(comment.to + 1)] : lines.map((each, at) => (at === comment.from ? kept : each));
+				const on = kept === undefined ? comment.below - (comment.to - comment.from + 1) : comment.from;
 				const start = after.slice(0, on).reduce((sum, each) => sum + each.length + 1, 0);
 				const code = after[on]!;
 				const answer = await annotations(vscode.commands).refer(after.join("\n"), file, [{ "start": start + (code.length - code.trimStart().length), "end": start + code.trimEnd().length }]);
@@ -283,7 +285,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				const wrote = await Promise.resolve(vscode.commands.executeCommand<string[]>("editor.git.authorsOf", file, comment.from + 1, comment.to + 1)).then((authors) => (Array.isArray(authors) ? authors : []), () => []);
 				const edit = new vscode.WorkspaceEdit();
 
-				edit.delete(document.uri, new vscode.Range(comment.from, 0, comment.to + 1, 0));
+				edit.delete(document.uri, kept === undefined ? new vscode.Range(comment.from, 0, comment.to + 1, 0) : new vscode.Range(comment.from, kept.length, comment.from, lines[comment.from]!.length));
 
 				if (!await vscode.workspace.applyEdit(edit)) {
 					return undefined;

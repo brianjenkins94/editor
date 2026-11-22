@@ -90,3 +90,14 @@ test("a `//` line inside a string isn't a comment: it stays, and the action says
 	await expect(workbench.locator(".notification-list-item", { "hasText": "That's inside a string" })).toBeVisible({ "timeout": 60_000 });
 	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("// inside a string");
 });
+
+test("a comment beside code made a note: the code stays, the comment's text beside it in the Margin", async ({ page }) => {
+	const workbench = await openEditor(page, { ...files, "beside.mjs": "export const KEPT = 10; // the oldest goes first\n" });
+
+	await openFile(workbench, "beside.mjs");
+	await top(workbench);
+	await quickFix(workbench, "Make this comment a note");
+	await expect(workbench.locator(".pane-item.tone-info", { "hasText": "the oldest goes first" })).toBeVisible({ "timeout": 60_000 });
+	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("export const KEPT = 10;");
+	await expect(workbench.locator(".editor-instance .view-lines").first()).not.toContainText("// the oldest");
+});
