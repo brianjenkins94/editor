@@ -8,7 +8,7 @@ export interface SessionState {
 	"status"?: number;
 }
 
-const RS = "\u001E"; // record separator (ASCII RS) — frames the cwd/exit-code probe; ~never appears in real shell output
+const RS = "\u001E";
 const PROBE = `\n__jbrc=$?\nprintf '${RS}%s${RS}%s${RS}' "$PWD" "$__jbrc"`;
 const PROBE_RE = new RegExp(`${RS}([^${RS}]*)${RS}([^${RS}]*)${RS}$`, "u");
 
@@ -116,7 +116,7 @@ export function statementsOf(input: string, streaming: ReadonlySet<string>): { "
 		} else if (character === "'" || character === "\"") {
 			quote = character;
 		} else if (runsWhole(input, index)) {
-			return undefined; // a subshell, a group, a command substitution, a here-document, a background job
+			return undefined;
 		} else if (then !== undefined) {
 			statements.push({ "text": input.slice(start, index), "then": then });
 			index += then.length - 1;

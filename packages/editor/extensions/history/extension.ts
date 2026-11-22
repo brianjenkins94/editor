@@ -93,7 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	async function runsSay(): Promise<void> {
 		if (latest === undefined || ran.size === 0) {
-			return; // nothing has run: nothing to say
+			return;
 		}
 
 		const { graph, ways } = latest;

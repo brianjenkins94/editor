@@ -13,7 +13,7 @@ export function ensureCrossOriginIsolated(): boolean {
 
 	navigator.serviceWorker.register(base + "coi-serviceworker.js" + (strict || switching ? "?coep=require-corp" : ""), { "type": "module" }).then((registration) => {
 		if (isolated || exhausted) {
-			return;   // isolated already (headers, or the worker), or not possible here: the worker just attaches for the resolver
+			return;
 		}
 
 		if (switching) {

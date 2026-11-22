@@ -69,7 +69,7 @@ async function siteExtensions(): Promise<string[]> {
 
 		return Array.isArray(listed) ? listed.filter((each): each is string => typeof each === "string").map((each) => new URL(each, root).href) : [];
 	} catch {
-		return []; // none, or not a list (a dev server answering with its index)
+		return [];
 	}
 }
 

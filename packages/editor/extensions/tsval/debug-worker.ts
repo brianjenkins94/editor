@@ -56,7 +56,7 @@ globalThis.addEventListener("message", (event: MessageEvent<ToWorker>): void => 
 		case "reverseContinue":
 		case "disconnect":
 			if (state.awaitAction !== undefined) {
-				state.actionTrace = trace; // continue the adapter action's trace in the step it drives
+				state.actionTrace = trace;
 				const resolve = state.awaitAction;
 
 				state.awaitAction = undefined;

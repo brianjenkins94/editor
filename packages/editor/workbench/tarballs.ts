@@ -53,7 +53,7 @@ function prefetchDependencies(name: string, packages: VersionsFile["packages"]):
 
 		seen.add(dependency);
 		queue.push(...entry.dependencies ?? []);
-		void tarball(dependency, entry.version, entry.tarball).catch(() => undefined); // (asked again when it's required)
+		void tarball(dependency, entry.version, entry.tarball).catch(() => undefined);
 	}
 }
 

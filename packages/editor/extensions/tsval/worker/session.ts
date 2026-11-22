@@ -268,7 +268,7 @@ export function formatLogArg(value: unknown): string {
 	try {
 		return JSON.stringify(value) ?? asString(value);
 	} catch {
-		return asString(value); // circular, or a BigInt
+		return asString(value);
 	}
 }
 
@@ -550,7 +550,7 @@ function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityA
 
 function onBreakpointHook(vm: Vm): void {
 	if (state.control === undefined) {
-		return; // no shared control word (shouldn't happen post-launch) — resume rather than hang
+		return;
 	}
 
 	const place = placeOf(vm);
@@ -773,7 +773,7 @@ function stopReason(base: Vm, action: ForwardAction, stop: Place | undefined): "
 
 async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext, parent: ReturnType<typeof workerLog> = workerLog()): Promise<void> {
 	state.current = base;
-	state.evaluating = base; // (a program file a package requires is evaluated on the machine running)
+	state.evaluating = base;
 	const span = trace !== undefined
 		? workerLog().continueSpan(trace, "editor.extensions.tsval.worker.session.step", { "action": action })
 		: parent.span("editor.extensions.tsval.worker.session.step", { "action": action });
@@ -919,7 +919,7 @@ async function handle(action: Action): Promise<void> {
 }
 
 async function session(initial: Vm, run: Span): Promise<void> {
-	await advanceFrom(initial, "continue", undefined, run); // run to the first breakpoint (or completion), under the run's span
+	await advanceFrom(initial, "continue", undefined, run);
 
 	while (!state.done) {
 		const action = await nextAction();

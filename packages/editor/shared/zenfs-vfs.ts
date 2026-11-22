@@ -69,12 +69,12 @@ export function attachSharedWorkspace(buffer: unknown): void {
 		return;
 	}
 
-	sharedWorkspaceBuffer = buffer; // retained so we can hand it to a spawned child worker
+	sharedWorkspaceBuffer = buffer;
 
 	if (configured) {
 		void mountSharedWorkspace(buffer);
 	} else {
-		pendingBuffer = buffer; // createZenfsVFS mounts it once configured
+		pendingBuffer = buffer;
 	}
 }
 

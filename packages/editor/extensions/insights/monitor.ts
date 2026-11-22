@@ -127,7 +127,7 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 		try {
 			fresh = await vscode.commands.executeCommand<Record<string, MetricsSample[]>>("editor.metrics.read", since);
 		} catch {
-			return; // nothing serves it (yet)
+			return;
 		}
 
 		for (const [key, points] of series) {

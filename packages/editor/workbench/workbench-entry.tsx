@@ -318,7 +318,7 @@ function maybeBoot(): void {
 			bridgeExt.getApi().then((api: unknown) => {
 				vscodeApi = api;
 				documentOpens = countDocumentOpens(api as typeof import("vscode"));
-				markApiReady(); // let a queued openProject (picker) proceed
+				markApiReady();
 				markBridgeReady();
 				markReady("api");
 				whenDebuggerUp(api as typeof import("vscode"), workbenchHub).catch((error: unknown) => {

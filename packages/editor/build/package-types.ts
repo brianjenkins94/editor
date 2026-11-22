@@ -10,9 +10,9 @@ const TYPES_VIRTUAL = "editor:types";
 const VERSIONS_VIRTUAL = "editor:versions";
 
 const DECL_SUFFIX = [".d.ts", ".d.mts", ".d.cts"];
-const PKG_DECL_CAP = 600 * 1024;                     // per package: larger .d.ts surfaces get shimmed, not baked
-const ALWAYS_SHIM = new Set(["vscode", "lucide"]);   // ambient host API / heavy value-less icon union
-const AMBIENT_FILE = `${FOLDER}/editor-ambient.d.ts`; // root project .d.ts for shims (see the note where it's written)
+const PKG_DECL_CAP = 600 * 1024;
+const ALWAYS_SHIM = new Set(["vscode", "lucide"]);
+const AMBIENT_FILE = `${FOLDER}/editor-ambient.d.ts`;
 
 function importedPackages(): string[] {
 	const roots = new Set<string>();
@@ -111,7 +111,7 @@ function typeSurface(): SnapshotFile[] {
 		const dir = path.join(nm, pkg);
 
 		if (!utilFs.existsSync(dir)) {
-			return false;   // not installed (or a bogus match) — nothing to seed
+			return false;
 		}
 
 		const seeded = seedDecls(root, pkg, dir, files);
@@ -147,7 +147,7 @@ function typeSurface(): SnapshotFile[] {
 			}
 
 			if (!ownTypes && !viaTypes) {
-				shims.push(pkg);   // ships no types and has no installed @types counterpart → ambient any
+				shims.push(pkg);
 			}
 		}
 	}

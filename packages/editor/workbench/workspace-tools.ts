@@ -390,7 +390,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			const bytes = await vscode.workspace.fs.readFile(uri);
 
 			if (bytes.byteLength > GREP_BYTES || bytes.includes(0)) {
-				return undefined; // data, or binary
+				return undefined;
 			}
 
 			return vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? decoder.decode(bytes);

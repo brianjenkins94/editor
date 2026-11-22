@@ -91,5 +91,3 @@ export function capabilityBreakLines(sourceFile: ts.SourceFile, policy: Policy):
 
 	return [...lines];
 }
-
-/** The choices at a capability stop: the run contract's (editor-api). */

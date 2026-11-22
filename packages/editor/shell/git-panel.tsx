@@ -242,7 +242,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const lineDeselect = useRef(new Map<string, Set<number>>()).current;
 	const changedCount = useRef(new Map<string, number>()).current;
 	const codehikeActive = useRef(false);
-	const msgRef = useRef<HTMLElement>(null); // wa-textarea; exposes a `value` property at runtime
+	const msgRef = useRef<HTMLElement>(null);
 
 	const fileState = (path: string): FileState["state"] => {
 		if (deselected.has(path)) {
@@ -290,7 +290,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		const [shown] = await review({ "paths": [path], "texts": true });
 
 		if (shown === undefined) {
-			hideOverlay(); // no change left to show
+			hideOverlay();
 
 			return;
 		}
@@ -305,7 +305,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		try {
 			const { mountDiff, setDiffHighlight } = await import("./git-codehike");
 
-			setDiffHighlight(null); // drop any spotlight left over from the previously-open file
+			setDiffHighlight(null);
 
 			await mountDiff(overlay.body, {
 				"docKey": path,
@@ -322,7 +322,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 						lineDeselect.set(path, new Set(dropped));
 					}
 
-					deselected.delete(path); // touching lines means the file is (partially) IN, not fully excluded
+					deselected.delete(path);
 					force();
 				},
 				"onDiscardRows": async (hunkRows) => {
@@ -441,7 +441,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	};
 
 	const pickFile = (path: string, checked: boolean): void => {
-		lineDeselect.delete(path); // a file-level toggle overrides any per-line selection
+		lineDeselect.delete(path);
 
 		if (checked) {
 			deselected.delete(path);

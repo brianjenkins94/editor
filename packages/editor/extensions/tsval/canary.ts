@@ -87,7 +87,7 @@ export function inert(): unknown {
 	return new Proxy(target, {
 		"get": (_target, property) => {
 			if (property === "then") {
-				return undefined; // not a thenable — don't let `await` adopt it
+				return undefined;
 			}
 
 			if (property === Symbol.iterator) {

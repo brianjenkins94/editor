@@ -46,7 +46,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks & { "args"?: string[] }): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
 		const runId = hooks.runId ?? crypto.randomUUID();
 
-		currentRunId = runId; // so the terminal treats it as running (routes Ctrl-C to the abort signal below)
+		currentRunId = runId;
 		let settled = false;
 
 		const offOutput = hub.subscribe(`node.out.${runId}`, (data) => {
@@ -67,7 +67,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		});
 
 		const onAbort = (): void => {
-			hub.publish("debug.stop", { "runId": runId }); // ask the ext host to stop the debug session
+			hub.publish("debug.stop", { "runId": runId });
 			finish(true, 130);
 		};
 

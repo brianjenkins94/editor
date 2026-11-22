@@ -62,7 +62,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		const key = resource.toString();
 
 		if (announced.has(key)) {
-			return; // once per resource — enough to make TS re-resolve
+			return;
 		}
 
 		announced.add(key);
@@ -156,7 +156,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 				whole.add(name);
 			})().catch((error: unknown) => {
-				prefetching.delete(name); // (asked again next time: the CDN goes on answering it a file at a time meanwhile)
+				prefetching.delete(name);
 
 				throw error;
 			}));
@@ -279,13 +279,13 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
-				return Promise.reject(notFound()); // not fetched yet — fail fast; the background fetch caches + announces, then we re-stat
+				return Promise.reject(notFound());
 			}
 
 			const statData = fileResults.get(rel);
 
 			if (statData === undefined) {
-				return Promise.reject(notFound()); // 404 at the CDN — the file genuinely doesn't exist
+				return Promise.reject(notFound());
 			}
 
 			return Promise.resolve({ "type": FileType.File, "ctime": 0, "mtime": 0, "size": statData.length });
@@ -305,7 +305,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
-				return Promise.reject(notFound()); // not fetched yet — fail fast; the background fetch will announce and we re-read
+				return Promise.reject(notFound());
 			}
 
 			const data = fileResults.get(rel);

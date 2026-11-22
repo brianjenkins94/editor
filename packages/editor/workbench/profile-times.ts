@@ -192,7 +192,7 @@ export function installProfileTimes(vscode: typeof vscodeApi, hub: Hub, runs: Ru
 		const run = typeof port === "number" ? runs.runningService((candidate) => candidate.port === port) : undefined;
 
 		if (run === undefined || port === undefined || profile === undefined) {
-			return; // a test's page, or its server has stopped since
+			return;
 		}
 
 		void log.span("editor.workbench.profile-times.keep", { "window": key ?? "", "count": profile.nodes.length }, async (span) => {

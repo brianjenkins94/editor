@@ -6,8 +6,8 @@ import { log } from "@brianjenkins94/util/logger";
 import * as ts from "typescript";
 
 const VIRTUAL = "editor:workspace";
-export const FOLDER = "/workspace";                  // the explorer root the demo files mount under
-const MAX_BYTES = 256 * 1024;                 // skip anything unexpectedly large
+export const FOLDER = "/workspace";
+const MAX_BYTES = 256 * 1024;
 
 const TEXT = new Set(["ts", "tsx", "mjs", "cjs", "js", "jsx", "json", "md", "yml", "yaml", "html", "css", "txt"]);
 
@@ -81,7 +81,7 @@ function snapshot(): SnapshotFile[] {
 	const demo = demoDir();
 
 	if (!utilFs.existsSync(demo)) {
-		return [];   // no demo yet → the workbench opens on an empty folder
+		return [];
 	}
 
 	const files: SnapshotFile[] = [];

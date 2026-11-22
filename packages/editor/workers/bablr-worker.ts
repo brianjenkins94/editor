@@ -1,4 +1,4 @@
-import "./bablr-fast-freeze"; // first: neutralizes record freezing before the BABLR bundle captures Object.freeze
+import "./bablr-fast-freeze";
 // (A comment, so sorting leaves the freeze first.)
 import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
 import { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
@@ -55,7 +55,7 @@ const database = new Promise<IDBDatabase | undefined>((resolve) => {
 			resolve(undefined);
 		});
 	} catch {
-		resolve(undefined); // no IndexedDB here: parsed every time
+		resolve(undefined);
 	}
 }).then(async (db) => {
 	if (db !== undefined) {

@@ -58,7 +58,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 
 					return { ...config, "__runId": id };
 				} catch {
-					return config; // without core, it runs all the same, unrecorded
+					return config;
 				}
 			}
 		}),

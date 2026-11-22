@@ -8,7 +8,7 @@ function host(): Window | undefined {
 	let current: Window = window;
 
 	if (mine === undefined) {
-		return undefined; // not a dev server's page
+		return undefined;
 	}
 
 	try {

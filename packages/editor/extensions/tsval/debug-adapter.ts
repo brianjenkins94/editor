@@ -519,7 +519,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private onStopped(message: Extract<WorkerEvent, { "type": "stopped" }>): void {
 		this.snapshot = message.snapshot;
 		this.lastStopAtomic = message.atomic === true;
-		this.endAction(); // the action reached a stop — close its round-trip span
+		this.endAction();
 		this.ask = message.ask;
 
 		if (message.ask !== undefined) {

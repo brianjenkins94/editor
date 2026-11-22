@@ -69,7 +69,7 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 		const placed = await store.placed(document);
 
 		if (placed === undefined) {
-			return; // edited since: a newer look follows
+			return;
 		}
 
 		const text = document.getText();

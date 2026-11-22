@@ -150,7 +150,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true, ...info.noDebug === true ? { "noDebug": true } : {} });
 
 					if (started !== true) {
-						bridgeHub.publish(`debug.declined.${info.runId}`, {}); // start failed → the terminal says so
+						bridgeHub.publish(`debug.declined.${info.runId}`, {});
 					}
 				})();
 			}) },
@@ -168,7 +168,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 
 	const attachWorkspaceBuffer = (buffer: unknown): void => {
 		if (typeof SharedArrayBuffer === "undefined" || !(buffer instanceof SharedArrayBuffer)) {
-			return; // no COI / not shared — a debug run's worker keeps its own InMemory FS
+			return;
 		}
 
 		workspace.buffer = buffer;

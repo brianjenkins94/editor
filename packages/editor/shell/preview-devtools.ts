@@ -80,7 +80,7 @@ export function installPreviewCdp(hub: Hub, frameOf: (window: { "key"?: string; 
 
 		session.catch(() => {
 			sessions.delete(page);
-		}); // didn't load: the next command tries again
+		});
 		sessions.set(page, session);
 
 		return session;
@@ -166,7 +166,7 @@ export function openDevtoolsPanel(hub: Hub, key: string, preview: HTMLIFrameElem
 
 	const toFrontend = (message: string): void => {
 		frame.contentWindow?.postMessage(message, "*");
-	}; // an opaque origin has no name to target
+	};
 
 	const start = (): void => {
 		generation += 1;

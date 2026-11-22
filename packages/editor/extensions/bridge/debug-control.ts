@@ -150,7 +150,7 @@ class Session {
 				"locals": locals
 			};
 		} catch {
-			return base; // (it went on, or ended, while it was asked)
+			return base;
 		}
 	}
 

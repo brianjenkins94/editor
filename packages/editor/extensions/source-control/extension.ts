@@ -38,7 +38,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 				return true;
 			} catch {
-				return false; // no repository yet, or the editor's git isn't up: the next change refreshes
+				return false;
 			} finally {
 				refreshing = undefined;
 			}

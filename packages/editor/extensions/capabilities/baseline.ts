@@ -237,7 +237,7 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, 
 	const versions = await readJson(vscode.Uri.joinPath(root, await keptAt(versionsPath(), there))) as VersionsFile | undefined;
 
 	if (versions === undefined) {
-		return true; // not resolved yet: its writing syncs this
+		return true;
 	}
 
 	const uri = vscode.Uri.joinPath(root, await keptAt(baselinePath(), there));

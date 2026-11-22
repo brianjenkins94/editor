@@ -49,6 +49,16 @@ test("a comment beside code: its text, on that line, from its column; one inside
 	assert.equal(commentAt(lines("const a = 1;// no space before it"), 0), undefined);
 });
 
+test("a JSX comment on lines of its own: off its braces and markers, on the element below", () => {
+	const file = lines("\t\t\t{/* Keyed: unkeyed, preact can reuse\n\t\t\t    the panel's host. */}\n\t\t\t<div key=\"a\" />");
+
+	for (const at of [0, 1]) {
+		assert.deepEqual(commentAt(file, at), { "from": 0, "to": 1, "text": "Keyed: unkeyed, preact can reuse\nthe panel's host.", "below": 2 });
+	}
+
+	assert.equal(commentAt(lines("{/* @jsx h */}\n<div />"), 0), undefined);
+});
+
 test("what stays a comment: a tool's, one beside code, one with no code below, and code itself", () => {
 	assert.equal(commentAt(lines("// eslint-disable-next-line no-console\nconsole.log(1);"), 0), undefined);
 	assert.equal(commentAt(lines("// @ts-expect-error: untyped\nimport x from \"x\";"), 0), undefined);

@@ -5,7 +5,7 @@ const REST = { "format": Array, "default": [], "positional": "rest" } as const;
 export default {
 	"name": "npm",
 	"summary": "Run package.json scripts; install adds a dependency to package.json.",
-	"streaming": true, // a script may run node or vite
+	"streaming": true,
 	"subcommands": {
 		"install": {
 			"summary": "Add packages to package.json; alone, pin the dependencies and link or unpack what the CDN can't serve.",

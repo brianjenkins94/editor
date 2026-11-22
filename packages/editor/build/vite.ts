@@ -104,7 +104,7 @@ export function vscodePlugin(): Plugin {
 		"configureServer": function(server) {
 			server.middlewares.use((req, res, next) => {
 				const [url] = (req.url ?? "").split("?");
-				const index = url.indexOf(MOUNT); // tolerate any base prefix (e.g. /editor/)
+				const index = url.indexOf(MOUNT);
 
 				if (index === -1) {
 					next();
@@ -128,7 +128,7 @@ export function vscodePlugin(): Plugin {
 
 				if (file !== undefined) {
 					res.setHeader("content-type", CONTENT_TYPES[path.extname(file)] ?? "application/octet-stream");
-					res.end(fs.readFileSync(file, { "encoding": null })); // bytes: wasm/fonts, not text
+					res.end(fs.readFileSync(file, { "encoding": null }));
 
 					return;
 				}
@@ -147,14 +147,14 @@ export function vscodePlugin(): Plugin {
 					const relative = path.relative(root, absolute).split(path.sep).join("/");
 
 					if (emitted.has(relative)) {
-						return; // workbench entry wins over component on conflict
+						return;
 					}
 
 					emitted.add(relative);
 					this.emitFile({
 						"type": "asset",
 						"fileName": path.posix.join("__vscode__", relative),
-						"source": await fs.readFile(absolute, { "encoding": null }) // bytes: wasm/fonts, not text
+						"source": await fs.readFile(absolute, { "encoding": null })
 					});
 				});
 			}

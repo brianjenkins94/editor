@@ -78,7 +78,7 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 		if (data["ready"] === true) {
 			void prefetchConfigs().then(() => {
 				if (failure !== undefined) {
-					return; // (started afresh meanwhile)
+					return;
 				}
 
 				const link = runtime.connect("eslint");

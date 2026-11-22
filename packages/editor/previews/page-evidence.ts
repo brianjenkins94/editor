@@ -189,7 +189,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 		const known = versions.get(key);
 
 		if (known !== undefined) {
-			return known.ops; // re-imported unchanged: it counts on
+			return known.ops;
 		}
 
 		const counts = new Uint32Array(table.length);

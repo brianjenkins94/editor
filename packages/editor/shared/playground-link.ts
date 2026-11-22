@@ -56,7 +56,7 @@ function classicCompilerOptions(query: URLSearchParams, javascript: boolean): Re
 		if (raw === "true" || raw === "false") {
 			options[key] = raw === "true";
 		} else if (key === "jsx" && raw === "0") {
-			delete options[key]; // JsxEmit.None: tsconfig spells it by leaving the option out
+			delete options[key];
 		} else if (ENUM_OPTIONS[key] !== undefined) {
 			options[key] = ENUM_OPTIONS[key][raw] ?? raw;
 		} else if (/^\d+$/u.test(raw)) {
@@ -143,7 +143,7 @@ export function parsePlaygroundLink(hash: string, search = ""): PlaygroundProjec
 		try {
 			return classicProject(decodeURIComponent(fragment.slice("src=".length)), query);
 		} catch {
-			return undefined; // malformed escape
+			return undefined;
 		}
 	}
 
@@ -171,7 +171,7 @@ export function playgroundLink(base: string, workspace: SharedWorkspace): { "url
 	for (const { bytes, path } of workspace.files.filter((file) => file.path.startsWith(WORKSPACE))) {
 		try {
 			if (bytes.includes(0)) {
-				throw new TypeError("binary"); // a NUL byte means binary, as git judges it
+				throw new TypeError("binary");
 			}
 
 			files[path] = decoder.decode(bytes);

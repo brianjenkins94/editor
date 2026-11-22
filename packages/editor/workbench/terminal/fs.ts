@@ -169,7 +169,7 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			try {
 				await fs.writeFile(uri(path), toBytes(content, encodingOf(options)));
 			} catch (error) {
-				throw translate(error, path); // NoPermissions on a managed config → EACCES
+				throw translate(error, path);
 			}
 		},
 
@@ -227,7 +227,7 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 				await fs.delete(uri(path), { "recursive": options?.recursive ?? false, "useTrash": false });
 			} catch (error) {
 				if (options?.force === true) {
-					return; // `rm -f` ignores a missing target
+					return;
 				}
 
 				throw translate(error, path);
@@ -246,7 +246,7 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			try {
 				await fs.rename(uri(source), uri(destination), { "overwrite": true });
 			} catch (error) {
-				throw translate(error, destination); // a managed source/target rejects (workspace-fs rename guard) → EACCES
+				throw translate(error, destination);
 			}
 		},
 
@@ -283,7 +283,7 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			return paths;
 		},
 
-		"realpath": (path: string): Promise<string> => Promise.resolve(path), // no symlink layer — the path IS the real path
+		"realpath": (path: string): Promise<string> => Promise.resolve(path),
 
 		"chmod": async (): Promise<void> => { /* permissions are the filesystem's call, not the shell's — no-op */ },
 		"utimes": async (): Promise<void> => { /* the store doesn't expose mtime writes — no-op */ },

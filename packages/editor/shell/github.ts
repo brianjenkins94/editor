@@ -91,7 +91,7 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 				throw new GitHubError(failure.status, failure.statusText, failure.body);
 			}
 
-			throw error; // a genuine network/transport failure
+			throw error;
 		}
 
 		if (!response.ok) {

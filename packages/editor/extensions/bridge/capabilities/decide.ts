@@ -42,7 +42,7 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 		const op = call.op ?? (call.method !== undefined ? FS_SYNC[call.method] ?? FS_ASYNC[call.method] ?? CAP_FS[call.method] : undefined);
 
 		if (op === undefined) {
-			return undefined; // not a gated fs method
+			return undefined;
 		}
 
 		const path = typeof arg0 === "string" ? arg0 : call.resource ?? "";
@@ -195,7 +195,7 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 
 	try {
 		await gate(request, options);
-		recordObservation(request, "allow", counted, how.decided); // fired ⇒ observed surface + this run's record
+		recordObservation(request, "allow", counted, how.decided);
 
 		return { "allow": true, "decided": how.decided };
 	} catch (error) {
@@ -204,7 +204,7 @@ export async function decideCapabilityAs(call: CapabilityCall): Promise<{ "allow
 				answers?.refused.add(answered(request.scope));
 			}
 
-			recordObservation(request, "deny", counted, how.decided); // attempt-but-blocked: recorded, not in the surface
+			recordObservation(request, "deny", counted, how.decided);
 
 			return { "allow": false, "decided": how.decided };
 		}

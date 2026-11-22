@@ -31,7 +31,7 @@ import "theme/components/checkbox";
 import "theme/components/divider";
 import "theme/components/input";
 import "theme/components/relative-time";
-import "theme/chrome"; // Web Awesome (not its native styles), our brand tokens, the system's light/dark mode
+import "theme/chrome";
 
 const FEATURES: ShellFeature[] = [
 	push,
@@ -113,11 +113,11 @@ function Shell() {
 		appAddress.searchParams.delete("instance");
 		appFrame.src = appAddress.href;
 
-		reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
+		reportArchitecture(shellHub);
 		relayLoggerToHub(shellHub, "shell");
 		tapConsoleAndErrors(shellHub, "shell");
 		shellHub.link(windowTransport(appFrame.contentWindow));
-		reportShellMetrics(shellHub); // its long frames, on the metrics plane (editor-metrics.ts)
+		reportShellMetrics(shellHub);
 
 		const scheme = window.matchMedia("(prefers-color-scheme: dark)");
 		const publishScheme = (): void => {

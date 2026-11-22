@@ -35,7 +35,7 @@ let native = ((): boolean => {
 	try {
 		return localStorage.getItem(NATIVE_KEY) === "true";
 	} catch {
-		return false; // no storage: the pane
+		return false;
 	}
 })();
 let nativeFace: ReturnType<typeof installNativeFace> | undefined;
@@ -351,7 +351,7 @@ async function draw(uri: string): Promise<void> {
 	const places = await placeAll(file, [...items.map((item) => item.at), ...groups.map((group) => group.at), ...marks.map((mark) => mark.at), ...path?.at ?? []]);
 
 	if (drawing.get(uri) !== token) {
-		return; // a newer draw
+		return;
 	}
 
 	const placed = items.flatMap((item, index): Placed[] => (places[index] === undefined ? [] : [{ "item": item, "fromLine": places[index][0], "toLine": places[index][1] }]));

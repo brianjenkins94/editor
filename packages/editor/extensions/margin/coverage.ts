@@ -71,7 +71,7 @@ export function installCoverage(context: vscode.ExtensionContext): void {
 		const lines = await linesOf(document, ofFile);
 
 		if (document.version !== version) {
-			return; // typed meanwhile: a newer draw follows
+			return;
 		}
 
 		const inFile = [...lines].filter(([line]) => line < document.lineCount);

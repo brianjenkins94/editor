@@ -246,7 +246,7 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 			const { chain, lastTime } = await sinceCommit(path);
 
 			if (chain.length <= 1) {
-				return { "groups": [], "bursts": 0, "lastTime": 0 }; // nothing since the last commit
+				return { "groups": [], "bursts": 0, "lastTime": 0 };
 			}
 
 			const { groups, bursts } = await bablr.editGroups(chain);

@@ -52,7 +52,7 @@ if (reset === "wait") {
 		}
 	});
 
-	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
+	tapConsoleAndErrors(rootHub, "host");
 	const tab = crypto.randomUUID().slice(0, 8);
 
 	linkServiceWorkerHub(rootHub);
@@ -62,7 +62,7 @@ if (reset === "wait") {
 	serve(rootHub, `capability.decide.${tab}`, async (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300_000, "waitForResponderMs": 10_000 }));
 	serve(rootHub, `capability.record.${tab}`, async (args) => tabRpc.request("capability.record", args, { "timeoutMs": 30_000, "waitForResponderMs": 10_000 }));
 	serve(rootHub, "virtual.tab", () => tab);
-	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
+	linkDebugMcp(rootHub);
 	void import("./app/tools").then(({ editorTools }) => {
 		servePageTools(rootHub, { "tab": tab, "tools": editorTools(rootHub) });
 	});

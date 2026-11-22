@@ -60,9 +60,48 @@ function besideAt(line: string): number | undefined {
 	return undefined;
 }
 
+/** A JSX comment's lines around `line`: from a line starting `{/*` to one ending `*\/}`, nothing else on either. */
+function jsxAround(lines: readonly string[], line: number): [number, number] | undefined {
+	let from = line;
+
+	while (from >= 0 && !/^\s*\{\/\*/u.test(lines[from]!)) {
+		if (from < line && lines[from]!.includes("*/")) {
+			return undefined;
+		}
+
+		from -= 1;
+	}
+
+	if (from < 0) {
+		return undefined;
+	}
+
+	let to = from;
+
+	while (to < lines.length && !lines[to]!.includes("*/")) {
+		to += 1;
+	}
+
+	return to < lines.length && to >= line && /\*\/\}\s*$/u.test(lines[to]!) ? [from, to] : undefined;
+}
+
 export function commentAt(lines: readonly string[], line: number): Comment | undefined {
 	if (line < 0 || line >= lines.length) {
 		return undefined;
+	}
+
+	// (in JSX, `{/* … */}` on lines of its own)
+	const jsx = jsxAround(lines, line);
+
+	if (jsx !== undefined) {
+		const said = lines.slice(jsx[0], jsx[1] + 1).join("\n").replace(/^\s*\{\/\*\*?/u, "").replace(/\*\/\}\s*$/u, "").split("\n").map((each) => each.trim()).join("\n").trim();
+		let below = jsx[1] + 1;
+
+		while (below < lines.length && lines[below]!.trim() === "") {
+			below += 1;
+		}
+
+		return said === "" || FOR_TOOLS.test(said) || below >= lines.length ? undefined : { "from": jsx[0], "to": jsx[1], "text": said, "below": below };
 	}
 
 	// (beside code: the note on that line's code, which stays)

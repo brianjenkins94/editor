@@ -56,7 +56,7 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const note = (changes: WorkspaceChange[]): void => {
 		if (changes.length === 0) {
-			return; // a quiet touch (a read's access time): nothing to publish
+			return;
 		}
 
 		const absolute = changes.map((change) => ({ "path": prefix + (change.path === "/" ? "" : change.path), "type": change.type }));

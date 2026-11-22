@@ -69,7 +69,7 @@ export function registerTimes(context: vscode.ExtensionContext, store: EvidenceS
 		const placed = await store.placed(document);
 
 		if (placed === undefined) {
-			return; // edited since: a newer look follows
+			return;
 		}
 
 		byDocument.set(document.uri.toString(), { "text": document.getText(), "timed": placed.filter((each): each is Timed => each.evidence.time !== undefined && shareOf(each as Timed) >= MIN_SHARE) });

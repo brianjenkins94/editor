@@ -57,15 +57,15 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	tails.set(terminal, tail);
 	const state: SessionState = { "cwd": cwd0, "env": {} };
 	let line = "";
-	let pos = 0; // cursor position within `line`
+	let pos = 0;
 	let running = false;
 	let inEscape = false;
-	let esc = ""; // accumulates an in-progress escape sequence (arrow keys, Home/End, Delete…)
+	let esc = "";
 	const history: string[] = [];
-	let histIndex = 0; // index into `history`; === history.length means the live, un-submitted line
-	let draft = ""; // the live line, stashed while browsing history so ↓ can restore it
-	let controller: AbortController | undefined; // the running command's Ctrl-C handle
-	let stdinBuffer = ""; // the line being typed into a running process's stdin (flushed on Enter)
+	let histIndex = 0;
+	let draft = "";
+	let controller: AbortController | undefined;
+	let stdinBuffer = "";
 
 	const write = (text: string): void => {
 		fire(text.replace(/\r?\n/gu, "\r\n"));
@@ -131,7 +131,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 					blocks.push(`[31m${result.stderr.replace(/\n$/u, "")}[0m`);
 				}
 
-				if (blocks.length > 0 && !signal.aborted) { // on Ctrl-C the output already streamed; skip abort noise
+				if (blocks.length > 0 && !signal.aborted) {
 					write((fresh ? "" : "\n") + blocks.join("\n"));
 					fresh = false;
 				}
@@ -160,7 +160,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		} catch (error) {
 			exitCode = 1;
 
-			if (!signal.aborted) { // an abort is the user's Ctrl-C, not a failure to report
+			if (!signal.aborted) {
 				write(`[31m${error instanceof Error ? error.message : String(error)}[0m`);
 			}
 		} finally {
@@ -178,7 +178,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		for (const character of data) {
 			const code = character.charCodeAt(0);
 
-			if (code === 0x03) { // Ctrl-C — interrupt the running command (kills a node worker)
+			if (code === 0x03) {
 				fire("^C\r\n");
 				stdinBuffer = "";
 				controller?.abort();
@@ -187,23 +187,23 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			}
 
 			if (runner.isRunning()) {
-				if (code === 0x0D || code === 0x0A) { // Enter → flush the buffered line into stdin
+				if (code === 0x0D || code === 0x0A) {
 					fire("\r\n");
 					runner.sendStdin(`${stdinBuffer}\n`);
 					stdinBuffer = "";
-				} else if (code === 0x7F || code === 0x08) { // Backspace — edit the buffer
+				} else if (code === 0x7F || code === 0x08) {
 					if (stdinBuffer !== "") {
 						stdinBuffer = stdinBuffer.slice(0, -1);
 						fire("\b \b");
 					}
-				} else if (code === 0x04) { // Ctrl-D: submit a partial line if any, else signal end-of-input (like a tty)
+				} else if (code === 0x04) {
 					if (stdinBuffer === "") {
 						runner.endStdin();
 					} else {
 						runner.sendStdin(stdinBuffer);
 						stdinBuffer = "";
 					}
-				} else if (code >= 0x20 || code === 0x09) { // printable / tab — echo and buffer
+				} else if (code >= 0x20 || code === 0x09) {
 					fire(character);
 					stdinBuffer += character;
 				}
@@ -212,7 +212,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	};
 
 	const setLine = (next: string): void => {
-		fire("\b".repeat(pos) + "\x1B[0K" + next); // cursor to start, erase to EOL, print the replacement
+		fire("\b".repeat(pos) + "\x1B[0K" + next);
 		line = next;
 		pos = next.length;
 	};
@@ -221,7 +221,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		const tail = line.slice(pos);
 
 		line = line.slice(0, pos) + chars + tail;
-		fire(chars + tail + "\b".repeat(tail.length)); // print inserted text + tail, then back onto the insertion point
+		fire(chars + tail + "\b".repeat(tail.length));
 		pos += chars.length;
 	};
 
@@ -234,7 +234,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 		line = line.slice(0, pos - 1) + tail;
 		pos -= 1;
-		fire("\b" + tail + " " + "\b".repeat(tail.length + 1)); // move left, reprint tail over the gap, erase last cell, restore cursor
+		fire("\b" + tail + " " + "\b".repeat(tail.length + 1));
 	};
 
 	const deleteAt = (): void => {
@@ -282,7 +282,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		}
 
 		if (histIndex === history.length) {
-			draft = line; // leaving the live line — stash it so ↓ can come back
+			draft = line;
 		}
 
 		histIndex -= 1;
@@ -318,7 +318,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			return;
 		}
 
-		const token = line.slice(line.lastIndexOf(" ") + 1); // the word being completed (may be "")
+		const token = line.slice(line.lastIndexOf(" ") + 1);
 		const before = line.slice(0, line.length - token.length);
 		const isCommand = before.trim() === "" && !token.includes("/");
 
@@ -330,25 +330,25 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		const isDir = new Map<string, boolean>();
 
 		if (isCommand) {
-			await getSession(); // (just-bash's own command names come with it)
+			await getSession();
 			matches.push(...completions.filter((name) => name.startsWith(base)));
 		} else {
 			try {
 				for (const [name, type] of await api.workspace.fs.readDirectory(api.Uri.file(resolveDir(dirPrefix)))) {
 					if (name.startsWith(base)) {
 						matches.push(name);
-						isDir.set(name, (type & 2) === 2); // FileType.Directory bit
+						isDir.set(name, (type & 2) === 2);
 					}
 				}
 			} catch {
-				return; // unreadable dir → nothing to offer
+				return;
 			}
 		}
 
 		matches.sort((left, right) => left.localeCompare(right));
 
 		if (matches.length === 0) {
-			fire("\x07"); // bell
+			fire("\x07");
 
 			return;
 		}
@@ -365,7 +365,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		const prefix = longestCommonPrefix(matches);
 
 		if (prefix.length > base.length) {
-			setLine(before + dirPrefix + prefix); // extend to the shared prefix; more to type
+			setLine(before + dirPrefix + prefix);
 
 			return;
 		}
@@ -434,7 +434,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			handleEscape(esc);
 			esc = "";
 		} else if (esc.length === 1 && esc !== "[" && esc !== "O") {
-			inEscape = false; // not a sequence we track (bare ESC, etc.) — drop it
+			inEscape = false;
 			esc = "";
 		}
 	};
@@ -451,45 +451,45 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 			if (inEscape) {
 				feedEscape(character, code);
-			} else if (code === 0x1B) { // ESC — begin an escape sequence
+			} else if (code === 0x1B) {
 				inEscape = true;
 				esc = "";
-			} else if (code === 0x0D || code === 0x0A) { // Enter (CR from a terminal; LF from paste/automation)
+			} else if (code === 0x0D || code === 0x0A) {
 				fire("\r\n");
 
 				const command = line;
 
 				if (command.trim() !== "" && history[history.length - 1] !== command) {
-					history.push(command); // record for ↑/↓ (skip blanks and consecutive dupes)
+					history.push(command);
 				}
 
 				histIndex = history.length;
 				draft = "";
 				void runLine(command);
 
-				return; // the rest of this chunk waits until the command finishes
-			} else if (code === 0x7F || code === 0x08) { // Backspace
+				return;
+			} else if (code === 0x7F || code === 0x08) {
 				backspace();
-			} else if (code === 0x03) { // Ctrl-C — abandon the current line
-				fire("^C" + commandFinished()); // (finished without running, for shell integration)
+			} else if (code === 0x03) {
+				fire("^C" + commandFinished());
 				line = "";
 				pos = 0;
 				histIndex = history.length;
 				prompt();
-			} else if (code === 0x01) { // Ctrl-A → start of line
+			} else if (code === 0x01) {
 				moveHome();
-			} else if (code === 0x05) { // Ctrl-E → end of line
+			} else if (code === 0x05) {
 				moveEnd();
-			} else if (code === 0x09) { // Tab → complete the current word (command or path)
+			} else if (code === 0x09) {
 				void complete();
-			} else if (code >= 0x20) { // printable — insert at the cursor
+			} else if (code >= 0x20) {
 				insert(character);
 			}
 		}
 	};
 
 	const start = (): void => {
-		void getSession(); // warm the bundle while the user reads the banner
+		void getSession();
 
 		fire("[1mjust-bash[0m — an in-browser shell on the workspace filesystem\r\n");
 		prompt();

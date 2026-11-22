@@ -89,7 +89,7 @@ function openPersist(): Promise<IDBDatabase | undefined> {
 				resolve(undefined);
 			};
 		} catch {
-			resolve(undefined); // private mode / blocked — the store just runs without persistence
+			resolve(undefined);
 		}
 	});
 }
@@ -157,7 +157,7 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 
 	for (const [path, contents] of persisted) {
 		if (RETIRED.has(path)) {
-			retired.push(path); // written by an older build; dropped below rather than brought back
+			retired.push(path);
 		} else if (localMounted && inLocal(path)) {
 			if (contents !== null && !fs.existsSync(path)) {
 				ensureParent(path);
@@ -167,7 +167,7 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 			moved.push(path);
 		} else if (contents === null) {
 			try {
-				fs.rmSync(path, { "recursive": true, "force": true }); // seeded, deleted since: it stays deleted
+				fs.rmSync(path, { "recursive": true, "force": true });
 				tombstoned += 1;
 			} catch { /* a file stands where its folder was: already gone */ }
 
@@ -327,7 +327,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 				store.createFileSync(inStore, { "mode": 0o644, "uid": 0, "gid": 0 });
 			} catch {
-				fs.writeFileSync(path, contents); // the seed's (it's there already): as any write
+				fs.writeFileSync(path, contents);
 
 				return;
 			}
@@ -449,7 +449,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 			transaction.commit();
 		} catch (error) {
-			log.warn("workspace persistence failed", { "error": String(error) }); // best-effort: the store still has it
+			log.warn("workspace persistence failed", { "error": String(error) });
 		} finally {
 			caller = undefined;
 			countCall("indexeddb", "flush", "persist", performance.now() - started, undefined, bytes);
@@ -465,7 +465,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	window.addEventListener("pagehide", flush);
 
 	for (const path of retired) {
-		persist(path); // gone from zen-fs, so the flush deletes it
+		persist(path);
 	}
 
 	forgetPersisted(db, moved);
@@ -599,11 +599,11 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 		"writeFile": (resource, content): Promise<void> => settled(() => {
 			if (readonlyPaths.has(resource.path)) {
-				throw readOnly(); // managed/read-only — reject EVERY write path (editor Save, the vscode API, the terminal)
+				throw readOnly();
 			}
 
 			ensureParent(resource.path);
-			fs.writeFileSync(resource.path, content); // persisted + announced by the change stream (apply)
+			fs.writeFileSync(resource.path, content);
 			handle.writes += 1;
 		}),
 
@@ -613,7 +613,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 		"delete": (resource, options): Promise<void> => settled(() => {
 			if (readonlyPaths.has(resource.path)) {
-				throw readOnly(); // a managed config can't be deleted out from under the tooling that owns it
+				throw readOnly();
 			}
 
 			fs.rmSync(resource.path, { "recursive": options.recursive, "force": true });
@@ -621,11 +621,11 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 		"rename": (from, to): Promise<void> => settled(() => {
 			if (readonlyPaths.has(from.path) || readonlyPaths.has(to.path)) {
-				throw readOnly(); // can't rename a managed file away, nor clobber one by renaming onto it
+				throw readOnly();
 			}
 
 			ensureParent(to.path);
-			fs.renameSync(from.path, to.path); // a file or a whole directory — the change stream persists what moved
+			fs.renameSync(from.path, to.path);
 		})
 	};
 

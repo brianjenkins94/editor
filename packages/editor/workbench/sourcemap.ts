@@ -60,7 +60,7 @@ export function originalPosition(map: SourceMap, line: number, column: number): 
 			const values = decodeSegment(segment);
 
 			if (values.length < 4) {
-				generatedColumn += values[0] ?? 0; // no source: a generated-only segment
+				generatedColumn += values[0] ?? 0;
 			} else {
 				generatedColumn += values[0];
 				source += values[1];

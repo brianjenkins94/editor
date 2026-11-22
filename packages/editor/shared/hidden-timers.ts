@@ -26,7 +26,7 @@ export function installHiddenTabTimers(realm: Realm = globalThis as unknown as R
 	try {
 		clock = new realm.Worker(URL.createObjectURL(new Blob([CLOCK], { "type": "text/javascript" })));
 	} catch {
-		return; // (no worker here: the realm's own timers)
+		return;
 	}
 
 	realm.__hiddenTabTimers = true;

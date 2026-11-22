@@ -21,7 +21,7 @@ export function windowServerTransport(channel: string, getFallbackTarget: () => 
 			const handler = (event: MessageEvent): void => {
 				if (isFrame(event.data, channel)) {
 					if (event.source !== null) {
-						target = event.source as Window; // re-pair to the pane's current window
+						target = event.source as Window;
 					}
 
 					onMessage(event.data.msg);
