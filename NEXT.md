@@ -41,8 +41,9 @@ How it's kept:
    changes marked*). In order:
    - **The boundaries** (ARCHITECTURE.md has the reasons, checked 2026-11-03: nothing split). Left: whether tsval can
      give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file). Tried
-     2026-11-21 with packages/editor/test's 46 unit files, in Brave: a background tab's editor reloaded three times
-     mid-run (Vite re-optimizing once, then frozen), 11 files in. Time it with the tab in front.
+     2026-11-21 with packages/editor/test's 46 unit files (`runs_tests`, this repository cloned into `?instance=`), in
+     Brave: the renderer crashed ("Aw, Snap!", error code 5) as the run started, with the tab in front; earlier, 11 files
+     in, the workbench near 1.8 GB. Its own item first: a suite run here takes the editor down.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
      fit* answered. One owner a file is where that starts: reassess sharing from what runs show — Features and tests
      says which of a feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx,
