@@ -52,6 +52,9 @@ How it's kept:
      it (`RARE`: a statement at most 10% of the tests ran).
    - **Notes for comments, and agents reading them**: the migration, with Notes: Make This Comment a Note (its lightbulb on
      a comment, 2026-11-22: the text on the code below it, the repository's, who wrote it kept; a tool's comment stays).
+     The worked example (2026-11-22): the notes feature's own two files, 32 comments, 20 notes and 12 dropped — made in
+     an instance of this repository and copied out, the code's edits only the comments' lines (a save there also runs
+     ESLint's fixes: undone). Left: packages/editor's other 266 files (~6,900 comment lines), then the pass.
      Then the pass's third condition, to show notes lose nothing. An edit that orphans a note says so (2026-11-20: files_edit, files_write and files_replace answer
      `orphaned`, as Problems says "A note lost its place"). Agents read them (2026-11-17): `files_read` with the notes
      beside its lines, `decisions_for` with a file's among its whys. What the measure found to go on (2026-11-03, 128

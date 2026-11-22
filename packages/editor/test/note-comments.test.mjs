@@ -39,6 +39,7 @@ test("a block, JSDoc's or not, from any of its lines: off its markers; past a bl
 		"text": "one line",
 		"below": 1
 	});
+	assert.equal(commentAt(lines("\t/** Merged line by line:\n\t *  the rest aligned under the first. */\n\tsave();"), 0)?.text, "Merged line by line:\nthe rest aligned under the first.", "a line aligned under the first keeps none of its indent");
 });
 
 test("what stays a comment: a tool's, one beside code, one with no code below, and code itself", () => {

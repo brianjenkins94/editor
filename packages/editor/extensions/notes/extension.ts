@@ -1,19 +1,3 @@
-/**
- * Notes on code that stay with it (RUNTIME-EVIDENCE.md, *Durable annotations on spans*). A note is kept on the BABLR span it's
- * about, in `.silo/notes/<author>/<file>.jsonl` (in git, everyone's beside everyone else's), and each time its file is drawn it's
- * found again in the text as it is now. It's shown beside its code in the Margin, not behind a mark to click: something to
- * go and open is too easy to ignore (the user, 2026-11-06, of panels).
- *
- * Found on its span, or followed there: a note of yours followed is rewritten where it landed, so the next look finds it by id.
- * Moved to another file: a note of yours goes with it; anyone else's waits here, saying where. Its code changed, or perhaps moved:
- * shown there, asking to be kept. Gone: it waits in Problems, at its last place. Each is decided from the lightbulb, as a rule placed in the code is.
- * Dismissing writes a tombstone, so a branch merge can't bring it back. Only a note's author changes it — and a note that
- * was a comment, the repository's (`.silo/notes/repository/`), anyone: it's shared as the comment was (the user,
- * 2026-11-20), who wrote the comment kept on it.
- *
- * A comment becomes a note from its lightbulb (Make This Comment a Note: packages/editor/ARCHITECTURE.md, *Comments become
- * notes*): its text, off the comment's markers, on the code just below it, and the comment gone from the code.
- */
 import type { Resolved, SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type { PaneContent, PaneItem } from "@brianjenkins94/editor-api/pane";
 import type { Annotation } from "@brianjenkins94/util/silo/annotations";
@@ -26,21 +10,17 @@ import { annotationsPath, GITATTRIBUTES, SILO_DIR, withLines } from "@brianjenki
 import * as vscode from "vscode";
 import { commentAt } from "./comments";
 
-/** A note: its text, and for one that was a comment, who wrote the comment (its lines' blame). */
 type Note = Annotation<{ "text": string; "wrote"?: string[] }>;
 
-/** A note, who wrote it, and where it was found now: the 0-based line it's on, when that's in this file. */
 interface Landing { "note": Note; "owner": string; "resolved": Resolved; "line"?: number }
 
 const VIEW = "notes";
-/** Whose a note that was a comment is: the repository's, anyone's to change. */
 const REPOSITORY = "repository";
 const CODE = /\.[cm]?[jt]sx?$/u;
 const LANGUAGES = ["typescript", "typescriptreact", "javascript", "javascriptreact"];
 
 const textOf = ({ payload }: Note): string => payload?.text ?? "";
 
-/** A note as a line can say it. */
 const shortly = (note: Note): string => {
 	const text = textOf(note);
 
@@ -51,7 +31,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	const observed = observeExtension(VIEW, vscode);
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
 	const diagnostics = vscode.languages.createDiagnosticCollection(VIEW);
-	/** What each file's notes were last found as: what its lightbulb offers, and what's shown while it can't be parsed. */
 	const landed = new Map<string, Landing[]>();
 	const read = async (uri: vscode.Uri): Promise<string> => Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => "");
 	const write = async (uri: vscode.Uri, text: string): Promise<void> => {
@@ -60,14 +39,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	const relative = (uri: vscode.Uri): string => vscode.workspace.asRelativePath(uri, false);
 
 	let user: string | undefined;
-	// Who you are to git: `local` until it says, read again until it does, as a sign-in may come after the first note.
 	const me = async (): Promise<string> => {
 		user ??= userSlug(await read(vscode.Uri.joinPath(root, ".git/config")));
 
 		return user ?? "local";
 	};
 
-	/** Everyone's notes on `file`, with who wrote each. */
 	const notesOn = async (file: string): Promise<{ "note": Note; "owner": string }[]> => {
 		const folder = vscode.Uri.joinPath(root, SILO_DIR, VIEW);
 		const owners = await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => [] as string[]);
@@ -76,11 +53,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		return found.flat().filter(({ note }) => note.dismissed !== true);
 	};
 
-	/** A note `you` may change: yours, or the repository's. */
 	const mine = (owner: string, you: string): boolean => owner === you || owner === REPOSITORY;
 
-	/** Write `note` into `owner`'s notes on `file` (yours, by default): added, or replacing the version there. They merge line
-	 *  by line across branches, as the rest of silo's records do. */
 	const save = async (file: string, note: Note, owner?: string): Promise<void> => {
 		const uri = vscode.Uri.joinPath(root, annotationsPath(VIEW, owner ?? await me(), file));
 		const attributes = vscode.Uri.joinPath(root, SILO_DIR, ".gitattributes");
@@ -97,8 +71,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		await refreshPane(vscode.commands, VIEW, uri);
 	};
 
-	/** Find `document`'s notes in its text as it is now, and do what that asks: a note of yours is kept where it landed. Undefined:
-	 *  that can't be told now (it doesn't parse as it is, often mid-edit, which isn't their being lost). */
 	const look = async (document: vscode.TextDocument): Promise<Landing[] | undefined> => {
 		const file = relative(document.uri);
 		const notes = await notesOn(file);
@@ -134,7 +106,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		}));
 	};
 
-	/** What a note that isn't on its code says, at its last place. */
 	const lostProblem = (document: vscode.TextDocument, { note, owner, resolved }: Landing): vscode.Diagnostic => {
 		const near = document.positionAt(Math.min(note.ref.baseline?.start ?? 0, document.getText().length));
 		const elsewhere = resolved.status === "moved" ? resolved.candidate?.file : undefined;
@@ -145,7 +116,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		return problem;
 	};
 
-	/** A note beside its code: yours plain, anyone else's with who wrote it; one whose code changed or perhaps moved asking to be kept. */
 	const itemOf = async (uri: string, { note, owner, resolved, line }: Landing): Promise<PaneItem[]> => {
 		if (line === undefined) {
 			return [];
@@ -165,7 +135,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const span = async <T>(word: string, attributes: Record<string, string | number>, work: () => Promise<T>): Promise<T> => (observed === undefined ? work() : observed.log.span(`editor.extensions.notes.${word}`, attributes, work));
 
-	/** A reference to the code selected, or the line the cursor's on. Else, why not. */
 	const referAt = async (document: vscode.TextDocument, selection: vscode.Selection): Promise<SpanRef | string> => {
 		const { firstNonWhitespaceCharacterIndex, range } = document.lineAt(selection.start.line);
 		const start = selection.isEmpty ? document.offsetAt(new vscode.Position(selection.start.line, firstNonWhitespaceCharacterIndex)) : document.offsetAt(selection.start);
@@ -182,7 +151,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		return answer.value[0] ?? "A note can't attach here: there's no code there it can stand on. Select a statement or an expression.";
 	};
 
-	/** A note this file's lightbulb can act on (yours, or the repository's), by its id, with whose it is. */
 	const yours = async (id: string, uri: string): Promise<{ "note": Note; "owner": string } | undefined> => {
 		const you = await me();
 
@@ -190,7 +158,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	};
 
 	const watcher = vscode.workspace.createFileSystemWatcher(`**/${SILO_DIR}/${VIEW}/**/*.jsonl`);
-	// Notes changed underneath: a pull, a merge, another window.
 	const changed = (): void => {
 		void redraw();
 	};
@@ -205,11 +172,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		watcher.onDidCreate(changed),
 		watcher.onDidChange(changed),
 		watcher.onDidDelete(changed),
-		// Saved: code moved into this file is on disk now, where a note that lost its place elsewhere looks for it.
 		vscode.workspace.onDidSaveTextDocument(changed),
-		// A file's notes as the Margin shows them, for what reads it another way (an agent's files_read, decisions_for): each
-		// found in its text now — its 1-based line, or none where it lost its place — with who wrote it. (No look at all, and
-		// so no parse, for a file with none.)
 		vscode.commands.registerCommand("notes.on", async (path: unknown): Promise<{ "line"?: number; "text": string; "by": string; "status": Resolved["status"] }[]> => {
 			const uri = vscode.Uri.joinPath(root, String(path).replace(/^\/workspace\//u, ""));
 
@@ -231,7 +194,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			const { version } = document;
 			const found = await span("look", { "path": document.uri.path }, async () => look(document));
 
-			// (edited while it looked, a newer look follows; not parsing, they stay where they're shown)
 			if (found !== undefined && document.version === version) {
 				landed.set(document.uri.toString(), found);
 				diagnostics.set(document.uri, found.filter(({ line }) => line === undefined).map((each) => lostProblem(document, each)));
@@ -275,8 +237,6 @@ export function activate(context: vscode.ExtensionContext): void {
 				return note.id;
 			});
 		}),
-		// A comment made a note: its text, on the code below it, the repository's (anyone's to change), who wrote it kept;
-		// and the comment gone from the code. The note's place is read off the text as it is once the comment's gone.
 		vscode.commands.registerCommand("notes.fromComment", async (given?: unknown, at?: unknown) => {
 			const editor = vscode.window.activeTextEditor;
 			const document = typeof given === "string" ? await vscode.workspace.openTextDocument(vscode.Uri.parse(given)) : editor?.document;
@@ -312,13 +272,11 @@ export function activate(context: vscode.ExtensionContext): void {
 					return undefined;
 				}
 
-				// (who wrote it, by its lines' blame: none for a comment not committed)
 				const wrote = await Promise.resolve(vscode.commands.executeCommand<string[]>("editor.git.authorsOf", file, comment.from + 1, comment.to + 1)).then((authors) => (Array.isArray(authors) ? authors : []), () => []);
 				const edit = new vscode.WorkspaceEdit();
 
 				edit.delete(document.uri, new vscode.Range(comment.from, 0, comment.to + 1, 0));
 
-				// (the comment out first: if that doesn't go, there's no note either)
 				if (!await vscode.workspace.applyEdit(edit)) {
 					return undefined;
 				}
@@ -340,7 +298,6 @@ export function activate(context: vscode.ExtensionContext): void {
 				await redraw(uri);
 			}
 		}),
-		// Kept where it's shown, or put back where the cursor is.
 		vscode.commands.registerCommand("notes.place", async (id: string, uri: string, line: number) => {
 			const found = await yours(id, uri);
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
@@ -384,6 +341,5 @@ export function activate(context: vscode.ExtensionContext): void {
 		}, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] })
 	);
 
-	// (it asked before this command was there)
 	void redraw();
 }
