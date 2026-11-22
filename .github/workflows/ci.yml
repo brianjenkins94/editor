@@ -7,6 +7,9 @@
     "push": {
       "branches": ["main"]
     },
+    # The full run (packages/silo/README.md, *Tests by feature, in your face*): every test, whatever a change reaches,
+    # so a resting test and a vouched one are run by CI itself at least weekly.
+    "schedule": [{ "cron": "0 6 * * 1" }],
     "workflow_call": {}
   },
   # One run per branch at a time. A pull request's superseded run is cancelled; on main a run always finishes and only
@@ -19,6 +22,7 @@
   "jobs": {
     "build-lint": {
       "runs-on": "ubuntu-latest",
+      "permissions": { "contents": "read", "actions": "read" },
       "strategy": {
         "matrix": {
           "script": ["build", "lint", "test"]
@@ -30,7 +34,17 @@
         # workspace-packages makes CI an ephemeral pnpm workspace (editor uses npm locally, no committed
         # pnpm-workspace.yaml) so sibling packages link — a `"*"` dep on a sibling resolves locally, not 404.
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
-        { "run": "pnpm run --if-present ${{ matrix.script }}" }
+        # The tests a change needs (`silo test`, decision 20): from the push's base, reading how each test did in this
+        # workflow's earlier runs from their logs (hence `actions: read`); a pull request, the schedule, or a base it
+        # can't read run everything.
+        {
+          "run": "pnpm run --if-present ${{ matrix.script }}",
+          "env": {
+            "SILO_BASE": "${{ github.event_name == 'push' && github.event.before || '' }}",
+            "SILO_FULL": "${{ github.event_name == 'schedule' && 'true' || 'false' }}",
+            "GITHUB_TOKEN": "${{ github.token }}"
+          }
+        }
       ],
       "timeout-minutes": 15
     },

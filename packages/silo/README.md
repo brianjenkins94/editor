@@ -1037,7 +1037,9 @@ From *Tests by feature* (above), for the rewrite:
     have matched on both before (the editor's case: tsval where vouches are made, Node in CI); CI isn't made to run
     tsval for it.
 20. ~~**CI's entry point.**~~ Decided 2026-11-20: a silo subcommand any CI calls, which asks which tests a change needs
-    and takes the runner's report back (reopening decision 9). Open still: which runner reports it reads first.
+    and takes the runner's report back (reopening decision 9). Which runner's report first (decided 2026-11-22):
+    node:test's — `silo test` runs the runner with silo's node:test reporter beside its own, a line a test with its file
+    (src/reporter.mjs), and the next run reads them back from the CI's log; nothing is committed from CI.
 21. ~~**What a declared feature's ledger entry holds.**~~ Decided 2026-11-02: what the manifest held — `what` (what it's
     for), `docs`, `paths` (the code it owns), `ways` (its ways in) — and the `tests` it owns, beside the decision's
     `status`, `why` and `since`. The ledger becomes the source of truth: `silo check` errors on any drift between it and

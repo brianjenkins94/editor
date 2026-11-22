@@ -13,6 +13,10 @@
  *   silo coverage [repo] [--since …] [--until …] [--ref …] [--json]
  *                                                      what the committed runs ran, commit by commit, by feature: what
  *                                                        started running, what stopped, what's reached and never ran
+ *   silo test --files <globs> --run <runner> [--base …] [--full] [--audit …] [--dry] [--json]
+ *                                                      the tests a change needs, run: what it reaches, less what's vouched
+ *                                                        for or resting, more what failed lately in CI (decision 20)
+ *   silo vouch --files <globs> --run <runner>         run the tests; vouch for each that passes, with what it reaches
  *   silo observed <reach> [--repo …] [--json]          each test against the features its file declares: what its reach
  *                                                        (a folder of `<suite>.json`) says of the ledger's boundaries
  *   silo remove <entry> [why] [--key …] [--paths …]    take a feature out: what only it reaches, its package manifests' entries,
@@ -89,6 +93,19 @@ function usedGrew(baseline: { "consumer": Record<string, Record<string, { "grew"
 			return `  ${spec}${workspace === "." ? "" : ` (${workspace})`}: can also ${grew.map(([capability, origin]) => `${capability} (${origin})`).join(", ")}`;
 		}).join("\n")}\n`);
 	}
+}
+
+/** The files `globs` (comma-separated, from `cwd`) match, by their paths from `repo`'s top, each once, in order. */
+async function globbed(globs: string, cwd: string, repo: string): Promise<string[]> {
+	const files: string[] = [];
+
+	for (const glob of globs.split(",").filter((each) => each !== "")) {
+		for await (const file of fs.glob(glob, { "cwd": cwd })) {
+			files.push(file);
+		}
+	}
+
+	return [...new Set(files.map((file) => path.relative(repo, path.resolve(cwd, file)).split(path.sep).join("/")))].sort();
 }
 
 /** TypeScript's analyzer of `repo`, with the TypeScript silo bundles. */
@@ -652,6 +669,101 @@ export const app = subcommands({
 					process.stderr.write(`silo coverage: ${unparsed.length} file${unparsed.length === 1 ? "" : "s"} ran but couldn't be parsed, so what ran there isn't counted:\n${unparsed.map((line) => "  " + line).join("\n")}\n`);
 					process.exitCode = 1;
 				}
+			}
+		}),
+		command({
+			"name": "test",
+			"description": "The tests a change needs, run: what the change reaches by declaration, less what's vouched for (`.silo/vouches/`) or resting, more what failed or flaked lately in this CI's own runs — then the runner on the files selected, with silo's node:test reporter beside its own, so the next run reads back how each test did from this one's log. What a CI step calls (decision 20); a base it can't read, or --full, runs everything.",
+			"config": juvy({
+				"files": { "format": String, "default": "", "doc": "The test files the runner would run: globs, from the working folder, comma-separated." },
+				"run": { "format": String, "default": "", "doc": "The runner's command, its arguments split on spaces (`node --import tsx --test`): the files selected and silo's reporter are added." },
+				"base": { "format": String, "default": "", "doc": "The commit the change is from (a push's `before`). None: everything runs." },
+				"runtime": { "format": String, "default": "node", "doc": "What the runner runs tests on: a vouch made on another counts only for a test the two have agreed on (decision 19)." },
+				"full": { "format": Boolean, "default": false, "doc": "Run everything (the scheduled full run)." },
+				"audit": { "format": Number, "default": 0, "doc": "The share of vouched tests run anyway, at random (decision 17)." },
+				"workflow": { "format": String, "default": "ci", "doc": "The CI workflow whose runs say how each test has done." },
+				"dry": { "format": Boolean, "default": false, "doc": "Say what would run, and run nothing." },
+				"json": jsonFlag
+			}),
+			"handler": async (config) => {
+				const { runSelected, selectFor } = await import("./test.ts");
+				const cwd = process.cwd();
+				const repo = await repoOf(cwd);
+				const candidates = await globbed(config.get("files"), cwd, repo);
+				const repository = process.env["GITHUB_REPOSITORY"];
+				const analyzer = await analyzerOf(repo);
+				let selected;
+
+				try {
+					selected = await selectFor({
+						"repo": repo,
+						"candidates": candidates,
+						"analyzer": analyzer,
+						// (a CI's base, as its step's environment says it: SILO_BASE)
+						...(config.get("base") || process.env["SILO_BASE"] || "") === "" ? {} : { "base": config.get("base") || process.env["SILO_BASE"]! },
+						"runtime": config.get("runtime"),
+						"full": config.get("full") || process.env["SILO_FULL"] === "true",
+						"audit": config.get("audit"),
+						...repository === undefined ? {} : { "ci": { "repository": repository, "workflow": config.get("workflow"), ...process.env["GITHUB_TOKEN"] === undefined ? {} : { "token": process.env["GITHUB_TOKEN"] } } }
+					});
+				} finally {
+					analyzer.close?.();
+				}
+
+				if (config.get("json")) {
+					process.stdout.write(JSON.stringify(selected, undefined, "\t") + "\n");
+
+					return;
+				}
+
+				if (config.get("dry") || config.get("run") === "") {
+					const { selectionText } = await import("@brianjenkins94/util/silo/select");
+
+					process.stdout.write(selectionText(selected) + "\n");
+
+					return;
+				}
+
+				process.exitCode = await runSelected(selected, config.get("run").split(/\s+/u).filter((part) => part !== ""), { "repo": repo, "cwd": cwd, "say": (text) => { process.stdout.write(text + "\n"); } });
+			}
+		}),
+		command({
+			"name": "vouch",
+			"description": "Run the tests and vouch for those that pass (`.silo/vouches/<you>.jsonl`): each with what it reaches in the code as it is now, so CI can take the pass rather than run the test again, while that code stays as it was. What a commit flow or a pre-commit hook calls; commit the file with the change.",
+			"config": juvy({
+				"files": { "format": String, "default": "", "doc": "The test files: globs, from the working folder, comma-separated." },
+				"run": { "format": String, "default": "", "doc": "The runner's command (`node --import tsx --test`): the files and silo's reporter are added." },
+				"runtime": { "format": String, "default": "node", "doc": "What the runner runs tests on." }
+			}),
+			"handler": async (config) => {
+				const { graphAt, runWithReporter, vouchesFor } = await import("./test.ts");
+				const { gitUser } = await import("@brianjenkins94/util/silo/runs");
+				const { parseVouches, vouchesText } = await import("@brianjenkins94/util/silo/select");
+				const { vouchesPath } = await import("@brianjenkins94/util/silo/layout");
+				const cwd = process.cwd();
+				const repo = await repoOf(cwd);
+				const files = await globbed(config.get("files"), cwd, repo);
+				const ran = runWithReporter(files, config.get("run").split(/\s+/u).filter((part) => part !== ""), { "repo": repo, "cwd": cwd });
+				const analyzer = await analyzerOf(repo);
+				let graph;
+
+				try {
+					graph = await graphAt(repo, analyzer, files);
+				} finally {
+					analyzer.close?.();
+				}
+
+				const user = gitUser(repo) ?? "local";
+				const made = vouchesFor(ran.outcomes, graph!, { "by": user, "runtime": config.get("runtime") });
+				const kept = path.join(repo, vouchesPath(user));
+				// (a test's latest vouch is the one kept: the file grows by what changed, not by every run)
+				const before = fs.existsSync(kept) ? parseVouches(fs.readFileSync(kept)) : [];
+				const now = new Set(made.map((vouch) => vouch.test));
+
+				fs.mkdirSync(path.dirname(kept), { "recursive": true });
+				fs.writeFileSync(kept, vouchesText([...before.filter((vouch) => !now.has(vouch.test)), ...made]));
+				process.stdout.write(`vouched for ${String(made.length)} of ${String(ran.outcomes.length)} tests (${path.relative(cwd, kept)})\n`);
+				process.exitCode = ran.status;
 			}
 		}),
 		command({
