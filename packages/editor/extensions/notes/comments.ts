@@ -1,6 +1,9 @@
 export interface Comment { "from": number; "to": number; "text": string; "below": number }
 
-const FOR_TOOLS = /^\s*(?:eslint-(?:disable|enable)|@ts-(?:expect-error|ignore|nocheck|check)\b|prettier-ignore|istanbul ignore|[cv]8 ignore|#__PURE__|webpackChunkName|global\s)|@license|@preserve|\bcopyright\b/iu;
+const FOR_TOOLS = /^\s*(?:eslint-(?:disable|enable)|@ts-(?:expect-error|ignore|nocheck|check)\b|@jsx|@vite-ignore|no default\b|prettier-ignore|istanbul ignore|[cv]8 ignore|#__PURE__|webpackChunkName|global\s)|@license|@preserve|\bcopyright\b/iu;
+
+/** A `//` line that's a tool's: its own comment, never part of a run beside it. */
+const directive = (line: string): boolean => FOR_TOOLS.test(line.replace(/^\s*\/\/ ?/u, ""));
 
 const lineComment = (line: string): boolean => /^\s*\/\/(?!\/)/u.test(line);
 const blockStart = (line: string): boolean => /^\s*\/\*/u.test(line);
@@ -46,11 +49,15 @@ export function commentAt(lines: readonly string[], line: number): Comment | und
 		let from = line;
 		let to = line;
 
-		while (from > 0 && lineComment(lines[from - 1])) {
+		if (directive(lines[line])) {
+			return undefined;
+		}
+
+		while (from > 0 && lineComment(lines[from - 1]) && !directive(lines[from - 1])) {
 			from -= 1;
 		}
 
-		while (to < lines.length - 1 && lineComment(lines[to + 1])) {
+		while (to < lines.length - 1 && lineComment(lines[to + 1]) && !directive(lines[to + 1])) {
 			to += 1;
 		}
 

@@ -45,6 +45,11 @@ test("a block, JSDoc's or not, from any of its lines: off its markers; past a bl
 test("what stays a comment: a tool's, one beside code, one with no code below, and code itself", () => {
 	assert.equal(commentAt(lines("// eslint-disable-next-line no-console\nconsole.log(1);"), 0), undefined);
 	assert.equal(commentAt(lines("// @ts-expect-error: untyped\nimport x from \"x\";"), 0), undefined);
+	assert.equal(commentAt(lines("/** @jsxImportSource preact */\nimport x from \"x\";"), 0), undefined);
+	assert.equal(commentAt(lines("switch (a) {\n\tcase 1: break;\n\t// no default\n}"), 2), undefined);
+	// (a why above a directive: the why alone, the directive staying with its line)
+	assert.deepEqual(commentAt(lines("// Buffer, as isomorphic-git reads it.\n// eslint-disable-next-line ts/naming-convention\nglobalThis.Buffer = Buffer;"), 0), { "from": 0, "to": 0, "text": "Buffer, as isomorphic-git reads it.", "below": 2 });
+	assert.equal(commentAt(lines("// Buffer, as isomorphic-git reads it.\n// eslint-disable-next-line ts/naming-convention\nglobalThis.Buffer = Buffer;"), 1), undefined);
 	assert.equal(commentAt(lines("/*! @license MIT */\nexport {};"), 0), undefined);
 	assert.equal(commentAt(lines("/// <reference types=\"node\" />\nexport {};"), 0), undefined);
 	assert.equal(commentAt(lines("/**\n * Kept as comments: an eslint-disable, a @ts-expect-error.\n */\nexport {};"), 1)?.text, "Kept as comments: an eslint-disable, a @ts-expect-error.", "prose naming a directive isn't one");
