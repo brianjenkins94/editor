@@ -511,6 +511,15 @@ tells CI they passed. CI decides for itself whether to run them again. It's a de
 with the project's own runner, and hands the report back for the ledger; committing the shared records is the CI's
 own glue (decision 20).
 
+**Built** (2026-11-22): the selection and the vouch are lib `util/silo/select` (pure: a test's id is its file and titles;
+a vouch's reach the fingerprints of the declarations it reached, `./graph`, so it lapses when one changes). `silo test
+--files <globs> --run <runner>` is the CI step: it selects from the change since `--base` (the push's `before`; none
+runs everything), the vouches and the workflow's own runs, runs the runner on the files selected with silo's node:test
+reporter beside its own, and reads each test's outcomes back from earlier runs' logs. `silo vouch` runs tests and
+vouches for the passes, for a commit to carry. Reach is static for now: what a test's file reaches in the declaration
+graph, dynamic imports followed (a test reaches all of a module it loads), so a test runs for any change to code it
+could run. Not yet: the editor's commit flow making vouches (tsval's, decision 19's case), and per-test reach from runs.
+
 **Dogfooding in the editor.** The editor is where this is tried first, and what it already has maps onto it:
 - **Reach** is its traces: tests run on tsval's `node:test` in the editor, and their reach is BABLR span ids, kept per
   file (`.silo/local/traces`). CI's architecture suites have reach records too (`.silo/evidence/ci/architecture.json`)

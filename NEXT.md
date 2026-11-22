@@ -81,14 +81,15 @@ How it's kept:
      rule only a dependency's call needs reads as one none of the code can make); *Capability findings* moving to
      TypeScript 7 once it loads a tsserver plugin.
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
-3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
-   what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is
-   made at commit time, per person, by the tests run in the editor, and names the declarations each ran, so it lapses
-   when that code changes; a test rests after 20 green runs, with a weekly full run; CI reruns a vouched test after 7
-   days. Built so far is only what it stands on: tests run in the editor (`runs_tests`, the in-editor specs), the ledger
-   declares each feature's tests, and runs record their reach. Not built: vouches, `touched` and `resting`, and CI
-   reading them, the `silo` subcommand CI calls (decision 20). Decided 2026-11-20: decisions 15, 17–20 (silo README).
-   Done when a push's CI runs fewer tests because the rest are vouched for or resting.
+3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Decided 2026-10-29
+   and 2026-11-20 (decisions 15–20), the report node:test's (the user, 2026-11-22). Built 2026-11-22: lib
+   `util/silo/select` (selection by test from what a change reaches by declaration, vouches that lapse when what they
+   reached changes, resting after 20 green runs, the week's window, audits, runtimes that must have agreed) and silo's
+   `silo test` (CI's step: selects, runs, its reporter's lines read back from the workflow's logs) and `silo vouch`; ci.yml
+   passes the push's base and runs everything Mondays. Left: packages/editor's tests run through `silo test` (after the
+   notes migration); the editor's commit flow vouching (tsval, decision 19: a vouch counts in Node only for a test whose
+   outcomes have agreed); then per-test reach from runs, finer than a file's static reach. Done when a push's CI runs
+   fewer tests because the rest are vouched for or resting.
 
 ## Watching
 
