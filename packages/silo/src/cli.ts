@@ -681,7 +681,7 @@ export const app = subcommands({
 				"runtime": { "format": String, "default": "node", "doc": "What the runner runs tests on: a vouch made on another counts only for a test the two have agreed on (decision 19)." },
 				"full": { "format": Boolean, "default": false, "doc": "Run everything (the scheduled full run)." },
 				"audit": { "format": Number, "default": 0, "doc": "The share of vouched tests run anyway, at random (decision 17)." },
-				"workflow": { "format": String, "default": "ci", "doc": "The CI workflow whose runs say how each test has done." },
+				"workflow": { "format": String, "default": "", "doc": "The CI workflow whose runs say how each test has done, by its file's name (`ci.yml`). None: the one running this step (GITHUB_WORKFLOW_REF)." },
 				"dry": { "format": Boolean, "default": false, "doc": "Say what would run, and run nothing." },
 				"json": jsonFlag
 			}),
@@ -704,7 +704,8 @@ export const app = subcommands({
 						"runtime": config.get("runtime"),
 						"full": config.get("full") || process.env["SILO_FULL"] === "true",
 						"audit": config.get("audit"),
-						...repository === undefined ? {} : { "ci": { "repository": repository, "workflow": config.get("workflow"), ...process.env["GITHUB_TOKEN"] === undefined ? {} : { "token": process.env["GITHUB_TOKEN"] } } }
+						"say": (text) => process.stderr.write(text + "\n"),
+						...repository === undefined ? {} : { "ci": { "repository": repository, "workflow": config.get("workflow") || path.basename((process.env["GITHUB_WORKFLOW_REF"] ?? "ci.yml").split("@")[0]!), ...process.env["GITHUB_TOKEN"] === undefined ? {} : { "token": process.env["GITHUB_TOKEN"] } } }
 					});
 				} finally {
 					analyzer.close?.();

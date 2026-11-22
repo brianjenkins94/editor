@@ -117,13 +117,19 @@ export interface TestOptions {
 	"audit": number;
 	/** Where CI's own runs are read: `owner/name`, its workflow, and a token; none, and every test is new. */
 	"ci"?: { "repository": string; "workflow": string; "token"?: string; "limit"?: number };
+	/** Where what went wrong on the way is said: CI's runs that couldn't be read. */
+	"say"?: (text: string) => void;
 }
 
 /** Each candidate test, run or not, and why. */
 export async function selectFor(options: TestOptions): Promise<Selected[]> {
 	const head = await graphAt(options.repo, options.analyzer, options.candidates);
 	const base = options.base === undefined || /^0+$/u.test(options.base) ? undefined : await graphAt(options.repo, options.analyzer, options.candidates, options.base);
-	const runs = options.ci === undefined ? [] : await githubRuns({ "repository": options.ci.repository, "workflow": options.ci.workflow, "limit": options.ci.limit ?? 20, "read": reportedIn, ...options.ci.token === undefined ? {} : { "token": options.ci.token } }).catch(() => []);
+	const runs = options.ci === undefined ? [] : await githubRuns({ "repository": options.ci.repository, "workflow": options.ci.workflow, "limit": options.ci.limit ?? 20, "read": reportedIn, ...options.ci.token === undefined ? {} : { "token": options.ci.token } }).catch((error: unknown) => {
+		options.say?.(`${options.ci!.repository}'s ${options.ci!.workflow} runs couldn't be read (${(error as Error).message}): every test is new to this run.`);
+
+		return [];
+	});
 	const known = standingsByTest(runs);
 	// (a file's tests as CI's runs know them; a file none know of stands for its tests, new)
 	const tests = options.candidates.flatMap((file) => {
