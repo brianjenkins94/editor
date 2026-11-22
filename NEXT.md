@@ -39,10 +39,10 @@ How it's kept:
    22), the measures were taken (`.silo/zero-knowledge.json`, `.silo/last-run/`), and the features came back to rough
    parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
    changes marked*). In order:
-   - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
-     fit* answered. One owner a file is where that starts: reassess sharing from what runs show — Features and tests
-     says which of a feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx,
-     four features' pages under one owner, is a known case.
+   - **Silo, firmed up** (*Silo, firmed up*; each capability under its job, *What doesn't fit* answered 2026-11-22). Left:
+     one owner a file is where it starts — reassess sharing from what runs show. Features and tests says which of a
+     feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx, four
+     features' pages under one owner, is a known case.
      `silo observed .silo/local/reach` compares each test's reach with the ledger (2026-11-17: 149 tests, a median of
      100% in their own features' code, 26 under half, mostly a dependency). CI's reach, from a dispatched architecture
      run (2026-11-20, 44800937124: half the specs, the other half past the limit, 60 min since), each spec its own file's
@@ -117,11 +117,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
   NotAllowedError still happens after e86501b is unknown: read the next reports, which carry their stack. Also seen
   once: `[almostnode] worker_threads.Worker is not implemented` (synckit's `createSyncFn`, e4e927b).
 
-- **A seeded instance loses `.silo/` files beside a seeded `.silo/local/` one** (found 2026-11-22): an address's seed
-  (`?seed=`, the in-editor specs' `openEditor`) with `.silo/baseline.json` and `.silo/local/baseline-files.json` boots with
-  no `.silo/baseline.json` (`.silo` lists empty; `.silo/local/`, its own IndexedDB mount, mounted before the seed, holds
-  its file). With no `.silo/local/` file seeded, `.silo/`'s are there. Only a seed does this: no repository has
-  `.silo/local/` (git ignores it).
+- **A seeded `.silo/baseline.json` moves to `.silo/local/`** (found 2026-11-22): git-engine.ts `keepLocal` moves a kept
+  file git has neither committed nor staged from `.silo/` to its local copy — a migration for what editors before
+  2026-10-30 wrote there. A seed's (`?seed=`, the specs' `openEditor`) is untracked, so it moves too (seen with a
+  `.silo/local/` file seeded beside it; dependency-baseline.spec's, without one, stays: why, not looked into). Nothing is
+  lost — the extension reads the local copy — but a spec can't open it where it seeded it. Whether the migration has
+  done its work by now is the question.
 - **A repository load the browser closed on is kept half-written** (2026-10-31): a load's files are written back to
   IndexedDB in debounced batches (workspace-fs.ts `flush`), and a browser closed in the middle keeps what landed — here
   `.git/HEAD`, `.git/config` and acquired types, no working tree. The shell's note of what it loaded (`shell:githubRepo`

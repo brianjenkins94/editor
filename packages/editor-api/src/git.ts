@@ -10,9 +10,8 @@ import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
  *  `.refs/<name>/`. Not in git's store, so git doesn't see it; the walks for the project's own files leave it out. */
 export const REFS_DIR = ".refs";
 
-/** The files the editor makes for a project, under `.silo/`: the versions it pins, the dependency baseline, the static
- *  capability surface. */
-export const KEPT = ["versions.json", "baseline.json", "capabilities.json"];
+/** The files the editor makes for a project, under `.silo/`: the versions it pins, the dependency baseline. */
+export const KEPT = ["versions.json", "baseline.json"];
 
 /** `.silo/<name>`'s local copy, `.silo/local/<name>`: git doesn't see it (`.silo/.gitignore`). */
 export function localOf(shared: string): string {

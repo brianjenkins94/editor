@@ -689,9 +689,12 @@ line; the editor), and what supersedes what. Where it starts:
   what more than one feature's runs reach is made a feature of its own, or split.
 - **One attribution of runs to features**: the ledger's (lib `ownersOf`). `coverage` tells what ran by owning feature, and
   `exercise` went (*What doesn't fit* 4).
-- **History's three features** (above) are split by what's silo's and what's the editor's view of it.
-- **The rest of *What doesn't fit*** (two stores of what code can do, the subcommands, the leftovers) answered, or
-  carried on with a reason, and decision 21 with them.
+- **History's three features** (above) are split (checked 2026-11-22): what each reads of the program and decides is lib's
+  (`ledger`, `history`, `graph`, `features`), what `silo check` and `silo history` run too; extensions/history holds where
+  it shows (Problems, the lightbulb, its Output).
+- **The rest of *What doesn't fit*** answered or carried with a reason (2026-11-22; decision 21 was already): one store
+  of what code can do (the stored static surface and the observed rollup went, neither read), the ten subcommands under
+  their jobs, the leftovers lib's; deobfuscation and a gate outside the editor carried, each with its reason.
 
 **Visibility: anything we'd ever debug, without a profiler.** What exists: the metrics plane, span rates and latencies
 from every context's `→ x` / `← x (12ms)` records, the workspace's fill, and each zen-fs store operation counted as an

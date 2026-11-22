@@ -48,9 +48,9 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 
 | Job | Question it answers | Command line | Editor | lib `util/silo` | In `.silo/` |
 |---|---|---|---|---|---|
-| Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
+| Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`, `slice`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by owning feature), `features` (`--score`: derivations against the declared features), `history`; the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by owning feature), `features` (`--score`: derivations against the declared features), `history`, `observed` (each test's reach against the features its file declares); the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
 | Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
 ## What the prototype had, and where it is now
@@ -61,7 +61,7 @@ The prototype is `~/Documents/GitHub/silo` (its README is the design doc). Its p
 |---|---|---|
 | `silo <script>` (runner) | Drift check, then bundle the script with a capability broker injected and run it, prompting on any new scope; grants persisted, runs recorded, confidence updated | **No desktop runner.** The decision core is lib `util/silo/enforce/decide.mjs` (used by util/mcp's broker); the editor gates its own runs |
 | BERNARD / JUDICIAL | A redline nothing can auto-approve (secrets, `rm`, `eval`, system dirs, unknown hosts), then a pluggable decider (a command, an agent, you) | `enforce/decide.mjs` (`redline`, `judicial`) |
-| `silo audit` | Per dependency: the members your code imports, joined with what that slice can reach (tree-shaken, deobfuscated with webcrack ∪ wakaru), diffed against `.silo/baseline.json`; exits 1 on drift | Split: `audit` (the import surface and builtins) is live; the package half (`packages`, `deobfuscate`) is **cut off** (see question 1) |
+| `silo audit` | Per dependency: the members your code imports, joined with what that slice can reach (tree-shaken, deobfuscated with webcrack ∪ wakaru), diffed against `.silo/baseline.json`; exits 1 on drift | Split: `audit` (the import surface and builtins) is live; the slice is back (`slice`, the baseline's join); deobfuscation (`packages`, `deobfuscate`) is cut off (see question 1) |
 | `silo install` (cooldown) | Nothing published in the last week; a breadcrumb for the runner when the lockfile moves | `silo install` (live) |
 | CI gate | The audit in CI, as a GitHub Action (`action.yml`) | Not carried over |
 | Two static engines | TypeScript's call hierarchy (precise, under-reports) and tree-shaking (over-reports); their disagreement is the blind-spot detector | `detect`/`reach` (pattern-based); the TypeScript reading is in `ts-analysis` for history, not capabilities |
@@ -88,28 +88,34 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
 
 ## What doesn't fit (open questions)
 
-1. **The baseline analyzes packages more coarsely than the prototype did.** Both front ends run lib's `detect` (a
-   pattern scan) over every code file of each package's own tarball: the editor from the registry, the command line
-   from node_modules. The prototype was finer: only the slice of a package your code imports (tree-shaken), and
-   deobfuscated first (`package-capabilities`, `deobfuscate`), which the port into lib cut off.
-2. **There's no gate outside the editor.** The editor gates its runs (tsval, almostnode) and util/mcp gates MCP tools,
-   but nothing gates a program you run from a terminal. The prototype's `silo <script>` was that gate (a bundled
-   broker, BERNARD and JUDICIAL); its decision core survived, its runner didn't. A `silo run` has been discussed
-   (tsval with policy, recording exceptions) and not built. Not urgent while the editor (already a browser sandbox) is the product, but needed to
-   reconcile the two.
-3. **Two stores of what code can do.** `baseline.json` holds what packages can do (Anticipate). `capabilities.json` and
-   `capabilities/<user>.json` hold what the code can do and what it was seen doing (the capabilities extension's). How
-   they relate isn't written down.
+1. ~~**The baseline analyzes packages more coarsely than the prototype did.**~~ Half back (2026-11-22): the code's use of a
+   package is sliced again — each use's members tree-shaken out of the package's tarball by rolldown and scanned
+   (lib `slice.ts` `sliceCaps`, the baseline's `join`), in the editor's package worker and `silo init`/`install` alike.
+   Carried, with its reason: deobfuscation (`deobfuscate`, `packages`). A package whose calls the scan can't see is still
+   caught where it matters, at the call — the gate decides it, and the run's effects keep it — so it waits for a
+   package the scan is shown to miss.
+2. **There's no gate outside the editor.** Carried (2026-11-22), for the reason it gave: the editor gates its runs (tsval,
+   almostnode) and util/mcp gates MCP tools, but nothing gates a program you run from a terminal. The prototype's
+   `silo <script>` was that gate (a bundled broker, BERNARD and JUDICIAL); its decision core survived, its runner didn't.
+   A `silo run` (tsval with the policy, recording exceptions) waits until the editor, already a browser sandbox and the
+   product, isn't the only place code runs that needs one.
+3. ~~**Two stores of what code can do.**~~ Answered 2026-11-22: one, `baseline.json`, for what packages can do. What the
+   code itself can do isn't stored — it's read off the code when asked (`detect`: the Features and tests view's "can …",
+   an unused allow rule's callers) — and what it was seen doing is each run's effects (`runs/`). The static
+   `capabilities.json` and the observed rollup `capabilities/<user>.json` went: the first had no writer since the
+   reduction, the second no reader. Their gap, the signal they were kept apart for, is asked of the two directly: a
+   feature's "… not in its tests' runs", an allow rule no run used.
 4. ~~**Two attributions of runs to features.**~~ Decided 2026-11-03: one, the ledger's. A file's features are who declares
    it (lib `ownersOf`, decision 22), and `coverage` tells what ran by them. `exercise` had no callers left and went. What
    runs and traces show is compared with the declaration, and doesn't stand in for it. That comparison isn't built:
    *Declared against observed*, which is also how sharing gets reassessed, and it needs per-test reach recorded against
    today's tests (`.silo/last-run/reach.json` is `full-editor`'s, whose tests are gone).
-5. **Which subcommands belong.** By the four jobs, all seven do: three for Track, two for Anticipate (with overlap),
-   three for Remember, none for Gate. But they aren't grouped that way, the file's own header lists five of them, and
-   `features` and `history` rest on the parked feature layer.
-6. **The leftovers.** Whether `packages` and `deobfuscate` get wired into the baseline (see 1), and whether `guard`
-   stays. (`provenance` and `review`, the dropped AI-approval purpose's, are removed.)
+5. ~~**Which subcommands belong.**~~ Answered 2026-11-22: all ten, each under its job (the table above): Anticipate
+   `init` and `install`; Track `install`'s sync and `check`'s runs beyond the baseline; Remember `coverage`, `features`,
+   `history`, `observed`, and the ledger's `status`, `remove` and `restore`; Gate `check` (CI's `silo` job). The command
+   line's header lists all ten. `features` and `history` read the ledger's declared features now, not the parked layer.
+6. ~~**The leftovers.**~~ Answered 2026-11-22: `packages` and `deobfuscate` stay in lib, unused here, with 1's carrying;
+   `guard` has no caller in the editor or silo either, and is lib's to keep or drop.
 7. ~~**Tests and purity have no job yet.**~~ Decided 2026-10-24: no fifth job. Choosing which tests a change reaches,
    and deciding purity statically, are Anticipate (the heuristic floor); what runs observed — reach, purity seen — is
    Remember (the runtime ceiling). The jobs at the top say so.

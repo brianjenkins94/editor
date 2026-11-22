@@ -96,7 +96,7 @@ export async function includeSilo(): Promise<void> {
 }
 
 /**
- * The files the editor makes for a project (editor-api's git.ts `KEPT`: versions, baseline, capabilities) are the
+ * The files the editor makes for a project (editor-api's git.ts `KEPT`: versions, baseline) are the
  * repository's at `.silo/` once it has committed them, and local until then (`keptAt`). One at `.silo/` that git has
  * neither in HEAD nor staged — an editor before 2026-10-30 wrote them there, and every commit took them — is moved to
  * its local copy, where git doesn't see it.

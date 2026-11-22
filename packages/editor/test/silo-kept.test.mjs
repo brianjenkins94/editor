@@ -1,5 +1,5 @@
 /**
- * The files the editor makes for a project (`.silo/versions.json`, `baseline.json`, `capabilities.json`) are the
+ * The files the editor makes for a project (`.silo/versions.json`, `baseline.json`) are the
  * repository's once it has committed them, and local until then (editor-api's git.ts `keptAt`): loading a repository
  * doesn't put them in its next commit. And one an earlier editor wrote at `.silo/` untracked is moved to its local copy
  * as the workspace becomes a repository (git-engine.ts `includeSilo`), on zen-fs's in-memory filesystem.

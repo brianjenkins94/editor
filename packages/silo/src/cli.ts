@@ -10,6 +10,9 @@
  *   silo check [repo] [--prices] [--json]              the ledger's drift from the code (each with what deleting its
  *                                                        feature would free), the dormant ways in, and what the runs'
  *                                                        packages did beyond the baseline
+ *   silo coverage [repo] [--since …] [--until …] [--ref …] [--json]
+ *                                                      what the committed runs ran, commit by commit, by feature: what
+ *                                                        started running, what stopped, what's reached and never ran
  *   silo observed <reach> [--repo …] [--json]          each test against the features its file declares: what its reach
  *                                                        (a folder of `<suite>.json`) says of the ledger's boundaries
  *   silo remove <entry> [why] [--key …] [--paths …]    take a feature out: what only it reaches, its package manifests' entries,

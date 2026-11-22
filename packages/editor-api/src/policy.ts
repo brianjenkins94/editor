@@ -1,30 +1,23 @@
 /**
- * `.silo/` store — the on-disk capability layout the editor owns as silo's FIRST-CLASS harness (no silo CLI
- * exists; this is the reference writer). Two independent axes, and the layout keeps each axis's base/derived
- * halves apart because the GAP between them is the security signal:
+ * `.silo/` store — the capability decisions the editor keeps for a project, base and override apart:
  *
  *   .silo/
  *     policy.json               DECISIONS · base    — the contract, human-authored (we only READ it — but for keeping a
  *                                                   placed rule's place up with its code: movePlace)
  *     policy/<user>.json        DECISIONS · mine    — overrides; "Allow always"/"Deny always" write HERE
- *     capabilities.json         FACTS · static      — what analysis says code CAN do (written by the panel side)
- *     capabilities/<user>.json  FACTS · observed    — what I actually saw FIRE (rollup, day-coarsened)
  *     .gitignore                silo-managed        — ignores local/ (recorded results: this machine's alone)
  *
  * (The whole `.silo/` layout, and who writes what, is silo's: @brianjenkins94/util/silo/layout.)
  *
- * Why never merge the axes:
- *   • base vs override — silo must never rewrite the reviewable CONTRACT; a person's grants land in their own
- *     git-user-scoped file, so overrides commit conflict-free (everyone writes only their file).
- *   • static vs observed — a scope OBSERVED with no matching STATIC entry is the alarm (dynamic eval, obfuscation,
- *     a supply-chain payload that reads clean and runs dirty). Merged, that signal is gone.
+ * Why never merge them: silo must never rewrite the reviewable CONTRACT; a person's grants land in their own
+ * git-user-scoped file, so overrides commit conflict-free (everyone writes only their file).
  *
- * Timestamps land per axis, each answering a different question: `added` (when I authorized) on the override
- * rule; firstObserved/lastObserved (when it fired) on the observed rollup; and per run, in the one run ledger: each
- * run's envelope (`.silo/runs/<user>.jsonl`, evidence.ts) lists its effects — what it made, was denied, skipped or was
- * given — kept while it runs (run-effects.ts) and taken when its envelope is written (`run.effects`).
- * "lastAllowed" and "was I exposed to compromised dep X in window W" are QUERIES over the observed side, never stored
- * decision state.
+ * What the code CAN do isn't stored: it's read off the code when it's asked (lib's `detect`). What it DID is each run's:
+ * its envelope (`.silo/runs/<user>.jsonl`, evidence.ts) lists its effects — what it made, was denied, skipped or was
+ * given — kept while it runs (run-effects.ts) and taken when its envelope is written (`run.effects`). The gap between the
+ * two is asked of both (a feature's "can … not in its tests' runs"; an allow rule no run used), and "was I exposed to
+ * compromised dep X in window W" is a query over the runs. (A stored static surface, `capabilities.json`, and an observed
+ * rollup, `capabilities/<user>.json`, went 2026-11-22: neither had a reader.)
  *
  * MONOREPO-READY: siloRoot() is the one place the responsible `.silo` is resolved. Today it's the single
  * workspace root; later it resolves the nearest `.silo` walking up from a run's entry, so a monorepo can carry a
@@ -34,12 +27,11 @@ import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker
 import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import type { Disposition, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
-import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
+import { GITIGNORE, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { recordEffect } from "./effects.ts";
 import { recordingKey } from "./gate.ts";
-import { keptAt, localOf } from "./git.ts";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -251,146 +243,14 @@ export async function movePlace(whose: "mine" | "shared", previous: Rule, rule: 
 	await writeText(file, JSON.stringify(moved, null, "\t") + "\n");
 }
 
-// ── static facts: the capability surface (committed, shared) ─────────────────────────────────────────────────
-
-/** One statically-detected capability site: what a file CAN reach (from findReach, surfaced via the plugin's
- *  diagnostics). `resource` is "" when unresolved (a call whose target a run/literal hasn't pinned yet). No line
- *  number — the surface is "what capabilities/resources this file reaches", so it churns only on real DRIFT (a new
- *  capability or resource), not on every edit that shifts a line. */
-export interface StaticEntry {
-	"capability": string;
-	"callee": string;
-	"resource": string;
-}
-export interface StaticSurface {
-	"version": number;
-	"capabilities": Record<string, StaticEntry[]>;
-}
-
-/** Read `.silo/capabilities.json` (the STATIC surface; its local copy when the repository hasn't it: git.ts `keptAt`),
- *  empty if absent/malformed. */
-export async function loadStaticSurface(): Promise<StaticSurface> {
-	const root = siloRoot();
-
-	if (root === undefined) {
-		return { "version": 1, "capabilities": {} };
-	}
-
-	const text = await readText(fileIn(root, capabilitiesPath())) ?? await readText(fileIn(root, localOf(capabilitiesPath())));
-
-	if (text !== undefined) {
-		try {
-			const parsed = JSON.parse(text) as Partial<StaticSurface>;
-
-			if (parsed.capabilities !== undefined && typeof parsed.capabilities === "object") {
-				return { "version": parsed.version ?? 1, "capabilities": parsed.capabilities };
-			}
-		} catch { /* malformed → empty */ }
-	}
-
-	return { "version": 1, "capabilities": {} };
-}
-
-/** Write `.silo/capabilities.json` with file keys AND each file's entries sorted, so the committed file diffs
- *  cleanly (drift shows as a real add/remove, never a reorder). */
-export async function writeStaticSurface(surface: StaticSurface): Promise<void> {
-	const root = siloRoot();
-
-	if (root === undefined) {
-		return;
-	}
-
-	const sorted: StaticSurface = { "version": surface.version, "capabilities": {} };
-
-	for (const path of Object.keys(surface.capabilities).sort((left, right) => left.localeCompare(right))) {
-		sorted.capabilities[path] = [...surface.capabilities[path]].sort((left, right) => (left.capability + left.callee + left.resource).localeCompare(right.capability + right.callee + right.resource));
-	}
-
-	await writeText(fileIn(root, await keptAt(capabilitiesPath(), async (path) => await readText(fileIn(root, path)) !== undefined)), JSON.stringify(sorted, null, "\t") + "\n");
-}
-
-// ── observed facts: the rollup + each run's effects ────────────────────────────────────────────────────────────────
-
-interface ObservedEntry {
-	"kind": string;
-	"resource": string;
-	"firstObserved": string;
-	"lastObserved": string;
-}
-interface ObservedSurface {
-	"version": number;
-	"observed": Record<string, ObservedEntry>;
-}
-
-let observedCache: ObservedSurface | undefined;
-
-async function loadObserved(root: vscode.Uri, user: string): Promise<ObservedSurface> {
-	if (observedCache === undefined) {
-		observedCache = { "version": 1, "observed": {} };
-		await readObserved(root, user);
-	}
-
-	return observedCache;
-}
-
-/** `loadObserved`'s read of the rollup, kept when it parses. */
-async function readObserved(root: vscode.Uri, user: string): Promise<void> {
-	const text = await readText(fileIn(root, observedCapabilitiesPath(user)));
-
-	if (text !== undefined) {
-		try {
-			const parsed = JSON.parse(text) as Partial<ObservedSurface>;
-
-			if (parsed.observed !== undefined && typeof parsed.observed === "object") {
-				observedCache = { "version": parsed.version ?? 1, "observed": parsed.observed };
-			}
-		} catch { /* malformed → empty */ }
-	}
-}
-
-/**
- * Record one gated decision on the OBSERVED axis (best-effort, never blocks or fails a decision):
- *   • fold ALLOWED scopes into `capabilities/<user>.json` — the committed rollup, day-coarsened (rewritten only
- *     when a scope is first seen or its last-seen DATE advances) so the tracked file stays quiet in git.
- *   • when `runId` is known (a preview's run), count it among that run's effects (recordEffect) — made, or denied.
- * A denied call fired nothing, so it's kept out of the observed surface.
- */
+/** Record one gated decision: when `runId` is known (a preview's run), counted among that run's effects (recordEffect) —
+ *  made, or denied. */
 export function recordObservation(request: CapabilityRequest, disposition: Disposition, runId?: string, decided?: Effect["decided"]): void {
-	// Counted SYNCHRONOUSLY (before any await) so a fast run-exit can't race it — with how it was decided (an answer at the
-	// call is an exception to the policy, on record in the run).
+	// Counted SYNCHRONOUSLY so a fast run-exit can't race it — with how it was decided (an answer at the call is an
+	// exception to the policy, on record in the run).
 	if (runId !== undefined) {
 		recordEffect(runId, request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind, request.resource ?? "", disposition === "allow" ? "made" : "denied", 1, decided);
 	}
-
-	void (async () => {
-		try {
-			const root = siloRoot();
-
-			if (root === undefined) {
-				return;
-			}
-
-			const now = new Date().toISOString();
-			const user = await currentUser();
-
-			if (disposition !== "allow") {
-				return; // denied ⇒ nothing fired ⇒ not part of the observed surface
-			}
-
-			const surface = await loadObserved(root, user);
-			const entry = surface.observed[request.scope];
-
-			if (entry === undefined) {
-				surface.observed[request.scope] = { "kind": request.kind, "resource": request.resource ?? "", "firstObserved": now, "lastObserved": now };
-			} else if (entry.lastObserved.slice(0, 10) !== now.slice(0, 10)) {
-				entry.lastObserved = now; // advanced to a new day — worth persisting
-			} else {
-				return; // same scope, same day → the rollup already reflects this
-			}
-
-			await writeText(fileIn(root, observedCapabilitiesPath(user)), JSON.stringify(surface, null, "\t") + "\n");
-		} catch { /* observation is advisory; a failure must never affect enforcement */ }
-	})();
 }
 
 let gitignoreEnsured = false;
