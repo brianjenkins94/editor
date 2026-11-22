@@ -41,8 +41,8 @@ How it's kept:
    changes marked*). In order:
    - **Silo, firmed up** (*Silo, firmed up*; each capability under its job, *What doesn't fit* answered 2026-11-22). Left:
      one owner a file is where it starts — reassess sharing from what runs show. Features and tests says which of a
-     feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx, four
-     features' pages under one owner, is a known case.
+     feature's files other features' tests run (2026-11-21), traces not yet. The known case, packages/admin/src/views.tsx
+     (five features' pages under one owner), split 2026-11-22: each page its feature's file, what they share ui.tsx.
      `silo observed .silo/local/reach` compares each test's reach with the ledger (2026-11-17: 149 tests, a median of
      100% in their own features' code, 26 under half, mostly a dependency). CI's reach, from a dispatched architecture
      run (2026-11-20, 44800937124: half the specs, the other half past the limit, 60 min since), each spec its own file's

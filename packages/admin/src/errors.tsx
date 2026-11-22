@@ -9,7 +9,7 @@ import type { SourceMapInput } from "@jridgewell/trace-mapping";
 import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping";
 import { useEffect, useState } from "preact/hooks";
 import { get } from "./session";
-import { Table, When } from "./views";
+import { Table, When } from "./ui";
 
 interface Group { "fingerprint": string; "source": string; "name": string; "message": string | null; "route": string | null; "first_seen": number; "last_seen": number; "count": number; "releases": string; "recent"?: number }
 

@@ -31,7 +31,12 @@ import { MailPage } from "./mail";
 import type { Maintenance, SwitchState } from "./maintenance";
 import { KillSwitch, MaintenanceBanner, PausedBanner, Switches } from "./maintenance";
 import { get, session, SIGNED_OUT, submit } from "./session";
-import { Audit, Overview, Permissions, Sessions, TrafficPage, UnusualPage, UserPage, Users } from "./views";
+import { Audit } from "./audit";
+import { Sessions } from "./sessions";
+import { TrafficPage } from "./traffic";
+import { Permissions } from "./ui";
+import { UnusualPage } from "./unusual";
+import { Overview, UserPage, Users } from "./users";
 
 adminStyles();
 

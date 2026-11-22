@@ -60,7 +60,7 @@
     "what": "Shows an overview page and the list of accounts, and for each user their identities, sessions and audit rows.",
     "docs": "packages/api/README.md, *The UI*",
     "paths": [
-      "packages/admin/src/views.tsx"
+      "packages/admin/src/users.tsx"
     ]
   },
   "Admin: sign-in and roles": {
@@ -71,6 +71,7 @@
     "docs": "packages/api/README.md, *Roles and permissions*",
     "paths": [
       "packages/admin/src/logins.ts",
+      "packages/admin/src/ui.tsx",
       "packages/admin/src/main.tsx",
       "packages/admin/src/session.ts",
       "packages/api/src/admin.ts",
@@ -88,6 +89,7 @@
     "docs": "packages/api/README.md, *Errors and timelines (O4–O7)*",
     "paths": [
       "packages/admin/src/timeline.tsx",
+      "packages/admin/src/sessions.tsx",
       "packages/api/src/session-events.ts",
       "packages/api/src/timeline.ts"
     ],
@@ -2410,6 +2412,7 @@
     "docs": "packages/api/README.md, *A tamper-evident audit log*",
     "paths": [
       "packages/api/scripts/audit.ts",
+      "packages/admin/src/audit.tsx",
       "packages/api/src/audit-copies.ts",
       "packages/api/src/audit.ts",
       "packages/api/src/refusals.ts"
@@ -2671,6 +2674,7 @@
     "docs": "packages/api/README.md, *The cost guard (O2)*",
     "paths": [
       "packages/api/src/spend.ts",
+      "packages/admin/src/traffic.tsx",
       "packages/api/src/traffic.ts"
     ],
     "tests": [
@@ -2750,6 +2754,7 @@
     "docs": "packages/api/README.md, *Behavior (B7–B9)*",
     "paths": [
       "packages/api/migrations/0006_behavior.sql",
+      "packages/admin/src/unusual.tsx",
       "packages/api/src/behavior.ts"
     ],
     "tests": [

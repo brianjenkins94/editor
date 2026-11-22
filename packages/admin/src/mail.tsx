@@ -7,7 +7,7 @@
  */
 import { useContext, useEffect, useState } from "preact/hooks";
 import { get, post } from "./session";
-import { Permissions, Table } from "./views";
+import { Permissions, Table } from "./ui";
 
 interface Mail {
 	"window": { "days": number; "since": string; "until": string };

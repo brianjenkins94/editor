@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from "preact/hooks";
 import { get } from "./session";
-import { Table, When } from "./views";
+import { Table, When } from "./ui";
 
 type Item =
 	| { "kind": "request"; "at": number; "route": string; "status": number; "ms": number; "trace": string | null }
