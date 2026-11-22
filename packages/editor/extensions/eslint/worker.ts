@@ -108,6 +108,7 @@ module.exports = async () => {
 	const { ESLint } = require("eslint");
 	const messages = (result) => result.messages.map((message) => ({ "line": message.line, "column": message.column, "endLine": message.endLine, "endColumn": message.endColumn, "message": message.message, "ruleId": message.ruleId, "severity": message.severity, "fixable": message.fix !== undefined }));
 	const pair = (options) => ({ "linting": new ESLint(options), "fixing": new ESLint({ ...options, "fix": true }) });
+	// (one ESLint a working directory, each finding a file's config above it as ESLint 10 does — and caching what it loads)
 	const byCwd = new Map();
 	const at = (cwd) => {
 		if (!byCwd.has(cwd)) {
@@ -118,6 +119,7 @@ module.exports = async () => {
 	};
 	let preset;
 	const presetPair = async () => (preset ??= pair({ "cwd": "/workspace", "overrideConfigFile": true, "overrideConfig": (await import("@brianjenkins94/util/eslint")).default }));
+	// (the file's config, loaded now so one that can't be is known before anything is linted with it)
 	const using = async (file, cwd) => {
 		const own = at(cwd);
 		const config = await own.linting.findConfigFile(file);
@@ -136,6 +138,7 @@ module.exports = async () => {
 	};
 	const told = ({ config, error }) => ({ ...config === undefined ? {} : { "config": config }, ...error === undefined ? {} : { "error": error } });
 
+	// (what the workspace's root lints with, loaded now — its config, or the preset — so the first file waits on less)
 	await using("/workspace/index.ts", "/workspace");
 
 	return {

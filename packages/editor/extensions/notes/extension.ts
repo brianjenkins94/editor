@@ -272,6 +272,14 @@ export function activate(context: vscode.ExtensionContext): void {
 					return undefined;
 				}
 
+				// (a `//` line inside a string or a template — code carried as text, an embedded page's script — reads as a
+				// comment line by line, and what's below it is the string's: not a comment, nothing a note can stand on)
+				if (/String|Template/u.test(ref.shape?.type ?? "")) {
+					void vscode.window.showInformationMessage("That's inside a string, not a comment: it's left as it is.");
+
+					return undefined;
+				}
+
 				const wrote = await Promise.resolve(vscode.commands.executeCommand<string[]>("editor.git.authorsOf", file, comment.from + 1, comment.to + 1)).then((authors) => (Array.isArray(authors) ? authors : []), () => []);
 				const edit = new vscode.WorkspaceEdit();
 

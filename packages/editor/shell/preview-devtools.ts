@@ -127,6 +127,7 @@ function frontendUrl(): string {
 <style>@media (prefers-color-scheme: dark) { body { background-color: rgb(41 42 45); } }</style>
 <meta name="referrer" content="no-referrer">
 <script>
+// Sandboxed (an opaque origin), web storage throws on access: DevTools keeps its settings there, so give it memory.
 for (const name of ["localStorage", "sessionStorage"]) {
 	const items = new Map();
 	const storage = {

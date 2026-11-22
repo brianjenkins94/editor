@@ -79,3 +79,14 @@ test("a comment made a note: gone from the code, its text beside the code it was
 	await openFile(workbench, ".silo/notes/repository/commented.mjs.jsonl");
 	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("Two, until the rate", { "timeout": 30_000 });
 });
+
+test("a `//` line inside a string isn't a comment: it stays, and the action says why", async ({ page }) => {
+	const workbench = await openEditor(page, { ...files, "embedded.mjs": "export const page = `\n// inside a string\nconst x = 1;\n`;\n" });
+
+	await openFile(workbench, "embedded.mjs");
+	await top(workbench);
+	await codeOf(workbench).press("ArrowDown");
+	await quickFix(workbench, "Make this comment a note");
+	await expect(workbench.locator(".notification-list-item", { "hasText": "That's inside a string" })).toBeVisible({ "timeout": 60_000 });
+	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("// inside a string");
+});
