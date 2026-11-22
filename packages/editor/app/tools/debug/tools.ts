@@ -1,18 +1,11 @@
-/**
- * The debugger, driven as a person drives it: Run, the debug toolbar, the gutter's breakpoints, a stop's answers in the Margin
- * (the bridge's extensions/bridge/debug-control.ts). Every answer about a session is the same shape: its state, and while
- * stopped the line, its code and the locals, with what the program printed.
- */
 import type { ToolFamily, ToolHost } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
 const SESSION = z.string().optional().describe("The session id (from debug_list or debug_start). Omit when exactly one is going.");
-/** An ordering of the program's events to run again: debug_explore's `eventLoop`, with one outcome's `schedule`. */
 const EVENT_LOOP = z.object({ "now": z.number(), "seed": z.number(), "schedule": z.array(z.number()).optional() });
 const PROGRAM = z.string().optional().describe("The file, absolute or relative to the workspace (src/index.ts, say). Default: the file open in the editor.");
 
-/** The session to act on: `session`, else this tab's only one. */
 async function sessionOf({ request }: ToolHost, session: unknown, signal: AbortSignal): Promise<string> {
 	if (typeof session === "string") {
 		return session;

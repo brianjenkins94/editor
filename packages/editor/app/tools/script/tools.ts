@@ -1,4 +1,3 @@
-/** JavaScript for the computation a script is for, the workspace read-only, in the capability-gated realm (script-run.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

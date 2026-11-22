@@ -1,4 +1,3 @@
-/** What's been decided about a file or a name: the ledger and the docs (code-reach.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

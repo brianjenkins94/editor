@@ -1,6 +1,3 @@
-/** What the code says: a change's problems against HEAD (code-problems.ts), as the review panel shows each changed
- *  file's; which files BABLR parses (bablr.ts). And refactoring as a person does it (code-refactor.ts): Find All References,
- *  Rename Symbol, and the Explorer's move with its imports kept right. */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

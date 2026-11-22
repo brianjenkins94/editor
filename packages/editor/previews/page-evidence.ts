@@ -1,19 +1,3 @@
-/**
- * The page runtime of runtime evidence (RUNTIME-EVIDENCE.md, the third slice): what a preview's instrumented modules
- * (almostnode's frameworks/instrument.ts) tell `globalThis.__evidence`, counted in the page — statements as they start,
- * what went through each site — and reported to the editor (page-script.ts).
- *
- * Counts are page-global, by file and version (the module source's git blob oid): a module a hot update re-imports
- * with an edit counts into its new version, one re-imported unchanged counts on into its old one; a module's own scope
- * would lose them on every update. A report is a page's totals since it loaded, not what changed since the last, so a
- * lost one costs nothing. A page reports every 10 seconds while its counts change, on each hot update (before the
- * module is re-imported), and on `pagehide`.
- *
- * Recorded stops (RUNNING.md: a breakpoint in a page) are told here too (`p`): each time a stop's line runs, what was in
- * scope — each value previewed then, as the margin shows a live value — with `this`, the event the page was handling
- * and the functions it was in; the latest of each stop's hits kept, and reported soon after (not every 10 seconds: a
- * stop is looked at as it happens).
- */
 import type { SiteObservation } from "@brianjenkins94/editor-api";
 import type { Encoded } from "@brianjenkins94/editor-api/recorded";
 import type { ModuleEvidence, RecordedStop, Replay, StopHit } from "@brianjenkins94/editor-api/recorded";
@@ -23,13 +7,10 @@ import { esmPackage } from "@brianjenkins94/editor-api/recorded";
 import { preview } from "@brianjenkins94/editor-api/values";
 import { typeTag } from "@brianjenkins94/tsval/values";
 
-/** What a site of a module records: a statement (coverage), or one of tsval's observe sites (instrument.ts). */
 type SiteKind = "statement" | ObserveSite;
 
-/** A site of the module's table: its kind and its node's range (0-based line and character). */
 type Entry = [SiteKind, number, number, number, number];
 
-/** The runtime operations an instrumented module calls (instrument.ts). */
 interface Ops {
 	"s": (site: number) => void;
 	"v": (site: number, value: unknown) => unknown;
@@ -43,15 +24,10 @@ interface Ops {
 	"x": (recording: Recording) => void;
 }
 
-/** A replayable function's call being recorded, and the stop's hit it reached (if it did). */
 interface Recording { "replay": Replay; "hit"?: StopHit }
 
-/** How many of a stop's hits keep their recorded call (the latest): each is a snapshot of what the call read. */
 const MAX_REPLAYS = 5;
 
-/** A value as a stop shows it, previewed in the page (a value read later would be what it became): a DOM node or an
- *  event by what it is (`<button#add.primary>`, `MouseEvent click` — their properties live on prototypes, which a plain
- *  preview doesn't read), anything else as the margin previews a live value. */
 function stopPreview(value: unknown): string {
 	if (typeof Node !== "undefined" && value instanceof Element) {
 		return `<${value.tagName.toLowerCase()}${value.id === "" ? "" : "#" + value.id}${[...value.classList].map((name) => "." + name).join("")}>`;
@@ -68,23 +44,17 @@ function stopPreview(value: unknown): string {
 	return preview(value);
 }
 
-/** How many of a stop's hits are kept (the latest), and how soon after a hit the page reports. */
 const MAX_HITS = 20;
 const STOP_REPORT_MS = 150;
 
 
-/** How often a page with changes reports. */
 const REPORT_MS = 10_000;
-/** At most this many type tags a site reports (the rest as `other`), and distinct primitives it keeps, each string cut
- *  to SAMPLE_CHARS — as the debug worker's site sums (site-sums.ts). */
 const MAX_TAGS = 8;
 const MAX_SAMPLES = 5;
 const SAMPLE_CHARS = 40;
 
-/** A value site's kinds of value: the first it saw, counted on a fast path, then any others; and a few primitives. */
 interface Kinds { "first": string; "firstCount": number; "others": Record<string, number> | undefined; "samples": (string | number | boolean)[] }
 
-/** `tags`, at most MAX_TAGS of them: the most counted MAX_TAGS − 1, and the rest as `other`. */
 function capped(tags: Record<string, number>): Record<string, number> {
 	const ranked = Object.entries(tags).sort(([, left], [, right]) => right - left);
 
@@ -96,12 +66,6 @@ function capped(tags: Record<string, number>): Record<string, number> {
 			};
 }
 
-/**
- * Count what the page's instrumented modules tell `globalThis.__evidence`, and call `report` with every version's
- * evidence when it's time. Returns `flush`, which reports now.
- */
-/** The packages a page loaded from esm.sh, by name@version (sorted): each exact version its modules came from — the
- *  entry URL names a range (`react@^19`), and the stub it answers imports the version it resolved (`/react@19.3.0/…`). */
 export function loadedPackages(urls: string[]): string[] {
 	const found = new Set<string>();
 
@@ -116,7 +80,6 @@ export function loadedPackages(urls: string[]): string[] {
 	return [...found].toSorted();
 }
 
-/** What this page loaded, as loadedPackages tells it from the page's resource timing. */
 function pagePackages(): string[] {
 	return loadedPackages(performance.getEntriesByType("resource").map((entry) => entry.name));
 }
@@ -129,9 +92,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 		reportStops([...stops.values()].map(({ "count": _count, ...stop }) => stop));
 	};
 
-	/** The replayable calls being made, innermost last. */
 	const calls: Recording[] = [];
-	/** A stop of `file`'s `version` hit: what's in scope, previewed now (a value read later would be what it became). */
 	const stopHit = (file: string, version: string, at: [number, number, number, number], scope: () => Record<string, unknown>, self: () => unknown, where: string): void => {
 		const key = `${file}\0${version}\0${at.join(",")}`;
 		const stop = stops.get(key) ?? { "file": file, "version": version, "at": at, "where": where, "hits": [], "count": 0 };
@@ -157,7 +118,6 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 
 		stop.count += 1;
 		stop.hits = [...stop.hits, hit].slice(-MAX_HITS);
-		// The recorded call it's in, if its function is replayable: given the hit as it leaves. Only the latest few keep one.
 		stop.hits.slice(0, -MAX_REPLAYS).forEach((older) => {
 			delete older.replay;
 		});
@@ -196,7 +156,6 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 
 			recording.replay.calls.push(slot);
 
-			// A promise: what it settles to, when it does (a replay's await gets that).
 			if (value !== null && typeof value === "object" && typeof (value as { "then"?: unknown }).then === "function") {
 				void (value as Promise<unknown>).then((settled) => {
 					slot[2] = { "$": "p", "v": encode(settled) };
@@ -216,7 +175,6 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 			calls.splice(at);
 		}
 
-		// Reached its stop: the hit keeps it, to be stepped (and is reported again, with it).
 		if (recording.hit !== undefined) {
 			recording.hit.replay = recording.replay;
 			stopTimer ??= setTimeout(stopsNow, STOP_REPORT_MS);
@@ -234,14 +192,11 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 			return known.ops; // re-imported unchanged: it counts on
 		}
 
-		// Counted on the app's hot paths, so lean: typed counters by site, and each value site's kinds with a fast path
-		// for the one it usually sees (most sites only ever see one).
 		const counts = new Uint32Array(table.length);
 		const seen = new Uint32Array(table.length);
 		const nullish = new Uint32Array(table.length);
 		const arms = new Uint32Array(table.length * 2);
 		const kinds: (Kinds | undefined)[] = [];
-		// Whether each optional link stopped its chain: a later link is told only when the one before it didn't.
 		const stopped = new Uint8Array(table.length);
 		const value = (site: number, observed: unknown): unknown => {
 			changed = true;
@@ -404,7 +359,6 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 		}
 	};
 
-	// `module` is what instrumented modules call; `evidence` reads what the page has counted (for a debugger, a test).
 	Object.assign(globalThis, {
 		"__evidence": { "module": module, "evidence": evidence }
 	});
@@ -413,8 +367,6 @@ export function installPageEvidence(report: (modules: ModuleEvidence[], packages
 			flush();
 		}
 	}, REPORT_MS);
-	// A hot update re-imports a module: what its old version counted goes first. (The tap is the page's first script,
-	// so this listener hears the update before the HMR client acts on it.)
 	addEventListener("message", (event: MessageEvent) => {
 		if ((event.data as { "channel"?: unknown } | null)?.channel === "vite-hmr") {
 			flush();

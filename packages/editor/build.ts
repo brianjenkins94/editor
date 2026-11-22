@@ -22,36 +22,17 @@ import { editorSettingsDefaultsPlugin, editorWorkspacePlugin } from "./build/sna
 import { buildServiceWorker, staticHostPlugin } from "./build/static-host";
 import { vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
 
-/**
- * The whole packages/editor build, in ONE file — the five vite passes that used to be separate `-c` configs
- * (entry / lsp / eslint.engine / host / sw). `preBuild()` runs the four that emit into dist/ + docs/ (workbench
- * entry, lsp workers, eslint engine, sw); `hostBuild()` is the host site that serves the accumulated dist/ +
- * component under /__vscode__/. Order is load-bearing: the workbench entry empties dist/ FIRST, every later
- * pass sets emptyOutDir:false. `build` runs both; `dev.ts` runs preBuild() then serves the host live with
- * `hostPlugins()`. No vite.config.ts — buildPackage passes an inline config; nothing to auto-load.
- */
 export const root = url.fileURLToPath(new URL(".", import.meta.url));
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
-/** Source maps: locally, every bundle of ours carries one, so a debugger and V8 coverage map back to the repo's files.
- *  In CI none, but production's deploy asks for hidden ones (SOURCE_MAPS=hidden: written, not referenced from the code),
- *  which it keeps per release outside the site for the admin app's stacks (packages/api/scripts/keep-source-maps.ts). */
 const sourcemap: boolean | "hidden" = !isCI || (process.env["SOURCE_MAPS"] === "hidden" ? "hidden" : false);
 
-/** COVERAGE=1 (off unless asked: `COVERAGE=1 npm run dev`): our modules instrumented in every pass (build/coverage.ts), so
- *  what each test ran can be read — a UI spec's in the editor, its window's (shell/preview-windows.tsx), and each
- *  architecture test's from outside. It costs: 9% slower to boot and up to a third more script (measured 2026-11-16). */
 const coverage = (): Plugin[] => (process.env["COVERAGE"] === "1" ? [coveragePlugin()] : []);
 
-/** Packages every bundle takes the editor's one copy of, whichever linked package imports them. */
 const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode", "@awesome.me/webawesome"];
 
-/** Warnings that are known, and so by design, that a build says over and over: util's node builtins (its env and fs work
- *  in Node or a browser, and its self-tests' `node:assert` is imported in blocks a browser never runs), and the direct `eval`
- *  of almostnode and vm-browserify (each emulates Node's vm). */
 const KNOWN_WARNINGS = [/has been externalized for browser compatibility, imported by "[^"]*[\\/]@brianjenkins94[\\/]util[\\/]/u, /\[EVAL\][\s\S]*[\\/](?:almostnode|vm-browserify)[\\/]/u];
 
-/** Vite's logger, less the known warnings: what's left is worth reading — in CI, where it's the log a failure is read in. */
 export const logger = createLogger();
 
 for (const level of ["warn", "warnOnce"] as const) {
@@ -64,41 +45,24 @@ for (const level of ["warn", "warnOnce"] as const) {
 	};
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-// Virtual-module bundlers (extensions + almostnode node servers), formerly entry.config.ts helpers.
-// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** A browser-flavored `process` (no `versions.node`), prepended to bundles that run where there is none: silo's reach chain
- *  and util's env read the global at module eval. (polyfillNode injects a `process`, but napi-rs's runtime detection must
- *  still pick its browser path.) */
 const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
 
-/** The same `process`, but the bundle's own: an extension's bundle runs as a CommonJS module in the extension host, a realm
- *  every extension shares, where a global `process` makes other extensions (VS Code's TypeScript) take it for Node. */
 const MODULE_PROCESS_SHIM = "var process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
 
-/** Bundle `<folder>/<file>` (a folder of this package, e.g. `extensions/bridge`; deps inlined) into one chunk's code.
- *  `externals` stay unbundled. `configFile:false` isolates the nested build. */
 async function bundleCode(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), plugins: Plugin[] = [], banner?: string): Promise<string> {
 	const dir = url.fileURLToPath(new URL(`./${folder}/`, import.meta.url));
 	const output = await build({
 		"configFile": false,
 		"logLevel": "silent",
 		"root": root,
-		// One util, hub and observability — the editor's: editor-api's modules, linked from its own folder, would find
-		// the copies its dev dependencies installed beside it (a stale util once cost a rule its package).
 		"resolve": { "dedupe": SHARED_PACKAGES },
 		"plugins": [...coverage(), ...plugins],
 		"build": {
 			"write": false,
 			"minify": isCI,
-			// Script text, not a file: its map rides inline (locally only, as every pass's).
 			"sourcemap": isCI ? false : "inline",
 			"target": "esnext",
 			"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
-			// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
-			// into siblings we don't capture (we grab only the entry chunk as a string).
-			// keepNames: as the workbench's (its build, below), for a worker that bundles zen-fs
 			"rollupOptions": { "external": externals, "output": { "codeSplitting": false, "keepNames": true, ...banner === undefined ? {} : { "banner": banner } } }
 		}
 	}) as RollupOutput[];
@@ -106,18 +70,12 @@ async function bundleCode(folder: string, file: string, id: string, format: "cjs
 	return output[0].output.find((chunk) => chunk.type === "chunk")?.code ?? "";
 }
 
-/** `<folder>/<file>` bundled (bundleCode) as a virtual module `<name>:<id>`, named for the folder's last segment, whose
- *  default export is the code, a string. */
-/** Node's built-ins, by both their names: what a server run by almostnode imports from it, not from the bundle. */
 const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
 
-/** A language server's `<file>` → ESM string (`<name>:<id>`) with ALL NODE BUILTINS EXTERNAL, run by almostnode
- *  in a worker host. */
 function bundledNodeServer(name: string, file = "server-node.ts", id = "server-node"): Plugin {
 	return bundledModule("extensions/" + name, file, id, "es", nodeBuiltins);
 }
 
-/** Emit cspell's dictionaries (extensions/cspell/dictionaries.ts) at fixed, unhashed URLs server-host fetches at runtime. */
 function cspellDict(): Plugin {
 	return {
 		"name": "cspell-dict",
@@ -142,15 +100,8 @@ function bundledModule(folder: string, file: string, id: string, format: "cjs" |
 	};
 }
 
-/** What goes in an extension's folder beside its entry, by the path its manifest's `files` lists it at: a classic
- *  bootstrap for one of its workers (a module worker built with the LSP workers, in lsp/, sharing their chunks — an
- *  extension's workers start classic; `hold` keeps the messages that come before the module has loaded), a script
- *  bundled from its folder, or JSON. A file the manifest lists that's none of these is another pass's (a tsserver
- *  plugin and its engine). */
 type ExtensionFile = { "worker": string; "hold"?: boolean } | { "script": string; "format": "es" | "iife" } | { "json": unknown };
 
-/** A classic worker script that imports module worker `file` (lsp/'s) from `depth` folders below the site, telling the
- *  worker's starter if it couldn't (watchWorker reads `failed`). */
 function workerBootstrapSource(file: string, depth: number, hold: boolean): string {
 	const target = JSON.stringify("../".repeat(depth) + "lsp/" + file);
 	const failed = "(error) => { postMessage({ \"failed\": String(error && error.stack || error) }); }";
@@ -160,13 +111,6 @@ function workerBootstrapSource(file: string, depth: number, hold: boolean): stri
 		: `import(${target}).catch(${failed});\n`;
 }
 
-/**
- * An extension, as a folder the editor loads it from — the way an extension from outside the editor is loaded
- * (workbench/extensions.ts): `extensions/<name>/` holds its package.json (its manifest, `browser` its content-hashed
- * entry), the entry (`extension.ts`, browser CJS, `vscode` external, its `vscode` tapped — commandTap — so the
- * architecture view discovers its commands) and `files`' files. `<name>:extension` is `{ base, manifest }`. The
- * extension host fetches the entry on activation, so none of it is on the workbench's boot path.
- */
 function bundledExtension(name: string, files: Record<string, ExtensionFile> = {}): Plugin {
 	const virtual = `${name}:extension`;
 	const resolved = "\0" + virtual;
@@ -180,10 +124,7 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 				return undefined;
 			}
 
-			// `vscode` is external only from the tapped module: the extension's own imports of it go to that module first.
-			// The extension host has no `process`; util reads it as it loads.
 			const code = await bundleCode(folder, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, [commandTap(name)], MODULE_PROCESS_SHIM);
-			// (content-hashed, so a deploy never pairs a new manifest with a stale entry)
 			const entry = `extension-${createHash("sha256").update(code).digest("hex").slice(0, 8)}.js`;
 			const manifest = { ...JSON.parse(fs.readFileSync(resolvePath(`./${folder}/package.json`), "utf8")) as Record<string, unknown>, "browser": entry };
 
@@ -209,8 +150,6 @@ function bundledExtension(name: string, files: Record<string, ExtensionFile> = {
 	};
 }
 
-/** `editor:release`: the commit being built (`git rev-parse --short HEAD`), or "dev" without git: the editor's error
- *  reports say which release they came from (shell/reporting.ts; packages/api/README.md O6). */
 function releasePlugin(): Plugin {
 	const id = "editor:release";
 	let release = "dev";
@@ -218,7 +157,6 @@ function releasePlugin(): Plugin {
 	try {
 		release = execFileSync("git", ["rev-parse", "--short", "HEAD"], { "encoding": "utf8" }).trim();
 	} catch {
-		/* not a checkout */
 	}
 
 	return {
@@ -228,20 +166,10 @@ function releasePlugin(): Plugin {
 	};
 }
 
-/** The host site's plugins — shared by the host BUILD (hostBuild) and the DEV server (dev.ts): cross-origin
- *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
- *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
 export function hostPlugins(): Plugin[] {
 	return [
 		releasePlugin(),
 		...coverage(),
-		// The SHELL (main.tsx → shell.tsx) is built here, and it lazily imports the browser GitHub client
-		// (github.ts → fido → util/env, util/store), which pulls in node builtins: `env.ts` reads `process`/`path`/`url`
-		// at eval and `store.ts` (dynamic, browser-guarded) touches `fs`. `polyfillNode([...])` resolves these to unenv's
-		// AND injects the `process`/`Buffer` globals env.ts needs; `buffer` too, for the repo load's clone (isomorphic-git, in
-		// git-clone.ts, uses `Buffer`). Scoped to this list so it can't stub a builtin another chunk resolves itself.
-		// github.ts is dynamically imported, so fido + these polyfills land in a lazy chunk (docs/github-*.js), off the
-		// shell's cold-start path.
 		polyfillNode(["fs", "path", "url", "util", "buffer"]),
 		{
 			"name": "coi-headers",
@@ -262,27 +190,15 @@ export function hostPlugins(): Plugin[] {
 	];
 }
 
-/**
- * The passes that emit into dist/ (+ docs/coi-serviceworker.js) — everything the host build/dev server then
- * SERVES. Run before hostBuild() (full build) or before starting the dev server (dev.ts). Order matters: the
- * workbench entry empties dist/ first; the rest set emptyOutDir:false.
- */
 export async function preBuild(): Promise<void> {
-	// 1. Workbench iframe entry (workbench-entry.tsx → dist/workbench.js). monaco kept external → ./main.js.
 	await buildPackage(root, {
 		"customLogger": logger,
-		// Relative, like every other build here: the workbench is served under /__vscode__/, and with the default "/"
-		// Vite's dynamic-import preload helper asked for a lazy chunk's dependencies at the SITE root (the terminal's
-		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
-		// still worked.
 		"base": "./",
 		"plugins": [
 			...coverage(),
 			bundledExtension("bridge"),
 			bundledExtension("tsval"),
-			// (its worker: ESLint and the preset under almostnode, from the toolchain built beside it — build/eslint-toolchain.ts)
 			bundledExtension("eslint", { "worker.js": { "worker": "eslint-worker.js" } }),
-			// (its tsserver plugin, as the package the TypeScript extension loads it from)
 			bundledExtension("change-problems", { "node_modules/change-problems-ts-plugin/package.json": { "json": { "name": "change-problems-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "node_modules/change-problems-ts-plugin/index.js": { "script": "ts-plugin.js", "format": "es" } }),
 			bundledExtension("history", HISTORY_FILES),
 			bundledExtension("capabilities", CAPABILITIES_FILES),
@@ -292,21 +208,11 @@ export async function preBuild(): Promise<void> {
 			bundledExtension("insights"),
 			bundledExtension("type-queries"),
 			bundledExtension("cosmetic"),
-			// (its worker: cspell under almostnode — a classic script is done at once, so the client's first messages are
-			// held until the module's server listens)
 			bundledExtension("cspell", { "server.js": { "worker": "server-host.js", "hold": true } }),
 			editorSettingsDefaultsPlugin(),
 			polyfillNode(["path", "url", "buffer"])
 		],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
-		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
-		// `@automerge/automerge` → its base64-INLINED-WASM entry (fullfat_base64): the default browser condition wants a
-		// bundler to serve a separate `automerge.wasm`, which our static Pages deploy can't; the base64 build carries the
-		// wasm inline, so the lazily-imported edit-history chunk is self-contained. Resolve via package.json → sibling.
-		// The terminal's commands run on juvy, which parses with node:util's parseArgs: @pkgjs/parseargs (Node's own, as a
-		// package). polyfillNode(["path", "url", "buffer"]) is for util/env, which juvy imports (it reads node:path/url at
-		// load), and for isomorphic-git (the git SCM engine), which uses `Buffer` — unenv's, injected where it's read (and
-		// git-engine.ts sets the global, for the dev optimizer's copy) — and gives the bundle `global`/`process` too.
 		"resolve": { "dedupe": SHARED_PACKAGES, "alias": { "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
@@ -315,26 +221,15 @@ export async function preBuild(): Promise<void> {
 			"rollupOptions": {
 				"input": { "workbench": "workbench/workbench-entry.tsx" },
 				"external": ["@brianjenkins94/monaco-vscode-api/main"],
-				// keepNames: CI's minify renames classes, and memium (zen-fs's structs) knows a struct by its class's name —
-				// zen-fs's `class DirListing extends $from.packed("DirListing", …)` minified to `class e` is no struct to it
 				"output": { "chunkFileNames": "[name].js", "keepNames": true, "paths": { "@brianjenkins94/monaco-vscode-api/main": "./main.js" } }
 			}
 		}
 	});
 
-	// 2. LSP host + tsval debug workers (dist/lsp/), almostnode-hosted — node builtins external.
 	await buildPackage(root, {
 		"customLogger": logger,
 		"base": "./",
-		// `dedupe` collapses the two physical typescript installs (almostnode's own dep + tsval's) to ONE, so the
-		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
-		// (and hub/observability to the editor's own: a debugger's worker connects through editor-api's runtime helper,
-		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
-		// (`@brianjenkins94/bablr`, the BABLR worker's: its built, browser-safe dist — the fresh one, not the store's copy)
 		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", ...SHARED_PACKAGES] },
-		// (almostnode's built-ins are unenv's modules, which import each other by Node's names: unenvResolve makes those
-		// unenv's own)
-		// (and the page runtime a dev server puts in its pages, as a script: runtime evidence)
 		"plugins": [...coverage(), unenvResolve(), bundledModule("previews", "page-script.ts", "page-evidence", "iife", []), bundledNodeServer("cspell"), cspellDict()],
 		"worker": { "plugins": coverage, "rollupOptions": { "output": { "sourcemap": sourcemap } } },
 		"build": {
@@ -342,59 +237,39 @@ export async function preBuild(): Promise<void> {
 			"emptyOutDir": false,
 			"sourcemap": sourcemap,
 			"assetsInlineLimit": 0,
-			// These run as Web Workers (no DOM). Vite's default dynamic-import preload helper injects a
-			// <link rel=modulepreload> via `document`, which throws in a worker — so the node worker's lazy
-			// `import()` of the ViteDevServer (ts) chunk crashes. Disable the polyfill; workers just fetch chunks.
 			"modulePreload": false,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
 				"input": {
 					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
-					// cspell's language server, under almostnode (the cspell extension starts it)
 					"lsp/server-host": resolvePath("./extensions/cspell/server-host.ts"),
-					// ESLint's worker: real ESLint and the preset under almostnode (the eslint extension starts it), from the
-					// toolchain beside it
 					"lsp/eslint-worker": resolvePath("./extensions/eslint/worker.ts"),
-					// BABLR's worker (workbench/bablr.ts starts it): which files its grammar takes
 					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts"),
-					// (the dev servers' worker, started for the first one)
 					"lsp/node-worker": resolvePath("./workers/node-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
 					"assetFileNames": "lsp/[name]-[hash][extname]",
-					// The debug worker bundles util (silo's policy, and util's env with it), which reads `process` as it
-					// loads; it's a realm of its own, with none. Not the almostnode workers: they emulate Node's own.
 					"banner": (chunk) => (chunk.name === "lsp/debug-worker" ? PROCESS_SHIM : ""),
-					// Force `typescript` into ONE shared chunk. The node worker (ViteDevServer transpile) loads it
-					// lazily; the debug worker (tsval) would otherwise INLINE its own ~7MB copy — this makes both
-					// reference the same lsp/typescript-*.js instead of shipping ts twice.
 					"manualChunks": (id) => (/[\\/]node_modules[\\/]typescript[\\/]/u.test(id) ? "typescript" : undefined)
 				}
 			}
 		}
 	});
 
-	// 2b. ESLint's toolchain (dist/lsp/eslint-toolchain.tgz): ESLint, the preset and what they load, traced from a real lint
-	// and packed for the eslint worker to unpack (build/eslint-toolchain.ts).
 	const toolchain = await eslintToolchain(path.join(root, "dist/lsp/eslint-toolchain.tgz"));
 
 	logger.info(`eslint toolchain: ${toolchain.packages} packages, ${toolchain.files} files, ${(toolchain.bytes / 1048576).toFixed(1)} MB`);
 
-	// 3. The history extension's tsserver plugin and its engine (build/history.ts).
 	await buildHistory(root, { "logger": logger, "sourcemap": sourcemap, "banner": PROCESS_SHIM });
 
-	// The capabilities extension's: its plugin, engine and canary (build/capabilities.ts).
 	await buildCapabilities(root, { "logger": logger, "sourcemap": sourcemap, "banner": PROCESS_SHIM });
 
-	// 4. The service worker a static host serves the editor with (build/static-host.ts).
 	await buildServiceWorker(root, logger);
 
 	checkExtensionFolders(path.join(root, "dist"));
 }
 
-/** Every extension's folder holds what its manifest says it does — its entry and each of `files` — and each worker
- *  bootstrap in it names a module that was built: a file missing fails the build, not a worker that never starts. */
 function checkExtensionFolders(dist: string): void {
 	const missing: string[] = [];
 
@@ -426,10 +301,6 @@ function checkExtensionFolders(dist: string): void {
 	}
 }
 
-/** Preload the shell's chunk (and its imports + CSS) from index.html. main.tsx imports it dynamically (so its
- *  WebAwesome chrome stays out of the app iframe), which otherwise starts the fetch only once index.js has run —
- *  and the app iframe, and so the workbench iframe, waits on the shell rendering. Fetch only (`preload`, not
- *  `modulepreload`): the app iframe loads this same index.html and never runs the shell. */
 function shellPreloadPlugin(): Plugin {
 	return {
 		"name": "shell-preload",
@@ -454,8 +325,6 @@ function shellPreloadPlugin(): Plugin {
 	};
 }
 
-/** The host site (→ repo docs/), serving the pre-built dist/ + component under /__vscode__/. emptyOutDir FALSE
- *  so it lays down alongside the published package tarballs (docs/*.tgz). */
 async function hostBuild(): Promise<void> {
 	await buildPackage(root, {
 		"customLogger": logger,
@@ -467,7 +336,6 @@ async function hostBuild(): Promise<void> {
 	});
 }
 
-// `tsx build.ts` → the full build. Imported by dev.ts (for preBuild/hostPlugins), where this guard stays false.
 if (isEntry(import.meta)) {
 	await preBuild();
 	await hostBuild();

@@ -1,6 +1,3 @@
-/** The workspace's git: status, diff, the changes as hunks, commit and discard (whole files or hunks), branches, a push
- *  to GitHub, and history — log, a file at a revision, blame, a commit opened beside the work (git-service.ts, git-review.ts, git-push.ts,
- *  git-history.ts, git-refs.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

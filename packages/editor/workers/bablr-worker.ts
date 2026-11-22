@@ -1,20 +1,3 @@
-/**
- * The editor's BABLR, off the main thread (workbench/bablr.ts starts it and asks one thing at a time): whether BABLR's
- * grammar takes a text, and why not when it doesn't, and where its comments are — `bablr.parse` { source } →
- * { parsed, why?, comments?, ms, cached }, `comments` each comment's start and end, in turn. BABLR is
- * a VM interpreter, about 14 ms a line, so a text's answer is kept by its git blob oid in this browser's IndexedDB
- * (`bablr`, its own database, not the workspace's store), under PARSE_VERSION, so a grammar change asks again: a file
- * is parsed once however often it's asked about.
- *
- * And what's placed on code stays on it (RUNTIME-EVIDENCE.md, *Durable annotations on spans*; editor-api's annotations.ts is its
- * contract): `bablr.spans`, a text's spans; `bablr.refer`, a reference to the span standing for each range; `bablr.resolve`,
- * where references' spans are now, by silo's resolver: by id, followed from a text they were made against, or in another file.
- * The last few parses are kept here for these: a text is asked about many times running, and a parse of one being typed
- * isn't worth keeping on disk.
- *
- * What else is built on a parse — verdicts (`full-editor`'s worker) — comes back with the features that need it. A parse
- * yields as it goes, so a cancelled call's signal ends it mid-parse and the worker stays.
- */
 import "./bablr-fast-freeze"; // first: neutralizes record freezing before the BABLR bundle captures Object.freeze
 // (A comment, so sorting leaves the freeze first.)
 import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
@@ -30,11 +13,8 @@ hub.link(portTransport(globalThis));
 
 const { log } = observe(hub, { "network": NETWORK_PROBES });
 
-/** A text's answer as kept: whether it parsed, why not, where its comments are (each one's start and end, in turn), and
- *  what the parse took. */
 interface Answer { "parsed": boolean; "why"?: string; "comments"?: number[]; "ms": number }
 
-/** A text's git blob oid: what git calls the same content. */
 async function blobOid(text: string): Promise<string> {
 	const body = new TextEncoder().encode(text);
 	const header = new TextEncoder().encode(`blob ${String(body.length)}\0`);
@@ -57,13 +37,11 @@ function done<T>(request: IDBRequest<T>): Promise<T> {
 	});
 }
 
-/** The answers, kept: a store of them by PARSE_VERSION and blob oid; another version's go as it opens. */
 const database = new Promise<IDBDatabase | undefined>((resolve) => {
 	try {
 		const open = indexedDB.open("bablr", 3);
 
 		open.addEventListener("upgradeneeded", () => {
-			// (a version before's answers, and full-editor's kept spans: they go)
 			for (const name of [...open.result.objectStoreNames]) {
 				open.result.deleteObjectStore(name);
 			}
@@ -139,18 +117,14 @@ serve(hub, "bablr.parse", async (args, { signal }) => {
 	return { ...answer, "cached": false };
 });
 
-// ── what's placed on code ──
-
 interface CstSpan { "type": string | null; "start": number; "end": number; "token": boolean; "trivia": boolean; "text"?: string }
 interface Cst { "spans": CstSpan[]; "length": number; "hash": string }
 interface Anchor { "type": string | null; "start": number; "end": number; "id": string }
 type Parsed = { "cst": Cst } | { "why": string };
 
-/** How many texts' parses are kept: enough for a file and what it's being compared with. */
 const KEPT_PARSES = 16;
 const parses = new Map<string, Parsed>();
 
-/** A text's parse, or why BABLR can't: the most recently asked about kept. */
 async function parsed(source: string, signal: AbortSignal): Promise<Parsed> {
 	const known = parses.get(source);
 
@@ -182,7 +156,6 @@ async function parsed(source: string, signal: AbortSignal): Promise<Parsed> {
 	return answer;
 }
 
-/** `parsed`'s parse as BABLR's identity core takes one: it throws where the text doesn't parse. */
 const parseFor = (signal: AbortSignal) => async (source: string): Promise<Cst> => {
 	const answer = await parsed(source, signal);
 
@@ -193,9 +166,6 @@ const parseFor = (signal: AbortSignal) => async (source: string): Promise<Cst> =
 	return answer.cst;
 };
 
-// Two texts of a file (HEAD's and the working tree's) ⇒ whether the change is cosmetic (formatting or comments only) or
-// meaningful, the nodes that changed and their lines: the cosmetic extension's badge (workbench/bablr.ts `classify`).
-// From the parses kept above, so each version is parsed once however many it's compared with.
 serve(hub, "bablr.verdict", async (args, { signal }) => {
 	const { contents } = args as { "contents": string[] };
 
@@ -211,7 +181,6 @@ serve(hub, "bablr.verdict", async (args, { signal }) => {
 				throw error;
 			}
 
-			// (a text BABLR can't parse: the caller says so rather than guess)
 			span.end({ "op": "unparsable" });
 
 			return { "verdict": "unparsable", "changedNodeIds": [], "changedLines": [] };
@@ -219,8 +188,6 @@ serve(hub, "bablr.verdict", async (args, { signal }) => {
 	});
 });
 
-// A file's texts since the last commit, [HEAD, …each burst after it] ⇒ the code each change touched, for "your edits"
-// (edit-history.ts): from the parses kept above, so a burst's text is parsed once. Nothing where one doesn't parse.
 serve(hub, "bablr.editGroups", async (args, { signal }) => {
 	const { chain } = args as { "chain": string[] };
 
@@ -245,7 +212,6 @@ serve(hub, "bablr.editGroups", async (args, { signal }) => {
 
 const anchorsOf = (source: string, cst: Cst): Anchor[] => spanAnchors(source, "Program", cst) as Anchor[];
 
-/** Each span of a text with its shape: its id, type, offsets and the code's tokens in it. */
 function shapesOf(source: string, cst: Cst): SpanShape[] {
 	const tokens = cst.spans.filter((span) => span.token && !span.trivia).toSorted((left, right) => left.start - right.start);
 	const firstAt = (offset: number): number => {
@@ -337,7 +303,6 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 	const blob = await blobOid(source);
 	const elsewhere = new Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }>();
 
-	// (the other files' spans only when a reference isn't here)
 	if (!observed && refs.some((ref) => !ids.has(ref.span))) {
 		for (const [path, text] of Object.entries(others)) {
 			const theirs = await parsed(text, signal);

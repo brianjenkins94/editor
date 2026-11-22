@@ -1,4 +1,3 @@
-/** What a file's Margin shows beside its code, as data rather than read off its page (the margin extension's `margin.state`). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

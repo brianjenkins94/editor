@@ -1,5 +1,3 @@
-/** What's running and what ran (`runs.list` / `runs.stop`, runs.ts), and test runs: which a change reaches and their
- *  results as data (`tests.affected` / `tests.run`, test-runs.ts). */
 import type { PageToolAsk } from "@brianjenkins94/observability";
 import type { PageToolContext, ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
@@ -39,7 +37,6 @@ const runs: ToolFamily = ({ request }) => [
 		})
 	},
 	{
-		// (a run answers within 50 s — done, or where it is — so a call never waits out an agent's tool limit in silence)
 		"timeoutMs": 120000,
 		"tool": defineTool({
 			"name": "runs_tests",
@@ -53,7 +50,6 @@ const runs: ToolFamily = ({ request }) => [
 			"handler": async ({ files, run }, context) => {
 				const ran = await request("tests.run", { "files": files, "run": run, "approved": (context as PageToolContext).approved }, context.signal) as { "ask"?: PageToolAsk["ask"] };
 
-				// (a gated call the policy leaves undecided: asked of the person — BERNARD, JUDICIAL, then them — before it runs)
 				if (ran.ask !== undefined) {
 					throw new Ask(ran.ask);
 				}

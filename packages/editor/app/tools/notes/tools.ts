@@ -1,4 +1,3 @@
-/** Notes on code, as an agent adds them: what Add Note does on a selection (the notes extension's `notes.add`, workspace-tools.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

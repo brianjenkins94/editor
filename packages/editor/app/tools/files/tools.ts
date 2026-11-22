@@ -1,5 +1,3 @@
-/** The workspace, as an agent works in it — files read, written, edited, deleted, found and searched (`files.*`, workspace-tools.ts) —
- *  and the filesystems' calls one at a time, for a while (`fs.trace`, fs-trace.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

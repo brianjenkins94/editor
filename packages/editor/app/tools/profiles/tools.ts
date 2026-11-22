@@ -1,7 +1,3 @@
-/**
- * A CPU profile of a preview window's page (`preview.profile`, shell/preview-profile.ts), as its title bar's Profile button
- * takes one: kept with its server's run, each function's time shown on the code, in the editor too.
- */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

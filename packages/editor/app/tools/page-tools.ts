@@ -1,10 +1,3 @@
-/**
- * The editor's tools (host.ts) as observability page tools, which the tab serves and debug-mcp registers while it's
- * connected: a tool's zod input shape announced as JSON Schema (debug-mcp makes zod of it again), and its handler run
- * with the call's signal. Its answer is its ToolResult (`ok` / `fail`), which debug-mcp passes on as it is.
- *
- * Kept apart from index.ts (whose glob only Vite can read), so a test can serve a family's tools.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { PageTool } from "@brianjenkins94/observability";
 import type { EditorTool, PageToolContext, ToolHost } from "./host";
@@ -12,13 +5,10 @@ import { createRpcClient } from "@brianjenkins94/hub";
 import { z } from "zod";
 import { Ask } from "./host";
 
-/** A service that isn't up fails fast, instead of waiting out the whole call. */
 const RESPONDER_MS = 3000;
 
-/** What a page tool can't do: it runs in the tab, not in debug-mcp's server. */
 const unavailable = (what: string) => (): Promise<never> => Promise.reject(new Error(`a page tool can't ${what}`));
 
-/** The host this tab's tools get: requests into its root hub's tree. */
 export function createToolHost(hub: Hub): ToolHost {
 	const rpc = createRpcClient(hub);
 
@@ -37,7 +27,6 @@ export function createToolHost(hub: Hub): ToolHost {
 	};
 }
 
-/** `tools` as page tools. */
 export function toPageTools(tools: EditorTool[]): PageTool[] {
 	return tools.map(({ tool, timeoutMs }) => ({
 		"name": tool.name,
@@ -49,7 +38,6 @@ export function toPageTools(tools: EditorTool[]): PageTool[] {
 				"signal": signal,
 				"approved": approved,
 				"elicit": unavailable("ask for input"),
-				// (asked of the person through debug-mcp: the tool's answer is the question, until it's approved)
 				"confirm": async (message, key = message) => {
 					if (approved.includes(key)) {
 						return true;

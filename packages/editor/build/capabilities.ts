@@ -1,9 +1,3 @@
-/**
- * The capabilities extension's build (extensions/capabilities/): its folder's tsserver plugin, as the package tsserver loads
- * (node_modules/capabilities-ts-plugin/), and what that plugin runs: the engine (util/silo's reading of TypeScript's tree) and
- * the canary (tsval's sandboxed background run). Both run inside the plugin, so neither bundles a TypeScript. And the
- * dependency baseline's package worker (packages-worker.ts), which the extension starts for a sync.
- */
 import type { Logger, Plugin } from "vite";
 import * as url from "node:url";
 import * as fs from "@brianjenkins94/util/fs";
@@ -14,12 +8,8 @@ import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 const PLUGIN_FOLDER = "extensions/capabilities/node_modules/capabilities-ts-plugin";
 
-/** What goes in the extension's folder beside its entry (build.ts' bundledExtension): the plugin's package.json, and the
- *  package worker's bootstrap. */
 export const CAPABILITIES_FILES = { "policy.schema.json": { "json": POLICY_SCHEMA }, "node_modules/capabilities-ts-plugin/package.json": { "json": { "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" } }, "packages.js": { "worker": "packages-worker.js" } };
 
-/** Emit the tsserver plugin VERBATIM into its extension's folder, beside the engine and the canary: its import.meta.url finds
- *  them (copied byte-for-byte, not a vite input). */
 function capabilitiesTsPlugin(): Plugin {
 	return {
 		"name": "capabilities-ts-plugin-asset",
@@ -29,8 +19,6 @@ function capabilitiesTsPlugin(): Plugin {
 	};
 }
 
-/** The engine, reading the tree tsserver hands it and parsing nothing; and the canary, with `typescript` EXTERNALIZED to the
- *  ts-external shim (the plugin sets globalThis.__capabilitiesTs first). `banner` gives each a `process`. */
 export async function buildCapabilities(root: string, { logger, sourcemap, banner }: { "logger": Logger; "sourcemap": boolean | "hidden"; "banner": string }): Promise<void> {
 	const output = { "banner": banner, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" };
 	const shared = { "outDir": "dist", "emptyOutDir": false, "minify": false, "sourcemap": sourcemap, "assetsInlineLimit": 0 };
@@ -52,10 +40,6 @@ export async function buildCapabilities(root: string, { logger, sourcemap, banne
 		"plugins": [polyfillNode()],
 		"build": { ...shared, "rollupOptions": { "preserveEntrySignatures": "strict", "input": { [`${PLUGIN_FOLDER}/capabilities-canary`]: resolvePath("../extensions/tsval/canary.ts") }, "output": output } }
 	});
-	// The baseline's package worker (dist/lsp/packages-worker.js): what each dependency's tarball says it can do, and the
-	// joins (rolldown's browser build, loaded on the first slice). A build of its own: it reads util (and util's env, which
-	// reads `process` as it loads), so every chunk carries the shim; shared with another worker, a chunk of util would load
-	// before the shim on either's entry. (A worker: no `document` for the preload helper.)
 	await buildPackage(root, {
 		"customLogger": logger,
 		"base": "./",

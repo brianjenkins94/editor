@@ -1,4 +1,3 @@
-/** How a commit did in CI: its GitHub Actions runs, a run's jobs, a job's log (ci-status.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

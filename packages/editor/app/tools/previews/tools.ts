@@ -1,7 +1,3 @@
-/**
- * A preview window's page, as its DevTools has it: one Chrome DevTools Protocol command to it (`preview.cdp`,
- * shell/preview-devtools.ts), what the DevTools button in its title bar docks under it.
- */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

@@ -1,12 +1,3 @@
-/**
- * RUNNING.md, *What it costs*: what running in the debugger costs. The same programs run three ways, in Node (no
- * browser in the way): natively on almostnode (a real run today), on tsval bare, and on tsval as the debug worker runs
- * it (coverage, the profile, observed sites, the value trace). Workloads: pure computation in the program's code; data
- * shuffled mostly by built-ins; a server answering requests (its handler stepped, called from almostnode's http); and a
- * build-like run whose heavy work is in a package (native under tsval too: packages/tsval/README.md, *Modules*).
- *
- *   node --experimental-strip-types packages/editor/bench/running.ts [rounds]
- */
 import { register } from "node:module";
 
 // eslint-disable-next-line ts/no-deprecated -- module.registerHooks() takes synchronous in-thread hooks, not extensionless.mjs's async loader module: not a drop-in
@@ -74,7 +65,6 @@ function runtimeWith(files: Files, options: ConstructorParameters<typeof Runtime
 	return new Runtime(vfs, { "cwd": "/workspace", "onConsole": () => undefined, ...options });
 }
 
-/** One run of `files`' main.js in `mode`, then its requests if it serves: the milliseconds each took. */
 async function runOnce(files: Files, mode: Mode, requests = 0): Promise<{ "run": number; "requests": number }> {
 	const started = performance.now();
 	let runtime: InstanceType<typeof Runtime>;
@@ -99,14 +89,12 @@ async function runOnce(files: Files, mode: Mode, requests = 0): Promise<{ "run":
 		};
 		const debugging = mode === "debugger" ? { "coverage": true, "profile": true, "observe": () => undefined, "trace": () => undefined } : {};
 
-		// (URL isn't one of tsval's standard globals: the host's, as native has it.)
 		({ vm } = createVM(files["/workspace/main.js"], { "fileName": "/workspace/main.js", "modules": loader, "globals": { "URL": URL }, "eventLoop": { "pace": "fast" }, ...debugging }));
 		await runToEnd(vm);
 	}
 
 	const ran = performance.now() - started;
 
-	// (A server's listen registers a tick later.)
 	if (requests > 0) {
 		for (let waited = 0; getServer(4100) === undefined && waited < 100; waited += 1) {
 			await new Promise((resolve) => {

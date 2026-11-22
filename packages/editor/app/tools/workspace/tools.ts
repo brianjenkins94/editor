@@ -1,4 +1,3 @@
-/** Experiments that undo themselves: Save Checkpoint and Restore Checkpoint, as a person runs them (checkpoints.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

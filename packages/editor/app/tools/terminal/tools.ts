@@ -1,5 +1,3 @@
-/** The terminals' output (`terminal.state`, terminal/index.ts), as data. Running a command line is people's: an agent acts
- * through the other families' tools (host.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";

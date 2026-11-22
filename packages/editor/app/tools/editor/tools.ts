@@ -1,5 +1,3 @@
-/** What's in front of you in the editor, its Problems and its notifications, as data, and VS Code's own trace log for
- *  one component, for a while (editor-state.ts). */
 import type { ToolFamily } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
