@@ -659,9 +659,14 @@ each for a reason the code still gives:
   **Command counts stay command-tap's**: the bridge's architecture report still reads them, and core's command service
   still can't tell which extension called.
 
-**tsval's workspace buffer** holds as what its module loader reads, but its reason has weakened: since a run loads
-`.refs/` through its link, the same test file took 3.4 s that way and 3.9 s from the store (git-hunks, warm, one run each),
-and ESLint's worker has never had the buffer. Whether tsval can give up the privilege wants a whole suite's timing.
+**tsval keeps its workspace buffer** as what its module loader reads (timed 2026-11-22, this repository cloned into an
+instance, packages/editor/test's 46 unit files through `runs_tests`). From the store: 125.8 s and 125.6 s, 14 s of it in
+the tests themselves, the rest loading. With the workspace's own files through the link instead (node_modules still
+the store's), 29 of the 46 didn't load at all, their packages not found (the run installs what's missing from the
+lockfile, and that path took the link's answers for the store's), and of the 18 that ran both ways, those that load
+only their own code took the same (23.2 s against 23.5 s over 15), those that load more took longer (tarballs.test
+2.1 → 6.5 s, static-host 1.4 → 3.4 s, stat-cache 1.6 → 2.4 s). The one file timed before (`.refs/` through the link:
+3.4 s against 3.9 s) was the cheap case.
 
 **What the reduction broke, and what's back:** *Answer a call where it stops* is core, but its one person's way in was
 the Margin's buttons, so for a day a person's run sat stopped at a gated call with nothing to answer it by. The question
