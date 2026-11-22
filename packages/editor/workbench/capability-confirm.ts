@@ -87,16 +87,43 @@ export function sayUnconfirmed(runs: number, callers: string[] | undefined): str
 		: `${unused}, but ${callers[0]}${callers.length > 1 ? ` and ${String(callers.length - 1)} more` : ""} can make the call: a test that reaches it would confirm it.`;
 }
 
-/** Each of the workspace's code files under `root` (not node_modules, a dot-folder or a declaration file), and what its
- *  text says it can do. */
-async function capabilitiesOf(vscode: typeof vscodeApi, root: string): Promise<Map<string, string[]>> {
-	const uris = (await vscode.workspace.findFiles("**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}", "{**/node_modules/**,**/.*/**}")).filter((uri) => !/\.d\.[cm]?ts$/u.test(uri.path));
-	const read = await Promise.all(uris.map(async (uri): Promise<[string, string[]]> => [
-		uri.path.slice(root.length + 1),
-		await Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => refine(detect(new TextDecoder().decode(bytes))), () => [])
-	]));
+/** What each code file can do as last read, by its path, kept while its modification time and size stay as they were. */
+const known = new Map<string, { "mtime": number; "size": number; "can": string[] }>();
 
-	return new Map(read.filter(([, can]) => can.length > 0));
+/**
+ * Each of the workspace's code files under `root` (not node_modules, a dot-folder or a declaration file) — or of `files`,
+ * when the caller has listed them already (relative to `root`) — that can do anything, and what its text says it can do
+ * (lib's `detect`); a file is read again only once it's changed (`known`). `files`, how many there are; `read`, how many
+ * were read this time.
+ */
+export async function capabilitiesOf(vscode: typeof vscodeApi, root: string, files?: string[]): Promise<{ "capabilities": Map<string, string[]>; "files": number; "read": number }> {
+	const uris = (files === undefined
+		? await vscode.workspace.findFiles("**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}", "{**/node_modules/**,**/.*/**}")
+		: files.map((file) => vscode.Uri.file(`${root}/${file}`))).filter((uri) => !/\.d\.[cm]?ts$/u.test(uri.path));
+	let read = 0;
+	const each = await Promise.all(uris.map(async (uri): Promise<[string, string[]]> => {
+		const path = uri.path.slice(root.length + 1);
+		const stat = await Promise.resolve(vscode.workspace.fs.stat(uri)).catch(() => undefined);
+		const kept = known.get(path);
+
+		if (stat === undefined) {
+			return [path, []];
+		}
+
+		if (kept?.mtime === stat.mtime && kept.size === stat.size) {
+			return [path, kept.can];
+		}
+
+		read += 1;
+
+		const can = await Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => refine(detect(new TextDecoder().decode(bytes))), () => []);
+
+		known.set(path, { "mtime": stat.mtime, "size": stat.size, "can": can });
+
+		return [path, can];
+	}));
+
+	return { "capabilities": new Map(each.filter(([, can]) => can.length > 0)), "files": uris.length, "read": read };
 }
 
 export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
@@ -115,6 +142,7 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 		let count = 0;
 		// (what the code can do, read only once a rule's gone unused: every code file of the workspace)
 		let capabilities: Map<string, string[]> | undefined;
+		let read: number | undefined;
 
 		problems.clear();
 
@@ -131,7 +159,9 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 				count += found.length;
 
 				if (found.length > 0) {
-					capabilities ??= await capabilitiesOf(vscode, ROOT);
+					if (capabilities === undefined) {
+						({ capabilities, read } = await capabilitiesOf(vscode, ROOT));
+					}
 				}
 
 				const can = capabilities;
@@ -151,7 +181,7 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 			}
 		}
 
-		span.end({ "count": count, "runs": history.length, ...capabilities === undefined ? {} : { "files": capabilities.size } });
+		span.end({ "count": count, "runs": history.length, ...read === undefined ? {} : { "read": read } });
 	});
 
 	vscode.languages.registerCodeActionsProvider({ "pattern": "**/.silo/{policy.json,policy/*.json}" }, {

@@ -40,7 +40,9 @@ How it's kept:
    parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
    changes marked*). In order:
    - **The boundaries** (ARCHITECTURE.md has the reasons, checked 2026-11-03: nothing split). Left: whether tsval can
-     give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file).
+     give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file). Tried
+     2026-11-21 with packages/editor/test's 46 unit files, in Brave: a background tab's editor reloaded three times
+     mid-run (Vite re-optimizing once, then frozen), 11 files in. Time it with the tab in front.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
      fit* answered. One owner a file is where that starts: reassess sharing from what runs show — Features and tests
      says which of a feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx,
@@ -76,8 +78,8 @@ How it's kept:
      runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
      (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
    - **What reintroduced features left for later**: *Capabilities confirmed by runs* without the baseline's join (a
-     rule only a dependency's call needs reads as one none of the code can make), or capabilities by feature;
-     *Capability findings* moving to TypeScript 7 once it loads a tsserver plugin.
+     rule only a dependency's call needs reads as one none of the code can make); *Capability findings* moving to
+     TypeScript 7 once it loads a tsserver plugin.
    - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
 3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Waits on item 2:
    what's vouched for is the rewrite's declared tests. Decided 2026-10-29 (*Decisions*, *Tests by feature*): a vouch is

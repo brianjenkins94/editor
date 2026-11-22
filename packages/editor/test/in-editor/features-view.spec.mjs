@@ -19,7 +19,8 @@ const LEDGER = {
 	"Nothing yet": entry("Has no tests."),
 	"Viewing": entry("A suite and a spec.", ["suite.mjs", "view.spec.mjs"]),
 	"Writing": entry("Two tests on one file.", ["one.test.mjs", "two.test.mjs"]),
-	"Growing": entry("A test that comes to write.", ["grow.test.mjs"]),
+	// (asks.mjs its code: what it can do, and its test's run not doing it)
+	"Growing": { ...entry("A test that comes to write.", ["grow.test.mjs"]), "paths": ["asks.mjs"] },
 	"Gone": { "status": "removed", "why": "out", "since": "2026-11-04", "what": "Was here." }
 };
 const rule = (capability, resource) => ({ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": capability }, { "target_id": "resource", "operator_id": "matches", "argument": resource }] }, "then": [{ "action_id": "allow" }] });
@@ -65,8 +66,10 @@ test("each feature's tests, what kind they are, run from there, how they came ou
 	await expect(row("suite.mjs").locator("wa-button")).toHaveCount(0);
 	await expect(row("add.test.mjs").locator("wa-badge")).toHaveCount(0);
 
-	// A feature's own code that no test has loaded says so.
+	// A feature's own code that no test has loaded says so; and what its code can do, that no run of its tests did.
 	await expect(row("Multiplying")).toContainText("1 file no test loads");
+	await expect(row("Growing")).toContainText("can net");
+	await expect(row("Growing")).toContainText("net not in its tests' runs");
 
 	// Run: when it passed, and how long.
 	await run("add.test.mjs");

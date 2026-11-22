@@ -28,6 +28,7 @@ import { isOwnedCode, ownersOf, parseLedger } from "@brianjenkins94/util/silo/le
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { featuresViewStyles } from "theme/styles/features-view";
+import { capabilitiesOf } from "./capability-confirm";
 import { fileOf, titlesOf } from "./ci-outcomes";
 import { contentionsOf, kindOf, slowerOf } from "./test-runs";
 import { isTestFile } from "./terminal/commands/node/node";
@@ -66,6 +67,54 @@ interface Model {
 	/** How much of each feature's own code the tests here ran: its statements, how many ran, and its code files no test's
 	 *  last run loaded. */
 	"coverage": Map<string, FeatureCoverage>;
+	/** What each feature's own code can do, and what its tests' last runs did. */
+	"capabilities": Map<string, FeatureCapabilities>;
+}
+
+/** What a feature's own code can do (each file's text, as lib's `detect` reads it: a capability, never what it reaches),
+ *  and what the last run of each of its test files did (its effects that reached the world, or were given back). */
+interface FeatureCapabilities { "can": string[]; "used": string[] }
+
+/** Each feature's capabilities: its code files' (by the ledger's owners, not a test's own), and its tests' last runs'. */
+function capabilitiesByFeature(ledger: Ledger, canOf: Map<string, string[]>, history: RunRecord[], files: Map<string, string[]>): Map<string, FeatureCapabilities> {
+	const byFeature = new Map<string, FeatureCapabilities>();
+	// (history is latest last: each file's last run is the last kept)
+	const last = new Map(history.map((run) => [run.file, run]));
+
+	for (const [file, can] of canOf) {
+		if (!isTestFile(file)) {
+			for (const owner of ownersOf(ledger, file)) {
+				const its = byFeature.get(owner) ?? { "can": [], "used": [] };
+
+				its.can = [...new Set([...its.can, ...can])].toSorted();
+				byFeature.set(owner, its);
+			}
+		}
+	}
+
+	for (const [feature, its] of byFeature) {
+		its.used = [
+			...new Set((files.get(feature) ?? []).flatMap((test) => last.get(test)?.effects ?? []).filter((effect) => effect.how !== "denied" && effect.how !== "skipped").map((effect) => effect.capability))
+		].toSorted();
+	}
+
+	return byFeature;
+}
+
+/** A feature's capabilities, said: what its code can do, and what of that no last run of its tests did. */
+function Capabilities({ of }: { "of": FeatureCapabilities | undefined }): JSX.Element | null {
+	if (of === undefined || of.can.length === 0) {
+		return null;
+	}
+
+	const unseen = of.can.filter((capability) => !of.used.includes(capability));
+
+	return (
+		<span class="wa-cluster wa-gap-3xs">
+			<span title="What its own code can do, as its text says: a capability, not what it reaches.">{`can ${of.can.join(", ")}`}</span>
+			{unseen.length === 0 ? null : <wa-badge appearance="outlined" variant="warning" title="What its code can do that no last run of its tests did: untested here, or no longer needed.">{`${unseen.join(", ")} not in its tests' runs`}</wa-badge>}
+		</span>
+	);
 }
 
 /** How much of a feature's own code the tests here ran (`coverageByFeature`), and which of its files other features'
@@ -325,6 +374,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										<span>{files.length === 0 ? "no tests" : `${String(files.length)} ${files.length === 1 ? "file" : "files"}`}</span>
 										{failing === 0 ? null : <wa-badge variant="danger">{`${String(failing)} failing`}</wa-badge>}
 										<Covered coverage={model.coverage.get(name)} />
+										<Capabilities of={model.capabilities.get(name)} />
 									</span>
 								</td>
 								<td />
@@ -407,7 +457,7 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 	const ledgerUri = vscode.Uri.file(`${ROOT}/${ledgerPath()}`);
 	const approved: string[] = [];
 	const running = new Set<string>();
-	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "unchecked": { "not run": [], "lines not run": [], "config": [] }, "slowerBy": 25, "titles": new Map(), "ci": { "byFile": new Map(), "runs": 0 }, "coverage": new Map() };
+	let model: Model = { "features": [], "files": new Map(), "kinds": new Map(), "history": [], "reach": new Map(), "touched": new Set(), "unchecked": { "not run": [], "lines not run": [], "config": [] }, "slowerBy": 25, "titles": new Map(), "ci": { "byFile": new Map(), "runs": 0 }, "coverage": new Map(), "capabilities": new Map() };
 	const redraws = new Set<() => void>();
 	const redraw = (): void => {
 		for (const each of redraws) {
@@ -458,12 +508,13 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		const { coverage } = await rpc.request("tests.coverage", {}, { "timeoutMs": 60_000 }) as { "coverage": Record<string, { "statements": number; "ran": number; "by"?: string[] }> };
 		// (the workspace's code a feature could own: not a test, nothing installed or built)
 		const code = (await vscode.workspace.findFiles("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", "**/node_modules/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isOwnedCode(path) && !isTestFile(path));
+		const { "capabilities": canOf, "read": capabilitiesRead } = await capabilitiesOf(vscode, ROOT, code);
 		const { "tests": affected, why } = await rpc.request("tests.affected", { "glance": true }, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
 		const changesThat = (reason: Why): string[] => why.filter((each) => each.why === reason).map((each) => each.path);
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci, "coverage": coverageByFeature(ledger, code, coverage, featuresOfTests(files)) };
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci, "coverage": coverageByFeature(ledger, code, coverage, featuresOfTests(files)), "capabilities": capabilitiesByFeature(ledger, canOf, history, files) };
 		model.ci = { ...model.ci, "byFile": joined(standings) };
-		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length, "files": code.length });
+		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length, "files": code.length, "read": capabilitiesRead });
 		redraw();
 	});
 
