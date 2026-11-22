@@ -50,19 +50,12 @@ How it's kept:
      code_parses 79–98%; capability-findings, instances and cosmetic 0–2%, their features' code run by every editor and so
      not counted, what's left the terminal and review they lean on. `activate`, reached by every test, says nothing to
      it (`RARE`: a statement at most 10% of the tests ran).
-   - **Notes for comments, and agents reading them**: the migration, with Notes: Make This Comment a Note (its lightbulb on
-     a comment, 2026-11-22: the text on the code below it, the repository's, who wrote it kept; a tool's comment stays).
-     The worked example (2026-11-22): the notes feature's own two files, 32 comments, 20 notes and 12 dropped — made in
-     an instance of this repository and copied out, the code's edits only the comments' lines (a save there also runs
-     ESLint's fixes: undone). Left: packages/editor's other 266 files (~6,900 comment lines), then the pass.
-     Then the pass's third condition, to show notes lose nothing. An edit that orphans a note says so (2026-11-20: files_edit, files_write and files_replace answer
-     `orphaned`, as Problems says "A note lost its place"). Agents read them (2026-11-17): `files_read` with the notes
-     beside its lines, `decisions_for` with a file's among its whys. What the measure found to go on (2026-11-03, 128
-     comments in 9 files): 53% dropped (JSDoc saying what a declaration's name and body do), 39% notes (whys, gotchas, a
-     contract with another file, history), 6% notes citing a doc, 2% kept (a pragma, an `eslint-disable` with its
-     reason); every file's header a note. The zero-knowledge baseline: the code alone 12 of 15, as it is 14.5 — every
-     point the comments carried a why. A migrated note is the repository's, its comment's author kept on it (decided
-     2026-11-20).
+   - **Notes for comments, and agents reading them**: migrated 2026-11-22 — packages/editor's 3,094 comments on their
+     own lines, 2,754 notes (`.silo/notes/repository/`) and 359 dropped, each decided as the worked example's were (Notes:
+     Make This Comment a Note, in instances of this repository; a tool's directive kept, and a comment run stops at one).
+     Left: the pass's third condition, to show notes lose nothing — the zero-knowledge questions
+     (`.silo/zero-knowledge.json`) answered from the code with its notes through the tools, against the 14.5 of 15 the
+     comments gave. Not migrated: tests (test/), and comments inside JSX (`{/* … */}`), which the action doesn't offer.
    - **The standard**, from the pass's gaps.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
      (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s

@@ -607,6 +607,9 @@ packages/editor's lines (outside tests) are comments. Each one is:
   spans* in RUNTIME-EVIDENCE.md; `pickAnchor` for the span);
 - a note citing a doc, when it points at one (`FILE.md, *Section*`).
 
+Migrated 2026-11-22: packages/editor's 3,094 whole-line comments outside its tests became 2,754 notes and 359 drops
+(12%, against the 2026-11-03 sample's 53%: what's left after the reduction is mostly whys). A comment for a tool stays.
+
 A comment becomes a note from its lightbulb (Notes: Make This Comment a Note, extensions/notes/comments.ts): its text off
 the markers, on the code just below it, the repository's (`.silo/notes/repository/`, anyone's to change), with who wrote
 it by its lines' blame; one for a tool isn't offered.
