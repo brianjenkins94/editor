@@ -79,6 +79,34 @@ const realmBoundaries = [
 	...EXTENSIONS.map((name) => realmImports([`${EDITOR}/extensions/${name}/**/${SOURCES}`], [...otherRealms("extensions"), ...EXTENSIONS.filter((other) => other !== name), ...STILL_IN_SHARED.has(name) || name in PRIVILEGED ? [] : ["shared"]], [], PRIVILEGED[name]))
 ];
 
+/** A comment a tool reads: a directive (where it starts), a triple-slash reference, a license. */
+const FOR_TOOLS = /^\s*(?:eslint-(?:disable|enable)|eslint\s|@ts-(?:expect-error|ignore|nocheck|check)\b|@jsx|@vite-ignore|no default\b|prettier-ignore|istanbul ignore|[cv]8 ignore|#__PURE__|webpackChunkName|global\s|\/\s*<reference)|@license|@preserve|\bcopyright\b/iu;
+
+/** notes/no-prose-comments: a comment that explains, not a tool's — a directive, the comment an empty block holds for
+ *  no-empty, one between imports that holds their groups apart for sorting. */
+const NO_PROSE_COMMENTS = {
+	"meta": { "type": "suggestion", "messages": { "prose": "A comment that explains is a note: its lightbulb's Make This Comment a Note puts it beside this code, in the Margin. Only what a tool reads stays a comment." } },
+	"create": (context) => ({
+		"Program": (program) => {
+			const { sourceCode } = context;
+
+			for (const comment of sourceCode.getAllComments()) {
+				const at = sourceCode.getNodeByRangeIndex(comment.range[0]);
+				// (what no-empty and no-empty-function read: the comment that's all an empty block holds)
+				const emptyBlock = (at?.type === "BlockStatement" || at?.type === "StaticBlock" || at?.type === "ClassBody") && at.body.length === 0;
+				// (and what import sorting reads: a comment between two imports holds their groups apart)
+				const before = program.body.findLast((statement) => statement.range[1] <= comment.range[0]);
+				const after = program.body.find((statement) => statement.range[0] >= comment.range[1]);
+				const betweenImports = before?.type === "ImportDeclaration" && after?.type === "ImportDeclaration";
+
+				if (!FOR_TOOLS.test(comment.value.replace(/^[*!]/u, "")) && !emptyBlock && !betweenImports) {
+					context.report({ "loc": comment.loc, "messageId": "prose" });
+				}
+			}
+		}
+	})
+};
+
 export default [
 	...config,
 	{
@@ -180,6 +208,15 @@ export default [
 			// no-floating-promises is a false positive on every top-level test in these files.
 			"ts/no-floating-promises": "off"
 		}
+	},
+	{
+		// No prose comments in the editor's code: what explains is a note, beside its code in the Margin (ARCHITECTURE.md,
+		// *Comments become notes*; Notes: Make This Comment a Note, from the comment's lightbulb). Only what a tool reads
+		// stays a comment. Its tests keep theirs, and a comment inside JSX, which the action doesn't take, says so.
+		"files": ["packages/editor/**/*.{ts,tsx}"],
+		"ignores": ["packages/editor/test/**", "packages/editor/demo/**", "packages/editor/dist/**", "packages/editor/**/test/**", "packages/editor/**/*.d.ts"],
+		"plugins": { "notes": { "rules": { "no-prose-comments": NO_PROSE_COMMENTS } } },
+		"rules": { "notes/no-prose-comments": "error" }
 	},
 	{
 		// The BABLR grammar is a class of parser PRODUCTIONS, not ordinary methods, and two "everything-on"

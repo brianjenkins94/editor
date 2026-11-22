@@ -241,11 +241,6 @@ function Shell() {
 				</div>
 			</div>
 
-			{/* The aside slot stays mounted across collapse so the imperatively-rendered git panel (mounted once, in
-			    the effect above) survives — collapsed just hides it and shows the rail. Its header (with the collapse
-			    button, passed in above) is the panel's own. The children are KEYED: unkeyed, a sibling swapping in
-			    or out can make preact reuse the git panel's host <div> for another element, stamping that element's
-			    class and children onto it — the panel then renders inside it. */}
 			<div
 				slot="aside"
 				class={rhsCollapsed

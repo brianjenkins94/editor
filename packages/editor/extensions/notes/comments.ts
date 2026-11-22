@@ -2,7 +2,6 @@ export interface Comment { "from": number; "to": number; "text": string; "below"
 
 const FOR_TOOLS = /^\s*(?:eslint-(?:disable|enable)|@ts-(?:expect-error|ignore|nocheck|check)\b|@jsx|@vite-ignore|no default\b|prettier-ignore|istanbul ignore|[cv]8 ignore|#__PURE__|webpackChunkName|global\s)|@license|@preserve|\bcopyright\b/iu;
 
-/** A `//` line that's a tool's: its own comment, never part of a run beside it. */
 const directive = (line: string): boolean => FOR_TOOLS.test(line.replace(/^\s*\/\/ ?/u, ""));
 
 const lineComment = (line: string): boolean => /^\s*\/\/(?!\/)/u.test(line);
@@ -37,7 +36,6 @@ function blockAround(lines: readonly string[], line: number): [number, number] |
 		: undefined;
 }
 
-/** Where a `//` comment beside code starts on `line` (outside its quotes, after a space), if one does. */
 function besideAt(line: string): number | undefined {
 	let quote: string | undefined;
 
@@ -60,7 +58,6 @@ function besideAt(line: string): number | undefined {
 	return undefined;
 }
 
-/** A JSX comment's lines around `line`: from a line starting `{/*` to one ending `*\/}`, nothing else on either. */
 function jsxAround(lines: readonly string[], line: number): [number, number] | undefined {
 	let from = line;
 
@@ -90,7 +87,6 @@ export function commentAt(lines: readonly string[], line: number): Comment | und
 		return undefined;
 	}
 
-	// (in JSX, `{/* … */}` on lines of its own)
 	const jsx = jsxAround(lines, line);
 
 	if (jsx !== undefined) {
@@ -104,7 +100,6 @@ export function commentAt(lines: readonly string[], line: number): Comment | und
 		return said === "" || FOR_TOOLS.test(said) || below >= lines.length ? undefined : { "from": jsx[0], "to": jsx[1], "text": said, "below": below };
 	}
 
-	// (beside code: the note on that line's code, which stays)
 	const beside = anyComment(lines[line]) ? undefined : besideAt(lines[line]);
 
 	if (beside !== undefined) {

@@ -259,7 +259,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			const file = relative(document.uri);
 
 			return span("fromComment", { "path": file, "count": comment.to - comment.from + 1 }, async () => {
-				// (a comment beside code leaves its line, less the comment; one on lines of its own, those lines)
 				const kept = comment.column === undefined ? undefined : lines[comment.from]!.slice(0, comment.column).trimEnd();
 				const after = kept === undefined ? [...lines.slice(0, comment.from), ...lines.slice(comment.to + 1)] : lines.map((each, at) => (at === comment.from ? kept : each));
 				const on = kept === undefined ? comment.below - (comment.to - comment.from + 1) : comment.from;
@@ -274,8 +273,6 @@ export function activate(context: vscode.ExtensionContext): void {
 					return undefined;
 				}
 
-				// (a `//` line inside a string or a template — code carried as text, an embedded page's script — reads as a
-				// comment line by line, and what's below it is the string's: not a comment, nothing a note can stand on)
 				if (/String|Template/u.test(ref.shape?.type ?? "")) {
 					void vscode.window.showInformationMessage("That's inside a string, not a comment: it's left as it is.");
 

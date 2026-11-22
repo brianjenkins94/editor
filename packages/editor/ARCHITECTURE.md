@@ -643,11 +643,14 @@ it. Each question the code alone gets wrong is fixed one of three ways: the code
 (a why the code can't), or a doc (it spans many places). A feature's pass runs again when it's reintroduced, against
 its baseline.
 
-**How the code looks** is written from the gaps the pass finds, each rule beside what checks it (ESLint, `silo check`,
-or the pass). Likely: folders are realms; a feature is an extension (*Features as extensions*, above) and registers its
-own ways in (composition roots registering for many features are what the manifest's derivations couldn't follow:
-packages/silo/README.md, *The feature manifest*); no prose comments, only the kind tools read. The first feature
-reintroduced is the worked example the rules point at.
+**How the code looks** is written from the gaps the pass finds, each rule beside what checks it. The pass of 2026-11-22
+found none in the code (its one half-mark was the key's), so the standard is what the rewrite already holds to:
+- **Folders are realms**: code imports only what its realm can load (ESLint's `no-restricted-imports`, per folder,
+  eslint.config.js).
+- **A feature registers its own ways in**, and every way in is a feature's (`silo check`, CI's `silo` job).
+- **No prose comments, only the kind tools read**: what explains is a note beside its code (`notes/no-prose-comments`,
+  eslint.config.js: a directive, the comment an empty block holds for `no-empty`, and one between imports that holds
+  their groups apart are a tool's; the rest is a note, made from its lightbulb). packages/editor's code, not its tests.
 
 **The architecture, reassessed.** A feature's boundaries are drawn before it's declared, so the extensions were looked
 at again before the reduction, one feature to an extension. Done 2026-11-02: the bridge is core's crossing alone (the

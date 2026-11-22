@@ -50,7 +50,6 @@ How it's kept:
      code_parses 79–98%; capability-findings, instances and cosmetic 0–2%, their features' code run by every editor and so
      not counted, what's left the terminal and review they lean on. `activate`, reached by every test, says nothing to
      it (`RARE`: a statement at most 10% of the tests ran).
-   - **The standard**, from the pass's gaps.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
      (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
      `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Not yet trusted:
