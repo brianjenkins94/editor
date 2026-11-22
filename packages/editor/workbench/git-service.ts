@@ -1,6 +1,6 @@
 import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Logger } from "@brianjenkins94/util/logger";
+import type { Logger, Span } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
@@ -30,7 +30,11 @@ export interface GitReader {
 
 export type CommitPart = (pick: CommitPick, whole: engine.CommitFile, file: GitReader["file"]) => Promise<engine.CommitFile | undefined>;
 
-export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger, { part }: { "part"?: CommitPart } = {}): GitReader {
+export type BeforeCommit = (span: Span) => Promise<string | undefined>;
+
+export interface GitService extends GitReader { "beforeCommit": (step: BeforeCommit) => void }
+
+export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logger, { part }: { "part"?: CommitPart } = {}): GitService {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
 	let changedSince: Set<string> | undefined;
@@ -132,7 +136,15 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		return part(pick, whole, file);
 	};
 
-	const commit = async (request: { "message"?: string; "files"?: CommitPick[] } | null): Promise<engine.Committed> => {
+	let before: BeforeCommit | undefined;
+
+	const tested = async (): Promise<string | undefined> => {
+		const step = before;
+
+		return step === undefined ? undefined : log.span("editor.workbench.git-service.test", {}, async (span) => step(span)).catch((error: unknown) => `The tests a commit runs first didn't run: ${error instanceof Error ? error.message : String(error)}`);
+	};
+
+	const commit = async (request: { "message"?: string; "files"?: CommitPick[] } | null): Promise<engine.Committed & { "tests"?: string }> => {
 		const message = request?.message?.trim();
 
 		if (message === undefined || message === "") {
@@ -142,6 +154,8 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		let made: engine.Committed;
 
 		changes += 1;
+
+		const tests = await tested();
 
 		if (request?.files === undefined) {
 			made = await engine.commitAll(message);
@@ -156,7 +170,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		hub.publish("git.changed");
 		log.info("git commit (service)", { "oid": made.oid.slice(0, 7), "files": request?.files?.length });
 
-		return made;
+		return { ...made, ...tests === undefined ? {} : { "tests": tests } };
 	};
 
 	serve(hub, "git.commit", async (args) => commit(args));
@@ -224,5 +238,11 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		log.error("git repository unavailable", { "error": thrown instanceof Error ? thrown.message : String(thrown) });
 	});
 
-	return { "status": status, "file": file };
+	return {
+		"status": status,
+		"file": file,
+		"beforeCommit": (step) => {
+			before = step;
+		}
+	};
 }

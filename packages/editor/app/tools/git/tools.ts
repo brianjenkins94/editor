@@ -100,7 +100,7 @@ const git: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "git_commit",
 			"config": {
-				"description": "Commit every change, or the files given — each whole, or only some of its hunks (ids from git_review) — with a message. The working tree keeps what isn't committed. Returns { oid }.",
+				"description": "Commit every change, or the files given — each whole, or only some of its hunks (ids from git_review) — with a message. The working tree keeps what isn't committed. First it runs the touched tests that haven't run since their code changed, as the editor's commit does: their passes are vouched for, and the commit carries the vouches. Returns { oid, tests? }, tests saying what ran first.",
 				"inputSchema": {
 					"message": z.string().describe("The commit message."),
 					"files": z.array(z.union([z.string(), z.object({ "path": z.string(), "hunks": z.array(z.string()).optional() })])).optional().describe("Only these files (relative to the workspace), a path for the whole file's change or { path, hunks } for some of it; default, every change.")

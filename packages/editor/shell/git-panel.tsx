@@ -473,7 +473,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		try {
 			const payload = included.map((file) => (fileState(file.path) === "partial" ? { "path": file.path, "except": [...lineDeselect.get(file.path) ?? []] } : { "path": file.path }));
 
-			await rpc.request("git.commit", { "message": message, "files": payload });
+			await rpc.request("git.commit", { "message": message, "files": payload }, { "timeoutMs": 600_000 });
 
 			if (msgRef.current !== null) {
 				(msgRef.current as { "value": string }).value = "";

@@ -14,6 +14,14 @@ interface Pulled { "ref": string; "outcome": string; "files"?: string[]; "confli
 export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, message: string, repo: string): Promise<CommitOutcome> {
 	const span = githubLog.span("editor.shell.commit.githubCommit", { "repo": repo });
 	let made: string | undefined;
+	let tests = "";
+	const commit = async (): Promise<string> => {
+		const committed = await rpc.request("git.commit", { "message": message }, { "timeoutMs": 600_000 }) as { "oid": string; "tests"?: string };
+
+		tests = committed.tests === undefined ? "" : `. ${committed.tests}`;
+
+		return committed.oid.slice(0, 7);
+	};
 
 	try {
 		const pull = async (): Promise<Pulled> => rpc.request("git.pull", {}, { "timeoutMs": 300_000 }) as Promise<Pulled>;
@@ -24,7 +32,7 @@ export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, m
 		}
 
 		if (pulled.outcome === "diverged") {
-			made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 600_000 }) as { "oid": string }).oid.slice(0, 7);
+			made = await commit();
 			pulled = await pull();
 		}
 
@@ -37,7 +45,7 @@ export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, m
 		const changed = files.filter(({ path }) => path !== ".silo/.gitignore" && path !== ".silo/.gitattributes");
 
 		if (changed.length > 0 && made === undefined) {
-			made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 600_000 }) as { "oid": string }).oid.slice(0, 7);
+			made = await commit();
 		}
 
 		const pushed = await rpc.request("git.push", {}, { "timeoutMs": 300_000 }) as { "ref": string; "ok": boolean; "error"?: string };
@@ -48,13 +56,13 @@ export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, m
 
 		span.info("committed and pushed", { "files": changed.length, "ref": pushed.ref, "pulled": pulled.outcome, ...made === undefined ? {} : { "sha": made } });
 
-		return { "said": caught + (made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}`), "failed": false, ...made === undefined ? {} : { "made": made } };
+		return { "said": caught + (made === undefined ? `Nothing to commit: pushed ${pushed.ref}` : `Committed ${made} and pushed ${pushed.ref}${tests}`), "failed": false, ...made === undefined ? {} : { "made": made } };
 	} catch (failure) {
 		const text = failure instanceof Error ? failure.message : "Commit failed";
 
 		span.error("commit or push failed", { "error": errText(failure), "status": statusOf(failure), ...made === undefined ? {} : { "sha": made } });
 
-		return { "said": made === undefined ? text : `Committed ${made}, but not pushed: ${text}`, "failed": true, ...made === undefined ? {} : { "made": made } };
+		return { "said": made === undefined ? text : `Committed ${made}, but not pushed: ${text}${tests}`, "failed": true, ...made === undefined ? {} : { "made": made } };
 	} finally {
 		span.end();
 	}

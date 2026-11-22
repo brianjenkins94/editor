@@ -78,9 +78,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			try {
-				await vscode.commands.executeCommand("editor.git.commit", message);
+				const { tests } = await vscode.commands.executeCommand<{ "tests"?: string }>("editor.git.commit", message);
+
 				inputBox.value = "";
 				await refresh();
+
+				if (tests !== undefined) {
+					void vscode.window.showInformationMessage(tests);
+				}
 			} catch (error) {
 				void vscode.window.showErrorMessage("Commit failed: " + (error instanceof Error ? error.message : String(error)));
 			}

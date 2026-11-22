@@ -3172,7 +3172,8 @@
     "docs": "packages/silo/README.md, *Tests by feature, in your face*",
     "ways": [
       "cli command|test",
-      "cli command|vouch"
+      "cli command|vouch",
+      "command|history.vouched"
     ],
     "paths": [
       "packages/editor/extensions/history/vouches.ts",
@@ -3180,6 +3181,7 @@
       "packages/silo/src/test.ts"
     ],
     "tests": [
+      "packages/editor/test/in-editor/vouches.spec.mjs",
       "packages/editor/test/vouches.test.mjs",
       "packages/silo/test/test-command.test.ts"
     ]

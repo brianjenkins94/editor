@@ -93,3 +93,32 @@ test("after a commit, the committed file isn't listed", async () => {
 	await commands.get("editor.git.commit")("b");
 	assert.deepEqual((await service.status()).files.filter(({ path }) => path === "b.txt"), []);
 });
+
+test("a commit runs its step first (the touched tests, test-runs.ts's), says what it said, and commits whatever the step makes of it", async () => {
+	const hub = createHub({ "id": "workbench" });
+
+	serve(hub, "git.identity", async () => ({ "name": "test", "email": "test@localhost" }));
+
+	const service = installGitService(vscode, hub, counting().log);
+	const order = [];
+
+	await fs.promises.writeFile(`${DIR}/c.txt`, "c\n");
+	service.beforeCommit(async () => {
+		order.push("tests");
+
+		return "Ran 1.";
+	});
+
+	const made = await commands.get("editor.git.commit")("c");
+
+	assert.equal(made.tests, "Ran 1.");
+	assert.deepEqual(order, ["tests"]);
+
+	// (a step that throws doesn't stop the commit: it says why)
+	await fs.promises.writeFile(`${DIR}/d.txt`, "d\n");
+	service.beforeCommit(async () => {
+		throw new Error("no debugger");
+	});
+	assert.equal((await commands.get("editor.git.commit")("d")).tests, "The tests a commit runs first didn't run: no debugger");
+	assert.deepEqual((await service.status()).files.filter(({ path }) => path === "d.txt"), []);
+});

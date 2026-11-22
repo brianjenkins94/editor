@@ -382,6 +382,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		output,
+		vscode.commands.registerCommand("history.vouched", async () => {
+			await queue;
+		}),
 		vscode.commands.registerCommand("history.show", () => {
 			output.show(true);
 		}),

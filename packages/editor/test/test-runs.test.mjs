@@ -4,12 +4,13 @@
  * And which tests a change selects (`selectionOf`, `changedLines`): by the lines it changed and what each test last ran,
  * and why each changed file selected what it did. And which test files can't run at once (`contentionsOf`): one writes
  * what another reads or writes, over every run kept, said by the tests that did it. And how much of each code file the
- * tests ran (`statementsOf`, `coverageOf`): by statements, over each test file's last run.
+ * tests ran (`statementsOf`, `coverageOf`): by statements, over each test file's last run. And what a commit says of the
+ * touched tests it ran first (`ranFirst`, decision 12): how they came out, and what it left to CI.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { changedLines, contentionsOf, coverageOf, kindOf, selectionOf, slowerOf, statementsOf } from "../workbench/test-runs.ts";
+import { changedLines, contentionsOf, coverageOf, kindOf, ranFirst, selectionOf, slowerOf, statementsOf } from "../workbench/test-runs.ts";
 
 const ID = "a.test.mjs › adds";
 
@@ -184,4 +185,15 @@ test("coverage: a statement any test file's run ran, of a code file's statements
 		"math.mjs": { "statements": 3, "ran": 2, "by": ["a.test.mjs", "b.test.mjs"] },
 		"other.mjs": { "statements": 1, "ran": 1, "by": [] }
 	});
+});
+
+test("a commit says what it ran first, how it came out, and what it left to CI", () => {
+	const ran = [
+		{ "file": "a.test.mjs", "exitCode": 1, "ms": 5, "tests": [{ "id": "a.test.mjs › adds", "outcome": "pass" }, { "id": "a.test.mjs › breaks", "outcome": "fail" }] },
+		// (a file that died outside any test)
+		{ "file": "b.test.mjs", "exitCode": 1, "ms": 5, "tests": [] }
+	];
+
+	assert.equal(ranFirst(ran, ["c.test.mjs"], ["d.test.mjs", "e.test.mjs"]), "Ran the touched tests that hadn't run since their code changed: 1 passed, vouched for, 2 failed (a.test.mjs › breaks, b.test.mjs). c.test.mjs hasn't: it asks for a capability, so CI runs it. d.test.mjs, e.test.mjs haven't: not in time, so CI runs them.");
+	assert.equal(ranFirst([{ "file": "a.test.mjs", "exitCode": 0, "ms": 5, "tests": [{ "id": "a.test.mjs › adds", "outcome": "pass" }] }], [], []), "Ran the touched tests that hadn't run since their code changed: 1 passed, vouched for.");
 });

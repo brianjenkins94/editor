@@ -50,6 +50,12 @@ test("caught up with GitHub first, it says so", async () => {
 	assert.equal((await commitAndPush(rpc, "m", "someone/repo")).said, "Caught up with GitHub (2 files). Committed 1234567 and pushed main");
 });
 
+test("the touched tests the commit ran first, said after it", async () => {
+	const { rpc } = workbench({ "git.pull": { "ref": "main", "outcome": "up to date" }, "git.status": { "files": [{ "path": "a.txt" }] }, "git.commit": { "oid": "1234567890", "tests": "Ran the touched tests that hadn't run since their code changed: 1 passed, vouched for." }, "git.push": pushed });
+
+	assert.equal((await commitAndPush(rpc, "m", "someone/repo")).said, "Committed 1234567 and pushed main. Ran the touched tests that hadn't run since their code changed: 1 passed, vouched for.");
+});
+
 test("nothing changed — or only .silo's own seeds — pushes what's committed, committing nothing", async () => {
 	const { rpc, asked } = workbench({ "git.pull": { "ref": "main", "outcome": "ahead" }, "git.status": { "files": [{ "path": ".silo/.gitignore" }, { "path": ".silo/.gitattributes" }] }, "git.push": pushed });
 

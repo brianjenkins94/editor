@@ -523,8 +523,12 @@ could run. The editor vouches too (2026-11-22): each passing tsval test, held to
 included) by its contents' git id — not by declaration: the editor's TypeScript and CI's (7, in Node) needn't
 fingerprint alike, while a git id is the same anywhere — kept in `.silo/local/vouches.jsonl` until the next commit
 carries them in the committer's `.silo/vouches/<user>.jsonl`; CI takes one for a test whose tsval vouch it has since passed itself
-(`agreedOn`, decision 19). Not yet: the commit flow running what hasn't run (decision 12), a dependency's upgrade
-lapsing a vouch (code under node_modules isn't held to), and CI's selection by per-test reach from runs.
+(`agreedOn`, decision 19). Its commit runs first what hasn't run (decision 12, 2026-11-22): the touched tests, those
+whose last run is older than a file it ran, each file's run vouching as any does; one that asks for a capability, or
+isn't reached in two minutes, is left to CI, and the commit says what ran and how it came out (the Source Control view's
+message, the commit button's, `git_commit`'s `tests`). The terminal's `git commit` doesn't, as `--no-verify` wouldn't.
+Not yet: a dependency's upgrade lapsing a vouch (code under node_modules isn't held to), and CI's selection by per-test
+reach from runs.
 
 **Dogfooding in the editor.** The editor is where this is tried first, and what it already has maps onto it:
 - **Reach** is its traces: tests run on tsval's `node:test` in the editor, and their reach is BABLR span ids, kept per

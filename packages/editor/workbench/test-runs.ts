@@ -1,7 +1,7 @@
 import type { CoverageEvent, Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
-import type { GitReader } from "./git-service";
+import type { GitService } from "./git-service";
 import type { NodeRunner } from "./node-runner";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { alignedRows, hunksOf } from "../shared/git-hunks";
@@ -26,6 +26,10 @@ const KEPT = 20;
 const STALL_MS = 120_000;
 
 const AFFECTED_MS = 60_000;
+
+const COMMIT_READY_MS = 10_000;
+
+const COMMIT_RUNS_MS = 120_000;
 
 const UNTRACED_LISTED = 50;
 
@@ -313,7 +317,20 @@ export function selectionOf(changes: Change[], reach: Record<string, Record<stri
 	return { "tests": tests, "why": why };
 }
 
-export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitReader, runner: NodeRunner): void {
+export function ranFirst(ran: readonly Ran[], asking: readonly string[], left: readonly string[]): string {
+	const tests = ran.flatMap((file) => file.tests);
+	const passed = tests.filter((test) => test.outcome === "pass").length;
+	const failed = [...tests.filter((test) => test.outcome === "fail").map((test) => test.id), ...ran.filter((file) => file.exitCode !== 0 && !file.tests.some((test) => test.outcome === "fail")).map((file) => file.file)];
+	const files = (list: readonly string[]): string => `${list.join(", ")}${list.length === 1 ? " hasn't" : " haven't"}`;
+
+	return [
+		...ran.length === 0 ? [] : [`Ran the touched tests that hadn't run since their code changed: ${String(passed)} passed${passed === 0 ? "" : ", vouched for"}${failed.length === 0 ? "" : `, ${String(failed.length)} failed (${failed.join(", ")})`}.`],
+		...asking.length === 0 ? [] : [`${files(asking)}: ${asking.length === 1 ? "it asks" : "they ask"} for a capability, so CI runs ${asking.length === 1 ? "it" : "them"}.`],
+		...left.length === 0 ? [] : [`${files(left)}: not in time, so CI runs ${left.length === 1 ? "it" : "them"}.`]
+	].join(" ");
+}
+
+export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitService, runner: NodeRunner): void {
 	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
@@ -545,6 +562,48 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return { "files": ran.length, "pass": outcomes.filter((outcome) => outcome === "pass").length, "fail": outcomes.filter((outcome) => outcome === "fail").length + ran.filter((file) => diedOutsideATest(file.exitCode, file.tests)).length, "skip": outcomes.filter((outcome) => outcome === "skip" || outcome === "todo").length };
 	};
 
+	const runAndKeep = async (file: string, signal: AbortSignal, approvals: string[], stopAll: () => void, last: ReadonlyMap<string, string>): Promise<Ran | { "asked": Asked }> => {
+		const result = await runFile(file, signal, approvals, stopAll);
+
+		if (result.asked !== undefined) {
+			return { "asked": result.asked };
+		}
+
+		const earlier = (await readHistory()).filter((run) => run.file === file);
+		const percent = vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25);
+
+		await keepReach(file, result.tests);
+
+		if (result.statements !== undefined) {
+			await keepCoverage(file, result.statements);
+		}
+		await keep({
+			"file": file,
+			"at": new Date().toISOString(),
+			"ms": result.ms,
+			"exitCode": result.exitCode,
+			...result.stalled === undefined ? {} : { "stalled": result.stalled },
+			"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...test.error === undefined ? {} : { "error": test.error }, ...test.effects === undefined ? {} : { "effects": test.effects } })),
+			"effects": result.effects,
+			...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
+		});
+
+		return {
+			"file": file,
+			"exitCode": result.exitCode,
+			"ms": result.ms,
+			...result.attached ? {} : { "error": "the debugger couldn't take it" },
+			...result.stalled === undefined ? {} : { "stalled": result.stalled },
+			"tests": result.tests.map((test) => {
+				const id = [file, ...test.titles].join(" › ");
+				const slower = test.outcome === "pass" ? slowerOf(earlier, id, test, percent) : undefined;
+
+				return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...slower === undefined ? {} : { "slower": slower }, ...last.has(id) ? { "before": last.get(id) } : {} };
+			}),
+			...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
+		};
+	};
+
 	const runBatch = async (batch: Batch): Promise<Record<string, unknown>> => {
 		const { files, "affected": onlyAffected, approved } = batch.args as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown };
 		const approvals = Array.isArray(approved) ? approved.filter((key): key is string => typeof key === "string") : [];
@@ -580,45 +639,13 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				continue;
 			}
 
-			const result = await runFile(file, signal, approvals, () => { batch.controller.abort(); });
+			const kept = await runAndKeep(file, signal, approvals, () => { batch.controller.abort(); }, last);
 
-			if (result.asked !== undefined) {
-				return { "ask": result.asked, "rest": chosen.slice(index) };
+			if ("asked" in kept) {
+				return { "ask": kept.asked, "rest": chosen.slice(index) };
 			}
 
-			const earlier = (await readHistory()).filter((run) => run.file === file);
-			const percent = vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25);
-
-			await keepReach(file, result.tests);
-
-			if (result.statements !== undefined) {
-				await keepCoverage(file, result.statements);
-			}
-			await keep({
-				"file": file,
-				"at": new Date().toISOString(),
-				"ms": result.ms,
-				"exitCode": result.exitCode,
-				...result.stalled === undefined ? {} : { "stalled": result.stalled },
-				"tests": result.tests.map((test) => ({ "id": [file, ...test.titles].join(" › "), "outcome": test.outcome, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...test.error === undefined ? {} : { "error": test.error }, ...test.effects === undefined ? {} : { "effects": test.effects } })),
-				"effects": result.effects,
-				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
-			});
-
-			batch.ran.push({
-				"file": file,
-				"exitCode": result.exitCode,
-				"ms": result.ms,
-				...result.attached ? {} : { "error": "the debugger couldn't take it" },
-				...result.stalled === undefined ? {} : { "stalled": result.stalled },
-				"tests": result.tests.map((test) => {
-					const id = [file, ...test.titles].join(" › ");
-					const slower = test.outcome === "pass" ? slowerOf(earlier, id, test, percent) : undefined;
-
-					return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...slower === undefined ? {} : { "slower": slower }, ...last.has(id) ? { "before": last.get(id) } : {} };
-				}),
-				...diedOutsideATest(result.exitCode, result.tests) ? { "output": result.output } : {}
-			});
+			batch.ran.push(kept);
 		}
 
 		return {
@@ -628,6 +655,51 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			...chosen.length === 0 ? { "nothing": listed.length === 0 ? "no affected test is stale: name files to run them anyway" : "no files" } : {}
 		};
 	};
+
+	git.beforeCommit(async (span) => {
+		const waiting = await waitFor(["workspace", "debugger", "versions"], COMMIT_READY_MS);
+
+		if (waiting.length > 0) {
+			return `No tests ran first: the editor is still starting (${waiting.join(" and ")}), so CI runs them.`;
+		}
+
+		const found = await within(affected(), AFFECTED_MS, `working out the touched tests took over ${String(AFFECTED_MS / 1000)} s`);
+		const files = [...new Set(found.tests.filter((test) => test.stale).map((test) => test.file))];
+
+		span.info("touched", { "count": files.length });
+
+		if (files.length === 0) {
+			return undefined;
+		}
+
+		const controller = new AbortController();
+		const last = new Map(found.tests.map((test) => [test.id, test.outcome]));
+		const started = performance.now();
+		const ran: Ran[] = [];
+		const asking: string[] = [];
+		const left: string[] = [];
+
+		for (const file of files) {
+			if (controller.signal.aborted || performance.now() - started > COMMIT_RUNS_MS) {
+				left.push(file);
+
+				continue;
+			}
+
+			const kept = await runAndKeep(file, controller.signal, [], () => { controller.abort(); }, last);
+
+			if ("asked" in kept) {
+				asking.push(file);
+			} else {
+				ran.push(kept);
+			}
+		}
+
+		await Promise.resolve(vscode.commands.executeCommand("history.vouched")).catch(() => undefined);
+		span.end({ "files": ran.length, "asking": asking.length, "left": left.length });
+
+		return ranFirst(ran, asking, left);
+	});
 
 	const batches = new Map<string, Batch>();
 	const startBatch = (args: Record<string, unknown>, resumed?: Batch): Batch => {
