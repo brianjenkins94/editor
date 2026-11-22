@@ -1,18 +1,9 @@
-/**
- * What went through each observed site of a tsval run (its `observe` hook), summed as the program runs: the debug
- * worker's half of runtime evidence's values and branches (RUNTIME-EVIDENCE.md, the second slice). Nothing is kept per
- * event. A timeline's sums are its own: a fork (time travel's next step) starts from a copy, as coverage does. The page
- * runtime (page-evidence.ts) sums a preview's sites the same way, keyed by its site index instead of a node.
- */
 import type { SiteObservation } from "@brianjenkins94/editor-api";
 import type { ObserveSite } from "@brianjenkins94/tsval";
 import type ts from "typescript";
-// typeTag alone, not the interpreter: the page runtime bundles this into every preview page.
 import { typeTag } from "@brianjenkins94/tsval/values";
 
-/** At most this many type tags a site; the rest count as `other`. */
 const MAX_TAGS = 8;
-/** At most this many distinct primitives a site keeps, each string cut to SAMPLE_CHARS. */
 const MAX_SAMPLES = 5;
 const SAMPLE_CHARS = 40;
 
@@ -20,13 +11,10 @@ interface Sums { "site": ObserveSite; "seen": number; "nullish": number; "tags":
 
 export type SiteSums<Key = ts.Node> = Map<Key, Sums>;
 
-/** Add what `site` (`node`, or whatever keys the sums) was just told — a value, or for a branch the arm that ran — to
- *  `sums`. */
 export function addObservation<Key>(sums: SiteSums<Key>, node: Key, site: ObserveSite, value: unknown): void {
 	let known = sums.get(node);
 
 	if (known === undefined) {
-		// Every branch site tsval observes has two arms (then/else; the right side ran/didn't).
 		known = {
 			"site": site,
 			"seen": 0,
@@ -66,7 +54,6 @@ export function addObservation<Key>(sums: SiteSums<Key>, node: Key, site: Observ
 	}
 }
 
-/** A value as a sample keeps it: a string cut short, a boolean or finite number as it is; nothing else is sampled. */
 function sampleOf(value: unknown): string | number | boolean | undefined {
 	if (typeof value === "string") {
 		return value.slice(0, SAMPLE_CHARS);
@@ -77,7 +64,6 @@ function sampleOf(value: unknown): string | number | boolean | undefined {
 		: undefined;
 }
 
-/** A copy of `sums` a fork goes on adding to, leaving the original as it was. */
 export function copySums(sums: SiteSums | undefined): SiteSums {
 	return new Map([
 		...sums ?? []
@@ -92,7 +78,6 @@ export function copySums(sums: SiteSums | undefined): SiteSums {
 	]));
 }
 
-/** Each site that ran, with its node's range in `file` (0-based line and character), in source order. */
 export function siteObservations(sums: SiteSums | undefined, file: ts.SourceFile): SiteObservation[] {
 	const position = (offset: number): [number, number] => {
 		const { line, character } = file.getLineAndCharacterOfPosition(offset);
@@ -109,7 +94,6 @@ export function siteObservations(sums: SiteSums | undefined, file: ts.SourceFile
 	}));
 }
 
-/** What a site's sums say, as a report gives it: for a branch its arms, for a value its counts, tags and samples. */
 export function summary(known: Sums): Omit<SiteObservation, "start" | "end"> {
 	return {
 		"site": known.site,

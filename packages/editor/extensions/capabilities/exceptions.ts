@@ -1,27 +1,14 @@
-/**
- * Exceptions, on the call (no view: the user, 2026-11-06): the answers people gave at a call in their runs — allowed once,
- * or refused — said in that call's decision (findings.ts), beside what the policy says. An answer is an exception to the
- * policy, recorded in the run's effects (`decided`) so it's on record whether or not a policy grew from it; "allowed always"
- * isn't one here, as it's a rule in the policy now and the decision says so.
- *
- * Read from every user's runs kept in `.silo/runs/`, again as they change.
- */
 import type { Effect, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import { parseRuns } from "@brianjenkins94/util/silo/evidence";
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
-/** The answers that are exceptions, and how each reads. */
 const ANSWERS: Partial<Record<NonNullable<Effect["decided"]>, string>> = { "once": "allowed once", "refused": "refused" };
 
-/** An answer given at a call: how, in how many runs, and the latest. */
 interface Answered { "how": string; "runs": number; "last": string }
 
 export interface Exceptions {
-	/** What was answered at a call of `capability` on `resource` (the program's own calls), said as a sentence to follow
-	 *  the decision's (its full stop first); "" when nothing was. */
 	"said": (capability: string, resource: string | undefined) => string;
-	/** The runs changed: what's said may have. */
 	"onDidChange": vscode.Event<void>;
 }
 

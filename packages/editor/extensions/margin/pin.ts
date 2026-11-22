@@ -1,8 +1,3 @@
-/**
- * What runs after an edit do with a call they can't make (RUNTIME-EVIDENCE.md, *Live runs*). Nobody is watching one, so it asks
- * nothing: a call it didn't make says so on its line in the Margin, with *Pin…*, a value past runs saw there kept as a rule, and
- * *Rule…*, any rule about it. Both are rules for those runs alone (`trigger is edit`), since a run you start can still ask.
- */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Predicate, Rule } from "@brianjenkins94/util/silo/policy";
 import type { RunTrace } from "@brianjenkins94/util/silo/traces";
@@ -11,11 +6,8 @@ import { recordedResult, replaceRule } from "@brianjenkins94/editor-api/policy";
 import * as vscode from "vscode";
 import { keptRuns } from "./runs";
 
-/** Only for runs after an edit. */
 const AFTER_AN_EDIT: Predicate = { "target_id": "trigger", "operator_id": "is", "argument": "edit" };
 
-/** A value a run kept as a preview (`'hi'`, `12`, `true`, `null`) as the value itself. Undefined for one that isn't a primitive:
- *  an object's preview can't be given back as it was. */
 function previewed(text: string): { "value": unknown } | undefined {
 	if (/^'[\s\S]*'$/u.test(text)) {
 		return { "value": text.slice(1, -1).replaceAll("\\'", "'").replaceAll("\\\\", "\\") };
@@ -30,9 +22,6 @@ function previewed(text: string): { "value": unknown } | undefined {
 	}
 }
 
-/** The line each of `trace`'s values is on in `source` (the text of the run the question's on), where a past run's text
- *  differs — an edit, a fix on save, above the call — followed there by its code; undefined where it's gone, or for a value
- *  with no range to follow. Its own lines, where the text is the same (or either isn't known). */
 async function linesIn(trace: RunTrace, path: string, source: string | undefined): Promise<(number | undefined)[]> {
 	if (source === undefined || trace.source === undefined || trace.source === source) {
 		return trace.values.map((value) => value.line);
@@ -43,9 +32,6 @@ async function linesIn(trace: RunTrace, path: string, source: string | undefined
 	return trace.values.map((value, index) => (value.at === undefined ? undefined : lines[index]));
 }
 
-/** The values past runs saw at a call on `line` of `uri` (of `source`, the text of the run asking): what it returned the last
- *  time it ran for real, then what was bound or returned on that line in the runs kept of the file, each once, the most seen
- *  first. */
 async function pastValues(uri: string, capability: string, resource: string, line: number, source?: string): Promise<{ "value": unknown; "label": string; "detail": string }[]> {
 	const found = new Map<string, { "value": unknown; "label": string; "detail": string; "seen": number }>();
 	const recorded = await recordedResult(capability, resource).catch(() => undefined);
@@ -56,7 +42,6 @@ async function pastValues(uri: string, capability: string, resource: string, lin
 
 	for (const trace of await keptRuns(vscode.workspace.asRelativePath(vscode.Uri.parse(uri), false))) {
 		const lines = await linesIn(trace, vscode.Uri.parse(uri).path, source);
-		// (a run that didn't make the call saw its stand-in's value, or the one it was already given: nothing it returned)
 		const made = !trace.values.some((value, index) => lines[index] === line && (value.kind === "skip" || value.kind === "given"));
 
 		for (const [index, value] of made ? trace.values.entries() : []) {
@@ -75,7 +60,6 @@ async function pastValues(uri: string, capability: string, resource: string, lin
 	return [...found.values()].toSorted((left, right) => right.seen - left.seen);
 }
 
-/** `rule`, for runs after an edit alone. */
 function afterAnEdit(rule: Rule): Rule {
 	return { ...rule, "when": { "logicalType_id": "all", "predicates": [AFTER_AN_EDIT, ...rule.when.predicates] } };
 }

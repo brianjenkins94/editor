@@ -1,16 +1,3 @@
-/**
- * Type Queries — `// ^?` beneath an expression shows its type, as in the TypeScript Playground and twoslash:
- *
- *     const message = greet("world")
- *     //    ^? const message: string
- *
- * The caret points at a column of the line above (past any other query lines stacked there); what hovering that
- * character would say — TypeScript's quick info, the code block of its hover — is an inlay hint after the `^?`. Public
- * API only (an inlay-hints provider asking the hover providers), so it works the same in a desktop VS Code.
- *
- * A query's answer can change when another file does (the function it calls), and inlay hints are only re-asked for
- * on an edit to their own document; diagnostics changing is the sign TypeScript has re-checked, so that re-asks too.
- */
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 
@@ -21,12 +8,9 @@ const LANGUAGES = [
 	"javascriptreact"
 ];
 const QUERY = /^\s*\/\/\s*\^\?/u;
-// TypeScript's hover leads with its quick info as a fenced code block.
 const QUICK_INFO = /```(?:typescript|ts|tsx|javascript|js|jsx)\n([\s\S]*?)\n```/u;
-// One line in the editor; the full answer is the hint's tooltip.
 const MAX_LABEL = 120;
 
-/** The quick info a hover gives for `position`, or undefined when it has none. */
 async function quickInfo(uri: vscode.Uri, position: vscode.Position): Promise<string | undefined> {
 	const hovers = await vscode.commands.executeCommand<vscode.Hover[]>("vscode.executeHoverProvider", uri, position);
 
@@ -43,7 +27,6 @@ async function quickInfo(uri: vscode.Uri, position: vscode.Position): Promise<st
 	return undefined;
 }
 
-/** The hint answering the query on `line`, or undefined when the line isn't one or nothing answers it. */
 async function answer(document: vscode.TextDocument, line: number): Promise<vscode.InlayHint | undefined> {
 	const { text } = document.lineAt(line);
 
@@ -101,7 +84,6 @@ export function activate(context: vscode.ExtensionContext): void {
 					}
 				}
 
-				// (asked of every file as it's shown and edited: a span only when there are queries to answer)
 				if (queries.length === 0) {
 					return [];
 				}

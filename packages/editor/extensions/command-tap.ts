@@ -1,32 +1,14 @@
-/**
- * Each bundled extension's commands, as the architecture view discovers them (ARCHITECTURE.md, *Discovered, not declared*): the build hands
- * every extension a `vscode` whose `commands` are these (build/command-tap.ts), so what it registers and what it calls is
- * counted — by the extension, with nothing in its own code. Each extension host keeps one tally for every extension in
- * it, and sends its totals to the bridge (`editor.arch.commands`) a moment after they change; the bridge puts them on the
- * view as extensions and the commands between them.
- *
- * `typescript.tsserverRequest` is told with the request it carries (`_types.at`, `_eslint.fixAll`): a tsserver plugin's
- * requests are commands too, one level down.
- *
- * Its `workspace.fs` is counted the same way, for the stores it reads and writes (a tool's dot-directory: storeShape) —
- * which extension keeps what, which reads what.
- */
 import type * as vscodeApi from "vscode";
 import { storeShape } from "../shared/architecture-zenfs";
 
-/** the bridge's command that takes a host's totals; never counted itself. */
 export const ARCH_COMMANDS = "editor.arch.commands";
 
-/** How long after a change a host's totals go out. */
 const FLUSH_MS = 2000;
 
-/** What a host has seen: each command's registrant, each (caller, command) pair's calls, each (extension, operation,
- *  store) triple's operations. */
 export interface CommandTotals { "host": string; "registered": [string, string][]; "calls": [string, string, number][]; "files": [string, string, string, number][] }
 
 interface Tally { "id": string; "registered": Map<string, string>; "calls": Map<string, number>; "files": Map<string, number>; "timer": ReturnType<typeof setTimeout> | undefined }
 
-/** This extension host's tally, shared by every extension in it (they share the realm). */
 function tally(): Tally {
 	// eslint-disable-next-line ts/naming-convention -- the global every extension in this host shares the tally through
 	const self = globalThis as { "__commandTap"?: Tally };
@@ -37,7 +19,6 @@ function tally(): Tally {
 	return self.__commandTap;
 }
 
-/** Send the host's totals a moment after `mine` changed (one send for every change in the meantime). */
 function changed(mine: Tally, vscode: typeof vscodeApi): void {
 	mine.timer ??= setTimeout(() => {
 		mine.timer = undefined;
@@ -49,7 +30,6 @@ function changed(mine: Tally, vscode: typeof vscodeApi): void {
 	}, FLUSH_MS);
 }
 
-/** `vscode.commands` for `extension`: the same commands, counted. */
 export function tappedCommands(vscode: typeof vscodeApi, extension: string): typeof vscodeApi.commands {
 	const real = vscode.commands;
 	const mine = tally();
@@ -85,14 +65,10 @@ export function tappedCommands(vscode: typeof vscodeApi, extension: string): typ
 	};
 }
 
-/** `vscode.workspace` for `extension`: the real one — its live getters included, by delegation — but for `fs`, whose
- *  every operation on a tool's store is counted. */
 export function tappedWorkspace(vscode: typeof vscodeApi, extension: string): typeof vscodeApi.workspace {
 	return Object.create(vscode.workspace, { "fs": { "value": tappedFs(vscode, extension), "enumerable": true } }) as typeof vscodeApi.workspace;
 }
 
-/** `vscode.workspace.fs` for `extension`: the same file system, each read, write and delete of a file in a tool's store
- *  counted (a directory's listing or a stat isn't a store's content). */
 function tappedFs(vscode: typeof vscodeApi, extension: string): typeof vscodeApi.workspace.fs {
 	const real = vscode.workspace.fs;
 	const mine = tally();

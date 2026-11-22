@@ -1,9 +1,3 @@
-/**
- * What runs say could go, on the code (suggestions.ts finds it): each suggestion drawn in purple, the evidence's color —
- * an operator underlined, code that never ran tinted, more strongly the more tries say so — with a Hint diagnostic under
- * it, so the lightbulb offers its fix (never applied for you). Where the code is open, not in a view of its own: a list
- * somewhere else is somewhere nobody looks.
- */
 import type { EvidenceStore } from "@brianjenkins94/editor-api/evidence";
 import type { Suggestion } from "./suggestions";
 import * as vscode from "vscode";
@@ -11,7 +5,6 @@ import { suggestions } from "./suggestions";
 
 const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 
-/** The languages whose code runs leave evidence in. */
 const CODE_SELECTOR = [
 	"typescript",
 	"typescriptreact",
@@ -19,12 +12,10 @@ const CODE_SELECTOR = [
 	"javascriptreact"
 ].map((language) => ({ "language": language }));
 
-/** The evidence's purple, by theme, at each strength (suggestions.ts `strength`). */
 const PURPLE = { "dark": "#b180d7", "light": "#8250df" };
 const ALPHA = ["99", "cc", "ff"];
 const TINT = ["1f", "33", "4d"];
 
-/** A decoration per style and strength: an underline (wavy) or a tint, and a mark in the overview ruler. */
 function decorations(): Record<Suggestion["style"], vscode.TextEditorDecorationType[]> {
 	const make = (style: Suggestion["style"], level: number): vscode.TextEditorDecorationType => {
 		const themed = (color: string): vscode.ThemableDecorationRenderOptions => (style === "underline"
@@ -48,9 +39,7 @@ function decorations(): Record<Suggestion["style"], vscode.TextEditorDecorationT
 export function registerFixes(context: vscode.ExtensionContext, store: EvidenceStore): void {
 	const diagnostics = vscode.languages.createDiagnosticCollection("evidence");
 	const styles = decorations();
-	/** Each diagnostic's fix, by the diagnostic. */
 	const fixes = new WeakMap<vscode.Diagnostic, { "title": string; "range": vscode.Range; "text": string }>();
-	/** Each open document's suggestions, and the text they're offsets into. */
 	const byDocument = new Map<string, { "text": string; "suggestions": Suggestion[] }>();
 	const thresholds = (): [number, number] => {
 		const settings = vscode.workspace.getConfiguration("silo.evidence");
@@ -72,7 +61,6 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 		}
 	};
 
-	/** An open document: its suggestions drawn, and as diagnostics for the lightbulb. */
 	const check = async (document: vscode.TextDocument): Promise<void> => {
 		if (!CODE.test(document.uri.path)) {
 			return;
@@ -141,13 +129,11 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 		}, {
 			"providedCodeActionKinds": [vscode.CodeActionKind.QuickFix]
 		}),
-		// A file's evidence changed (a run ended): the editors showing it looked at again.
 		store.onDidChange((file) => {
 			for (const editor of vscode.window.visibleTextEditors.filter((candidate) => vscode.workspace.asRelativePath(candidate.document.uri, false) === file)) {
 				void check(editor.document);
 			}
 		}),
-		// Shown: drawn from what's known, then looked at as the document it is.
 		vscode.window.onDidChangeVisibleTextEditors((editors) => {
 			for (const editor of editors) {
 				draw(editor);
@@ -159,8 +145,6 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 				checkOpen();
 			}
 		}),
-		// Edited: the marks no longer match until the evidence is placed again, once typing pauses (BABLR re-reads the
-		// whole file), and the evidence follows the spans.
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			if (event.contentChanges.length > 0) {
 				for (const editor of vscode.window.visibleTextEditors.filter((candidate) => candidate.document === event.document)) {
@@ -173,7 +157,6 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 				}, 400);
 			}
 		}),
-		// Closed: its marks and diagnostics go with it.
 		vscode.workspace.onDidCloseTextDocument((document) => {
 			diagnostics.delete(document.uri);
 			byDocument.delete(document.uri.toString());

@@ -1,16 +1,3 @@
-/**
- * The Margin: the file's runtime column, a pane view beside the code (ARCHITECTURE.md, *Extension points* 4). A run stopped
- * at a gated call asks here, on the line it stopped at: what the call would do, and Allow, Skip or Deny, each
- * for this call, this run or always, the choice sent back to the session (`editor.capability.decide`), which resumes it.
- *
- * In the margin rather than a notification because a program waiting on a person has to say so for as long as it waits:
- * a notification can be dismissed, and then nothing says it's stopped (the user, 2026-11-03). So the question stays until
- * it's answered or the run moves on.
- *
- * From every debugger's `ask` event (the run contract). A run's values, and how it ended short, are values.ts's; coverage's
- * marks are its gutter column's (coverage.ts); giving a value a run uses is mock.ts's, a rule's place in the code placed.ts's, and
- * what a run after an edit does with a call it can't make pin.ts's.
- */
 import type { AskEvent, CapabilityChoice } from "@brianjenkins94/editor-api";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
 import type { PaneAction, PaneContent, PaneItem } from "@brianjenkins94/editor-api/pane";
@@ -23,18 +10,14 @@ import { installPin } from "./pin";
 import { installPlaced, placedMarks } from "./placed";
 import { endMarks, installValues, runsShown, valueItems, valuesState } from "./values";
 
-/** The view the Margin is, in the pane. */
 const VIEW = "margin";
 
-/** A question being asked: the session waiting on it, and what it asks. */
 interface Asking { "session": string; "ask": AskEvent }
 
-/** A call as the question says it, in code. */
 function code(text: string): string {
 	return `\`${text.replaceAll("`", "'")}\``;
 }
 
-/** A stop's question, as a pane item: the call and what it reaches, then its answers. */
 function questionOf({ session, ask }: Asking): Pick<PaneContent, "items"> & { "marks": NonNullable<PaneContent["marks"]> } {
 	const known = ask.resolved ? ask.resource : undefined;
 	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/policy/<you>.json)` : undefined;
@@ -71,12 +54,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	installCoverage(context);
 
-	/** The question each file is asking, by its URI. */
 	const asks = new Map<string, Asking>();
 	const redraw = (uri: string): void => {
 		void refreshPane(vscode.commands, VIEW, uri);
 	};
-	/** The session's question goes: answered, moved on from, or its run over. */
 	const clear = (session: string): void => {
 		for (const [uri, asking] of asks) {
 			if (asking.session === session) {
@@ -104,7 +85,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			const asking = asks.get(uri);
 			const question = asking === undefined ? undefined : questionOf(asking);
 			const text = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
-			// (the question first on its line: it's what the run waits on)
 			const items = [...question?.items ?? [], ...valueItems(uri, text)];
 			const marks = [...question?.marks ?? [], ...endMarks(uri), ...await placedMarks(uri)];
 
@@ -112,7 +92,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
 			return items.length === 0 && marks.length === 0 && runs.runs === undefined ? undefined : { "items": items, "marks": marks, ...runs };
 		}),
-		// What the Margin shows of a file, as data (an agent's margin_state): its run's values, and the question it's asking.
 		vscode.commands.registerCommand("margin.state", async (file: unknown) => {
 			const uri = vscode.Uri.file(String(file)).toString();
 			const text = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
@@ -132,7 +111,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
 			await (observed === undefined ? decide() : observed.log.span("editor.extensions.margin.decide", { "op": String(choice) }, decide));
 		}),
-		// (the picker's the capabilities extension's: a stop's answered by what it picks)
 		vscode.commands.registerCommand("margin.give", async (session: string, capability: string, resource?: string) => {
 			const given = await vscode.commands.executeCommand<{ "value": unknown } | undefined>("capabilities.pickValue", capability, resource);
 
@@ -159,7 +137,6 @@ export function activate(context: vscode.ExtensionContext): void {
 				redraw(uri);
 			}
 		}),
-		// (resumed some other way, VS Code's toolbar say: nothing in the session is stopped any more)
 		vscode.debug.onDidChangeActiveStackItem((item) => {
 			const { activeDebugSession } = vscode.debug;
 

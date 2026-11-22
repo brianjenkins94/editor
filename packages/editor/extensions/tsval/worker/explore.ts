@@ -1,9 +1,3 @@
-/**
- * Every ordering of the program's events (tsval's explore, packages/tsval/src/explore.ts): each run fresh, with the
- * stand-ins a run of a given schedule has, so every host call answers at once, and which answer comes first, or whether
- * one comes before a timer, is the choice. No breakpoints, no stops. Each distinct ending: what it printed and where (a
- * crash too: a throw, or a rejection nothing handled), a schedule that gets there, and the events chosen along it.
- */
 import type { Control, Explored, Ordering, Printed } from "../debug-protocol";
 import type { Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
@@ -13,7 +7,6 @@ import { programModules, runtimeReady } from "./runtime";
 import { formatLogArg } from "./session";
 import { state, workerLog } from "./state";
 
-/** Where `error` was thrown, if tsval noted it: the file and 1-based line. */
 function thrownAt(vm: Vm | undefined, error: unknown): { "file"?: string; "line"?: number } {
 	try {
 		const at = vm?.location(vm.throwSite(error));
@@ -37,11 +30,9 @@ export async function exploreOrderings(message: Extract<Control, { "type": "expl
 
 		const found = await explore(async (schedule) => {
 			const output: Printed[] = [];
-			// (no runtime given: each call its stand-in, as a launch of one ordering has, so the run it debugs goes this way)
 			const surface = capabilitySurface(message.fileName, message.args ?? []);
 			let vm: Vm | undefined;
 
-			// Each run from scratch: its own modules (the program's evaluated again), its own stand-ins.
 			state.runtime?.clearCache();
 			state.programBuiltins = surface.modules;
 			state.programFunctions = functionsIn([surface.modules, surface.globals]);
@@ -103,7 +94,6 @@ export async function exploreOrderings(message: Extract<Control, { "type": "expl
 					...thrownAt(vm, error)
 				};
 			} finally {
-				// A rejection nothing handled is told a turn later.
 				await new Promise((resolve) => {
 					setTimeout(resolve, 0);
 				});

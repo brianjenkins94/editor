@@ -1,18 +1,9 @@
-/**
- * A recorded call, run again (RUNNING.md: stepping a recorded handler): the program a replay runs, and what stands in for
- * the calls it can't make. Pure — the debug worker runs it (debug-worker.ts `launchReplay`), node tests it.
- */
 import type { Encoded } from "@brianjenkins94/editor-api/recorded";
 import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type ts from "typescript";
 import { revive } from "@brianjenkins94/editor-api/recorded";
 import { isGuestFunction } from "@brianjenkins94/tsval";
 
-/** The program a replay runs (RUNNING.md: stepping a recorded handler): the recorded version's text with everything but
- *  the function blanked (newlines kept, so every line and column is the file's), the function made the callee of a call
- *  with its recorded `this` and arguments — `(__self.__replay = <fn>, __self.__replay(...__args))` — on the stack the
- *  debugger steps (a call through `.call` would run nested, unstepped). What goes in front sits in the blank before it,
- *  what goes after in the blank after; with no room, in front of everything. */
 export function replayProgram(source: string, [l1, c1, l2, c2]: [number, number, number, number]): string {
 	const offset = (line: number, character: number): number => {
 		let at = 0;
@@ -25,8 +16,6 @@ export function replayProgram(source: string, [l1, c1, l2, c2]: [number, number,
 	};
 
 	const [from, end] = [offset(l1, c1), offset(l2, c2)];
-	// (a declaration's range starts at its modifiers: an exported function's `export`, or `export default`, isn't the
-	// function's, and can't be in an expression)
 	const start = from + (/^export\s+(?:default\s+)?/u.exec(source.slice(from, end))?.[0].length ?? 0);
 	const blank = (text: string): string => text.replace(/[^\n]/gu, " ");
 	const prefix = "(__self.__replay = ";
@@ -53,10 +42,6 @@ export function replayProgram(source: string, [l1, c1, l2, c2]: [number, number,
 	return before + source.slice(start, end) + after;
 }
 
-/** What stands in for what a replay couldn't record (`standIn`: a named function), and the host guard (tsval's
- *  `hostGuard`) that hands each call to something outside the program — a page's function, a DOM method, a builtin —
- *  the result it had, by where it was made and how many times there; a call with a function of the program's among its
- *  arguments (`items.map(fn)`) is made for real, so the debugger steps into it. */
 export function replayGuard(replay: Replay): { "standIn": (name: string) => (...args: unknown[]) => unknown; "hostGuard": { "beforeCall": (callee: (...args: unknown[]) => unknown, self: unknown, construct: boolean, site: { "node": ts.Node; "args": readonly unknown[] }) => (...args: unknown[]) => unknown } } {
 	const standIn = (name: string): ((...args: unknown[]) => unknown) => Object.defineProperty(function standIn(): unknown {
 		return undefined;

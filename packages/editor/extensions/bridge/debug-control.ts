@@ -1,49 +1,25 @@
-/**
- * Every debugger's sessions as hub requests, so an agent (debug-mcp's debug_* tools) drives a run as a person does in the
- * editor: Run, the debug toolbar's steps and stop, the gutter's breakpoints, a stop's answers in the Margin. Each is done
- * through VS Code, so it shows in the editor as a person's would, whichever debugger it is.
- *
- *   `debug.sessions`                         every session going, where each is
- *   `debug.start` { program?, breakpoints? } Run: the file, answered with where it first stops, idles or ends
- *   `debug.explore` { program? }             Explore Orderings: the file under every ordering of its events, its outcomes
- *   `debug.breakpoints` { program?, lines }  a file's breakpoints replaced, VS Code's own
- *   `debug.session.<id>.step` { action }     a step, answered with the next stop, or the end
- *   `debug.session.<id>.state`               where it is now
- *   `debug.session.<id>.decide` { choice }   a stop's question answered, as its buttons in the Margin do; then the next stop
- *   `debug.session.<id>.stop`                ended
- *   `margin.state` { file? }                 what the Margin shows of a file
- *
- * A session is followed by a debug adapter tracker on its DAP messages and read with DAP's own requests (stackTrace, scopes,
- * variables). One subject per session sends each request to the tab whose session it is, with several tabs linked.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import { serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 
-/** How a stopped session goes on: DAP's own requests, the toolbar's. */
 export type DebugAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
 
-/** `starting` until it first stops; `idle`, waiting on a request, its stdin or a timer with nothing to step from. */
 export type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
 
-/** Where a session is: the answer to every request about one. Where it stopped, its code and its locals only while stopped. */
 export interface DebugOutcome {
 	"session": string;
 	"name": string;
 	"program": string;
 	"state": DebugState;
-	/** Why it stopped: breakpoint, step, capability (a call the policy hasn't decided, its question in the Margin), … */
 	"reason"?: string;
-	/** The file it stopped in, when it isn't `program`. */
 	"file"?: string;
 	"line"?: number;
 	"column"?: number;
 	"function"?: string;
 	"code"?: string;
 	"locals"?: { "name": string; "value": string; "type": string }[];
-	/** What the program printed since the request began, its last lines. */
 	"output": string[];
 }
 
@@ -51,22 +27,18 @@ interface Frame { "id": number; "name": string; "line": number; "column": number
 
 interface Variable { "name": string; "value": string; "type"?: string }
 
-/** What the program printed since the request began, at most this many lines. */
 const OUTPUT_LINES = 200;
 
-/** A file's text as it is now: its open document's, edits not yet saved included, else what's on disk. */
 async function textOf(uri: vscode.Uri): Promise<string> {
 	const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
 
 	return open?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
 }
 
-/** A debug session as its DAP messages say it is. */
 class Session {
 	public state: DebugState = "starting";
 	public readonly session: vscode.DebugSession;
 	private reason: string | undefined;
-	/** A question asked (the run contract's `ask`, just before it stops): the reason the next stop is. */
 	private asking = false;
 	private thread = 1;
 	private output: string[] = [];
@@ -82,7 +54,6 @@ class Session {
 		return typeof program === "string" ? program : "";
 	}
 
-	/** What the adapter told VS Code. */
 	public sent(message: { "type"?: string; "event"?: string; "body"?: Record<string, unknown> }): void {
 		if (message.type !== "event") {
 			return;
@@ -130,7 +101,6 @@ class Session {
 		}
 	}
 
-	/** What VS Code asked the adapter: a step or an answer, by anyone, starts a new request's output. */
 	public received(message: { "type"?: string; "command"?: string }): void {
 		if (message.type === "request" && (ACTIONS.has(message.command ?? "") || message.command === "decide")) {
 			this.state = "running";
@@ -148,7 +118,6 @@ class Session {
 		this.waiters.clear();
 	}
 
-	/** Where it is now. */
 	public async outcome(): Promise<DebugOutcome> {
 		const base = { "session": this.session.id, "name": this.session.name, "program": this.program, "state": this.state, "output": [...this.output] };
 
@@ -185,7 +154,6 @@ class Session {
 		}
 	}
 
-	/** Where it is once it next stops, idles or ends; or `signal.reason`, if the caller gives up first. */
 	public async next(signal: AbortSignal): Promise<DebugOutcome> {
 		await new Promise<void>((resolve, reject) => {
 			const waiter = (): void => {
@@ -204,12 +172,10 @@ class Session {
 		return this.outcome();
 	}
 
-	/** Where it is once it's no longer starting or running: now, if it isn't. */
 	public async settled(signal: AbortSignal): Promise<DebugOutcome> {
 		return this.state === "starting" || this.state === "running" ? this.next(signal) : this.outcome();
 	}
 
-	/** Go on with `action`, then where it stops next. */
 	public async act(action: DebugAction, signal: AbortSignal): Promise<DebugOutcome> {
 		if (this.state !== "stopped") {
 			throw new Error(`the session is ${this.state}, not stopped${this.state === "idle" ? " (it's waiting on a request, its stdin or a timer: a breakpoint in what handles it stops it there)" : ""}`);
@@ -222,7 +188,6 @@ class Session {
 		return next;
 	}
 
-	/** Answer the question it stopped on, as the Margin's buttons do, then where it stops next. */
 	public async decide(choice: string, signal: AbortSignal): Promise<DebugOutcome> {
 		if (this.state !== "stopped" || this.reason !== "capability") {
 			throw new Error("the session isn't stopped at a question");
@@ -236,7 +201,6 @@ class Session {
 	}
 }
 
-/** A path as a launch wants it: absolute, a relative one under the workspace; the file in front when there's none. */
 function resolveProgram(program: string | undefined): string {
 	const path = program ?? vscode.window.activeTextEditor?.document.uri.path;
 
@@ -247,7 +211,6 @@ function resolveProgram(program: string | undefined): string {
 	return path.startsWith("/") ? path : `${(vscode.workspace.workspaceFolders?.[0]?.uri.path ?? "/workspace").replace(/\/$/u, "")}/${path}`;
 }
 
-/** Replace `program`'s breakpoints with `lines` (1-based), through VS Code, so its gutter and every session have them. */
 function setBreakpoints(program: string, lines: number[]): void {
 	const uri = vscode.Uri.file(program);
 
@@ -257,13 +220,10 @@ function setBreakpoints(program: string, lines: number[]): void {
 
 export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, log?: ObservedExtension["log"]): void {
 	const sessions = new Map<string, Session>();
-	/** `debug.start`s waiting for the session their launch is marked with. */
 	const launches = new Map<string, (session: Session) => void>();
-	/** Each session's requests, served until it ends. */
 	const served = new Map<string, () => void>();
 
 	const follow = (debugSession: vscode.DebugSession): Session | undefined => {
-		// (a live run is nobody's to drive: RUNTIME-EVIDENCE.md, *Live runs*)
 		if (debugSession.configuration["__live"] === true) {
 			return undefined;
 		}
@@ -311,7 +271,6 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 		return session;
 	};
 
-	/** Run `program` (the file in front by default), as Run does, and answer with where it first stops, idles or ends. */
 	const start = async (program: string | undefined, breakpoints: number[] | undefined, eventLoop: unknown, signal: AbortSignal): Promise<DebugOutcome> => {
 		const path = resolveProgram(program);
 
@@ -319,7 +278,6 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 			throw new Error(`${path.split("/").pop() ?? path} isn't a program: Run runs a JavaScript or TypeScript file`);
 		}
 
-		// (before the launch, so they're there by the time it runs)
 		if (breakpoints !== undefined) {
 			setBreakpoints(path, breakpoints);
 		}
@@ -333,7 +291,6 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 			}, { "once": true });
 		});
 
-		// (what Run starts: tsval/run-file.ts' runOf)
 		if (!await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "Run", "program": path, "__launchId": launch, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop } })) {
 			launches.delete(launch);
 
@@ -360,14 +317,12 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 				};
 			}
 		}),
-		// A run's end, from what every host is told (an inline adapter tells its tracker no exit).
 		vscode.debug.onDidTerminateDebugSession((debugSession) => {
 			sessions.get(debugSession.id)?.settle("terminated");
 			sessions.delete(debugSession.id);
 			served.get(debugSession.id)?.();
 			served.delete(debugSession.id);
 		}),
-		// (one that's ended is gone, though VS Code may not have said so yet)
 		{ "dispose": serve(hub, "debug.sessions", async () => Promise.all([...sessions.values()].filter(({ state }) => state !== "terminated").map(async (session) => {
 			const { "output": _output, "locals": _locals, ...summary } = await session.outcome();
 
@@ -386,7 +341,6 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 
 			return span("start", { "caller": "agent", "path": program ?? "" }, async () => start(program, breakpoints, eventLoop, signal));
 		}) },
-		// Explore Orderings, its command (tsval's): what it says on the code shown as a person's would be, its outcomes the answer.
 		{ "dispose": serve(hub, "debug.explore", async (args) => {
 			const path = resolveProgram((args as { "program"?: string } | undefined)?.program);
 

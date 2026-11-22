@@ -1,47 +1,31 @@
-/**
- * Where a preview's time went, on the code (RUNTIME-EVIDENCE.md, *Time*): each function the runs' profiles sampled says, at
- * the end of its line, its share of the time profiled and its own time a profile (`38% · 1.7 s`), and its head is tinted
- * the warmer the more of the time it took; the hover adds its time with what it called, and who called it and what it
- * called. What's said is the evidence kept in git (a `time` observation on the function's span: workbench/profile-times.ts
- * records it with the run that profiled it), folded across runs, users and machines, and fading as runs that profile
- * the file don't sample it. Nothing to open: it's beside the function until the function changes.
- */
 import type { EvidenceStore, Placed } from "@brianjenkins94/editor-api/evidence";
 import * as vscode from "vscode";
 
 const CODE = /\.[cm]?[jt]sx?$/u;
 const CODE_SELECTOR = ["typescript", "typescriptreact", "javascript", "javascriptreact"].map((language) => ({ "language": language }));
 
-/** A function's share of the time below this isn't said: it took next to none. */
 const MIN_SHARE = 0.01;
-/** The share at which its head is tinted, at each strength. */
 const TINTED = [0.1, 0.25, 0.5];
 
-/** Time's warm colour, by theme, and its tint at each strength. */
 const WARM = { "dark": "#e5a050", "light": "#bc4c00" };
 const TINT = ["1f", "33", "4d"];
 
-/** A placed span with time evidence. */
 type Timed = Placed & { "evidence": Required<Pick<Placed["evidence"], "time">> };
 
-/** `ms` as it reads: milliseconds under a second, else seconds. */
 function duration(ms: number): string {
 	return ms < 1000 ? `${String(Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
-/** A function's share of the time its profiles sampled. */
 function shareOf({ evidence }: Timed): number {
 	return evidence.time.profiledMs === 0 ? 0 : evidence.time.selfMs / evidence.time.profiledMs;
 }
 
-/** What it says at the end of its line: its share, and its own time a profile. */
 function said(timed: Timed): string {
 	const { selfMs, runs } = timed.evidence.time;
 
 	return `${String(Math.round(shareOf(timed) * 100))}% · ${duration(selfMs / Math.max(1, runs))}`;
 }
 
-/** The names that took the most of `byName`'s time, most first, each with its time. */
 function names(byName: Record<string, number>, runs: number): string {
 	return Object.entries(byName).sort(([, a], [, b]) => b - a).slice(0, 5).map(([name, ms]) => `\`${name}\` ${duration(ms / Math.max(1, runs))}`).join(", ");
 }
@@ -54,7 +38,6 @@ export function registerTimes(context: vscode.ExtensionContext, store: EvidenceS
 		"overviewRulerColor": WARM.dark + alpha,
 		"overviewRulerLane": vscode.OverviewRulerLane.Right
 	}));
-	/** Each open document's timed spans, and the text they're offsets into. */
 	const byDocument = new Map<string, { "text": string; "timed": Timed[] }>();
 
 	const draw = (editor: vscode.TextEditor): void => {
@@ -101,12 +84,10 @@ export function registerTimes(context: vscode.ExtensionContext, store: EvidenceS
 	context.subscriptions.push(
 		atEnd,
 		...tints,
-		// The hover on a function's head: its time with what it called, and who called it and what it called.
 		vscode.languages.registerHoverProvider(CODE_SELECTOR, {
 			"provideHover": (document, position) => {
 				const here = byDocument.get(document.uri.toString());
 				const offset = document.offsetAt(position);
-				// (on a function's first line: its span is the whole function, whose body has hovers of its own)
 				const timed = here?.text === document.getText() ? here.timed.filter((each) => each.start <= offset && document.positionAt(each.start).line === position.line).sort((a, b) => (a.end - a.start) - (b.end - b.start))[0] : undefined;
 
 				if (timed === undefined) {
@@ -124,7 +105,6 @@ export function registerTimes(context: vscode.ExtensionContext, store: EvidenceS
 				return new vscode.Hover(new vscode.MarkdownString(lines.join("\n\n")));
 			}
 		}),
-		// A file's evidence changed (a run ended): the editors showing it looked at again.
 		store.onDidChange((file) => {
 			for (const editor of vscode.window.visibleTextEditors.filter((candidate) => vscode.workspace.asRelativePath(candidate.document.uri, false) === file)) {
 				void check(editor.document);
@@ -136,7 +116,6 @@ export function registerTimes(context: vscode.ExtensionContext, store: EvidenceS
 				void check(editor.document);
 			}
 		}),
-		// Edited: what's said no longer matches until the evidence is placed again, once typing pauses.
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			if (event.contentChanges.length > 0) {
 				for (const editor of vscode.window.visibleTextEditors.filter((candidate) => candidate.document === event.document)) {

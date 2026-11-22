@@ -1,8 +1,3 @@
-/**
- * The program's capabilities, decided per call (RUNNING.md, *Effects are real, decided per call*): its `fs`,
- * `child_process` and `fetch` gated — made, skipped, denied or given — a stop's resource probed, and each call counted
- * among the run's effects.
- */
 import type { Effect } from "@brianjenkins94/editor-api";
 import type { HostGuard } from "@brianjenkins94/tsval";
 import type { Runtime } from "./runtime";
@@ -19,17 +14,11 @@ import { post, state } from "./state";
 import { testsEffects } from "./tests";
 import { tellReplayed, tellSkipped } from "./values";
 
-/** The run's effects (the run contract's `Effect`): each gated call it made, was denied, skipped or was given, by its
- *  capability and resource — told the adapter as the run ends, for the run ledger (its envelope's `effects`). */
 const effects = new Map<string, Effect>();
 
 let tallying = false;
 
-/** A gated call, counted among the run's effects — a package's (`pkg`, its name@version) apart from the program's — with
- *  how it was decided: within the package's baseline, by the policy, or at the call (the person's answer). And among each
- *  running test's; only theirs (`ofRun` false) for a call the editor keeps among the run's itself. */
 export function tally(capability: string, resource: string, how: Effect["how"], pkg?: string, decided?: Effect["decided"], ofRun = true): void {
-	// (a package's call is an effect of each of the program's calls it's in: the program's own are told at their gate)
 	if (pkg !== undefined) {
 		state.evaluating?.impure("effect", capability);
 	}
@@ -41,7 +30,6 @@ export function tally(capability: string, resource: string, how: Effect["how"], 
 	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}\0${decided ?? ""}`;
 	const effect = (): Effect => ({ "capability": capability, "resource": resource, "how": how, "calls": 0, ...pkg === undefined ? {} : { "package": pkg }, ...decided === undefined ? {} : { "decided": decided } });
 
-	// (the run's, and each test's going on as it's made: tests.ts)
 	for (const tallied of [...ofRun ? [effects] : [], ...testsEffects()]) {
 		const known = tallied.get(key) ?? effect();
 
@@ -50,28 +38,18 @@ export function tally(capability: string, resource: string, how: Effect["how"], 
 	}
 }
 
-/** The run's effects so far, told the adapter (each telling has them all; its last is the run's). */
 export function tellEffects(): void {
 	if (effects.size > 0) {
 		post({ "type": "effects", "effects": [...effects.values()].map((effect) => ({ ...effect })) });
 	}
 }
 
-/** What ends a probe's fork at the call — uncatchable, so the guest's own try/catch can't swallow it. */
 const PROBED = Object.assign(new Error("probe: the call reached"), { [UNCATCHABLE]: true });
 
-/** Each stop's probed resource, by machine and place (`file:line`): a stop asks more than once. */
 const probed = new WeakMap<Vm, Map<string, string | undefined>>();
 
-/**
- * The resource a capability call on `line` reaches, when its argument is computed on the line itself
- * (`path.join(dir, name)`, a template): the machine forked at the stop and stepped until the call — its arguments
- * evaluated as the run will evaluate them, every capability call on the way its inert stand-in, the event loop
- * deterministic — then thrown away. Undefined if the fork doesn't get there (it threw first, or took too long).
- */
 export function probeResource(vm: Vm, place: Place, capability: string, argIndex = 0): string | undefined {
 	const known = probed.get(vm);
-	// (by what it's after too: a copy's source and where it lands are two probes of one line)
 	const key = `${place.file}:${place.line}:${capability}:${String(argIndex)}`;
 
 	if (known?.has(key) === true) {
@@ -89,7 +67,6 @@ export function probeResource(vm: Vm, place: Place, capability: string, argIndex
 			fork.step();
 		}
 	} catch {
-		// PROBED (the call reached), or the fork threw before it: either way, what was found is what there is.
 	} finally {
 		({ resource } = state.probing);
 		state.probing = undefined;
@@ -100,7 +77,6 @@ export function probeResource(vm: Vm, place: Place, capability: string, argIndex
 	return resource;
 }
 
-/** Every function in `holders`' values, `depth` levels down. */
 export function functionsIn(holders: Record<string, unknown>[], depth = 2): WeakSet<object> {
 	const found = new WeakSet<object>();
 	const seen = new Set<unknown>();
@@ -133,18 +109,8 @@ export function functionsIn(holders: Record<string, unknown>[], depth = 2): Weak
 	return found;
 }
 
-/** Each stop's line, as lineReaches found it, by machine and call. */
 const linesReached = new WeakMap<Vm, Map<ts.CallExpression, boolean | undefined>>();
 
-/**
- * Whether `call` — the capability-shaped call a stop at `place` is for — is a call of one of the program's own
- * built-ins (programFunctions): a fork run to it, whose host guard sees the callee as it's about to be called and ends
- * the fork there, so nothing on the line happens twice (a package's objects aren't forked). A call that only looks like
- * one — `fs.mkdir` on a package's own `fs` (zen-fs's in-memory one), a canary's stand-ins — reaches nothing of the
- * program's, and isn't a stop: what a package itself reaches, it reaches through node:fs, where the package gate decides.
- * The fork stops where the line does: a line done without the guard seeing the call made it of a guest function (the
- * program's own code: not a built-in either). Undefined when the fork can't say (the line threw, or ran too long).
- */
 export function lineReaches(vm: Vm, place: Place, call: ts.CallExpression): boolean | undefined {
 	const known = linesReached.get(vm) ?? new Map<ts.CallExpression, boolean | undefined>();
 
@@ -172,25 +138,21 @@ export function lineReaches(vm: Vm, place: Place, call: ts.CallExpression): bool
 			return outer?.beforeCall?.(callee, thisArg, isConstruct, site) ?? callee;
 		}
 	};
-	// (stand-ins called on the way are their inert selves, as on any probe's fork)
 	state.probing = { "capability": "" };
 
 	try {
-		// (the guard ends it at the call, by throwing)
 		for (let steps = 0; steps < 20_000 && !fork.finished && !fork.idle; steps += 1) {
 			fork.step();
 
 			const here = placeOf(fork);
 
 			if (fork.finished || fork.idle || fork.frames.length < depth || (fork.frames.length === depth && (here?.file !== place.file || here.line !== place.line))) {
-				// (the line done, and the call — if it was made — never a host function's)
 				reached ??= false;
 
 				break;
 			}
 		}
 	} catch {
-		// PROBED (the call reached), or the line threw first: either way, what was found is what there is.
 	} finally {
 		state.probing = undefined;
 	}
@@ -202,13 +164,6 @@ export function lineReaches(vm: Vm, place: Place, call: ts.CallExpression): bool
 
 export function capabilitySurface(fileName: string, args: string[], real?: Runtime, where: { "cwd"?: string; "env"?: Record<string, string> } = {}): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const standins = gated(capabilityStandins(), real, where.cwd ?? "/workspace");
-	// What a script reads of its process: its arguments (a run's inputs), the directory it was started in and its
-	// environment (a terminal's — RUNNING.md, *Output goes where it was started*), and its stdin — nothing it can do.
-	// (Its version is the one almostnode's process reports, packages/almostnode/shims/process.ts, so a run reads the same
-	// version whichever runtime it's in.)
-	// And how it ends: `exit(code)` there and then, or `exitCode` once it's done, as node's. What it writes to stdout and
-	// stderr is its output, as its console's is; and a built-in by its name (getBuiltinModule, Node 22.3+) is what its
-	// import would give it: its stand-ins first (`fs`), else the runtime's.
 	const process = {
 		"argv": ["node", fileName, ...args],
 		"stdout": guestStream("stdout"),
@@ -233,7 +188,6 @@ export function capabilitySurface(fileName: string, args: string[], real?: Runti
 	return { "globals": { ...standins.globals, "console": guestConsole(), "process": process }, "modules": standins.modules };
 }
 
-/** What a capability call's argument names: a path, or a URL's href — else undefined. */
 function pathOrUrl(argument: unknown): string | undefined {
 	if (typeof argument === "string") {
 		return argument;
@@ -242,7 +196,6 @@ function pathOrUrl(argument: unknown): string | undefined {
 	return argument instanceof URL ? argument.href : undefined;
 }
 
-/** The resource a capability call reaches, by its argument: a path, a URL, a request's url — else none (""). */
 export function reachedBy(argument: unknown): string {
 	const named = pathOrUrl(argument);
 
@@ -256,7 +209,6 @@ export function reachedBy(argument: unknown): string {
 		return String(url);
 	}
 
-	// http.request's options: where they reach
 	if (typeof argument === "object" && argument !== null && ("hostname" in argument || "host" in argument)) {
 		const { protocol = "http:", hostname, host, port, path = "" } = argument as { "protocol"?: string; "hostname"?: string; "host"?: string; "port"?: number | string; "path"?: string };
 
@@ -266,8 +218,6 @@ export function reachedBy(argument: unknown): string {
 	return "";
 }
 
-/** A call on a probe's fork (probeResource): the one it's after records what it reaches and ends the fork; any other is
- *  its inert self. */
 function probeCall(probe: NonNullable<typeof state.probing>, fn: (...args: unknown[]) => unknown, self: unknown, args: unknown[]): unknown {
 	const tagged = standinCapability(fn);
 
@@ -275,7 +225,6 @@ function probeCall(probe: NonNullable<typeof state.probing>, fn: (...args: unkno
 		return fn.apply(self, args);
 	}
 
-	// (a copy's or a rename's landing is its own capability, at its second argument: FS_DESTINATION)
 	const argIndex = probe.argIndex ?? tagged.resourceArg;
 	const after = argIndex === tagged.resourceArg ? tagged.capability : tagged.landing;
 
@@ -288,35 +237,22 @@ function probeCall(probe: NonNullable<typeof state.probing>, fn: (...args: unkno
 	return fn.apply(self, args);
 }
 
-/** A call's arguments as it's made: a relative path the program's directory's (`cwd`), as node resolves it. */
 function madeArgs(capability: string, args: unknown[], resourceArg: number, cwd: string): unknown[] {
 	const argument = args[resourceArg];
 
 	return capability.startsWith("fs:") && typeof argument === "string" && !argument.startsWith("/") ? args.map((each, index) => (index === resourceArg ? `${cwd}/${argument}` : each)) : args;
 }
 
-/** Whether a call on `path` is on a workspace file — one the editor makes, and keeps among the run's effects itself. */
 function editorKeeps(capability: string, path: unknown): boolean {
 	return capability.startsWith("fs:") && typeof path === "string" && (path === "/workspace" || path.startsWith("/workspace/"));
 }
 
-/** The program's capabilities (RUNNING.md, *Effects are real, decided per call*): its `fs`, `child_process` and
- *  `fetch`, each gated call decided as it's made — a probe's fork gets the stand-in; a call the user denied at its stop
- *  (`denyNext`) fails with node's EACCES; a call a rule gives the result of (RUNNING.md, *A call's result*), or the
- *  user gave it at the stop (`giveNext`), gets that; a call the policy allows, or the user allowed at its stop
- *  (`allowNext`), happens for real through almostnode (`real`) — what it read recorded — and any other fails as a
- *  denied one would. With no `real` (exploring orderings: a run many times over), every call is its inert stand-in, as
- *  before. A module's other members are almostnode's own. (A module object shared under several names stays one
- *  object.) */
 function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, cwd = "/workspace"): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
 	const programFs = real === undefined ? undefined : state.programFsFor?.(cwd);
 
-	// (only a run that can make calls has effects to tell: exploring orderings, every call is its stand-in)
 	tallying = real !== undefined;
 	const gate = (fn: (...args: unknown[]) => unknown, effect?: (...args: unknown[]) => unknown) => function(this: unknown, ...args: unknown[]): unknown {
-		// A probe's fork (probeResource): the call it's after records what it reaches, and ends the fork there; any other
-		// call on the way is its inert self — neither touches what the run itself was given (denyNext, giveNext).
 		if (state.probing !== undefined) {
 			return probeCall(state.probing, fn, this, args);
 		}
@@ -327,12 +263,10 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			return fn.apply(this, args);
 		}
 
-		// (made, refused or stood in for, it's an effect of each call it's in)
 		state.evaluating?.impure("effect", tagged.capability);
 
 		const argument = args[tagged.resourceArg];
 		const resource = reachedBy(argument);
-		// How it's decided: the person's answer at its stop, when it was stopped at — else the policy.
 		const decided: Effect["decided"] = state.answeredNext ?? "policy";
 
 		state.answeredNext = undefined;
@@ -368,9 +302,6 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			return fn.apply(this, args);
 		}
 
-		// A copy's or a rename's other path, where it lands, is decided too. Its stop asked about its first path the policy
-		// gates — its source, when that's gated — so the answer there is this path's only when the source wasn't; else the
-		// policy alone decides it, and a call it won't let land isn't made.
 		const landing = tagged.landing === undefined ? undefined : { "capability": tagged.landing, "resource": reachedBy(args[1]) };
 
 		if (landing !== undefined) {
@@ -392,17 +323,12 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			}
 		}
 
-		// Skipped (by the policy, or because a live run can't make it: not made, the run going on — as at its stop), made, or
-		// refused — as any debugger's calls through the runtime's files are (gate.ts).
 		const verdict = verdictOf(state.policy, tagged.capability, resource, state.live);
 		const canReplay = state.live && !policySkips(state.policy, tagged.capability, resource, true);
-		// A live run's write to a workspace file goes into its own layer, gone when it ends, instead of not happening, and a
-		// read of what it wrote reads it there. Not a call a rule itself skips.
 		const target = madeArgs(tagged.capability, args, tagged.resourceArg, cwd)[tagged.resourceArg];
 		const intoLayer = verdict === "skip" && canReplay && state.runLayer !== undefined && programFs !== undefined && editorKeeps(tagged.capability, target) && (tagged.capability !== "fs:read" || state.runLayer.holds(String(target)));
 
 		if (verdict === "skip" && !intoLayer) {
-			// What it returned when it last ran for real, given back if it did: the same request's (a POST's isn't a GET's).
 			const key = recordingKey(tagged.capability, resource, requestOf(tagged.capability, args));
 
 			if (canReplay && Object.hasOwn(state.recordedResults, key)) {
@@ -423,12 +349,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			state.allowNext = false;
 		}
 
-		// A relative path is the program's directory's (its process.cwd(): a terminal's), as node resolves it — where a copy
-		// lands too.
 		const made = madeArgs(tagged.capability, landing === undefined ? args : madeArgs(landing.capability, args, 1, cwd), tagged.resourceArg, cwd);
 
-		// (a workspace file's call the editor makes, and keeps among the run's effects itself; but not one into a live run's
-		// own layer, which the editor never sees)
 		if (intoLayer) {
 			tally(tagged.capability, resource, "made", undefined, "layer");
 		} else {
@@ -439,11 +361,9 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			tally(landing.capability, landing.resource, "made", undefined, decided, !(programFs !== undefined && editorKeeps(landing.capability, made[1])));
 		}
 
-		// (what a layer gave back isn't what the call returns for real)
 		return madeFor(() => effect(...made), intoLayer ? undefined : { "capability": tagged.capability, "resource": resource, "request": requestOf(tagged.capability, args) });
 	};
 
-	// almostnode's own module (or the network) a stand-in module stands for: its members, the gated ones made real.
 	const realOf = (key: string): Record<string, unknown> | undefined => {
 		if (real === undefined) {
 			return undefined;
@@ -451,7 +371,6 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 
 		const id = key.replace(/^node:/u, "");
 
-		// The program's `fs`: its workspace files through the editor.
 		if (programFs !== undefined && (id === "fs" || id === "fs/promises")) {
 			return (id === "fs" ? programFs : programFs.promises) as unknown as Record<string, unknown>;
 		}
@@ -489,10 +408,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value, key)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value, key)])) };
 }
 
-/** The most of a read's result recorded, to give back when it isn't made. */
 const RECORD_MAX = 256 * 1024;
 
-/** What a read returned, as text: a string, or bytes decoded. Undefined for anything else. */
 function textOf(value: unknown): string | undefined {
 	if (typeof value === "string") {
 		return value;
@@ -501,8 +418,6 @@ function textOf(value: unknown): string | undefined {
 	return value instanceof Uint8Array ? new TextDecoder().decode(value) : undefined;
 }
 
-/** Make `call` — a program's capability call, allowed — for real: a write let through the runtime's refusal while it's
- *  made, and what a read returned recorded (text, not too much of it). */
 function madeFor(call: () => unknown, recording?: { "capability": string; "resource": string; "request"?: string }): unknown {
 	const record = (value: unknown): void => {
 		const text = textOf(value);
@@ -535,8 +450,6 @@ function madeFor(call: () => unknown, recording?: { "capability": string; "resou
 	return result;
 }
 
-/** A call that wasn't made (skipped: at its stop, or by the policy) — its stand-in's `result` — counted among the run's
- *  effects and told on its line. */
 function skipped(capability: string, resource: string, result: unknown, decided?: Effect["decided"]): unknown {
 	tally(capability, resource, "skipped", undefined, decided);
 	tellSkipped(capability, resource);
@@ -544,11 +457,8 @@ function skipped(capability: string, resource: string, result: unknown, decided?
 	return result;
 }
 
-/** Whether `place` is a capability call the policy gated when it was armed. */
 export const capabilityAt = (place: Place): boolean => state.capabilityLines.get(place.file)?.has(place.line) === true;
 
-/** The host functions the run's own code is given that this worker watches (tsval's `watches`): its console's, and its
- *  capability stand-ins — it tells their effects (`impure`). */
 export function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object> {
 	const watched = new WeakSet<object>();
 
@@ -563,8 +473,6 @@ export function watchedOf(...holders: Record<string, unknown>[]): WeakSet<object
 	return watched;
 }
 
-/** Arm the capability calls in `file` the policy gates as lines a run stops at, to ask there (RUNTIME-EVIDENCE.md,
- *  *Capability decisions, on the line*); with no policy, none, and a live run stops at nothing. */
 export function armCapabilities(file: ts.SourceFile): void {
 	state.capabilityLines.set(file.fileName, new Set(state.policy === undefined || state.live ? [] : capabilityBreakLines(file, state.policy)));
 }

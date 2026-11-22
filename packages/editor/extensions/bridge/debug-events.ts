@@ -1,27 +1,3 @@
-/**
- * What every debugger's runs tell the editor — tsval's, and any interpreter plugged in as `run.debugger` (editor-contrib's
- * starting point, contrib/README.md) — read the one way: the run contract's custom events (@brianjenkins94/editor-api)
- * into what core shows and keeps.
- *
- * - `ask`: a capability stop's question, answered as capability-stops.ts says;
- * - `recorded`: what an allowed call returned, to give back when it isn't made (editor-api/policy's recordResult);
- * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list);
- * - `coverage`: what the run ran and what went through its sites, as it ends (`evidence.observed`: evidence.ts keeps it in
- *   git; the Margin reads the event itself);
- * - `effects`: its capability calls, each with how it was decided, an answer at the call among them (`evidence.effects`:
- *   evidence.ts puts them in the run's envelope, where they're its exceptions on record).
- *
- * A run a terminal started (`__startedBy: "terminal"`, its `__runId` the terminal's run) prints there — its `output`
- * events' stdout and stderr (`node.out.<run>`) — and reads what's typed there (`node.stdin.<run>`, the `stdin` request).
- *
- * And what Run means, whichever debugger it starts — each launch resolved here:
- *
- * - its policy (`__policy`): what its gated calls are decided by;
- * - its rules (placed-rules.ts): what variables they set at their places (`__places`), and its arguments if one gives them;
- * - a run in core's registry (`runs.begin`), known by one id from start to end — its end the run's, with its exit code
- *   (DAP's `exited`: extension.ts's `node.exit`). Not a live run, which isn't in the running list: it's told what calls
- *   returned when they last ran for real instead (`__recorded`).
- */
 import type { AskEvent, CoverageEvent, ListeningEvent, RecordedEvent, StdinRequest } from "@brianjenkins94/editor-api";
 import { takeEffects } from "@brianjenkins94/editor-api/effects";
 import { recordedResults, recordResult } from "@brianjenkins94/editor-api/policy";
@@ -31,11 +7,8 @@ import { asked, policyFor } from "./capability-stops";
 import { bridgeHub } from "./hub";
 import { byRules } from "./placed-rules";
 
-/** How each session ended, as its DAP messages say (a debugger in this extension host — another's isn't seen): its exit
- *  code (`exited`). */
 const ends = new Map<string, { "exitCode": number }>();
 
-/** The terminal run `session` was started as, if a terminal started it. */
 function terminalRun(session: vscode.DebugSession): string | undefined {
 	const runId = session.configuration["__runId"];
 
@@ -45,23 +18,19 @@ function terminalRun(session: vscode.DebugSession): string | undefined {
 }
 
 export function registerDebugEvents(context: vscode.ExtensionContext): void {
-	// What a run did through the editor, kept here as it did it (runtime-fs.ts): its workspace's files. Taken as the run ends.
 	serve(bridgeHub, "run.effects", (args) => ({
 		"effects": takeEffects((args as { "run": string }).run)
 	}));
 
 	const rpc = createRpcClient(bridgeHub);
-	/** Each terminal's run's stdin subscription, by its session. */
 	const typing = new Map<string, () => void>();
 
 	context.subscriptions.push(
-		// A run in the running list, known by one id from start to end.
 		vscode.debug.registerDebugConfigurationProvider("*", {
 			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
 				const program = typeof given["program"] === "string"
 					? given["program"]
 					: "";
-				// Every debugger decides its gated calls by the editor's policy (the run contract's `__policy`).
 				const policy = await policyFor();
 				const live = given["__live"] === true;
 				const config = {
@@ -108,7 +77,6 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					break;
 				}
 
-				// A run's evidence is of the text that ran, each of its files with its own (packages/tsval/README.md, *Modules*).
 				case "coverage": {
 					if (typeof runId !== "string") {
 						break;
@@ -156,7 +124,6 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					break;
 			}
 		}),
-		// How a session ends — and a terminal's run's output, printed there.
 		vscode.debug.registerDebugAdapterTrackerFactory("*", {
 			"createDebugAdapterTracker": (session) => {
 				const runId = terminalRun(session);
@@ -213,7 +180,6 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 
 			ends.delete(session.id);
 
-			// Its run ends with it, with its exit code.
 			if (typeof config["__runId"] === "string") {
 				bridgeHub.publish(`node.exit.${config["__runId"]}`, { "exitCode": end?.exitCode ?? 0 });
 			}

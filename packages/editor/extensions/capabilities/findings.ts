@@ -1,19 +1,3 @@
-/**
- * The capability findings, shown: each open TypeScript/JavaScript document's (the plugin's `_capabilities.findings` —
- * engine.findings over the tree the TypeScript server holds) as this extension's own diagnostics — source
- * "capabilities", code 900100; a dangerous capability a warning, the rest a hint — so they're squiggles, in Problems
- * (the warnings) and in the hover.
- *
- * Asked of what's in an editor: once it's shown and has settled, once its edits have, and again while the canary is still
- * running (`pending`) or the server isn't up yet. Not of every document VS Code holds, nor the moment one opens: that's a request
- * to the server per model, a few of them each retried, before the server has been told of the file. The plugin only answers:
- * nothing is put into the TypeScript server's own diagnostics, so whatever hosts the readings later (TypeScript 7's API
- * connection) answers the same request.
- *
- * Each says how it's decided, and is as loud as that asks for (decisions.ts): a call a run would stop at, or that's denied, is
- * in Problems; one that's been allowed goes quiet. Its lightbulb decides it. And what people answered at it in their runs,
- * allowed once or refused (exceptions.ts).
- */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import type { Finding } from "./decisions";
@@ -22,25 +6,19 @@ import type { Exceptions } from "./exceptions";
 import { actionsFor, decisionOfCall, POLICY_FILES, sayDecision, severityOf } from "./decisions";
 
 export const LANGUAGES = new Set(["typescript", "typescriptreact", "javascript", "javascriptreact"]);
-/** How long edits settle before a document is asked about. */
 const SETTLE_MS = 300;
-/** How long a document's been shown before it's asked about: the TypeScript extension tells the server of it first. */
 const SHOWN_MS = 1000;
-/** How long apart, and how often, a document is asked again while its answer isn't final. */
 const AGAIN_MS = 1000;
 const AGAIN = 30;
 
-/** What `_capabilities.findings` answers. */
 interface Answer {
 	"ready"?: boolean;
 	"pending"?: boolean;
 	"findings"?: Finding[];
 }
 
-/** A finding, where it is. */
 interface Placed { "finding": Finding; "range": vscode.Range }
 
-/** Calls `changed` when a policy file does. */
 function watchPolicy(changed: () => Promise<void>): vscode.Disposable[] {
 	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_FILES);
 	const again = (): void => {
@@ -53,10 +31,8 @@ function watchPolicy(changed: () => Promise<void>): vscode.Disposable[] {
 export function publishFindings(context: vscode.ExtensionContext, exceptions: Exceptions, log?: ObservedExtension["log"]): void {
 	const collection = vscode.languages.createDiagnosticCollection("capabilities");
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
-	/** Each document's findings as last answered, to say again when the policy changes, and for its lightbulb. */
 	const placed = new Map<string, { "document": vscode.TextDocument; "found": Placed[] }>();
 
-	/** A document's findings, shown as the policy has them now. */
 	const show = async (uri: string): Promise<void> => {
 		const known = placed.get(uri);
 
@@ -66,7 +42,6 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 
 		const files = await loadPolicyFiles();
 
-		// (closed meanwhile: its findings went with it)
 		if (placed.get(uri) !== known) {
 			return;
 		}
@@ -87,7 +62,6 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 	const shown = (document: vscode.TextDocument): boolean => document.uri.scheme === "file" && LANGUAGES.has(document.languageId) && vscode.window.visibleTextEditors.some((editor) => editor.document === document);
 
 	const asked = async (document: vscode.TextDocument, again: number): Promise<void> => {
-		// (no longer in an editor: asked again when it's back)
 		if (document.isClosed || !shown(document)) {
 			return;
 		}
@@ -96,7 +70,6 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 		const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: Answer } | undefined>("typescript.tsserverRequest", "_capabilities.findings", { "file": document.uri })).catch(() => undefined);
 		const answer = response?.body;
 
-		// (closed meanwhile, or edited: a later ask is on its way)
 		if (document.isClosed || document.version !== version) {
 			return;
 		}
@@ -106,7 +79,6 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 			await show(document.uri.toString());
 		}
 
-		// (the server or its engine not up yet, or the canary still running: asked again shortly)
 		if ((answer?.ready !== true || answer.pending === true) && again < AGAIN) {
 			schedule(document, AGAIN_MS, again + 1);
 		}
@@ -128,7 +100,6 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 		}, delay));
 	}
 
-	/** `uri`'s findings, and its asking, gone. */
 	const forget = (uri: vscode.Uri): void => {
 		clearTimeout(timers.get(uri.toString()));
 		timers.delete(uri.toString());
@@ -159,7 +130,6 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 				}));
 			}
 		}, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
-		// (decided anywhere: here, at a stop, or by editing the file)
 		...watchPolicy(showAll),
 		exceptions.onDidChange(() => {
 			void showAll();
@@ -179,8 +149,6 @@ export function publishFindings(context: vscode.ExtensionContext, exceptions: Ex
 		vscode.workspace.onDidCloseTextDocument((document) => {
 			forget(document.uri);
 		}),
-		// (a file gone — from the terminal as much as the Explorer — takes its findings with it: its
-		// document can stay open with no editor, so no close says so, and its rows in Problems outlived it)
 		gone,
 		gone.onDidDelete((uri) => {
 			for (const each of [...placed.keys(), ...timers.keys()]) {

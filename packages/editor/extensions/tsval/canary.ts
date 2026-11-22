@@ -1,24 +1,3 @@
-/**
- * Capabilities canary — the DYNAMIC half of the capability IDE (the middle column: concrete pre-call values).
- *
- * The static engine (engine.ts, util/silo `findReach`) captures a capability call's resource only when it's a
- * STATIC STRING LITERAL. The canary covers the rest: it RUNS the module in the tsval interpreter and, at the
- * host↔guest boundary, observes the CONCRETE argument each capability call is actually invoked with — the real
- * URL a `fetch(base + id)` builds, the path a computed `writeFile(dir + name)` writes.
- *
- * The interpreter IS the sandbox: tsval runs with zero ambient authority (no real fetch/fs/exec unless injected),
- * and `HostGuard.beforeCall` fires BEFORE any host call, so nothing dangerous can execute — we observe and hand
- * back an inert stand-in. That's why the canary needs no almostnode-style runtime: almostnode performs REAL
- * effects (real network), the opposite of what a canary wants. `beforeCall` gives the call-expression node (→
- * source span, the same anchor the static rows use) and the arguments AS EVALUATED. Capability calls are
- * classified by the IDENTITY of the injected stand-in (each is tagged), which also catches aliasing
- * (`const f = fetch; f(url)`); danger grading stays with silo policy (`isDangerous`, parser-free).
- *
- * This runs INSIDE the tsserver plugin, reusing tsserver's own `typescript` (the build externalizes it), so the
- * engine ships ~1MB instead of bundling a ~7MB copy. A step budget bounds the run so untrusted code can't hang
- * the language server. M0 scope: CALL capabilities that execute during a normal run (top-level, or reachable from
- * one); `env` is a member read the static half already resolves, so the canary skips it.
- */
 import type { HostCallSite } from "@brianjenkins94/tsval";
 import type { CapabilityHit } from "./capability-calls";
 import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
@@ -28,34 +7,22 @@ import ts from "typescript";
 import { classifyCall, renderCallee } from "./capability-calls";
 
 export interface CanaryObservation {
-	/** Capability class (silo vocabulary): net / fs:read / fs:write / exec. */
 	"capability": string;
-	/** The call expression text (e.g. "fetch", "fs.writeFile"). */
 	"callee": string;
-	/** The concrete resource observed at the call — the first string argument, resolved at runtime. */
 	"value": string;
-	/** Whether a string resource was observed (false → the call ran but its resource wasn't a string arg). */
 	"observed": boolean;
-	/** The STATICALLY-known resource: the literal text when the resource argument is a string literal in the
-	 *  source, else undefined (a concatenation / variable / computed value the static half can't resolve). */
 	"static"?: string;
-	/** Source span of the call, for anchoring to the document (same basis as the static rows). */
 	"start": number;
 	"end": number;
-	/** Whether the capability is dangerous enough to gate (silo policy). */
 	"dangerous": boolean;
 }
 
-/** Brand tagging an injected stand-in with the capability it stands for (read back in `beforeCall`). */
 const CAPABILITY = Symbol("capabilities.canary.capability");
-/** Which argument index carries the resource (URL / path / command). Default 0. */
 const RESOURCE_ARG = Symbol("capabilities.canary.resourceArg");
-/** A copy's or a rename's other path: what it does where it lands, its second argument (FS_DESTINATION). */
 const LANDING = Symbol("capabilities.canary.landing");
 
 type Tagged = ((...args: unknown[]) => unknown) & { [CAPABILITY]?: string; [RESOURCE_ARG]?: number; [LANDING]?: string };
 
-/** Tag a stand-in with its capability (and optionally which arg is the resource, and what it does at its second). */
 function tag<T extends (...args: never[]) => unknown>(capability: string, fn: T, resourceArg = 0, landing?: string): T {
 	(fn as Tagged)[CAPABILITY] = capability;
 	(fn as Tagged)[RESOURCE_ARG] = resourceArg;
@@ -67,8 +34,6 @@ function tag<T extends (...args: never[]) => unknown>(capability: string, fn: T,
 	return fn;
 }
 
-/** The capability a stand-in stands for, and which of its arguments is the resource — and, for a copy or a rename, the
- *  capability of its second argument, where it lands — undefined for one untagged. */
 export function standinCapability(fn: unknown): { "capability": string; "resourceArg": number; "landing"?: string } | undefined {
 	const capability = typeof fn === "function" ? (fn as Tagged)[CAPABILITY] : undefined;
 	const landing = capability === undefined ? undefined : (fn as Tagged)[LANDING];
@@ -76,9 +41,6 @@ export function standinCapability(fn: unknown): { "capability": string; "resourc
 	return capability === undefined ? undefined : { "capability": capability, "resourceArg": (fn as Tagged)[RESOURCE_ARG] ?? 0, ...landing === undefined ? {} : { "landing": landing } };
 }
 
-/** A stand-in's result as a rule gives it (RUNNING.md, *A call's result*), in the shape the call returns — `real` is
- *  what the inert stand-in returned: a fetch's response with it as its body, a read's contents, a command's output;
- *  sync or async as the call is. A write's result isn't given (nothing reads it). */
 export function givenAs(capability: string, real: unknown, value: unknown): unknown {
 	const text = typeof value === "string" ? value : JSON.stringify(value);
 	const settle = (shaped: unknown): unknown => (real instanceof Promise ? Promise.resolve(shaped) : shaped);
@@ -102,8 +64,6 @@ export function givenAs(capability: string, real: unknown, value: unknown): unkn
 	return real;
 }
 
-/** Aliasing fallback: when AST classification misses (`const f = fetch; f(url)` — the callee is `f`), the invoked
- *  stand-in's own tag still identifies the capability. Same CapabilityHit shape as the shared AST classifier. */
 function tagHit(callee: Tagged, site: HostCallSite): CapabilityHit | undefined {
 	const capability = callee[CAPABILITY];
 
@@ -117,18 +77,10 @@ function tagHit(callee: Tagged, site: HostCallSite): CapabilityHit | undefined {
 	return { "capability": capability, "resource": typeof resource === "string" ? resource : "", "callee": renderCallee(site.node.expression), "dangerous": isDangerous(capability), "argIndex": argIndex };
 }
 
-/** An inert Response stand-in so a run performs no real network but keeps executing. */
 function inertResponse(): unknown {
 	return { "ok": true, "status": 200, "json": () => Promise.resolve({}), "text": () => Promise.resolve(""), "arrayBuffer": () => Promise.resolve(new ArrayBuffer(0)) };
 }
 
-/**
- * A recursive inert stand-in for an UNMOCKED module, so `import x from "some-lib"` (or `require`) doesn't abort the
- * run — the code keeps going and can still reach the capability calls it makes directly. Callable, constructable,
- * every property yields another inert; it deliberately does NOT look like a Promise (`then` undefined) and iterates
- * as empty, so `await`/destructuring/`for…of` don't hang or throw. Untagged: unmocked modules aren't classified
- * (a future refinement can tag known HTTP clients like axios); this is purely about not stopping the run.
- */
 export function inert(): unknown {
 	function target(): void { /* inert */ }
 
@@ -153,16 +105,9 @@ export function inert(): unknown {
 	});
 }
 
-/** The tagged host globals + module stand-ins: resolvable AND inert during observation. Shared with the tsval debug
- *  worker so a debugged run has the SAME zero-authority surface as the canary — the guest can `import` node builtins
- *  / call `fetch` and keep executing to a capability breakpoint instead of crashing on an unresolved module. (Real
- *  effects are the almostnode "production" path's job, not tsval's.) */
 export function capabilityStandins(): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const noop = (): void => { /* inert */ };
-	// Every method almostnode gates, as an inert stand-in: reads find nothing, writes (a copy or a rename's too) do nothing.
 	const fsResults: Record<string, () => unknown> = { "readdir": () => [], "readdirSync": () => [], "existsSync": () => false, "createReadStream": inert, "createWriteStream": inert };
-	// (a function of each method's own: tag() marks the function, so a shared one — noop, inert — took the last method's
-	// tag: every write a copy's landing, its data resolved as a path; createReadStream createWriteStream's capability)
 	const resultOf = (method: string, op: string): () => unknown => {
 		const result = fsResults[method] ?? (op === "read" && FS_DESTINATION[method] === undefined ? () => "" : noop);
 
@@ -205,11 +150,6 @@ export function capabilityStandins(): { "globals": Record<string, unknown>; "mod
 	};
 }
 
-/**
- * Run `src` in the tsval interpreter and return the concrete pre-call resource observed at each capability call
- * that executed. Best-effort: a run that throws (or exceeds the step budget) still returns whatever was observed
- * before it stopped.
- */
 export async function runCanary(src: string, fileName: string): Promise<CanaryObservation[]> {
 	const observations: CanaryObservation[] = [];
 	const standins = capabilityStandins();
@@ -220,9 +160,6 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 			return;
 		}
 
-		// One classifier for everyone: the shared AST classifier decides capability + resource-arg; the tag is only
-		// a fallback for aliasing the AST can't see. (The debugger uses classifyCall alone — it has no tags.)
-		// (a copy or a rename: one observation per path it reaches)
 		const classified = classifyCall(site.node, site.args);
 		const fallback = tagHit(callee, site);
 		const hits = classified.length > 0 ? classified : fallback === undefined ? [] : [fallback];
@@ -248,12 +185,8 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 
 	const loaded = createVM(src, {
 		"fileName": fileName,
-		// A fuel limit: this runs untrusted module code INSIDE the tsserver worker, so a `while (true)` must not
-		// hang the language server. Exceeding it throws uncatchably → caught below, partial observations kept.
 		"maxSteps": 5_000_000,
 		"globals": standins.globals,
-		// Known capability modules → tagged inert mocks; anything else → a recursive inert stand-in so the import
-		// doesn't abort the run (coverage) while still doing nothing real.
 		"resolveModule": (specifier) => (Object.hasOwn(standins.modules, specifier) ? standins.modules[specifier] : inert()),
 		"hostGuard": {
 			"beforeCall": (callee, _thisArg, _isConstruct, site) => {

@@ -1,63 +1,26 @@
-/**
- * ESLint — extension host entry (plain CJS, loads in the web-worker host that can't load ESM entrypoints:
- * CodinGame/monaco-vscode-api#818). This is the WEB implementation of `dbaeumer.vscode-eslint`: the manifest claims
- * that id, so a repo's `.vscode/settings.json` written for the desktop extension (defaultFormatter,
- * `source.fixAll.eslint`, `eslint.*`) means the same thing here. The desktop extension runs an eslint language
- * server under Node; here real ESLint runs under almostnode in a worker of this extension's (worker.ts), with the
- * preset and the workspace's files — through the workspace runtime, so an open editor's unsaved text is what it reads —
- * and this entry shows what it says:
- *
- *   • each open JavaScript/TypeScript document is linted as it opens and once its edits settle, and its problems are
- *     this extension's own diagnostics (source "eslint", the rule as the code), honoring `eslint.enable`,
- *     `eslint.validate` and `eslint.rules.customizations` as the desktop extension does;
- *   • `source.fixAll.eslint` (what `editor.codeActionsOnSave` runs) and the formatter both ask the worker to fix the
- *     document's text;
- *   • the formatter is registered only while `eslint.format.enable` is true — the desktop extension's default is
- *     false, so `editor.defaultFormatter` alone doesn't make eslint format on either side;
- *   • each file's config is the nearest `eslint.config.*` above it, as ESLint 10 finds it (else the preset), from the
- *     working directory `eslint.workingDirectories` gives it, read as the desktop server reads it; a config that fails
- *     to load is a problem on that file, saying why and that the preset lints meanwhile, and a change to one starts the
- *     worker afresh, as the desktop server reloads its config. (`!cwd` is moot: the worker's process stays at the
- *     workspace's root, and ESLint's `cwd` is the working directory.)
- */
 import type { Logger } from "@brianjenkins94/util/logger";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { observeExtension, workspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
-/** Its records and spans: the editor's (`ext:eslint`, through the workspace runtime's link: observeExtension) once it's
- *  activated in the editor, else a logger of its own. */
 let log: Logger = logger({ "source": "eslint" });
 
-/** How long after a save's code actions are cancelled it's tried again: once the save it was part of has given up. */
 const SAVE_AGAIN_MS = 100;
 const LANGUAGES = ["javascript", "javascriptreact", "typescript", "typescriptreact"];
 const FIX_ALL = vscode.CodeActionKind.SourceFixAll.append("eslint");
-/** How long edits settle before a document is linted again. */
 const SETTLE_MS = 300;
-/** A diagnostic severity's name, as `_eslint.problems` answers it. */
 const SEVERITY_NAMES: Record<vscode.DiagnosticSeverity, string> = { [vscode.DiagnosticSeverity.Error]: "error", [vscode.DiagnosticSeverity.Warning]: "warning", [vscode.DiagnosticSeverity.Information]: "info", [vscode.DiagnosticSeverity.Hint]: "hint" };
-/** The rules the desktop server marks unnecessary (drawn faded): unused things. */
 const UNUSED_RULES = new Set(["no-unused-imports", "no-unused-private-class-members", "no-unused-vars"]);
 
-/** What the worker says of a file (eslint's messages). */
 interface Message { "line"?: number; "column"?: number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
-/** The names ESLint finds a config by, in any folder (worker.ts: ESLint's own lookup). */
 const CONFIG_GLOB = "**/eslint.config.{js,mjs,cjs,ts,mts,cts}";
-/** What else a worker reads as it starts and keeps: the tsconfigs the type-aware rules' project service reads (worker.ts
- *  lends the root a stand-in where it has none). */
 const TSCONFIG_GLOB = "**/tsconfig*.json";
-/** What marks a folder as a project's, for `{ "mode": "auto" }`: the desktop server's marks, flat config's names among them. */
 const PROJECT_MARKS = new Set(["package.json", ".eslintignore", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", "eslint.config.mts", "eslint.config.cts"]);
 
-/** Which config linted a file (none: the preset), and why it isn't the file's own when that failed to load. */
 interface Using { "config"?: string; "error"?: string }
 
-/** The packages the workspace's configs name (and the files of its own they import), read ahead by the editor, whole
- *  (`editor.nodeModules.prefetch`, the CDN's node_modules): what the worker loads them from is then all there. A failure
- *  costs nothing but the wait: the CDN goes on answering a file at a time. */
 async function prefetchConfigs(): Promise<void> {
 	await log.span("editor.extensions.eslint.prefetch", {}, async (span) => {
 		const configs = await vscode.workspace.findFiles(CONFIG_GLOB, "**/node_modules/**");
@@ -71,12 +34,8 @@ async function prefetchConfigs(): Promise<void> {
 	});
 }
 
-/** The worker: lint a text, or fix it, as `file` from the working directory `cwd` — until it's disposed. */
 interface Worker { "loaded": () => boolean; "lint": (file: string, text: string, cwd: string) => Promise<Message[]>; "fix": (file: string, text: string, cwd: string) => Promise<{ "output": string; "fixed": boolean }>; "dispose": () => void }
 
-/** ESLint's worker (worker.ts, through its bootstrap `worker.js`), given its link into the workspace runtime once it
- *  listens; `onUsing` hears which config each answer came from. Undefined where there's no workspace runtime (no editor
- *  core in this host): nothing is linted. */
 function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) => void): Worker | undefined {
 	const runtime = workspaceRuntime();
 
@@ -89,7 +48,6 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 	const disposables: (() => void)[] = [];
 	const worker = new globalThis.Worker(vscode.Uri.joinPath(context.extensionUri, "worker.js").toString(true), { "name": "eslint" });
 	const pending = new Map<number, { "resolve": (answer: Record<string, unknown>) => void; "reject": (error: Error) => void }>();
-	// (it listens once it says it's ready: its module loads after the bootstrap, and a message before then is lost)
 	let listening: () => void;
 	const ready = new Promise<void>((resolve) => {
 		listening = resolve;
@@ -107,7 +65,6 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 		pending.clear();
 	};
 
-	// (its load, from its start to ESLint ready in it: what the first lint waits on)
 	const booting = log.span("editor.extensions.eslint.boot");
 
 	watchWorker(worker, "eslint-worker", (message) => {
@@ -118,9 +75,6 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 	worker.addEventListener("message", (event: MessageEvent) => {
 		const data = event.data as Record<string, unknown>;
 
-		// (it listens: its link into the workspace — then it loads ESLint, and answers once it has. The packages its configs
-		// name are read ahead first, whole: a config reads them as Node reads a disk, a folder listed too, and the CDN has a
-		// file only once something has fetched it, a folder's listing never)
 		if (data["ready"] === true) {
 			void prefetchConfigs().then(() => {
 				if (failure !== undefined) {
@@ -167,7 +121,6 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 	disposables.push(() => {
 		worker.terminate();
 		failAll(new Error("eslint's worker was started afresh"));
-		// (ended, if it hadn't: a worker started afresh before it loaded — a config changed as the workspace was written)
 		booting.end({ "startedAfresh": true });
 	});
 
@@ -200,7 +153,6 @@ function startWorker(context: vscode.ExtensionContext, onUsing: (using: Using) =
 	};
 }
 
-/** The `eslint.*` settings, read the way the desktop extension reads them. */
 function settings(): { "enable": boolean; "validate": string[] | null; "customizations": { "rule": string; "severity": string; "fixable"?: boolean }[] } {
 	const config = vscode.workspace.getConfiguration("eslint");
 	const customizations = config.get<unknown>("rules.customizations");
@@ -212,10 +164,8 @@ function settings(): { "enable": boolean; "validate": string[] | null; "customiz
 	};
 }
 
-/** An `eslint.workingDirectories` entry, as the desktop extension takes them. */
 type WorkingDirectory = string | { "directory": string } | { "pattern": string } | { "mode": string };
 
-/** A glob over folders as a regular expression: `**` across folders, `*` and `?` within one's name. */
 function globOf(pattern: string): RegExp {
 	const glob = pattern.replace(/^\.\//u, "").replace(/\/?$/u, "/");
 	const source = glob.replaceAll(/\*\*\/|[*?.+^${}()|[\]\\]/gu, (token) => ({ "**/": "(?:[^/]+/)*", "*": "[^/]*", "?": "[^/]" })[token] ?? `\\${token}`);
@@ -223,7 +173,6 @@ function globOf(pattern: string): RegExp {
 	return new RegExp(`^${source}$`, "u");
 }
 
-/** The nearest folder from `file`'s up to `root` with a project's mark in it (PROJECT_MARKS), or `root`. */
 async function projectFolderOf(root: string, file: string): Promise<string> {
 	if (file.includes("/node_modules/")) {
 		return root;
@@ -240,8 +189,6 @@ async function projectFolderOf(root: string, file: string): Promise<string> {
 	return root;
 }
 
-/** The folders an entry lists that could hold `file`: a directory (relative to `root`, or absolute), or each folder above
- *  the file a pattern matches. */
 function candidatesOf(entry: WorkingDirectory, root: string, file: string): string[] {
 	if (typeof entry === "string" || "directory" in entry) {
 		const directory = typeof entry === "string" ? entry : entry.directory;
@@ -265,17 +212,12 @@ function candidatesOf(entry: WorkingDirectory, root: string, file: string): stri
 	return folders;
 }
 
-/** The folder ESLint works from for `document` — `eslint.workingDirectories` as the desktop server reads it: of the
- *  listed directories and patterns' folders holding the file, the longest, unless a `mode` comes after it; `auto` the
- *  nearest folder above the file that's a project's (PROJECT_MARKS); else, `location` or the setting unset, the
- *  workspace's root. */
 async function workingDirectoryOf(document: vscode.TextDocument): Promise<string> {
 	const root = (vscode.workspace.getWorkspaceFolder(document.uri) ?? vscode.workspace.workspaceFolders?.[0])?.uri.path ?? "/workspace";
 	const file = document.uri.path;
 	const entries = vscode.workspace.getConfiguration("eslint", document.uri).get<unknown>("workingDirectories");
 	let chosen: { "directory": string } | { "mode": string } | undefined;
 
-	// (an entry that isn't one of the shapes is passed over, as the desktop server passes it over)
 	const listed = (Array.isArray(entries) ? entries : []).filter((entry): entry is WorkingDirectory => typeof entry === "string" || (typeof entry === "object" && entry !== null));
 
 	for (const entry of listed) {
@@ -297,15 +239,12 @@ async function workingDirectoryOf(document: vscode.TextDocument): Promise<string
 	return chosen?.mode === "auto" ? projectFolderOf(root, file) : root;
 }
 
-/** Whether eslint lints `document`: `eslint.enable`, then `eslint.validate` (null: every JavaScript/TypeScript language). */
 function validates(document: vscode.TextDocument): boolean {
 	const { enable, validate } = settings();
 
 	return document.uri.scheme === "file" && LANGUAGES.includes(document.languageId) && enable && (validate === null || validate.includes(document.languageId));
 }
 
-/** `eslint.rules.customizations`' severity for a problem, with the desktop server's semantics: `*` globs, a leading `!`
- *  negates, an entry with `fixable` applies only when it matches whether the problem has a fix, and the last match wins. */
 function customized(ruleId: string, fixable: boolean): string | undefined {
 	let severity: string | undefined;
 
@@ -321,7 +260,6 @@ function customized(ruleId: string, fixable: boolean): string | undefined {
 	return severity;
 }
 
-/** A problem's severity — eslint's (2 error, 1 warning), as customized — or undefined when it's customized off. */
 function severityOf(message: Message): vscode.DiagnosticSeverity | undefined {
 	const base = message.severity === 2 ? "error" : "warn";
 	const override = message.ruleId === null ? undefined : customized(message.ruleId, message.fixable);
@@ -330,7 +268,6 @@ function severityOf(message: Message): vscode.DiagnosticSeverity | undefined {
 	return resolved === "off" ? undefined : resolved === "error" ? vscode.DiagnosticSeverity.Error : resolved === "info" ? vscode.DiagnosticSeverity.Information : vscode.DiagnosticSeverity.Warning;
 }
 
-/** A problem as a diagnostic in `document`, or undefined when it's customized off. */
 function diagnosticOf(document: vscode.TextDocument, message: Message): vscode.Diagnostic | undefined {
 	const severity = severityOf(message);
 
@@ -338,7 +275,6 @@ function diagnosticOf(document: vscode.TextDocument, message: Message): vscode.D
 		return undefined;
 	}
 
-	// (a message may have no place: a parser that couldn't start says so of the whole file, and it goes on the first line)
 	const start = new vscode.Position(Math.max(0, (message.line ?? 1) - 1), Math.max(0, (message.column ?? 1) - 1));
 	const end = message.endLine === undefined || message.endColumn === undefined ? start.translate(0, 1) : new vscode.Position(message.endLine - 1, message.endColumn - 1);
 	const diagnostic = new vscode.Diagnostic(document.validateRange(new vscode.Range(start, end)), message.message, severity);
@@ -350,7 +286,6 @@ function diagnosticOf(document: vscode.TextDocument, message: Message): vscode.D
 		diagnostic.code = message.ruleId;
 	}
 
-	// (as the desktop server marks them: unused things, drawn faded)
 	if (UNUSED_RULES.has(rule) || /\b(?:defined|assigned)\b.+\bnever used\b/iu.test(message.message)) {
 		diagnostic.tags = [vscode.DiagnosticTag.Unnecessary];
 	}
@@ -370,7 +305,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		context.subscriptions.push({ "dispose": observed.dispose });
 	}
 
-	// (a workspace config that failed to load: a problem on it, apart from what linting it says — until it loads)
 	const configProblems = vscode.languages.createDiagnosticCollection("eslint-config");
 	const onUsing = ({ config, error }: Using): void => {
 		if (config === undefined) {
@@ -405,7 +339,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
 	const selector = LANGUAGES.map((language) => ({ "language": language }));
 
-	/** Every autofix for the document — the fixed text, or undefined when there's nothing to fix. */
 	const fixAll = async (document: vscode.TextDocument): Promise<string | undefined> => {
 		if (!validates(document)) {
 			return undefined;
@@ -414,8 +347,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		const text = document.getText();
 
 		return log.span("editor.extensions.eslint.fix", { "path": document.uri.fsPath, "bytes": text.length }, async (span) => {
-			// (not while ESLint loads: VS Code drops a save, saying nothing, if a code action provider registers while it waits
-			// on code actions, as extensions starting up do. This save goes unfixed, its problems show, and the next one fixes.)
 			if (!worker.loaded()) {
 				span.end({ "fixed": false, "loading": true });
 
@@ -437,8 +368,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		// (a file gone from disk, its text not changed since: nothing to lint — its document lives on a while, and a lint of it
-		// would put its problems back)
 		if (document.uri.scheme === "file" && !document.isDirty && !await vscode.workspace.fs.stat(document.uri).then(() => true, () => false)) {
 			collection.delete(document.uri);
 
@@ -454,9 +383,6 @@ export function activate(context: vscode.ExtensionContext): void {
 				return undefined;
 			});
 
-			// (what it said is kept only for the text it linted: closed meanwhile, removed from disk (a lint waiting on ESLint's
-			// boot can outlast its file, whose document lives on), its version moved, or ESLint turned off for it — that cleared
-			// it, and this one mustn't put its problems back)
 			const there = said === undefined || document.uri.scheme !== "file" || document.isDirty || await vscode.workspace.fs.stat(document.uri).then(() => true, () => false);
 			const dropped = said === undefined ? undefined : document.isClosed ? "closed" : there ? document.version === version ? validates(document) ? undefined : "off" : "moved" : "gone";
 
@@ -492,7 +418,6 @@ export function activate(context: vscode.ExtensionContext): void {
 				schedule(event.document, SETTLE_MS);
 			}
 		}),
-		// A file (or a folder of them) gone: its problems go with it, as its document may live on.
 		gone,
 		gone.onDidDelete((uri) => {
 			const under = uri.path.endsWith("/") ? uri.path : uri.path + "/";
@@ -510,8 +435,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			timers.delete(document.uri.toString());
 			collection.delete(document.uri);
 		}),
-		// A text's problems as `uri` would show them, customized as the Problems view's are — for a change's problems
-		// (workbench/code-problems.ts), which asks of a file at HEAD and now; undefined where eslint doesn't lint the file.
 		vscode.commands.registerCommand("_eslint.problems", async (uri: vscode.Uri, text?: string) => {
 			const document = await vscode.workspace.openTextDocument(uri);
 
@@ -529,14 +452,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 		vscode.languages.registerCodeActionsProvider(selector, {
 			"provideCodeActions": async (document, _range, codeContext, token) => {
-				// Only as a source action (save / "Fix all"), never as a lightbulb on every cursor move.
 				if (codeContext.only === undefined || !FIX_ALL.intersects(codeContext.only)) {
 					return [];
 				}
 
-				// VS Code abandons a save, saying nothing, when these are cancelled because a provider registered meanwhile, as
-				// extensions starting up do. Nobody asked for that: the text as it was, still unsaved, once it's over, is saved
-				// again. (Skipped, it saves anyway; edited, it isn't this text.)
 				const { version } = document;
 				const cancelled = token.onCancellationRequested(() => {
 					setTimeout(() => {
@@ -569,7 +488,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		} }
 	);
 
-	// The formatter follows `eslint.format.enable` (default false, as on desktop).
 	let formatter: vscode.Disposable | undefined;
 
 	const syncFormatter = (): void => {
@@ -605,8 +523,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		schedule(document, 0);
 	}
 
-	// A config made, changed or removed — ESLint's, or a tsconfig its project service read — a worker afresh: the old one's
-	// config, plugins and programs stay loaded in it; and every open document linted with what it loads.
 	const folder = vscode.workspace.workspaceFolders?.[0];
 
 	if (folder !== undefined) {
@@ -626,7 +542,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			}, SETTLE_MS);
 		};
 
-		// (not a package's own, as one is installed)
 		const project = (uri: vscode.Uri): void => {
 			if (!uri.path.includes("/node_modules/")) {
 				restarted();

@@ -1,10 +1,3 @@
-/**
- * Explore Orderings (tsval's explore): every way the file's async results and timers can come, run, in a debug worker of
- * its own (worker/explore.ts). What depends on the order is said where it is, not in a list (no view: the user, 2026-11-06):
- * each line that prints or throws differently from one ordering to another has a diagnostic saying how, and its lightbulb
- * debugs any of them, run exactly that way (a launch's `eventLoop`, its schedule). An edit to the file takes them away, as
- * what they say may no longer be so.
- */
 import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 import type { Explored, Ordering } from "./debug-protocol";
 import { loadEffectivePolicy } from "@brianjenkins94/editor-api/policy";
@@ -15,13 +8,10 @@ import { startWorker } from "./debug-adapter";
 
 const log = logger({ "source": "tsval" });
 
-/** How many runs an exploring takes at most. */
 const MAX_RUNS = 100;
 
-/** Every ordering of `program`'s events, run: with the rules a run has (the arguments a rule gives its process.argv too). */
 async function exploreProgram(runtime: WorkspaceRuntime, program: vscode.Uri, maxRuns = MAX_RUNS): Promise<Explored> {
 	const source = vscode.workspace.textDocuments.find((document) => document.uri.toString() === program.toString())?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(program));
-	// (outside a session: the policy as the enforcer reads it)
 	const policy = await loadEffectivePolicy().catch(() => EMPTY_POLICY);
 	const argv = given(policy, {
 		"program": vscode.workspace.asRelativePath(program, false)
@@ -70,7 +60,6 @@ async function exploreProgram(runtime: WorkspaceRuntime, program: vscode.Uri, ma
 	}
 }
 
-/** 1st, 2nd, 3rd, 4th… */
 function ordinal(count: number): string {
 	const tens = count % 100;
 	const suffix = tens >= 11 && tens <= 13
@@ -80,7 +69,6 @@ function ordinal(count: number): string {
 	return `${String(count)}${suffix}`;
 }
 
-/** Where among `total` printed lines the `index`th is: first, last, or its ordinal. */
 function placeIn(index: number, total: number): string {
 	if (index === 0) {
 		return "first";
@@ -91,9 +79,6 @@ function placeIn(index: number, total: number): string {
 		: ordinal(index + 1);
 }
 
-/** What `outcome` did at `file`'s `line`: what it printed there (and where in all it printed, when that's more than one
- *  line), and whether it threw there. Nothing is said as what the others did there that it didn't: whether the line ran,
- *  exploring doesn't know. */
 function didAt(outcome: Ordering, file: string, line: number, outcomes: Ordering[]): string {
 	const printed = outcome.output.flatMap((each, index) => (each.file === file && each.line === line
 		? [`prints ${JSON.stringify(each.text)}${outcome.output.length === 1
@@ -117,7 +102,6 @@ function didAt(outcome: Ordering, file: string, line: number, outcomes: Ordering
 		: "doesn't throw";
 }
 
-/** "ordering 2", "orderings 1 and 3", "orderings 1, 2 and 4". */
 function orderingsNamed(indices: number[]): string {
 	const numbers = indices.map((index) => String(index + 1));
 
@@ -126,13 +110,10 @@ function orderingsNamed(indices: number[]): string {
 		: `orderings ${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)}`;
 }
 
-/** What one exploring said, for the lightbulb on its diagnostics. */
 interface Exploring { "program": vscode.Uri; "explored": Explored }
 
-/** A diagnostic's: the exploring it says, and the line it's on, when it's one line's. */
 interface Said { "exploring": Exploring; "at"?: { "file": string; "line": number } }
 
-/** An outcome as its lightbulb names it: the events, in the order chosen. */
 function pathOf(outcome: Ordering): string {
 	const path = outcome.path.join(" → ");
 
@@ -148,7 +129,6 @@ function pathOf(outcome: Ordering): string {
 export function registerExplore(context: vscode.ExtensionContext, runtime: WorkspaceRuntime): void {
 	const diagnostics = vscode.languages.createDiagnosticCollection("orderings");
 	const saidOf = new WeakMap<vscode.Diagnostic, Said>();
-	/** The files each program's diagnostics are on, by the program. */
 	const placed = new Map<string, vscode.Uri[]>();
 
 	const clear = (program: string): void => {
@@ -159,7 +139,6 @@ export function registerExplore(context: vscode.ExtensionContext, runtime: Works
 		placed.delete(program);
 	};
 
-	/** Each line that goes differently from one ordering to another, said there. */
 	const say = (exploring: Exploring): void => {
 		const { program, explored } = exploring;
 		const places = new Map<string, { "file": string; "line": number }>();
@@ -216,7 +195,6 @@ export function registerExplore(context: vscode.ExtensionContext, runtime: Works
 			}
 		}
 
-		// (it ends differently, but no line says so: a throw from where tsval didn't note, say)
 		if (byFile.size === 0) {
 			add(program.path, new vscode.Diagnostic(new vscode.Range(0, 0, 0, Number.MAX_SAFE_INTEGER), `How this file ends depends on the order of events: ${explored.outcomes.map((outcome, index) => `${orderingsNamed([index])} ${outcome.crash === undefined
 				? `prints ${String(outcome.output.length)} line${outcome.output.length === 1
@@ -240,7 +218,6 @@ export function registerExplore(context: vscode.ExtensionContext, runtime: Works
 
 	context.subscriptions.push(
 		diagnostics,
-		// (what it found is its answer too: an agent's debug_explore runs this, and is shown what a person is)
 		vscode.commands.registerCommand("tsval.exploreOrderings", async (target?: vscode.Uri): Promise<Explored | { "error": string } | undefined> => {
 			const program = target instanceof vscode.Uri
 				? target
@@ -310,7 +287,6 @@ export function registerExplore(context: vscode.ExtensionContext, runtime: Works
 
 				const { exploring, at } = said;
 
-				// (each named by what it does on the line it's asked on, when it's one line's; and by its events)
 				return exploring.explored.outcomes.map((outcome, index) => {
 					const title = `Debug ordering ${String(index + 1)}${at === undefined
 						? ""
@@ -330,7 +306,6 @@ export function registerExplore(context: vscode.ExtensionContext, runtime: Works
 		}, {
 			"providedCodeActionKinds": [vscode.CodeActionKind.QuickFix]
 		}),
-		// (an edit to a file it ran: what was said of it may no longer be so)
 		vscode.workspace.onDidChangeTextDocument(({ document, contentChanges }) => {
 			if (contentChanges.length === 0) {
 				return;

@@ -1,8 +1,3 @@
-/**
- * A test file's tests as node-test.js tells them (`__editorTest`): each one's outcome, what it threw, a failed
- * assertion's sides, its time, the statements it ran — its program's, and those of the editor its page drove, when
- * that's counted (state's `windowReach`) — and the gated calls it made (its effects).
- */
 import type { CoverageEvent, Effect, TestReport } from "@brianjenkins94/editor-api";
 import type ts from "typescript";
 import type { Vm } from "./state";
@@ -11,26 +6,17 @@ import { held, readsStdin } from "./process";
 import { EDITOR_SOURCES } from "./runtime";
 import { post, state } from "./state";
 
-/** Each running test's coverage counts as it started, by its titles (JSON): what ran since is that test's. */
 export const testStarts = new Map<string, Map<ts.SourceFile, number[]>>();
 
-/** When each test started, by the host's clock (the program's runs on the deterministic loop's): its time. And the
- *  statement clock's reading then: its work. */
 const testClock = new Map<string, number>();
 const testStatements = new Map<string, number>();
 
-/** Each running test's effects so far (the gate's tally, gate.ts), by its titles: a suite's its tests' too, as its
- *  statements are. Tests run at once in one file would each take the others' too. */
 const testEffects = new Map<string, Map<string, Effect>>();
 
-/** Where an effect made now is tallied for the tests running. */
 export function testsEffects(): Map<string, Effect>[] {
 	return [...testEffects.values()];
 }
 
-/** node-test.js's `__editorTest`: a test started (`titles`), ended (and how: `outcome`, what it threw, and what a failed
- *  assertion compared, as JSON), or the file's tests are done (`titles` then the count that failed). Called from the
- *  program's code, with strings only. */
 export function testTold(kind: string, titles?: string, outcome?: string, error?: string, assertion?: string): void {
 	if (kind === "start" && titles !== undefined) {
 		testStarts.set(titles, new Map([
@@ -93,7 +79,6 @@ export function testTold(kind: string, titles?: string, outcome?: string, error?
 	}
 }
 
-/** The statements that ran since `started` (each file's counts then), in each of the program's files. */
 function ranSince(started: Map<ts.SourceFile, number[]>): TestReport["files"] {
 	return [
 		...state.current?.coverage ?? []
@@ -122,8 +107,6 @@ function ranSince(started: Map<ts.SourceFile, number[]>): TestReport["files"] {
 	});
 }
 
-/** What the run ran of the program's files, each with its text, as a run ends (the run contract's `coverage`): every statement
- *  that could run, with how often it did. Not what's installed: the program's own. */
 export function tellCoverage(): void {
 	const reports = [
 		...state.current?.coverage ?? []
@@ -141,7 +124,6 @@ export function tellCoverage(): void {
 				? undefined
 				: state.sumsOf.get(state.current), file),
 			"statements": entry.statements.map((node, index) => {
-			// (what anchors a statement with a body: its name or condition, whose span outlives an edit inside it)
 				const { name, expression } = node as ts.Node & { "name"?: ts.Node; "expression"?: ts.Node };
 				const head = "body" in node || "thenStatement" in node || "statement" in node
 					? name ?? expression
@@ -173,7 +155,6 @@ export function tellCoverage(): void {
 	}
 }
 
-/** A run's tests, none yet: its launch. */
 export function startTests(): void {
 	state.testsRan = [];
 	testStarts.clear();
@@ -182,16 +163,12 @@ export function startTests(): void {
 	state.testsDone = false;
 }
 
-/** A test file's tests all done, and nothing left that Node counts as keeping a process alive — no ref'd timer, server or
- *  stdin — only promises that nothing here will settle (a package's): it ends, as `node --test` does. (Before then a
- *  pending promise may be a request in flight, which the browser shows no handle for.) */
 export function testsOver(vm: Vm): boolean {
 	return state.testsDone && held.size === 0 && !readsStdin() && ![
 		...vm.loop?.timers.values() ?? []
 	].some((timer) => timer.ref);
 }
 
-/** The run's end: a test file's tests told, each with what it ran; `exitCode`, or 1 when one failed, as `node --test`. */
 export function tellTests(exitCode: number): number {
 	if (state.testsRan.length > 0) {
 		post({ "type": "tests", "tests": state.testsRan });

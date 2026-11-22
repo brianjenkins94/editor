@@ -1,27 +1,8 @@
-/**
- * Capability breakpoints — the DECOUPLED decision layer between the capability policy and a debugger. A debugger
- * that runs the program (tsval's stepping VM today; an almostnode "production" adapter later) calls this at its
- * host-call boundary — the same `beforeCall` seam the canary uses — to answer ONE question: does the policy
- * require a hard stop here? If so, the debugger pauses at that line (native VS Code debug UI); the user inspects,
- * steps (back, under tsval), and decides.
- *
- * Kept free of any debugger/vscode dependency (only `typescript` for the AST node shape + silo's policy layer,
- * `@brianjenkins94/util/silo/policy`) so it can be consumed from either the tsval debug worker or an almostnode adapter without coupling
- * to either — the point of building it standalone first.
- *
- * Classification is AST-based (callee name → capability, a fixed argument as the resource), NOT the canary's
- * tagged-stand-in trick: a debugger runs the program's REAL (or almostnode-shimmed) capabilities, not the canary's
- * mocks, so there are no tags to read — the call node is what we have. (Aliasing like `const f = fetch` isn't
- * caught here, unlike the canary; a later refinement can resolve it.)
- */
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { FS_ASYNC, FS_DESTINATION, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { effectiveDisposition, givenResult, isDangerous } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 
-/** A capability call the debugger (or the canary) reached: what it is, and the resource it targets (when a
- *  string). `argIndex` is which argument carried the resource, so a caller with the raw args + the call node can
- *  recover the observed value / static literal without re-deciding the capability. */
 export interface CapabilityHit {
 	"capability": string;
 	"resource": string;
@@ -32,18 +13,13 @@ export interface CapabilityHit {
 
 interface Matcher {
 	"capability": string;
-	/** Which argument carries the resource (URL / path / command). */
 	"arg": number;
 }
 
-/** Bare-identifier callees (`fetch(...)`) and the fido/http verb surface → net. */
 const IDENTIFIER_MATCHERS: Record<string, Matcher[]> = {
 	"fetch": [{ "capability": "net", "arg": 0 }]
 };
 
-/** Method callees (`fs.writeFile(...)`, `child_process.spawn(...)`, or a destructured `writeFile(...)`), keyed by
- *  the method/function name — the node fs surface (almostnode's own gate table, so the squiggles see every method the
- *  runtime gates; a copy or a rename by both its paths) + child_process. */
 const NAME_MATCHERS: Record<string, Matcher[]> = {
 	...Object.fromEntries(Object.entries({ ...FS_SYNC, ...FS_ASYNC }).map(([method, op]) => [method, [{ "capability": "fs:" + op, "arg": 0 }, ...FS_DESTINATION[method] === undefined ? [] : [{ "capability": "fs:" + FS_DESTINATION[method], "arg": 1 }]]])),
 	"spawn": [{ "capability": "exec", "arg": 0 }],
@@ -53,7 +29,6 @@ const NAME_MATCHERS: Record<string, Matcher[]> = {
 	"execFile": [{ "capability": "exec", "arg": 0 }]
 };
 
-/** Render a callee for display: `fetch` or `fs.writeFile` (`?` for a dynamic receiver). */
 export function renderCallee(callee: ts.Expression): string {
 	if (ts.isIdentifier(callee)) {
 		return callee.text;
@@ -66,9 +41,7 @@ export function renderCallee(callee: ts.Expression): string {
 	return "?";
 }
 
-/** Match a call's callee to its capability matchers (identifier or `.method`), or undefined. */
 function matchersFor(callee: ts.Expression): Matcher[] | undefined {
-	// (own entries only: a callee named `toString` isn't the table's prototype's)
 	const own = (table: Record<string, Matcher[]>, name: string): Matcher[] | undefined => (Object.hasOwn(table, name) ? table[name] : undefined);
 
 	if (ts.isIdentifier(callee)) {
@@ -80,9 +53,6 @@ function matchersFor(callee: ts.Expression): Matcher[] | undefined {
 	}
 }
 
-/** Classify a host call at runtime into its capability hits (with the evaluated resources) — one per path a copy or a
- *  rename reaches, else one — or none if it isn't a capability call. `args` are the arguments AS EVALUATED (what the
- *  debugger's beforeCall already has). */
 export function classifyCall(node: ts.CallExpression, args: readonly unknown[]): CapabilityHit[] {
 	return (matchersFor(node.expression) ?? []).map((matcher) => {
 		const resource = args[matcher.arg];
@@ -97,32 +67,15 @@ export function classifyCall(node: ts.CallExpression, args: readonly unknown[]):
 	});
 }
 
-/**
- * Does the policy require a hard stop at this capability hit? Break on an undecided dangerous call (`review`), so the
- * debugger pauses for every capability the user hasn't decided, firewall-style. A decided one passes: `allow` runs it,
- * `skip` goes past it, `deny` fails it (EACCES) — a *Deny always* doesn't ask again (and non-dangerous, undecided,
- * passes straight through).
- */
 export function shouldBreak(policy: Policy, hit: CapabilityHit): boolean {
-	// A call a rule gives the result of (RUNNING.md, *A call's result*) never happens: the debugger's stand-in returns it
-	// instead. (stops are armed only in runs someone is watching: `you`'s)
 	return effectiveDisposition(policy, hit.capability, hit.resource, hit.dangerous, { "trigger": "you" }) === "review" && givenResult(policy, { "trigger": "you", "capability": hit.capability, "resource": hit.resource }) === undefined;
 }
 
-/**
- * The 1-based source lines a debugger should pre-arm as capability breakpoints under `policy` — every capability
- * call the policy would NOT let pass. The decision is STATIC (the resource is the literal argument when there is
- * one, else empty → an undecided dangerous call still breaks), because a debugger arms breakpoints at line
- * granularity BEFORE the run; the concrete runtime resource is then visible in the Variables pane at the stop.
- * A debug worker adds these alongside the user's breakpoints, so a gated call hard-stops at its line with the
- * debugger's normal step / step-back.
- */
 export function capabilityBreakLines(sourceFile: ts.SourceFile, policy: Policy): number[] {
 	const lines = new Set<number>();
 
 	(function visit(node: ts.Node): void {
 		if (ts.isCallExpression(node)) {
-			// (no runtime args at arm time — resource comes from a literal below)
 			for (const hit of classifyCall(node, [])) {
 				const argNode = node.arguments[hit.argIndex];
 				const resource = argNode !== undefined && ts.isStringLiteralLike(argNode) ? argNode.text : "";

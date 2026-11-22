@@ -1,23 +1,12 @@
-/**
- * The editor's own performance, in the status bar (the metrics plane, ARCHITECTURE.md, *The metrics plane*): its memory,
- * how full its workspace is, the share of time in long frames, and spans that are failing, each read once a second
- * through the `editor.metrics.read` command (the bridge's: metrics-bridge.ts), so it uses nothing but VS Code's API.
- * What each did over the last two minutes is in its hover, as a sparkline: no view to open (the user, 2026-11-06: no
- * out-of-the-way panels).
- */
 import type { MetricsSample } from "@brianjenkins94/observability";
 import * as vscode from "vscode";
 
-/** Points kept per series: two minutes at one a second. */
 const KEEP = 120;
 
-/** How many points a hover's sparkline draws. */
 const DRAWN = 40;
 
-/** A sparkline's heights, lowest first (not the full block: a row of those reads as one bar). */
 const BARS = "▁▂▃▄▅▆▇";
 
-/** `source:name` → [t, value] points, oldest first. */
 type Series = Map<string, [number, number][]>;
 
 function formatMB(mb: number): string {
@@ -30,8 +19,6 @@ function formatMB(mb: number): string {
 		: 1)} MB`;
 }
 
-/** A series' last `DRAWN` values as a sparkline: from 0 to its highest, or (`fromLowest`) around its own range, at least a
- *  fifth of its highest, so one that barely moves draws flat across the middle rather than its jitter as cliffs. */
 function sparkline(points: [number, number][] | undefined, fromLowest = false): string {
 	const values = (points ?? []).slice(-DRAWN).map(([, value]) => value);
 
@@ -72,7 +59,6 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 	}
 
 	const latest = (key: string): number | undefined => series.get(key)?.at(-1)?.[1];
-	/** A hover: its title, the sparkline of `key` over the last minutes, and any more lines. */
 	const hover = (title: string, key: string, lines: string[] = [], fromLowest = false): vscode.MarkdownString => {
 		const markdown = new vscode.MarkdownString(`**${title}**\n\n`);
 
@@ -118,7 +104,6 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 			: "shell:longFrames", [`workbench: ${workbench.toFixed(0)}%`, `shell (the preview windows): ${shell.toFixed(0)}%`]);
 		longFrames.show();
 
-		// Failing operations — a CDN fetch, a type acquisition, an LSP request — show here only while they fail.
 		const failing = [
 			...series.keys()
 		].filter((key) => key.startsWith("root:spans.") && key.endsWith(".errors")).map((key) => [
@@ -145,7 +130,6 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 			return; // nothing serves it (yet)
 		}
 
-		// A series with no reading in the window has gone (a span name idles out of the span metrics).
 		for (const [key, points] of series) {
 			if ((points.at(-1)?.[0] ?? 0) < Date.now() - KEEP * 1000) {
 				series.delete(key);

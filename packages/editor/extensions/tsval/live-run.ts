@@ -1,32 +1,14 @@
-/**
- * Live runs (RUNTIME-EVIDENCE.md, *Live runs*): the file you're editing runs again on each save, and on an interval once it's
- * been edited while its text differs from what its last run ran, so the Margin stays current. It's a debug session like any
- * other, but quiet (no toolbar, status bar, view or console, stopping at nothing, not in the running list) and harmless:
- * nobody is watching, so it asks nothing (the debug worker's `live`). An edit stops the one going. None starts while a run of
- * yours of the same file is going, since that's what its Margin shows, and starting one of yours stops a live one. Off with
- * `run.liveRuns`; the interval is `run.liveRuns.interval` (seconds, 0: saves only).
- *
- * VS Code binds F5 to starting only while nothing's debugging, and a live run counts: pressed just after a save, F5 would do
- * nothing. So while only live runs are going, `run.liveGoing` binds it (this extension's package.json). And it opens the Debug
- * Console on a page's first session, which any session that never opens it would use up — a live run, a test file run from
- * Features and tests, a terminal's `node` — and the run of yours after them would end unseen, the console opened later showing
- * the first of the ended ones: the first of yours is told to open it.
- */
 import { appRootOf } from "@brianjenkins94/editor-api/lifecycle";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 import { runOf } from "./run-file";
 
-/** Saves this close together are one run: the last. */
 const SAVE_DEBOUNCE_MS = 250;
 
-/** A run of the same text started this recently (the interval's, or the save before) isn't started again by a save. */
 const SAME_TEXT_MS = 1000;
 
-/** The ended sessions remembered, by id. */
 const ENDED_KEPT = 200;
 
-/** What a live run runs: a JavaScript or TypeScript file (not one of declarations). */
 const PROGRAM = /(?<!\.d)\.[cm]?[jt]sx?$/u;
 
 const log = logger({ "source": "live-run" });
@@ -34,31 +16,22 @@ const log = logger({ "source": "live-run" });
 const readText = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 const enabled = (): boolean => vscode.workspace.getConfiguration("run").get<boolean>("liveRuns", true);
 const isLive = (session: vscode.DebugSession): boolean => session.configuration["__live"] === true;
-/** A session that never opens the Debug Console (above). */
 const isQuiet = (session: vscode.DebugSession): boolean => session.configuration.internalConsoleOptions === "neverOpen";
 const isProgram = (document: vscode.TextDocument): boolean => document.uri.scheme === "file" && PROGRAM.test(document.uri.path);
 
 export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	let saved: ReturnType<typeof setTimeout> | undefined;
 	let ticking: ReturnType<typeof setInterval> | undefined;
-	/** The live run going, by its file. */
 	const running = new Map<string, vscode.DebugSession>();
-	/** The files a live run is being started for, until its session starts. */
 	const starting = new Set<string>();
-	/** What each file's last live run ran, and when it started. */
 	const last = new Map<string, { "text": string; "at": number }>();
-	/** The files edited since their last live run: what the interval runs (opening a file doesn't run it). */
 	const edited = new Set<string>();
-	/** Every debug session going, by its id. An ended one is known by its id too, as a short run on a busy host can be told
-	 *  ended before it's told started, and kept as going it would hold up that file's live runs for good. */
 	const sessions = new Map<string, vscode.DebugSession>();
 	const ended = new Set<string>();
 	const programOf = (session: vscode.DebugSession): string => String(session.configuration["program"]);
-	/** Whether a quiet session has started and one of yours hasn't, for the Debug Console (above). */
 	let quietFirst = false;
 	let yoursStarted = false;
 	let told = false;
-	/** Whether only live runs are going, for F5 (above). */
 	const tell = (): void => {
 		const going = running.size + starting.size > 0 && [...sessions.values()].every(isLive);
 
@@ -67,7 +40,6 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			void vscode.commands.executeCommand("setContext", "run.liveGoing", going);
 		}
 	};
-	/** A run of yours of `path` going: anything but a live run. */
 	const yours = (path: string): boolean => [...sessions.values()].some((session) => !isLive(session) && programOf(session) === path);
 
 	const stop = (path: string): void => {
@@ -82,7 +54,6 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	const start = async (document: vscode.TextDocument, why: string): Promise<void> => {
 		const path = document.uri.path;
 
-		// (an app's file runs in its page, not here: RUNNING.md, *Apps*)
 		if (!enabled() || yours(path) || running.has(path) || starting.has(path) || await appRootOf(path, readText) !== undefined) {
 			return;
 		}
@@ -98,7 +69,6 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 		});
 	};
 
-	/** Every `run.liveRuns.interval` seconds: the file in front of you, if it's changed since its last run. */
 	const tick = (): void => {
 		clearInterval(ticking);
 		ticking = undefined;
@@ -130,7 +100,6 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			sessions.set(session.id, session);
 
 			if (isLive(session)) {
-				// (one of yours started while this one was starting: yours is what the Margin and the console show)
 				if (yours(programOf(session))) {
 					void vscode.debug.stopDebugging(session);
 				} else {
@@ -153,7 +122,6 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			sessions.delete(session.id);
 			ended.add(session.id);
 
-			// (the latest ended ones are enough: a start told late is told just after its end)
 			if (ended.size > ENDED_KEPT) {
 				ended.delete(ended.values().next().value as string);
 			}
@@ -164,18 +132,14 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 
 			tell();
 		}),
-		// The edit makes the run going stale. The next save, or the interval, runs it again.
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			const { document } = event;
 
-			// (yours: typed, so not yet saved — not the file reloaded as it changed on disk, a checkout's: one ran a live run
-			// beside rules.spec's F5 and took its Debug Console)
 			if (event.contentChanges.length > 0 && document.isDirty && isProgram(document) && vscode.window.activeTextEditor?.document === document) {
 				edited.add(document.uri.path);
 				stop(document.uri.path);
 			}
 		}),
-		// A save runs it: the last of a burst of saves, unless that text started a run just now.
 		vscode.workspace.onDidSaveTextDocument((document) => {
 			if (!isProgram(document)) {
 				return;
@@ -191,7 +155,6 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 				}
 			}, SAVE_DEBOUNCE_MS);
 		}),
-		// Run a file again now, whatever ran before (a rule just saved for its calls, say).
 		vscode.commands.registerCommand("run.live.again", async (value: unknown) => {
 			const uri = value instanceof vscode.Uri ? value.toString() : value;
 			const document = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);

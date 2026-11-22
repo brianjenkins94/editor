@@ -1,15 +1,8 @@
-/**
- * What the feature ledger says about the workspace, from its files as read (ledger.ts reads them and keeps them; this has
- * no editor of its own, so its tests give it files): what's been decided about a file or a name (`history.decisions`),
- * and `silo check`'s drift, each problem where it goes — on the ledger at the entry it's about (a dead end the ledger
- * doesn't name, at its top), or on the file no feature owns, or two do.
- */
 import type { Feature } from "@brianjenkins94/util/silo/features";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
 import { declaredFeatures, drift, isOwnedCode, parseLedger } from "@brianjenkins94/util/silo/ledger";
 
-/** The doc lines `history.decisions` lists, at most. */
 const DOC_LINES = 60;
 
 export interface Decisions {
@@ -19,9 +12,6 @@ export interface Decisions {
 	"counts": { "docs": number };
 }
 
-/** What's been decided about `target` (a path, or a file's name; or a name: an identifier, a feature, a way in's id): the
- *  ledger's entries naming it (or whose paths or tests hold the file, or ways in name it), and each line of the docs naming it,
- *  under its heading. Nothing asked, nothing answered. */
 export function decisionsFor(target: unknown, ledgerText: string | undefined, texts: ReadonlyMap<string, string>): Decisions | undefined {
 	if (typeof target !== "string" || target.trim() === "") {
 		return undefined;
@@ -66,7 +56,6 @@ export function decisionsFor(target: unknown, ledgerText: string | undefined, te
 	};
 }
 
-/** A drift problem, where it goes: the file (from the root), the line (0-based) and how much of it. */
 export interface Placed {
 	"path": string;
 	"line": number;
@@ -75,8 +64,6 @@ export interface Placed {
 	"message": string;
 }
 
-/** `silo check`'s drift over the workspace — every file there is (`files`), the docs' and code's text (`texts`), its ways
- *  in now (`features`) — each problem placed. */
 export function driftOf(ledgerText: string | undefined, files: ReadonlySet<string>, texts: ReadonlyMap<string, string>, features: ReadonlyMap<string, Feature>, today: string): Placed[] {
 	const ledger = parseLedger(ledgerText);
 	const found = drift(ledger, {
@@ -105,7 +92,6 @@ export function driftOf(ledgerText: string | undefined, files: ReadonlySet<strin
 	return found.map((each) => {
 		const message = `${each.check}: ${each.message} — change the code: ${each.code}; or the decision: ${each.decision}`;
 
-		// (a file no feature owns, or two do: on that file — its path the message's start)
 		if (each.check === "unowned file" || each.check === "owned twice") {
 			return {
 				"path": each.message.slice(0, each.message.indexOf(" is owned")),
@@ -116,7 +102,6 @@ export function driftOf(ledgerText: string | undefined, files: ReadonlySet<strin
 			};
 		}
 
-		// (at its entry's line in the ledger; a dead end the ledger doesn't name, at the top)
 		const line = Math.max(0, each.entry === undefined
 			? -1
 			: lines.findIndex((text) => text.includes(JSON.stringify(each.entry))));

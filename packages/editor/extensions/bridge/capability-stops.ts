@@ -1,14 +1,3 @@
-/**
- * Capability stops, whichever debugger's (the run contract, @brianjenkins94/editor-api): a run stopped at a gated call
- * asks on its line (`ask`), and the answer — `editor.capability.decide` (ARCHITECTURE.md, *Extension points* 3): a test
- * run's approval, runs_tests' — goes back to the debugger as a `decide` request.
- *
- * What an answer means is the editor's, not the debugger's: Allow, Skip or Deny for this call, this run (every call of
- * its capability, until the run ends — a rule kept here, never written) or always (my policy override, as the preview's
- * prompt writes it); a rule made in the margin's rule editor (saved in my policy, deciding the call as it does); or a
- * result given in the call's place. The debugger is told the verdict, and — when the answer changed it — the policy in
- * effect from now on. Every debugger is given the policy as it launches (`__policy`, debug-events.ts).
- */
 import type { AskEvent, CapabilityChoice, DecideRequest } from "@brianjenkins94/editor-api";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import { loadEffectivePolicy, persistOverride, replaceRule } from "@brianjenkins94/editor-api/policy";
@@ -17,15 +6,10 @@ import * as vscode from "vscode";
 
 const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always", "rule", "give-once"] satisfies CapabilityChoice[]);
 
-/** The question each session is stopped at, by its id. */
 const asks = new Map<string, AskEvent>();
-/** What each session was allowed, skipped or denied for the rest of its run (… this run), ahead of every other rule. */
 const runRules = new Map<string, Rule[]>();
-/** The call each session was just told to make, skip or fail (… once): for the editor to decide that call by, when it
- *  makes it (runtime-fs.ts) — once. */
 const onceFor = new Map<string, { "capability": string; "resource": string; "verdict": "allow" | "skip" | "deny" }>();
 
-/** What `session` was told for the call of `capability` on `resource` it's making now, if it was told just this once. */
 export function takeOnce(session: string, capability: string, resource: string): "allow" | "skip" | "deny" | undefined {
 	const once = onceFor.get(session);
 
@@ -38,8 +22,6 @@ export function takeOnce(session: string, capability: string, resource: string):
 	return once.verdict;
 }
 
-/** The policy a run decides its calls by: base `policy.json` and my overrides, as the enforcer reads them — and, for a
- *  session already running, what it was told for the rest of its run. */
 export async function policyFor(session?: string): Promise<Policy> {
 	let policy: Policy;
 
@@ -54,19 +36,15 @@ export async function policyFor(session?: string): Promise<Policy> {
 	return kept.length === 0 ? policy : { ...policy, "rules": [...kept, ...policy.rules] };
 }
 
-/** A session asking (its `ask` event): the question it's stopped at, to decide by. */
 export function asked(session: vscode.DebugSession, ask: AskEvent): void {
 	asks.set(session.id, ask);
 }
 
-/** The question answered — or gone (the run resumed some other way, or ended). */
 function answered(session: string): void {
 	asks.delete(session);
 }
 
-/** The call `session` is stopped at (`ask`), decided by `rule`: the rule kept, and what it decides for the debugger. */
 async function ruleRequest(session: vscode.DebugSession, ask: AskEvent, rule?: Rule): Promise<DecideRequest> {
-	// The call as a rule sees it: an unknown resource is "".
 	const subject = { "capability": ask.capability, "resource": ask.resolved ? ask.resource : "" };
 	const decision = rule?.then?.find(({ "action_id": actionId }) => ["allow", "deny", "skip", "ask"].includes(actionId))?.action_id;
 
@@ -74,7 +52,6 @@ async function ruleRequest(session: vscode.DebugSession, ask: AskEvent, rule?: R
 		throw new Error(rule === undefined ? "no rule" : problemOf(rule) ?? "the rule doesn't cover this call");
 	}
 
-	// A rule giving the call's result decides it too: the call isn't made, the debugger returns what it gives.
 	const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
 
 	if (decision !== "allow" && decision !== "deny" && decision !== "skip" && !gives) {
@@ -86,7 +63,6 @@ async function ruleRequest(session: vscode.DebugSession, ask: AskEvent, rule?: R
 	return { "verdict": !gives && (decision === "deny" || decision === "skip") ? decision : "allow", "policy": await policyFor(session.id) };
 }
 
-/** What `choice` means for the call `session` is stopped at, told the debugger (`decide`), which continues. */
 async function decide(session: vscode.DebugSession, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<void> {
 	const ask = asks.get(session.id);
 
@@ -111,8 +87,6 @@ async function decide(session: vscode.DebugSession, choice: CapabilityChoice, ru
 	} else if (choice === "give-once") {
 		request = { "verdict": "give", "value": give ?? null };
 	} else if (choice === "allow-run" || choice === "skip-run" || choice === "deny-run") {
-		// Every call of the capability, until the run ends — whatever it reaches (a loop's calls reach a different one
-		// each time round) — allowed, skipped or denied, this one with them.
 		const action = choice.slice(0, choice.indexOf("-")) as "allow" | "skip" | "deny";
 
 		runRules.set(session.id, [...runRules.get(session.id) ?? [], { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }] }, "then": [{ "action_id": action }] }]);
@@ -122,15 +96,12 @@ async function decide(session: vscode.DebugSession, choice: CapabilityChoice, ru
 
 		request = { "verdict": disposition, "policy": await always(disposition) };
 	} else {
-		// This call only: allowed, skipped (the run goes on as if it did nothing), or denied (it fails, as refused).
 		const verdict = choice === "allow-once" ? "allow" : choice;
 
 		onceFor.set(session.id, { "capability": ask.capability, "resource": ask.resource, "verdict": verdict });
 		request = { "verdict": verdict };
 	}
 
-	// (how it was decided, for its run's record: an answer at the call is an exception to the policy — a rule made here,
-	// or "always", is in the policy now; this run's, once)
 	let decided: NonNullable<DecideRequest["decided"]> = request.verdict === "allow" || request.verdict === "give" ? "once" : "refused";
 
 	if (request.verdict === "allow" && (choice === "allow-always" || choice === "rule")) {
@@ -138,18 +109,13 @@ async function decide(session: vscode.DebugSession, choice: CapabilityChoice, ru
 	}
 
 	await session.customRequest("decide", { ...request, "decided": decided });
-	// (answered, the run goes on — a debugger in another extension host is seen by no tracker resuming)
 	answered(session.id);
 }
 
-/** Every session's capability stops: answered by `editor.capability.decide`, and cleared as the session resumes or
- *  ends. */
 export function registerCapabilityStops(context: vscode.ExtensionContext): void {
-	/** Every session running, by its id. */
 	const running = new Map<string, vscode.DebugSession>();
 
 	context.subscriptions.push(
-		// A session's stop answered (ARCHITECTURE.md, *Extension points* 3) — answered itself once it's told.
 		vscode.commands.registerCommand("editor.capability.decide", async (id: unknown, choice: unknown, rule?: Rule, give?: unknown) => {
 			const session = typeof id === "string" ? running.get(id) : undefined;
 
@@ -162,7 +128,6 @@ export function registerCapabilityStops(context: vscode.ExtensionContext): void 
 		vscode.debug.onDidStartDebugSession((session) => {
 			running.set(session.id, session);
 		}),
-		// Resumed — by an answer, or VS Code's toolbar — the question's been answered.
 		vscode.debug.registerDebugAdapterTrackerFactory("*", {
 			"createDebugAdapterTracker": (session) => ({
 				"onDidSendMessage": (message: { "type"?: string; "event"?: string }) => {

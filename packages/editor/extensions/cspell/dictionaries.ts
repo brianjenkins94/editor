@@ -1,17 +1,7 @@
-/**
- * The cspell dictionaries the editor loads: cspell's own defaults for code (cspell-bundled-dicts' default config) — English,
- * company and software terms everywhere; TypeScript, Node and npm words in code and JSON; HTML and CSS words where those
- * are written. Each is a file of its @cspell package, served beside the language server (build.ts `cspellDict`), fetched
- * into its file system (server-host.ts) and enabled for its languages (server-node.ts). A repository's own words
- * (a cspell config's) aren't read: the server checks with these alone.
- */
 export interface Dictionary {
-	/** cspell's name for it. */
 	"name": string;
-	/** The package it's in, and its file there. */
 	"package": string;
 	"file": string;
-	/** The languages it's for (VS Code's ids); none, every one. */
 	"languages"?: string[];
 }
 
@@ -32,7 +22,6 @@ export const DICTIONARIES: Dictionary[] = [
 	{ "name": "css", "package": "@cspell/dict-css", "file": "dict/css.txt", "languages": ["css", "less", "scss", "html", "javascriptreact", "typescriptreact"] }
 ];
 
-/** Its file's name where it's served and in the server's file system: its name, with its file's extension. */
 export function servedName(dictionary: Dictionary): string {
 	const base = dictionary.file.slice(dictionary.file.lastIndexOf("/") + 1);
 

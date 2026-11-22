@@ -1,13 +1,3 @@
-/**
- * Capabilities: what a program's calls can reach, shown in the code (ARCHITECTURE.md at the `full-editor` tag, *Capabilities*).
- * The tsserver plugin (ts-plugin.js) answers `_capabilities.findings`, from the tree the server holds and a sandboxed
- * background run of the file (tsval's canary.ts), and findings.ts shows them as this extension's diagnostics.
- *
- * A call's decision is on the call (decisions.ts): the diagnostic says how it's decided and by what, and its lightbulb
- * changes that. There's no view of them to go and look at (the user, 2026-11-06). And the dependency baseline: what each
- * dependency's own code can do, kept as the project's dependencies and code change (baseline.ts), with what goes beyond it
- * said where it is (growth.ts).
- */
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
 import * as vscode from "vscode";
 import { keepBaseline } from "./baseline";

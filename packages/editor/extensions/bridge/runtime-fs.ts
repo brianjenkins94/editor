@@ -1,15 +1,3 @@
-/**
- * The runtime's files (ARCHITECTURE.md, *Extension points* 2, *The runtime's files, through core*): a debugger's worker reads and
- * writes the workspace synchronously through its mailbox (editor-api's `connectRuntime`), and each call is answered
- * here — an open editor's unsaved text for a read, a write as the workspace's (editors, Source Control and watchers see
- * it). A call of the program's (not the debugger's own `load`) is decided as tsval decides its own: by the session's
- * policy (`policyFor`, its "this run" answers included, and a call it was just told to make once), and a live run makes
- * nothing but a read the policy allows. What a call did is kept among the run's effects here (editor-api/effects's recordEffect)
- * — the debugger doesn't tell it.
- *
- * The gate keeps the program to the policy, whichever debugger runs it; the debugger's extension is trusted as any
- * extension is (it has `vscode.workspace.fs`).
- */
 import type { Effect } from "@brianjenkins94/editor-api";
 import type { RuntimeDecision } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
@@ -25,7 +13,6 @@ import { countCall } from "../../shared/fs-boundaries";
 const READS = new Set(["readFile", "stat", "readdir"]);
 const WRITES = new Set(["writeFile", "mkdir", "rm", "rename"]);
 
-/** VS Code's file errors, as node names them. */
 const CODES: Record<string, string> = { "FileNotFound": "ENOENT", "FileExists": "EEXIST", "FileIsADirectory": "EISDIR", "FileNotADirectory": "ENOTDIR", "NoPermissions": "EACCES", "Unavailable": "EAGAIN" };
 
 interface Answer { "meta": Record<string, unknown>; "payload"?: Uint8Array }
@@ -34,7 +21,6 @@ function failure(message: string, code: string): Error {
 	return Object.assign(new Error(message), { "code": code });
 }
 
-/** `path`, normalized — if it's in the workspace. */
 function workspacePath(path: unknown): string | undefined {
 	if (typeof path !== "string" || !path.startsWith("/")) {
 		return undefined;
@@ -55,7 +41,6 @@ function workspacePath(path: unknown): string | undefined {
 	return normal === "/workspace" || normal.startsWith("/workspace/") ? normal : undefined;
 }
 
-/** The call, made (`to`: where a rename goes). */
 async function perform(op: string, path: string, payload: Uint8Array, to?: string): Promise<Answer> {
 	const uri = vscode.Uri.file(path);
 
@@ -74,7 +59,6 @@ async function perform(op: string, path: string, payload: Uint8Array, to?: strin
 			}
 
 			case "readdir": {
-				// (each entry's kind with its name, as VS Code lists them: a typed listing is one call a folder, not a stat an entry)
 				const listed = await vscode.workspace.fs.readDirectory(uri);
 
 				return { "meta": { "entries": listed.map(([name]) => name), "types": listed.map(([, type]) => ((type & vscode.FileType.Directory) === 0 ? "file" : "directory")) } };
@@ -107,20 +91,15 @@ async function perform(op: string, path: string, payload: Uint8Array, to?: strin
 	}
 }
 
-/** What a skipped call answers: as if there were nothing there, and nothing done. */
 function skipped(op: string): Answer {
 	return { "meta": op === "readdir" ? { "entries": [] } : {}, ...op === "readFile" ? { "payload": new Uint8Array() } : {} };
 }
 
-/** Answer each debugger worker's file calls, once it hands over its mailbox (`runtime.fs.attach`). */
 export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): void {
 	const rpc = createRpcClient(hub);
 	const sessions = new Map<string, vscode.DebugSession>();
-	/** Each session's mailboxes, stopped as it ends. */
 	const stops = new Map<string, (() => void)[]>();
 
-	/** How the program's call of `capability` on `path` goes, and how that was decided: as the policy decides, unless the
-	 *  person answered for this call at its stop (an exception to the policy). */
 	const decide = async (session: string | undefined, capability: string, path: string): Promise<{ "verdict": "allow" | "skip" | "deny"; "decided": NonNullable<Effect["decided"]> }> => {
 		const once = session === undefined ? undefined : takeOnce(session, capability, path);
 
@@ -131,7 +110,6 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): v
 		return { "verdict": verdictOf(await policyFor(session), capability, path, session !== undefined && sessions.get(session)?.configuration["__live"] === true), "decided": "policy" };
 	};
 
-	/** A call of the program's in `session`, among its run's effects — how it went, and how it was decided. */
 	const counted = (session: string | undefined, capability: string, path: string, how: Effect["how"], decided?: Effect["decided"]): Effect["how"] => {
 		const runId = session === undefined ? undefined : sessions.get(session)?.configuration["__runId"];
 
@@ -145,8 +123,6 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): v
 	const answer = async (session: string | undefined, meta: Record<string, unknown>, payload: Uint8Array): Promise<Answer & { "how"?: Effect["how"] }> => {
 		const op = meta["op"] as string;
 
-		// A package's call beyond its baseline, decided at the call (the run contract's `decide`): as a preview's are, for the
-		// run the session is — the worker counts it, as that package's, with how it was decided.
 		if (op === "decide") {
 			const call = (meta["call"] ?? {}) as RuntimeDecision;
 			const runId = session === undefined ? undefined : sessions.get(session)?.configuration["__runId"];
@@ -154,7 +130,6 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): v
 			return { "meta": await decideCapabilityAs({ "kind": call.kind, ...call.method === undefined ? {} : { "method": call.method }, ...call.op === undefined ? {} : { "op": call.op }, "args": call.args, "package": call.package, ...call.why === undefined ? {} : { "why": call.why }, ...typeof runId === "string" ? { "runId": runId } : {} }) as unknown as Record<string, unknown> };
 		}
 
-		// A package the debugger's require found nothing of: its tarball, fetched by the workbench (tarballs.ts).
 		if (op === "tarball") {
 			return { "meta": {}, "payload": await rpc.request("packages.tarball", { "name": meta["name"], "version": meta["version"] }, { "timeoutMs": 300_000, "waitForResponderMs": 30_000 }).catch((error: unknown) => {
 				throw failure(`ENOENT: ${String(meta["name"])}@${String(meta["version"])}'s tarball: ${error instanceof Error ? error.message : String(error)}`, "ENOENT");
@@ -167,24 +142,20 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): v
 			throw failure(`unknown call "${op}"`, "EINVAL");
 		}
 
-		// (a rename's both ends, each in the workspace)
 		const to = op === "rename" ? workspacePath(meta["to"]) : undefined;
 
 		if (path === undefined || (op === "rename" && to === undefined)) {
 			throw failure(`EACCES: ${(path === undefined ? meta["path"] : meta["to"]) as string} isn't in the workspace`, "EACCES");
 		}
 
-		// The debugger's own: the program and what it imports, read.
 		if (meta["load"] === true && READS.has(op)) {
 			return perform(op, path, payload);
 		}
 
 		const capability = READS.has(op) ? "fs:read" : "fs:write";
-		// Each path it reaches decided (a rename: both, refused if either is) — and counted.
 		const paths = to === undefined ? [path] : [path, to];
 		const decisions = await Promise.all(paths.map(async (each) => decide(session, capability, each)));
 		const verdicts = decisions.map((each) => each.verdict);
-		// (an answer at the stop, when there was one: the exception on record)
 		const decided = decisions.find((each) => each.decided !== "policy")?.decided ?? "policy";
 		let verdict: "deny" | "skip" | "allow" = "allow";
 
@@ -206,7 +177,6 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): v
 			throw failure(`EACCES: permission denied — ${capability} ${paths.join(" → ")} isn't allowed (the policy decides it, and it wasn't asked)`, "EACCES");
 		}
 
-		// (made — a call that then fails, as node's would, was made all the same)
 		const how = count("made");
 
 		return { ...await perform(op, path, payload, to), "how": how };
@@ -230,12 +200,7 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub): v
 				throw new TypeError("runtime.fs.attach: a mailbox (a SharedArrayBuffer)");
 			}
 
-			// The session its link was made for: the extension named it to `connect` — never the worker's word.
 			const bound = from === undefined ? undefined : runtimeSession(from);
-			// Each call counted, not spanned: a debug run's or a linter's file calls are thousands a second (CLAUDE.md, *Spans*,
-			// hot paths) — by operation and by the worker's link (`from`: eslint, a debugger's, by its kind), with its path and bytes, as the
-			// metrics plane's `fs` (fs-boundaries.ts); a failed one apart, as `<op>-failed`.
-			// (by its kind — `eslint`, not `eslint#3488b734`: a worker started afresh is the same caller)
 			const who = from?.split("#")[0] ?? "runtime";
 			const stop = answerMailbox(mailbox, async (meta, payload) => {
 				const op = typeof meta["op"] === "string" ? meta["op"] : "unknown";

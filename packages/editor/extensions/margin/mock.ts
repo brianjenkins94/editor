@@ -1,8 +1,3 @@
-/**
- * Mock a value (RUNNING.md, *Rules*): give the program a different value from the lightbulb, on the line it's about. A variable
- * now (at a stop, as code could: not a const), or on every run, by a rule placed on its line; `process.argv` on every run, by a
- * rule about the program. Rules, so they show (placed.ts) and can be taken out, rather than a hidden setting.
- */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
 import { loadPolicyFiles, replaceRule } from "@brianjenkins94/editor-api/policy";
@@ -14,7 +9,6 @@ import { valueNamed } from "./values";
 
 const LANGUAGES = ["typescript", "typescriptreact", "javascript", "javascriptreact"];
 
-/** What's typed, read as JSON if it is, else as text. */
 function valueOf(typed: string): unknown {
 	try {
 		return JSON.parse(typed) as unknown;
@@ -23,15 +17,12 @@ function valueOf(typed: string): unknown {
 	}
 }
 
-/** A command line's arguments: split on spaces, a quoted one kept whole. */
 export function argumentsOf(line: string): string[] {
 	return [...line.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/gu)].map((match) => match[1] ?? match[2] ?? match[3]);
 }
 
-/** The variables `line`'s text declares. */
 const declaredIn = (text: string): string[] => [...text.matchAll(/\b(?:const|let|var)\s+([\p{ID_Start}$_][\p{ID_Continue}$]*)/gu)].map((match) => match[1]);
 
-/** The variables on `line` of `document` someone could mean: what it declares, and what the Margin has a value of there. */
 function variablesOn(document: vscode.TextDocument, line: number, word: string | undefined): string[] {
 	const named = word !== undefined && valueNamed(document.uri.toString(), line, word) ? [word] : [];
 
@@ -43,7 +34,6 @@ export function installMock(context: vscode.ExtensionContext, log?: ObservedExte
 	const ask = async (title: string, value?: string): Promise<string | undefined> => vscode.window.showInputBox({ "title": title, "prompt": "JSON, or text", ...value === undefined ? {} : { "value": value } });
 
 	context.subscriptions.push(
-		// Now, at the stop: the session's own Set Value, as the Variables view's.
 		vscode.commands.registerCommand("margin.setValue", async (name: string) => {
 			const session = vscode.debug.activeDebugSession;
 			const typed = session === undefined ? undefined : await ask(`Set ${name} now`);

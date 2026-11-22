@@ -1,114 +1,57 @@
-/**
- * The tsval debugger's adapter ⇄ worker protocol, over the pod hub. Each session has two subjects: control goes DOWN
- * (`debug.session.<id>.control`, adapter → worker) and events come UP (`debug.session.<id>.event`, worker → adapter),
- * so several sessions share the pod hub without crossing. A control message that starts work carries the adapter
- * action's trace context in the hub envelope, so the worker's step continues that trace.
- *
- * The one thing that isn't a message: resuming from a breakpoint inside a host-invoked guest call (a server's handler,
- * a library's callback).
- * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
- * launch.
- */
 import type { CoverageEvent, Effect, LiveBatch, TestReport, RulePlace } from "@brianjenkins94/editor-api";
 import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 
-// The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
 export type { RunEnd } from "@brianjenkins94/editor-api";
 
-/** What the adapter posts its worker: first its link into the editor's runtime (editor-api's workspace runtime: its
- *  servers answer the preview through it, its log and spans are the editor's), then control messages — each with the
- *  adapter action's trace, which the work it starts continues. The worker posts back `WorkerEvent`s. */
 export type ToWorker =
 	| { "kind": "runtime"; "port": MessagePort }
 	| { "kind": "control"; "control": Control; "trace"?: { "traceId": string; "parentSpanId": string } };
 
 export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 
-/** Where a program threw: its line and range — in `file`, when that's another of its files than the entry. */
-/** How a run ended short: an uncaught error where it was thrown. */
 export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string; "stopped"?: true }
 
-/** Adapter → worker. */
 export type Control =
 	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "places"?: Record<string, RulePlace[]>; "live"?: boolean; "recorded"?: Record<string, unknown>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay }
-	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
 	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
-	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
-	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
-	 *  "Allow always", is the policy now in effect — what stops from here on; `give`, the result the call returns instead
-	 *  of being made (a rule's *give result*, just this once). */
 	| { "type": "decide"; "deny"?: boolean; "skip"?: boolean; "policy"?: Policy; "give"?: unknown; "decided"?: "once" | "always" | "refused" }
-	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
 	| { "type": "setValue"; "name": string; "value": string }
-	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
 	| { "type": "pace"; "pace": "real" | "fast" }
-	/** Input for the program's process.stdin (typed in the Debug Console). */
-	/** The program's input — or (`end`) its end, as a terminal's Ctrl-D. */
 	| { "type": "stdin"; "data": string; "end"?: boolean }
 	| { "type": StepAction | "disconnect" };
 
-/** Where tsval's event loop starts (its clock, its random seed) and the choices to make. */
 export interface LoopStart { "now": number; "seed": number; "schedule"?: number[] }
 
-/** A line the program printed, exploring: the text, and where the call that printed it is (its file, its 1-based line). */
 export interface Printed { "text": string; "file": string; "line": number }
 
-/** One way a run of the program can end, from exploring its orderings: what it printed and where, where it threw if it did,
- *  a schedule that gets there (to debug it), the events chosen along it, and how many runs ended this way. */
 export interface Ordering { "output": Printed[]; "crash"?: { "message": string; "file"?: string; "line"?: number }; "schedule": number[]; "path": string[]; "runs": number }
 
-/** What exploring a program's orderings found: how many runs, whether every ordering was run, and the distinct outcomes. */
 export interface Explored { "runs": number; "complete": boolean; "outcomes": Ordering[]; "eventLoop": LoopStart }
 
-/** A rule placed in the code (RUNNING.md, *A rule placed in the code*), found in the text that runs: the 1-based line
- *  its statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
- *  matches there. */
 export interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
 
-/** A stop, complete enough that the adapter answers stackTrace/scopes/variables with no round-trip. */
 export interface Snapshot {
-	/** `file`: the program file the frame is in (the entry when absent); `code`: its line's text. */
 	"frames": { "id": number; "name": string; "line": number; "column": number; "at"?: [number, number]; "file"?: string; "code"?: string }[];
 	"scopes": Record<number, { "name": string; "variablesReference": number; "expensive": boolean }[]>;
 	"variables": Record<number, Variable[]>;
-	/** True when this stop is an earlier point in history (a time-travel view), for the stop reason. */
 	"traveled"?: boolean;
 }
 
-/** What a capability stop asks (RUNTIME-EVIDENCE.md, *Capability decisions, on the line*): the gated call on the line it stopped at — its capability,
- *  its callee as written, and the resource it would reach, from the run's own values where they're known by then (a
- *  literal, a variable's value), else the argument as written. `line` is 0-based. */
-/** `file`: the program file the call is in, with its text (`source`), when it isn't the entry. */
 export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean; "file"?: string; "source"?: string }
 
-/** Worker → adapter. */
 export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean; "ask"?: CapabilityAsk }
-	/** The program is over: `exitCode` 1 when it threw, else 0. */
-	/** `crash.file`: where it threw, when that's another of the program's files than the entry. */
-	/** `quiet`: a live run of text that doesn't parse yet, which ran nothing and so has nothing to tell. */
 	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash; "quiet"?: true }
-	/** What an allowed call returned, for what's given back when it isn't made. */
 	| { "type": "recorded"; "capability": string; "resource": string; "value": unknown; "request"?: string }
-	/** The run's effects so far — each gated call made, denied, skipped or given — told with its coverage, for its envelope
-	 *  in the run ledger (each telling has them all). */
 	| { "type": "effects"; "effects": Effect[] }
 	| { "type": "coverage"; "coverage": CoverageEvent }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
-	/** Live values new since the last, of the entry or (`file`) another of the program's files, with its text (`source`) the
-	 *  first time: a few times a second, and before a stop or the end. */
 	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
-	/** A test file's tests (node:test, node-test.js), each with the statements it ran — just before `terminated`. */
 	| { "type": "tests"; "tests": TestReport[] }
-	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
-	/** A server the program started listens on `port` (it answers the preview there). */
 	| { "type": "listening"; "port": number }
-	/** Out of work, serving: the session is idle until a request (or a timer) comes. */
 	| { "type": "serving"; "ports": number[] }
-	/** The program is computing, every few seconds while it runs code (the run contract's `busy`). */
 	| { "type": "busy" }
-	/** What exploring the program's orderings found (asked by `explore`). */
 	| { "type": "explored"; "explored": Explored };

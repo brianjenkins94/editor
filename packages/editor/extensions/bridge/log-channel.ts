@@ -1,13 +1,3 @@
-/**
- * The editor's own log, as a person reads it (CLAUDE.md, *Spans*; *Agent tools*: what agents' `logs_query`, `logs_wait`
- * and `spans_query` read from outside). *Developer: Show the Editor's Log* writes every context's records — the shell's,
- * the workbench's, the extensions', the workers' — to the Output channel "Editor Log" as they come: a span as its
- * `→ name` when it opens and `← name (Xms)` when it ends, a record at its level, each under its source. The Output
- * view's filter finds a source or a name, its log level hides the quieter ones (a span's open is a trace).
- *
- * Only for LOG_MINUTES from when it's asked (asked again, from then), or until *Developer: Stop the Editor's Log*: every
- * record would otherwise cross into this extension host for nobody.
- */
 import { installHubCollector } from "@brianjenkins94/observability";
 import { renderRecord } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";

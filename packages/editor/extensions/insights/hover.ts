@@ -1,10 +1,3 @@
-/**
- * What went through the code under the cursor, across every run kept in git (RUNTIME-EVIDENCE.md, the second slice):
- * for a value site (`a?.b`'s `a`, `a ?? b`'s `a`, a parameter, a return), how many values came through, how often they
- * were nullish, which kinds, and a few of the values as this machine saw them; for a branch (`if`, `?:`, `&&`, `||`),
- * how often each arm ran. For a value site, the type TypeScript gives it beside the kinds runs saw (History's tsserver
- * plugin's `_types.at`), so whether the types held is there to read.
- */
 import type { EvidenceStore, SpanEvidence } from "@brianjenkins94/editor-api/evidence";
 import * as vscode from "vscode";
 
@@ -15,7 +8,6 @@ const CODE = [
 	{ "scheme": "file", "language": "javascriptreact" }
 ];
 
-/** What a value site is, by its node type (BABLR's). */
 function valueSite(type: string | undefined): string {
 	if (type === "MemberExpression" || type === "CallExpression") {
 		return "`?.` — what it tested";
@@ -34,7 +26,6 @@ function valueSite(type: string | undefined): string {
 		: "Values";
 }
 
-/** A branch's name and its arms', by its node type. */
 function branchSite(type: string | undefined): { "name": string; "arms": string[] } {
 	if (type === "If") {
 		return {
@@ -78,7 +69,6 @@ function share(part: number, whole: number): string {
 
 const bar = (part: number, whole: number): string => "█".repeat(Math.max(1, Math.round(part / Math.max(whole, 1) * 10))).padEnd(10, "░");
 
-/** The hover's text for one span's evidence (value or branch), with the type TypeScript gives it when known. */
 export function describe(evidence: SpanEvidence, type: string | undefined, declared?: string): string | undefined {
 	const { value, branch } = evidence;
 
@@ -123,7 +113,6 @@ export function registerHover(context: vscode.ExtensionContext, store: EvidenceS
 		"provideHover": async (document, position) => {
 			const offset = document.offsetAt(position);
 			const placed = await store.placed(document);
-			// The innermost span under the cursor with values or a branch: the code the cursor is on.
 			const [here] = (placed ?? []).filter(({ start, end, evidence }) => start <= offset && offset < end && (evidence.value !== undefined || evidence.branch !== undefined)).sort((left, right) => (left.end - left.start) - (right.end - right.start));
 			const declared = here?.evidence.value === undefined
 				? undefined

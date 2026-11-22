@@ -1,8 +1,3 @@
-/**
- * The run's live values (RUNTIME-EVIDENCE.md, *Live values*): what each line bound, returned or chose, from tsval's trace,
- * told to the adapter a few times a second and before each stop and the end, by the program file they're in, each its
- * own record.
- */
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Told, Traced } from "@brianjenkins94/editor-api/values";
 import type { Vm } from "./state";
@@ -13,23 +8,15 @@ import { rangeOf } from "./session";
 import { post, state } from "./state";
 
 const live = new Map<ts.SourceFile, LiveRecord>();
-/** The program's files whose text the adapter has been told (with their first values): the entry's it has. */
 const toldSource = new Set<string>();
-/** Each stop's place in each record's telling, for a run that goes on from that stop again. */
 const toldAt = new WeakMap<Vm, Map<LiveRecord, Told>>();
-/** Each traced node's file, line and range, read once: a node is traced each time it runs. */
 const tracedAt = new WeakMap<ts.Node, { "file": ts.SourceFile; "line": number; "at": [number, number] }>();
-/** Each call's function as the values name it, read once. */
 const calleeAt = new WeakMap<ts.Node, NonNullable<Traced["callee"]>>();
-/** The turns of a trace's loops, read once: tsval shares one loops array among a turn's events. */
 const loopTurns = new WeakMap<TraceEvent["loops"], number[]>();
 
 let timer: ReturnType<typeof setInterval> | undefined;
-/** When the values were last told, and how many were traced since the clock was last read: a run holds the worker while
- *  it goes, so the interval can't fire, and the trace tells them too, every quarter second. */
 let flushedAt = 0;
 let tracedSince = 0;
-/** Where the last value was: a value told by something other than the trace goes in the same turn. */
 let lastTraced: { "call": number; "turns": number[]; "step": number } | undefined;
 
 function liveIn(file: ts.SourceFile): LiveRecord {
@@ -56,7 +43,6 @@ function tracedPlace(node: ts.Node): { "file": ts.SourceFile; "line": number; "a
 	return place;
 }
 
-/** A function's name: its own, or the variable it's assigned to. */
 function calleeName(node: ts.Node): string {
 	const named = (node as { "name"?: ts.Node }).name;
 
@@ -91,7 +77,6 @@ function turnsOf(loops: TraceEvent["loops"]): number[] {
 	return turns;
 }
 
-/** Tell the adapter the values new since it was last told. */
 export function flushValues(): void {
 	flushedAt = Date.now();
 
@@ -99,7 +84,6 @@ export function flushValues(): void {
 		const batch = record.drain();
 
 		if (batch !== undefined && !EDITOR_SOURCES.has(file.fileName)) {
-			// Another of the program's files: which, and its text the first time (what its values' ranges are in).
 			const other = file === state.sourceFile ? {} : { "file": file.fileName, ...toldSource.has(file.fileName) ? {} : { "source": file.text } };
 
 			toldSource.add(file.fileName);
@@ -108,9 +92,7 @@ export function flushValues(): void {
 	}
 }
 
-/** What tsval's trace told (VMOptions.trace). */
 export function traceValue(event: TraceEvent): void {
-	// (a probe's fork didn't run; a replay's own wiring isn't the program's: replay-run.ts)
 	if (state.sourceFile === undefined || state.probing !== undefined || event.name.startsWith("__self.__replay")) {
 		return;
 	}
@@ -135,7 +117,6 @@ export function traceValue(event: TraceEvent): void {
 	}
 }
 
-/** The call and loop turns `vm` is in. */
 function whereNow(vm: Vm): { "call": number; "turns": number[] } {
 	const turns: number[] = [];
 
@@ -154,7 +135,6 @@ function whereNow(vm: Vm): { "call": number; "turns": number[] } {
 	return { "call": 0, "turns": turns.toReversed() };
 }
 
-/** A call skipped at its stop, told on its line as a value of its own: the margin says what didn't happen there. */
 export function tellSkipped(capability: string, resource: string): void {
 	const vm = state.evaluating;
 	const node = vm?.currentNode;
@@ -166,7 +146,6 @@ export function tellSkipped(capability: string, resource: string): void {
 	}
 }
 
-/** A call a live run gave what it returned when it last ran for real, told on its line: the margin says that's where the value came from. */
 export function tellReplayed(capability: string, resource: string): void {
 	const vm = state.evaluating;
 	const node = vm?.currentNode;
@@ -178,7 +157,6 @@ export function tellReplayed(capability: string, resource: string): void {
 	}
 }
 
-/** A value set by hand at the stop `vm` is at, or by a rule placed on `line` (0-based), shown with the run's values. */
 export function tellSet(vm: Vm, name: string, value: unknown, line?: number): void {
 	const at = vm.location();
 
@@ -188,19 +166,16 @@ export function tellSet(vm: Vm, name: string, value: unknown, line?: number): vo
 	}
 }
 
-/** A stop kept, to go on from: where the telling was. */
 export function keepTold(vm: Vm): void {
 	toldAt.set(vm, new Map([...live.values()].map((record) => [record, record.told()])));
 }
 
-/** A run going on from the stop `vm`: after a step back, the values it tells again are replays. */
 export function resumeTold(vm: Vm): void {
 	for (const record of live.values()) {
 		record.resume(toldAt.get(vm)?.get(record));
 	}
 }
 
-/** A launch: nothing told yet, and telling a few times a second. */
 export function startValues(): void {
 	live.clear();
 	toldSource.clear();
@@ -208,7 +183,6 @@ export function startValues(): void {
 	timer = setInterval(flushValues, 250);
 }
 
-/** The run's end: the last of them told. */
 export function endValues(): void {
 	clearInterval(timer);
 	flushValues();

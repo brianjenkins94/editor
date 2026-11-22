@@ -1,15 +1,3 @@
-/**
- * What a way in reaches (packages/editor/ARCHITECTURE.md, *Workspace tools*): for a command, hub request, agent tool, core
- * module, setting, view…, the feature that owns it, where it's registered, what taking it out would free and leave by hand
- * (`silo remove`'s plan, nothing written), and everywhere code, tests and docs name it. Asked before changing, moving or
- * removing one.
- * - **On the code:** on a way in's registration the lightbulb offers *What … reaches*, and History: What a Way In
- *   Reaches… asks for the one at the cursor (or one picked): a quick pick of every place, each opening it.
- * - **As data:** `history.reach` <key or id> (core's `code.reach`, agents' `code_reach`), `{ ready: false }` until History
- *   has read the program.
- * The program is History's reading (the TypeScript server plugin's, edits included); the docs and code it searches are the
- * ledger view's.
- */
 import type { Feature } from "@brianjenkins94/util/silo/features";
 import type { DeclarationGraph } from "@brianjenkins94/util/silo/graph";
 import type { LedgerView } from "./ledger";
@@ -17,29 +5,22 @@ import { includeByDefault } from "@brianjenkins94/util/silo/history";
 import { declaredFeatures, ownersOf, parseLedger, removalOf } from "@brianjenkins94/util/silo/ledger";
 import * as vscode from "vscode";
 
-/** The places naming a way in that are listed, at most, of each kind. */
 const NAMED = 100;
 
-/** A test file, as node finds them (the terminal's node command's isTestFile), and an in-editor spec. */
 const TEST_FILE = /(?:^|\/)tests?\/|(?:^|[./_-])(?:test|spec)[._-]/u;
 
-/** A place: a file's 1-based line, and its text. */
 interface Place {
 	"file": string;
 	"line": number;
 	"text": string;
 }
 
-/** What `history.reach` answers for one way in. */
 interface Reach {
 	"ready": true;
 	"way": { "key": string; "facet": string; "id": string; "sides": string[] };
-	/** The ledger's features owning it: by its `ways`, else by its registration's files. */
 	"features": string[];
 	"registered": Place[];
-	/** What only it reaches: its declarations, the files that would go whole, their lines and bytes. */
 	"frees": { "declarations": number; "files": string[]; "lines": number; "bytes": number };
-	/** Its code in files it shares with others: taken out by hand. */
 	"byHand": Place[];
 	"named": Place[];
 	"tests": Place[];
@@ -48,7 +29,6 @@ interface Reach {
 }
 
 export interface ReachView {
-	/** The program as History read it now. */
 	"read": (features: ReadonlyMap<string, Feature>, graph: DeclarationGraph) => void;
 }
 
@@ -60,7 +40,6 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 	const lineAt = (text: string, offset: number): number => text.slice(0, offset).split("\n").length;
 	const textOf = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
-	/** The way in `target` names: its key, or its id when one way in has it; else the closest, to choose from. */
 	const wayOf = (target: string): Feature | { "matches": string[]; "found": number } => {
 		const ways = [
 			...program?.features.values() ?? []
@@ -85,7 +64,6 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 		const { files, texts } = await ledger.workspace();
 		const tracked = [...files];
 		const parsed = parseLedger(await ledger.ledgerText());
-		// (the package manifests a removal takes it out of: the ledger view reads code and docs, not JSON)
 		const manifests = new Map<string, string>();
 
 		for (const file of tracked.filter((each) => /(?:^|\/)package\.json$/u.test(each) && includeByDefault(each))) {
@@ -131,7 +109,6 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 			: [
 					...new Set(way.ranges.flatMap((range) => ownersOf(parsed, range.file)))
 				];
-		// (by name: quoted, or as a word where it's an identifier — where it's registered aside)
 		const escaped = way.id.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 		const naming = new RegExp(/^[A-Za-z_$][\w$]*$/u.test(way.id)
 			? `(?<![\\w$])${escaped}(?![\\w$])`
@@ -139,7 +116,6 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 		const named: Place[] = [];
 		const docs: Place[] = [];
 
-		// (the docs, the program's code and its tests: not what's vendored or built)
 		const searched = [...texts].filter(([file]) => file.endsWith(".md") || includeByDefault(file) || TEST_FILE.test(file));
 
 		for (const [file, text] of searched.sort(([left], [right]) => left.localeCompare(right))) {
@@ -203,12 +179,10 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 		};
 	}
 
-	/** The ways in registered at `offset` in `file`. */
 	const waysAt = (file: string, offset: number): Feature[] => [
 		...program?.features.values() ?? []
 	].filter((way) => way.ranges.some((range) => range.file === file && offset >= range.start && offset <= range.end));
 
-	/** A reach, in a quick pick: each place a row that opens it. */
 	async function show(way: Feature): Promise<void> {
 		const reach = await reachOf(way);
 
@@ -286,8 +260,6 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 	}
 
 	context.subscriptions.push(
-		// What a way in reaches, by its key (`hub request|code.problems`) or its id when one way in has it. Undefined
-		// without one; `{ ready: false }` until History has read the program.
 		vscode.commands.registerCommand("history.reach", async (target: unknown) => {
 			if (program === undefined || typeof target !== "string" || target.trim() === "") {
 				return program === undefined
@@ -301,7 +273,6 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 				? { "ready": true, ...way }
 				: reachOf(way);
 		}),
-		// The same, shown: the way in `key` names, else the one at the cursor, else one picked.
 		vscode.commands.registerCommand("history.reach.show", async (key?: unknown) => {
 			if (program === undefined) {
 				void vscode.window.showInformationMessage("History hasn't read the program yet: open a TypeScript file, and ask again in a moment.");
@@ -342,7 +313,6 @@ export function reachView(context: vscode.ExtensionContext, root: vscode.Uri, le
 				await show(way);
 			}
 		}),
-		// On a way in's registration, the lightbulb: what it reaches.
 		vscode.languages.registerCodeActionsProvider({ "scheme": root.scheme }, {
 			"provideCodeActions": (document, range) => {
 				const path = relative(document.uri);

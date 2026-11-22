@@ -1,8 +1,3 @@
-/**
- * A rule placed in the code (RUNNING.md, *Rules*): tied to a statement, followed through edits, shown as a mark in the gutter
- * with its sentence on hover, so a mocked value isn't invisible. A place that's lost, or only uncertain, doesn't apply (it might
- * be the wrong line), and says so in the file rather than quietly doing nothing: the lightbulb puts it back.
- */
 import type { SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type { PaneMark } from "@brianjenkins94/editor-api/pane";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
@@ -17,18 +12,15 @@ const catalog = catalogOf(policy);
 const POLICY_FILES = "**/.silo/{policy.json,policy/*.json}";
 const LANGUAGES = ["typescript", "typescriptreact", "javascript", "javascriptreact"];
 
-/** A rule placed in a file, and where it is now. */
 export interface Placed {
 	"rule": Rule;
 	"whose": "mine" | "shared";
 	"ref": SpanRef;
 	"sentence": string;
 	"status": string;
-	/** The 0-based line it's on: none when it's lost. */
 	"line"?: number;
 }
 
-/** A place someone can act on: the line (trimmed) as a span reference. Undefined: the file doesn't parse, or there's no BABLR. */
 export async function referLine(document: vscode.TextDocument, line: number): Promise<SpanRef | undefined> {
 	const { firstNonWhitespaceCharacterIndex, range } = document.lineAt(line);
 	const start = document.offsetAt(new vscode.Position(line, firstNonWhitespaceCharacterIndex));
@@ -37,7 +29,6 @@ export async function referLine(document: vscode.TextDocument, line: number): Pr
 	return "value" in answer ? answer.value[0] : undefined;
 }
 
-/** The rules placed in `document`, as it is now; undefined when that can't be said (it doesn't parse, or there's no BABLR). */
 export async function placedIn(document: vscode.TextDocument): Promise<Placed[] | undefined> {
 	const file = vscode.workspace.asRelativePath(document.uri, false);
 	const files = await loadPolicyFiles();
@@ -50,7 +41,6 @@ export async function placedIn(document: vscode.TextDocument): Promise<Placed[] 
 	const text = document.getText();
 	const answer = await annotations(vscode.commands).resolve(text, file, rules.map(({ ref }) => ref));
 
-	// (the text can't be parsed as it is, or there's no BABLR: nothing to say this time)
 	if (!("value" in answer)) {
 		return undefined;
 	}
@@ -63,10 +53,8 @@ export async function placedIn(document: vscode.TextDocument): Promise<Placed[] 
 	});
 }
 
-/** Whether `placed` applies: a place that's lost or only uncertain doesn't. */
 export const applies = ({ status }: Placed): boolean => status !== "uncertain" && status !== "orphaned";
 
-/** `rule` with its place at `ref` instead. */
 function withPlace(rule: Rule, ref: SpanRef): Rule {
 	const moved = (predicate: Predicate): Predicate => {
 		if ("predicates" in predicate) {
@@ -81,7 +69,6 @@ function withPlace(rule: Rule, ref: SpanRef): Rule {
 
 let collection: vscode.DiagnosticCollection | undefined;
 
-/** The gutter's marks for the rules placed in `uri`, and a problem for each that's lost. */
 export async function placedMarks(uri: string): Promise<PaneMark[]> {
 	const document = vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 
@@ -92,14 +79,10 @@ export async function placedMarks(uri: string): Promise<PaneMark[]> {
 	const { version } = document;
 	const placed = await placedIn(document);
 
-	// (nothing to say — mid-edit, the text doesn't parse — or said of a text edited since, which a later ask answers: what
-	// was said stays. An answer coming back late for a text typed past wiped out the one for the text as it is, under load:
-	// mock-value.spec's lost rule, missing from Problems, NEXT.md)
 	if (placed === undefined || document.version !== version) {
 		return [];
 	}
 
-	// On the code too, as a call a rule decides is: what runs isn't what this line says.
 	collection?.set(document.uri, placed.map((each) => {
 		const problem = applies(each) && each.line !== undefined
 			? new vscode.Diagnostic(document.lineAt(each.line).range, `A rule changes what this line does: ${each.sentence}`, vscode.DiagnosticSeverity.Information)

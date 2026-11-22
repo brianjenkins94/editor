@@ -1,34 +1,3 @@
-/**
- * The dependency baseline (`.silo/baseline.json`, lib's util/silo/audit.ts `Baseline`), kept by this extension — the
- * editor's `silo init` and `silo install`: what each library the project depends on can do, read off its own code as
- * it's added. Made as the project opens, then synced as the dependencies change (lib's syncPackages): a library added is
- * taken as it is; a new version that can do more records what it grew, and that asks at the call unless the policy
- * allows it. Runs never change it — a compromised version would approve itself; what's decided at the call, beyond it,
- * is recorded in the runs instead (their effects' `decided`).
- *
- * The packages are the ones the project loads, by name@version — the editor's resolver's, in `.silo/versions.json` (the
- * workbench keeps it: a package-lock.json's versions, else each package.json's ranges resolved with nothing younger than
- * a week); a change to that file is a change to the dependencies. A platform build there (a native binary for some OS
- * or CPU, marked `platform`) never runs in the editor: it's left out. What each package can do is lib's packageCaps over
- * its published tarball — its own files, as installedPackages reads them on desktop, never what it depends on (each
- * dependency is its own entry) — read in a worker of this extension's (packages-worker.ts), started for a sync and ended
- * after it. Only a package that's new, or at a new version, is read.
- *
- * And `consumer`: the project's own use of its dependencies — per workspace (each package.json's folder), which members
- * of each its code uses (lib's consumerOf) — from every source file's import surface, read by this extension's
- * TypeScript server plugin (`_capabilities.surface`) off the trees the server already holds; and, for a package, the
- * join: what those members reach (lib's sliceCaps, in the package worker), which is what the debugger decides a
- * package's call against (lib's settledReach). Reach the code's use gains later — a member it starts using that
- * reaches more — is recorded as grown, with that member (lib's syncConsumer), and asks at the call until the policy
- * allows it. It changes with your code:
- * synced as code files change too. Until the server can answer, the consumer kept is left as it is.
- *
- * It's optional: `silo.baseline` off, none is made or synced, and the policy decides every package's call — what's lost
- * is tracking how the dependencies change over time, and how the project's use of them does.
- *
- * What goes beyond it is said where it is, not in a view (growth.ts): a version that grew, on its dependency's line; the
- * code's use that reaches more, on its import.
- */
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
 import type { Surface, SurfaceEntry, WsConsumer } from "@brianjenkins94/util/silo/detect";
 import type { BaselinePackages, InstalledPackages } from "@brianjenkins94/util/silo/evidence";
@@ -41,37 +10,25 @@ import { resolvedSince } from "./resolved";
 import { baselinePath, LOCAL_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
-/** How many packages are read at once. */
 const PARALLEL = 4;
 
-/** What `.silo/baseline.json` holds: the project's use of its dependencies, and what each package can do (and what a
- *  later version of it grew). */
 interface BaselineFile { "consumer"?: Record<string, WsConsumer>; "packages"?: BaselinePackages; "join"?: number }
 
-/** One slice for the package worker to read: its key (`workspace\nspec`), the specifier, and the members used. */
 interface Slice { "key": string; "spec": string; "members": string[] }
 
-/** How often, and how long apart, the consumer is asked for again while the TypeScript server isn't up yet. */
 const RETRIES = 30;
 const RETRY_MS = 2000;
 
-/** How long code changes settle before the consumer is read again. */
 const SETTLE_MS = 1500;
 
-/** Code files, as silo audit walks them. */
 const CODE = /\.[cm]?[jt]sx?$/u;
 
-/** What this reads of `.silo/versions.json` (the workbench's versions.ts `VersionsFile`). */
 interface VersionsFile { "from": string; "packages": Record<string, { "version": string; "tarball"?: string; "platform"?: true; "link"?: string }> }
 
-/** The package worker, started for one sync: a package's capabilities, by its tarball's URL, and its slices' (null where
- *  none could be built); `end` stops it. */
 function packageWorker(context: vscode.ExtensionContext): { "read": (url: string, name: string, slices: Slice[]) => Promise<{ "caps": string[]; "slices": Record<string, string[] | null> }>; "end": () => void } {
-	// (packages.js is a classic bootstrap importing the module worker by its URL, so its own imports resolve beside it)
 	const worker = new Worker(vscode.Uri.joinPath(context.extensionUri, "packages.js").toString(true), { "name": "packages" });
 	const pending = new Map<number, { "resolve": (answer: { "caps": string[]; "slices": Record<string, string[] | null> }) => void; "reject": (error: Error) => void }>();
 	let next = 0;
-	// (asked only once it listens: what's sent before its module loads is lost)
 	let markReady: () => void = () => undefined;
 	let markFailed: (error: Error) => void = () => undefined;
 	const ready = new Promise<void>((resolve, reject) => {
@@ -89,7 +46,6 @@ function packageWorker(context: vscode.ExtensionContext): { "read": (url: string
 	};
 
 	ready.catch(() => undefined);
-	// (its failure to load, or an uncaught error in it, said as the package worker's)
 	watchWorker(worker, "packages-worker", (message) => {
 		failAll("the package worker failed: " + message);
 	});
@@ -102,7 +58,6 @@ function packageWorker(context: vscode.ExtensionContext): { "read": (url: string
 			return;
 		}
 
-		// (said and failed by watchWorker)
 		if (failed !== undefined) {
 			return;
 		}
@@ -135,22 +90,14 @@ function packageWorker(context: vscode.ExtensionContext): { "read": (url: string
 	};
 }
 
-/** Each code file's import surface (workspace-relative path → specifier → its use), as read from TypeScript's server. */
 type Surfaces = Record<string, Record<string, SurfaceEntry>>;
 
-/** Where the code's use has been read from, kept beside the baseline (`.silo/local/baseline-files.json`): each code
- *  file's surface as last read, so a reading of fewer files (TypeScript's server holds only the projects it has loaded)
- *  takes nothing away; and the files there when the baseline was made that haven't been read yet, whose first reading
- *  is the baseline's, not growth. */
 interface ReadFrom { "files": Surfaces; "pending": string[] }
 
-/** The code files a baseline counts: not in node_modules or a dot-folder, relative to `root`. */
 async function codeFiles(root: vscode.Uri): Promise<string[]> {
 	return (await vscode.workspace.findFiles("**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}", "{**/node_modules/**,**/.*/**}")).map((uri) => uri.path.slice(root.path.length + 1));
 }
 
-/** Each code file's import surface, from this extension's TypeScript server plugin, off the trees the server holds:
- *  undefined while it can't answer. */
 async function surfacesNow(root: vscode.Uri): Promise<Surfaces | undefined> {
 	const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "ready"?: boolean; "files"?: Surfaces } } | undefined>("typescript.tsserverRequest", "_capabilities.surface", { "root": root.path })).catch(() => undefined);
 	const answer = response?.body;
@@ -162,8 +109,6 @@ async function surfacesNow(root: vscode.Uri): Promise<Surfaces | undefined> {
 	return Object.fromEntries(Object.entries(answer.files).filter(([path]) => CODE.test(path) && !path.split("/").some((part) => part.startsWith(".")))) as Surfaces;
 }
 
-/** Each workspace (its package.json's folder, relative to `root`, "." the root's) and whether it's a nested private one,
- *  which governs itself and is left out. */
 async function workspacesOf(root: vscode.Uri): Promise<{ "dir": string; "private": boolean }[]> {
 	const workspaces: { "dir": string; "private": boolean }[] = [];
 
@@ -177,11 +122,6 @@ async function workspacesOf(root: vscode.Uri): Promise<{ "dir": string; "private
 	return workspaces;
 }
 
-/**
- * The project's own use of its dependencies (lib's consumerOf) from these files' surfaces, merged per workspace — the
- * deepest folder with a package.json that has the file ("." the root's); a nested private workspace is left out, as
- * silo audit walks them — with each package's version as `.silo/versions.json` resolved it.
- */
 function consumerFrom(surfaces: Surfaces, workspaces: { "dir": string; "private": boolean }[], versions: VersionsFile): Record<string, WsConsumer> {
 	const owner = (path: string): { "dir": string; "private": boolean } => workspaces.filter(({ dir }) => dir !== "." && path.startsWith(dir + "/")).toSorted((one, other) => other.dir.length - one.dir.length)[0] ?? { "dir": ".", "private": false };
 	const buckets = new Map<string, Surface>();
@@ -207,12 +147,6 @@ function consumerFrom(surfaces: Surfaces, workspaces: { "dir": string; "private"
 	return consumerOf(Object.fromEntries([...buckets].map(([dir, surface]) => [dir, surfaceEntries(surface)])), (_workspace, pkg) => versions.packages[pkg]?.version);
 }
 
-/**
- * The code's use now, and what of it can have grown: every file read so far, each as last read (`read`); the same less
- * the files read for the first time now that were there when the baseline was made (`seen`, lib's syncConsumer's), whose
- * use is the baseline's; and what to keep for next time. `fresh`: no record of where it was read from (a baseline made
- * before this was kept, or none), so this reading is where the baseline starts. Undefined while the server can't answer.
- */
 async function consumerFor(root: vscode.Uri, versions: VersionsFile, existing: BaselineFile | undefined, kept: ReadFrom | undefined): Promise<{ "read": Record<string, WsConsumer>; "seen": Record<string, WsConsumer>; "fresh": boolean; "keep": ReadFrom } | undefined> {
 	const now = await surfacesNow(root);
 
@@ -223,7 +157,6 @@ async function consumerFor(root: vscode.Uri, versions: VersionsFile, existing: B
 	const there = new Set(await codeFiles(root));
 	const fresh = existing === undefined || kept === undefined;
 	const pending = new Set(fresh ? there : kept.pending);
-	// (each file there, as read now or as last read; one that's gone, gone)
 	const files = Object.fromEntries(Object.entries({ ...fresh ? {} : kept.files, ...now }).filter(([path]) => there.has(path)));
 	const firstRead = new Set(Object.keys(now).filter((path) => pending.has(path)));
 	const workspaces = await workspacesOf(root);
@@ -236,26 +169,17 @@ async function consumerFor(root: vscode.Uri, versions: VersionsFile, existing: B
 	};
 }
 
-/** `uri` as JSON, or undefined when there's none (or it isn't JSON). */
 async function readJson(uri: vscode.Uri): Promise<unknown> {
 	return Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => JSON.parse(new TextDecoder().decode(bytes)) as unknown, () => undefined);
 }
 
-/** The slices to read, by package (lib's joinsWanted — which keeps the join of a use unchanged since the baseline, set
- *  on `read`), as the package worker takes them: only a resolved package's (one not resolved keeps none). */
 function slicesOf(read: Record<string, WsConsumer> | undefined, existing: BaselineFile | undefined, resolved: VersionsFile["packages"]): Map<string, Slice[]> {
 	return new Map([...read === undefined ? [] : joinsWanted(read, existing)].filter(([name]) => resolved[name] !== undefined).map(([name, slices]) => [name, slices.map((slice) => ({ "key": slice.workspace + "\n" + slice.spec, "spec": slice.spec, "members": slice.members }))]));
 }
 
-/**
- * What each resolved package can do — the baseline's when it's the version it has, else read off its tarball — and,
- * for a package with slices wanted, each slice's join, set on the code's use (`read`): where none could be built, the
- * whole package's, the safe side. Read in the package worker, a few at a time; `unread` names what couldn't be.
- */
 async function readPackages(context: vscode.ExtensionContext, resolved: VersionsFile["packages"], known: BaselinePackages, slices: Map<string, Slice[]>, read: Record<string, WsConsumer> | undefined): Promise<{ "installed": InstalledPackages; "unread": string[] }> {
 	const installed: InstalledPackages = {};
 	const unread: string[] = [];
-	// (a package is read when its version is new, or a slice of it is wanted)
 	const wanted = Object.entries(resolved).filter(([name, { version }]) => {
 		const same = known[name]?.version === version;
 
@@ -299,24 +223,15 @@ async function readPackages(context: vscode.ExtensionContext, resolved: Versions
 	return { "installed": installed, "unread": unread };
 }
 
-/** The consumer to write: the code's use as `read` now, with what its reach gained marked grown (lib's syncConsumer) —
- *  nothing grows in a baseline being made, nor from a consumer not read yet (the server wasn't up when the baseline was
- *  made) — and the `join` mark, there once the code's use is read; until then, both as they were. */
 function consumerNow(existing: BaselineFile | undefined, use: Awaited<ReturnType<typeof consumerFor>>, added: ReadonlySet<string>): { "consumer": Record<string, WsConsumer>; "join"?: number } {
 	if (use === undefined) {
 		return { "consumer": existing?.consumer ?? {}, ...existing?.join === undefined ? {} : { "join": existing.join } };
 	}
 
-	// (where it starts, nothing grown: no record of where it was read from)
 	return { "consumer": syncConsumer(use.fresh ? undefined : resolvedSince(joinedBefore(existing), use.read), use.read, added, use.seen).consumer, "join": JOIN };
 }
 
 
-/**
- * `.silo/baseline.json` (in `root`) made if there's none, else brought up to `.silo/versions.json` (lib's
- * syncPackages) and to the project's code (its `consumer`). A package that can't be read is left out, and said: its
- * calls are the policy's to decide. False when the consumer couldn't be read yet (the server isn't up): ask again.
- */
 async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, log: ObservedExtension["log"] | undefined): Promise<boolean> {
 	const there = async (path: string): Promise<boolean> => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.joinPath(root, path))).then(() => true, () => false);
 	const versions = await readJson(vscode.Uri.joinPath(root, await keptAt(versionsPath(), there))) as VersionsFile | undefined;
@@ -328,14 +243,11 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, 
 	const uri = vscode.Uri.joinPath(root, await keptAt(baselinePath(), there));
 	const existing = await readJson(uri) as BaselineFile | undefined;
 	const known = existing?.packages ?? {};
-	// (a linked package is the workspace's own code, read as the consumer, not a dependency)
 	const resolved = Object.fromEntries(Object.entries(versions.packages).filter(([, each]) => each.platform !== true && each.link === undefined));
 
-	// (no dependencies: nothing for a baseline to hold, and the TypeScript server isn't made to load every file to say so)
 	if (Object.keys(resolved).length === 0 && existing === undefined) {
 		return true;
 	}
-	// (the code's use now — its package entries' caps, the joins, filled below — or undefined while the server can't say)
 	const readFrom = vscode.Uri.joinPath(root, LOCAL_DIR, "baseline-files.json");
 	const use = await consumerFor(root, versions, existing, await readJson(readFrom) as ReadFrom | undefined);
 	const read = use?.read;
@@ -352,12 +264,10 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, 
 
 	const packagesChanged = changed.added.length + changed.updated.length + changed.grew.length > 0;
 
-	// (made if there's none; else written only when something in it changed)
 	if (existing !== undefined && !packagesChanged && !consumerChanged && existing.join === join) {
 		return read !== undefined;
 	}
 
-	// (written as silo's saveBaseline writes it)
 	const sorted = Object.fromEntries(Object.entries(packages).toSorted(([one], [other]) => one.localeCompare(other)));
 
 	await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify({ "consumer": consumer, "packages": sorted, ...join === undefined ? {} : { "join": join } }, undefined, 2) + "\n"));
@@ -367,7 +277,6 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, 
 	return read !== undefined;
 }
 
-/** What a sync did, said in the extension's log: what each package did, and what couldn't be read. */
 function tell(log: ObservedExtension["log"] | undefined, what: string, packages: BaselinePackages, changed: ReturnType<typeof syncPackages>["changed"], unread: string[]): void {
 	const grew = changed.grew.map((name) => `${name} (${Object.entries(packages[name]!.grew ?? {}).filter(([, version]) => version === packages[name]!.version).map(([capability]) => capability).join(", ")})`);
 
@@ -378,9 +287,6 @@ function tell(log: ObservedExtension["log"] | undefined, what: string, packages:
 	}
 }
 
-/** Keep the baseline: synced now (the project opening), as `.silo/versions.json` changes (the dependencies did), as
- *  code files change (the consumer), and when `silo.baseline` is turned on — one sync at a time, one asked for
- *  meanwhile run after it. */
 export function keepBaseline(context: vscode.ExtensionContext, log?: ObservedExtension["log"]): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
 
@@ -401,7 +307,6 @@ export function keepBaseline(context: vscode.ExtensionContext, log?: ObservedExt
 		syncing = syncing.then(async () => {
 			queued = false;
 
-			// (the TypeScript server not up yet: its consumer asked for again shortly)
 			const read = log === undefined ? await syncBaseline(context, root, log) : await log.span("editor.extensions.capabilities.baseline.sync", {}, async () => syncBaseline(context, root, log));
 
 			if (!read && retries < RETRIES) {
@@ -413,10 +318,7 @@ export function keepBaseline(context: vscode.ExtensionContext, log?: ObservedExt
 		});
 	};
 
-	// (the versions, wherever they're kept: `.silo/`, or `.silo/local/`)
 	const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, `{${versionsPath()},${localOf(versionsPath())}}`));
-	// The consumer changes with the code — however it changes (a save, the terminal, a checkout): synced once the
-	// writes settle and the TypeScript server has seen them.
 	const code = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"));
 	let settling: ReturnType<typeof setTimeout> | undefined;
 	const codeChanged = (uri: vscode.Uri): void => {
