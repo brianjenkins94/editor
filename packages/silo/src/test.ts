@@ -105,6 +105,25 @@ export async function graphAt(repo: string, analyzer: Analyzer, tests: readonly 
 	}
 }
 
+/** The tests another runtime's vouches count for (decision 19): ones it vouched for before CI's latest run of them, which
+ *  passed too — the two having agreed. */
+export function agreedOn(vouches: readonly Vouch[], standings: ReadonlyMap<string, TestStanding>, runtime: string): Set<string> {
+	return new Set(vouches.filter((vouch) => vouch.runtime !== runtime && vouch.outcome === "pass").flatMap((vouch) => {
+		const standing = standings.get(vouch.test);
+
+		return standing !== undefined && standing.last.verdict === "pass" && vouch.at < standing.last.at ? [vouch.test] : [];
+	}));
+}
+
+/** What a vouch holds to beyond the graph's declarations: a file the graph doesn't read (a test's own, a JavaScript
+ *  helper), named by its path, by its contents' git id as it is in `repo` now. */
+export function filesNamedIn(repo: string, vouches: readonly Vouch[]): Map<string, string> {
+	const files = [...new Set(vouches.flatMap((vouch) => Object.keys(vouch.reached).filter((key) => !key.includes("#"))))].filter((file) => fs.existsSync(path.join(repo, file))).sort();
+	const oids = files.length === 0 ? [] : (git(repo, ["hash-object", "--", ...files]) ?? "").trim().split("\n");
+
+	return new Map(files.flatMap((file, index) => oids[index] === undefined || oids[index] === "" ? [] : [[file, oids[index]] as const]));
+}
+
 export interface TestOptions {
 	"repo": string;
 	/** The test files the runner would run, from the repository's top. */
@@ -142,13 +161,16 @@ export async function selectFor(options: TestOptions): Promise<Selected[]> {
 		throw new Error("the program couldn't be read");
 	}
 
+	const vouches = vouchesIn(options.repo);
+
 	return selectTests({
 		"tests": tests,
 		"reach": (test) => staticReach(head, test.file),
 		"changed": new Set(base === undefined ? [] : changedDeclarations(base, head)),
-		"fingerprints": head.fingerprints,
+		"fingerprints": new Map([...head.fingerprints, ...filesNamedIn(options.repo, vouches)]),
 		"standings": known,
-		"vouches": vouchesIn(options.repo),
+		"vouches": vouches,
+		"agreed": agreedOn(vouches, known, options.runtime),
 		"runtime": options.runtime,
 		"full": options.full || base === undefined,
 		"audit": options.audit,

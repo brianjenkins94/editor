@@ -34,9 +34,36 @@ test("a test's standing over CI's runs, by its file and titles: the job's name o
 
 test("a pass vouched for with what its file reaches, as fingerprinted now; a failure vouches for nothing", async () => {
 	const { vouchesFor } = await import("../src/test.ts");
+	const { digest } = await import("@brianjenkins94/util/silo/graph");
 	const edges: Record<string, string[]> = { "a.test.mjs#(top)": ["a.mjs#a"] };
 	const graph = { "fingerprints": new Map([["a.test.mjs#(top)", "t"], ["a.mjs#a", "f1"], ["b.mjs#b", "f2"]]), "nodes": () => Object.keys(edges), "edges": (id: string) => edges[id] ?? [] };
 	const made = vouchesFor([{ "titles": ["a.test.mjs", "adds"], "outcome": "pass" }, { "titles": ["a.test.mjs", "fails"], "outcome": "fail" }], graph, { "by": "brian", "runtime": "node", "at": "2026-11-22T18:00:00.000Z" });
 
-	assert.deepEqual(made, [{ "test": "a.test.mjs › adds", "outcome": "pass", "by": "brian", "at": "2026-11-22T18:00:00.000Z", "runtime": "node", "reached": { "a.test.mjs#(top)": "t", "a.mjs#a": "f1" } }]);
+	assert.deepEqual(made, [{ "test": "a.test.mjs › adds", "outcome": "pass", "by": "brian", "at": "2026-11-22T18:00:00.000Z", "runtime": "node", "reached": { "a.test.mjs#(top)": digest("t"), "a.mjs#a": digest("f1") } }]);
+});
+
+test("another runtime's vouch counts for a test CI passed after it was made (decision 19), not before, nor one CI failed", async () => {
+	const { agreedOn } = await import("../src/test.ts");
+	const standing = (id: string, verdict: "pass" | "fail", at: string) => [id, { "id": id, "runs": 3, "last": { "verdict": verdict, "run": "1", "commit": "c", "at": at }, "flakes": 0, "streak": { "verdict": verdict, "runs": 3 } }] as const;
+	const vouch = (test: string, at: string, runtime = "tsval") => ({ "test": test, "outcome": "pass" as const, "by": "brian", "at": at, "runtime": runtime, "reached": {} });
+	const standings = new Map([standing("a", "pass", "2026-11-22T12:00:00Z"), standing("b", "pass", "2026-11-22T12:00:00Z"), standing("c", "fail", "2026-11-22T12:00:00Z"), standing("d", "pass", "2026-11-22T12:00:00Z")]);
+
+	assert.deepEqual([...agreedOn([vouch("a", "2026-11-22T11:00:00Z"), vouch("b", "2026-11-22T13:00:00Z"), vouch("c", "2026-11-22T11:00:00Z"), vouch("d", "2026-11-22T11:00:00Z", "node"), vouch("e", "2026-11-22T11:00:00Z")], standings, "node")], ["a"]);
+});
+
+test("a vouch's file outside the graph is held to its contents' git id as the checkout has it", async () => {
+	const { filesNamedIn } = await import("../src/test.ts");
+	const { execFileSync } = await import("node:child_process");
+	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const path = await import("node:path");
+	const repo = mkdtempSync(path.join(tmpdir(), "silo-vouch-"));
+
+	execFileSync("git", ["init", "-q"], { "cwd": repo });
+	writeFileSync(path.join(repo, "a.test.mjs"), "test('adds', () => {});\n");
+
+	const reached = { "a.test.mjs": "x", "a.mjs#a": "f1", "gone.mjs": "y" };
+	const named = filesNamedIn(repo, [{ "test": "a.test.mjs › adds", "outcome": "pass", "by": "brian", "at": "2026-11-22T11:00:00Z", "runtime": "tsval", "reached": reached }]);
+
+	assert.deepEqual([...named], [["a.test.mjs", execFileSync("git", ["hash-object", "a.test.mjs"], { "cwd": repo, "encoding": "utf8" }).trim()]]);
 });

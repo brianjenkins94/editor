@@ -73,10 +73,11 @@ How it's kept:
    `silo test` (CI's step: selects, runs, its reporter's lines read back from the workflow's logs) and `silo vouch`; ci.yml
    passes the push's base and runs everything Mondays; packages/editor's unit tests run through `silo test` (2026-11-22).
    CI's runs read back since a fix the same day (the workflow named `ci`, which GitHub's API 404'd, so every test was
-   new; a run that can't be read now says so): 213 tests known. Left: see a push's CI skip — a test a push doesn't reach
-   rests after 20 green runs, so from about the 20th push on, a touched one vouched for sooner; the editor's commit
-   flow vouching (tsval, decision 19: a vouch counts in Node only for a test whose
-   outcomes have agreed); then per-test reach from runs, finer than a file's static reach. Done when a push's CI runs
+   new; a run that can't be read now says so): 213 tests known. The editor's tsval runs vouch, and its commits carry them
+   (2026-11-22; silo README, *Built*). Left: see a push's CI skip — a test a push doesn't reach rests after 20 green
+   runs, so from about the 20th push on; a touched one vouched for in the editor sooner, once CI has passed it after a
+   vouch (decision 19); the commit flow running what hasn't run (decision 12); a dependency's upgrade lapsing a vouch;
+   then CI's selection by per-test reach from runs, finer than a file's static reach. Done when a push's CI runs
    fewer tests because the rest are vouched for or resting.
 
 ## Watching

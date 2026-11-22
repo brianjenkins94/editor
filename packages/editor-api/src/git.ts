@@ -4,6 +4,7 @@
  * (`editor.annotations.classify`: the cosmetic extension's badge, the panel's). And where the editor keeps the files it
  * makes for a project (`keptAt`), and where a commit opened beside the work is (`REFS_DIR`).
  */
+import type { Vouch } from "@brianjenkins94/util/silo/select";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 
 /** The folder at the workspace's root where a commit opened beside the work is, read-only (workbench/git-refs.ts):
@@ -12,6 +13,23 @@ export const REFS_DIR = ".refs";
 
 /** The files the editor makes for a project, under `.silo/`: the versions it pins, the dependency baseline. */
 export const KEPT = ["versions.json", "baseline.json"];
+
+/** The vouches the editor's test runs made since the last commit (packages/silo/README.md, *Vouches*): the History
+ *  extension writes them, the next commit carries them in its author's `.silo/vouches/<user>.jsonl` (workbench/git-engine.ts). */
+export const PENDING_VOUCHES = `${LOCAL_DIR}/vouches.jsonl`;
+
+/** The latest of each test's vouches in `lists`, by test: what a vouches file keeps. */
+export function latestVouches(...lists: readonly Vouch[][]): Vouch[] {
+	const latest = new Map<string, Vouch>();
+
+	for (const vouch of lists.flat()) {
+		if ((latest.get(vouch.test)?.at ?? "") <= vouch.at) {
+			latest.set(vouch.test, vouch);
+		}
+	}
+
+	return [...latest.values()].sort((one, other) => one.test.localeCompare(other.test));
+}
 
 /** `.silo/<name>`'s local copy, `.silo/local/<name>`: git doesn't see it (`.silo/.gitignore`). */
 export function localOf(shared: string): string {

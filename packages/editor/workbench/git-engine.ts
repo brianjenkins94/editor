@@ -1,8 +1,10 @@
 import type { HttpClient } from "isomorphic-git";
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
-import { KEPT, localOf } from "@brianjenkins94/editor-api/git";
-import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
+import { KEPT, latestVouches, localOf, PENDING_VOUCHES } from "@brianjenkins94/editor-api/git";
+import { userSlug } from "@brianjenkins94/util/silo/evidence";
+import { LOCAL_DIR, SILO_DIR, vouchesPath } from "@brianjenkins94/util/silo/layout";
+import { parseVouches, vouchesText } from "@brianjenkins94/util/silo/select";
 import { fs as zenfs } from "@zenfs/core";
 import { add, branch, checkout, commit, currentBranch, deleteRef, Errors, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, merge, readBlob, readCommit, readTree, remove, resetIndex, resolveRef, setConfig, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 import { callerFs } from "../shared/fs-caller";
@@ -237,6 +239,23 @@ async function stageSiloSeeds(): Promise<void> {
 	}
 }
 
+async function stageVouches(): Promise<boolean> {
+	const pending = parseVouches(await readText(PENDING_VOUCHES) ?? "");
+
+	if (pending.length === 0) {
+		return false;
+	}
+
+	const user = userSlug(await readText(".git/config") ?? "") ?? "local";
+	const path = vouchesPath(user);
+
+	await fs.promises.mkdir(`${DIR}/${path.slice(0, path.lastIndexOf("/"))}`, { "recursive": true });
+	await fs.promises.writeFile(`${DIR}/${path}`, vouchesText(latestVouches(parseVouches(await readText(path) ?? ""), pending.map((vouch) => ({ ...vouch, "by": user })))));
+	await add({ "fs": fs, "dir": DIR, "filepath": path });
+
+	return true;
+}
+
 export interface Committed { "oid": string }
 
 async function keepExecutables(): Promise<void> {
@@ -265,20 +284,26 @@ async function keepExecutables(): Promise<void> {
 }
 
 async function committed(message: string): Promise<Committed> {
-	await stageSiloSeeds();
-	await keepExecutables();
-
 	const author = await authorOf().catch(() => undefined);
 
 	if (author !== undefined) {
 		await recordIdentity(author).catch(() => { /* the commit's author is what matters here */ });
 	}
 
+	const vouched = await stageVouches();
+
+	await stageSiloSeeds();
+	await keepExecutables();
+
 	const merging = await mergingIn();
 	const oid = await commit({ "fs": fs, "dir": DIR, "message": message, "author": author ?? AUTHOR, ...merging === undefined ? {} : { "parent": [await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }), merging] } });
 
 	if (merging !== undefined) {
 		await fs.promises.unlink(MERGE_HEAD).catch(() => undefined);
+	}
+
+	if (vouched) {
+		await fs.promises.unlink(`${DIR}/${PENDING_VOUCHES}`).catch(() => undefined);
 	}
 
 	return { "oid": oid };

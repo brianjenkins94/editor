@@ -1,17 +1,21 @@
-import type { CoverageEvent } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Span } from "@brianjenkins94/util/logger";
 import type { WayIn } from "@brianjenkins94/util/silo/features";
 import type { Analysis, Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { FileAnalysis } from "@brianjenkins94/util/silo/ts-analysis";
 import type { Exercise } from "./runs-say";
+import { latestVouches, PENDING_VOUCHES } from "@brianjenkins94/editor-api/git";
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
+import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf, waysInManifest } from "@brianjenkins94/util/silo/features";
 import { includeByDefault, Replayer } from "@brianjenkins94/util/silo/history";
+import { parseVouches, vouchesText } from "@brianjenkins94/util/silo/select";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
 import * as vscode from "vscode";
 import { ledgerView } from "./ledger";
 import { reachView } from "./reach";
 import { exerciseOf } from "./runs-say";
+import { vouchesOf } from "./vouches";
 
 const IDLE_MS = 1500;
 const RETRY_MS = 2000;
@@ -22,6 +26,16 @@ const LANGUAGES = new Set([
 	"javascript",
 	"javascriptreact"
 ]);
+
+async function blobOf(bytes: Uint8Array): Promise<string> {
+	const header = new TextEncoder().encode(`blob ${String(bytes.length)}\0`);
+	const whole = new Uint8Array(header.length + bytes.length);
+
+	whole.set(header);
+	whole.set(bytes, header.length);
+
+	return [...new Uint8Array(await crypto.subtle.digest("SHA-1", whole))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 interface ReadAnswer {
 	"ready": boolean;
@@ -167,6 +181,54 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 
 		queue = queue.then(runsSay).catch(() => undefined);
+	}
+
+	async function vouchFor(event: TestsEvent): Promise<void> {
+		const file = relative(vscode.Uri.file(event.file));
+
+		if (file === undefined || !event.tests.some((test) => test.outcome === "pass")) {
+			return;
+		}
+
+		const ranOf = (test: TestsEvent["tests"][number]): string[] => test.files.flatMap((ran) => {
+			const path = relative(vscode.Uri.file(ran.file));
+
+			return path === undefined || path.includes("node_modules/") ? [] : [path];
+		});
+		const paths = new Set([file, ...event.tests.flatMap(ranOf)]);
+		const unsaved = vscode.workspace.textDocuments.filter((document) => document.isDirty && paths.has(relative(document.uri) ?? "")).map((document) => relative(document.uri));
+
+		if (unsaved.length > 0) {
+			output.appendLine(`No vouch for ${file}'s tests: ${unsaved.join(", ")} unsaved, so what ran isn't what a commit would hold.`);
+
+			return;
+		}
+
+		const blobs = new Map<string, string>();
+
+		await Promise.all([...paths].map(async (path) => {
+			const bytes = await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, path))).catch(() => undefined);
+
+			if (bytes !== undefined) {
+				blobs.set(path, await blobOf(bytes));
+			}
+		}));
+
+		const by = userSlug(await textOf(".git/config")) ?? "local";
+		const { vouches, unsure } = vouchesOf(file, event.tests, ranOf, (path) => blobs.get(path), { "by": by, "at": new Date().toISOString() });
+		const pending = vscode.Uri.joinPath(root, PENDING_VOUCHES);
+		const write = async (span?: Span): Promise<void> => {
+			const kept = parseVouches(await Promise.resolve(vscode.workspace.fs.readFile(pending)).then((bytes) => new TextDecoder().decode(bytes), () => ""));
+
+			await vscode.workspace.fs.writeFile(pending, new TextEncoder().encode(vouchesText(latestVouches(kept, vouches))));
+			span?.end({ "count": vouches.length, "unsure": unsure.length });
+		};
+
+		if (vouches.length > 0) {
+			await (observed === undefined ? write() : observed.log.span("editor.extensions.history.vouch", { "path": file, "count": event.tests.length }, write));
+		}
+
+		output.appendLine(`${new Date().toISOString()} ${file}: ${String(vouches.length)} passing tests vouched for on tsval, for the next commit${unsure.length === 0 ? "" : `; not ${String(unsure.length)} whose run named no file of the program's to hold them to`}.`);
 	}
 
 	async function checkLedger(): Promise<void> {
@@ -326,6 +388,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.debug.onDidReceiveDebugSessionCustomEvent(({ event, body }) => {
 			if (event === "coverage") {
 				runEnded(body as CoverageEvent);
+			} else if (event === "tests") {
+				queue = queue.then(async () => vouchFor(body as TestsEvent)).catch((error: unknown) => {
+					output.appendLine("History couldn't vouch for a test run: " + (error instanceof Error ? error.message : String(error)));
+				});
 			}
 		}),
 		vscode.workspace.onDidChangeTextDocument((event) => {
